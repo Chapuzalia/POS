@@ -39,6 +39,7 @@ function mapCategory(row: CategoryRow): Category {
     name: row.name,
     kind: row.kind,
     icon: row.icon ?? row.kind,
+    isActive: row.is_active,
     sortOrder: row.sort_order,
   }
 }
@@ -77,6 +78,26 @@ function mapModifierGroups(rows: ModifierGroupRow[] | null): ModifierGroup[] {
     .sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
+function inferSaleFormats(kind: ProductRow['kind']) {
+  if (kind === 'alcohol' || kind === 'mixed') {
+    return ['cubata'] as const
+  }
+  if (kind === 'shot') {
+    return ['shot'] as const
+  }
+  if (kind === 'beer' || kind === 'beer_bottle') {
+    return ['beer_bottle'] as const
+  }
+  if (kind === 'soft_bottle' || kind === 'mixer' || kind === 'other') {
+    return ['soft_bottle'] as const
+  }
+  if (kind === 'cocktail') {
+    return ['cocktail'] as const
+  }
+
+  return ['soft_bottle'] as const
+}
+
 function mapProduct(row: ProductRow): Product {
   return {
     id: row.id,
@@ -85,6 +106,9 @@ function mapProduct(row: ProductRow): Product {
     name: row.name,
     description: row.description,
     kind: row.kind,
+    saleFormats: row.sale_formats?.length ? row.sale_formats : [...inferSaleFormats(row.kind)],
+    canSellStandalone: row.can_sell_standalone ?? row.kind !== 'mixer',
+    canUseAsMixer: row.can_use_as_mixer ?? row.kind === 'mixer',
     isActive: row.is_active,
     sortOrder: row.sort_order,
     variants: (row.product_variants ?? []).map(mapVariant).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -230,7 +254,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
     await Promise.all([
       supabase
         .from('categories')
-        .select('id, tenant_id, name, kind, icon, sort_order')
+        .select('id, tenant_id, name, kind, icon, is_active, sort_order')
         .eq('tenant_id', context.tenantId)
         .order('sort_order', { ascending: true }),
       supabase
@@ -243,6 +267,9 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
           name,
           description,
           kind,
+          sale_formats,
+          can_sell_standalone,
+          can_use_as_mixer,
           is_active,
           sort_order,
           product_variants (

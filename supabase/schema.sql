@@ -98,7 +98,7 @@ create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   name text not null,
-  kind text not null check (kind in ('beer', 'mixed', 'shot', 'other')),
+  kind text not null check (kind in ('beer', 'mixed', 'shot', 'other', 'alcohol', 'mixer', 'beer_bottle', 'soft_bottle', 'cocktail')),
   icon text,
   sort_order integer not null default 0,
   is_active boolean not null default true,
@@ -112,11 +112,16 @@ create table if not exists public.products (
   category_id uuid not null references public.categories(id) on delete restrict,
   name text not null,
   description text,
-  kind text not null check (kind in ('beer', 'mixed', 'shot', 'other')),
+  kind text not null check (kind in ('beer', 'mixed', 'shot', 'other', 'alcohol', 'mixer', 'beer_bottle', 'soft_bottle', 'cocktail')),
+  sale_formats text[] not null default '{}'::text[],
+  can_sell_standalone boolean not null default true,
+  can_use_as_mixer boolean not null default false,
   is_active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now()
+  updated_at timestamptz not null default now(),
+  constraint products_sale_formats_check
+    check (sale_formats <@ array['cubata', 'copa', 'shot', 'beer_bottle', 'soft_bottle', 'cocktail']::text[])
 );
 
 create table if not exists public.product_variants (
@@ -435,37 +440,43 @@ on conflict do nothing;
 
 insert into public.categories (id, tenant_id, name, kind, icon, sort_order)
 values
-  ('33333333-3333-3333-3333-333333333331', '11111111-1111-1111-1111-111111111111', 'Cerveza', 'beer', 'beer', 1),
-  ('33333333-3333-3333-3333-333333333332', '11111111-1111-1111-1111-111111111111', 'Copas', 'mixed', 'martini', 2),
-  ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', 'Chupitos', 'shot', 'shot', 3),
-  ('33333333-3333-3333-3333-333333333334', '11111111-1111-1111-1111-111111111111', 'Sin alcohol', 'other', 'glass', 4)
+  ('33333333-3333-3333-3333-333333333331', '11111111-1111-1111-1111-111111111111', 'Ginebra', 'alcohol', 'alcohol', 1),
+  ('33333333-3333-3333-3333-333333333332', '11111111-1111-1111-1111-111111111111', 'Ron', 'alcohol', 'alcohol', 2),
+  ('33333333-3333-3333-3333-333333333333', '11111111-1111-1111-1111-111111111111', 'Mixers y refrescos', 'mixer', 'glass', 3),
+  ('33333333-3333-3333-3333-333333333334', '11111111-1111-1111-1111-111111111111', 'Cervezas', 'beer_bottle', 'beer', 4),
+  ('33333333-3333-3333-3333-333333333335', '11111111-1111-1111-1111-111111111111', 'Cocteles', 'cocktail', 'martini', 5)
 on conflict do nothing;
 
-insert into public.products (id, tenant_id, category_id, name, description, kind, sort_order)
+insert into public.products (
+  id,
+  tenant_id,
+  category_id,
+  name,
+  description,
+  kind,
+  sale_formats,
+  can_sell_standalone,
+  can_use_as_mixer,
+  sort_order
+)
 values
-  ('44444444-4444-4444-4444-444444444441', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333331', 'Caña', 'Cerveza de barril', 'beer', 1),
-  ('44444444-4444-4444-4444-444444444442', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333332', 'Gin Tonic', 'Copa premium configurable', 'mixed', 1),
-  ('44444444-4444-4444-4444-444444444443', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333', 'Tequila', 'Chupito clásico', 'shot', 1),
-  ('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333334', 'Agua', 'Botella fría', 'other', 1)
+  ('44444444-4444-4444-4444-444444444441', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333331', 'Seagrams', 'Ginebra', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1),
+  ('44444444-4444-4444-4444-444444444442', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333332', 'Barcelo', 'Ron', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1),
+  ('44444444-4444-4444-4444-444444444443', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333', 'Tonica', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 1),
+  ('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333334', 'Estrella Damm', 'Botellin de cerveza', 'beer_bottle', array['beer_bottle'], true, false, 1),
+  ('44444444-4444-4444-4444-444444444445', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333335', 'Mojito', 'Coctel preparado', 'cocktail', array['cocktail'], true, false, 1)
 on conflict do nothing;
 
 insert into public.product_variants (id, tenant_id, product_id, name, price_cents, is_default, sort_order)
 values
-  ('55555555-5555-5555-5555-555555555551', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444441', 'Vaso', 300, true, 1),
-  ('55555555-5555-5555-5555-555555555552', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444442', 'Normal', 800, true, 1),
-  ('55555555-5555-5555-5555-555555555553', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444442', 'Premium', 1100, false, 2),
-  ('55555555-5555-5555-5555-555555555554', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444443', 'Chupito', 350, true, 1),
-  ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444', 'Botella', 250, true, 1)
-on conflict do nothing;
-
-insert into public.modifier_groups (id, tenant_id, product_id, name, min_select, max_select, sort_order)
-values ('66666666-6666-6666-6666-666666666661', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444442', 'Tónica', 1, 1, 1)
-on conflict do nothing;
-
-insert into public.modifiers (id, tenant_id, group_id, name, price_cents, sort_order)
-values
-  ('77777777-7777-7777-7777-777777777771', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666661', 'Schweppes', 0, 1),
-  ('77777777-7777-7777-7777-777777777772', '11111111-1111-1111-1111-111111111111', '66666666-6666-6666-6666-666666666661', 'Fever-Tree', 150, 2)
+  ('55555555-5555-5555-5555-555555555551', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444441', 'Cubata', 900, true, 1),
+  ('55555555-5555-5555-5555-555555555552', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444441', 'Copa', 700, false, 2),
+  ('55555555-5555-5555-5555-555555555553', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444441', 'Chupito', 350, false, 3),
+  ('55555555-5555-5555-5555-555555555554', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444442', 'Cubata', 850, true, 1),
+  ('55555555-5555-5555-5555-555555555555', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444442', 'Copa', 650, false, 2),
+  ('55555555-5555-5555-5555-555555555556', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444443', 'Botellin', 300, true, 1),
+  ('55555555-5555-5555-5555-555555555557', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444444', 'Botellin', 350, true, 1),
+  ('55555555-5555-5555-5555-555555555558', '11111111-1111-1111-1111-111111111111', '44444444-4444-4444-4444-444444444445', 'Coctel', 900, true, 1)
 on conflict do nothing;
 
 -- Vincula un usuario ya creado en Supabase Auth:

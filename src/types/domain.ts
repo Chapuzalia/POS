@@ -1,6 +1,17 @@
-export type CatalogKind = 'beer' | 'mixed' | 'shot' | 'other'
+export type SaleFormat = 'cubata' | 'copa' | 'shot' | 'beer_bottle' | 'soft_bottle' | 'cocktail'
 
-export type CatalogFilter = 'all' | CatalogKind
+export type CatalogKind =
+  | 'beer'
+  | 'mixed'
+  | 'shot'
+  | 'other'
+  | 'alcohol'
+  | 'mixer'
+  | 'beer_bottle'
+  | 'soft_bottle'
+  | 'cocktail'
+
+export type CatalogFilter = 'all' | SaleFormat
 
 export type PaymentMethod = 'cash' | 'card' | 'invitation' | 'other'
 
@@ -43,6 +54,7 @@ export type Category = {
   name: string
   kind: CatalogKind
   icon: string
+  isActive: boolean
   sortOrder: number
 }
 
@@ -81,6 +93,9 @@ export type Product = {
   name: string
   description: string | null
   kind: CatalogKind
+  saleFormats: SaleFormat[]
+  canSellStandalone: boolean
+  canUseAsMixer: boolean
   isActive: boolean
   sortOrder: number
   variants: ProductVariant[]
@@ -233,3 +248,37 @@ export type OfflineEvent =
       lastError?: string
       payload: CashClosedPayload
     }
+
+export type ProductCreateInput = {
+  canSellStandalone: boolean
+  canUseAsMixer: boolean
+  categoryId: string
+  description: string
+  kind: CatalogKind
+  name: string
+  priceCents: number
+  saleFormats: SaleFormat[]
+  variantName: string
+}
+
+export type CategoryCreateInput = {
+  kind: CatalogKind
+  name: string
+  sortOrder: number
+}
+
+export type CrmStats = {
+  averageTicketCents: number
+  byPayment: Array<{
+    method: PaymentMethod
+    totalCents: number
+    count: number
+  }>
+  monthSalesCents: number
+  monthTicketCount: number
+  topProducts: Array<{
+    productName: string
+    quantity: number
+    totalCents: number
+  }>
+}

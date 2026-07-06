@@ -10,26 +10,76 @@ import {
   type LucideIcon,
 } from 'lucide-react'
 import { useMemo, useState } from 'react'
+import {
+  canSellProductStandalone,
+  getProductSaleFormats,
+  getProductVariantForSaleFormat,
+  productSupportsSaleFormat,
+} from '../../lib/catalog'
 import { formatMoney, normalizeText } from '../../lib/format'
-import type { Catalog, CatalogFilter, CatalogKind, Product } from '../../types'
+import type { Catalog, CatalogFilter, CatalogKind, Product, SaleFormat } from '../../types'
 import { Button } from '../ui'
 
 const filterOptions: Array<{ id: CatalogFilter; label: string; icon: LucideIcon }> = [
   { id: 'all', label: 'Todo', icon: ReceiptText },
-  { id: 'beer', label: 'Cerveza', icon: Beer },
-  { id: 'mixed', label: 'Cubata', icon: Martini },
+  { id: 'cubata', label: 'Cubata', icon: Martini },
+  { id: 'copa', label: 'Copa', icon: Wine },
   { id: 'shot', label: 'Chupito', icon: Wine },
-  { id: 'other', label: 'Otros', icon: GlassWater },
+  { id: 'beer_bottle', label: 'Cerveza', icon: Beer },
+  { id: 'soft_bottle', label: 'Refresco', icon: GlassWater },
+  { id: 'cocktail', label: 'Coctel', icon: Martini },
 ]
 
-function getCatalogKindIcon(kind: CatalogKind) {
-  return filterOptions.find((option) => option.id === kind)?.icon ?? GlassWater
+function getCatalogKindIcon(kind: CatalogKind, activeFilter: CatalogFilter) {
+  if (activeFilter !== 'all') {
+    return filterOptions.find((option) => option.id === activeFilter)?.icon ?? GlassWater
+  }
+
+  if (kind === 'alcohol' || kind === 'mixed' || kind === 'shot') {
+    return Wine
+  }
+  if (kind === 'beer' || kind === 'beer_bottle') {
+    return Beer
+  }
+  if (kind === 'cocktail') {
+    return Martini
+  }
+
+  return GlassWater
+}
+
+function getCategoryKindsForFilter(filter: CatalogFilter): CatalogKind[] | null {
+  if (filter === 'all') {
+    return null
+  }
+  if (filter === 'cubata' || filter === 'copa' || filter === 'shot') {
+    return ['alcohol', 'mixed', 'shot']
+  }
+  if (filter === 'beer_bottle') {
+    return ['beer_bottle', 'beer']
+  }
+  if (filter === 'soft_bottle') {
+    return ['soft_bottle', 'mixer', 'other']
+  }
+  if (filter === 'cocktail') {
+    return ['cocktail']
+  }
+
+  return null
+}
+
+function getProductSaleFormat(product: Product, activeFilter: CatalogFilter): SaleFormat {
+  if (activeFilter !== 'all') {
+    return activeFilter
+  }
+
+  return getProductSaleFormats(product)[0] ?? 'soft_bottle'
 }
 
 type CatalogPanelProps = {
   catalog: Catalog | null
   disabled: boolean
-  onSelectProduct: (product: Product) => void
+  onSelectProduct: (product: Product, saleFormat: SaleFormat) => void
 }
 
 export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPanelProps) {
@@ -41,17 +91,23 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
   const normalizedSearch = normalizeText(search.trim())
 
   const visibleCategories = useMemo(
-    () =>
-      categories
-        .filter((category) => activeFilter === 'all' || category.kind === activeFilter)
-        .sort((a, b) => a.sortOrder - b.sortOrder),
+    () => {
+      const allowedKinds = getCategoryKindsForFilter(activeFilter)
+      return categories
+        .filter((category) => !allowedKinds || allowedKinds.includes(category.kind))
+        .sort((a, b) => a.sortOrder - b.sortOrder)
+    },
     [activeFilter, categories],
   )
 
   const visibleProducts = useMemo(() => {
     return products
       .filter((product) => product.isActive)
-      .filter((product) => activeFilter === 'all' || product.kind === activeFilter)
+      .filter((product) => activeFilter === 'all' || productSupportsSaleFormat(product, activeFilter))
+      .filter((product) => activeFilter !== 'soft_bottle' || canSellProductStandalone(product))
+      .filter((product) => activeFilter !== 'beer_bottle' || canSellProductStandalone(product))
+      .filter((product) => activeFilter !== 'cocktail' || canSellProductStandalone(product))
+      .filter((product) => activeFilter !== 'all' || canSellProductStandalone(product))
       .filter((product) => !selectedCategoryId || product.categoryId === selectedCategoryId)
       .filter((product) => {
         if (!normalizedSearch) {
@@ -86,7 +142,7 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
       <div className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 shadow-[var(--shadow)]">
-        <div className="grid grid-cols-5 gap-2">
+        <div className="grid grid-cols-7 gap-2 max-xl:grid-cols-4">
           {filterOptions.map((option) => {
             const Icon = option.icon
             return (
@@ -142,12 +198,13 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
           {showCategories ? (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5">
               {visibleCategories.map((category) => {
-                const Icon = getCatalogKindIcon(category.kind)
+                const Icon = getCatalogKindIcon(category.kind, activeFilter)
                 const count = products.filter(
                   (product) =>
                     product.categoryId === category.id &&
                     product.isActive &&
-                    (activeFilter === 'all' || product.kind === activeFilter),
+                    (activeFilter === 'all' || productSupportsSaleFormat(product, activeFilter)) &&
+                    (activeFilter === 'all' || activeFilter === 'cubata' || canSellProductStandalone(product)),
                 ).length
 
                 return (
@@ -171,15 +228,15 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
             visibleProducts.length ? (
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5">
                 {visibleProducts.map((product) => {
-                  const primaryVariant =
-                    product.variants.find((variant) => variant.isDefault) ?? product.variants[0] ?? null
+                  const saleFormat = getProductSaleFormat(product, activeFilter)
+                  const primaryVariant = getProductVariantForSaleFormat(product, saleFormat)
 
                   return (
                     <button
                       className="flex min-h-28 flex-col justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
                       disabled={disabled || !primaryVariant}
                       key={product.id}
-                      onClick={() => onSelectProduct(product)}
+                      onClick={() => onSelectProduct(product, saleFormat)}
                       type="button"
                     >
                       <span>

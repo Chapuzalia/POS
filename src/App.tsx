@@ -2,10 +2,12 @@ import { useState } from 'react'
 import { AppHeader } from './components/layout/AppHeader'
 import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog } from './components/modals'
 import { CatalogPanel, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
+import { CrmPage } from './components/crm/CrmPage'
 import { LoginScreen } from './components/screens/LoginScreen'
 import { LoadingScreen, MissingConfigScreen } from './components/screens/StateScreens'
 import themesData from './config/themes.json'
 import { createId, getLineSignature, getTicketTotal } from './lib/format'
+import { getProductVariantForSaleFormat } from './lib/catalog'
 import {
   clearSaleLedger,
   enqueueOfflineEvent,
@@ -42,6 +44,7 @@ import type {
   Product,
   ProductVariant,
   SaleRecord,
+  SaleFormat,
   TenantContext,
   ThemeDefinition,
   TicketLine,
@@ -52,7 +55,10 @@ import { getReadableError } from './utils/errors'
 
 type ProductDialogState = {
   product: Product
+  saleFormat: SaleFormat
 }
+
+type AppView = 'pos' | 'crm'
 
 const themes = themesData as ThemeDefinition[]
 const defaultThemeId = themes[0]?.id ?? 'hero-minimal'
@@ -86,6 +92,7 @@ function App() {
   const [configOpen, setConfigOpen] = useState(false)
   const [paidFeedback, setPaidFeedback] = useState<PaymentMethod | null>(null)
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
+  const [activeView, setActiveView] = useState<AppView>('pos')
   const cashSummary = summarizeSales(cashSession?.openingFloatCents ?? 0, salesLedger)
 
   async function refreshCatalog(activeContext = context) {
@@ -227,19 +234,19 @@ function App() {
     setProductDialog(null)
   }
 
-  function handleSelectProduct(product: Product) {
-    const firstVariant = product.variants.find((variant) => variant.isDefault) ?? product.variants[0]
+  function handleSelectProduct(product: Product, saleFormat: SaleFormat) {
+    const firstVariant = getProductVariantForSaleFormat(product, saleFormat)
 
     if (!firstVariant) {
       return
     }
 
-    if (product.variants.length === 1 && product.modifierGroups.length === 0) {
+    if (saleFormat !== 'cubata' && product.variants.length === 1 && product.modifierGroups.length === 0) {
       addTicketLine(product, firstVariant, [])
       return
     }
 
-    setProductDialog({ product })
+    setProductDialog({ product, saleFormat })
   }
 
   function updateLineQuantity(lineId: string, direction: 1 | -1) {
@@ -355,9 +362,25 @@ function App() {
 
   const canSell = Boolean(cashSession && ticketLines.length > 0 && !isBusy)
 
+  if (activeView === 'crm') {
+    return (
+      <CrmPage
+        catalog={catalog}
+        context={context}
+        error={error}
+        isOnline={isOnline}
+        onBackToPos={() => setActiveView('pos')}
+        onCatalogChanged={() => refreshCatalog(context)}
+        onError={setError}
+        onLogout={handleLogout}
+      />
+    )
+  }
+
   return (
     <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <AppHeader
+        activeView={activeView}
         cashSession={cashSession}
         isLoading={isLoading}
         isOnline={isOnline}
@@ -365,6 +388,7 @@ function App() {
         onOpenConfig={() => setConfigOpen(true)}
         onRefreshCatalog={() => void refreshCatalog()}
         onThemeChange={setThemeId}
+        onViewChange={setActiveView}
         pendingCount={pendingCount}
         themeId={themeId}
         themes={themes}
@@ -413,10 +437,12 @@ function App() {
       {productDialog ? (
         <ProductDialog
           isBusy={isBusy}
-          key={productDialog.product.id}
+          catalog={catalog}
+          key={`${productDialog.product.id}-${productDialog.saleFormat}`}
           onAdd={addTicketLine}
           onCancel={() => setProductDialog(null)}
           product={productDialog.product}
+          saleFormat={productDialog.saleFormat}
         />
       ) : null}
 

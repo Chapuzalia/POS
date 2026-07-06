@@ -13,11 +13,12 @@ declare
   v_user_id uuid;
   v_venue_id uuid;
   v_category_beer uuid;
-  v_category_mixed uuid;
-  v_category_shot uuid;
-  v_category_other uuid;
+  v_category_cocktail uuid;
+  v_category_gin uuid;
+  v_category_mixer uuid;
+  v_category_rum uuid;
+  v_category_whisky uuid;
   v_product_id uuid;
-  v_group_id uuid;
 begin
   select id
   into v_user_id
@@ -59,95 +60,124 @@ begin
     where id = v_venue_id;
   end if;
 
-  select id into v_category_beer from public.categories where tenant_id = v_tenant_id and name = 'Cerveza' limit 1;
+  select id into v_category_gin from public.categories where tenant_id = v_tenant_id and name = 'Ginebra' limit 1;
+  if v_category_gin is null then
+    insert into public.categories (tenant_id, name, kind, icon, sort_order)
+    values (v_tenant_id, 'Ginebra', 'alcohol', 'alcohol', 10)
+    returning id into v_category_gin;
+  end if;
+
+  select id into v_category_rum from public.categories where tenant_id = v_tenant_id and name = 'Ron' limit 1;
+  if v_category_rum is null then
+    insert into public.categories (tenant_id, name, kind, icon, sort_order)
+    values (v_tenant_id, 'Ron', 'alcohol', 'alcohol', 20)
+    returning id into v_category_rum;
+  end if;
+
+  select id into v_category_whisky from public.categories where tenant_id = v_tenant_id and name = 'Whisky' limit 1;
+  if v_category_whisky is null then
+    insert into public.categories (tenant_id, name, kind, icon, sort_order)
+    values (v_tenant_id, 'Whisky', 'alcohol', 'alcohol', 30)
+    returning id into v_category_whisky;
+  end if;
+
+  select id into v_category_mixer from public.categories where tenant_id = v_tenant_id and name = 'Mixers y refrescos' limit 1;
+  if v_category_mixer is null then
+    insert into public.categories (tenant_id, name, kind, icon, sort_order)
+    values (v_tenant_id, 'Mixers y refrescos', 'mixer', 'glass', 40)
+    returning id into v_category_mixer;
+  end if;
+
+  select id into v_category_beer from public.categories where tenant_id = v_tenant_id and name = 'Cervezas' limit 1;
   if v_category_beer is null then
     insert into public.categories (tenant_id, name, kind, icon, sort_order)
-    values (v_tenant_id, 'Cerveza', 'beer', 'beer', 1)
+    values (v_tenant_id, 'Cervezas', 'beer_bottle', 'beer', 50)
     returning id into v_category_beer;
   end if;
 
-  select id into v_category_mixed from public.categories where tenant_id = v_tenant_id and name = 'Copas' limit 1;
-  if v_category_mixed is null then
+  select id into v_category_cocktail from public.categories where tenant_id = v_tenant_id and name = 'Cocteles' limit 1;
+  if v_category_cocktail is null then
     insert into public.categories (tenant_id, name, kind, icon, sort_order)
-    values (v_tenant_id, 'Copas', 'mixed', 'martini', 2)
-    returning id into v_category_mixed;
+    values (v_tenant_id, 'Cocteles', 'cocktail', 'martini', 60)
+    returning id into v_category_cocktail;
   end if;
 
-  select id into v_category_shot from public.categories where tenant_id = v_tenant_id and name = 'Chupitos' limit 1;
-  if v_category_shot is null then
-    insert into public.categories (tenant_id, name, kind, icon, sort_order)
-    values (v_tenant_id, 'Chupitos', 'shot', 'shot', 3)
-    returning id into v_category_shot;
-  end if;
-
-  select id into v_category_other from public.categories where tenant_id = v_tenant_id and name = 'Sin alcohol' limit 1;
-  if v_category_other is null then
-    insert into public.categories (tenant_id, name, kind, icon, sort_order)
-    values (v_tenant_id, 'Sin alcohol', 'other', 'glass', 4)
-    returning id into v_category_other;
-  end if;
-
-  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Cana' limit 1;
+  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Seagrams' limit 1;
   if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sort_order)
-    values (v_tenant_id, v_category_beer, 'Cana', 'Cerveza de barril', 'beer', 1)
+    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_category_gin, 'Seagrams', 'Ginebra', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1)
     returning id into v_product_id;
   end if;
-  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Vaso') then
+  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Cubata') then
     insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
-    values (v_tenant_id, v_product_id, 'Vaso', 300, true, 1);
+    values (v_tenant_id, v_product_id, 'Cubata', 900, true, 1);
   end if;
-
-  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Gin Tonic' limit 1;
-  if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sort_order)
-    values (v_tenant_id, v_category_mixed, 'Gin Tonic', 'Copa configurable', 'mixed', 1)
-    returning id into v_product_id;
-  end if;
-  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Normal') then
+  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Copa') then
     insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
-    values (v_tenant_id, v_product_id, 'Normal', 800, true, 1);
-  end if;
-  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Premium') then
-    insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
-    values (v_tenant_id, v_product_id, 'Premium', 1100, false, 2);
-  end if;
-
-  select id into v_group_id from public.modifier_groups where product_id = v_product_id and name = 'Tonica' limit 1;
-  if v_group_id is null then
-    insert into public.modifier_groups (tenant_id, product_id, name, min_select, max_select, sort_order)
-    values (v_tenant_id, v_product_id, 'Tonica', 1, 1, 1)
-    returning id into v_group_id;
-  end if;
-  if not exists (select 1 from public.modifiers where group_id = v_group_id and name = 'Schweppes') then
-    insert into public.modifiers (tenant_id, group_id, name, price_cents, sort_order)
-    values (v_tenant_id, v_group_id, 'Schweppes', 0, 1);
-  end if;
-  if not exists (select 1 from public.modifiers where group_id = v_group_id and name = 'Fever-Tree') then
-    insert into public.modifiers (tenant_id, group_id, name, price_cents, sort_order)
-    values (v_tenant_id, v_group_id, 'Fever-Tree', 150, 2);
-  end if;
-
-  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Tequila' limit 1;
-  if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sort_order)
-    values (v_tenant_id, v_category_shot, 'Tequila', 'Chupito clasico', 'shot', 1)
-    returning id into v_product_id;
+    values (v_tenant_id, v_product_id, 'Copa', 700, false, 2);
   end if;
   if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Chupito') then
     insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
-    values (v_tenant_id, v_product_id, 'Chupito', 350, true, 1);
+    values (v_tenant_id, v_product_id, 'Chupito', 350, false, 3);
   end if;
 
-  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Agua' limit 1;
+  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Barcelo' limit 1;
   if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sort_order)
-    values (v_tenant_id, v_category_other, 'Agua', 'Botella fria', 'other', 1)
+    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_category_rum, 'Barcelo', 'Ron', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 2)
     returning id into v_product_id;
   end if;
-  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Botella') then
+  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Cubata') then
     insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
-    values (v_tenant_id, v_product_id, 'Botella', 250, true, 1);
+    values (v_tenant_id, v_product_id, 'Cubata', 850, true, 1);
+  end if;
+  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Copa') then
+    insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
+    values (v_tenant_id, v_product_id, 'Copa', 650, false, 2);
+  end if;
+
+  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Tonica' limit 1;
+  if v_product_id is null then
+    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_category_mixer, 'Tonica', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 1)
+    returning id into v_product_id;
+  end if;
+  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Botellin') then
+    insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
+    values (v_tenant_id, v_product_id, 'Botellin', 300, true, 1);
+  end if;
+
+  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Coca-Cola' limit 1;
+  if v_product_id is null then
+    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_category_mixer, 'Coca-Cola', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 2)
+    returning id into v_product_id;
+  end if;
+  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Botellin') then
+    insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
+    values (v_tenant_id, v_product_id, 'Botellin', 300, true, 1);
+  end if;
+
+  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Estrella Damm' limit 1;
+  if v_product_id is null then
+    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_category_beer, 'Estrella Damm', 'Botellin de cerveza', 'beer_bottle', array['beer_bottle'], true, false, 1)
+    returning id into v_product_id;
+  end if;
+  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Botellin') then
+    insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
+    values (v_tenant_id, v_product_id, 'Botellin', 350, true, 1);
+  end if;
+
+  select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Mojito' limit 1;
+  if v_product_id is null then
+    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_category_cocktail, 'Mojito', 'Coctel preparado', 'cocktail', array['cocktail'], true, false, 1)
+    returning id into v_product_id;
+  end if;
+  if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Coctel') then
+    insert into public.product_variants (tenant_id, product_id, name, price_cents, is_default, sort_order)
+    values (v_tenant_id, v_product_id, 'Coctel', 900, true, 1);
   end if;
 
   raise notice 'Tenant % listo para el usuario %', v_tenant_slug, v_user_email;

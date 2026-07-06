@@ -1,24 +1,36 @@
 import { X } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useMemo, useState, useEffect } from 'react'
+import { canUseProductAsMixer, getProductVariantForSaleFormat, getSaleFormatLabel } from '../../lib/catalog'
 import { formatMoney } from '../../lib/format'
-import type { ModifierGroup, Product, ProductVariant, TicketLineModifier } from '../../types'
+import type { Catalog, ModifierGroup, Product, ProductVariant, SaleFormat, TicketLineModifier } from '../../types'
 import { Button } from '../ui'
 
 type ProductDialogProps = {
+  catalog: Catalog | null
   isBusy: boolean
   onAdd: (product: Product, variant: ProductVariant, modifiers: TicketLineModifier[]) => void
   onCancel: () => void
   product: Product
+  saleFormat: SaleFormat
 }
 
-export function ProductDialog({ isBusy, onAdd, onCancel, product }: ProductDialogProps) {
-  const defaultVariant = product.variants.find((variant) => variant.isDefault) ?? product.variants[0]
+export function ProductDialog({ catalog, isBusy, onAdd, onCancel, product, saleFormat }: ProductDialogProps) {
+  const defaultVariant = getProductVariantForSaleFormat(product, saleFormat)
   const [selectedVariantId, setSelectedVariantId] = useState(defaultVariant?.id ?? '')
+  const [selectedMixerId, setSelectedMixerId] = useState('')
   const [selectedModifiers, setSelectedModifiers] = useState<Record<string, string[]>>({})
   const selectedVariant = product.variants.find((variant) => variant.id === selectedVariantId) ?? defaultVariant
+  const mixerProducts = useMemo(
+    () =>
+      (catalog?.products ?? [])
+        .filter((candidate) => candidate.isActive && canUseProductAsMixer(candidate))
+        .sort((a, b) => a.sortOrder - b.sortOrder),
+    [catalog],
+  )
+  const selectedMixer = mixerProducts.find((candidate) => candidate.id === selectedMixerId) ?? null
 
   const selectedModifierList = useMemo(() => {
-    return product.modifierGroups.flatMap((group) =>
+    const explicitModifiers = product.modifierGroups.flatMap((group) =>
       group.modifiers
         .filter((modifier) => selectedModifiers[group.id]?.includes(modifier.id))
         .map((modifier) => ({
@@ -28,16 +40,32 @@ export function ProductDialog({ isBusy, onAdd, onCancel, product }: ProductDialo
           priceCents: modifier.priceCents,
         })),
     )
-  }, [product.modifierGroups, selectedModifiers])
+
+    if (saleFormat !== 'cubata' || !selectedMixer) {
+      return explicitModifiers
+    }
+
+    return [
+      ...explicitModifiers,
+      {
+        groupId: 'mixer',
+        id: `mixer:${selectedMixer.id}`,
+        name: selectedMixer.name,
+        priceCents: 0,
+      },
+    ]
+  }, [product.modifierGroups, saleFormat, selectedMixer, selectedModifiers])
 
   const totalCents =
     (selectedVariant?.priceCents ?? 0) +
     selectedModifierList.reduce((total, modifier) => total + modifier.priceCents, 0)
 
-  const isValid = product.modifierGroups.every((group) => {
+  const isModifierValid = product.modifierGroups.every((group) => {
     const selectedCount = selectedModifiers[group.id]?.length ?? 0
     return selectedCount >= group.minSelect && selectedCount <= group.maxSelect
   })
+  const isMixerValid = saleFormat !== 'cubata' || Boolean(selectedMixer)
+  const isValid = isModifierValid && isMixerValid
 
   function toggleModifier(group: ModifierGroup, modifierId: string) {
     setSelectedModifiers((current) => {
@@ -56,12 +84,18 @@ export function ProductDialog({ isBusy, onAdd, onCancel, product }: ProductDialo
     })
   }
 
+  useEffect(() => {
+    if (selectedVariant && selectedMixer){
+      onAdd(product, selectedVariant, selectedModifierList)
+    }
+  }, [selectedMixerId])
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
       <section className="max-h-[calc(100svh-32px)] w-full max-w-xl overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold">{product.modifierGroups.length ? 'Complementos' : 'Formato'}</h2>
+            <h2 className="text-2xl font-bold">{getSaleFormatLabel(saleFormat)}</h2>
             <p className="text-sm text-[var(--muted)]">{product.name}</p>
           </div>
           <Button disabled={isBusy} onClick={onCancel} size="sm" type="button" variant="tertiary">
@@ -89,6 +123,35 @@ export function ProductDialog({ isBusy, onAdd, onCancel, product }: ProductDialo
                 </Button>
               ))}
             </div>
+          </div>
+        ) : null}
+
+        {saleFormat === 'cubata' ? (
+          <div className="mt-5">
+            <p className="mb-2 text-sm font-semibold text-[var(--muted)]">Mixer</p>
+            {mixerProducts.length ? (
+              <div className="grid gap-2">
+                {mixerProducts.map((mixer) => (
+                  <Button
+                    active={mixer.id === selectedMixerId}
+                    fullWidth
+                    key={mixer.id}
+                    onClick={() => setSelectedMixerId(mixer.id)}
+                    type="button"
+                    variant="tertiary"
+                  >
+                    <span className="flex w-full items-center justify-between gap-3">
+                      <span>{mixer.name}</span>
+                      <span className="font-mono tabular-nums">Incluido</span>
+                    </span>
+                  </Button>
+                ))}
+              </div>
+            ) : (
+              <div className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-4 text-sm font-semibold text-[var(--muted)]">
+                No hay mixers configurados en el CRM.
+              </div>
+            )}
           </div>
         ) : null}
 

@@ -18,16 +18,6 @@ export function TicketPanel({ isBusy, lines, onClear, onDecrement, onIncrement, 
 
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
-      <div className="flex items-center justify-between gap-3 border-b border-[var(--separator)] p-4">
-        <div>
-          <h2 className="text-xl font-bold text-[var(--foreground)]">Ticket actual</h2>
-          <p className="text-sm text-[var(--muted)]">{lines.length} lineas activas</p>
-        </div>
-        <Button disabled={!lines.length || isBusy} onClick={onClear} size="sm" type="button" variant="tertiary">
-          <Trash2 className="h-4 w-4" />
-        </Button>
-      </div>
-
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
         {lines.length === 0 ? (
           <div className="flex h-full min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">

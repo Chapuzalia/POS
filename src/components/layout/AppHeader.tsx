@@ -1,9 +1,10 @@
-import { Euro, Palette, RefreshCw, Settings, Store, Wifi, WifiOff } from 'lucide-react'
+import { Euro, LayoutDashboard, Palette, RefreshCw, Settings, Store, Wifi, WifiOff } from 'lucide-react'
 import type { CashSession, ThemeDefinition } from '../../types'
 import { cx } from '../../utils/cx'
 import { Button, Chip } from '../ui'
 
 type AppHeaderProps = {
+  activeView: 'pos' | 'crm'
   cashSession: CashSession | null
   isLoading: boolean
   isOnline: boolean
@@ -11,12 +12,14 @@ type AppHeaderProps = {
   onOpenConfig: () => void
   onRefreshCatalog: () => void
   onThemeChange: (themeId: string) => void
+  onViewChange: (view: 'pos' | 'crm') => void
   pendingCount: number
   themeId: string
   themes: ThemeDefinition[]
 }
 
 export function AppHeader({
+  activeView,
   cashSession,
   isLoading,
   isOnline,
@@ -24,6 +27,7 @@ export function AppHeader({
   onOpenConfig,
   onRefreshCatalog,
   onThemeChange,
+  onViewChange,
   pendingCount,
   themeId,
   themes,
@@ -39,7 +43,14 @@ export function AppHeader({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
-
+          <Button active={activeView === 'pos'} onClick={() => onViewChange('pos')} size="sm" type="button">
+            <Store className="h-4 w-4" />
+            TPV
+          </Button>
+          <Button active={activeView === 'crm'} onClick={() => onViewChange('crm')} size="sm" type="button">
+            <LayoutDashboard className="h-4 w-4" />
+            CRM
+          </Button>
           <Chip tone={cashSession ? 'success' : 'danger'}>
             {cashSession ? 'Caja abierta' : 'Caja cerrada'}
           </Chip>

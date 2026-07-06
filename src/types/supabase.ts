@@ -1,4 +1,4 @@
-import type { CatalogKind, PaymentMethod } from './domain'
+import type { CatalogKind, PaymentMethod, SaleFormat } from './domain'
 
 export type TenantRow = {
   id: string
@@ -26,6 +26,7 @@ export type CategoryRow = {
   name: string
   kind: CatalogKind
   icon: string | null
+  is_active: boolean
   sort_order: number
 }
 
@@ -64,6 +65,9 @@ export type ProductRow = {
   name: string
   description: string | null
   kind: CatalogKind
+  sale_formats?: SaleFormat[] | null
+  can_sell_standalone?: boolean | null
+  can_use_as_mixer?: boolean | null
   is_active: boolean
   sort_order: number
   product_variants: VariantRow[] | null
