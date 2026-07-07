@@ -3,7 +3,7 @@ import type { PaymentMethod } from '../../types'
 import { Button } from '../ui'
 
 const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: LucideIcon }> = [
-  { id: 'cash', label: 'Efectivoo', icon: Coins },
+  { id: 'cash', label: 'Efectivo', icon: Coins },
   { id: 'card', label: 'Tarjeta', icon: CreditCard },
   { id: 'invitation', label: 'Invitacion', icon: Gift },
   { id: 'other', label: 'Otro', icon: CircleHelp },
