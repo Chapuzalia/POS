@@ -1,13 +1,13 @@
-import { X } from 'lucide-react'
+import { GlassWater, X } from 'lucide-react'
 import { useMemo, useRef, useState } from 'react'
 import {
   canUseProductAsMixer,
   getProductSaleFormats,
   getProductVariantForSaleFormat,
-  getSaleFormatLabel,
 } from '../../lib/catalog'
 import { formatMoney } from '../../lib/format'
 import type { Catalog, ModifierGroup, Product, ProductVariant, SaleFormat, TicketLineModifier } from '../../types'
+import { cx } from '../../utils/cx'
 import { Button } from '../ui'
 
 type ProductDialogProps = {
@@ -18,6 +18,10 @@ type ProductDialogProps = {
   onCancel: () => void
   product: Product
   saleFormat: SaleFormat
+}
+
+function compareProductNames(a: Product, b: Product) {
+  return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }) || a.sortOrder - b.sortOrder
 }
 
 function getMixerSupplementCents(mixer: Product) {
@@ -71,6 +75,7 @@ export function ProductDialog({
   const [hasSubmitted, setHasSubmitted] = useState(false)
   const submittedRef = useRef(false)
   const isChoosingFormat = startsWithFormatSelection && !hasChosenFormat
+  const isChoosingMixer = !isChoosingFormat && selectedSaleFormat === 'cubata'
   const selectedVariant =
     product.variants.find((variant) => variant.id === selectedVariantId) ??
     getProductVariantForSaleFormat(product, selectedSaleFormat) ??
@@ -79,7 +84,7 @@ export function ProductDialog({
     () =>
       (catalog?.products ?? [])
         .filter((candidate) => candidate.isActive && canUseProductAsMixer(candidate))
-        .sort((a, b) => a.sortOrder - b.sortOrder),
+        .sort(compareProductNames),
     [catalog],
   )
   const selectedMixer = mixerProducts.find((candidate) => candidate.id === selectedMixerId) ?? null
@@ -99,22 +104,10 @@ export function ProductDialog({
     [product.modifierGroups, selectedModifiers],
   )
 
-  const selectedModifierList = useMemo(
-    () => getModifierListWithMixer(explicitModifierList, selectedSaleFormat, selectedMixer),
-    [explicitModifierList, selectedSaleFormat, selectedMixer],
-  )
-
-  const totalCents =
-    (selectedVariant?.priceCents ?? 0) +
-    selectedModifierList.reduce((total, modifier) => total + modifier.priceCents, 0)
-
   const isModifierValid = product.modifierGroups.every((group) => {
     const selectedCount = selectedModifiers[group.id]?.length ?? 0
     return selectedCount >= group.minSelect && selectedCount <= group.maxSelect
   })
-  const isMixerValid = selectedSaleFormat !== 'cubata' || Boolean(selectedMixer)
-  const isValid = isModifierValid && isMixerValid
-  const isSubmitDisabled = !selectedVariant || !isValid || isBusy || hasSubmitted
 
   function submitSelection(
     variant = selectedVariant,
@@ -171,7 +164,12 @@ export function ProductDialog({
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
-      <section className="max-h-[calc(100svh-32px)] w-full max-w-xl overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
+      <section
+        className={cx(
+          'max-h-[calc(100svh-32px)] w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]',
+          isChoosingMixer ? 'max-w-5xl' : 'max-w-xl',
+        )}
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold">
@@ -207,10 +205,10 @@ export function ProductDialog({
           </div>
         ) : null}
 
-        {!isChoosingFormat && selectedSaleFormat === 'cubata' ? (
+        {isChoosingMixer ? (
           <div className="mt-5">
             {mixerProducts.length ? (
-              <div className="grid gap-2">
+              <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {mixerProducts.map((mixer) => (
                   <Button
                     active={mixer.id === selectedMixerId}
@@ -220,12 +218,21 @@ export function ProductDialog({
                     onClick={() => handleMixerSelect(mixer)}
                     type="button"
                     variant="tertiary"
+                    className="h-28 overflow-hidden !justify-start !p-0"
                   >
-                    <span className="flex w-full items-center justify-between gap-3">
-                      <span>{mixer.name}</span>
-                      <span className="font-mono tabular-nums">
-                        {getMixerSupplementCents(mixer) ? `+${formatMoney(getMixerSupplementCents(mixer))}` : 'Incluido'}
+                    <span className="grid h-full w-full grid-cols-[6rem_minmax(0,1fr)] items-center">
+                      <span className="grid h-full w-24 place-items-center overflow-hidden bg-[var(--surface-secondary)] text-[var(--accent)]">
+                        {mixer.imageUrl ? (
+                          <img
+                            alt=""
+                            className="h-full w-full object-cover"
+                            src={mixer.imageUrl}
+                          />
+                        ) : (
+                          <GlassWater className="h-8 w-8" />
+                        )}
                       </span>
+                      <span className="min-w-0 truncate px-4 text-left text-lg">{mixer.name}</span>
                     </span>
                   </Button>
                 ))}

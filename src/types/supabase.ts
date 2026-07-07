@@ -64,6 +64,7 @@ export type ProductRow = {
   category_id: string
   name: string
   description: string | null
+  image_path?: string | null
   kind: CatalogKind
   sale_formats?: SaleFormat[] | null
   can_sell_standalone?: boolean | null

@@ -60,6 +60,10 @@ button {
   touch-action: manipulation;
 }
 
+.ticket-line-swipe {
+  touch-action: pan-y;
+}
+
 .crm-input {
   height: 44px;
   width: 100%;
@@ -606,6 +610,92 @@ button {
   white-space: nowrap;
 }
 
+.crm-open-cash {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.crm-open-cash-summary {
+  display: flex;
+  min-height: 48px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 1px solid #c9ded7;
+  border-radius: 4px;
+  background: #f0fbf5;
+  padding: 10px 12px;
+}
+
+.crm-open-cash-summary span {
+  color: #067647;
+  font-size: 12px;
+  font-weight: 900;
+  text-transform: uppercase;
+}
+
+.crm-open-cash-summary strong {
+  color: #082b4c;
+  font-size: 22px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.crm-open-cash-list {
+  display: grid;
+  gap: 10px;
+}
+
+.crm-open-cash-row {
+  display: grid;
+  grid-template-columns: minmax(210px, 1fr) minmax(104px, 0.32fr) minmax(78px, 0.2fr) minmax(92px, 0.26fr) minmax(240px, 0.8fr);
+  align-items: center;
+  gap: 12px;
+  border: 1px solid #e1e8ef;
+  border-radius: 4px;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.crm-open-cash-metric {
+  display: grid;
+  gap: 3px;
+}
+
+.crm-open-cash-metric span,
+.crm-open-cash-breakdown span {
+  color: #617386;
+  font-size: 11px;
+  font-weight: 850;
+}
+
+.crm-open-cash-metric strong {
+  color: #082b4c;
+  font-size: 16px;
+  font-weight: 950;
+  white-space: nowrap;
+}
+
+.crm-open-cash-breakdown {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.crm-open-cash-breakdown span {
+  display: inline-flex;
+  min-height: 24px;
+  align-items: center;
+  border-radius: 999px;
+  background: #e7eef5;
+  color: #082b4c;
+  padding: 0 8px;
+  white-space: nowrap;
+}
+
 .crm-horizontal-bars {
   padding: 14px;
 }
@@ -741,7 +831,7 @@ button {
 
 .crm-products-table .crm-data-head,
 .crm-products-table .crm-data-row {
-  grid-template-columns: minmax(220px, 1.35fr) minmax(170px, 0.95fr) minmax(150px, 0.85fr) 110px 116px 210px;
+  grid-template-columns: minmax(260px, 1.35fr) minmax(170px, 0.95fr) minmax(150px, 0.85fr) 110px 116px 210px;
 }
 
 .crm-categories-table .crm-data-head,
@@ -758,6 +848,31 @@ button {
   display: grid;
   min-width: 0;
   gap: 3px;
+}
+
+.crm-product-cell {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 10px;
+}
+
+.crm-product-thumb {
+  display: grid;
+  width: 42px;
+  height: 42px;
+  flex: 0 0 auto;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #d8e2eb;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #617386;
+  object-fit: cover;
+}
+
+.crm-product-thumb-empty {
+  background: #e7eef5;
 }
 
 .crm-cell-main strong,
@@ -944,6 +1059,74 @@ button {
   font-size: 11px;
   font-weight: 900;
   text-transform: uppercase;
+}
+
+.crm-field-error {
+  margin-top: 6px;
+  color: #b42318;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.crm-image-field {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+}
+
+.crm-image-preview {
+  display: grid;
+  width: 96px;
+  aspect-ratio: 1;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid #d8e2eb;
+  border-radius: 4px;
+  background: #f1f5f9;
+  color: #617386;
+}
+
+.crm-image-preview img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.crm-image-controls {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+}
+
+.crm-color-field {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 44px;
+  height: 36px;
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #d8e2eb;
+  border-radius: 4px;
+  background: #f8fafc;
+  padding: 0 8px;
+}
+
+.crm-color-field span {
+  overflow: hidden;
+  color: #52677a;
+  font-size: 11px;
+  font-weight: 900;
+  text-overflow: ellipsis;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.crm-color-field input {
+  width: 36px;
+  height: 24px;
+  border: 0;
+  background: transparent;
+  padding: 0;
 }
 
 .crm-checkbox-list {
@@ -1342,6 +1525,15 @@ button {
     grid-template-columns: 1fr;
   }
 
+  .crm-open-cash-row {
+    grid-template-columns: minmax(0, 1fr) repeat(3, minmax(80px, max-content));
+  }
+
+  .crm-open-cash-breakdown {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
   .crm-form-panel,
   .crm-editor-panel {
     position: static;
@@ -1393,6 +1585,20 @@ button {
     padding: 0;
   }
 
+  .crm-open-cash-summary {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .crm-open-cash-row {
+    grid-template-columns: 1fr 1fr;
+  }
+
+  .crm-open-cash-row .crm-cell-main,
+  .crm-open-cash-breakdown {
+    grid-column: 1 / -1;
+  }
+
   .crm-topbar {
     align-items: flex-start;
     flex-direction: column;
@@ -1423,6 +1629,7 @@ button {
 
   .crm-kpi-strip,
   .crm-import-result-grid,
+  .crm-image-field,
   .crm-variant-grid,
   .crm-product-main,
   .crm-category-editor,

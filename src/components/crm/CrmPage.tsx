@@ -30,19 +30,23 @@ import {
   saleFormatOptions,
 } from '../../lib/catalog'
 import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
+import { getDefaultProductImageFillColor } from '../../lib/productImages'
 import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImport'
 import {
   createCategory,
   createProductWithVariant,
   createVariant,
   deleteCategory,
+  deleteProductImage,
   deleteProduct,
   deleteVariant,
   importRevoCatalogProducts,
   loadCrmStats,
+  subscribeToCrmStatsChanges,
   updateCategory,
   updateProduct,
   updateVariant,
+  uploadProductImage,
   type CatalogImportResult,
 } from '../../services/crmService'
 import type {
@@ -50,6 +54,7 @@ import type {
   CatalogKind,
   Category,
   CrmStats,
+  PaymentMethod,
   Product,
   ProductVariant,
   SaleFormat,
@@ -77,6 +82,20 @@ const navItems: Array<{ id: CrmSection; label: string; icon: LucideIcon }> = [
   { id: 'import', label: 'Importacion', icon: Upload },
   { id: 'stats', label: 'Estadisticas', icon: BarChart3 },
 ]
+
+const crmDateTimeFormatter = new Intl.DateTimeFormat('es-ES', {
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  month: '2-digit',
+})
+
+const paymentLabels: Record<PaymentMethod, string> = {
+  card: 'Tarjeta',
+  cash: 'Efectivo',
+  invitation: 'Invitacion',
+  other: 'Otros',
+}
 
 export function CrmPage({
   catalog,
@@ -108,17 +127,51 @@ export function CrmPage({
     }
   }, [onError])
 
-  const refreshStats = useCallback(async () => {
-    await runAction(async () => {
+  const refreshStats = useCallback(async (options: { silent?: boolean } = {}) => {
+    const loadStats = async () => {
+      onError(null)
       setStats(await loadCrmStats(context))
-    })
-  }, [context, runAction])
+    }
+
+    if (options.silent) {
+      try {
+        await loadStats()
+      } catch (statsError) {
+        onError(getReadableError(statsError))
+      }
+      return
+    }
+
+    await runAction(loadStats)
+  }, [context, onError, runAction])
 
   useEffect(() => {
     if ((activeSection === 'dashboard' || activeSection === 'stats') && isOnline) {
       void refreshStats()
     }
   }, [activeSection, isOnline, refreshStats])
+
+  useEffect(() => {
+    if (!isOnline || (activeSection !== 'dashboard' && activeSection !== 'stats')) {
+      return undefined
+    }
+
+    let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
+    const unsubscribe = subscribeToCrmStatsChanges(context, () => {
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer)
+      }
+
+      refreshTimer = window.setTimeout(() => void refreshStats({ silent: true }), 250)
+    })
+
+    return () => {
+      if (refreshTimer) {
+        window.clearTimeout(refreshTimer)
+      }
+      unsubscribe()
+    }
+  }, [activeSection, context, isOnline, refreshStats])
 
   return (
     <div className="crm-shell">
@@ -304,6 +357,16 @@ function DashboardCrm({
         </div>
       </section>
 
+      <section className="crm-panel crm-panel-span">
+        <div className="crm-panel-header">
+          <span>Cajas abiertas</span>
+          <button className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
+        <OpenCashSessionsList stats={stats} />
+      </section>
+
       <section className="crm-panel">
         <div className="crm-panel-header">
           <span>Estado de catalogo</span>
@@ -363,6 +426,66 @@ function DashboardCrm({
         </div>
         <TopProductsList stats={stats} />
       </section>
+    </div>
+  )
+}
+
+function formatCrmDateTime(value: string) {
+  const date = new Date(value)
+
+  if (Number.isNaN(date.getTime())) {
+    return value
+  }
+
+  return crmDateTimeFormatter.format(date)
+}
+
+function OpenCashSessionsList({ stats }: { stats: CrmStats | null }) {
+  const sessions = stats?.openCashSessions ?? []
+  const totalOpenSalesCents = sessions.reduce((total, session) => total + session.salesCents, 0)
+
+  if (!stats) {
+    return <EmptyList message="Cargando cajas abiertas." />
+  }
+
+  if (!sessions.length) {
+    return <EmptyList message="No hay cajas abiertas." />
+  }
+
+  return (
+    <div className="crm-open-cash">
+      <div className="crm-open-cash-summary">
+        <span>{sessions.length} cajas abiertas</span>
+        <strong>{formatMoney(totalOpenSalesCents)}</strong>
+      </div>
+      <div className="crm-open-cash-list">
+        {sessions.map((session) => (
+          <div className="crm-open-cash-row" key={session.id}>
+            <div className="crm-cell-main">
+              <strong>{session.deviceName}</strong>
+              <span>{`${session.venueName} - abierta ${formatCrmDateTime(session.openedAt)}`}</span>
+            </div>
+            <div className="crm-open-cash-metric">
+              <span>Facturado</span>
+              <strong>{formatMoney(session.salesCents)}</strong>
+            </div>
+            <div className="crm-open-cash-metric">
+              <span>Tickets</span>
+              <strong>{session.ticketCount}</strong>
+            </div>
+            <div className="crm-open-cash-metric">
+              <span>Fondo</span>
+              <strong>{formatMoney(session.openingFloatCents)}</strong>
+            </div>
+            <div className="crm-open-cash-breakdown">
+              <span>{`${paymentLabels.cash}: ${formatMoney(session.cashCents)}`}</span>
+              <span>{`${paymentLabels.card}: ${formatMoney(session.cardCents)}`}</span>
+              <span>{`${paymentLabels.invitation}: ${formatMoney(session.invitationCents)}`}</span>
+              <span>{`${paymentLabels.other}: ${formatMoney(session.otherCents)}`}</span>
+            </div>
+          </div>
+        ))}
+      </div>
     </div>
   )
 }
@@ -625,6 +748,7 @@ function ProductsCrm({
 
     await runAction(async () => {
       await deleteProduct(tenantContext, product.id)
+      await deleteProductImage(tenantContext, product.imagePath).catch(() => undefined)
       if (editor?.mode === 'edit' && editor.productId === product.id) {
         setEditor(null)
       }
@@ -717,9 +841,18 @@ function ProductListRow({ category, disabled, onDelete, onEdit, product }: Produ
 
   return (
     <div className="crm-data-row">
-      <div className="crm-cell-main">
-        <strong>{product.name}</strong>
-        <span>{product.description || 'Sin descripcion'} · {product.isActive ? 'Activo' : 'Oculto'}</span>
+      <div className="crm-product-cell">
+        {product.imageUrl ? (
+          <img alt="" className="crm-product-thumb" src={product.imageUrl} />
+        ) : (
+          <div className="crm-product-thumb crm-product-thumb-empty">
+            <Boxes className="h-4 w-4" />
+          </div>
+        )}
+        <div className="crm-cell-main">
+          <strong>{product.name}</strong>
+          <span>{product.description || 'Sin descripcion'} · {product.isActive ? 'Activo' : 'Oculto'}</span>
+        </div>
       </div>
       <div className="crm-format-list">
         {getProductSaleFormats(product).map((format) => (
@@ -786,6 +919,12 @@ function ProductFormPanel({
   const [price, setPrice] = useState(centsToInput(primaryVariant?.priceCents ?? 0))
   const [newVariantName, setNewVariantName] = useState('')
   const [newVariantPrice, setNewVariantPrice] = useState('0.00')
+  const [imageFile, setImageFile] = useState<File | null>(null)
+  const [imagePreviewUrl, setImagePreviewUrl] = useState(product?.imageUrl ?? '')
+  const [imageObjectUrl, setImageObjectUrl] = useState<string | null>(null)
+  const [imageFillColor, setImageFillColor] = useState(getDefaultProductImageFillColor)
+  const [imageError, setImageError] = useState<string | null>(null)
+  const [shouldRemoveImage, setShouldRemoveImage] = useState(false)
   const selectedCategory = categories.find((category) => category.id === categoryId)
 
   useEffect(() => {
@@ -793,6 +932,14 @@ function ProductFormPanel({
       setCategoryId(firstCategory.id)
     }
   }, [categoryId, firstCategory])
+
+  useEffect(() => {
+    return () => {
+      if (imageObjectUrl) {
+        URL.revokeObjectURL(imageObjectUrl)
+      }
+    }
+  }, [imageObjectUrl])
 
   function handleCategoryChange(nextCategoryId: string) {
     const nextCategory = categories.find((category) => category.id === nextCategoryId)
@@ -821,6 +968,35 @@ function ProductFormPanel({
     }
   }
 
+  function handleImageChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null
+    event.currentTarget.value = ''
+    setImageError(null)
+
+    if (!file) {
+      return
+    }
+
+    if (!file.type.startsWith('image/')) {
+      setImageError('Selecciona un archivo de imagen valido.')
+      return
+    }
+
+    const nextObjectUrl = URL.createObjectURL(file)
+    setImageFile(file)
+    setImageObjectUrl(nextObjectUrl)
+    setImagePreviewUrl(nextObjectUrl)
+    setShouldRemoveImage(false)
+  }
+
+  function removeSelectedImage() {
+    setImageFile(null)
+    setImageObjectUrl(null)
+    setImagePreviewUrl('')
+    setImageError(null)
+    setShouldRemoveImage(Boolean(product?.imagePath))
+  }
+
   async function saveProduct() {
     if (!selectedCategory || !name.trim()) {
       return
@@ -830,38 +1006,61 @@ function ProductFormPanel({
       canUseAsMixer && hasMixerSupplement ? parseMoneyToCents(mixerSupplement) : 0
 
     await runAction(async () => {
-      if (isEditing && product) {
-        await updateProduct(tenantContext, product.id, {
-          canSellStandalone,
-          canUseAsMixer,
-          categoryId,
-          description: description.trim(),
-          kind,
-          mixerSupplementCents,
-          name: name.trim(),
-          saleFormats,
-        })
-        if (primaryVariant) {
-          await updateVariant(tenantContext, primaryVariant.id, {
+      let uploadedImagePath: string | null = null
+      const previousImagePath = product?.imagePath ?? null
+
+      try {
+        const nextImagePath = imageFile
+          ? await uploadProductImage(tenantContext, imageFile, imageFillColor)
+          : shouldRemoveImage
+            ? null
+            : previousImagePath
+
+        uploadedImagePath = imageFile ? nextImagePath : null
+
+        if (isEditing && product) {
+          await updateProduct(tenantContext, product.id, {
+            canSellStandalone,
+            canUseAsMixer,
+            categoryId,
+            description: description.trim(),
+            imagePath: nextImagePath,
+            kind,
+            mixerSupplementCents,
+            name: name.trim(),
+            saleFormats,
+          })
+          if (primaryVariant) {
+            await updateVariant(tenantContext, primaryVariant.id, {
+              priceCents: parseMoneyToCents(price),
+            })
+          }
+        } else {
+          await createProductWithVariant(tenantContext, {
+            canSellStandalone,
+            canUseAsMixer,
+            categoryId: selectedCategory.id,
+            description: description.trim(),
+            imagePath: nextImagePath,
+            kind,
+            mixerSupplementCents,
+            name: name.trim(),
             priceCents: parseMoneyToCents(price),
+            saleFormats,
+            variantName: variantName.trim() || 'Normal',
           })
         }
-      } else {
-        await createProductWithVariant(tenantContext, {
-          canSellStandalone,
-          canUseAsMixer,
-          categoryId: selectedCategory.id,
-          description: description.trim(),
-          kind,
-          mixerSupplementCents,
-          name: name.trim(),
-          priceCents: parseMoneyToCents(price),
-          saleFormats,
-          variantName: variantName.trim() || 'Normal',
-        })
+
+        if ((uploadedImagePath || shouldRemoveImage) && previousImagePath && previousImagePath !== nextImagePath) {
+          await deleteProductImage(tenantContext, previousImagePath).catch(() => undefined)
+        }
+
+        await onCatalogChanged()
+        onClose()
+      } catch (saveError) {
+        await deleteProductImage(tenantContext, uploadedImagePath).catch(() => undefined)
+        throw saveError
       }
-      await onCatalogChanged()
-      onClose()
     })
   }
 
@@ -964,6 +1163,47 @@ function ProductFormPanel({
         <Field label="Descripcion">
           <input className="crm-input" onChange={(event) => setDescription(event.target.value)} value={description} />
         </Field>
+        <div>
+          <span className="crm-field-label">Imagen</span>
+          <div className="crm-image-field">
+            <div className="crm-image-preview" style={{ backgroundColor: imageFillColor }}>
+              {imagePreviewUrl ? (
+                <img alt="" src={imagePreviewUrl} />
+              ) : (
+                <Boxes className="h-7 w-7" />
+              )}
+            </div>
+            <div className="crm-image-controls">
+              <label
+                className={
+                  disabled
+                    ? 'crm-secondary-button crm-file-button crm-file-button-disabled'
+                    : 'crm-secondary-button crm-file-button'
+                }
+              >
+                <Upload className="h-4 w-4" />
+                Cargar imagen
+                <input accept="image/*" disabled={disabled} onChange={handleImageChange} type="file" />
+              </label>
+              <label className="crm-color-field">
+                <span>Relleno</span>
+                <input
+                  disabled={disabled || !imageFile}
+                  onChange={(event) => setImageFillColor(event.target.value)}
+                  type="color"
+                  value={imageFillColor}
+                />
+              </label>
+              {imagePreviewUrl ? (
+                <button className="crm-state-button crm-state-button-danger" disabled={disabled} onClick={removeSelectedImage} type="button">
+                  <X className="h-4 w-4" />
+                  Quitar
+                </button>
+              ) : null}
+            </div>
+          </div>
+          {imageError ? <div className="crm-field-error">{imageError}</div> : null}
+        </div>
         <div>
           <span className="crm-field-label">Formatos de venta</span>
           <div className="crm-checkbox-list">

@@ -92,6 +92,8 @@ export type Product = {
   categoryId: string
   name: string
   description: string | null
+  imagePath: string | null
+  imageUrl: string | null
   kind: CatalogKind
   saleFormats: SaleFormat[]
   canSellStandalone: boolean
@@ -255,6 +257,7 @@ export type ProductCreateInput = {
   canUseAsMixer: boolean
   categoryId: string
   description: string
+  imagePath?: string | null
   kind: CatalogKind
   mixerSupplementCents: number
   name: string
@@ -278,6 +281,19 @@ export type CrmStats = {
   }>
   monthSalesCents: number
   monthTicketCount: number
+  openCashSessions: Array<{
+    id: string
+    venueName: string
+    deviceName: string
+    openedAt: string
+    openingFloatCents: number
+    salesCents: number
+    ticketCount: number
+    cashCents: number
+    cardCents: number
+    invitationCents: number
+    otherCents: number
+  }>
   topProducts: Array<{
     productName: string
     quantity: number

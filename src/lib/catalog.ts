@@ -55,8 +55,7 @@ export function productSupportsSaleFormat(product: Product, saleFormat: SaleForm
   return (
     (saleFormat === 'cubata' && product.kind === 'mixed') ||
     (saleFormat === 'shot' && product.kind === 'shot') ||
-    (saleFormat === 'beer_bottle' && product.kind === 'beer') ||
-    (saleFormat === 'soft_bottle' && product.kind === 'other')
+    (saleFormat === 'beer_bottle' && product.kind === 'beer')
   )
 }
 
@@ -92,7 +91,7 @@ export function getDefaultSaleFormatsForKind(kind: CatalogKind): SaleFormat[] {
   if (kind === 'beer' || kind === 'beer_bottle') {
     return ['beer_bottle']
   }
-  if (kind === 'soft_bottle' || kind === 'mixer' || kind === 'other') {
+  if (kind === 'soft_bottle' || kind === 'mixer') {
     return ['soft_bottle']
   }
   if (kind === 'cocktail') {

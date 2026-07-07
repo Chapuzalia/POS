@@ -1,4 +1,5 @@
 import { createId, getLineTotal, getTicketTotal } from '../lib/format'
+import { PRODUCT_IMAGE_BUCKET } from '../lib/productImages'
 import { supabase } from '../lib/supabase'
 import type {
   CashClosedPayload,
@@ -78,6 +79,14 @@ function mapModifierGroups(rows: ModifierGroupRow[] | null): ModifierGroup[] {
     .sort((a, b) => a.sortOrder - b.sortOrder)
 }
 
+function getProductImageUrl(imagePath: string | null | undefined) {
+  if (!imagePath || !supabase) {
+    return null
+  }
+
+  return supabase.storage.from(PRODUCT_IMAGE_BUCKET).getPublicUrl(imagePath).data.publicUrl
+}
+
 function inferSaleFormats(kind: ProductRow['kind']) {
   if (kind === 'alcohol' || kind === 'mixed') {
     return ['cubata'] as const
@@ -88,7 +97,7 @@ function inferSaleFormats(kind: ProductRow['kind']) {
   if (kind === 'beer' || kind === 'beer_bottle') {
     return ['beer_bottle'] as const
   }
-  if (kind === 'soft_bottle' || kind === 'mixer' || kind === 'other') {
+  if (kind === 'soft_bottle' || kind === 'mixer') {
     return ['soft_bottle'] as const
   }
   if (kind === 'cocktail') {
@@ -105,6 +114,8 @@ function mapProduct(row: ProductRow): Product {
     categoryId: row.category_id,
     name: row.name,
     description: row.description,
+    imagePath: row.image_path ?? null,
+    imageUrl: getProductImageUrl(row.image_path),
     kind: row.kind,
     saleFormats: row.sale_formats?.length ? row.sale_formats : [...inferSaleFormats(row.kind)],
     canSellStandalone: row.can_sell_standalone ?? row.kind !== 'mixer',
@@ -267,6 +278,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
           category_id,
           name,
           description,
+          image_path,
           kind,
           sale_formats,
           can_sell_standalone,

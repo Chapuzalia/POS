@@ -1,5 +1,6 @@
 import { supabase } from '../lib/supabase'
 import { normalizeText } from '../lib/format'
+import { PRODUCT_IMAGE_BUCKET, resizeProductImageToWebp } from '../lib/productImages'
 import type { RevoImportProduct } from '../lib/revoImport'
 import type {
   CatalogKind,
@@ -21,6 +22,25 @@ type TicketLineStatsRow = {
   product_name: string
   quantity: number
   line_total_cents: number
+}
+
+type OpenCashSessionRow = {
+  id: string
+  venue_id: string
+  device_id: string
+  opened_at: string
+  opening_float_cents: number
+}
+
+type OpenCashSessionSaleRow = {
+  cash_session_id: string
+  payment_method: PaymentMethod
+  total_cents: number
+}
+
+type NameRow = {
+  id: string
+  name: string
 }
 
 type ImportCategoryRow = {
@@ -67,6 +87,45 @@ function getMonthStartIso() {
 
 function getImportKey(value: string) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function createProductImagePath(context: TenantContext) {
+  const imageId =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `${Date.now()}-${Math.random().toString(16).slice(2)}`
+
+  return `${context.tenantId}/products/${imageId}.webp`
+}
+
+export async function uploadProductImage(context: TenantContext, file: File, fillColor?: string) {
+  const client = requireSupabase()
+  const imageBlob = await resizeProductImageToWebp(file, fillColor)
+  const imagePath = createProductImagePath(context)
+  const { error } = await client.storage.from(PRODUCT_IMAGE_BUCKET).upload(imagePath, imageBlob, {
+    cacheControl: '31536000',
+    contentType: 'image/webp',
+    upsert: false,
+  })
+
+  if (error) {
+    throw error
+  }
+
+  return imagePath
+}
+
+export async function deleteProductImage(context: TenantContext, imagePath: string | null | undefined) {
+  if (!imagePath || !imagePath.startsWith(`${context.tenantId}/`)) {
+    return
+  }
+
+  const client = requireSupabase()
+  const { error } = await client.storage.from(PRODUCT_IMAGE_BUCKET).remove([imagePath])
+
+  if (error) {
+    throw error
+  }
 }
 
 export async function createCategory(context: TenantContext, input: CategoryCreateInput) {
@@ -125,6 +184,7 @@ export async function createProductWithVariant(context: TenantContext, input: Pr
       category_id: input.categoryId,
       name: input.name,
       description: input.description || null,
+      image_path: input.imagePath ?? null,
       kind: input.kind,
       sale_formats: input.saleFormats,
       can_sell_standalone: input.canSellStandalone,
@@ -160,6 +220,7 @@ export async function updateProduct(
   input: {
     categoryId?: string
     description?: string
+    imagePath?: string | null
     isActive?: boolean
     kind?: CatalogKind
     name?: string
@@ -175,6 +236,7 @@ export async function updateProduct(
     .update({
       ...(input.categoryId !== undefined ? { category_id: input.categoryId } : {}),
       ...(input.description !== undefined ? { description: input.description || null } : {}),
+      ...(input.imagePath !== undefined ? { image_path: input.imagePath } : {}),
       ...(input.isActive !== undefined ? { is_active: input.isActive } : {}),
       ...(input.kind !== undefined ? { kind: input.kind } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
@@ -500,7 +562,13 @@ export async function importRevoCatalogProducts(
 export async function loadCrmStats(context: TenantContext): Promise<CrmStats> {
   const client = requireSupabase()
   const monthStart = getMonthStartIso()
-  const [{ data: salesRows, error: salesError }, { data: lineRows, error: linesError }] = await Promise.all([
+  const [
+    { data: salesRows, error: salesError },
+    { data: lineRows, error: linesError },
+    { data: openSessionRows, error: openSessionsError },
+    { data: venueRows, error: venuesError },
+    { data: deviceRows, error: devicesError },
+  ] = await Promise.all([
     client
       .from('sales')
       .select('id, payment_method, total_cents')
@@ -511,6 +579,14 @@ export async function loadCrmStats(context: TenantContext): Promise<CrmStats> {
       .select('product_name, quantity, line_total_cents')
       .eq('tenant_id', context.tenantId)
       .gte('created_at', monthStart),
+    client
+      .from('cash_sessions')
+      .select('id, venue_id, device_id, opened_at, opening_float_cents')
+      .eq('tenant_id', context.tenantId)
+      .eq('status', 'open')
+      .order('opened_at', { ascending: false }),
+    client.from('venues').select('id, name').eq('tenant_id', context.tenantId),
+    client.from('devices').select('id, name').eq('tenant_id', context.tenantId),
   ])
 
   if (salesError) {
@@ -521,11 +597,40 @@ export async function loadCrmStats(context: TenantContext): Promise<CrmStats> {
     throw linesError
   }
 
+  if (openSessionsError) {
+    throw openSessionsError
+  }
+
+  if (venuesError) {
+    throw venuesError
+  }
+
+  if (devicesError) {
+    throw devicesError
+  }
+
   const sales = (salesRows ?? []) as SaleStatsRow[]
   const lines = (lineRows ?? []) as TicketLineStatsRow[]
+  const openSessions = (openSessionRows ?? []) as OpenCashSessionRow[]
+  const venuesById = new Map(((venueRows ?? []) as NameRow[]).map((venue) => [venue.id, venue.name]))
+  const devicesById = new Map(((deviceRows ?? []) as NameRow[]).map((device) => [device.id, device.name]))
   const monthSalesCents = sales.reduce((total, sale) => total + sale.total_cents, 0)
   const byPaymentMap = new Map<PaymentMethod, { method: PaymentMethod; totalCents: number; count: number }>()
   const topProductMap = new Map<string, { productName: string; quantity: number; totalCents: number }>()
+  const openCashSessions = openSessions.map((session) => ({
+    id: session.id,
+    venueName: venuesById.get(session.venue_id) ?? 'Local sin nombre',
+    deviceName: devicesById.get(session.device_id) ?? 'Caja sin nombre',
+    openedAt: session.opened_at,
+    openingFloatCents: session.opening_float_cents,
+    salesCents: 0,
+    ticketCount: 0,
+    cashCents: 0,
+    cardCents: 0,
+    invitationCents: 0,
+    otherCents: 0,
+  }))
+  const openCashSessionById = new Map(openCashSessions.map((session) => [session.id, session]))
 
   sales.forEach((sale) => {
     const current = byPaymentMap.get(sale.payment_method) ?? {
@@ -553,11 +658,76 @@ export async function loadCrmStats(context: TenantContext): Promise<CrmStats> {
     })
   })
 
+  if (openSessions.length) {
+    const { data: openSessionSaleRows, error: openSessionSalesError } = await client
+      .from('sales')
+      .select('cash_session_id, payment_method, total_cents')
+      .eq('tenant_id', context.tenantId)
+      .in(
+        'cash_session_id',
+        openSessions.map((session) => session.id),
+      )
+
+    if (openSessionSalesError) {
+      throw openSessionSalesError
+    }
+
+    const openSessionSales = (openSessionSaleRows ?? []) as OpenCashSessionSaleRow[]
+
+    openSessionSales.forEach((sale) => {
+      const session = openCashSessionById.get(sale.cash_session_id)
+
+      if (!session) {
+        return
+      }
+
+      session.salesCents += sale.total_cents
+      session.ticketCount += 1
+
+      if (sale.payment_method === 'cash') {
+        session.cashCents += sale.total_cents
+      } else if (sale.payment_method === 'card') {
+        session.cardCents += sale.total_cents
+      } else if (sale.payment_method === 'invitation') {
+        session.invitationCents += sale.total_cents
+      } else {
+        session.otherCents += sale.total_cents
+      }
+    })
+  }
+
   return {
     averageTicketCents: sales.length ? Math.round(monthSalesCents / sales.length) : 0,
     byPayment: [...byPaymentMap.values()].sort((a, b) => b.totalCents - a.totalCents),
     monthSalesCents,
     monthTicketCount: sales.length,
+    openCashSessions,
     topProducts: [...topProductMap.values()].sort((a, b) => b.totalCents - a.totalCents).slice(0, 8),
+  }
+}
+
+export function subscribeToCrmStatsChanges(context: TenantContext, onChange: () => void) {
+  const client = supabase
+
+  if (!client) {
+    return () => undefined
+  }
+
+  const channel = client
+    .channel(`crm-stats:${context.tenantId}`)
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'cash_sessions', filter: `tenant_id=eq.${context.tenantId}` },
+      onChange,
+    )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'sales', filter: `tenant_id=eq.${context.tenantId}` },
+      onChange,
+    )
+    .subscribe()
+
+  return () => {
+    void client.removeChannel(channel)
   }
 }

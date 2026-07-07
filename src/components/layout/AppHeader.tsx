@@ -1,29 +1,25 @@
-import { Euro, LayoutDashboard, RefreshCw, Settings, Store, Wifi, WifiOff } from 'lucide-react'
+import { Euro, RefreshCw, Settings, Store, Wifi, WifiOff } from 'lucide-react'
 import type { CashSession } from '../../types'
 import { cx } from '../../utils/cx'
 import { Button, Chip } from '../ui'
 
 type AppHeaderProps = {
-  activeView: 'pos' | 'crm'
   cashSession: CashSession | null
   isLoading: boolean
   isOnline: boolean
   onCloseCash: () => void
   onOpenConfig: () => void
   onRefreshCatalog: () => void
-  onViewChange: (view: 'pos' | 'crm') => void
   pendingCount: number
 }
 
 export function AppHeader({
-  activeView,
   cashSession,
   isLoading,
   isOnline,
   onCloseCash,
   onOpenConfig,
   onRefreshCatalog,
-  onViewChange,
   pendingCount,
 }: AppHeaderProps) {
   return (
@@ -37,20 +33,7 @@ export function AppHeader({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
-          <Button active={activeView === 'pos'} onClick={() => onViewChange('pos')} size="sm" type="button">
-            <Store className="h-4 w-4" />
-            TPV
-          </Button>
-          <Button active={activeView === 'crm'} onClick={() => onViewChange('crm')} size="sm" type="button">
-            <LayoutDashboard className="h-4 w-4" />
-            CRM
-          </Button>
-          <Chip tone={cashSession ? 'success' : 'danger'}>
-            {cashSession ? 'Caja abierta' : 'Caja cerrada'}
-          </Chip>
-          <Chip icon={isOnline ? Wifi : WifiOff} tone={isOnline ? 'success' : 'danger'}>
-            {isOnline ? 'Online' : 'Offline'}
-          </Chip>
+          <Chip icon={isOnline ? Wifi : WifiOff} tone={isOnline ? 'success' : 'danger'} />
           {pendingCount ? <Chip tone="warning">{`${pendingCount} pendientes`}</Chip> : null}
           {cashSession ? (
             <Button onClick={onCloseCash} size="sm" type="button" variant="secondary">

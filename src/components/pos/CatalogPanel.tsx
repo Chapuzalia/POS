@@ -17,7 +17,7 @@ import {
   productSupportsSaleFormat,
 } from '../../lib/catalog'
 import { formatMoney, normalizeText } from '../../lib/format'
-import type { Catalog, CatalogFilter, CatalogKind, Product, SaleFormat } from '../../types'
+import type { Catalog, CatalogFilter, CatalogKind, Category, Product, SaleFormat } from '../../types'
 import { Button } from '../ui'
 
 const filterOptions: Array<{ id: CatalogFilter; label: string; icon: LucideIcon }> = [
@@ -29,6 +29,10 @@ const filterOptions: Array<{ id: CatalogFilter; label: string; icon: LucideIcon 
   { id: 'soft_bottle', label: 'Refresco', icon: GlassWater },
   { id: 'cocktail', label: 'Coctel', icon: Martini },
 ]
+
+function compareProductNames(a: Product, b: Product) {
+  return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }) || a.sortOrder - b.sortOrder
+}
 
 function getCatalogKindIcon(kind: CatalogKind, activeFilter: CatalogFilter) {
   if (activeFilter !== 'all') {
@@ -59,13 +63,21 @@ function getCategoryKindsForFilter(filter: CatalogFilter): CatalogKind[] | null 
     return ['beer_bottle', 'beer']
   }
   if (filter === 'soft_bottle') {
-    return ['soft_bottle', 'mixer', 'other']
+    return ['soft_bottle', 'mixer']
   }
   if (filter === 'cocktail') {
     return ['cocktail']
   }
 
   return null
+}
+
+function isSoftBottleCatalogProduct(product: Product, category: Category | undefined) {
+  if (category?.kind === 'other') {
+    return false
+  }
+
+  return product.kind === 'soft_bottle' || product.kind === 'mixer' || category?.kind === 'soft_bottle' || category?.kind === 'mixer'
 }
 
 function getProductSaleFormat(product: Product, activeFilter: CatalogFilter): SaleFormat {
@@ -88,6 +100,7 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
   const categories = useMemo(() => catalog?.categories ?? [], [catalog])
   const products = useMemo(() => catalog?.products ?? [], [catalog])
+  const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories])
   const normalizedSearch = normalizeText(search.trim())
   const productFilter = normalizedSearch ? 'all' : activeFilter
 
@@ -105,6 +118,7 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
     return products
       .filter((product) => product.isActive)
       .filter((product) => productFilter === 'all' || productSupportsSaleFormat(product, productFilter))
+      .filter((product) => productFilter !== 'soft_bottle' || isSoftBottleCatalogProduct(product, categoryById.get(product.categoryId)))
       .filter((product) => productFilter !== 'soft_bottle' || canSellProductStandalone(product))
       .filter((product) => productFilter !== 'beer_bottle' || canSellProductStandalone(product))
       .filter((product) => productFilter !== 'cocktail' || canSellProductStandalone(product))
@@ -115,7 +129,7 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
           return true
         }
 
-        const categoryName = categories.find((category) => category.id === product.categoryId)?.name ?? ''
+        const categoryName = categoryById.get(product.categoryId)?.name ?? ''
         const searchable = normalizeText(
           [
             product.name,
@@ -127,8 +141,8 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
 
         return searchable.includes(normalizedSearch)
       })
-      .sort((a, b) => a.sortOrder - b.sortOrder)
-  }, [categories, normalizedSearch, productFilter, products, selectedCategoryId])
+      .sort(compareProductNames)
+  }, [categoryById, normalizedSearch, productFilter, products, selectedCategoryId])
 
   const showCategories =
     activeFilter !== 'beer_bottle' && activeFilter !== 'soft_bottle' && !normalizedSearch && !selectedCategoryId
@@ -226,28 +240,38 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
 
           {!showCategories ? (
             visibleProducts.length ? (
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5">
+              <div className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-5">
                 {visibleProducts.map((product) => {
                   const saleFormat = getProductSaleFormat(product, productFilter)
                   const primaryVariant = getProductVariantForSaleFormat(product, saleFormat)
                   const allowFormatSelection = productFilter === 'all'
+                  const ProductIcon = getCatalogKindIcon(product.kind, productFilter)
 
                   return (
                     <button
-                      className="flex min-h-28 flex-col justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
+                      className="flex min-h-8 flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
                       disabled={disabled || !primaryVariant}
                       key={product.id}
                       onClick={() => onSelectProduct(product, saleFormat, allowFormatSelection)}
                       type="button"
                     >
-                      <span>
-                        <span className="line-clamp-2 font-bold text-[var(--foreground)]">{product.name}</span>
-                        <span className="mt-1 block text-sm text-[var(--muted)]">
-                          {product.variants.length <= 1 ? null : `${product.variants.length} formatos`}
-                        </span>
+                      <span className="grid aspect-square w-full place-items-center overflow-hidden bg-[var(--surface-secondary)] text-[var(--accent)]">
+                        {product.imageUrl ? (
+                          <img alt="" className="h-full w-full object-cover" src={product.imageUrl} />
+                        ) : (
+                          <ProductIcon className="h-9 w-9" />
+                        )}
                       </span>
-                      <span className="mt-3 font-mono text-xl font-black tabular-nums text-[var(--foreground)]">
-                        {primaryVariant ? formatMoney(primaryVariant.priceCents) : 'Sin precio'}
+                      <span className="flex min-h-0 flex-1 flex-col justify-between p-2">
+                        <span>
+                          <span className="line-clamp-2 font-bold text-[var(--foreground)]">{product.name}</span>
+                          <span className="mt-1 block text-sm text-[var(--muted)]">
+                            {product.variants.length <= 1 ? null : `${product.variants.length} formatos`}
+                          </span>
+                        </span>
+                        <span className="mt-0 font-mono text-xl font-black tabular-nums text-[var(--foreground)]">
+                          {primaryVariant ? formatMoney(primaryVariant.priceCents) : 'Sin precio'}
+                        </span>
                       </span>
                     </button>
                   )

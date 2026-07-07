@@ -2,7 +2,7 @@ import type { LucideIcon } from 'lucide-react'
 import { cx } from '../../utils/cx'
 
 type ChipProps = {
-  children: string
+  children?: string
   icon?: LucideIcon
   tone?: 'default' | 'success' | 'danger' | 'warning'
 }
@@ -19,7 +19,7 @@ export function Chip({ children, icon: Icon, tone = 'default' }: ChipProps) {
       )}
     >
       {Icon ? <Icon className="h-4 w-4" /> : null}
-      {children}
+      {children?children : null}
     </span>
   )
 }

@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { AppHeader } from './components/layout/AppHeader'
 import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog } from './components/modals'
 import { CatalogPanel, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
@@ -59,10 +59,14 @@ type ProductDialogState = {
   saleFormat: SaleFormat
 }
 
-type AppView = 'pos' | 'crm'
+type AppRoute = 'pos' | 'crm'
 
 const themes = themesData as ThemeDefinition[]
 const defaultThemeId = themes[0]?.id ?? 'hero-minimal'
+
+function getAppRoute(): AppRoute {
+  return window.location.pathname.replace(/\/+$/, '') === '/crm' ? 'crm' : 'pos'
+}
 
 function App() {
   const { selectedTheme, setThemeId, themeId } = useThemeTokens(themes, defaultThemeId)
@@ -93,8 +97,17 @@ function App() {
   const [configOpen, setConfigOpen] = useState(false)
   const [paidFeedback, setPaidFeedback] = useState<PaymentMethod | null>(null)
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
-  const [activeView, setActiveView] = useState<AppView>('pos')
+  const [route, setRoute] = useState<AppRoute>(() => getAppRoute())
   const cashSummary = summarizeSales(cashSession?.openingFloatCents ?? 0, salesLedger)
+
+  useEffect(() => {
+    function handlePopState() {
+      setRoute(getAppRoute())
+    }
+
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
 
   async function refreshCatalog(activeContext = context) {
     if (!activeContext || !supabaseConfig.isReady || !isOnline) {
@@ -339,6 +352,11 @@ function App() {
     saveCachedContext(null)
   }
 
+  function navigateToPos() {
+    window.history.pushState(null, '', '/')
+    setRoute('pos')
+  }
+
   if (!selectedTheme) {
     return null
   }
@@ -366,14 +384,14 @@ function App() {
 
   const canSell = Boolean(cashSession && ticketLines.length > 0 && !isBusy)
 
-  if (activeView === 'crm') {
+  if (route === 'crm') {
     return (
       <CrmPage
         catalog={catalog}
         context={context}
         error={error}
         isOnline={isOnline}
-        onBackToPos={() => setActiveView('pos')}
+        onBackToPos={navigateToPos}
         onCatalogChanged={() => refreshCatalog(context)}
         onError={setError}
         onLogout={handleLogout}
@@ -384,14 +402,12 @@ function App() {
   return (
     <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <AppHeader
-        activeView={activeView}
         cashSession={cashSession}
         isLoading={isLoading}
         isOnline={isOnline}
         onCloseCash={() => setCloseCashOpen(true)}
         onOpenConfig={() => setConfigOpen(true)}
         onRefreshCatalog={() => void refreshCatalog()}
-        onViewChange={setActiveView}
         pendingCount={pendingCount}
       />
 

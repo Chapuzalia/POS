@@ -3,6 +3,13 @@
 
 create extension if not exists pgcrypto;
 
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('product-images', 'product-images', true, 1048576, array['image/webp'])
+on conflict (id) do update
+set public = excluded.public,
+    file_size_limit = excluded.file_size_limit,
+    allowed_mime_types = excluded.allowed_mime_types;
+
 create or replace function public.set_updated_at()
 returns trigger
 language plpgsql
@@ -112,6 +119,7 @@ create table if not exists public.products (
   category_id uuid not null references public.categories(id) on delete restrict,
   name text not null,
   description text,
+  image_path text,
   kind text not null check (kind in ('beer', 'mixed', 'shot', 'other', 'alcohol', 'mixer', 'beer_bottle', 'soft_bottle', 'cocktail')),
   sale_formats text[] not null default '{}'::text[],
   can_sell_standalone boolean not null default true,
@@ -270,6 +278,20 @@ create index if not exists tickets_tenant_idx on public.tickets (tenant_id, crea
 create index if not exists sales_tenant_idx on public.sales (tenant_id, created_at desc);
 
 do $$
+begin
+  alter publication supabase_realtime add table public.cash_sessions;
+exception
+  when duplicate_object or undefined_object then null;
+end $$;
+
+do $$
+begin
+  alter publication supabase_realtime add table public.sales;
+exception
+  when duplicate_object or undefined_object then null;
+end $$;
+
+do $$
 declare
   table_name text;
 begin
@@ -400,6 +422,39 @@ create policy "offline_event_log_tenant_access"
 on public.offline_event_log for all
 using (public.user_has_tenant_access(tenant_id))
 with check (public.user_has_tenant_access(tenant_id));
+
+drop policy if exists "product_images_public_read" on storage.objects;
+create policy "product_images_public_read"
+on storage.objects for select
+using (bucket_id = 'product-images');
+
+drop policy if exists "product_images_tenant_insert" on storage.objects;
+create policy "product_images_tenant_insert"
+on storage.objects for insert
+with check (
+  bucket_id = 'product-images'
+  and public.user_has_tenant_access(((storage.foldername(name))[1])::uuid)
+);
+
+drop policy if exists "product_images_tenant_update" on storage.objects;
+create policy "product_images_tenant_update"
+on storage.objects for update
+using (
+  bucket_id = 'product-images'
+  and public.user_has_tenant_access(((storage.foldername(name))[1])::uuid)
+)
+with check (
+  bucket_id = 'product-images'
+  and public.user_has_tenant_access(((storage.foldername(name))[1])::uuid)
+);
+
+drop policy if exists "product_images_tenant_delete" on storage.objects;
+create policy "product_images_tenant_delete"
+on storage.objects for delete
+using (
+  bucket_id = 'product-images'
+  and public.user_has_tenant_access(((storage.foldername(name))[1])::uuid)
+);
 
 do $$
 declare
