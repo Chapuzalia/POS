@@ -68,6 +68,7 @@ export type ProductRow = {
   sale_formats?: SaleFormat[] | null
   can_sell_standalone?: boolean | null
   can_use_as_mixer?: boolean | null
+  mixer_supplement_cents?: number | null
   is_active: boolean
   sort_order: number
   product_variants: VariantRow[] | null

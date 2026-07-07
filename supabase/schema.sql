@@ -116,6 +116,7 @@ create table if not exists public.products (
   sale_formats text[] not null default '{}'::text[],
   can_sell_standalone boolean not null default true,
   can_use_as_mixer boolean not null default false,
+  mixer_supplement_cents integer not null default 0 check (mixer_supplement_cents >= 0),
   is_active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),

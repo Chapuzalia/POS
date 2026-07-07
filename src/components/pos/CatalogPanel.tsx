@@ -79,7 +79,7 @@ function getProductSaleFormat(product: Product, activeFilter: CatalogFilter): Sa
 type CatalogPanelProps = {
   catalog: Catalog | null
   disabled: boolean
-  onSelectProduct: (product: Product, saleFormat: SaleFormat) => void
+  onSelectProduct: (product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean) => void
 }
 
 export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPanelProps) {
@@ -89,6 +89,7 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
   const categories = useMemo(() => catalog?.categories ?? [], [catalog])
   const products = useMemo(() => catalog?.products ?? [], [catalog])
   const normalizedSearch = normalizeText(search.trim())
+  const productFilter = normalizedSearch ? 'all' : activeFilter
 
   const visibleCategories = useMemo(
     () => {
@@ -103,11 +104,11 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
   const visibleProducts = useMemo(() => {
     return products
       .filter((product) => product.isActive)
-      .filter((product) => activeFilter === 'all' || productSupportsSaleFormat(product, activeFilter))
-      .filter((product) => activeFilter !== 'soft_bottle' || canSellProductStandalone(product))
-      .filter((product) => activeFilter !== 'beer_bottle' || canSellProductStandalone(product))
-      .filter((product) => activeFilter !== 'cocktail' || canSellProductStandalone(product))
-      .filter((product) => activeFilter !== 'all' || canSellProductStandalone(product))
+      .filter((product) => productFilter === 'all' || productSupportsSaleFormat(product, productFilter))
+      .filter((product) => productFilter !== 'soft_bottle' || canSellProductStandalone(product))
+      .filter((product) => productFilter !== 'beer_bottle' || canSellProductStandalone(product))
+      .filter((product) => productFilter !== 'cocktail' || canSellProductStandalone(product))
+      .filter((product) => productFilter !== 'all' || canSellProductStandalone(product))
       .filter((product) => !selectedCategoryId || product.categoryId === selectedCategoryId)
       .filter((product) => {
         if (!normalizedSearch) {
@@ -127,9 +128,10 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
         return searchable.includes(normalizedSearch)
       })
       .sort((a, b) => a.sortOrder - b.sortOrder)
-  }, [activeFilter, categories, normalizedSearch, products, selectedCategoryId])
+  }, [categories, normalizedSearch, productFilter, products, selectedCategoryId])
 
-  const showCategories = !normalizedSearch && !selectedCategoryId
+  const showCategories =
+    activeFilter !== 'beer_bottle' && activeFilter !== 'soft_bottle' && !normalizedSearch && !selectedCategoryId
   const selectedCategory = selectedCategoryId
     ? categories.find((category) => category.id === selectedCategoryId) ?? null
     : null
@@ -141,8 +143,7 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
 
   return (
     <section className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 shadow-[var(--shadow)]">
-        <div className="grid grid-cols-7 gap-2 max-xl:grid-cols-4">
+      <div className="flex flex-row gap-2">
           {filterOptions.map((option) => {
             const Icon = option.icon
             return (
@@ -162,7 +163,6 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
             )
           })}
         </div>
-      </div>
 
       <div className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <div className="border-b border-[var(--separator)] p-4">
@@ -228,21 +228,22 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
             visibleProducts.length ? (
               <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5">
                 {visibleProducts.map((product) => {
-                  const saleFormat = getProductSaleFormat(product, activeFilter)
+                  const saleFormat = getProductSaleFormat(product, productFilter)
                   const primaryVariant = getProductVariantForSaleFormat(product, saleFormat)
+                  const allowFormatSelection = productFilter === 'all'
 
                   return (
                     <button
                       className="flex min-h-28 flex-col justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
                       disabled={disabled || !primaryVariant}
                       key={product.id}
-                      onClick={() => onSelectProduct(product, saleFormat)}
+                      onClick={() => onSelectProduct(product, saleFormat, allowFormatSelection)}
                       type="button"
                     >
                       <span>
                         <span className="line-clamp-2 font-bold text-[var(--foreground)]">{product.name}</span>
                         <span className="mt-1 block text-sm text-[var(--muted)]">
-                          {product.variants.length <= 1 ? 'Formato unico' : `${product.variants.length} formatos`}
+                          {product.variants.length <= 1 ? null : `${product.variants.length} formatos`}
                         </span>
                       </span>
                       <span className="mt-3 font-mono text-xl font-black tabular-nums text-[var(--foreground)]">

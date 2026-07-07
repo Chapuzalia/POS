@@ -96,6 +96,7 @@ export type Product = {
   saleFormats: SaleFormat[]
   canSellStandalone: boolean
   canUseAsMixer: boolean
+  mixerSupplementCents: number
   isActive: boolean
   sortOrder: number
   variants: ProductVariant[]
@@ -255,6 +256,7 @@ export type ProductCreateInput = {
   categoryId: string
   description: string
   kind: CatalogKind
+  mixerSupplementCents: number
   name: string
   priceCents: number
   saleFormats: SaleFormat[]

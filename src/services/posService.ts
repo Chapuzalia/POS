@@ -109,6 +109,7 @@ function mapProduct(row: ProductRow): Product {
     saleFormats: row.sale_formats?.length ? row.sale_formats : [...inferSaleFormats(row.kind)],
     canSellStandalone: row.can_sell_standalone ?? row.kind !== 'mixer',
     canUseAsMixer: row.can_use_as_mixer ?? row.kind === 'mixer',
+    mixerSupplementCents: row.mixer_supplement_cents ?? 0,
     isActive: row.is_active,
     sortOrder: row.sort_order,
     variants: (row.product_variants ?? []).map(mapVariant).sort((a, b) => a.sortOrder - b.sortOrder),
@@ -270,6 +271,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
           sale_formats,
           can_sell_standalone,
           can_use_as_mixer,
+          mixer_supplement_cents,
           is_active,
           sort_order,
           product_variants (

@@ -13,7 +13,7 @@ type TicketPanelProps = {
   onRemove: (lineId: string) => void
 }
 
-export function TicketPanel({ isBusy, lines, onClear, onDecrement, onIncrement, onRemove }: TicketPanelProps) {
+export function TicketPanel({ isBusy, lines, onDecrement, onIncrement, onRemove }: TicketPanelProps) {
   const total = getTicketTotal(lines)
 
   return (
@@ -34,13 +34,12 @@ export function TicketPanel({ isBusy, lines, onClear, onDecrement, onIncrement, 
                 key={line.id}
               >
                 <div className="min-w-0">
-                  <p className="truncate font-bold text-[var(--foreground)]">{line.productName}</p>
+                  <p className="truncate font-bold text-[var(--foreground)]">{line.quantity}x - {line.productName}</p>
                   <p className="text-sm text-[var(--muted)]">
-                    {line.variantName}
-                    {line.modifiers.length ? ` - ${line.modifiers.map((modifier) => modifier.name).join(', ')}` : ''}
+                    {line.modifiers.length ? ` + ${line.modifiers.map((modifier) => modifier.name).join(', ')}` : ''}
                   </p>
                   <p className="mt-1 font-mono text-sm tabular-nums text-[var(--muted)]">
-                    Cantidad: {line.quantity} x {formatMoney(line.unitPriceCents)}
+                    {formatMoney(line.unitPriceCents)}/u
                   </p>
                   {line.quantity > 1 ? (
                     <p className="font-mono text-sm font-bold tabular-nums text-[var(--foreground)]">

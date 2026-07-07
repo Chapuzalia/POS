@@ -25,6 +25,9 @@ alter table public.products
 add column if not exists can_use_as_mixer boolean not null default false;
 
 alter table public.products
+add column if not exists mixer_supplement_cents integer not null default 0 check (mixer_supplement_cents >= 0);
+
+alter table public.products
 drop constraint if exists products_sale_formats_check;
 
 alter table public.products

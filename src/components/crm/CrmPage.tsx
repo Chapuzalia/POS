@@ -12,10 +12,12 @@ import {
   Store,
   Tags,
   Trash2,
+  Upload,
   UserRound,
   X,
+  type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react'
 import {
   canSellProductStandalone,
   canUseProductAsMixer,
@@ -28,16 +30,20 @@ import {
   saleFormatOptions,
 } from '../../lib/catalog'
 import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
+import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImport'
 import {
   createCategory,
   createProductWithVariant,
   createVariant,
   deleteCategory,
   deleteProduct,
+  deleteVariant,
+  importRevoCatalogProducts,
   loadCrmStats,
   updateCategory,
   updateProduct,
   updateVariant,
+  type CatalogImportResult,
 } from '../../services/crmService'
 import type {
   Catalog,
@@ -51,7 +57,7 @@ import type {
 } from '../../types'
 import { getReadableError } from '../../utils/errors'
 
-type CrmSection = 'dashboard' | 'products' | 'categories' | 'stats'
+type CrmSection = 'dashboard' | 'products' | 'categories' | 'import' | 'stats'
 
 type CrmPageProps = {
   catalog: Catalog | null
@@ -64,10 +70,11 @@ type CrmPageProps = {
   onLogout: () => void
 }
 
-const navItems: Array<{ id: CrmSection; label: string; icon: typeof LayoutDashboard }> = [
+const navItems: Array<{ id: CrmSection; label: string; icon: LucideIcon }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'categories', label: 'Categorias', icon: Tags },
+  { id: 'import', label: 'Importacion', icon: Upload },
   { id: 'stats', label: 'Estadisticas', icon: BarChart3 },
 ]
 
@@ -217,6 +224,15 @@ export function CrmPage({
             />
           ) : null}
 
+          {activeSection === 'import' ? (
+            <RevoImportCrm
+              disabled={!isOnline || isBusy}
+              onCatalogChanged={onCatalogChanged}
+              runAction={runAction}
+              tenantContext={context}
+            />
+          ) : null}
+
           {activeSection === 'stats' ? (
             <StatsCrm disabled={!isOnline || isBusy} onRefresh={refreshStats} stats={stats} />
           ) : null}
@@ -232,6 +248,9 @@ function getSectionTitle(section: CrmSection) {
   }
   if (section === 'categories') {
     return 'Categorias del catalogo'
+  }
+  if (section === 'import') {
+    return 'Importacion REVO'
   }
   if (section === 'stats') {
     return 'Analitica comercial'
@@ -362,6 +381,191 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
     <div className="crm-mini-metric">
       <span>{label}</span>
       <strong>{value}</strong>
+    </div>
+  )
+}
+
+type RevoImportCrmProps = {
+  disabled: boolean
+  onCatalogChanged: () => Promise<void>
+  runAction: RunAction
+  tenantContext: TenantContext
+}
+
+function RevoImportCrm({ disabled, onCatalogChanged, runAction, tenantContext }: RevoImportCrmProps) {
+  const [fileError, setFileError] = useState<string | null>(null)
+  const [fileName, setFileName] = useState('')
+  const [importResult, setImportResult] = useState<CatalogImportResult | null>(null)
+  const [parseResult, setParseResult] = useState<RevoImportParseResult | null>(null)
+  const products = useMemo(() => parseResult?.products ?? [], [parseResult])
+  const variantCount = products.reduce((total, product) => total + product.variants.length, 0)
+  const allWarnings = useMemo(() => {
+    const productWarnings = products.flatMap((product) =>
+      product.warnings.map((warning) => `${product.name}: ${warning}`),
+    )
+    return [...(parseResult?.warnings ?? []), ...productWarnings]
+  }, [parseResult?.warnings, products])
+
+  async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null
+    event.currentTarget.value = ''
+    setFileError(null)
+    setImportResult(null)
+
+    if (!file) {
+      return
+    }
+
+    try {
+      const text = await file.text()
+      const nextResult = parseRevoItemsCsv(text)
+      setFileName(file.name)
+      setParseResult(nextResult)
+
+      if (!nextResult.products.length) {
+        setFileError('No se han encontrado productos importables en el CSV.')
+      }
+    } catch (readError) {
+      setFileName(file.name)
+      setParseResult(null)
+      setFileError(getReadableError(readError))
+    }
+  }
+
+  async function handleImport() {
+    if (!parseResult?.products.length) {
+      return
+    }
+
+    setImportResult(null)
+    await runAction(async () => {
+      const nextResult = await importRevoCatalogProducts(tenantContext, parseResult.products)
+      setImportResult(nextResult)
+      await onCatalogChanged()
+    })
+  }
+
+  return (
+    <div className="crm-dashboard-grid">
+      <section className="crm-panel crm-panel-span">
+        <div className="crm-list-toolbar">
+          <div className="crm-list-title">
+            <h2>Importar articulos REVO</h2>
+            <p>
+              {fileName
+                ? `${fileName} - ${products.length} productos y ${variantCount} formatos detectados`
+                : 'Selecciona el CSV de articulos exportado desde REVO.'}
+            </p>
+          </div>
+          <div className="crm-toolbar-actions">
+            <label
+              className={
+                disabled
+                  ? 'crm-secondary-button crm-file-button crm-file-button-disabled'
+                  : 'crm-secondary-button crm-file-button'
+              }
+            >
+              <Upload className="h-4 w-4" />
+              Seleccionar CSV
+              <input accept=".csv,text/csv" disabled={disabled} onChange={handleFileChange} type="file" />
+            </label>
+            <button
+              className="crm-primary-button"
+              disabled={disabled || !parseResult?.products.length}
+              onClick={() => void handleImport()}
+              type="button"
+            >
+              <Upload className="h-4 w-4" />
+              Importar
+            </button>
+          </div>
+        </div>
+
+        <div className="crm-kpi-strip">
+          <KpiCard color="green" label="Productos" value={products.length} />
+          <KpiCard color="blue" label="Formatos" value={variantCount} />
+          <KpiCard color="orange" label="Avisos" value={allWarnings.length} />
+          <KpiCard color="red" label="Filas omitidas" value={parseResult?.skippedRows ?? 0} />
+        </div>
+      </section>
+
+      {fileError ? <div className="crm-import-alert crm-import-alert-warning">{fileError}</div> : null}
+
+      {allWarnings.length ? (
+        <section className="crm-panel crm-panel-span">
+          <div className="crm-panel-header">
+            <span>Avisos de interpretacion</span>
+          </div>
+          <ul className="crm-import-warning-list">
+            {allWarnings.slice(0, 8).map((warning, index) => (
+              <li key={`${index}:${warning}`}>{warning}</li>
+            ))}
+            {allWarnings.length > 8 ? <li>{allWarnings.length - 8} avisos mas en el CSV.</li> : null}
+          </ul>
+        </section>
+      ) : null}
+
+      {importResult ? (
+        <section className="crm-panel crm-panel-span">
+          <div className="crm-panel-header">
+            <span>Resultado de importacion</span>
+          </div>
+          <div className="crm-import-result-grid">
+            <MiniMetric label="Categorias creadas" value={String(importResult.categoriesCreated)} />
+            <MiniMetric label="Categorias actualizadas" value={String(importResult.categoriesUpdated)} />
+            <MiniMetric label="Productos creados" value={String(importResult.productsCreated)} />
+            <MiniMetric label="Productos actualizados" value={String(importResult.productsUpdated)} />
+            <MiniMetric label="Formatos creados" value={String(importResult.variantsCreated)} />
+            <MiniMetric label="Formatos actualizados" value={String(importResult.variantsUpdated)} />
+          </div>
+        </section>
+      ) : null}
+
+      {parseResult ? (
+        <section className="crm-panel crm-panel-span">
+          <div className="crm-panel-header">
+            <span>Previsualizacion</span>
+          </div>
+          <div className="crm-data-table crm-import-table">
+            <div className="crm-data-head">
+              <span>Producto</span>
+              <span>Categoria destino</span>
+              <span>Formatos</span>
+              <span>Precio</span>
+              <span>Estado</span>
+              <span>Avisos</span>
+            </div>
+            {products.map((product) => (
+              <div className="crm-data-row" key={`${product.categoryName}:${product.name}`}>
+                <div className="crm-cell-main">
+                  <strong>{product.name}</strong>
+                  <span>{product.sourceCategories.join(', ') || 'REVO'}</span>
+                </div>
+                <span>{product.categoryName}</span>
+                <div className="crm-format-list">
+                  {product.saleFormats.map((format) => (
+                    <span key={format}>{getSaleFormatLabel(format)}</span>
+                  ))}
+                </div>
+                <div className="crm-price-list">
+                  {product.variants.map((variant) => (
+                    <span key={variant.name}>
+                      {variant.name}: {formatMoney(variant.priceCents)}
+                    </span>
+                  ))}
+                </div>
+                <span className={product.active ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+                  {product.active ? 'Activo' : 'Oculto'}
+                </span>
+                <span className="crm-import-warning-cell">
+                  {product.warnings.length ? product.warnings.join(' ') : 'Sin avisos'}
+                </span>
+              </div>
+            ))}
+            {!products.length ? <EmptyList message="Carga un CSV de REVO para ver la previsualizacion." /> : null}
+          </div>
+        </section>
+      ) : null}
     </div>
   )
 }
@@ -503,6 +707,13 @@ type ProductListRowProps = {
 
 function ProductListRow({ category, disabled, onDelete, onEdit, product }: ProductListRowProps) {
   const primaryVariant = product.variants.find((variant) => variant.isDefault) ?? product.variants[0]
+  const usageLabel = canUseProductAsMixer(product)
+    ? product.mixerSupplementCents
+      ? `Mixer +${formatMoney(product.mixerSupplementCents)}`
+      : 'Mixer'
+    : canSellProductStandalone(product)
+      ? 'Venta directa'
+      : 'Interno'
 
   return (
     <div className="crm-data-row">
@@ -518,7 +729,7 @@ function ProductListRow({ category, disabled, onDelete, onEdit, product }: Produ
       <span>{category?.name ?? 'Sin categoria'} · {getKindLabel(product.kind)}</span>
       <strong>{formatMoney(primaryVariant?.priceCents ?? 0)}</strong>
       <span className={product.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
-        {canUseProductAsMixer(product) ? 'Mixer' : canSellProductStandalone(product) ? 'Venta directa' : 'Interno'}
+        {usageLabel}
       </span>
       <div className="crm-action-group">
         <button className="crm-action-button" disabled={disabled} onClick={onEdit} type="button">
@@ -559,6 +770,7 @@ function ProductFormPanel({
   const isEditing = mode === 'edit'
   const primaryVariant = product?.variants.find((variant) => variant.isDefault) ?? product?.variants[0]
   const initialKind = product?.kind ?? firstCategory?.kind ?? 'other'
+  const initialMixerSupplementCents = product?.mixerSupplementCents ?? 0
   const [name, setName] = useState(product?.name ?? '')
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? firstCategory?.id ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
@@ -568,6 +780,8 @@ function ProductFormPanel({
   )
   const [canSellStandalone, setCanSellStandalone] = useState(product ? canSellProductStandalone(product) : true)
   const [canUseAsMixer, setCanUseAsMixer] = useState(product ? canUseProductAsMixer(product) : initialKind === 'mixer')
+  const [hasMixerSupplement, setHasMixerSupplement] = useState(initialMixerSupplementCents > 0)
+  const [mixerSupplement, setMixerSupplement] = useState(centsToInput(initialMixerSupplementCents || 100))
   const [variantName, setVariantName] = useState('Normal')
   const [price, setPrice] = useState(centsToInput(primaryVariant?.priceCents ?? 0))
   const [newVariantName, setNewVariantName] = useState('')
@@ -589,6 +803,7 @@ function ProductFormPanel({
       setSaleFormats(getDefaultSaleFormatsForKind(nextCategory.kind))
       setCanSellStandalone(true)
       setCanUseAsMixer(nextCategory.kind === 'mixer')
+      setHasMixerSupplement(false)
     }
   }
 
@@ -598,10 +813,21 @@ function ProductFormPanel({
     )
   }
 
+  function handleCanUseAsMixerChange(nextCanUseAsMixer: boolean) {
+    setCanUseAsMixer(nextCanUseAsMixer)
+
+    if (!nextCanUseAsMixer) {
+      setHasMixerSupplement(false)
+    }
+  }
+
   async function saveProduct() {
     if (!selectedCategory || !name.trim()) {
       return
     }
+
+    const mixerSupplementCents =
+      canUseAsMixer && hasMixerSupplement ? parseMoneyToCents(mixerSupplement) : 0
 
     await runAction(async () => {
       if (isEditing && product) {
@@ -611,6 +837,7 @@ function ProductFormPanel({
           categoryId,
           description: description.trim(),
           kind,
+          mixerSupplementCents,
           name: name.trim(),
           saleFormats,
         })
@@ -626,6 +853,7 @@ function ProductFormPanel({
           categoryId: selectedCategory.id,
           description: description.trim(),
           kind,
+          mixerSupplementCents,
           name: name.trim(),
           priceCents: parseMoneyToCents(price),
           saleFormats,
@@ -662,6 +890,33 @@ function ProductFormPanel({
       })
       setNewVariantName('')
       setNewVariantPrice('0.00')
+      await onCatalogChanged()
+    })
+  }
+
+  async function handleDeleteVariant(variant: ProductVariant) {
+    if (!product) {
+      return
+    }
+
+    if (product.variants.length <= 1) {
+      window.alert('No se puede eliminar el unico formato del producto.')
+      return
+    }
+
+    if (!window.confirm(`Eliminar el formato "${variant.name}"?`)) {
+      return
+    }
+
+    const nextDefaultVariant = variant.isDefault ? product.variants.find((item) => item.id !== variant.id) : null
+
+    await runAction(async () => {
+      await deleteVariant(tenantContext, variant.id)
+      if (nextDefaultVariant) {
+        await updateVariant(tenantContext, nextDefaultVariant.id, {
+          isDefault: true,
+        })
+      }
       await onCatalogChanged()
     })
   }
@@ -736,11 +991,40 @@ function ProductFormPanel({
               <span>Venta directa</span>
             </label>
             <label>
-              <input checked={canUseAsMixer} onChange={(event) => setCanUseAsMixer(event.target.checked)} type="checkbox" />
+              <input
+                checked={canUseAsMixer}
+                onChange={(event) => handleCanUseAsMixerChange(event.target.checked)}
+                type="checkbox"
+              />
               <span>Mixer para cubatas</span>
             </label>
           </div>
         </div>
+        {canUseAsMixer ? (
+          <div>
+            <span className="crm-field-label">Suplemento en cubatas</span>
+            <div className="crm-checkbox-list">
+              <label>
+                <input
+                  checked={hasMixerSupplement}
+                  onChange={(event) => setHasMixerSupplement(event.target.checked)}
+                  type="checkbox"
+                />
+                <span>Aplicar suplemento</span>
+              </label>
+            </div>
+          </div>
+        ) : null}
+        {canUseAsMixer && hasMixerSupplement ? (
+          <Field label="Importe suplemento">
+            <input
+              className="crm-input font-mono"
+              inputMode="decimal"
+              onChange={(event) => setMixerSupplement(event.target.value)}
+              value={mixerSupplement}
+            />
+          </Field>
+        ) : null}
         <div className={isEditing ? 'crm-one-field' : 'crm-two-fields'}>
           {isEditing ? (
             <Field label="Precio base">
@@ -781,8 +1065,10 @@ function ProductFormPanel({
           <div className="crm-variant-grid">
             {product.variants.map((variant) => (
               <VariantEditor
+                canDelete={product.variants.length > 1}
                 disabled={disabled}
                 key={variant.id}
+                onDelete={() => void handleDeleteVariant(variant)}
                 onCatalogChanged={onCatalogChanged}
                 runAction={runAction}
                 tenantContext={tenantContext}
@@ -815,14 +1101,24 @@ function ProductFormPanel({
 }
 
 type VariantEditorProps = {
+  canDelete: boolean
   disabled: boolean
+  onDelete: () => void
   onCatalogChanged: () => Promise<void>
   runAction: RunAction
   tenantContext: TenantContext
   variant: ProductVariant
 }
 
-function VariantEditor({ disabled, onCatalogChanged, runAction, tenantContext, variant }: VariantEditorProps) {
+function VariantEditor({
+  canDelete,
+  disabled,
+  onDelete,
+  onCatalogChanged,
+  runAction,
+  tenantContext,
+  variant,
+}: VariantEditorProps) {
   const [name, setName] = useState(variant.name)
   const [price, setPrice] = useState(centsToInput(variant.priceCents))
 
@@ -838,8 +1134,23 @@ function VariantEditor({ disabled, onCatalogChanged, runAction, tenantContext, v
 
   return (
     <div className="crm-variant-editor">
-      <input className="crm-input" onChange={(event) => setName(event.target.value)} value={name} />
-      <input className="crm-input font-mono" inputMode="decimal" onChange={(event) => setPrice(event.target.value)} value={price} />
+      <label className="crm-variant-field">
+        <span>Formato</span>
+        <input className="crm-input" onChange={(event) => setName(event.target.value)} value={name} />
+      </label>
+      <button
+        className="crm-delete-square-button"
+        disabled={disabled || !canDelete}
+        onClick={onDelete}
+        title={canDelete ? `Eliminar ${variant.name}` : 'No se puede eliminar el unico formato.'}
+        type="button"
+      >
+        <Trash2 className="h-4 w-4" />
+      </button>
+      <label className="crm-variant-field">
+        <span>Precio</span>
+        <input className="crm-input font-mono" inputMode="decimal" onChange={(event) => setPrice(event.target.value)} value={price} />
+      </label>
       <button className="crm-save-button" disabled={disabled} onClick={saveVariant} type="button">
         <Save className="h-4 w-4" />
       </button>

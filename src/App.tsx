@@ -54,6 +54,7 @@ import { nowIso } from './utils/dates'
 import { getReadableError } from './utils/errors'
 
 type ProductDialogState = {
+  allowFormatSelection: boolean
   product: Product
   saleFormat: SaleFormat
 }
@@ -234,19 +235,22 @@ function App() {
     setProductDialog(null)
   }
 
-  function handleSelectProduct(product: Product, saleFormat: SaleFormat) {
+  function handleSelectProduct(product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean) {
     const firstVariant = getProductVariantForSaleFormat(product, saleFormat)
 
     if (!firstVariant) {
       return
     }
 
-    if (saleFormat !== 'cubata' && product.variants.length === 1 && product.modifierGroups.length === 0) {
+    const needsDialog =
+      saleFormat === 'cubata' || product.modifierGroups.length > 0 || (allowFormatSelection && product.variants.length > 1)
+
+    if (!needsDialog) {
       addTicketLine(product, firstVariant, [])
       return
     }
 
-    setProductDialog({ product, saleFormat })
+    setProductDialog({ allowFormatSelection, product, saleFormat })
   }
 
   function updateLineQuantity(lineId: string, direction: 1 | -1) {
@@ -387,11 +391,8 @@ function App() {
         onCloseCash={() => setCloseCashOpen(true)}
         onOpenConfig={() => setConfigOpen(true)}
         onRefreshCatalog={() => void refreshCatalog()}
-        onThemeChange={setThemeId}
         onViewChange={setActiveView}
         pendingCount={pendingCount}
-        themeId={themeId}
-        themes={themes}
       />
 
       {error ? (
@@ -436,9 +437,10 @@ function App() {
 
       {productDialog ? (
         <ProductDialog
+          allowFormatSelection={productDialog.allowFormatSelection}
           isBusy={isBusy}
           catalog={catalog}
-          key={`${productDialog.product.id}-${productDialog.saleFormat}`}
+          key={`${productDialog.product.id}-${productDialog.saleFormat}-${productDialog.allowFormatSelection}`}
           onAdd={addTicketLine}
           onCancel={() => setProductDialog(null)}
           product={productDialog.product}
@@ -462,6 +464,7 @@ function App() {
           context={context}
           onClose={() => setConfigOpen(false)}
           onLogout={handleLogout}
+          onThemeChange={setThemeId}
           pendingCount={pendingCount}
           themeId={themeId}
           themes={themes}
