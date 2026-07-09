@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { AppHeader } from './components/layout/AppHeader'
-import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog } from './components/modals'
+import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog, SessionTicketsModal } from './components/modals'
 import { CatalogPanel, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
 import { CrmPage } from './components/crm/CrmPage'
 import { LoginScreen } from './components/screens/LoginScreen'
@@ -10,17 +10,24 @@ import { createId, getLineSignature, getTicketTotal } from './lib/format'
 import { getProductVariantForSaleFormat } from './lib/catalog'
 import {
   clearSaleLedger,
+  clearSessionTickets,
   enqueueOfflineEvent,
+  getCatalogStartTab,
   getCachedCashSession,
   getCachedCatalog,
   getCachedContext,
+  getCachedProductSalesStats,
   getCachedTicket,
   getSaleLedger,
+  getSessionTickets,
+  saveCatalogStartTab,
   saveCachedCashSession,
   saveCachedCatalog,
   saveCachedContext,
+  saveCachedProductSalesStats,
   saveCachedTicket,
   saveSaleLedger,
+  saveSessionTickets,
 } from './lib/offlineStore'
 import { supabaseConfig } from './lib/supabase'
 import { useOfflineSync } from './hooks/useOfflineSync'
@@ -30,6 +37,7 @@ import {
   buildSalePayload,
   loadCatalogFromSupabase,
   loadOpenCashSession,
+  loadProductSalesStatsFromSupabase,
   loadSalesLedgerFromSupabase,
   loginTenant,
   mergeLedgers,
@@ -39,12 +47,15 @@ import type {
   CashClosedPayload,
   CashSession,
   Catalog,
+  CatalogStartTab,
   LoginInput,
   PaymentMethod,
   Product,
+  ProductSalesStat,
   ProductVariant,
   SaleRecord,
   SaleFormat,
+  SessionTicketRecord,
   TenantContext,
   ThemeDefinition,
   TicketLine,
@@ -89,12 +100,23 @@ function App() {
     const cachedContext = getCachedContext()
     return cachedContext ? getSaleLedger(cachedContext) : []
   })
+  const [sessionTickets, setSessionTickets] = useState<SessionTicketRecord[]>(() => {
+    const cachedContext = getCachedContext()
+    const cachedSession = cachedContext ? getCachedCashSession(cachedContext) : null
+    return cachedContext && cachedSession ? getSessionTickets(cachedContext, cachedSession.id) : []
+  })
+  const [catalogStartTab, setCatalogStartTab] = useState<CatalogStartTab>(() => getCatalogStartTab())
+  const [productSalesStats, setProductSalesStats] = useState<ProductSalesStat[]>(() => {
+    const cachedContext = getCachedContext()
+    return cachedContext ? getCachedProductSalesStats(cachedContext.tenantId) : []
+  })
   const [isBusy, setIsBusy] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cashPaymentOpen, setCashPaymentOpen] = useState(false)
   const [closeCashOpen, setCloseCashOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
+  const [ticketHistoryOpen, setTicketHistoryOpen] = useState(false)
   const [paidFeedback, setPaidFeedback] = useState<PaymentMethod | null>(null)
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
   const [route, setRoute] = useState<AppRoute>(() => getAppRoute())
@@ -118,8 +140,11 @@ function App() {
     setError(null)
     try {
       const nextCatalog = await loadCatalogFromSupabase(activeContext)
+      const nextProductSalesStats = await loadProductSalesStatsFromSupabase(activeContext)
       setCatalog(nextCatalog)
+      setProductSalesStats(nextProductSalesStats)
       saveCachedCatalog(activeContext.tenantId, nextCatalog)
+      saveCachedProductSalesStats(activeContext.tenantId, nextProductSalesStats)
     } catch (loadError) {
       setError(getReadableError(loadError))
     } finally {
@@ -137,9 +162,10 @@ function App() {
       setContext(nextContext)
       saveCachedContext(nextContext)
 
-      const [nextCatalog, openSession] = await Promise.all([
+      const [nextCatalog, openSession, nextProductSalesStats] = await Promise.all([
         loadCatalogFromSupabase(nextContext),
         loadOpenCashSession(nextContext),
+        loadProductSalesStatsFromSupabase(nextContext),
       ])
       const localLedger = getSaleLedger(nextContext)
       const remoteLedger = openSession ? await loadSalesLedgerFromSupabase(nextContext, openSession.id) : []
@@ -147,8 +173,11 @@ function App() {
 
       setCatalog(nextCatalog)
       saveCachedCatalog(nextContext.tenantId, nextCatalog)
+      setProductSalesStats(nextProductSalesStats)
+      saveCachedProductSalesStats(nextContext.tenantId, nextProductSalesStats)
       setCashSession(openSession)
       saveCachedCashSession(nextContext, openSession)
+      setSessionTickets(openSession ? getSessionTickets(nextContext, openSession.id) : [])
       setTicketLines(getCachedTicket(nextContext))
       setSalesLedger(nextLedger)
       saveSaleLedger(nextContext, nextLedger)
@@ -170,7 +199,10 @@ function App() {
 
     setContext(cachedContext)
     setCatalog(getCachedCatalog(cachedContext.tenantId))
+    setProductSalesStats(getCachedProductSalesStats(cachedContext.tenantId))
     setCashSession(getCachedCashSession(cachedContext))
+    const cachedSession = getCachedCashSession(cachedContext)
+    setSessionTickets(cachedSession ? getSessionTickets(cachedContext, cachedSession.id) : [])
     setTicketLines(getCachedTicket(cachedContext))
     setSalesLedger(getSaleLedger(cachedContext))
   }
@@ -196,6 +228,81 @@ function App() {
     }
   }
 
+  function persistSessionTickets(nextTickets: SessionTicketRecord[]) {
+    setSessionTickets(nextTickets)
+    if (context && cashSession) {
+      saveSessionTickets(context, cashSession.id, nextTickets)
+    }
+  }
+
+  function updateCatalogStartTab(nextStartTab: CatalogStartTab) {
+    setCatalogStartTab(nextStartTab)
+    saveCatalogStartTab(nextStartTab)
+  }
+
+  function persistProductSalesStats(nextStats: ProductSalesStat[]) {
+    setProductSalesStats(nextStats)
+    if (context) {
+      saveCachedProductSalesStats(context.tenantId, nextStats)
+    }
+  }
+
+  function mergeProductSalesStats(lines: TicketLine[]) {
+    const statsByProduct = new Map(productSalesStats.map((stat) => [stat.productId, stat]))
+
+    lines.forEach((line) => {
+      const current = statsByProduct.get(line.productId) ?? {
+        productId: line.productId,
+        quantity: 0,
+        totalCents: 0,
+      }
+
+      statsByProduct.set(line.productId, {
+        ...current,
+        quantity: current.quantity + line.quantity,
+        totalCents: current.totalCents + line.unitPriceCents * line.quantity,
+      })
+    })
+
+    persistProductSalesStats(
+      [...statsByProduct.values()].sort(
+        (a, b) => b.quantity - a.quantity || b.totalCents - a.totalCents || a.productId.localeCompare(b.productId),
+      ),
+    )
+  }
+
+  function subtractProductSalesStats(lines: Array<{ productId: string; quantity: number; lineTotalCents: number }>) {
+    const statsByProduct = new Map(productSalesStats.map((stat) => [stat.productId, stat]))
+
+    lines.forEach((line) => {
+      const current = statsByProduct.get(line.productId)
+
+      if (!current) {
+        return
+      }
+
+      const nextQuantity = Math.max(0, current.quantity - line.quantity)
+      const nextTotalCents = Math.max(0, current.totalCents - line.lineTotalCents)
+
+      if (!nextQuantity) {
+        statsByProduct.delete(line.productId)
+        return
+      }
+
+      statsByProduct.set(line.productId, {
+        ...current,
+        quantity: nextQuantity,
+        totalCents: nextTotalCents,
+      })
+    })
+
+    persistProductSalesStats(
+      [...statsByProduct.values()].sort(
+        (a, b) => b.quantity - a.quantity || b.totalCents - a.totalCents || a.productId.localeCompare(b.productId),
+      ),
+    )
+  }
+
   function handleOpenCash(openingFloatCents: number) {
     if (!context) {
       return
@@ -214,6 +321,8 @@ function App() {
 
     persistCashSession(session)
     persistLedger([])
+    persistSessionTickets([])
+    saveSessionTickets(context, session.id, [])
     enqueueOfflineEvent({
       id: createId(),
       kind: 'cash_opened',
@@ -304,6 +413,19 @@ function App() {
       payload,
     })
     persistLedger([...salesLedger, saleRecord])
+    persistSessionTickets([
+      {
+        id: payload.sale.id,
+        cashSessionId: cashSession.id,
+        paymentMethod,
+        totalCents: payload.sale.totalCents,
+        createdAt: payload.sale.createdAt,
+        status: 'active',
+        payload,
+      },
+      ...sessionTickets,
+    ])
+    mergeProductSalesStats(ticketLines)
     persistTicket([])
     refreshPendingCount()
     setPaidFeedback(paymentMethod)
@@ -318,6 +440,90 @@ function App() {
     }
 
     completePayment(paymentMethod, null)
+  }
+
+  function changeTicketPayment(ticket: SessionTicketRecord, paymentMethod: PaymentMethod) {
+    if (!context || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod) {
+      return
+    }
+
+    const receivedCents = paymentMethod === 'cash' ? ticket.totalCents : null
+    const changeCents = 0
+    const nextTickets = sessionTickets.map((item) =>
+      item.id === ticket.id
+        ? {
+            ...item,
+            paymentMethod,
+            payload: {
+              ...item.payload,
+              sale: {
+                ...item.payload.sale,
+                paymentMethod,
+              },
+              payment: {
+                ...item.payload.payment,
+                method: paymentMethod,
+                receivedCents,
+                changeCents,
+              },
+            },
+          }
+        : item,
+    )
+
+    persistSessionTickets(nextTickets)
+    persistLedger(salesLedger.map((record) => (record.id === ticket.id ? { ...record, paymentMethod } : record)))
+    enqueueOfflineEvent({
+      id: createId(),
+      kind: 'sale_payment_changed',
+      tenantId: context.tenantId,
+      createdAt: nowIso(),
+      attempts: 0,
+      payload: {
+        saleId: ticket.payload.sale.id,
+        paymentId: ticket.payload.payment.id,
+        paymentMethod,
+        receivedCents,
+        changeCents,
+      },
+    })
+    refreshPendingCount()
+    void syncPendingEvents()
+  }
+
+  function voidSessionTicket(ticket: SessionTicketRecord) {
+    if (!context || ticket.status !== 'active') {
+      return
+    }
+
+    if (!window.confirm('Eliminar este ticket de la sesion?')) {
+      return
+    }
+
+    persistSessionTickets(
+      sessionTickets.map((item) => (item.id === ticket.id ? { ...item, status: 'voided' } : item)),
+    )
+    persistLedger(salesLedger.filter((record) => record.id !== ticket.id))
+    subtractProductSalesStats(
+      ticket.payload.lines.map((line) => ({
+        productId: line.productId,
+        quantity: line.quantity,
+        lineTotalCents: line.lineTotalCents,
+      })),
+    )
+    enqueueOfflineEvent({
+      id: createId(),
+      kind: 'sale_voided',
+      tenantId: context.tenantId,
+      createdAt: nowIso(),
+      attempts: 0,
+      payload: {
+        saleId: ticket.payload.sale.id,
+        ticketId: ticket.payload.ticket.id,
+      },
+    })
+    refreshPendingCount()
+    void syncPendingEvents()
   }
 
   function handleCloseCash(payload: CashClosedPayload) {
@@ -337,6 +543,8 @@ function App() {
     persistTicket([])
     setSalesLedger([])
     clearSaleLedger(context)
+    clearSessionTickets(context, payload.sessionId)
+    setSessionTickets([])
     setCloseCashOpen(false)
     refreshPendingCount()
     void syncPendingEvents()
@@ -348,6 +556,8 @@ function App() {
     setCashSession(null)
     setTicketLines([])
     setSalesLedger([])
+    setSessionTickets([])
+    setProductSalesStats([])
     setConfigOpen(false)
     saveCachedContext(null)
   }
@@ -407,6 +617,7 @@ function App() {
         isOnline={isOnline}
         onCloseCash={() => setCloseCashOpen(true)}
         onOpenConfig={() => setConfigOpen(true)}
+        onOpenTicketHistory={() => setTicketHistoryOpen(true)}
         onRefreshCatalog={() => void refreshCatalog()}
         pendingCount={pendingCount}
       />
@@ -433,7 +644,13 @@ function App() {
         </section>
 
         {cashSession ? (
-          <CatalogPanel catalog={catalog} disabled={isBusy} onSelectProduct={handleSelectProduct} />
+          <CatalogPanel
+            catalog={catalog}
+            catalogStartTab={catalogStartTab}
+            disabled={isBusy}
+            onSelectProduct={handleSelectProduct}
+            productSalesStats={productSalesStats}
+          />
         ) : (
           <OpenCashPanel disabled={!context || isBusy} isBusy={isBusy} onOpen={handleOpenCash} />
         )}
@@ -475,10 +692,22 @@ function App() {
         />
       ) : null}
 
+      {ticketHistoryOpen ? (
+        <SessionTicketsModal
+          isBusy={isBusy}
+          onChangePayment={changeTicketPayment}
+          onClose={() => setTicketHistoryOpen(false)}
+          onVoidTicket={voidSessionTicket}
+          tickets={sessionTickets}
+        />
+      ) : null}
+
       {configOpen ? (
         <ConfigModal
           context={context}
+          catalogStartTab={catalogStartTab}
           onClose={() => setConfigOpen(false)}
+          onCatalogStartTabChange={updateCatalogStartTab}
           onLogout={handleLogout}
           onThemeChange={setThemeId}
           pendingCount={pendingCount}

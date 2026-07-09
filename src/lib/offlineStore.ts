@@ -1,8 +1,11 @@
 import type {
   CashSession,
   Catalog,
+  CatalogStartTab,
   OfflineEvent,
+  ProductSalesStat,
   SaleRecord,
+  SessionTicketRecord,
   TenantContext,
   TicketLine,
 } from '../types'
@@ -50,8 +53,16 @@ function themeKey() {
   return `${prefix}:theme`
 }
 
+function catalogStartTabKey() {
+  return `${prefix}:catalog-start-tab`
+}
+
 function catalogKey(tenantId: string) {
   return `${prefix}:catalog:${tenantId}`
+}
+
+function productSalesStatsKey(tenantId: string) {
+  return `${prefix}:product-sales:${tenantId}`
 }
 
 function cashSessionKey(context: TenantContext) {
@@ -66,6 +77,10 @@ function ledgerKey(context: TenantContext) {
   return `${prefix}:ledger:${context.tenantId}:${context.deviceId}`
 }
 
+function sessionTicketsKey(context: TenantContext, cashSessionId: string) {
+  return `${prefix}:session-tickets:${context.tenantId}:${context.deviceId}:${cashSessionId}`
+}
+
 function queueKey() {
   return `${prefix}:queue`
 }
@@ -76,6 +91,14 @@ export function getStoredTheme(defaultThemeId: string) {
 
 export function saveStoredTheme(themeId: string) {
   writeJson(themeKey(), themeId)
+}
+
+export function getCatalogStartTab() {
+  return readJson<CatalogStartTab>(catalogStartTabKey(), 'all')
+}
+
+export function saveCatalogStartTab(startTab: CatalogStartTab) {
+  writeJson(catalogStartTabKey(), startTab)
 }
 
 export function getCachedContext() {
@@ -96,6 +119,14 @@ export function getCachedCatalog(tenantId: string) {
 
 export function saveCachedCatalog(tenantId: string, catalog: Catalog) {
   writeJson(catalogKey(tenantId), catalog)
+}
+
+export function getCachedProductSalesStats(tenantId: string) {
+  return readJson<ProductSalesStat[]>(productSalesStatsKey(tenantId), [])
+}
+
+export function saveCachedProductSalesStats(tenantId: string, stats: ProductSalesStat[]) {
+  writeJson(productSalesStatsKey(tenantId), stats)
 }
 
 export function getCachedCashSession(context: TenantContext) {
@@ -128,6 +159,18 @@ export function saveSaleLedger(context: TenantContext, records: SaleRecord[]) {
 
 export function clearSaleLedger(context: TenantContext) {
   removeKey(ledgerKey(context))
+}
+
+export function getSessionTickets(context: TenantContext, cashSessionId: string) {
+  return readJson<SessionTicketRecord[]>(sessionTicketsKey(context, cashSessionId), [])
+}
+
+export function saveSessionTickets(context: TenantContext, cashSessionId: string, tickets: SessionTicketRecord[]) {
+  writeJson(sessionTicketsKey(context, cashSessionId), tickets)
+}
+
+export function clearSessionTickets(context: TenantContext, cashSessionId: string) {
+  removeKey(sessionTicketsKey(context, cashSessionId))
 }
 
 export function getOfflineQueue() {

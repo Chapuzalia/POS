@@ -30,6 +30,13 @@ export type CategoryRow = {
   sort_order: number
 }
 
+export type SaleFormatRow = {
+  key: string
+  label: string
+  is_active: boolean
+  sort_order: number
+}
+
 export type VariantRow = {
   id: string
   product_id: string
@@ -82,4 +89,10 @@ export type SaleRow = {
   payment_method: PaymentMethod
   total_cents: number
   created_at: string
+}
+
+export type TicketLineProductSalesRow = {
+  product_id: string | null
+  quantity: number
+  line_total_cents: number
 }

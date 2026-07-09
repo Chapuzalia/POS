@@ -1,4 +1,11 @@
-export type SaleFormat = 'cubata' | 'copa' | 'shot' | 'beer_bottle' | 'soft_bottle' | 'cocktail'
+export type SaleFormat = string
+
+export type SaleFormatDefinition = {
+  key: SaleFormat
+  label: string
+  isActive: boolean
+  sortOrder: number
+}
 
 export type CatalogKind =
   | 'beer'
@@ -11,7 +18,9 @@ export type CatalogKind =
   | 'soft_bottle'
   | 'cocktail'
 
-export type CatalogFilter = 'all' | SaleFormat
+export type CatalogStartTab = 'all' | 'top'
+
+export type CatalogFilter = CatalogStartTab | SaleFormat
 
 export type PaymentMethod = 'cash' | 'card' | 'invitation' | 'other'
 
@@ -108,6 +117,7 @@ export type Product = {
 export type Catalog = {
   categories: Category[]
   products: Product[]
+  saleFormats: SaleFormatDefinition[]
   updatedAt: string
   source: 'supabase' | 'cache'
 }
@@ -147,6 +157,22 @@ export type SaleRecord = {
   paymentMethod: PaymentMethod
   totalCents: number
   createdAt: string
+}
+
+export type SessionTicketRecord = {
+  id: string
+  cashSessionId: string
+  paymentMethod: PaymentMethod
+  totalCents: number
+  createdAt: string
+  status: 'active' | 'voided'
+  payload: SaleCreatedPayload
+}
+
+export type ProductSalesStat = {
+  productId: string
+  quantity: number
+  totalCents: number
 }
 
 export type CashSummary = {
@@ -241,6 +267,33 @@ export type OfflineEvent =
       attempts: number
       lastError?: string
       payload: SaleCreatedPayload
+    }
+  | {
+      id: string
+      kind: 'sale_payment_changed'
+      tenantId: string
+      createdAt: string
+      attempts: number
+      lastError?: string
+      payload: {
+        saleId: string
+        paymentId: string
+        paymentMethod: PaymentMethod
+        receivedCents: number | null
+        changeCents: number
+      }
+    }
+  | {
+      id: string
+      kind: 'sale_voided'
+      tenantId: string
+      createdAt: string
+      attempts: number
+      lastError?: string
+      payload: {
+        saleId: string
+        ticketId: string
+      }
     }
   | {
       id: string

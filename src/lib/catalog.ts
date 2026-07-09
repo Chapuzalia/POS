@@ -1,14 +1,19 @@
-import type { CatalogKind, Product, ProductVariant, SaleFormat } from '../types'
+import type { CatalogKind, Product, ProductVariant, SaleFormat, SaleFormatDefinition } from '../types'
 import { normalizeText } from './format'
 
-export const saleFormatOptions: Array<{ label: string; value: SaleFormat }> = [
-  { label: 'Cubata', value: 'cubata' },
-  { label: 'Copa', value: 'copa' },
-  { label: 'Chupito', value: 'shot' },
-  { label: 'Botellin cerveza', value: 'beer_bottle' },
-  { label: 'Botellin refresco', value: 'soft_bottle' },
-  { label: 'Coctel', value: 'cocktail' },
+export const defaultSaleFormats: SaleFormatDefinition[] = [
+  { key: 'cubata', label: 'Cubata', isActive: true, sortOrder: 1 },
+  { key: 'copa', label: 'Copa', isActive: true, sortOrder: 2 },
+  { key: 'shot', label: 'Chupito', isActive: true, sortOrder: 3 },
+  { key: 'beer_bottle', label: 'Botellin cerveza', isActive: true, sortOrder: 4 },
+  { key: 'soft_bottle', label: 'Botellin refresco', isActive: true, sortOrder: 5 },
+  { key: 'cocktail', label: 'Coctel', isActive: true, sortOrder: 6 },
 ]
+
+export const saleFormatOptions = defaultSaleFormats.map((format) => ({
+  label: format.label,
+  value: format.key,
+}))
 
 export const productKindOptions: Array<{ label: string; value: CatalogKind }> = [
   { label: 'Alcohol', value: 'alcohol' },
@@ -27,7 +32,7 @@ export const categoryKindOptions: Array<{ label: string; value: CatalogKind }> =
   { label: 'Otros', value: 'other' },
 ]
 
-const saleFormatVariantAliases: Record<SaleFormat, string[]> = {
+const saleFormatVariantAliases: Record<string, string[]> = {
   cubata: ['cubata', 'copa larga', 'alcohol mixer', 'mixed'],
   copa: ['copa', 'solo', 'alcohol solo'],
   shot: ['chupito', 'shot'],
@@ -36,8 +41,17 @@ const saleFormatVariantAliases: Record<SaleFormat, string[]> = {
   cocktail: ['coctel', 'cocktail'],
 }
 
-export function getSaleFormatLabel(format: SaleFormat) {
-  return saleFormatOptions.find((option) => option.value === format)?.label ?? format
+export function getAvailableSaleFormats(saleFormats: SaleFormatDefinition[] | null | undefined) {
+  const source = saleFormats?.length ? saleFormats : defaultSaleFormats
+  return [...source].sort((a, b) => a.sortOrder - b.sortOrder || a.label.localeCompare(b.label, 'es'))
+}
+
+export function getActiveSaleFormats(saleFormats: SaleFormatDefinition[] | null | undefined) {
+  return getAvailableSaleFormats(saleFormats).filter((format) => format.isActive)
+}
+
+export function getSaleFormatLabel(format: SaleFormat, saleFormats?: SaleFormatDefinition[] | null) {
+  return getAvailableSaleFormats(saleFormats).find((option) => option.key === format)?.label ?? format
 }
 
 export function getKindLabel(kind: CatalogKind) {
@@ -72,7 +86,7 @@ export function canUseProductAsMixer(product: Product) {
 }
 
 export function getProductVariantForSaleFormat(product: Product, saleFormat: SaleFormat): ProductVariant | null {
-  const aliases = saleFormatVariantAliases[saleFormat].map(normalizeText)
+  const aliases = (saleFormatVariantAliases[saleFormat] ?? [saleFormat]).map(normalizeText)
   const matchingVariant = product.variants.find((variant) => {
     const normalizedName = normalizeText(variant.name)
     return aliases.some((alias) => normalizedName.includes(alias))

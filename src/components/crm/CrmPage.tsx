@@ -9,6 +9,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  SlidersHorizontal,
   Store,
   Tags,
   Trash2,
@@ -22,12 +23,12 @@ import {
   canSellProductStandalone,
   canUseProductAsMixer,
   categoryKindOptions,
+  getAvailableSaleFormats,
   getDefaultSaleFormatsForKind,
   getKindLabel,
   getProductSaleFormats,
   getSaleFormatLabel,
   productKindOptions,
-  saleFormatOptions,
 } from '../../lib/catalog'
 import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
 import { getDefaultProductImageFillColor } from '../../lib/productImages'
@@ -35,16 +36,19 @@ import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImp
 import {
   createCategory,
   createProductWithVariant,
+  createSaleFormat,
   createVariant,
   deleteCategory,
   deleteProductImage,
   deleteProduct,
+  deleteSaleFormat,
   deleteVariant,
   importRevoCatalogProducts,
   loadCrmStats,
   subscribeToCrmStatsChanges,
   updateCategory,
   updateProduct,
+  updateSaleFormat,
   updateVariant,
   uploadProductImage,
   type CatalogImportResult,
@@ -58,11 +62,12 @@ import type {
   Product,
   ProductVariant,
   SaleFormat,
+  SaleFormatDefinition,
   TenantContext,
 } from '../../types'
 import { getReadableError } from '../../utils/errors'
 
-type CrmSection = 'dashboard' | 'products' | 'categories' | 'import' | 'stats'
+type CrmSection = 'dashboard' | 'products' | 'categories' | 'sale-formats' | 'import' | 'stats'
 
 type CrmPageProps = {
   catalog: Catalog | null
@@ -79,6 +84,7 @@ const navItems: Array<{ id: CrmSection; label: string; icon: LucideIcon }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'categories', label: 'Categorias', icon: Tags },
+  { id: 'sale-formats', label: 'Formatos', icon: SlidersHorizontal },
   { id: 'import', label: 'Importacion', icon: Upload },
   { id: 'stats', label: 'Estadisticas', icon: BarChart3 },
 ]
@@ -112,6 +118,7 @@ export function CrmPage({
   const [stats, setStats] = useState<CrmStats | null>(null)
   const categories = catalog?.categories ?? []
   const products = catalog?.products ?? []
+  const saleFormats = getAvailableSaleFormats(catalog?.saleFormats)
   const activeProducts = products.filter((product) => product.isActive)
   const activeCategories = categories.filter((category) => category.isActive)
 
@@ -262,6 +269,7 @@ export function CrmPage({
               onCatalogChanged={onCatalogChanged}
               products={products}
               runAction={runAction}
+              saleFormats={saleFormats}
               tenantContext={context}
             />
           ) : null}
@@ -273,6 +281,17 @@ export function CrmPage({
               onCatalogChanged={onCatalogChanged}
               products={products}
               runAction={runAction}
+              tenantContext={context}
+            />
+          ) : null}
+
+          {activeSection === 'sale-formats' ? (
+            <SaleFormatsCrm
+              disabled={!isOnline || isBusy}
+              onCatalogChanged={onCatalogChanged}
+              products={products}
+              runAction={runAction}
+              saleFormats={saleFormats}
               tenantContext={context}
             />
           ) : null}
@@ -301,6 +320,9 @@ function getSectionTitle(section: CrmSection) {
   }
   if (section === 'categories') {
     return 'Categorias del catalogo'
+  }
+  if (section === 'sale-formats') {
+    return 'Formatos de venta'
   }
   if (section === 'import') {
     return 'Importacion REVO'
@@ -699,6 +721,7 @@ type ProductsCrmProps = {
   onCatalogChanged: () => Promise<void>
   products: Product[]
   runAction: RunAction
+  saleFormats: SaleFormatDefinition[]
   tenantContext: TenantContext
 }
 
@@ -717,6 +740,7 @@ function ProductsCrm({
   onCatalogChanged,
   products,
   runAction,
+  saleFormats,
   tenantContext,
 }: ProductsCrmProps) {
   const [query, setQuery] = useState('')
@@ -732,13 +756,13 @@ function ProductsCrm({
     return products.filter((product) => {
       const categoryName = categoryById.get(product.categoryId)?.name ?? ''
       const variantNames = product.variants.map((variant) => variant.name).join(' ')
-      const saleFormatNames = getProductSaleFormats(product).map(getSaleFormatLabel).join(' ')
+      const saleFormatNames = getProductSaleFormats(product).map((format) => getSaleFormatLabel(format, saleFormats)).join(' ')
       return [product.name, product.description ?? '', categoryName, getKindLabel(product.kind), saleFormatNames, variantNames]
         .join(' ')
         .toLowerCase()
         .includes(normalizedQuery)
     })
-  }, [categoryById, products, query])
+  }, [categoryById, products, query, saleFormats])
   const selectedProduct = editor?.mode === 'edit' ? products.find((product) => product.id === editor.productId) : null
 
   async function handleDeleteProduct(product: Product) {
@@ -798,6 +822,7 @@ function ProductsCrm({
               onDelete={() => void handleDeleteProduct(product)}
               onEdit={() => setEditor({ mode: 'edit', productId: product.id })}
               product={product}
+              saleFormats={saleFormats}
             />
           ))}
           {!filteredProducts.length ? <EmptyList message="No hay productos que coincidan con la busqueda." /> : null}
@@ -814,6 +839,7 @@ function ProductsCrm({
           onClose={() => setEditor(null)}
           product={selectedProduct ?? undefined}
           runAction={runAction}
+          saleFormats={saleFormats}
           tenantContext={tenantContext}
         />
       ) : null}
@@ -827,9 +853,10 @@ type ProductListRowProps = {
   onDelete: () => void
   onEdit: () => void
   product: Product
+  saleFormats: SaleFormatDefinition[]
 }
 
-function ProductListRow({ category, disabled, onDelete, onEdit, product }: ProductListRowProps) {
+function ProductListRow({ category, disabled, onDelete, onEdit, product, saleFormats }: ProductListRowProps) {
   const primaryVariant = product.variants.find((variant) => variant.isDefault) ?? product.variants[0]
   const usageLabel = canUseProductAsMixer(product)
     ? product.mixerSupplementCents
@@ -856,7 +883,7 @@ function ProductListRow({ category, disabled, onDelete, onEdit, product }: Produ
       </div>
       <div className="crm-format-list">
         {getProductSaleFormats(product).map((format) => (
-          <span key={format}>{getSaleFormatLabel(format)}</span>
+          <span key={format}>{getSaleFormatLabel(format, saleFormats)}</span>
         ))}
       </div>
       <span>{category?.name ?? 'Sin categoria'} · {getKindLabel(product.kind)}</span>
@@ -886,6 +913,7 @@ type ProductFormPanelProps = {
   onClose: () => void
   product?: Product
   runAction: RunAction
+  saleFormats: SaleFormatDefinition[]
   tenantContext: TenantContext
 }
 
@@ -897,6 +925,7 @@ function ProductFormPanel({
   onClose,
   product,
   runAction,
+  saleFormats,
   tenantContext,
 }: ProductFormPanelProps) {
   const firstCategory = categories[0]
@@ -908,7 +937,7 @@ function ProductFormPanel({
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? firstCategory?.id ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
   const [kind, setKind] = useState<CatalogKind>(initialKind)
-  const [saleFormats, setSaleFormats] = useState<SaleFormat[]>(
+  const [selectedSaleFormats, setSelectedSaleFormats] = useState<SaleFormat[]>(
     product ? getProductSaleFormats(product) : getDefaultSaleFormatsForKind(initialKind),
   )
   const [canSellStandalone, setCanSellStandalone] = useState(product ? canSellProductStandalone(product) : true)
@@ -947,7 +976,7 @@ function ProductFormPanel({
 
     if (!isEditing && nextCategory) {
       setKind(nextCategory.kind)
-      setSaleFormats(getDefaultSaleFormatsForKind(nextCategory.kind))
+      setSelectedSaleFormats(getDefaultSaleFormatsForKind(nextCategory.kind))
       setCanSellStandalone(true)
       setCanUseAsMixer(nextCategory.kind === 'mixer')
       setHasMixerSupplement(false)
@@ -955,7 +984,7 @@ function ProductFormPanel({
   }
 
   function toggleSaleFormat(format: SaleFormat) {
-    setSaleFormats((current) =>
+    setSelectedSaleFormats((current) =>
       current.includes(format) ? current.filter((currentFormat) => currentFormat !== format) : [...current, format],
     )
   }
@@ -1028,7 +1057,7 @@ function ProductFormPanel({
             kind,
             mixerSupplementCents,
             name: name.trim(),
-            saleFormats,
+            saleFormats: selectedSaleFormats,
           })
           if (primaryVariant) {
             await updateVariant(tenantContext, primaryVariant.id, {
@@ -1046,7 +1075,7 @@ function ProductFormPanel({
             mixerSupplementCents,
             name: name.trim(),
             priceCents: parseMoneyToCents(price),
-            saleFormats,
+            saleFormats: selectedSaleFormats,
             variantName: variantName.trim() || 'Normal',
           })
         }
@@ -1207,11 +1236,11 @@ function ProductFormPanel({
         <div>
           <span className="crm-field-label">Formatos de venta</span>
           <div className="crm-checkbox-list">
-            {saleFormatOptions.map((option) => (
-              <label key={option.value}>
+            {saleFormats.map((option) => (
+              <label key={option.key}>
                 <input
-                  checked={saleFormats.includes(option.value)}
-                  onChange={() => toggleSaleFormat(option.value)}
+                  checked={selectedSaleFormats.includes(option.key)}
+                  onChange={() => toggleSaleFormat(option.key)}
                   type="checkbox"
                 />
                 <span>{option.label}</span>
@@ -1394,6 +1423,206 @@ function VariantEditor({
       <button className="crm-save-button" disabled={disabled} onClick={saveVariant} type="button">
         <Save className="h-4 w-4" />
       </button>
+    </div>
+  )
+}
+
+type SaleFormatsCrmProps = {
+  disabled: boolean
+  onCatalogChanged: () => Promise<void>
+  products: Product[]
+  runAction: RunAction
+  saleFormats: SaleFormatDefinition[]
+  tenantContext: TenantContext
+}
+
+function SaleFormatsCrm({
+  disabled,
+  onCatalogChanged,
+  products,
+  runAction,
+  saleFormats,
+  tenantContext,
+}: SaleFormatsCrmProps) {
+  const [query, setQuery] = useState('')
+  const [newLabel, setNewLabel] = useState('')
+  const productsByFormat = useMemo(() => {
+    const nextMap = new Map<SaleFormat, number>()
+    products.forEach((product) => {
+      getProductSaleFormats(product).forEach((format) => {
+        nextMap.set(format, (nextMap.get(format) ?? 0) + 1)
+      })
+    })
+    return nextMap
+  }, [products])
+  const filteredSaleFormats = useMemo(() => {
+    const normalizedQuery = query.trim().toLowerCase()
+
+    if (!normalizedQuery) {
+      return saleFormats
+    }
+
+    return saleFormats.filter((format) =>
+      [format.label, format.key].join(' ').toLowerCase().includes(normalizedQuery),
+    )
+  }, [query, saleFormats])
+  const nextSortOrder = Math.max(0, ...saleFormats.map((format) => format.sortOrder)) + 1
+
+  async function addSaleFormat() {
+    if (!newLabel.trim()) {
+      return
+    }
+
+    await runAction(async () => {
+      await createSaleFormat(tenantContext, {
+        label: newLabel,
+        sortOrder: nextSortOrder,
+      })
+      setNewLabel('')
+      await onCatalogChanged()
+    })
+  }
+
+  async function handleDeleteSaleFormat(saleFormat: SaleFormatDefinition) {
+    const productCount = productsByFormat.get(saleFormat.key) ?? 0
+    const message = productCount
+      ? `Eliminar "${saleFormat.label}" y quitarlo de ${productCount} productos?`
+      : `Eliminar "${saleFormat.label}"?`
+
+    if (!window.confirm(message)) {
+      return
+    }
+
+    await runAction(async () => {
+      await deleteSaleFormat(tenantContext, saleFormat)
+      await onCatalogChanged()
+    })
+  }
+
+  return (
+    <div className="crm-entity-layout crm-entity-layout-full">
+      <section className="crm-panel crm-list-panel">
+        <div className="crm-list-toolbar">
+          <div className="crm-list-title">
+            <h2>Formatos de venta</h2>
+            <p>{filteredSaleFormats.length} de {saleFormats.length} formatos</p>
+          </div>
+          <div className="crm-toolbar-actions">
+            <label className="crm-search">
+              <Search className="h-4 w-4" />
+              <input onChange={(event) => setQuery(event.target.value)} placeholder="Buscar formato" value={query} />
+            </label>
+            <div className="crm-inline-create">
+              <input
+                className="crm-input"
+                onChange={(event) => setNewLabel(event.target.value)}
+                placeholder="Nuevo formato"
+                value={newLabel}
+              />
+              <button className="crm-primary-button" disabled={disabled || !newLabel.trim()} onClick={() => void addSaleFormat()} type="button">
+                <Plus className="h-4 w-4" />
+                Anadir
+              </button>
+            </div>
+          </div>
+        </div>
+
+        <div className="crm-data-table crm-sale-formats-table">
+          <div className="crm-data-head">
+            <span>Formato</span>
+            <span>Clave</span>
+            <span>Productos</span>
+            <span>Orden</span>
+            <span>Estado</span>
+            <span>Acciones</span>
+          </div>
+          {filteredSaleFormats.map((saleFormat) => (
+            <SaleFormatListRow
+              disabled={disabled}
+              key={saleFormat.key}
+              onCatalogChanged={onCatalogChanged}
+              onDelete={() => void handleDeleteSaleFormat(saleFormat)}
+              productCount={productsByFormat.get(saleFormat.key) ?? 0}
+              runAction={runAction}
+              saleFormat={saleFormat}
+              tenantContext={tenantContext}
+            />
+          ))}
+          {!filteredSaleFormats.length ? <EmptyList message="No hay formatos que coincidan con la busqueda." /> : null}
+        </div>
+      </section>
+    </div>
+  )
+}
+
+type SaleFormatListRowProps = {
+  disabled: boolean
+  onCatalogChanged: () => Promise<void>
+  onDelete: () => void
+  productCount: number
+  runAction: RunAction
+  saleFormat: SaleFormatDefinition
+  tenantContext: TenantContext
+}
+
+function SaleFormatListRow({
+  disabled,
+  onCatalogChanged,
+  onDelete,
+  productCount,
+  runAction,
+  saleFormat,
+  tenantContext,
+}: SaleFormatListRowProps) {
+  const [label, setLabel] = useState(saleFormat.label)
+  const [sortOrder, setSortOrder] = useState(String(saleFormat.sortOrder))
+
+  async function saveSaleFormat() {
+    await runAction(async () => {
+      await updateSaleFormat(tenantContext, saleFormat, {
+        label,
+        sortOrder: Number.parseInt(sortOrder, 10) || saleFormat.sortOrder,
+      })
+      await onCatalogChanged()
+    })
+  }
+
+  async function toggleSaleFormat() {
+    await runAction(async () => {
+      await updateSaleFormat(tenantContext, saleFormat, {
+        isActive: !saleFormat.isActive,
+      })
+      await onCatalogChanged()
+    })
+  }
+
+  return (
+    <div className="crm-data-row">
+      <input className="crm-input" onChange={(event) => setLabel(event.target.value)} value={label} />
+      <code className="crm-code-cell">{saleFormat.key}</code>
+      <strong>{productCount}</strong>
+      <input className="crm-input font-mono" inputMode="numeric" onChange={(event) => setSortOrder(event.target.value)} value={sortOrder} />
+      <span className={saleFormat.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+        {saleFormat.isActive ? 'Activo' : 'Oculto'}
+      </span>
+      <div className="crm-action-group">
+        <button className="crm-action-button" disabled={disabled} onClick={() => void saveSaleFormat()} type="button">
+          <Save className="h-4 w-4" />
+          Guardar
+        </button>
+        <button
+          className={saleFormat.isActive ? 'crm-state-button' : 'crm-state-button crm-state-button-danger'}
+          disabled={disabled}
+          onClick={() => void toggleSaleFormat()}
+          type="button"
+        >
+          {saleFormat.isActive ? 'Ocultar' : 'Activar'}
+        </button>
+        <button className="crm-danger-button" disabled={disabled} onClick={onDelete} type="button">
+          <Trash2 className="h-4 w-4" />
+          Eliminar
+        </button>
+      </div>
     </div>
   )
 }

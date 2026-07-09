@@ -839,6 +839,11 @@ button {
   grid-template-columns: minmax(240px, 1fr) 140px 100px 96px 210px;
 }
 
+.crm-sale-formats-table .crm-data-head,
+.crm-sale-formats-table .crm-data-row {
+  grid-template-columns: minmax(220px, 1fr) minmax(160px, 0.7fr) 90px 90px 96px 300px;
+}
+
 .crm-import-table .crm-data-head,
 .crm-import-table .crm-data-row {
   grid-template-columns: minmax(220px, 1.25fr) 170px minmax(170px, 0.75fr) minmax(160px, 0.75fr) 90px minmax(220px, 1fr);
@@ -961,6 +966,22 @@ button {
   min-width: 0;
   justify-content: flex-end;
   gap: 7px;
+}
+
+.crm-inline-create {
+  display: grid;
+  min-width: 300px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.crm-code-cell {
+  overflow: hidden;
+  color: #52677a;
+  font-size: 12px;
+  font-weight: 850;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .crm-editor-header {

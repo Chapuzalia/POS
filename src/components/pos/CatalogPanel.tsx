@@ -1,5 +1,6 @@
 import {
   ArrowLeft,
+  BarChart3,
   Beer,
   GlassWater,
   Martini,
@@ -9,34 +10,50 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import {
   canSellProductStandalone,
+  getActiveSaleFormats,
+  getSaleFormatLabel,
   getProductSaleFormats,
   getProductVariantForSaleFormat,
   productSupportsSaleFormat,
 } from '../../lib/catalog'
 import { formatMoney, normalizeText } from '../../lib/format'
-import type { Catalog, CatalogFilter, CatalogKind, Category, Product, SaleFormat } from '../../types'
+import type { Catalog, CatalogFilter, CatalogKind, CatalogStartTab, Category, Product, ProductSalesStat, SaleFormat } from '../../types'
 import { Button } from '../ui'
 
-const filterOptions: Array<{ id: CatalogFilter; label: string; icon: LucideIcon }> = [
-  { id: 'all', label: 'Todo', icon: ReceiptText },
-  { id: 'cubata', label: 'Cubata', icon: Martini },
-  { id: 'copa', label: 'Copa', icon: Wine },
-  { id: 'shot', label: 'Chupito', icon: Wine },
-  { id: 'beer_bottle', label: 'Cerveza', icon: Beer },
-  { id: 'soft_bottle', label: 'Refresco', icon: GlassWater },
-  { id: 'cocktail', label: 'Coctel', icon: Martini },
-]
+const saleFormatIcons: Record<string, LucideIcon> = {
+  beer_bottle: Beer,
+  cocktail: Martini,
+  copa: Wine,
+  cubata: Martini,
+  shot: Wine,
+  soft_bottle: GlassWater,
+}
+
+function getSaleFormatIcon(format: CatalogFilter) {
+  if (format === 'all') {
+    return ReceiptText
+  }
+  if (format === 'top') {
+    return BarChart3
+  }
+
+  return saleFormatIcons[format] ?? ReceiptText
+}
 
 function compareProductNames(a: Product, b: Product) {
   return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }) || a.sortOrder - b.sortOrder
 }
 
 function getCatalogKindIcon(kind: CatalogKind, activeFilter: CatalogFilter) {
+  if (activeFilter === 'top') {
+    return BarChart3
+  }
+
   if (activeFilter !== 'all') {
-    return filterOptions.find((option) => option.id === activeFilter)?.icon ?? GlassWater
+    return getSaleFormatIcon(activeFilter)
   }
 
   if (kind === 'alcohol' || kind === 'mixed' || kind === 'shot') {
@@ -53,7 +70,7 @@ function getCatalogKindIcon(kind: CatalogKind, activeFilter: CatalogFilter) {
 }
 
 function getCategoryKindsForFilter(filter: CatalogFilter): CatalogKind[] | null {
-  if (filter === 'all') {
+  if (filter === 'all' || filter === 'top') {
     return null
   }
   if (filter === 'cubata' || filter === 'copa' || filter === 'shot') {
@@ -81,7 +98,7 @@ function isSoftBottleCatalogProduct(product: Product, category: Category | undef
 }
 
 function getProductSaleFormat(product: Product, activeFilter: CatalogFilter): SaleFormat {
-  if (activeFilter !== 'all') {
+  if (activeFilter !== 'all' && activeFilter !== 'top') {
     return activeFilter
   }
 
@@ -90,19 +107,51 @@ function getProductSaleFormat(product: Product, activeFilter: CatalogFilter): Sa
 
 type CatalogPanelProps = {
   catalog: Catalog | null
+  catalogStartTab: CatalogStartTab
   disabled: boolean
   onSelectProduct: (product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean) => void
+  productSalesStats: ProductSalesStat[]
 }
 
-export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPanelProps) {
-  const [activeFilter, setActiveFilter] = useState<CatalogFilter>('all')
+export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProduct, productSalesStats }: CatalogPanelProps) {
+  const [activeFilter, setActiveFilter] = useState<CatalogFilter>(catalogStartTab)
   const [search, setSearch] = useState('')
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
   const categories = useMemo(() => catalog?.categories ?? [], [catalog])
   const products = useMemo(() => catalog?.products ?? [], [catalog])
+  const saleFormats = useMemo(() => getActiveSaleFormats(catalog?.saleFormats), [catalog?.saleFormats])
+  const productSalesById = useMemo(
+    () => new Map(productSalesStats.map((stat) => [stat.productId, stat])),
+    [productSalesStats],
+  )
+  const filterOptions = useMemo(
+    () => [
+      catalogStartTab === 'top'
+        ? { id: 'top', label: 'Top items', icon: BarChart3 }
+        : { id: 'all', label: 'Todo', icon: ReceiptText },
+      ...saleFormats.map((format) => ({
+        id: format.key,
+        label: getSaleFormatLabel(format.key, saleFormats),
+        icon: getSaleFormatIcon(format.key),
+      })),
+    ],
+    [catalogStartTab, saleFormats],
+  )
   const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories])
   const normalizedSearch = normalizeText(search.trim())
   const productFilter = normalizedSearch ? 'all' : activeFilter
+
+  useEffect(() => {
+    setActiveFilter(catalogStartTab)
+    setSelectedCategoryId(null)
+  }, [catalogStartTab])
+
+  useEffect(() => {
+    if (activeFilter !== 'all' && activeFilter !== 'top' && !saleFormats.some((format) => format.key === activeFilter)) {
+      setActiveFilter(catalogStartTab)
+      setSelectedCategoryId(null)
+    }
+  }, [activeFilter, catalogStartTab, saleFormats])
 
   const visibleCategories = useMemo(
     () => {
@@ -117,7 +166,8 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
   const visibleProducts = useMemo(() => {
     return products
       .filter((product) => product.isActive)
-      .filter((product) => productFilter === 'all' || productSupportsSaleFormat(product, productFilter))
+      .filter((product) => productFilter === 'all' || productFilter === 'top' || productSupportsSaleFormat(product, productFilter))
+      .filter((product) => productFilter !== 'top' || (productSalesById.get(product.id)?.quantity ?? 0) > 0)
       .filter((product) => productFilter !== 'soft_bottle' || isSoftBottleCatalogProduct(product, categoryById.get(product.categoryId)))
       .filter((product) => productFilter !== 'soft_bottle' || canSellProductStandalone(product))
       .filter((product) => productFilter !== 'beer_bottle' || canSellProductStandalone(product))
@@ -141,11 +191,43 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
 
         return searchable.includes(normalizedSearch)
       })
-      .sort(compareProductNames)
-  }, [categoryById, normalizedSearch, productFilter, products, selectedCategoryId])
+      .sort((a, b) => {
+        if (productFilter !== 'top') {
+          return compareProductNames(a, b)
+        }
 
+        const firstStat = productSalesById.get(a.id)
+        const secondStat = productSalesById.get(b.id)
+        return (
+          (secondStat?.quantity ?? 0) - (firstStat?.quantity ?? 0) ||
+          (secondStat?.totalCents ?? 0) - (firstStat?.totalCents ?? 0) ||
+          compareProductNames(a, b)
+        )
+      })
+  }, [categoryById, normalizedSearch, productFilter, productSalesById, products, selectedCategoryId])
+
+  const categoryProductCounts = useMemo(() => {
+    return new Map(
+      visibleCategories.map((category) => [
+        category.id,
+        products.filter(
+          (product) =>
+            product.categoryId === category.id &&
+            product.isActive &&
+            (activeFilter === 'all' || activeFilter === 'top' || productSupportsSaleFormat(product, activeFilter)) &&
+            (activeFilter === 'all' || activeFilter === 'top' || activeFilter === 'cubata' || canSellProductStandalone(product)),
+        ).length,
+      ]),
+    )
+  }, [activeFilter, products, visibleCategories])
+  const visibleCategoriesWithProducts = visibleCategories.filter((category) => (categoryProductCounts.get(category.id) ?? 0) > 0)
   const showCategories =
-    activeFilter !== 'beer_bottle' && activeFilter !== 'soft_bottle' && !normalizedSearch && !selectedCategoryId
+    activeFilter !== 'top' &&
+    activeFilter !== 'beer_bottle' &&
+    activeFilter !== 'soft_bottle' &&
+    !normalizedSearch &&
+    !selectedCategoryId &&
+    visibleCategoriesWithProducts.length > 1
   const selectedCategory = selectedCategoryId
     ? categories.find((category) => category.id === selectedCategoryId) ?? null
     : null
@@ -211,15 +293,9 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
 
           {showCategories ? (
             <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5">
-              {visibleCategories.map((category) => {
+              {visibleCategoriesWithProducts.map((category) => {
                 const Icon = getCatalogKindIcon(category.kind, activeFilter)
-                const count = products.filter(
-                  (product) =>
-                    product.categoryId === category.id &&
-                    product.isActive &&
-                    (activeFilter === 'all' || productSupportsSaleFormat(product, activeFilter)) &&
-                    (activeFilter === 'all' || activeFilter === 'cubata' || canSellProductStandalone(product)),
-                ).length
+                const count = categoryProductCounts.get(category.id) ?? 0
 
                 return (
                   <button
@@ -244,7 +320,7 @@ export function CatalogPanel({ catalog, disabled, onSelectProduct }: CatalogPane
                 {visibleProducts.map((product) => {
                   const saleFormat = getProductSaleFormat(product, productFilter)
                   const primaryVariant = getProductVariantForSaleFormat(product, saleFormat)
-                  const allowFormatSelection = productFilter === 'all'
+                  const allowFormatSelection = productFilter === 'all' || productFilter === 'top'
                   const ProductIcon = getCatalogKindIcon(product.kind, productFilter)
 
                   return (

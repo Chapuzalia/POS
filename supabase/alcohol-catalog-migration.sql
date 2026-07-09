@@ -30,10 +30,6 @@ add column if not exists mixer_supplement_cents integer not null default 0 check
 alter table public.products
 drop constraint if exists products_sale_formats_check;
 
-alter table public.products
-add constraint products_sale_formats_check
-check (sale_formats <@ array['cubata', 'copa', 'shot', 'beer_bottle', 'soft_bottle', 'cocktail']::text[]);
-
 update public.categories
 set kind = case
   when kind = 'beer' then 'beer_bottle'

@@ -8,6 +8,7 @@ import type {
   CrmStats,
   PaymentMethod,
   ProductCreateInput,
+  SaleFormatDefinition,
   SaleFormat,
   TenantContext,
 } from '../types'
@@ -41,6 +42,11 @@ type OpenCashSessionSaleRow = {
 type NameRow = {
   id: string
   name: string
+}
+
+type ProductSaleFormatsRow = {
+  id: string
+  sale_formats: SaleFormat[] | null
 }
 
 type ImportCategoryRow = {
@@ -87,6 +93,10 @@ function getMonthStartIso() {
 
 function getImportKey(value: string) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, ' ').trim()
+}
+
+function createSaleFormatKey(value: string) {
+  return getImportKey(value).replace(/\s+/g, '_')
 }
 
 function createProductImagePath(context: TenantContext) {
@@ -169,6 +179,90 @@ export async function updateCategory(
 export async function deleteCategory(context: TenantContext, categoryId: string) {
   const client = requireSupabase()
   const { error } = await client.from('categories').delete().eq('tenant_id', context.tenantId).eq('id', categoryId)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function createSaleFormat(context: TenantContext, input: { label: string; sortOrder: number }) {
+  const client = requireSupabase()
+  const label = input.label.trim()
+  const key = createSaleFormatKey(label)
+
+  if (!label || !key) {
+    throw new Error('Indica un nombre valido para el formato.')
+  }
+
+  if (key === 'all' || key === 'top') {
+    throw new Error('Ese nombre esta reservado para pestanas del catalogo.')
+  }
+
+  const { error } = await client.from('sale_formats').insert({
+    tenant_id: context.tenantId,
+    key,
+    label,
+    sort_order: input.sortOrder,
+    is_active: true,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function updateSaleFormat(
+  context: TenantContext,
+  saleFormat: SaleFormatDefinition,
+  input: { isActive?: boolean; label?: string; sortOrder?: number },
+) {
+  const client = requireSupabase()
+  const nextLabel = input.label?.trim()
+  const { error } = await client
+    .from('sale_formats')
+    .update({
+      ...(nextLabel !== undefined ? { label: nextLabel || saleFormat.label } : {}),
+      ...(input.sortOrder !== undefined ? { sort_order: input.sortOrder } : {}),
+      ...(input.isActive !== undefined ? { is_active: input.isActive } : {}),
+    })
+    .eq('tenant_id', context.tenantId)
+    .eq('key', saleFormat.key)
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function deleteSaleFormat(context: TenantContext, saleFormat: SaleFormatDefinition) {
+  const client = requireSupabase()
+  const { data: productRows, error: productsError } = await client
+    .from('products')
+    .select('id, sale_formats')
+    .eq('tenant_id', context.tenantId)
+    .contains('sale_formats', [saleFormat.key])
+
+  if (productsError) {
+    throw productsError
+  }
+
+  for (const product of (productRows ?? []) as ProductSaleFormatsRow[]) {
+    const nextSaleFormats = (product.sale_formats ?? []).filter((format) => format !== saleFormat.key)
+    const { error } = await client
+      .from('products')
+      .update({ sale_formats: nextSaleFormats })
+      .eq('tenant_id', context.tenantId)
+      .eq('id', product.id)
+
+    if (error) {
+      throw error
+    }
+  }
+
+  const { error } = await client
+    .from('sale_formats')
+    .delete()
+    .eq('tenant_id', context.tenantId)
+    .eq('key', saleFormat.key)
 
   if (error) {
     throw error

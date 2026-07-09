@@ -113,6 +113,19 @@ create table if not exists public.categories (
   updated_at timestamptz not null default now()
 );
 
+create table if not exists public.sale_formats (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  key text not null,
+  label text not null,
+  sort_order integer not null default 0,
+  is_active boolean not null default true,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  unique (tenant_id, key),
+  constraint sale_formats_key_check check (key ~ '^[a-z0-9_]+$' and key not in ('all', 'top'))
+);
+
 create table if not exists public.products (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
@@ -128,10 +141,11 @@ create table if not exists public.products (
   is_active boolean not null default true,
   sort_order integer not null default 0,
   created_at timestamptz not null default now(),
-  updated_at timestamptz not null default now(),
-  constraint products_sale_formats_check
-    check (sale_formats <@ array['cubata', 'copa', 'shot', 'beer_bottle', 'soft_bottle', 'cocktail']::text[])
+  updated_at timestamptz not null default now()
 );
+
+alter table public.products
+drop constraint if exists products_sale_formats_check;
 
 create table if not exists public.product_variants (
   id uuid primary key default gen_random_uuid(),
@@ -269,6 +283,7 @@ create index if not exists tenant_memberships_user_idx on public.tenant_membersh
 create index if not exists venues_tenant_idx on public.venues (tenant_id);
 create index if not exists devices_tenant_idx on public.devices (tenant_id, venue_id);
 create index if not exists categories_tenant_idx on public.categories (tenant_id, sort_order);
+create index if not exists sale_formats_tenant_idx on public.sale_formats (tenant_id, sort_order);
 create index if not exists products_tenant_idx on public.products (tenant_id, category_id, sort_order);
 create index if not exists product_variants_product_idx on public.product_variants (product_id, sort_order);
 create index if not exists modifier_groups_product_idx on public.modifier_groups (product_id, sort_order);
@@ -302,6 +317,7 @@ begin
     'venues',
     'devices',
     'categories',
+    'sale_formats',
     'products',
     'product_variants',
     'modifier_groups',
@@ -360,6 +376,12 @@ with check (public.user_has_tenant_access(tenant_id));
 drop policy if exists "categories_tenant_access" on public.categories;
 create policy "categories_tenant_access"
 on public.categories for all
+using (public.user_has_tenant_access(tenant_id))
+with check (public.user_has_tenant_access(tenant_id));
+
+drop policy if exists "sale_formats_tenant_access" on public.sale_formats;
+create policy "sale_formats_tenant_access"
+on public.sale_formats for all
 using (public.user_has_tenant_access(tenant_id))
 with check (public.user_has_tenant_access(tenant_id));
 
@@ -467,6 +489,7 @@ begin
     'venues',
     'devices',
     'categories',
+    'sale_formats',
     'products',
     'product_variants',
     'modifier_groups',
@@ -502,6 +525,20 @@ values
   ('33333333-3333-3333-3333-333333333334', '11111111-1111-1111-1111-111111111111', 'Cervezas', 'beer_bottle', 'beer', 4),
   ('33333333-3333-3333-3333-333333333335', '11111111-1111-1111-1111-111111111111', 'Cocteles', 'cocktail', 'martini', 5)
 on conflict do nothing;
+
+insert into public.sale_formats (tenant_id, key, label, sort_order, is_active)
+select tenant_id, key, label, sort_order, true
+from public.tenants
+cross join (
+  values
+    ('cubata', 'Cubata', 1),
+    ('copa', 'Copa', 2),
+    ('shot', 'Chupito', 3),
+    ('beer_bottle', 'Botellin cerveza', 4),
+    ('soft_bottle', 'Botellin refresco', 5),
+    ('cocktail', 'Coctel', 6)
+) as defaults(key, label, sort_order)
+on conflict (tenant_id, key) do nothing;
 
 insert into public.products (
   id,

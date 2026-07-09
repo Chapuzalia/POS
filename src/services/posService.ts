@@ -1,4 +1,5 @@
 import { createId, getLineTotal, getTicketTotal } from '../lib/format'
+import { defaultSaleFormats } from '../lib/catalog'
 import { PRODUCT_IMAGE_BUCKET } from '../lib/productImages'
 import { supabase } from '../lib/supabase'
 import type {
@@ -12,6 +13,7 @@ import type {
   OfflineEvent,
   PaymentMethod,
   Product,
+  ProductSalesStat,
   ProductVariant,
   SaleCreatedPayload,
   SaleLinePayload,
@@ -25,7 +27,9 @@ import type {
   MembershipRow,
   ModifierGroupRow,
   ProductRow,
+  SaleFormatRow,
   SaleRow,
+  TicketLineProductSalesRow,
   TenantRow,
   VariantRow,
   VenueRow,
@@ -40,6 +44,15 @@ function mapCategory(row: CategoryRow): Category {
     name: row.name,
     kind: row.kind,
     icon: row.icon ?? row.kind,
+    isActive: row.is_active,
+    sortOrder: row.sort_order,
+  }
+}
+
+function mapSaleFormat(row: SaleFormatRow) {
+  return {
+    key: row.key,
+    label: row.label,
     isActive: row.is_active,
     sortOrder: row.sort_order,
   }
@@ -262,11 +275,20 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
     throw new Error('Supabase no esta configurado.')
   }
 
-  const [{ data: categoryRows, error: categoriesError }, { data: productRows, error: productsError }] =
+  const [
+    { data: categoryRows, error: categoriesError },
+    { data: saleFormatRows, error: saleFormatsError },
+    { data: productRows, error: productsError },
+  ] =
     await Promise.all([
       supabase
         .from('categories')
         .select('id, tenant_id, name, kind, icon, is_active, sort_order')
+        .eq('tenant_id', context.tenantId)
+        .order('sort_order', { ascending: true }),
+      supabase
+        .from('sale_formats')
+        .select('key, label, is_active, sort_order')
         .eq('tenant_id', context.tenantId)
         .order('sort_order', { ascending: true }),
       supabase
@@ -320,13 +342,20 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
     throw categoriesError
   }
 
+  if (saleFormatsError) {
+    throw saleFormatsError
+  }
+
   if (productsError) {
     throw productsError
   }
 
+  const saleFormats = ((saleFormatRows ?? []) as SaleFormatRow[]).map(mapSaleFormat)
+
   return {
     categories: ((categoryRows ?? []) as CategoryRow[]).map(mapCategory),
     products: ((productRows ?? []) as ProductRow[]).map(mapProduct),
+    saleFormats: saleFormats.length ? saleFormats : defaultSaleFormats,
     updatedAt: nowIso(),
     source: 'supabase',
   }
@@ -390,6 +419,48 @@ export async function loadSalesLedgerFromSupabase(context: TenantContext, cashSe
     totalCents: sale.total_cents,
     createdAt: sale.created_at,
   }))
+}
+
+export async function loadProductSalesStatsFromSupabase(context: TenantContext): Promise<ProductSalesStat[]> {
+  if (!supabase) {
+    return []
+  }
+
+  const { data, error } = await supabase
+    .from('ticket_lines')
+    .select('product_id, quantity, line_total_cents, tickets!inner(status)')
+    .eq('tenant_id', context.tenantId)
+    .eq('tickets.status', 'paid')
+    .not('product_id', 'is', null)
+
+  if (error) {
+    throw error
+  }
+
+  const statsByProduct = new Map<string, ProductSalesStat>()
+  const lines = (data ?? []) as TicketLineProductSalesRow[]
+
+  lines.forEach((line) => {
+    if (!line.product_id) {
+      return
+    }
+
+    const current = statsByProduct.get(line.product_id) ?? {
+      productId: line.product_id,
+      quantity: 0,
+      totalCents: 0,
+    }
+
+    statsByProduct.set(line.product_id, {
+      ...current,
+      quantity: current.quantity + line.quantity,
+      totalCents: current.totalCents + line.line_total_cents,
+    })
+  })
+
+  return [...statsByProduct.values()].sort(
+    (a, b) => b.quantity - a.quantity || b.totalCents - a.totalCents || a.productId.localeCompare(b.productId),
+  )
 }
 
 export function mergeLedgers(localRecords: SaleRecord[], remoteRecords: SaleRecord[]) {
@@ -558,6 +629,70 @@ export async function syncEvent(event: OfflineEvent) {
 
     if (paymentError) {
       throw paymentError
+    }
+
+    return
+  }
+
+  if (event.kind === 'sale_payment_changed') {
+    const { changeCents, paymentId, paymentMethod, receivedCents, saleId } = event.payload
+    const { error: saleError } = await supabase
+      .from('sales')
+      .update({ payment_method: paymentMethod })
+      .eq('tenant_id', event.tenantId)
+      .eq('id', saleId)
+
+    if (saleError) {
+      throw saleError
+    }
+
+    const { error: paymentError } = await supabase
+      .from('sale_payments')
+      .update({
+        method: paymentMethod,
+        received_cents: receivedCents,
+        change_cents: changeCents,
+      })
+      .eq('tenant_id', event.tenantId)
+      .eq('id', paymentId)
+
+    if (paymentError) {
+      throw paymentError
+    }
+
+    return
+  }
+
+  if (event.kind === 'sale_voided') {
+    const { saleId, ticketId } = event.payload
+    const { error: paymentError } = await supabase
+      .from('sale_payments')
+      .delete()
+      .eq('tenant_id', event.tenantId)
+      .eq('sale_id', saleId)
+
+    if (paymentError) {
+      throw paymentError
+    }
+
+    const { error: saleError } = await supabase
+      .from('sales')
+      .delete()
+      .eq('tenant_id', event.tenantId)
+      .eq('id', saleId)
+
+    if (saleError) {
+      throw saleError
+    }
+
+    const { error: ticketError } = await supabase
+      .from('tickets')
+      .update({ status: 'void' })
+      .eq('tenant_id', event.tenantId)
+      .eq('id', ticketId)
+
+    if (ticketError) {
+      throw ticketError
     }
 
     return
