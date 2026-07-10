@@ -183,7 +183,6 @@ export function ProductDialog({
 
         {isChoosingFormat ? (
           <div className="mt-5">
-            <p className="mb-2 text-sm font-semibold text-[var(--muted)]">Formato</p>
             <div className="grid gap-2">
               {product.variants.map((variant) => (
                 <Button
@@ -194,6 +193,7 @@ export function ProductDialog({
                   onClick={() => handleVariantSelect(variant)}
                   type="button"
                   variant="tertiary"
+                  size="lg"
                 >
                   <span className="flex w-full items-center justify-between gap-3">
                     <span>{variant.name}</span>

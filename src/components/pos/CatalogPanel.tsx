@@ -2,6 +2,8 @@ import {
   ArrowLeft,
   BarChart3,
   Beer,
+  ChevronLeft,
+  ChevronRight,
   GlassWater,
   Martini,
   ReceiptText,
@@ -10,7 +12,7 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   canSellProductStandalone,
   getActiveSaleFormats,
@@ -117,6 +119,9 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
   const [activeFilter, setActiveFilter] = useState<CatalogFilter>(catalogStartTab)
   const [search, setSearch] = useState('')
   const [selectedCategoryId, setSelectedCategoryId] = useState<string | null>(null)
+  const [canScrollTabsBack, setCanScrollTabsBack] = useState(false)
+  const [canScrollTabsForward, setCanScrollTabsForward] = useState(false)
+  const tabsScrollerRef = useRef<HTMLDivElement | null>(null)
   const categories = useMemo(() => catalog?.categories ?? [], [catalog])
   const products = useMemo(() => catalog?.products ?? [], [catalog])
   const saleFormats = useMemo(() => getActiveSaleFormats(catalog?.saleFormats), [catalog?.saleFormats])
@@ -152,6 +157,24 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
       setSelectedCategoryId(null)
     }
   }, [activeFilter, catalogStartTab, saleFormats])
+
+  useEffect(() => {
+    updateTabScrollState()
+
+    const scroller = tabsScrollerRef.current
+    if (!scroller) {
+      return
+    }
+
+    const resizeObserver = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(updateTabScrollState)
+    resizeObserver?.observe(scroller)
+    window.addEventListener('resize', updateTabScrollState)
+
+    return () => {
+      resizeObserver?.disconnect()
+      window.removeEventListener('resize', updateTabScrollState)
+    }
+  }, [filterOptions.length])
 
   const visibleCategories = useMemo(
     () => {
@@ -237,9 +260,37 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
     setSelectedCategoryId(null)
   }
 
+  function updateTabScrollState() {
+    const scroller = tabsScrollerRef.current
+
+    if (!scroller) {
+      return
+    }
+
+    const maxScrollLeft = scroller.scrollWidth - scroller.clientWidth
+    setCanScrollTabsBack(scroller.scrollLeft > 1)
+    setCanScrollTabsForward(scroller.scrollLeft < maxScrollLeft - 1)
+  }
+
+  function scrollTabs(direction: -1 | 1) {
+    const scroller = tabsScrollerRef.current
+
+    if (!scroller) {
+      return
+    }
+
+    scroller.scrollBy({ left: direction * scroller.clientWidth, behavior: 'smooth' })
+  }
+
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-4">
-      <div className="flex flex-row gap-2">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+      <div className="relative min-w-0 max-w-full">
+        <div
+          className="catalog-tabs-scroll min-w-0 max-w-full overflow-x-auto pb-1"
+          onScroll={updateTabScrollState}
+          ref={tabsScrollerRef}
+        >
+          <div className="grid min-w-full grid-flow-col auto-cols-[calc((100%-3rem)/7)] gap-2">
           {filterOptions.map((option) => {
             const Icon = option.icon
             return (
@@ -258,7 +309,37 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
               </Button>
             )
           })}
+          </div>
         </div>
+
+        {canScrollTabsBack ? (
+          <>
+            <div className="pointer-events-none absolute inset-y-0 left-0 w-12 bg-gradient-to-r from-[var(--background)] to-transparent" />
+            <button
+              aria-label="Ver pestanas anteriores"
+              className="absolute left-1 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]"
+              onClick={() => scrollTabs(-1)}
+              type="button"
+            >
+              <ChevronLeft className="h-5 w-5" />
+            </button>
+          </>
+        ) : null}
+
+        {canScrollTabsForward ? (
+          <>
+            <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-[var(--background)] to-transparent" />
+            <button
+              aria-label="Ver mas pestanas"
+              className="absolute right-1 top-1/2 z-10 grid h-9 w-9 -translate-y-1/2 place-items-center rounded-full border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]"
+              onClick={() => scrollTabs(1)}
+              type="button"
+            >
+              <ChevronRight className="h-5 w-5" />
+            </button>
+          </>
+        ) : null}
+      </div>
 
       <div className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
         <div className="border-b border-[var(--separator)] p-4">

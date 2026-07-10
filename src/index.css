@@ -64,6 +64,15 @@ button {
   touch-action: pan-y;
 }
 
+.catalog-tabs-scroll {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+
+.catalog-tabs-scroll::-webkit-scrollbar {
+  display: none;
+}
+
 .crm-input {
   height: 44px;
   width: 100%;
