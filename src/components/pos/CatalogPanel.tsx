@@ -145,6 +145,7 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
   const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories])
   const normalizedSearch = normalizeText(search.trim())
   const productFilter = normalizedSearch ? 'all' : activeFilter
+  const isFormatFilter = activeFilter !== 'all' && activeFilter !== 'top'
 
   useEffect(() => {
     setActiveFilter(catalogStartTab)
@@ -198,6 +199,13 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
       .filter((product) => productFilter !== 'all' || canSellProductStandalone(product))
       .filter((product) => !selectedCategoryId || product.categoryId === selectedCategoryId)
       .filter((product) => {
+        if (normalizedSearch || productFilter === 'all' || productFilter === 'top') {
+          return true
+        }
+
+        return selectedCategoryId ? !product.isFeatured : product.isFeatured
+      })
+      .filter((product) => {
         if (!normalizedSearch) {
           return true
         }
@@ -238,6 +246,7 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
             product.categoryId === category.id &&
             product.isActive &&
             (activeFilter === 'all' || activeFilter === 'top' || productSupportsSaleFormat(product, activeFilter)) &&
+            (activeFilter === 'all' || activeFilter === 'top' || !product.isFeatured) &&
             (activeFilter === 'all' || activeFilter === 'top' || activeFilter === 'cubata' || canSellProductStandalone(product)),
         ).length,
       ]),
@@ -246,16 +255,19 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
   const visibleCategoriesWithProducts = visibleCategories.filter((category) => (categoryProductCounts.get(category.id) ?? 0) > 0)
   const showCategories =
     activeFilter !== 'top' &&
-    activeFilter !== 'beer_bottle' &&
-    activeFilter !== 'soft_bottle' &&
     !normalizedSearch &&
     !selectedCategoryId &&
-    visibleCategoriesWithProducts.length > 1
+    (isFormatFilter ? visibleCategoriesWithProducts.length > 0 : visibleCategoriesWithProducts.length > 1)
+  const showProductGrid = !showCategories || (isFormatFilter && visibleProducts.length > 0)
   const selectedCategory = selectedCategoryId
     ? categories.find((category) => category.id === selectedCategoryId) ?? null
     : null
 
   function handleFilterChange(filter: CatalogFilter) {
+    if (filter !== activeFilter && search) {
+      setSearch('')
+    }
+
     setActiveFilter(filter)
     setSelectedCategoryId(null)
   }
@@ -372,30 +384,7 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
             </div>
           ) : null}
 
-          {showCategories ? (
-            <div className="grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5">
-              {visibleCategoriesWithProducts.map((category) => {
-                const Icon = getCatalogKindIcon(category.kind, activeFilter)
-                const count = categoryProductCounts.get(category.id) ?? 0
-
-                return (
-                  <button
-                    className="min-h-28 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
-                    disabled={disabled || count === 0}
-                    key={category.id}
-                    onClick={() => setSelectedCategoryId(category.id)}
-                    type="button"
-                  >
-                    <Icon className="mb-3 h-6 w-6 text-[var(--accent)]" />
-                    <p className="font-bold text-[var(--foreground)]">{category.name}</p>
-                    <p className="mt-1 text-sm text-[var(--muted)]">{count} productos</p>
-                  </button>
-                )
-              })}
-            </div>
-          ) : null}
-
-          {!showCategories ? (
+          {showProductGrid ? (
             visibleProducts.length ? (
               <div className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-5">
                 {visibleProducts.map((product) => {
@@ -439,6 +428,29 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
                 No hay resultados en este catalogo.
               </div>
             )
+          ) : null}
+
+          {showCategories ? (
+            <div className={`${showProductGrid && visibleProducts.length ? 'mt-3 ' : ''}grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5`}>
+              {visibleCategoriesWithProducts.map((category) => {
+                const Icon = getCatalogKindIcon(category.kind, activeFilter)
+                const count = categoryProductCounts.get(category.id) ?? 0
+
+                return (
+                  <button
+                    className="min-h-28 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={disabled || count === 0}
+                    key={category.id}
+                    onClick={() => setSelectedCategoryId(category.id)}
+                    type="button"
+                  >
+                    <Icon className="mb-3 h-6 w-6 text-[var(--accent)]" />
+                    <p className="font-bold text-[var(--foreground)]">{category.name}</p>
+                    <p className="mt-1 text-sm text-[var(--muted)]">{count} productos</p>
+                  </button>
+                )
+              })}
+            </div>
           ) : null}
         </div>
       </div>

@@ -24,6 +24,8 @@ export type CatalogFilter = CatalogStartTab | SaleFormat
 
 export type PaymentMethod = 'cash' | 'card' | 'invitation' | 'other'
 
+export type TenantRole = 'owner' | 'admin' | 'manager' | 'cashier'
+
 export type ThemeMode = 'light' | 'dark'
 
 export type ThemeDefinition = {
@@ -47,14 +49,35 @@ export type TenantContext = {
   deviceName: string
   userId: string
   userName: string
-  role: string
+  role: TenantRole
 }
 
 export type LoginInput = {
-  tenantSlug: string
   email: string
   password: string
-  deviceName: string
+}
+
+export type CrmVenue = {
+  id: string
+  name: string
+  sortOrder: number
+  isActive: boolean
+}
+
+export type CrmDevice = {
+  id: string
+  venueId: string
+  name: string
+  isActive: boolean
+}
+
+export type CrmPosUser = {
+  id: string
+  email: string
+  fullName: string
+  isActive: boolean
+  venueId: string
+  deviceId: string
 }
 
 export type Category = {
@@ -107,6 +130,7 @@ export type Product = {
   saleFormats: SaleFormat[]
   canSellStandalone: boolean
   canUseAsMixer: boolean
+  isFeatured: boolean
   mixerSupplementCents: number
   isActive: boolean
   sortOrder: number
@@ -311,6 +335,7 @@ export type ProductCreateInput = {
   categoryId: string
   description: string
   imagePath?: string | null
+  isFeatured: boolean
   kind: CatalogKind
   mixerSupplementCents: number
   name: string

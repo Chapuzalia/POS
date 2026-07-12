@@ -29,18 +29,24 @@ import {
   saveSaleLedger,
   saveSessionTickets,
 } from './lib/offlineStore'
-import { supabaseConfig } from './lib/supabase'
+import { supabase, supabaseConfig } from './lib/supabase'
 import { useOfflineSync } from './hooks/useOfflineSync'
 import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useThemeTokens } from './hooks/useThemeTokens'
 import {
+  TenantSessionError,
   buildSalePayload,
+  hasValidOfflineSession,
   loadCatalogFromSupabase,
   loadOpenCashSession,
   loadProductSalesStatsFromSupabase,
   loadSalesLedgerFromSupabase,
+  loadSessionTicketsFromSupabase,
   loginTenant,
+  logoutTenant,
   mergeLedgers,
+  restoreTenantContext,
+  subscribeToCashSessionChanges,
   summarizeSales,
 } from './services/posService'
 import type {
@@ -79,37 +85,57 @@ function getAppRoute(): AppRoute {
   return window.location.pathname.replace(/\/+$/, '') === '/crm' ? 'crm' : 'pos'
 }
 
+function isCrmAdministrator(context: TenantContext) {
+  return context.role === 'owner' || context.role === 'admin'
+}
+
+async function loadTenantState(activeContext: TenantContext) {
+  if (isCrmAdministrator(activeContext)) {
+    const catalog = await loadCatalogFromSupabase(activeContext)
+
+    return {
+      catalog,
+      cashSession: null,
+      productSalesStats: [],
+      salesLedger: [],
+    }
+  }
+
+  const [nextCatalog, openSession, nextProductSalesStats] = await Promise.all([
+    loadCatalogFromSupabase(activeContext),
+    loadOpenCashSession(activeContext),
+    loadProductSalesStatsFromSupabase(activeContext),
+  ])
+  const localLedger = openSession ? getSaleLedger(activeContext) : []
+  const remoteLedger = openSession ? await loadSalesLedgerFromSupabase(activeContext, openSession.id) : []
+
+  return {
+    catalog: nextCatalog,
+    cashSession: openSession,
+    productSalesStats: nextProductSalesStats,
+    salesLedger: mergeLedgers(localLedger, remoteLedger),
+  }
+}
+
 function App() {
   const { selectedTheme, setThemeId, themeId } = useThemeTokens(themes, defaultThemeId)
   const isOnline = useOnlineStatus()
-  const { pendingCount, refreshPendingCount, syncPendingEvents } = useOfflineSync(isOnline)
-  const [context, setContext] = useState<TenantContext | null>(() => getCachedContext())
-  const [catalog, setCatalog] = useState<Catalog | null>(() => {
-    const cachedContext = getCachedContext()
-    return cachedContext ? getCachedCatalog(cachedContext.tenantId) : null
-  })
-  const [cashSession, setCashSession] = useState<CashSession | null>(() => {
-    const cachedContext = getCachedContext()
-    return cachedContext ? getCachedCashSession(cachedContext) : null
-  })
-  const [ticketLines, setTicketLines] = useState<TicketLine[]>(() => {
-    const cachedContext = getCachedContext()
-    return cachedContext ? getCachedTicket(cachedContext) : []
-  })
-  const [salesLedger, setSalesLedger] = useState<SaleRecord[]>(() => {
-    const cachedContext = getCachedContext()
-    return cachedContext ? getSaleLedger(cachedContext) : []
-  })
-  const [sessionTickets, setSessionTickets] = useState<SessionTicketRecord[]>(() => {
-    const cachedContext = getCachedContext()
-    const cachedSession = cachedContext ? getCachedCashSession(cachedContext) : null
-    return cachedContext && cachedSession ? getSessionTickets(cachedContext, cachedSession.id) : []
-  })
+  const {
+    clearRejectedSaleEvent,
+    pendingCount,
+    rejectedSaleEvent,
+    refreshPendingCount,
+    syncPendingEvents,
+  } = useOfflineSync(isOnline)
+  const [context, setContext] = useState<TenantContext | null>(null)
+  const [catalog, setCatalog] = useState<Catalog | null>(null)
+  const [cashSession, setCashSession] = useState<CashSession | null>(null)
+  const [ticketLines, setTicketLines] = useState<TicketLine[]>([])
+  const [salesLedger, setSalesLedger] = useState<SaleRecord[]>([])
+  const [sessionTickets, setSessionTickets] = useState<SessionTicketRecord[]>([])
   const [catalogStartTab, setCatalogStartTab] = useState<CatalogStartTab>(() => getCatalogStartTab())
-  const [productSalesStats, setProductSalesStats] = useState<ProductSalesStat[]>(() => {
-    const cachedContext = getCachedContext()
-    return cachedContext ? getCachedProductSalesStats(cachedContext.tenantId) : []
-  })
+  const [productSalesStats, setProductSalesStats] = useState<ProductSalesStat[]>([])
+  const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [isBusy, setIsBusy] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
@@ -130,6 +156,252 @@ function App() {
     window.addEventListener('popstate', handlePopState)
     return () => window.removeEventListener('popstate', handlePopState)
   }, [])
+
+  useEffect(() => {
+    if (!context) {
+      return
+    }
+
+    const requiredRoute: AppRoute = isCrmAdministrator(context) ? 'crm' : 'pos'
+
+    if (route !== requiredRoute) {
+      window.history.replaceState(null, '', requiredRoute === 'crm' ? '/crm' : '/')
+      setRoute(requiredRoute)
+    }
+  }, [context, route])
+
+  useEffect(() => {
+    if (!supabase) {
+      return undefined
+    }
+
+    const { data } = supabase.auth.onAuthStateChange((event) => {
+      if (event === 'SIGNED_OUT') {
+        clearActiveState()
+        saveCachedContext(null)
+      }
+    })
+
+    return () => data.subscription.unsubscribe()
+  }, [])
+
+  useEffect(() => {
+    let cancelled = false
+
+    async function restoreOnlineState() {
+      if (!supabaseConfig.isReady || !isOnline) {
+        setIsBootstrapping(false)
+        return
+      }
+
+      const cachedContext = getCachedContext()
+
+      if (!cachedContext) {
+        setIsBootstrapping(false)
+        return
+      }
+
+      setIsBusy(true)
+      setIsLoading(true)
+      setError(null)
+
+      try {
+        const restoredContext = await restoreTenantContext(cachedContext)
+        if (!isCrmAdministrator(restoredContext)) {
+          await syncPendingEvents()
+        }
+        const restoredState = await loadTenantState(restoredContext)
+
+        if (!cancelled) {
+          applyTenantState(restoredContext, restoredState)
+        }
+      } catch (restoreError) {
+        if (!cancelled) {
+          clearActiveState()
+          if (restoreError instanceof TenantSessionError) {
+            saveCachedContext(null)
+          }
+          setError(getReadableError(restoreError))
+        }
+      } finally {
+        if (!cancelled) {
+          setIsBootstrapping(false)
+          setIsBusy(false)
+          setIsLoading(false)
+        }
+      }
+    }
+
+    void restoreOnlineState()
+
+    return () => {
+      cancelled = true
+    }
+  }, [isOnline, syncPendingEvents])
+
+  useEffect(() => {
+    if (!context || !isOnline || isCrmAdministrator(context)) {
+      return undefined
+    }
+
+    const activeContext = context
+    let active = true
+    let refreshVersion = 0
+
+    async function refreshCashSession() {
+      const requestVersion = ++refreshVersion
+
+      try {
+        const nextSession = await loadOpenCashSession(activeContext)
+
+        if (!active || requestVersion !== refreshVersion) {
+          return
+        }
+
+        const previousSession = getCachedCashSession(activeContext)
+
+        if (nextSession?.id === previousSession?.id) {
+          return
+        }
+
+        if (previousSession) {
+          clearSessionTickets(activeContext, previousSession.id)
+        }
+
+        setCashSession(nextSession)
+        saveCachedCashSession(activeContext, nextSession)
+        setCashPaymentOpen(false)
+        setCloseCashOpen(false)
+        setTicketHistoryOpen(false)
+        setPaidFeedback(null)
+
+        if (!nextSession) {
+          setSalesLedger([])
+          clearSaleLedger(activeContext)
+          setSessionTickets([])
+          setError('La caja se ha cerrado desde otro dispositivo. Abre una nueva caja para continuar.')
+          return
+        }
+
+        const remoteLedger = await loadSalesLedgerFromSupabase(activeContext, nextSession.id)
+
+        if (!active || requestVersion !== refreshVersion) {
+          return
+        }
+
+        setSalesLedger(remoteLedger)
+        saveSaleLedger(activeContext, remoteLedger)
+        setSessionTickets(getSessionTickets(activeContext, nextSession.id))
+        setError(null)
+      } catch (cashSessionError) {
+        if (active && requestVersion === refreshVersion) {
+          setError(getReadableError(cashSessionError))
+        }
+      }
+    }
+
+    const unsubscribe = subscribeToCashSessionChanges(activeContext, () => {
+      void refreshCashSession()
+    })
+
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [context, isOnline])
+
+  useEffect(() => {
+    if (!context || !rejectedSaleEvent || rejectedSaleEvent.tenantId !== context.tenantId) {
+      return
+    }
+
+    const rejectedSessionId = rejectedSaleEvent.payload.ticket.cashSessionId
+    const restoredLines = rejectedSaleEvent.payload.lines.map((line) => ({
+      id: line.id,
+      modifiers: line.modifiers,
+      productId: line.productId,
+      productName: line.productName,
+      quantity: line.quantity,
+      unitPriceCents: line.unitPriceCents,
+      variantId: line.variantId,
+      variantName: line.variantName,
+    }))
+
+    if (getCachedTicket(context).length === 0) {
+      setTicketLines(restoredLines)
+      saveCachedTicket(context, restoredLines)
+    }
+
+    if (cashSession?.id === rejectedSessionId) {
+      setCashSession(null)
+      saveCachedCashSession(context, null)
+    }
+
+    setSalesLedger((currentLedger) => currentLedger.filter((sale) => sale.id !== rejectedSaleEvent.payload.sale.id))
+    clearSaleLedger(context)
+    setSessionTickets((currentTickets) =>
+      currentTickets.filter((ticket) => ticket.id !== rejectedSaleEvent.payload.sale.id),
+    )
+    clearSessionTickets(context, rejectedSessionId)
+    setCashPaymentOpen(false)
+    setCloseCashOpen(false)
+    setTicketHistoryOpen(false)
+    setPaidFeedback(null)
+    setError('La venta no se ha registrado porque la caja estaba cerrada. El ticket se ha recuperado para cobrarlo tras abrir una caja nueva.')
+    clearRejectedSaleEvent()
+  }, [cashSession, clearRejectedSaleEvent, context, rejectedSaleEvent])
+
+  function applyTenantState(
+    nextContext: TenantContext,
+    state: Awaited<ReturnType<typeof loadTenantState>>,
+  ) {
+    const previousSession = getCachedCashSession(nextContext)
+
+    setContext(nextContext)
+    saveCachedContext(nextContext)
+    setCatalog(state.catalog)
+    saveCachedCatalog(nextContext.tenantId, state.catalog)
+    setProductSalesStats(state.productSalesStats)
+    saveCachedProductSalesStats(nextContext.tenantId, state.productSalesStats)
+    setCashSession(state.cashSession)
+    saveCachedCashSession(nextContext, state.cashSession)
+    setTicketLines(isCrmAdministrator(nextContext) ? [] : getCachedTicket(nextContext))
+    setSalesLedger(state.salesLedger)
+
+    if (isCrmAdministrator(nextContext)) {
+      setSessionTickets([])
+      window.history.replaceState(null, '', '/crm')
+      setRoute('crm')
+      return
+    }
+
+    if (state.cashSession) {
+      saveSaleLedger(nextContext, state.salesLedger)
+      setSessionTickets(getSessionTickets(nextContext, state.cashSession.id))
+      return
+    }
+
+    clearSaleLedger(nextContext)
+    if (previousSession) {
+      clearSessionTickets(nextContext, previousSession.id)
+    }
+    setSessionTickets([])
+  }
+
+  function clearActiveState() {
+    setContext(null)
+    setCatalog(null)
+    setCashSession(null)
+    setTicketLines([])
+    setSalesLedger([])
+    setSessionTickets([])
+    setProductSalesStats([])
+    setCashPaymentOpen(false)
+    setCloseCashOpen(false)
+    setConfigOpen(false)
+    setTicketHistoryOpen(false)
+    setProductDialog(null)
+  }
 
   async function refreshCatalog(activeContext = context) {
     if (!activeContext || !supabaseConfig.isReady || !isOnline) {
@@ -159,29 +431,11 @@ function App() {
 
     try {
       const nextContext = await loginTenant(input)
-      setContext(nextContext)
-      saveCachedContext(nextContext)
-
-      const [nextCatalog, openSession, nextProductSalesStats] = await Promise.all([
-        loadCatalogFromSupabase(nextContext),
-        loadOpenCashSession(nextContext),
-        loadProductSalesStatsFromSupabase(nextContext),
-      ])
-      const localLedger = getSaleLedger(nextContext)
-      const remoteLedger = openSession ? await loadSalesLedgerFromSupabase(nextContext, openSession.id) : []
-      const nextLedger = mergeLedgers(localLedger, remoteLedger)
-
-      setCatalog(nextCatalog)
-      saveCachedCatalog(nextContext.tenantId, nextCatalog)
-      setProductSalesStats(nextProductSalesStats)
-      saveCachedProductSalesStats(nextContext.tenantId, nextProductSalesStats)
-      setCashSession(openSession)
-      saveCachedCashSession(nextContext, openSession)
-      setSessionTickets(openSession ? getSessionTickets(nextContext, openSession.id) : [])
-      setTicketLines(getCachedTicket(nextContext))
-      setSalesLedger(nextLedger)
-      saveSaleLedger(nextContext, nextLedger)
-      await syncPendingEvents()
+      if (!isCrmAdministrator(nextContext)) {
+        await syncPendingEvents()
+      }
+      const nextState = await loadTenantState(nextContext)
+      applyTenantState(nextContext, nextState)
     } catch (loginError) {
       setError(getReadableError(loginError))
     } finally {
@@ -190,21 +444,38 @@ function App() {
     }
   }
 
-  function enterOffline() {
+  async function enterOffline() {
     const cachedContext = getCachedContext()
 
     if (!cachedContext) {
       return
     }
 
-    setContext(cachedContext)
-    setCatalog(getCachedCatalog(cachedContext.tenantId))
-    setProductSalesStats(getCachedProductSalesStats(cachedContext.tenantId))
-    setCashSession(getCachedCashSession(cachedContext))
-    const cachedSession = getCachedCashSession(cachedContext)
-    setSessionTickets(cachedSession ? getSessionTickets(cachedContext, cachedSession.id) : [])
-    setTicketLines(getCachedTicket(cachedContext))
-    setSalesLedger(getSaleLedger(cachedContext))
+    setIsBusy(true)
+    setError(null)
+
+    try {
+      if (isCrmAdministrator(cachedContext)) {
+        throw new TenantSessionError('El CRM de administracion requiere conexion.')
+      }
+
+      if (!(await hasValidOfflineSession(cachedContext))) {
+        throw new TenantSessionError('La sesion ha caducado. Conecta el TPV e inicia sesion de nuevo.')
+      }
+
+      setContext(cachedContext)
+      setCatalog(getCachedCatalog(cachedContext.tenantId))
+      setProductSalesStats(getCachedProductSalesStats(cachedContext.tenantId))
+      setCashSession(getCachedCashSession(cachedContext))
+      const cachedSession = getCachedCashSession(cachedContext)
+      setSessionTickets(cachedSession ? getSessionTickets(cachedContext, cachedSession.id) : [])
+      setTicketLines(getCachedTicket(cachedContext))
+      setSalesLedger(getSaleLedger(cachedContext))
+    } catch (offlineError) {
+      setError(getReadableError(offlineError))
+    } finally {
+      setIsBusy(false)
+    }
   }
 
   function persistTicket(nextLines: TicketLine[]) {
@@ -442,6 +713,32 @@ function App() {
     completePayment(paymentMethod, null)
   }
 
+  async function openTicketHistory() {
+    if (!context || !cashSession) {
+      return
+    }
+
+    if (!isOnline) {
+      setError('El historico de tickets requiere conexion para consultar los datos de Supabase.')
+      return
+    }
+
+    setIsBusy(true)
+    setError(null)
+
+    try {
+      await syncPendingEvents()
+      const remoteTickets = await loadSessionTicketsFromSupabase(context, cashSession.id)
+      setSessionTickets(remoteTickets)
+      saveSessionTickets(context, cashSession.id, remoteTickets)
+      setTicketHistoryOpen(true)
+    } catch (historyError) {
+      setError(getReadableError(historyError))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   function changeTicketPayment(ticket: SessionTicketRecord, paymentMethod: PaymentMethod) {
     if (!context || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod) {
       return
@@ -550,21 +847,19 @@ function App() {
     void syncPendingEvents()
   }
 
-  function handleLogout() {
-    setContext(null)
-    setCatalog(null)
-    setCashSession(null)
-    setTicketLines([])
-    setSalesLedger([])
-    setSessionTickets([])
-    setProductSalesStats([])
-    setConfigOpen(false)
-    saveCachedContext(null)
-  }
+  async function handleLogout() {
+    setIsBusy(true)
+    setError(null)
 
-  function navigateToPos() {
-    window.history.pushState(null, '', '/')
-    setRoute('pos')
+    try {
+      await logoutTenant()
+    } catch (logoutError) {
+      setError(getReadableError(logoutError))
+    } finally {
+      clearActiveState()
+      saveCachedContext(null)
+      setIsBusy(false)
+    }
   }
 
   if (!selectedTheme) {
@@ -575,7 +870,7 @@ function App() {
     return <MissingConfigScreen />
   }
 
-  if (isLoading && !context) {
+  if (isBootstrapping || (isLoading && !context)) {
     return <LoadingScreen />
   }
 
@@ -594,14 +889,13 @@ function App() {
 
   const canSell = Boolean(cashSession && ticketLines.length > 0 && !isBusy)
 
-  if (route === 'crm') {
+  if (isCrmAdministrator(context)) {
     return (
       <CrmPage
         catalog={catalog}
         context={context}
         error={error}
         isOnline={isOnline}
-        onBackToPos={navigateToPos}
         onCatalogChanged={() => refreshCatalog(context)}
         onError={setError}
         onLogout={handleLogout}
@@ -617,7 +911,7 @@ function App() {
         isOnline={isOnline}
         onCloseCash={() => setCloseCashOpen(true)}
         onOpenConfig={() => setConfigOpen(true)}
-        onOpenTicketHistory={() => setTicketHistoryOpen(true)}
+        onOpenTicketHistory={() => void openTicketHistory()}
         onRefreshCatalog={() => void refreshCatalog()}
         pendingCount={pendingCount}
       />

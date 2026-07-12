@@ -740,6 +740,40 @@ button {
   align-items: start;
 }
 
+.crm-access-layout {
+  display: grid;
+  grid-template-columns: 330px minmax(0, 1fr);
+  gap: 14px;
+  align-items: start;
+}
+
+.crm-access-forms,
+.crm-access-user-list {
+  display: grid;
+  gap: 12px;
+}
+
+.crm-access-users {
+  min-width: 0;
+}
+
+.crm-access-user-list {
+  padding: 12px;
+}
+
+.crm-access-user-row {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.8fr) 90px 110px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e1e8ef;
+  padding: 10px 0;
+}
+
+.crm-access-user-row:last-child {
+  border-bottom: 0;
+}
+
 .crm-entity-layout {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 390px;
@@ -1551,6 +1585,7 @@ button {
 
   .crm-dashboard-grid,
   .crm-management-grid,
+  .crm-access-layout,
   .crm-entity-layout {
     grid-template-columns: 1fr;
   }
@@ -1590,6 +1625,15 @@ button {
 @media (max-width: 760px) {
   .crm-shell {
     height: 100vh;
+  }
+
+  .crm-access-user-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .crm-access-user-row > .crm-cell-main:nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
   }
 
   .crm-sidebar {

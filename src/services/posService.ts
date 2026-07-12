@@ -18,11 +18,14 @@ import type {
   SaleCreatedPayload,
   SaleLinePayload,
   SaleRecord,
+  SessionTicketRecord,
   TenantContext,
   TicketLine,
+  TicketLineModifier,
 } from '../types'
 import type {
   CategoryRow,
+  DeviceAssignmentRow,
   DeviceRow,
   MembershipRow,
   ModifierGroupRow,
@@ -31,6 +34,7 @@ import type {
   SaleRow,
   TicketLineProductSalesRow,
   TenantRow,
+  UserMembershipRow,
   VariantRow,
   VenueRow,
 } from '../types/supabase'
@@ -133,6 +137,7 @@ function mapProduct(row: ProductRow): Product {
     saleFormats: row.sale_formats?.length ? row.sale_formats : [...inferSaleFormats(row.kind)],
     canSellStandalone: row.can_sell_standalone ?? row.kind !== 'mixer',
     canUseAsMixer: row.can_use_as_mixer ?? row.kind === 'mixer',
+    isFeatured: row.is_featured ?? false,
     mixerSupplementCents: row.mixer_supplement_cents ?? 0,
     isActive: row.is_active,
     sortOrder: row.sort_order,
@@ -187,73 +192,101 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw new Error('No se ha recibido usuario autenticado.')
   }
 
-  const { data: tenant, error: tenantError } = await supabase
-    .from('tenants')
-    .select('id, name, slug')
-    .eq('slug', input.tenantSlug)
-    .maybeSingle<TenantRow>()
-
-  if (tenantError) {
-    throw new Error(`No se pudo cargar el negocio: ${getReadableError(tenantError)}`)
-  }
-
-  if (!tenant) {
-    throw new Error(
-      `No existe un negocio visible con slug "${input.tenantSlug}". Comprueba public.tenants y public.tenant_memberships.`,
-    )
-  }
-
-  const { data: membership, error: membershipError } = await supabase
+  const { data: memberships, error: membershipError } = await supabase
     .from('tenant_memberships')
-    .select('role')
-    .eq('tenant_id', tenant.id)
+    .select('tenant_id, role')
     .eq('user_id', user.id)
     .eq('is_active', true)
-    .maybeSingle<MembershipRow>()
+    .limit(2)
 
   if (membershipError) {
     throw new Error(`No se pudo cargar la membresia del usuario: ${getReadableError(membershipError)}`)
   }
 
-  if (!membership) {
-    throw new Error(
-      `El usuario ${user.email ?? user.id} no tiene membresia activa en ${tenant.name}. Aniadelo en public.tenant_memberships.`,
-    )
+  const activeMemberships = (memberships ?? []) as UserMembershipRow[]
+
+  if (activeMemberships.length === 0) {
+    throw new Error(`El usuario ${user.email ?? user.id} no tiene acceso activo a ningun negocio.`)
   }
 
-  const { data: venue, error: venueError } = await supabase
-    .from('venues')
-    .select('id, name')
+  if (activeMemberships.length > 1) {
+    throw new Error('Este usuario pertenece a mas de un negocio. Usa una cuenta diferente para cada negocio.')
+  }
+
+  const membership = activeMemberships[0]
+  const { data: tenant, error: tenantError } = await supabase
+    .from('tenants')
+    .select('id, name, slug')
+    .eq('id', membership.tenant_id)
+    .single<TenantRow>()
+
+  if (tenantError || !tenant) {
+    throw new Error(`No se pudo cargar el negocio asignado: ${getReadableError(tenantError)}`)
+  }
+
+  if (membership.role === 'owner' || membership.role === 'admin') {
+    return {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      tenantSlug: tenant.slug,
+      venueId: '',
+      venueName: '',
+      deviceId: '',
+      deviceName: '',
+      userId: user.id,
+      userName: user.user_metadata.full_name ?? user.email ?? 'Administrador',
+      role: membership.role,
+    }
+  }
+
+  if (membership.role !== 'cashier') {
+    throw new Error('Este usuario no tiene permisos de administracion ni una cuenta de caja compatible.')
+  }
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('device_user_assignments')
+    .select('tenant_id, user_id, venue_id, device_id, is_active')
     .eq('tenant_id', tenant.id)
+    .eq('user_id', user.id)
     .eq('is_active', true)
-    .order('sort_order', { ascending: true })
-    .limit(1)
-    .maybeSingle<VenueRow>()
+    .maybeSingle<DeviceAssignmentRow>()
+
+  if (assignmentError) {
+    throw new Error(`No se pudo cargar la asignacion del TPV: ${getReadableError(assignmentError)}`)
+  }
+
+  if (!assignment) {
+    throw new Error('Este usuario no tiene ningun dispositivo activo asignado. Contacta con administracion.')
+  }
+
+  const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
+    supabase
+      .from('venues')
+      .select('id, name')
+      .eq('tenant_id', tenant.id)
+      .eq('id', assignment.venue_id)
+      .eq('is_active', true)
+      .maybeSingle<VenueRow>(),
+    supabase
+      .from('devices')
+      .select('id, name')
+      .eq('tenant_id', tenant.id)
+      .eq('venue_id', assignment.venue_id)
+      .eq('id', assignment.device_id)
+      .eq('is_active', true)
+      .maybeSingle<DeviceRow>(),
+  ])
 
   if (venueError) {
     throw new Error(`No se pudo cargar el local: ${getReadableError(venueError)}`)
   }
 
-  if (!venue) {
-    throw new Error(`El negocio ${tenant.name} no tiene ningun local activo en public.venues.`)
+  if (deviceError) {
+    throw new Error(`No se pudo cargar el dispositivo asignado: ${getReadableError(deviceError)}`)
   }
 
-  const { data: device, error: deviceError } = await supabase
-    .from('devices')
-    .upsert(
-      {
-        tenant_id: tenant.id,
-        venue_id: venue.id,
-        name: input.deviceName,
-        is_active: true,
-      },
-      { onConflict: 'tenant_id,venue_id,name' },
-    )
-    .select('id, name')
-    .single<DeviceRow>()
-
-  if (deviceError) {
-    throw new Error(`No se pudo registrar el dispositivo "${input.deviceName}": ${getReadableError(deviceError)}`)
+  if (!venue || !device) {
+    throw new Error('El local o dispositivo asignado esta desactivado o ya no existe.')
   }
 
   return {
@@ -267,6 +300,153 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
+  }
+}
+
+export class TenantSessionError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'TenantSessionError'
+  }
+}
+
+export async function restoreTenantContext(cachedContext: TenantContext): Promise<TenantContext> {
+  if (!supabase) {
+    throw new Error('Supabase no esta configurado.')
+  }
+
+  const { data: authData, error: authError } = await supabase.auth.getUser()
+
+  if (authError) {
+    const authStatus = (authError as { status?: number }).status
+    if (authError.name === 'AuthSessionMissingError' || authStatus === 401 || authStatus === 403) {
+      throw new TenantSessionError('La sesion ha caducado. Inicia sesion de nuevo.')
+    }
+
+    throw authError
+  }
+
+  const user = authData.user
+
+  if (!user || user.id !== cachedContext.userId) {
+    throw new TenantSessionError('La sesion guardada no pertenece al usuario de este TPV.')
+  }
+
+  const [{ data: tenant, error: tenantError }, { data: membership, error: membershipError }] = await Promise.all([
+    supabase
+      .from('tenants')
+      .select('id, name, slug')
+      .eq('id', cachedContext.tenantId)
+      .maybeSingle<TenantRow>(),
+    supabase
+      .from('tenant_memberships')
+      .select('role')
+      .eq('tenant_id', cachedContext.tenantId)
+      .eq('user_id', user.id)
+      .eq('is_active', true)
+      .maybeSingle<MembershipRow>(),
+  ])
+
+  if (tenantError || membershipError) {
+    throw tenantError ?? membershipError
+  }
+
+  if (!tenant || !membership) {
+    throw new TenantSessionError('El usuario ya no tiene acceso activo a este negocio.')
+  }
+
+  if (membership.role === 'owner' || membership.role === 'admin') {
+    return {
+      tenantId: tenant.id,
+      tenantName: tenant.name,
+      tenantSlug: tenant.slug,
+      venueId: '',
+      venueName: '',
+      deviceId: '',
+      deviceName: '',
+      userId: user.id,
+      userName: user.user_metadata.full_name ?? user.email ?? 'Administrador',
+      role: membership.role,
+    }
+  }
+
+  const { data: assignment, error: assignmentError } = await supabase
+    .from('device_user_assignments')
+    .select('tenant_id, user_id, venue_id, device_id, is_active')
+    .eq('tenant_id', tenant.id)
+    .eq('user_id', user.id)
+    .eq('is_active', true)
+    .maybeSingle<DeviceAssignmentRow>()
+
+  if (assignmentError) {
+    throw assignmentError
+  }
+
+  if (membership.role !== 'cashier' || !assignment) {
+    throw new TenantSessionError('El usuario ya no tiene un dispositivo activo asignado.')
+  }
+
+  const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
+    supabase
+      .from('venues')
+      .select('id, name')
+      .eq('tenant_id', tenant.id)
+      .eq('id', assignment.venue_id)
+      .eq('is_active', true)
+      .maybeSingle<VenueRow>(),
+    supabase
+      .from('devices')
+      .select('id, name')
+      .eq('tenant_id', tenant.id)
+      .eq('venue_id', assignment.venue_id)
+      .eq('id', assignment.device_id)
+      .eq('is_active', true)
+      .maybeSingle<DeviceRow>(),
+  ])
+
+  if (venueError || deviceError) {
+    throw venueError ?? deviceError
+  }
+
+  if (!venue || !device) {
+    throw new TenantSessionError('El local o dispositivo asignado esta desactivado.')
+  }
+
+  return {
+    tenantId: tenant.id,
+    tenantName: tenant.name,
+    tenantSlug: tenant.slug,
+    venueId: venue.id,
+    venueName: venue.name,
+    deviceId: device.id,
+    deviceName: device.name,
+    userId: user.id,
+    userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
+    role: membership.role,
+  }
+}
+
+export async function hasValidOfflineSession(context: TenantContext) {
+  if (!supabase) {
+    return false
+  }
+
+  const { data, error } = await supabase.auth.getSession()
+  const session = data.session
+  const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : 0
+
+  return !error && Boolean(session && session.user.id === context.userId && expiresAtMs > Date.now())
+}
+
+export async function logoutTenant() {
+  if (!supabase) {
+    return
+  }
+
+  const { error } = await supabase.auth.signOut({ scope: 'local' })
+
+  if (error) {
+    throw error
   }
 }
 
@@ -305,6 +485,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
           sale_formats,
           can_sell_standalone,
           can_use_as_mixer,
+          is_featured,
           mixer_supplement_cents,
           is_active,
           sort_order,
@@ -419,6 +600,184 @@ export async function loadSalesLedgerFromSupabase(context: TenantContext, cashSe
     totalCents: sale.total_cents,
     createdAt: sale.created_at,
   }))
+}
+
+type SessionTicketQueryRow = {
+  id: string
+  tenant_id: string
+  cash_session_id: string
+  venue_id: string
+  device_id: string
+  user_id: string
+  status: 'paid' | 'void'
+  total_cents: number
+  local_created_at: string
+  ticket_lines: Array<{
+    id: string
+    product_id: string | null
+    variant_id: string | null
+    product_name: string
+    variant_name: string
+    quantity: number
+    unit_price_cents: number
+    line_total_cents: number
+    modifiers: TicketLineModifier[]
+  }> | null
+  sales: Array<{
+    id: string
+    payment_method: PaymentMethod
+    total_cents: number
+    local_created_at: string
+    sale_payments: Array<{
+      id: string
+      method: PaymentMethod
+      amount_cents: number
+      received_cents: number | null
+      change_cents: number
+    }> | null
+  }> | null
+}
+
+export async function loadSessionTicketsFromSupabase(
+  context: TenantContext,
+  cashSessionId: string,
+): Promise<SessionTicketRecord[]> {
+  if (!supabase) {
+    throw new Error('Supabase no esta configurado.')
+  }
+
+  const [{ data: ticketData, error: ticketsError }, { data: eventData, error: eventsError }] = await Promise.all([
+    supabase
+      .from('tickets')
+      .select(`
+        id,
+        tenant_id,
+        cash_session_id,
+        venue_id,
+        device_id,
+        user_id,
+        status,
+        total_cents,
+        local_created_at,
+        ticket_lines (
+          id,
+          product_id,
+          variant_id,
+          product_name,
+          variant_name,
+          quantity,
+          unit_price_cents,
+          line_total_cents,
+          modifiers
+        ),
+        sales (
+          id,
+          payment_method,
+          total_cents,
+          local_created_at,
+          sale_payments (
+            id,
+            method,
+            amount_cents,
+            received_cents,
+            change_cents
+          )
+        )
+      `)
+      .eq('tenant_id', context.tenantId)
+      .eq('cash_session_id', cashSessionId)
+      .order('local_created_at', { ascending: false }),
+    supabase
+      .from('offline_event_log')
+      .select('payload')
+      .eq('tenant_id', context.tenantId)
+      .eq('event_kind', 'sale_created')
+      .filter('payload->ticket->>cashSessionId', 'eq', cashSessionId),
+  ])
+
+  if (ticketsError || eventsError) {
+    throw ticketsError ?? eventsError
+  }
+
+  const loggedPayloads = new Map<string, SaleCreatedPayload>()
+
+  for (const row of eventData ?? []) {
+    const payload = row.payload as SaleCreatedPayload | null
+
+    if (payload?.ticket?.id) {
+      loggedPayloads.set(payload.ticket.id, payload)
+    }
+  }
+
+  return ((ticketData ?? []) as SessionTicketQueryRow[]).map((ticket) => {
+    const loggedPayload = loggedPayloads.get(ticket.id)
+    const sale = ticket.sales?.[0]
+    const payment = sale?.sale_payments?.[0]
+    const saleId = sale?.id ?? loggedPayload?.sale.id ?? ticket.id
+    const paymentMethod = sale?.payment_method ?? loggedPayload?.sale.paymentMethod ?? 'other'
+    const createdAt = sale?.local_created_at ?? loggedPayload?.sale.createdAt ?? ticket.local_created_at
+    const lines = (ticket.ticket_lines ?? []).map((line) => {
+      const loggedLine = loggedPayload?.lines.find((item) => item.id === line.id)
+
+      return {
+        id: line.id,
+        ticketId: ticket.id,
+        tenantId: ticket.tenant_id,
+        productId: line.product_id ?? loggedLine?.productId ?? '',
+        variantId: line.variant_id ?? loggedLine?.variantId ?? '',
+        productName: line.product_name,
+        variantName: line.variant_name,
+        quantity: line.quantity,
+        unitPriceCents: line.unit_price_cents,
+        lineTotalCents: line.line_total_cents,
+        modifiers: line.modifiers ?? [],
+      }
+    })
+    const payload: SaleCreatedPayload = {
+      ticket: {
+        id: ticket.id,
+        tenantId: ticket.tenant_id,
+        cashSessionId: ticket.cash_session_id,
+        venueId: ticket.venue_id,
+        deviceId: ticket.device_id,
+        userId: ticket.user_id,
+        totalCents: ticket.total_cents,
+        createdAt: ticket.local_created_at,
+      },
+      lines,
+      sale: {
+        id: saleId,
+        tenantId: ticket.tenant_id,
+        ticketId: ticket.id,
+        cashSessionId: ticket.cash_session_id,
+        venueId: ticket.venue_id,
+        deviceId: ticket.device_id,
+        userId: ticket.user_id,
+        totalCents: sale?.total_cents ?? ticket.total_cents,
+        paymentMethod,
+        createdAt,
+      },
+      payment: {
+        id: payment?.id ?? loggedPayload?.payment.id ?? ticket.id,
+        tenantId: ticket.tenant_id,
+        saleId,
+        method: payment?.method ?? paymentMethod,
+        amountCents: payment?.amount_cents ?? ticket.total_cents,
+        receivedCents: payment?.received_cents ?? loggedPayload?.payment.receivedCents ?? null,
+        changeCents: payment?.change_cents ?? loggedPayload?.payment.changeCents ?? 0,
+      },
+    }
+
+    return {
+      id: saleId,
+      cashSessionId: ticket.cash_session_id,
+      paymentMethod,
+      totalCents: ticket.total_cents,
+      createdAt,
+      status: ticket.status === 'void' ? 'voided' : 'active',
+      payload,
+    }
+  })
 }
 
 export async function loadProductSalesStatsFromSupabase(context: TenantContext): Promise<ProductSalesStat[]> {
@@ -540,17 +899,20 @@ export async function syncEvent(event: OfflineEvent) {
 
   if (event.kind === 'cash_opened') {
     const { session } = event.payload
-    const { error } = await supabase.from('cash_sessions').upsert({
-      id: session.id,
-      tenant_id: session.tenantId,
-      venue_id: session.venueId,
-      device_id: session.deviceId,
-      opened_by: session.userId,
-      opened_at: session.openedAt,
-      opening_float_cents: session.openingFloatCents,
-      status: 'open',
-      sync_source: 'offline_first',
-    })
+    const { error } = await supabase.from('cash_sessions').upsert(
+      {
+        id: session.id,
+        tenant_id: session.tenantId,
+        venue_id: session.venueId,
+        device_id: session.deviceId,
+        opened_by: session.userId,
+        opened_at: session.openedAt,
+        opening_float_cents: session.openingFloatCents,
+        status: 'open',
+        sync_source: 'offline_first',
+      },
+      { ignoreDuplicates: true, onConflict: 'id' },
+    )
 
     if (error) {
       throw error
@@ -560,75 +922,13 @@ export async function syncEvent(event: OfflineEvent) {
   }
 
   if (event.kind === 'sale_created') {
-    const { lines, payment, sale, ticket } = event.payload
-    const { error: ticketError } = await supabase.from('tickets').upsert({
-      id: ticket.id,
-      tenant_id: ticket.tenantId,
-      cash_session_id: ticket.cashSessionId,
-      venue_id: ticket.venueId,
-      device_id: ticket.deviceId,
-      user_id: ticket.userId,
-      status: 'paid',
-      subtotal_cents: ticket.totalCents,
-      total_cents: ticket.totalCents,
-      local_created_at: ticket.createdAt,
-      created_at: ticket.createdAt,
+    const { error } = await supabase.rpc('sync_sale_created', {
+      p_event_id: event.id,
+      p_payload: event.payload,
     })
 
-    if (ticketError) {
-      throw ticketError
-    }
-
-    const { error: linesError } = await supabase.from('ticket_lines').upsert(
-      lines.map((line) => ({
-        id: line.id,
-        ticket_id: line.ticketId,
-        tenant_id: line.tenantId,
-        product_id: line.productId,
-        variant_id: line.variantId,
-        product_name: line.productName,
-        variant_name: line.variantName,
-        quantity: line.quantity,
-        unit_price_cents: line.unitPriceCents,
-        line_total_cents: line.lineTotalCents,
-        modifiers: line.modifiers,
-      })),
-    )
-
-    if (linesError) {
-      throw linesError
-    }
-
-    const { error: saleError } = await supabase.from('sales').upsert({
-      id: sale.id,
-      tenant_id: sale.tenantId,
-      ticket_id: sale.ticketId,
-      cash_session_id: sale.cashSessionId,
-      venue_id: sale.venueId,
-      device_id: sale.deviceId,
-      user_id: sale.userId,
-      total_cents: sale.totalCents,
-      payment_method: sale.paymentMethod,
-      local_created_at: sale.createdAt,
-      created_at: sale.createdAt,
-    })
-
-    if (saleError) {
-      throw saleError
-    }
-
-    const { error: paymentError } = await supabase.from('sale_payments').upsert({
-      id: payment.id,
-      sale_id: payment.saleId,
-      tenant_id: payment.tenantId,
-      method: payment.method,
-      amount_cents: payment.amountCents,
-      received_cents: payment.receivedCents,
-      change_cents: payment.changeCents,
-    })
-
-    if (paymentError) {
-      throw paymentError
+    if (error) {
+      throw error
     }
 
     return
@@ -718,8 +1018,45 @@ export async function syncEvent(event: OfflineEvent) {
     })
     .eq('id', payload.sessionId)
     .eq('tenant_id', payload.tenantId)
+    .eq('status', 'open')
 
   if (error) {
     throw error
+  }
+}
+
+export function subscribeToCashSessionChanges(
+  context: TenantContext,
+  onChange: () => void,
+) {
+  if (!supabase) {
+    return () => undefined
+  }
+
+  const client = supabase
+  const channel = client
+    .channel(`cash-sessions-${context.deviceId}`)
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'cash_sessions',
+        filter: `device_id=eq.${context.deviceId}`,
+      },
+      (payload) => {
+        const session = (Object.keys(payload.new).length ? payload.new : payload.old) as {
+          tenant_id?: string
+        }
+
+        if (session.tenant_id === context.tenantId) {
+          onChange()
+        }
+      },
+    )
+    .subscribe()
+
+  return () => {
+    void client.removeChannel(channel)
   }
 }

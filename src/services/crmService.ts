@@ -5,7 +5,10 @@ import type { RevoImportProduct } from '../lib/revoImport'
 import type {
   CatalogKind,
   CategoryCreateInput,
+  CrmDevice,
+  CrmPosUser,
   CrmStats,
+  CrmVenue,
   PaymentMethod,
   ProductCreateInput,
   SaleFormatDefinition,
@@ -78,6 +81,12 @@ export type CatalogImportResult = {
   variantsUpdated: number
 }
 
+export type CrmAccessData = {
+  venues: CrmVenue[]
+  devices: CrmDevice[]
+  users: CrmPosUser[]
+}
+
 function requireSupabase() {
   if (!supabase) {
     throw new Error('Supabase no esta configurado.')
@@ -97,6 +106,112 @@ function getImportKey(value: string) {
 
 function createSaleFormatKey(value: string) {
   return getImportKey(value).replace(/\s+/g, '_')
+}
+
+export async function loadCrmAccessData(context: TenantContext): Promise<CrmAccessData> {
+  const client = requireSupabase()
+  const [{ data: venueRows, error: venuesError }, { data: deviceRows, error: devicesError }, usersResult] =
+    await Promise.all([
+      client
+        .from('venues')
+        .select('id, name, sort_order, is_active')
+        .eq('tenant_id', context.tenantId)
+        .order('sort_order'),
+      client
+        .from('devices')
+        .select('id, venue_id, name, is_active')
+        .eq('tenant_id', context.tenantId)
+        .order('name'),
+      client.functions.invoke<{ users: CrmPosUser[] }>('manage-pos-users', {
+        body: { action: 'list', tenantId: context.tenantId },
+      }),
+    ])
+
+  if (venuesError || devicesError || usersResult.error) {
+    throw venuesError ?? devicesError ?? usersResult.error
+  }
+
+  const functionError = (usersResult.data as { error?: string } | null)?.error
+  if (functionError) {
+    throw new Error(functionError)
+  }
+
+  return {
+    venues: (venueRows ?? []).map((venue) => ({
+      id: venue.id as string,
+      name: venue.name as string,
+      sortOrder: venue.sort_order as number,
+      isActive: venue.is_active as boolean,
+    })),
+    devices: (deviceRows ?? []).map((device) => ({
+      id: device.id as string,
+      venueId: device.venue_id as string,
+      name: device.name as string,
+      isActive: device.is_active as boolean,
+    })),
+    users: usersResult.data?.users ?? [],
+  }
+}
+
+export async function createCrmVenue(context: TenantContext, name: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('venues').insert({
+    tenant_id: context.tenantId,
+    name: name.trim(),
+    sort_order: 0,
+    is_active: true,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function createCrmDevice(context: TenantContext, venueId: string, name: string) {
+  const client = requireSupabase()
+  const { error } = await client.from('devices').insert({
+    tenant_id: context.tenantId,
+    venue_id: venueId,
+    name: name.trim(),
+    is_active: true,
+  })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function createCrmPosUser(
+  context: TenantContext,
+  input: { deviceId: string; email: string; fullName: string; password: string },
+) {
+  const client = requireSupabase()
+  const { data, error } = await client.functions.invoke<{ error?: string }>('manage-pos-users', {
+    body: { action: 'create', tenantId: context.tenantId, ...input },
+  })
+
+  if (error) {
+    throw error
+  }
+
+  if (data?.error) {
+    throw new Error(data.error)
+  }
+}
+
+export async function setCrmPosUserActive(context: TenantContext, userId: string, isActive: boolean) {
+  const client = requireSupabase()
+  const { data, error } = await client.functions.invoke<{ error?: string }>('manage-pos-users', {
+    body: { action: 'set-active', tenantId: context.tenantId, userId, isActive },
+  })
+
+  if (error) {
+    throw error
+  }
+
+  if (data?.error) {
+    throw new Error(data.error)
+  }
 }
 
 function createProductImagePath(context: TenantContext) {
@@ -283,6 +398,7 @@ export async function createProductWithVariant(context: TenantContext, input: Pr
       sale_formats: input.saleFormats,
       can_sell_standalone: input.canSellStandalone,
       can_use_as_mixer: input.canUseAsMixer,
+      is_featured: input.isFeatured,
       mixer_supplement_cents: input.canUseAsMixer ? input.mixerSupplementCents : 0,
       is_active: true,
       sort_order: 0,
@@ -316,6 +432,7 @@ export async function updateProduct(
     description?: string
     imagePath?: string | null
     isActive?: boolean
+    isFeatured?: boolean
     kind?: CatalogKind
     name?: string
     saleFormats?: ProductCreateInput['saleFormats']
@@ -332,6 +449,7 @@ export async function updateProduct(
       ...(input.description !== undefined ? { description: input.description || null } : {}),
       ...(input.imagePath !== undefined ? { image_path: input.imagePath } : {}),
       ...(input.isActive !== undefined ? { is_active: input.isActive } : {}),
+      ...(input.isFeatured !== undefined ? { is_featured: input.isFeatured } : {}),
       ...(input.kind !== undefined ? { kind: input.kind } : {}),
       ...(input.name !== undefined ? { name: input.name } : {}),
       ...(input.saleFormats !== undefined ? { sale_formats: input.saleFormats } : {}),

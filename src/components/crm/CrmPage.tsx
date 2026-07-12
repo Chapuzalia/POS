@@ -1,9 +1,11 @@
 import {
   BarChart3,
   Boxes,
+  Building2,
   ChevronRight,
   LayoutDashboard,
   LogOut,
+  MonitorSmartphone,
   Pencil,
   Plus,
   RefreshCw,
@@ -15,10 +17,11 @@ import {
   Trash2,
   Upload,
   UserRound,
+  Users,
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type CSSProperties, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
 import {
   canSellProductStandalone,
   canUseProductAsMixer,
@@ -35,6 +38,9 @@ import { getDefaultProductImageFillColor } from '../../lib/productImages'
 import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImport'
 import {
   createCategory,
+  createCrmDevice,
+  createCrmPosUser,
+  createCrmVenue,
   createProductWithVariant,
   createSaleFormat,
   createVariant,
@@ -45,6 +51,8 @@ import {
   deleteVariant,
   importRevoCatalogProducts,
   loadCrmStats,
+  loadCrmAccessData,
+  setCrmPosUserActive,
   subscribeToCrmStatsChanges,
   updateCategory,
   updateProduct,
@@ -52,6 +60,7 @@ import {
   updateVariant,
   uploadProductImage,
   type CatalogImportResult,
+  type CrmAccessData,
 } from '../../services/crmService'
 import type {
   Catalog,
@@ -67,14 +76,13 @@ import type {
 } from '../../types'
 import { getReadableError } from '../../utils/errors'
 
-type CrmSection = 'dashboard' | 'products' | 'categories' | 'sale-formats' | 'import' | 'stats'
+type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'import' | 'stats'
 
 type CrmPageProps = {
   catalog: Catalog | null
   context: TenantContext
   error: string | null
   isOnline: boolean
-  onBackToPos: () => void
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
   onLogout: () => void
@@ -82,6 +90,7 @@ type CrmPageProps = {
 
 const navItems: Array<{ id: CrmSection; label: string; icon: LucideIcon }> = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'access', label: 'Accesos', icon: Users },
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'categories', label: 'Categorias', icon: Tags },
   { id: 'sale-formats', label: 'Formatos', icon: SlidersHorizontal },
@@ -108,7 +117,6 @@ export function CrmPage({
   context,
   error,
   isOnline,
-  onBackToPos,
   onCatalogChanged,
   onError,
   onLogout,
@@ -211,10 +219,6 @@ export function CrmPage({
         </nav>
 
         <div className="crm-sidebar-footer">
-          <button className="crm-nav-item" onClick={onBackToPos} type="button">
-            <Store className="h-4 w-4" />
-            <span>Volver al TPV</span>
-          </button>
           <button className="crm-nav-item" onClick={onLogout} type="button">
             <LogOut className="h-4 w-4" />
             <span>Cerrar sesion</span>
@@ -274,6 +278,14 @@ export function CrmPage({
             />
           ) : null}
 
+          {activeSection === 'access' ? (
+            <AccessManagementCrm
+              disabled={!isOnline || isBusy}
+              runAction={runAction}
+              tenantContext={context}
+            />
+          ) : null}
+
           {activeSection === 'categories' ? (
             <CategoriesCrm
               categories={categories}
@@ -315,6 +327,9 @@ export function CrmPage({
 }
 
 function getSectionTitle(section: CrmSection) {
+  if (section === 'access') {
+    return 'Locales, dispositivos y usuarios'
+  }
   if (section === 'products') {
     return 'Gestion de productos y precios'
   }
@@ -335,6 +350,174 @@ function getSectionTitle(section: CrmSection) {
 }
 
 type RunAction = (action: () => Promise<void>) => Promise<void>
+
+type AccessManagementCrmProps = {
+  disabled: boolean
+  runAction: RunAction
+  tenantContext: TenantContext
+}
+
+function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManagementCrmProps) {
+  const [data, setData] = useState<CrmAccessData>({ devices: [], users: [], venues: [] })
+  const [venueName, setVenueName] = useState('')
+  const [deviceName, setDeviceName] = useState('')
+  const [deviceVenueId, setDeviceVenueId] = useState('')
+  const [userName, setUserName] = useState('')
+  const [userEmail, setUserEmail] = useState('')
+  const [userPassword, setUserPassword] = useState('')
+  const [userDeviceId, setUserDeviceId] = useState('')
+
+  const refresh = useCallback(async () => {
+    setData(await loadCrmAccessData(tenantContext))
+  }, [tenantContext])
+
+  useEffect(() => {
+    void runAction(refresh)
+  }, [refresh, runAction])
+
+  useEffect(() => {
+    if (!deviceVenueId && data.venues.length) {
+      setDeviceVenueId(data.venues[0].id)
+    }
+
+    const assignedDevices = new Set(data.users.filter((user) => user.isActive).map((user) => user.deviceId))
+    const firstAvailableDevice = data.devices.find((device) => device.isActive && !assignedDevices.has(device.id))
+
+    if (!userDeviceId || assignedDevices.has(userDeviceId)) {
+      setUserDeviceId(firstAvailableDevice?.id ?? '')
+    }
+  }, [data, deviceVenueId, userDeviceId])
+
+  async function submitVenue(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runAction(async () => {
+      await createCrmVenue(tenantContext, venueName)
+      setVenueName('')
+      await refresh()
+    })
+  }
+
+  async function submitDevice(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runAction(async () => {
+      await createCrmDevice(tenantContext, deviceVenueId, deviceName)
+      setDeviceName('')
+      await refresh()
+    })
+  }
+
+  async function submitUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runAction(async () => {
+      await createCrmPosUser(tenantContext, {
+        deviceId: userDeviceId,
+        email: userEmail.trim(),
+        fullName: userName.trim(),
+        password: userPassword,
+      })
+      setUserName('')
+      setUserEmail('')
+      setUserPassword('')
+      await refresh()
+    })
+  }
+
+  async function toggleUser(userId: string, isActive: boolean) {
+    await runAction(async () => {
+      await setCrmPosUserActive(tenantContext, userId, isActive)
+      await refresh()
+    })
+  }
+
+  const venueById = new Map(data.venues.map((venue) => [venue.id, venue]))
+  const deviceById = new Map(data.devices.map((device) => [device.id, device]))
+  const assignedDeviceIds = new Set(data.users.filter((user) => user.isActive).map((user) => user.deviceId))
+  const availableDevices = data.devices.filter((device) => device.isActive && !assignedDeviceIds.has(device.id))
+
+  return (
+    <div className="crm-access-layout">
+      <div className="crm-access-forms">
+        <section className="crm-panel">
+          <div className="crm-panel-header"><span>Nuevo local</span><Building2 className="h-4 w-4" /></div>
+          <form className="crm-form-stack" onSubmit={(event) => void submitVenue(event)}>
+            <Field label="Nombre del local">
+              <input className="crm-input" disabled={disabled} onChange={(event) => setVenueName(event.target.value)} required value={venueName} />
+            </Field>
+            <button className="crm-primary-button" disabled={disabled || !venueName.trim()} type="submit">
+              <Plus className="h-4 w-4" /> Crear local
+            </button>
+          </form>
+        </section>
+
+        <section className="crm-panel">
+          <div className="crm-panel-header"><span>Nuevo dispositivo</span><MonitorSmartphone className="h-4 w-4" /></div>
+          <form className="crm-form-stack" onSubmit={(event) => void submitDevice(event)}>
+            <Field label="Local">
+              <select className="crm-input" disabled={disabled} onChange={(event) => setDeviceVenueId(event.target.value)} required value={deviceVenueId}>
+                {data.venues.filter((venue) => venue.isActive).map((venue) => <option key={venue.id} value={venue.id}>{venue.name}</option>)}
+              </select>
+            </Field>
+            <Field label="Nombre del dispositivo">
+              <input className="crm-input" disabled={disabled} onChange={(event) => setDeviceName(event.target.value)} required value={deviceName} />
+            </Field>
+            <button className="crm-primary-button" disabled={disabled || !deviceVenueId || !deviceName.trim()} type="submit">
+              <Plus className="h-4 w-4" /> Crear dispositivo
+            </button>
+          </form>
+        </section>
+
+        <section className="crm-panel">
+          <div className="crm-panel-header"><span>Nuevo usuario TPV</span><UserRound className="h-4 w-4" /></div>
+          <form className="crm-form-stack" onSubmit={(event) => void submitUser(event)}>
+            <Field label="Nombre">
+              <input className="crm-input" disabled={disabled} onChange={(event) => setUserName(event.target.value)} required value={userName} />
+            </Field>
+            <Field label="Email">
+              <input className="crm-input" disabled={disabled} onChange={(event) => setUserEmail(event.target.value)} required type="email" value={userEmail} />
+            </Field>
+            <Field label="Contrasena inicial">
+              <input className="crm-input" disabled={disabled} minLength={8} onChange={(event) => setUserPassword(event.target.value)} required type="password" value={userPassword} />
+            </Field>
+            <Field label="Dispositivo">
+              <select className="crm-input" disabled={disabled} onChange={(event) => setUserDeviceId(event.target.value)} required value={userDeviceId}>
+                {availableDevices.map((device) => (
+                  <option key={device.id} value={device.id}>{venueById.get(device.venueId)?.name} / {device.name}</option>
+                ))}
+              </select>
+            </Field>
+            <button className="crm-primary-button" disabled={disabled || !userDeviceId || userPassword.length < 8} type="submit">
+              <Plus className="h-4 w-4" /> Crear usuario
+            </button>
+          </form>
+        </section>
+      </div>
+
+      <section className="crm-panel crm-access-users">
+        <div className="crm-list-toolbar">
+          <div className="crm-list-title"><h2>Usuarios de caja</h2><p>{data.users.length} cuentas configuradas</p></div>
+          <button className="crm-icon-button" disabled={disabled} onClick={() => void runAction(refresh)} type="button"><RefreshCw className="h-4 w-4" /></button>
+        </div>
+        <div className="crm-access-user-list">
+          {data.users.map((user) => {
+            const device = deviceById.get(user.deviceId)
+            const venue = venueById.get(user.venueId)
+            return (
+              <div className="crm-access-user-row" key={user.id}>
+                <div className="crm-cell-main"><strong>{user.fullName || user.email}</strong><span>{user.email}</span></div>
+                <div className="crm-cell-main"><strong>{venue?.name ?? 'Local no disponible'}</strong><span>{device?.name ?? 'Dispositivo no disponible'}</span></div>
+                <span className={user.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>{user.isActive ? 'Activo' : 'Inactivo'}</span>
+                <button className={user.isActive ? 'crm-danger-button' : 'crm-secondary-button'} disabled={disabled} onClick={() => void toggleUser(user.id, !user.isActive)} type="button">
+                  {user.isActive ? 'Desactivar' : 'Activar'}
+                </button>
+              </div>
+            )
+          })}
+          {!data.users.length ? <EmptyList message="No hay usuarios TPV creados." /> : null}
+        </div>
+      </section>
+    </div>
+  )
+}
 
 type DashboardCrmProps = {
   activeCategories: number
@@ -878,7 +1061,10 @@ function ProductListRow({ category, disabled, onDelete, onEdit, product, saleFor
         )}
         <div className="crm-cell-main">
           <strong>{product.name}</strong>
-          <span>{product.description || 'Sin descripcion'} · {product.isActive ? 'Activo' : 'Oculto'}</span>
+          <span>
+            {product.description || 'Sin descripcion'} · {product.isActive ? 'Activo' : 'Oculto'} ·{' '}
+            {product.isFeatured ? 'Destacado' : 'Normal'}
+          </span>
         </div>
       </div>
       <div className="crm-format-list">
@@ -940,6 +1126,7 @@ function ProductFormPanel({
   const [selectedSaleFormats, setSelectedSaleFormats] = useState<SaleFormat[]>(
     product ? getProductSaleFormats(product) : getDefaultSaleFormatsForKind(initialKind),
   )
+  const [isFeatured, setIsFeatured] = useState(product?.isFeatured ?? false)
   const [canSellStandalone, setCanSellStandalone] = useState(product ? canSellProductStandalone(product) : true)
   const [canUseAsMixer, setCanUseAsMixer] = useState(product ? canUseProductAsMixer(product) : initialKind === 'mixer')
   const [hasMixerSupplement, setHasMixerSupplement] = useState(initialMixerSupplementCents > 0)
@@ -1054,6 +1241,7 @@ function ProductFormPanel({
             categoryId,
             description: description.trim(),
             imagePath: nextImagePath,
+            isFeatured,
             kind,
             mixerSupplementCents,
             name: name.trim(),
@@ -1071,6 +1259,7 @@ function ProductFormPanel({
             categoryId: selectedCategory.id,
             description: description.trim(),
             imagePath: nextImagePath,
+            isFeatured,
             kind,
             mixerSupplementCents,
             name: name.trim(),
@@ -1246,6 +1435,19 @@ function ProductFormPanel({
                 <span>{option.label}</span>
               </label>
             ))}
+          </div>
+        </div>
+        <div>
+          <span className="crm-field-label">Catalogo</span>
+          <div className="crm-checkbox-list">
+            <label>
+              <input
+                checked={isFeatured}
+                onChange={(event) => setIsFeatured(event.target.checked)}
+                type="checkbox"
+              />
+              <span>Producto Destacado</span>
+            </label>
           </div>
         </div>
         <div>

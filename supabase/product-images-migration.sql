@@ -12,9 +12,8 @@ set public = excluded.public,
     allowed_mime_types = excluded.allowed_mime_types;
 
 drop policy if exists "product_images_public_read" on storage.objects;
-create policy "product_images_public_read"
-on storage.objects for select
-using (bucket_id = 'product-images');
+-- El bucket publico permite getPublicUrl sin una politica SELECT. No crearla:
+-- SELECT sobre storage.objects tambien habilitaria el listado global.
 
 drop policy if exists "product_images_tenant_insert" on storage.objects;
 create policy "product_images_tenant_insert"

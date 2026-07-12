@@ -1,4 +1,4 @@
-import type { CatalogKind, PaymentMethod, SaleFormat } from './domain'
+import type { CatalogKind, PaymentMethod, SaleFormat, TenantRole } from './domain'
 
 export type TenantRow = {
   id: string
@@ -7,7 +7,19 @@ export type TenantRow = {
 }
 
 export type MembershipRow = {
-  role: string
+  role: TenantRole
+}
+
+export type UserMembershipRow = MembershipRow & {
+  tenant_id: string
+}
+
+export type DeviceAssignmentRow = {
+  tenant_id: string
+  user_id: string
+  venue_id: string
+  device_id: string
+  is_active: boolean
 }
 
 export type VenueRow = {
@@ -76,6 +88,7 @@ export type ProductRow = {
   sale_formats?: SaleFormat[] | null
   can_sell_standalone?: boolean | null
   can_use_as_mixer?: boolean | null
+  is_featured?: boolean | null
   mixer_supplement_cents?: number | null
   is_active: boolean
   sort_order: number
