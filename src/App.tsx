@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { AppHeader } from './components/layout/AppHeader'
 import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog, SessionTicketsModal } from './components/modals'
 import { CatalogPanel, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
@@ -72,12 +72,35 @@ import type {
 import { nowIso } from './utils/dates'
 import { getReadableError } from './utils/errors'
 import { heartbeatLoginLease, releaseLocalLoginLock } from './services/loginLeaseService'
+import { TableMapView } from './features/tables/components/TableMapView'
+import { TableOrderBar } from './features/tables/components/TableOrderBar'
+import { RestaurantOrderPanel } from './features/tables/components/RestaurantOrderPanel'
+import {
+  closeRestaurantOrder,
+  groupRestaurantTables,
+  loadOpenRestaurantOrders,
+  loadRestaurantMap,
+  loadRestaurantOrder,
+  loadRestaurantOrderPendingUnits,
+  loadVenueTablesEnabled,
+  markRestaurantOrderFullyServed,
+  markRestaurantOrderLineFullyServed,
+  markRestaurantOrderLineUnitsServed,
+  moveRestaurantOrder,
+  openRestaurantOrder,
+  saveRestaurantOrderLines,
+  subscribeToRestaurantMap,
+} from './features/tables/service'
+import type { PosView, RestaurantMap, RestaurantOrderDetail, RestaurantOrderSaveState } from './features/tables/types'
+import { canDecreaseLineQuantity, getOrderPendingUnits, isLineRemovable } from './features/tables/service-status'
 
 type ProductDialogState = {
   allowFormatSelection: boolean
   product: Product
   saleFormat: SaleFormat
 }
+
+type PendingRestaurantPayment = { method: PaymentMethod; receivedCents: number | null; pendingUnits: number }
 
 type AppRoute = 'pos' | 'crm' | 'superadmin'
 
@@ -171,6 +194,20 @@ function App() {
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
   const [loginLeaseBlocked, setLoginLeaseBlocked] = useState(false)
   const [route, setRoute] = useState<AppRoute>(() => getAppRoute())
+  const [tablesEnabled, setTablesEnabled] = useState(false)
+  const [restaurantMap, setRestaurantMap] = useState<RestaurantMap>({ areas: [], tables: [] })
+  const [restaurantOrder, setRestaurantOrder] = useState<RestaurantOrderDetail | null>(null)
+  const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
+  const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
+  const [tablesConfigLoaded, setTablesConfigLoaded] = useState(false)
+  const [restaurantSaveState, setRestaurantSaveState] = useState<RestaurantOrderSaveState>('saved')
+  const [pendingRestaurantPayment, setPendingRestaurantPayment] = useState<PendingRestaurantPayment | null>(null)
+  const restaurantOrderRef = useRef<RestaurantOrderDetail | null>(null)
+  const restaurantEditGenerationRef = useRef(0)
+  const restaurantSaveStateRef = useRef<RestaurantOrderSaveState>('saved')
+  const restaurantSavePromiseRef = useRef<Promise<RestaurantOrderDetail | null> | null>(null)
+  const flushRestaurantOrderDraftRef = useRef<() => Promise<RestaurantOrderDetail | null>>(async () => null)
+  const posViewRef = useRef<PosView>(posView)
   const cashSummary = summarizeSales(cashSession?.openingFloatCents ?? 0, salesLedger)
 
   useEffect(() => {
@@ -194,6 +231,100 @@ function App() {
       setRoute(requiredRoute)
     }
   }, [context, route])
+
+  useEffect(() => {
+    if (!context || !isOnline || isAdministrativeUser(context)) {
+      return undefined
+    }
+
+    let active = true
+    let initialized = false
+    setTablesConfigLoaded(false)
+    const refreshMap = async () => {
+      try {
+        const enabled = await loadVenueTablesEnabled(context)
+        if (!active) return
+        setTablesEnabled(enabled)
+        if (!enabled) {
+          setPosView({ type: 'quick_sale' })
+          setRestaurantMap({ areas: [], tables: [] })
+          setTablesConfigLoaded(true)
+          initialized = true
+          return
+        }
+        const nextMap = await loadRestaurantMap(context)
+        if (active) {
+          setRestaurantMap(nextMap)
+          setPosView((current) => !initialized && current.type === 'quick_sale' ? { type: 'table_map', areaId: nextMap.areas[0]?.id } : current)
+          setTablesConfigLoaded(true)
+          initialized = true
+        }
+      } catch (mapError) {
+        if (active) {
+          setTablesConfigLoaded(true)
+          setError(getReadableError(mapError))
+        }
+      }
+    }
+
+    void refreshMap()
+    let realtimeTimer: ReturnType<typeof window.setTimeout> | null = null
+    const unsubscribe = subscribeToRestaurantMap(context, () => {
+      if (realtimeTimer) window.clearTimeout(realtimeTimer)
+      realtimeTimer = window.setTimeout(() => {
+        void (async () => {
+          await refreshMap()
+          const currentView = posViewRef.current
+          if (currentView.type !== 'table_order' || restaurantSaveStateRef.current !== 'saved') return
+          try {
+            const detail = await loadRestaurantOrder(context, currentView.orderId)
+            if (!active || restaurantSaveStateRef.current !== 'saved') return
+            if (detail.order.status !== 'open') {
+              restaurantOrderRef.current = null
+              setRestaurantOrder(null)
+              updateRestaurantSaveState('saved')
+              setPosView({ type: 'table_map', areaId: detail.tables[0]?.areaId })
+              return
+            }
+            restaurantOrderRef.current = detail
+            setRestaurantOrder(detail)
+          } catch (orderError) {
+            if (active) setError(getReadableError(orderError))
+          }
+        })()
+      }, 250)
+    })
+    return () => {
+      active = false
+      if (realtimeTimer) window.clearTimeout(realtimeTimer)
+      unsubscribe()
+    }
+  }, [context, isOnline])
+
+  useEffect(() => {
+    restaurantOrderRef.current = restaurantOrder
+  }, [restaurantOrder])
+
+  useEffect(() => {
+    posViewRef.current = posView
+  }, [posView])
+
+  useEffect(() => {
+    if (!isOnline || restaurantSaveState !== 'dirty' || !restaurantOrder) return undefined
+    const timer = window.setTimeout(() => void flushRestaurantOrderDraftRef.current(), 800)
+    return () => window.clearTimeout(timer)
+  }, [isOnline, restaurantOrder, restaurantSaveState])
+
+  useEffect(() => {
+    if (!isOnline) return undefined
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden' && restaurantSaveStateRef.current === 'dirty') {
+        void flushRestaurantOrderDraftRef.current()
+      }
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [isOnline])
 
   useEffect(() => {
     if (!context || !isOnline) {
@@ -476,6 +607,17 @@ function App() {
     setConfigOpen(false)
     setTicketHistoryOpen(false)
     setProductDialog(null)
+    setPendingRestaurantPayment(null)
+    setTablesEnabled(false)
+    setRestaurantMap({ areas: [], tables: [] })
+    setRestaurantOrder(null)
+    restaurantOrderRef.current = null
+    restaurantEditGenerationRef.current = 0
+    restaurantSavePromiseRef.current = null
+    updateRestaurantSaveState('saved')
+    setPosView({ type: 'quick_sale' })
+    setMoveOrderId(null)
+    setTablesConfigLoaded(false)
   }
 
   async function refreshCatalog(activeContext = context) {
@@ -687,7 +829,272 @@ function App() {
     void syncPendingEvents()
   }
 
+  async function refreshRestaurantState(orderId?: string) {
+    if (!context || !isOnline) return
+    const [nextMap, nextOrder] = await Promise.all([
+      loadRestaurantMap(context),
+      orderId ? loadRestaurantOrder(context, orderId) : Promise.resolve(null),
+    ])
+    setRestaurantMap(nextMap)
+    if (nextOrder) {
+      restaurantOrderRef.current = nextOrder
+      setRestaurantOrder(nextOrder)
+      updateRestaurantSaveState('saved')
+    }
+  }
+
+  function updateRestaurantSaveState(nextState: RestaurantOrderSaveState) {
+    restaurantSaveStateRef.current = nextState
+    setRestaurantSaveState(nextState)
+  }
+
+  function updateRestaurantDraft(transform: (detail: RestaurantOrderDetail) => RestaurantOrderDetail) {
+    const current = restaurantOrderRef.current
+    if (!current) return
+    const transformed = transform(current)
+    const next = {
+      ...transformed,
+      totalCents: transformed.lines.reduce((total, line) => total + line.quantity * line.unitPriceCents, 0),
+    }
+    restaurantOrderRef.current = next
+    restaurantEditGenerationRef.current += 1
+    setRestaurantOrder(next)
+    updateRestaurantSaveState('dirty')
+  }
+
+  async function flushRestaurantOrderDraft(): Promise<RestaurantOrderDetail | null> {
+    const currentDraft = restaurantOrderRef.current
+    if (currentDraft && restaurantSaveStateRef.current === 'saved') return currentDraft
+    if (!isOnline) {
+      setError('La gestion de mesas requiere conexion para guardar la comanda.')
+      return null
+    }
+
+    const pendingSave = restaurantSavePromiseRef.current
+    if (pendingSave) {
+      await pendingSave
+      return restaurantSaveStateRef.current === 'dirty'
+        ? flushRestaurantOrderDraft()
+        : restaurantOrderRef.current
+    }
+
+    const draft = restaurantOrderRef.current
+    if (!draft) return null
+    if (restaurantSaveStateRef.current === 'saved') return draft
+    if (restaurantSaveStateRef.current === 'error') updateRestaurantSaveState('dirty')
+
+    const savedGeneration = restaurantEditGenerationRef.current
+    updateRestaurantSaveState('saving')
+    const request = (async () => {
+      try {
+        const result = await saveRestaurantOrderLines(draft)
+        const current = restaurantOrderRef.current
+        if (!current || current.order.id !== draft.order.id) return null
+        const hasNewerEdits = restaurantEditGenerationRef.current !== savedGeneration
+        const reconciled: RestaurantOrderDetail = {
+          ...current,
+          order: { ...current.order, revision: result.revision },
+          lines: hasNewerEdits ? current.lines : result.lines,
+          totalCents: hasNewerEdits
+            ? current.lines.reduce((total, line) => total + line.quantity * line.unitPriceCents, 0)
+            : result.lines.reduce((total, line) => total + line.quantity * line.unitPriceCents, 0),
+        }
+        restaurantOrderRef.current = reconciled
+        setRestaurantOrder(reconciled)
+        updateRestaurantSaveState(hasNewerEdits ? 'dirty' : 'saved')
+        return reconciled
+      } catch (saveError) {
+        if ((saveError as { code?: string }).code === '40001' && context) {
+          try {
+            const remoteOrder = await loadRestaurantOrder(context, draft.order.id)
+            restaurantOrderRef.current = remoteOrder
+            setRestaurantOrder(remoteOrder)
+            updateRestaurantSaveState('saved')
+            setError('La comanda cambio en otro dispositivo. Se ha recargado la version mas reciente.')
+          } catch (reloadError) {
+            updateRestaurantSaveState('error')
+            setError(getReadableError(reloadError))
+          }
+          return null
+        }
+        updateRestaurantSaveState('error')
+        setError(getReadableError(saveError))
+        return null
+      }
+    })()
+
+    restaurantSavePromiseRef.current = request
+    const result = await request
+    if (restaurantSavePromiseRef.current === request) restaurantSavePromiseRef.current = null
+    return result
+  }
+
+  flushRestaurantOrderDraftRef.current = flushRestaurantOrderDraft
+
+  async function openTableOrder(tableIds: string[], guestCount: number) {
+    if (!context || !cashSession || !isOnline) return
+    setIsBusy(true); setError(null)
+    try {
+      await syncPendingEvents()
+      const orderId = await openRestaurantOrder({ tableIds, guestCount, cashSessionId: cashSession.id, deviceId: context.deviceId })
+      await refreshRestaurantState(orderId)
+      setPosView({ type: 'table_order', orderId })
+    } catch (orderError) { setError(getReadableError(orderError)) } finally { setIsBusy(false) }
+  }
+
+  async function openExistingTableOrder(orderId: string) {
+    if (!context || !isOnline) return
+    setIsBusy(true); setError(null)
+    try {
+      const detail = await loadRestaurantOrder(context, orderId)
+      restaurantOrderRef.current = detail
+      setRestaurantOrder(detail)
+      updateRestaurantSaveState('saved')
+      setPosView({ type: 'table_order', orderId })
+    }
+    catch (orderError) { setError(getReadableError(orderError)) } finally { setIsBusy(false) }
+  }
+
+  async function returnToTableMap() {
+    if (posView.type === 'table_order') {
+      const saved = await flushRestaurantOrderDraft()
+      if (!saved) return
+    }
+    try {
+      const nextMap = context && isOnline ? await loadRestaurantMap(context) : restaurantMap
+      setRestaurantOrder(null)
+      restaurantOrderRef.current = null
+      updateRestaurantSaveState('saved')
+      setRestaurantMap(nextMap)
+      setPosView({ type: 'table_map', areaId: nextMap.areas[0]?.id })
+    } catch (mapError) {
+      setError(getReadableError(mapError))
+    }
+  }
+
+  async function prepareMoveTableOrder() {
+    const current = restaurantOrderRef.current
+    if (!current) return
+    const saved = await flushRestaurantOrderDraft()
+    if (!saved) return
+    setMoveOrderId(saved.order.id)
+    setPosView({ type: 'table_map', areaId: saved.tables[0]?.areaId })
+  }
+
+  async function groupTables(tableIds: string[], guestCount: number) {
+    if (!context || !cashSession || !isOnline) return
+    setIsBusy(true); setError(null)
+    try {
+      await syncPendingEvents()
+      const orderId = await groupRestaurantTables({ tableIds, guestCount, cashSessionId: cashSession.id, deviceId: context.deviceId })
+      await refreshRestaurantState(orderId)
+      setPosView({ type: 'table_order', orderId })
+    } catch (groupError) { setError(getReadableError(groupError)) } finally { setIsBusy(false) }
+  }
+
+  async function moveTableOrder(tableId: string) {
+    if (!moveOrderId || !isOnline) return
+    setIsBusy(true); setError(null)
+    try {
+      await moveRestaurantOrder(moveOrderId, tableId)
+      await refreshRestaurantState(moveOrderId)
+      setPosView({ type: 'table_order', orderId: moveOrderId })
+      setMoveOrderId(null)
+    } catch (moveError) { setError(getReadableError(moveError)) } finally { setIsBusy(false) }
+  }
+
+  async function completeRestaurantPayment(paymentMethod: PaymentMethod, receivedCents: number | null, forceWithPending = false) {
+    if (!context || !cashSession || !restaurantOrderRef.current || !isOnline) return
+    setIsBusy(true); setError(null)
+    try {
+      const savedOrder = await flushRestaurantOrderDraft()
+      if (!savedOrder) return
+      const pendingCheck = await loadRestaurantOrderPendingUnits(context, savedOrder.order.id)
+      restaurantOrderRef.current = pendingCheck.detail
+      setRestaurantOrder(pendingCheck.detail)
+      updateRestaurantSaveState('saved')
+      if (pendingCheck.pendingUnits > 0 && !forceWithPending) {
+        setPendingRestaurantPayment({ method: paymentMethod, receivedCents, pendingUnits: pendingCheck.pendingUnits })
+        return
+      }
+      const paymentResult = await closeRestaurantOrder(savedOrder.order.id, paymentMethod, receivedCents, forceWithPending)
+      if (paymentResult.requiresConfirmation) {
+        setPendingRestaurantPayment({ method: paymentMethod, receivedCents, pendingUnits: paymentResult.pendingUnits })
+        return
+      }
+      const [nextLedger, nextStats] = await Promise.all([
+        loadSalesLedgerFromSupabase(context, cashSession.id), loadProductSalesStatsFromSupabase(context),
+      ])
+      persistLedger(nextLedger); persistProductSalesStats(nextStats)
+      setRestaurantOrder(null)
+      restaurantOrderRef.current = null
+      setPendingRestaurantPayment(null)
+      updateRestaurantSaveState('saved')
+      setPaidFeedback(paymentMethod)
+      await refreshRestaurantState()
+      setPosView({ type: 'table_map', areaId: restaurantMap.areas[0]?.id })
+      window.setTimeout(() => setPaidFeedback(null), 500)
+    } catch (paymentError) { setError(getReadableError(paymentError)) } finally { setIsBusy(false) }
+  }
+
+  async function requestCloseCash() {
+    if (!context || !cashSession) return
+    if (tablesEnabled && !isOnline) {
+      setError('Con el addon de mesas activo, el cierre de caja requiere conexion para comprobar comandas abiertas.')
+      return
+    }
+    if (isOnline) {
+      try {
+        const openOrders = await loadOpenRestaurantOrders(context, cashSession.id)
+        if (openOrders.length) {
+          const details = await Promise.all(openOrders.map((order) => loadRestaurantOrder(context, order.id)))
+          setError(`No se puede cerrar la caja. Comandas abiertas: ${details.map((detail) => `${detail.tables.map((table) => table.name).join(' + ')} (${(detail.totalCents / 100).toFixed(2)} EUR, abierta ${new Date(detail.order.openedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}, ${getOrderPendingUnits(detail.lines)} por servir)`).join('; ')}`)
+          return
+        }
+      } catch (closeCheckError) { setError(getReadableError(closeCheckError)); return }
+    }
+    setCloseCashOpen(true)
+  }
+
   function addTicketLine(product: Product, variant: ProductVariant, modifiers: TicketLineModifier[]) {
+    if (posView.type === 'table_order') {
+      if (!isOnline) { setError('La gestion de mesas requiere conexion.'); return }
+      const current = restaurantOrderRef.current
+      if (!current || !context) return
+      const signature = getLineSignature({ productId: product.id, variantId: variant.id, modifiers })
+      const existing = current.lines.find((line) =>
+        line.productId !== null
+        && line.note === null
+        && getLineSignature({ productId: line.productId, variantId: line.variantId ?? '', modifiers: line.modifiers }) === signature
+      )
+      const modifierTotal = modifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
+      const timestamp = nowIso()
+      updateRestaurantDraft((detail) => ({
+        ...detail,
+        lines: existing
+          ? detail.lines.map((line) => line.id === existing.id ? { ...line, quantity: line.quantity + 1, updatedAt: timestamp } : line)
+          : [...detail.lines, {
+              id: createId(),
+              tenantId: context.tenantId,
+              venueId: context.venueId,
+              orderId: detail.order.id,
+              productId: product.id,
+              variantId: variant.id,
+              productName: product.name,
+              variantName: variant.name,
+              unitPriceCents: variant.priceCents + modifierTotal,
+              quantity: 1,
+              servedQuantity: 0,
+              fullyServedAt: null,
+              modifiers,
+              note: null,
+              createdAt: timestamp,
+              updatedAt: timestamp,
+            }],
+      }))
+      setProductDialog(null)
+      return
+    }
     const modifierTotal = modifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
     const candidate: TicketLine = {
       id: createId(),
@@ -728,6 +1135,22 @@ function App() {
   }
 
   function updateLineQuantity(lineId: string, direction: 1 | -1) {
+    if (posView.type === 'table_order') {
+      if (!isOnline) return
+      const line = restaurantOrderRef.current?.lines.find((item) => item.id === lineId)
+      if (!line) return
+      if (direction === -1 && !canDecreaseLineQuantity(line)) {
+        setError('No puedes reducir la cantidad por debajo de las unidades servidas.')
+        return
+      }
+      updateRestaurantDraft((detail) => ({
+        ...detail,
+        lines: detail.lines
+          .map((line) => line.id === lineId ? { ...line, quantity: line.quantity + direction, updatedAt: nowIso() } : line)
+          .filter((line) => line.quantity > 0),
+      }))
+      return
+    }
     const nextLines = ticketLines
       .map((line) =>
         line.id === lineId
@@ -742,7 +1165,53 @@ function App() {
     persistTicket(nextLines)
   }
 
+  async function runRestaurantServiceAction(action: (order: RestaurantOrderDetail) => Promise<void>) {
+    if (!context || !isOnline || isBusy) return
+    setIsBusy(true)
+    setError(null)
+    try {
+      const saved = await flushRestaurantOrderDraft()
+      if (!saved) return
+      await action(saved)
+      const detail = await loadRestaurantOrder(context, saved.order.id)
+      restaurantOrderRef.current = detail
+      setRestaurantOrder(detail)
+      updateRestaurantSaveState('saved')
+    } catch (serviceError) {
+      setError(getReadableError(serviceError))
+      const current = restaurantOrderRef.current
+      if (current) {
+        try {
+          const detail = await loadRestaurantOrder(context, current.order.id)
+          restaurantOrderRef.current = detail
+          setRestaurantOrder(detail)
+          updateRestaurantSaveState('saved')
+        } catch {
+          // Se mantiene el error original de la operacion.
+        }
+      }
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  function serveRestaurantLineUnit(lineId: string) {
+    void runRestaurantServiceAction(async () => markRestaurantOrderLineUnitsServed(lineId, 1))
+  }
+
+  function serveRestaurantLineFully(lineId: string) {
+    void runRestaurantServiceAction(async () => markRestaurantOrderLineFullyServed(lineId))
+  }
+
+  function serveRestaurantOrderFully() {
+    void runRestaurantServiceAction(async (order) => markRestaurantOrderFullyServed(order.order.id))
+  }
+
   function completePayment(paymentMethod: PaymentMethod, receivedCents: number | null) {
+    if (posView.type === 'table_order') {
+      void completeRestaurantPayment(paymentMethod, receivedCents)
+      return
+    }
     if (!context || !cashSession || ticketLines.length === 0) {
       return
     }
@@ -970,7 +1439,10 @@ function App() {
     )
   }
 
-  const canSell = Boolean(cashSession && ticketLines.length > 0 && !isBusy)
+  const activeTicketLines: TicketLine[] = posView.type === 'table_order' && restaurantOrder
+    ? restaurantOrder.lines.map((line) => ({ id: line.id, productId: line.productId ?? '', productName: line.productName, variantId: line.variantId ?? '', variantName: line.variantName, unitPriceCents: line.unitPriceCents, quantity: line.quantity, modifiers: line.modifiers }))
+    : ticketLines
+  const canSell = Boolean(cashSession && activeTicketLines.length > 0 && !isBusy && (posView.type !== 'table_order' || isOnline))
 
   if (isSuperadmin(context)) {
     return (
@@ -998,13 +1470,17 @@ function App() {
     )
   }
 
+  if (isOnline && !tablesConfigLoaded) {
+    return <LoadingScreen />
+  }
+
   return (
     <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <AppHeader
         cashSession={cashSession}
         isLoading={isLoading}
         isOnline={isOnline}
-        onCloseCash={() => setCloseCashOpen(true)}
+        onCloseCash={() => void requestCloseCash()}
         onOpenConfig={() => setConfigOpen(true)}
         onOpenTicketHistory={() => void openTicketHistory()}
         onRefreshCatalog={() => void refreshCatalog()}
@@ -1019,24 +1495,83 @@ function App() {
         </div>
       ) : null}
 
-      <main className="mx-auto flex min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 max-lg:flex-col">
+      {tablesEnabled && posView.type !== 'table_map' ? (
+        <TableOrderBar
+          isBusy={isBusy}
+          isOnline={isOnline}
+          onBack={() => void returnToTableMap()}
+          onMove={() => void prepareMoveTableOrder()}
+          order={posView.type === 'table_order' ? restaurantOrder : null}
+          quickSale={posView.type === 'quick_sale'}
+          saveState={restaurantSaveState}
+        />
+      ) : null}
+
+      {tablesEnabled && posView.type === 'table_map' ? (
+        <TableMapView
+          canOpen={Boolean(cashSession)}
+          isBusy={isBusy}
+          isOnline={isOnline}
+          map={restaurantMap}
+          moveOrderId={moveOrderId}
+          onAreaChange={(areaId) => setPosView({ type: 'table_map', areaId })}
+          onCancelMove={() => setMoveOrderId(null)}
+          onGroup={groupTables}
+          onMove={moveTableOrder}
+          onOpen={openTableOrder}
+          onOpenOrder={(orderId) => void openExistingTableOrder(orderId)}
+          onQuickSale={() => { setRestaurantOrder(null); setPosView({ type: 'quick_sale' }) }}
+          openCashPanel={!cashSession ? <OpenCashPanel disabled={!context || isBusy} isBusy={isBusy} onOpen={handleOpenCash} /> : undefined}
+          selectedAreaId={posView.areaId}
+        />
+      ) : null}
+
+      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 max-lg:flex-col ${tablesEnabled && posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:w-full max-lg:min-w-0">
-          <TicketPanel
-            isBusy={isBusy}
-            lines={ticketLines}
-            onClear={() => persistTicket([])}
+          {posView.type === 'table_order' && restaurantOrder ? <RestaurantOrderPanel
+            isBusy={isBusy || !isOnline}
             onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
             onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
-            onRemove={(lineId) => persistTicket(ticketLines.filter((line) => line.id !== lineId))}
-          />
-          <PaymentPanel disabled={!canSell} feedback={paidFeedback} onPayment={handlePayment} />
+            onRemove={(lineId) => {
+              const line = restaurantOrderRef.current?.lines.find((item) => item.id === lineId)
+              if (!line || !isLineRemovable(line)) {
+                setError('No puedes eliminar una linea con productos ya servidos.')
+                return
+              }
+              updateRestaurantDraft((detail) => ({ ...detail, lines: detail.lines.filter((item) => item.id !== lineId) }))
+            }}
+            onServeAll={serveRestaurantLineFully}
+            onServeAllOrder={serveRestaurantOrderFully}
+            onServeOne={serveRestaurantLineUnit}
+            order={restaurantOrder}
+          /> : <TicketPanel
+            isBusy={isBusy}
+            lines={activeTicketLines}
+            onClear={() => {
+              if (posView.type === 'table_order') {
+                updateRestaurantDraft((detail) => ({ ...detail, lines: [] }))
+              } else {
+                persistTicket([])
+              }
+            }}
+            onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
+            onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
+            onRemove={(lineId) => {
+              if (posView.type === 'table_order') {
+                updateRestaurantDraft((detail) => ({ ...detail, lines: detail.lines.filter((line) => line.id !== lineId) }))
+              } else {
+                persistTicket(ticketLines.filter((line) => line.id !== lineId))
+              }
+            }}
+          />}
+          <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={posView.type === 'table_order' ? 'Cobrar todo' : undefined} onPayment={handlePayment} />
         </section>
 
         {cashSession ? (
           <CatalogPanel
             catalog={catalog}
             catalogStartTab={catalogStartTab}
-            disabled={isBusy}
+            disabled={isBusy || (posView.type === 'table_order' && !isOnline)}
             onSelectProduct={handleSelectProduct}
             productSalesStats={productSalesStats}
           />
@@ -1044,6 +1579,21 @@ function App() {
           <OpenCashPanel disabled={!context || isBusy} isBusy={isBusy} onOpen={handleOpenCash} />
         )}
       </main>
+
+      {pendingRestaurantPayment ? <div className="table-modal-backdrop">
+        <section className="table-modal" role="dialog" aria-modal="true" aria-labelledby="pending-service-title">
+          <h2 id="pending-service-title">Productos pendientes</h2>
+          <p>Quedan {pendingRestaurantPayment.pendingUnits} {pendingRestaurantPayment.pendingUnits === 1 ? 'producto pendiente' : 'productos pendientes'} de servir.</p>
+          <div>
+            <button className="table-action secondary" onClick={() => setPendingRestaurantPayment(null)} type="button">Volver a la comanda</button>
+            <button className="table-action primary" onClick={() => {
+              const payment = pendingRestaurantPayment
+              setPendingRestaurantPayment(null)
+              void completeRestaurantPayment(payment.method, payment.receivedCents, true)
+            }} type="button">Cobrar igualmente</button>
+          </div>
+        </section>
+      </div> : null}
 
       {cashPaymentOpen ? (
         <CashPaymentModal
@@ -1053,7 +1603,7 @@ function App() {
             setCashPaymentOpen(false)
             completePayment('cash', receivedCents)
           }}
-          totalCents={getTicketTotal(ticketLines)}
+          totalCents={getTicketTotal(activeTicketLines)}
         />
       ) : null}
 

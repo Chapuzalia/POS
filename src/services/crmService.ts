@@ -129,7 +129,7 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
     await Promise.all([
       client
         .from('venues')
-        .select('id, name, sort_order, is_active')
+        .select('id, name, sort_order, is_active, tables_enabled')
         .eq('tenant_id', context.tenantId)
         .order('sort_order'),
       client
@@ -157,6 +157,7 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
       name: venue.name as string,
       sortOrder: venue.sort_order as number,
       isActive: venue.is_active as boolean,
+      tablesEnabled: venue.tables_enabled as boolean,
     })),
     devices: (deviceRows ?? []).map((device) => ({
       id: device.id as string,
@@ -172,7 +173,7 @@ export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]>
   const client = requireSupabase()
   const { data, error } = await client
     .from('venues')
-    .select('id, name, sort_order, is_active')
+    .select('id, name, sort_order, is_active, tables_enabled')
     .eq('tenant_id', context.tenantId)
     .order('sort_order')
 
@@ -185,6 +186,7 @@ export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]>
     name: venue.name as string,
     sortOrder: venue.sort_order as number,
     isActive: venue.is_active as boolean,
+    tablesEnabled: venue.tables_enabled as boolean,
   }))
 }
 

@@ -1,5 +1,6 @@
 import {
   BarChart3,
+  Armchair,
   Boxes,
   Building2,
   ChevronRight,
@@ -81,8 +82,9 @@ import type {
   TenantContext,
 } from '../../types'
 import { getReadableError } from '../../utils/errors'
+import { TableManagementPage } from '../../features/table-management/TableManagementPage'
 
-type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'import' | 'stats'
+type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'tables' | 'import' | 'stats'
 
 type CrmPageProps = {
   catalog: Catalog | null
@@ -100,6 +102,7 @@ const navItems: Array<{ id: CrmSection; label: string; icon: LucideIcon }> = [
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'categories', label: 'Categorias', icon: Tags },
   { id: 'sale-formats', label: 'Formatos', icon: SlidersHorizontal },
+  { id: 'tables', label: 'Mesas y zonas', icon: Armchair },
   { id: 'import', label: 'Importar / exportar', icon: Upload },
   { id: 'stats', label: 'Estadisticas', icon: BarChart3 },
 ]
@@ -369,6 +372,15 @@ export function CrmPage({
             />
           ) : null}
 
+          {activeSection === 'tables' ? (
+            <TableManagementPage
+              context={context}
+              disabled={!isOnline || isBusy}
+              onError={onError}
+              venueId={selectedVenueId}
+            />
+          ) : null}
+
           {activeSection === 'stats' ? (
             <StatsCrm disabled={!isOnline || isBusy} onRefresh={refreshStats} stats={stats} />
           ) : null}
@@ -393,6 +405,9 @@ function getSectionTitle(section: CrmSection) {
   }
   if (section === 'import') {
     return 'Importar y exportar catalogo'
+  }
+  if (section === 'tables') {
+    return 'Mesas y zonas del local'
   }
   if (section === 'stats') {
     return 'Analitica comercial'

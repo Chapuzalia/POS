@@ -62,6 +62,7 @@ export type CrmVenue = {
   name: string
   sortOrder: number
   isActive: boolean
+  tablesEnabled: boolean
 }
 
 export type CrmDevice = {

@@ -12,11 +12,14 @@ const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: LucideIcon
 type PaymentPanelProps = {
   disabled: boolean
   feedback: PaymentMethod | null
+  heading?: string
   onPayment: (method: PaymentMethod) => void
 }
 
-export function PaymentPanel({ disabled, feedback, onPayment }: PaymentPanelProps) {
+export function PaymentPanel({ disabled, feedback, heading, onPayment }: PaymentPanelProps) {
   return (
+    <section className="space-y-2">
+      {heading ? <h2 className="text-sm font-black uppercase tracking-wide text-[var(--foreground)]">{heading}</h2> : null}
       <div className="gap-2 flex flex-row xl:grid-cols-4">
         {paymentOptions.map((payment) => {
           const Icon = feedback === payment.id ? CheckCircle2 : payment.icon
@@ -36,5 +39,6 @@ export function PaymentPanel({ disabled, feedback, onPayment }: PaymentPanelProp
           )
         })}
       </div>
+    </section>
   )
 }
