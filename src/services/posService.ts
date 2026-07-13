@@ -300,7 +300,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name')
+      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
@@ -336,6 +336,13 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     venueName: venue.name,
     deviceId: device.id,
     deviceName: device.name,
+    deviceMode: device.device_mode,
+    defaultCashRegisterId: device.default_cash_register_id,
+    canTakeOrders: device.can_take_orders,
+    canTakePayments: device.can_take_payments,
+    canOpenCashSession: device.can_open_cash_session,
+    canCloseCashSession: device.can_close_cash_session,
+    canManageCash: device.can_manage_cash,
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
@@ -462,7 +469,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name')
+      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
@@ -494,6 +501,13 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     venueName: venue.name,
     deviceId: device.id,
     deviceName: device.name,
+    deviceMode: device.device_mode,
+    defaultCashRegisterId: device.default_cash_register_id,
+    canTakeOrders: device.can_take_orders,
+    canTakePayments: device.can_take_payments,
+    canOpenCashSession: device.can_open_cash_session,
+    canCloseCashSession: device.can_close_cash_session,
+    canManageCash: device.can_manage_cash,
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
@@ -640,30 +654,33 @@ export async function loadOpenCashSession(context: TenantContext) {
 
   const { data, error } = await supabase
     .from('cash_sessions')
-    .select('id, tenant_id, venue_id, device_id, opened_by, opened_at, opening_float_cents')
+    .select('id, tenant_id, venue_id, opened_by_device_id, opened_by, opened_at, opening_float_cents, cash_register_id, cash_registers(name)')
     .eq('tenant_id', context.tenantId)
-    .eq('device_id', context.deviceId)
+    .eq('venue_id', context.venueId)
     .eq('status', 'open')
     .order('opened_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
 
   if (error) {
     throw error
   }
 
-  if (!data) {
+  if (!data?.length) {
     return null
   }
 
+  const selected = data.length === 1 ? data[0] : null
+  if (!selected) return null
+
   return {
-    id: data.id as string,
-    tenantId: data.tenant_id as string,
-    venueId: data.venue_id as string,
-    deviceId: data.device_id as string,
-    userId: data.opened_by as string,
-    openedAt: data.opened_at as string,
-    openingFloatCents: data.opening_float_cents as number,
+    id: selected.id as string,
+    tenantId: selected.tenant_id as string,
+    venueId: selected.venue_id as string,
+    deviceId: selected.opened_by_device_id as string,
+    cashRegisterId: selected.cash_register_id as string,
+    cashRegisterName: (selected.cash_registers as unknown as { name?: string } | null)?.name ?? 'Caja',
+    userId: selected.opened_by as string,
+    openedAt: selected.opened_at as string,
+    openingFloatCents: selected.opening_float_cents as number,
     status: 'open' as const,
   }
 }
@@ -697,6 +714,7 @@ type SessionTicketQueryRow = {
   id: string
   tenant_id: string
   cash_session_id: string
+  cash_register_id: string
   venue_id: string
   device_id: string
   user_id: string
@@ -744,6 +762,7 @@ export async function loadSessionTicketsFromSupabase(
         id,
         tenant_id,
         cash_session_id,
+        cash_register_id,
         venue_id,
         device_id,
         user_id,
@@ -829,6 +848,7 @@ export async function loadSessionTicketsFromSupabase(
         id: ticket.id,
         tenantId: ticket.tenant_id,
         cashSessionId: ticket.cash_session_id,
+        cashRegisterId: ticket.cash_register_id,
         venueId: ticket.venue_id,
         deviceId: ticket.device_id,
         userId: ticket.user_id,
@@ -841,6 +861,7 @@ export async function loadSessionTicketsFromSupabase(
         tenantId: ticket.tenant_id,
         ticketId: ticket.id,
         cashSessionId: ticket.cash_session_id,
+        cashRegisterId: ticket.cash_register_id,
         venueId: ticket.venue_id,
         deviceId: ticket.device_id,
         userId: ticket.user_id,
@@ -952,6 +973,7 @@ export function buildSalePayload(
       id: ticketId,
       tenantId: context.tenantId,
       cashSessionId: cashSession.id,
+      cashRegisterId: cashSession.cashRegisterId,
       venueId: context.venueId,
       deviceId: context.deviceId,
       userId: context.userId,
@@ -964,6 +986,7 @@ export function buildSalePayload(
       tenantId: context.tenantId,
       ticketId,
       cashSessionId: cashSession.id,
+      cashRegisterId: cashSession.cashRegisterId,
       venueId: context.venueId,
       deviceId: context.deviceId,
       userId: context.userId,
@@ -1126,14 +1149,14 @@ export function subscribeToCashSessionChanges(
 
   const client = supabase
   const channel = client
-    .channel(`cash-sessions-${context.deviceId}`)
+    .channel(`cash-sessions-${context.tenantId}-${context.venueId}`)
     .on(
       'postgres_changes',
       {
         event: '*',
         schema: 'public',
         table: 'cash_sessions',
-        filter: `device_id=eq.${context.deviceId}`,
+        filter: `venue_id=eq.${context.venueId}`,
       },
       (payload) => {
         const session = (Object.keys(payload.new).length ? payload.new : payload.old) as {

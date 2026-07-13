@@ -6,6 +6,7 @@ import '../tables.css'
 
 type Props = {
   canOpen: boolean
+  canQuickSale: boolean
   isBusy: boolean
   isOnline: boolean
   map: RestaurantMap
@@ -28,7 +29,7 @@ function elapsed(openedAt: string | null) {
 }
 
 export function TableMapView(props: Props) {
-  const { canOpen, isBusy, isOnline, map, moveOrderId, onAreaChange, onCancelMove, onGroup, onMove, onOpen, onOpenOrder, onQuickSale, openCashPanel, selectedAreaId } = props
+  const { canOpen, canQuickSale, isBusy, isOnline, map, moveOrderId, onAreaChange, onCancelMove, onGroup, onMove, onOpen, onOpenOrder, onQuickSale, openCashPanel, selectedAreaId } = props
   const [groupMode, setGroupMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<string[]>([])
   const [pendingIds, setPendingIds] = useState<string[] | null>(null)
@@ -70,7 +71,7 @@ export function TableMapView(props: Props) {
         <div><h1>Mapa de mesas</h1><p>Selecciona una mesa para abrir o recuperar su comanda.</p></div>
         <div className="table-map-actions">
           <button className="table-action secondary" disabled={!isOnline || isBusy || Boolean(moveOrderId)} onClick={() => { setGroupMode((value) => !value); setSelectedIds([]) }} type="button"><Link2 size={18} /> {groupMode ? 'Cancelar agrupacion' : 'Agrupar mesas'}</button>
-          <button className="table-action primary" onClick={onQuickSale} type="button"><ShoppingBag size={18} /> Venta rapida</button>
+          <button className="table-action primary" disabled={!canQuickSale} onClick={onQuickSale} type="button"><ShoppingBag size={18} /> Venta rapida</button>
         </div>
       </header>
       {!isOnline ? <div className="table-offline-warning">La gestion de mesas requiere conexion. La venta rapida sigue disponible.</div> : null}

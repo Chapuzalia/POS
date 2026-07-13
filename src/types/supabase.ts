@@ -1,4 +1,4 @@
-import type { CatalogKind, PaymentMethod, SaleFormat, TenantRole } from './domain'
+import type { CatalogKind, DeviceMode, PaymentMethod, SaleFormat, TenantRole } from './domain'
 
 export type TenantRow = {
   id: string
@@ -30,6 +30,13 @@ export type VenueRow = {
 export type DeviceRow = {
   id: string
   name: string
+  device_mode: DeviceMode
+  default_cash_register_id: string | null
+  can_take_orders: boolean
+  can_take_payments: boolean
+  can_open_cash_session: boolean
+  can_close_cash_session: boolean
+  can_manage_cash: boolean
 }
 
 export type CategoryRow = {

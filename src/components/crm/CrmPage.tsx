@@ -42,6 +42,7 @@ import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImp
 import {
   createCategory,
   createCrmDevice,
+  createCashRegister,
   createCrmPosUser,
   createCrmVenue,
   createProductWithVariant,
@@ -425,10 +426,13 @@ type AccessManagementCrmProps = {
 }
 
 function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManagementCrmProps) {
-  const [data, setData] = useState<CrmAccessData>({ devices: [], users: [], venues: [] })
+  const [data, setData] = useState<CrmAccessData>({ cashRegisters: [], devices: [], users: [], venues: [] })
   const [venueName, setVenueName] = useState('')
   const [deviceName, setDeviceName] = useState('')
   const [deviceVenueId, setDeviceVenueId] = useState('')
+  const [deviceMode, setDeviceMode] = useState<'satellite' | 'checkout' | 'hybrid'>('checkout')
+  const [deviceRegisterId, setDeviceRegisterId] = useState('')
+  const [registerName, setRegisterName] = useState('')
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [userPassword, setUserPassword] = useState('')
@@ -467,10 +471,15 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
   async function submitDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     await runAction(async () => {
-      await createCrmDevice(tenantContext, deviceVenueId, deviceName)
+      await createCrmDevice(tenantContext, deviceVenueId, deviceName, deviceMode, deviceRegisterId || null)
       setDeviceName('')
       await refresh()
     })
+  }
+
+  async function submitRegister(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runAction(async () => { await createCashRegister(tenantContext, deviceVenueId, registerName); setRegisterName(''); await refresh() })
   }
 
   async function submitUser(event: FormEvent<HTMLFormElement>) {
@@ -504,6 +513,7 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
   return (
     <div className="crm-access-layout">
       <div className="crm-access-forms">
+        <section className="crm-panel"><div className="crm-panel-header"><span>Nuevo punto de caja</span><Store className="h-4 w-4" /></div><form className="crm-form-stack" onSubmit={(event) => void submitRegister(event)}><Field label="Nombre"><input className="crm-input" disabled={disabled} onChange={(event) => setRegisterName(event.target.value)} required value={registerName} /></Field><button className="crm-primary-button" disabled={disabled || !deviceVenueId || !registerName.trim()} type="submit"><Plus className="h-4 w-4" /> Crear punto de caja</button></form></section>
         <section className="crm-panel">
           <div className="crm-panel-header"><span>Nuevo local</span><Building2 className="h-4 w-4" /></div>
           <form className="crm-form-stack" onSubmit={(event) => void submitVenue(event)}>
@@ -527,6 +537,8 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
             <Field label="Nombre del dispositivo">
               <input className="crm-input" disabled={disabled} onChange={(event) => setDeviceName(event.target.value)} required value={deviceName} />
             </Field>
+            <Field label="Modo"><select className="crm-input" onChange={(event) => setDeviceMode(event.target.value as typeof deviceMode)} value={deviceMode}><option value="satellite">Satelite</option><option value="checkout">Caja</option><option value="hybrid">Hibrido</option></select></Field>
+            <Field label="Caja predeterminada"><select className="crm-input" onChange={(event) => setDeviceRegisterId(event.target.value)} value={deviceRegisterId}><option value="">Sin preferencia</option>{data.cashRegisters.filter((register) => register.venueId === deviceVenueId && register.isActive).map((register) => <option key={register.id} value={register.id}>{register.name}</option>)}</select></Field>
             <button className="crm-primary-button" disabled={disabled || !deviceVenueId || !deviceName.trim()} type="submit">
               <Plus className="h-4 w-4" /> Crear dispositivo
             </button>

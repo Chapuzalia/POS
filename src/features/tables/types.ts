@@ -6,12 +6,12 @@ export type ServiceStatus = 'pending' | 'partial' | 'served'
 
 export type DiningArea = { id: string; tenantId: string; venueId: string; name: string; sortOrder: number; isActive: boolean; canvasWidth: number; canvasHeight: number; createdAt: string; updatedAt: string }
 export type RestaurantTable = { id: string; tenantId: string; venueId: string; areaId: string; name: string; capacity: number; shape: RestaurantTableShape; positionX: number; positionY: number; width: number; height: number; isActive: boolean; sortOrder: number; reservedUntil: string | null; reservationNote: string | null; createdAt: string; updatedAt: string }
-export type RestaurantOrder = { id: string; tenantId: string; venueId: string; cashSessionId: string; openedByUserId: string; openedByDeviceId: string; guestCount: number; status: 'open' | 'paid' | 'cancelled'; revision: number; openedAt: string; updatedAt: string; closedAt: string | null }
+export type RestaurantOrder = { id: string; tenantId: string; venueId: string; cashSessionId: string; cashRegisterId: string; openedByUserId: string; openedByDeviceId: string; guestCount: number; status: 'open' | 'paid' | 'cancelled'; revision: number; openedAt: string; updatedAt: string; closedAt: string | null }
 export type OrderTable = { orderId: string; tableId: string; joinedAt: string; releasedAt: string | null }
 export type RestaurantOrderLine = { id: string; tenantId: string; venueId: string; orderId: string; productId: string | null; variantId: string | null; productName: string; variantName: string; unitPriceCents: number; quantity: number; servedQuantity: number; fullyServedAt: string | null; modifiers: TicketLineModifier[]; note: string | null; createdAt: string; updatedAt: string }
 export type RestaurantTableMapItem = RestaurantTable & { status: RestaurantTableStatus; orderId: string | null; orderOpenedAt: string | null; guestCount: number | null; totalCents: number; pendingUnits: number; groupTableIds: string[] }
 export type RestaurantMap = { areas: DiningArea[]; tables: RestaurantTableMapItem[] }
-export type RestaurantOrderDetail = { order: RestaurantOrder; lines: RestaurantOrderLine[]; tables: RestaurantTable[]; totalCents: number }
+export type RestaurantOrderDetail = { order: RestaurantOrder; cashRegisterName: string; lines: RestaurantOrderLine[]; tables: RestaurantTable[]; totalCents: number }
 
 export type DiningAreaCreateInput = { venueId: string; name: string; sortOrder: number }
 export type DiningAreaUpdateInput = Partial<Pick<DiningArea, 'name' | 'sortOrder' | 'isActive' | 'canvasWidth' | 'canvasHeight'>>

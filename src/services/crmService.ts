@@ -10,6 +10,8 @@ import type {
   CrmPosUser,
   CrmStats,
   CrmVenue,
+  CashRegister,
+  DeviceMode,
   PaymentMethod,
   ProductCreateInput,
   SaleFormatDefinition,
@@ -100,6 +102,7 @@ export type CrmAccessData = {
   venues: CrmVenue[]
   devices: CrmDevice[]
   users: CrmPosUser[]
+  cashRegisters: CashRegister[]
 }
 
 function requireSupabase() {
@@ -125,7 +128,7 @@ function createSaleFormatKey(value: string) {
 
 export async function loadCrmAccessData(context: TenantContext): Promise<CrmAccessData> {
   const client = requireSupabase()
-  const [{ data: venueRows, error: venuesError }, { data: deviceRows, error: devicesError }, usersResult] =
+  const [{ data: venueRows, error: venuesError }, { data: deviceRows, error: devicesError }, { data: registerRows, error: registersError }, usersResult] =
     await Promise.all([
       client
         .from('venues')
@@ -134,16 +137,17 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
         .order('sort_order'),
       client
         .from('devices')
-        .select('id, venue_id, name, is_active')
+        .select('id, venue_id, name, is_active, device_mode, default_cash_register_id')
         .eq('tenant_id', context.tenantId)
         .order('name'),
+      client.from('cash_registers').select('id, tenant_id, venue_id, name, is_active, sort_order').eq('tenant_id', context.tenantId).order('sort_order'),
       client.functions.invoke<{ users: CrmPosUser[] }>('manage-pos-users', {
         body: { action: 'list', tenantId: context.tenantId },
       }),
     ])
 
-  if (venuesError || devicesError || usersResult.error) {
-    throw venuesError ?? devicesError ?? usersResult.error
+  if (venuesError || devicesError || registersError || usersResult.error) {
+    throw venuesError ?? devicesError ?? registersError ?? usersResult.error
   }
 
   const functionError = (usersResult.data as { error?: string } | null)?.error
@@ -164,8 +168,11 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
       venueId: device.venue_id as string,
       name: device.name as string,
       isActive: device.is_active as boolean,
+      deviceMode: device.device_mode as DeviceMode,
+      defaultCashRegisterId: device.default_cash_register_id as string | null,
     })),
     users: usersResult.data?.users ?? [],
+    cashRegisters: (registerRows ?? []).map((register) => ({ id: register.id as string, tenantId: register.tenant_id as string, venueId: register.venue_id as string, name: register.name as string, isActive: register.is_active as boolean, sortOrder: register.sort_order as number })),
   }
 }
 
@@ -204,18 +211,30 @@ export async function createCrmVenue(context: TenantContext, name: string) {
   }
 }
 
-export async function createCrmDevice(context: TenantContext, venueId: string, name: string) {
+export async function createCrmDevice(context: TenantContext, venueId: string, name: string, deviceMode: DeviceMode, defaultCashRegisterId: string | null) {
   const client = requireSupabase()
   const { error } = await client.from('devices').insert({
     tenant_id: context.tenantId,
     venue_id: venueId,
     name: name.trim(),
     is_active: true,
+    device_mode: deviceMode,
+    default_cash_register_id: defaultCashRegisterId,
+    can_take_orders: true,
+    can_take_payments: deviceMode !== 'satellite',
+    can_open_cash_session: deviceMode !== 'satellite',
+    can_close_cash_session: deviceMode !== 'satellite',
+    can_manage_cash: deviceMode !== 'satellite',
   })
 
   if (error) {
     throw error
   }
+}
+
+export async function createCashRegister(context: TenantContext, venueId: string, name: string) {
+  const { error } = await requireSupabase().from('cash_registers').insert({ tenant_id: context.tenantId, venue_id: venueId, name: name.trim(), is_active: true })
+  if (error) throw error
 }
 
 export async function createCrmPosUser(

@@ -5,13 +5,13 @@ import { getOrderPendingUnits } from './service-status'
 
 type AreaRow = { id: string; tenant_id: string; venue_id: string; name: string; sort_order: number; is_active: boolean; canvas_width: number; canvas_height: number; created_at: string; updated_at: string }
 type TableRow = { id: string; tenant_id: string; venue_id: string; area_id: string; name: string; capacity: number; shape: RestaurantTable['shape']; position_x: number; position_y: number; width: number; height: number; is_active: boolean; sort_order: number; reserved_until: string | null; reservation_note: string | null; created_at: string; updated_at: string }
-type OrderRow = { id: string; tenant_id: string; venue_id: string; cash_session_id: string; opened_by_user_id: string; opened_by_device_id: string; guest_count: number; status: RestaurantOrder['status']; revision: number; opened_at: string; updated_at: string; closed_at: string | null }
+type OrderRow = { id: string; tenant_id: string; venue_id: string; cash_session_id: string; cash_register_id: string; opened_by_user_id: string; opened_by_device_id: string; guest_count: number; status: RestaurantOrder['status']; revision: number; opened_at: string; updated_at: string; closed_at: string | null }
 type OrderTableRow = { order_id: string; table_id: string; joined_at: string; released_at: string | null }
 type OrderLineRow = { id: string; tenant_id: string; venue_id: string; order_id: string; product_id: string | null; variant_id: string | null; product_name: string; variant_name: string; unit_price_cents: number; quantity: number; served_quantity: number; fully_served_at: string | null; modifiers: TicketLineModifier[]; note: string | null; created_at: string; updated_at: string }
 
 const areaColumns = 'id, tenant_id, venue_id, name, sort_order, is_active, canvas_width, canvas_height, created_at, updated_at'
 const tableColumns = 'id, tenant_id, venue_id, area_id, name, capacity, shape, position_x, position_y, width, height, is_active, sort_order, reserved_until, reservation_note, created_at, updated_at'
-const orderColumns = 'id, tenant_id, venue_id, cash_session_id, opened_by_user_id, opened_by_device_id, guest_count, status, revision, opened_at, updated_at, closed_at'
+const orderColumns = 'id, tenant_id, venue_id, cash_session_id, cash_register_id, opened_by_user_id, opened_by_device_id, guest_count, status, revision, opened_at, updated_at, closed_at'
 const lineColumns = 'id, tenant_id, venue_id, order_id, product_id, variant_id, product_name, variant_name, unit_price_cents, quantity, served_quantity, fully_served_at, modifiers, note, created_at, updated_at'
 
 function requireSupabase() {
@@ -21,7 +21,7 @@ function requireSupabase() {
 
 const mapArea = (row: AreaRow): DiningArea => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, sortOrder: row.sort_order, isActive: row.is_active, canvasWidth: row.canvas_width, canvasHeight: row.canvas_height, createdAt: row.created_at, updatedAt: row.updated_at })
 const mapTable = (row: TableRow): RestaurantTable => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, areaId: row.area_id, name: row.name, capacity: row.capacity, shape: row.shape, positionX: Number(row.position_x), positionY: Number(row.position_y), width: Number(row.width), height: Number(row.height), isActive: row.is_active, sortOrder: row.sort_order, reservedUntil: row.reserved_until, reservationNote: row.reservation_note, createdAt: row.created_at, updatedAt: row.updated_at })
-const mapOrder = (row: OrderRow): RestaurantOrder => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, cashSessionId: row.cash_session_id, openedByUserId: row.opened_by_user_id, openedByDeviceId: row.opened_by_device_id, guestCount: row.guest_count, status: row.status, revision: row.revision, openedAt: row.opened_at, updatedAt: row.updated_at, closedAt: row.closed_at })
+const mapOrder = (row: OrderRow): RestaurantOrder => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, cashSessionId: row.cash_session_id, cashRegisterId: row.cash_register_id, openedByUserId: row.opened_by_user_id, openedByDeviceId: row.opened_by_device_id, guestCount: row.guest_count, status: row.status, revision: row.revision, openedAt: row.opened_at, updatedAt: row.updated_at, closedAt: row.closed_at })
 const mapLine = (row: OrderLineRow): RestaurantOrderLine => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, orderId: row.order_id, productId: row.product_id, variantId: row.variant_id, productName: row.product_name, variantName: row.variant_name, unitPriceCents: row.unit_price_cents, quantity: row.quantity, servedQuantity: Number(row.served_quantity), fullyServedAt: row.fully_served_at, modifiers: row.modifiers ?? [], note: row.note, createdAt: row.created_at, updatedAt: row.updated_at })
 
 export async function loadVenueTablesEnabled(context: TenantContext, venueId = context.venueId) {
@@ -105,7 +105,8 @@ export async function loadRestaurantOrder(context: TenantContext, orderId: strin
     tableRows = (data ?? []) as TableRow[]
   }
   const lines = ((linesResult.data ?? []) as OrderLineRow[]).map(mapLine)
-  return { order: mapOrder(orderResult.data), lines, tables: tableRows.map(mapTable), totalCents: lines.reduce((sum, line) => sum + line.quantity * line.unitPriceCents, 0) }
+  const { data: register } = await client.from('cash_registers').select('name').eq('id', orderResult.data.cash_register_id).maybeSingle<{ name: string }>()
+  return { order: mapOrder(orderResult.data), cashRegisterName: register?.name ?? 'Caja', lines, tables: tableRows.map(mapTable), totalCents: lines.reduce((sum, line) => sum + line.quantity * line.unitPriceCents, 0) }
 }
 
 export async function createDiningArea(context: TenantContext, input: DiningAreaCreateInput) {

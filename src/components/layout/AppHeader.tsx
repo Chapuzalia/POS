@@ -6,6 +6,7 @@ import { Chip } from '../ui'
 
 type AppHeaderProps = {
   cashSession: CashSession | null
+  canCloseCash: boolean
   isLoading: boolean
   isOnline: boolean
   onCloseCash: () => void
@@ -17,6 +18,7 @@ type AppHeaderProps = {
 
 export function AppHeader({
   cashSession,
+  canCloseCash,
   isLoading,
   isOnline,
   onCloseCash,
@@ -86,7 +88,7 @@ export function AppHeader({
             >
               {cashSession ? (
                 <>
-                  <button
+                  {canCloseCash ? <button
                     className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
                     onClick={() => runMenuAction(onOpenTicketHistory)}
                     role="menuitem"
@@ -94,7 +96,7 @@ export function AppHeader({
                   >
                     <ReceiptText className="h-4 w-4" />
                     <span>Historico de tickets</span>
-                  </button>
+                  </button> : null}
                   <button
                     className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
                     onClick={() => runMenuAction(onCloseCash)}
@@ -130,6 +132,7 @@ export function AppHeader({
         </div>
 
         <div className="flex flex-wrap items-center justify-end gap-2">
+          {cashSession ? <Chip>{`Caja: ${cashSession.cashRegisterName}`}</Chip> : null}
           <Chip icon={isOnline ? Wifi : WifiOff} tone={isOnline ? 'success' : 'danger'} />
           {pendingCount ? <Chip tone="warning">{`${pendingCount} pendientes`}</Chip> : null}
         </div>

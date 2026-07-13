@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from './components/layout/AppHeader'
 import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog, SessionTicketsModal } from './components/modals'
 import { CatalogPanel, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
@@ -54,6 +54,7 @@ import {
 import type {
   CashClosedPayload,
   CashSession,
+  CashRegister,
   Catalog,
   CatalogStartTab,
   LoginInput,
@@ -93,6 +94,8 @@ import {
 } from './features/tables/service'
 import type { PosView, RestaurantMap, RestaurantOrderDetail, RestaurantOrderSaveState } from './features/tables/types'
 import { canDecreaseLineQuantity, getOrderPendingUnits, isLineRemovable } from './features/tables/service-status'
+import { CashSessionGate } from './features/cash-registers/CashSessionGate'
+import { closeCashRegisterSession, loadCashRegisterOptions, openCashRegisterSession, subscribeToVenueCashSessions } from './features/cash-registers/service'
 
 type ProductDialogState = {
   allowFormatSelection: boolean
@@ -177,6 +180,8 @@ function App() {
   const [context, setContext] = useState<TenantContext | null>(null)
   const [catalog, setCatalog] = useState<Catalog | null>(null)
   const [cashSession, setCashSession] = useState<CashSession | null>(null)
+  const [cashRegisters, setCashRegisters] = useState<CashRegister[]>([])
+  const [venueCashSessions, setVenueCashSessions] = useState<CashSession[]>([])
   const [ticketLines, setTicketLines] = useState<TicketLine[]>([])
   const [salesLedger, setSalesLedger] = useState<SaleRecord[]>([])
   const [sessionTickets, setSessionTickets] = useState<SessionTicketRecord[]>([])
@@ -209,6 +214,36 @@ function App() {
   const flushRestaurantOrderDraftRef = useRef<() => Promise<RestaurantOrderDetail | null>>(async () => null)
   const posViewRef = useRef<PosView>(posView)
   const cashSummary = summarizeSales(cashSession?.openingFloatCents ?? 0, salesLedger)
+
+  const refreshCashRegisterOptions = useCallback(async (activeContext = context) => {
+    if (!activeContext || !isOnline || isAdministrativeUser(activeContext)) return
+    const state = await loadCashRegisterOptions(activeContext)
+    setCashRegisters(state.registers)
+    setVenueCashSessions(state.sessions)
+    const current = cashSession ? state.sessions.find((session) => session.id === cashSession.id) : null
+    if (cashSession && !current) {
+      setCashSession(null)
+      saveCachedCashSession(activeContext, null)
+      setCashPaymentOpen(false)
+      setCloseCashOpen(false)
+      setError('La caja con la que estabas trabajando se ha cerrado.')
+      return
+    }
+    if (!cashSession) {
+      const automatic = state.sessions.length === 1 ? state.sessions[0] : null
+      if (automatic) {
+        setCashSession(automatic)
+        saveCachedCashSession(activeContext, automatic)
+      }
+    }
+  }, [cashSession, context, isOnline])
+
+  useEffect(() => {
+    if (!context || !isOnline || isAdministrativeUser(context)) return undefined
+    void refreshCashRegisterOptions(context)
+    const unsubscribe = subscribeToVenueCashSessions(context, () => void refreshCashRegisterOptions(context))
+    return unsubscribe
+  }, [context, isOnline, cashSession?.id, refreshCashRegisterOptions])
 
   useEffect(() => {
     function handlePopState() {
@@ -797,36 +832,46 @@ function App() {
     )
   }
 
+  async function handleOpenCashRegister(registerId: string, openingFloatCents: number) {
+    if (!context || !isOnline || !context.canOpenCashSession) return
+    setIsBusy(true)
+    setError(null)
+    try {
+      const session = await openCashRegisterSession(context, registerId, openingFloatCents)
+      persistCashSession(session)
+      persistLedger([])
+      persistSessionTickets([])
+      saveSessionTickets(context, session.id, [])
+      await refreshCashRegisterOptions(context)
+    } catch (openError) {
+      setError(getReadableError(openError))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function joinCashSession(session: CashSession) {
+    if (!context || !isOnline) return
+    setIsBusy(true)
+    try {
+      persistCashSession(session)
+      const [ledger, tickets] = await Promise.all([
+        loadSalesLedgerFromSupabase(context, session.id),
+        loadSessionTicketsFromSupabase(context, session.id),
+      ])
+      persistLedger(ledger)
+      persistSessionTickets(tickets)
+    } catch (joinError) {
+      persistCashSession(null)
+      setError(getReadableError(joinError))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   function handleOpenCash(openingFloatCents: number) {
-    if (!context) {
-      return
-    }
-
-    const session: CashSession = {
-      id: createId(),
-      tenantId: context.tenantId,
-      venueId: context.venueId,
-      deviceId: context.deviceId,
-      userId: context.userId,
-      openedAt: nowIso(),
-      openingFloatCents,
-      status: 'open',
-    }
-
-    persistCashSession(session)
-    persistLedger([])
-    persistSessionTickets([])
-    saveSessionTickets(context, session.id, [])
-    enqueueOfflineEvent({
-      id: createId(),
-      kind: 'cash_opened',
-      tenantId: context.tenantId,
-      createdAt: nowIso(),
-      attempts: 0,
-      payload: { session },
-    })
-    refreshPendingCount()
-    void syncPendingEvents()
+    const registerId = context?.defaultCashRegisterId ?? cashRegisters.find((register) => register.isActive)?.id
+    if (registerId) void handleOpenCashRegister(registerId, openingFloatCents)
   }
 
   async function refreshRestaurantState(orderId?: string) {
@@ -932,7 +977,7 @@ function App() {
   flushRestaurantOrderDraftRef.current = flushRestaurantOrderDraft
 
   async function openTableOrder(tableIds: string[], guestCount: number) {
-    if (!context || !cashSession || !isOnline) return
+    if (!context || !context.canTakeOrders || !cashSession || !isOnline) return
     setIsBusy(true); setError(null)
     try {
       await syncPendingEvents()
@@ -1004,7 +1049,7 @@ function App() {
   }
 
   async function completeRestaurantPayment(paymentMethod: PaymentMethod, receivedCents: number | null, forceWithPending = false) {
-    if (!context || !cashSession || !restaurantOrderRef.current || !isOnline) return
+    if (!context || !context.canTakePayments || !cashSession || !restaurantOrderRef.current || !isOnline) return
     setIsBusy(true); setError(null)
     try {
       const savedOrder = await flushRestaurantOrderDraft()
@@ -1039,6 +1084,7 @@ function App() {
 
   async function requestCloseCash() {
     if (!context || !cashSession) return
+    if (!context.canCloseCashSession) { setError('Este dispositivo no puede cerrar cajas.'); return }
     if (tablesEnabled && !isOnline) {
       setError('Con el addon de mesas activo, el cierre de caja requiere conexion para comprobar comandas abiertas.')
       return
@@ -1373,19 +1419,11 @@ function App() {
     void syncPendingEvents()
   }
 
-  function handleCloseCash(payload: CashClosedPayload) {
-    if (!context) {
-      return
-    }
-
-    enqueueOfflineEvent({
-      id: createId(),
-      kind: 'cash_closed',
-      tenantId: context.tenantId,
-      createdAt: payload.closedAt,
-      attempts: 0,
-      payload,
-    })
+  async function handleCloseCash(payload: CashClosedPayload) {
+    if (!context || !isOnline || !context.canCloseCashSession) return
+    setIsBusy(true)
+    try {
+      await closeCashRegisterSession(context, payload.sessionId, payload)
     persistCashSession(null)
     persistTicket([])
     setSalesLedger([])
@@ -1394,7 +1432,12 @@ function App() {
     setSessionTickets([])
     setCloseCashOpen(false)
     refreshPendingCount()
-    void syncPendingEvents()
+      await refreshCashRegisterOptions(context)
+    } catch (closeError) {
+      setError(getReadableError(closeError))
+    } finally {
+      setIsBusy(false)
+    }
   }
 
   async function handleLogout() {
@@ -1442,7 +1485,7 @@ function App() {
   const activeTicketLines: TicketLine[] = posView.type === 'table_order' && restaurantOrder
     ? restaurantOrder.lines.map((line) => ({ id: line.id, productId: line.productId ?? '', productName: line.productName, variantId: line.variantId ?? '', variantName: line.variantName, unitPriceCents: line.unitPriceCents, quantity: line.quantity, modifiers: line.modifiers }))
     : ticketLines
-  const canSell = Boolean(cashSession && activeTicketLines.length > 0 && !isBusy && (posView.type !== 'table_order' || isOnline))
+  const canSell = Boolean(context.canTakePayments && cashSession && activeTicketLines.length > 0 && !isBusy && (posView.type !== 'table_order' || isOnline))
 
   if (isSuperadmin(context)) {
     return (
@@ -1474,10 +1517,25 @@ function App() {
     return <LoadingScreen />
   }
 
+  if (!cashSession) {
+    return <CashSessionGate
+      context={context}
+      isBusy={isBusy}
+      isOnline={isOnline}
+      onJoin={(session) => void joinCashSession(session)}
+      onLogout={() => void handleLogout()}
+      onOpen={handleOpenCashRegister}
+      onRefresh={() => void refreshCashRegisterOptions(context)}
+      registers={cashRegisters}
+      sessions={venueCashSessions}
+    />
+  }
+
   return (
     <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <AppHeader
         cashSession={cashSession}
+        canCloseCash={context.canCloseCashSession === true}
         isLoading={isLoading}
         isOnline={isOnline}
         onCloseCash={() => void requestCloseCash()}
@@ -1509,7 +1567,8 @@ function App() {
 
       {tablesEnabled && posView.type === 'table_map' ? (
         <TableMapView
-          canOpen={Boolean(cashSession)}
+          canOpen={Boolean(cashSession && context.canTakeOrders)}
+          canQuickSale={context.canTakePayments === true}
           isBusy={isBusy}
           isOnline={isOnline}
           map={restaurantMap}
@@ -1520,7 +1579,7 @@ function App() {
           onMove={moveTableOrder}
           onOpen={openTableOrder}
           onOpenOrder={(orderId) => void openExistingTableOrder(orderId)}
-          onQuickSale={() => { setRestaurantOrder(null); setPosView({ type: 'quick_sale' }) }}
+          onQuickSale={() => { if (context.canTakePayments) { setRestaurantOrder(null); setPosView({ type: 'quick_sale' }) } }}
           openCashPanel={!cashSession ? <OpenCashPanel disabled={!context || isBusy} isBusy={isBusy} onOpen={handleOpenCash} /> : undefined}
           selectedAreaId={posView.areaId}
         />

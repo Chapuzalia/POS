@@ -25,6 +25,7 @@ export type CatalogFilter = CatalogStartTab | SaleFormat
 export type PaymentMethod = 'cash' | 'card' | 'invitation' | 'other'
 
 export type TenantRole = 'superadmin' | 'owner' | 'admin' | 'manager' | 'cashier'
+export type DeviceMode = 'satellite' | 'checkout' | 'hybrid'
 
 export type ThemeMode = 'light' | 'dark'
 
@@ -47,6 +48,13 @@ export type TenantContext = {
   venueName: string
   deviceId: string
   deviceName: string
+  deviceMode?: DeviceMode
+  defaultCashRegisterId?: string | null
+  canTakeOrders?: boolean
+  canTakePayments?: boolean
+  canOpenCashSession?: boolean
+  canCloseCashSession?: boolean
+  canManageCash?: boolean
   userId: string
   userName: string
   role: TenantRole
@@ -70,6 +78,8 @@ export type CrmDevice = {
   venueId: string
   name: string
   isActive: boolean
+  deviceMode: DeviceMode
+  defaultCashRegisterId: string | null
 }
 
 export type CrmPosUser = {
@@ -171,11 +181,15 @@ export type CashSession = {
   tenantId: string
   venueId: string
   deviceId: string
+  cashRegisterId: string
+  cashRegisterName: string
   userId: string
   openedAt: string
   openingFloatCents: number
   status: 'open'
 }
+
+export type CashRegister = { id: string; tenantId: string; venueId: string; name: string; isActive: boolean; sortOrder: number }
 
 export type SaleRecord = {
   id: string
@@ -228,6 +242,7 @@ export type SaleCreatedPayload = {
     id: string
     tenantId: string
     cashSessionId: string
+    cashRegisterId: string
     venueId: string
     deviceId: string
     userId: string
@@ -240,6 +255,7 @@ export type SaleCreatedPayload = {
     tenantId: string
     ticketId: string
     cashSessionId: string
+    cashRegisterId: string
     venueId: string
     deviceId: string
     userId: string
