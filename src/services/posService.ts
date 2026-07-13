@@ -300,14 +300,14 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
+      .select('id, name')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
       .maybeSingle<VenueRow>(),
     supabase
       .from('devices')
-      .select('id, name')
+      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
       .eq('tenant_id', tenant.id)
       .eq('venue_id', assignment.venue_id)
       .eq('id', assignment.device_id)
@@ -469,14 +469,14 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
+      .select('id, name')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
       .maybeSingle<VenueRow>(),
     supabase
       .from('devices')
-      .select('id, name')
+      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
       .eq('tenant_id', tenant.id)
       .eq('venue_id', assignment.venue_id)
       .eq('id', assignment.device_id)

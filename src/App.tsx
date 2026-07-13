@@ -172,6 +172,7 @@ function App() {
   const isOnline = useOnlineStatus()
   const {
     clearRejectedSaleEvent,
+    lastSyncError,
     pendingCount,
     rejectedSaleEvent,
     refreshPendingCount,
@@ -1704,9 +1705,11 @@ function App() {
         <ConfigModal
           context={context}
           catalogStartTab={catalogStartTab}
+          lastSyncError={lastSyncError}
           onClose={() => setConfigOpen(false)}
           onCatalogStartTabChange={updateCatalogStartTab}
           onLogout={handleLogout}
+          onRetrySync={() => void syncPendingEvents()}
           onThemeChange={setThemeId}
           pendingCount={pendingCount}
           themeId={themeId}

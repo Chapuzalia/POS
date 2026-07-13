@@ -42,13 +42,13 @@ import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImp
 import {
   createCategory,
   createCrmDevice,
-  createCashRegister,
   createCrmPosUser,
   createCrmVenue,
   createProductWithVariant,
   createSaleFormat,
   createVariant,
   deleteCategory,
+  deleteCrmPosUser,
   deleteProductImage,
   deleteProduct,
   deleteSaleFormat,
@@ -61,6 +61,7 @@ import {
   setCrmPosUserActive,
   subscribeToCrmStatsChanges,
   updateCategory,
+  updateCrmPosUser,
   updateProduct,
   updateSaleFormat,
   updateVariant,
@@ -73,8 +74,10 @@ import type {
   Catalog,
   CatalogKind,
   Category,
+  CrmPosUser,
   CrmStats,
   CrmVenue,
+  DeviceMode,
   PaymentMethod,
   Product,
   ProductVariant,
@@ -426,17 +429,21 @@ type AccessManagementCrmProps = {
 }
 
 function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManagementCrmProps) {
-  const [data, setData] = useState<CrmAccessData>({ cashRegisters: [], devices: [], users: [], venues: [] })
+  const [data, setData] = useState<CrmAccessData>({ devices: [], users: [], venues: [] })
   const [venueName, setVenueName] = useState('')
   const [deviceName, setDeviceName] = useState('')
   const [deviceVenueId, setDeviceVenueId] = useState('')
   const [deviceMode, setDeviceMode] = useState<'satellite' | 'checkout' | 'hybrid'>('checkout')
-  const [deviceRegisterId, setDeviceRegisterId] = useState('')
-  const [registerName, setRegisterName] = useState('')
   const [userName, setUserName] = useState('')
   const [userEmail, setUserEmail] = useState('')
   const [userPassword, setUserPassword] = useState('')
   const [userDeviceId, setUserDeviceId] = useState('')
+  const [editingUserId, setEditingUserId] = useState<string | null>(null)
+  const [editingUserName, setEditingUserName] = useState('')
+  const [editingUserEmail, setEditingUserEmail] = useState('')
+  const [editingUserPassword, setEditingUserPassword] = useState('')
+  const [editingUserDeviceId, setEditingUserDeviceId] = useState('')
+  const [editingUserDeviceMode, setEditingUserDeviceMode] = useState<DeviceMode>('checkout')
 
   const refresh = useCallback(async () => {
     setData(await loadCrmAccessData(tenantContext))
@@ -471,15 +478,10 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
   async function submitDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     await runAction(async () => {
-      await createCrmDevice(tenantContext, deviceVenueId, deviceName, deviceMode, deviceRegisterId || null)
+      await createCrmDevice(tenantContext, deviceVenueId, deviceName, deviceMode)
       setDeviceName('')
       await refresh()
     })
-  }
-
-  async function submitRegister(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    await runAction(async () => { await createCashRegister(tenantContext, deviceVenueId, registerName); setRegisterName(''); await refresh() })
   }
 
   async function submitUser(event: FormEvent<HTMLFormElement>) {
@@ -505,6 +507,58 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
     })
   }
 
+  function startEditingUser(user: CrmPosUser) {
+    const assignedDevice = data.devices.find((device) => device.id === user.deviceId)
+    setEditingUserId(user.id)
+    setEditingUserName(user.fullName)
+    setEditingUserEmail(user.email)
+    setEditingUserPassword('')
+    setEditingUserDeviceId(user.deviceId)
+    setEditingUserDeviceMode(assignedDevice?.deviceMode ?? 'checkout')
+  }
+
+  function cancelEditingUser() {
+    setEditingUserId(null)
+    setEditingUserName('')
+    setEditingUserEmail('')
+    setEditingUserPassword('')
+    setEditingUserDeviceId('')
+    setEditingUserDeviceMode('checkout')
+  }
+
+  function changeEditingUserDevice(deviceId: string) {
+    setEditingUserDeviceId(deviceId)
+    const selectedDevice = data.devices.find((device) => device.id === deviceId)
+    if (selectedDevice) setEditingUserDeviceMode(selectedDevice.deviceMode)
+  }
+
+  async function submitUserEdit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingUserId) return
+
+    await runAction(async () => {
+      await updateCrmPosUser(tenantContext, editingUserId, {
+        deviceId: editingUserDeviceId,
+        deviceMode: editingUserDeviceMode,
+        email: editingUserEmail.trim(),
+        fullName: editingUserName.trim(),
+        password: editingUserPassword || undefined,
+      })
+      cancelEditingUser()
+      await refresh()
+    })
+  }
+
+  async function removeUser(user: CrmPosUser) {
+    if (!window.confirm(`Eliminar la cuenta TPV de "${user.fullName || user.email}"? Esta accion no se puede deshacer.`)) return
+
+    await runAction(async () => {
+      await deleteCrmPosUser(tenantContext, user.id)
+      if (editingUserId === user.id) cancelEditingUser()
+      await refresh()
+    })
+  }
+
   const venueById = new Map(data.venues.map((venue) => [venue.id, venue]))
   const deviceById = new Map(data.devices.map((device) => [device.id, device]))
   const assignedDeviceIds = new Set(data.users.filter((user) => user.isActive).map((user) => user.deviceId))
@@ -513,7 +567,6 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
   return (
     <div className="crm-access-layout">
       <div className="crm-access-forms">
-        <section className="crm-panel"><div className="crm-panel-header"><span>Nuevo punto de caja</span><Store className="h-4 w-4" /></div><form className="crm-form-stack" onSubmit={(event) => void submitRegister(event)}><Field label="Nombre"><input className="crm-input" disabled={disabled} onChange={(event) => setRegisterName(event.target.value)} required value={registerName} /></Field><button className="crm-primary-button" disabled={disabled || !deviceVenueId || !registerName.trim()} type="submit"><Plus className="h-4 w-4" /> Crear punto de caja</button></form></section>
         <section className="crm-panel">
           <div className="crm-panel-header"><span>Nuevo local</span><Building2 className="h-4 w-4" /></div>
           <form className="crm-form-stack" onSubmit={(event) => void submitVenue(event)}>
@@ -538,7 +591,7 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
               <input className="crm-input" disabled={disabled} onChange={(event) => setDeviceName(event.target.value)} required value={deviceName} />
             </Field>
             <Field label="Modo"><select className="crm-input" onChange={(event) => setDeviceMode(event.target.value as typeof deviceMode)} value={deviceMode}><option value="satellite">Satelite</option><option value="checkout">Caja</option><option value="hybrid">Hibrido</option></select></Field>
-            <Field label="Caja predeterminada"><select className="crm-input" onChange={(event) => setDeviceRegisterId(event.target.value)} value={deviceRegisterId}><option value="">Sin preferencia</option>{data.cashRegisters.filter((register) => register.venueId === deviceVenueId && register.isActive).map((register) => <option key={register.id} value={register.id}>{register.name}</option>)}</select></Field>
+            <p className="crm-form-help">Los dispositivos Caja e Hibrido crean automaticamente su propio punto de caja. Los Satelite solo trabajan con cajas ya abiertas.</p>
             <button className="crm-primary-button" disabled={disabled || !deviceVenueId || !deviceName.trim()} type="submit">
               <Plus className="h-4 w-4" /> Crear dispositivo
             </button>
@@ -580,14 +633,63 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
           {data.users.map((user) => {
             const device = deviceById.get(user.deviceId)
             const venue = venueById.get(user.venueId)
+            const deviceModeLabel = device?.deviceMode === 'satellite' ? 'Satelite' : device?.deviceMode === 'hybrid' ? 'Hibrido' : 'Caja'
+            const editDevices = data.devices.filter((candidate) => (
+              candidate.isActive
+              && (!assignedDeviceIds.has(candidate.id) || (user.isActive && candidate.id === user.deviceId))
+            ))
+            const isEditing = editingUserId === user.id
             return (
-              <div className="crm-access-user-row" key={user.id}>
-                <div className="crm-cell-main"><strong>{user.fullName || user.email}</strong><span>{user.email}</span></div>
-                <div className="crm-cell-main"><strong>{venue?.name ?? 'Local no disponible'}</strong><span>{device?.name ?? 'Dispositivo no disponible'}</span></div>
-                <span className={user.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>{user.isActive ? 'Activo' : 'Inactivo'}</span>
-                <button className={user.isActive ? 'crm-danger-button' : 'crm-secondary-button'} disabled={disabled} onClick={() => void toggleUser(user.id, !user.isActive)} type="button">
-                  {user.isActive ? 'Desactivar' : 'Activar'}
-                </button>
+              <div className="crm-access-user-entry" key={user.id}>
+                <div className="crm-access-user-row">
+                  <div className="crm-cell-main"><strong>{user.fullName || user.email}</strong><span>{user.email}</span></div>
+                  <div className="crm-cell-main">
+                    <strong>{venue?.name ?? (user.hasDeviceAssignment ? 'Local no disponible' : 'Pendiente de asignar')}</strong>
+                    <span>{device ? `${device.name} · ${deviceModeLabel}` : user.hasDeviceAssignment ? 'Dispositivo no disponible' : 'Edita el usuario para asignarle un dispositivo'}</span>
+                  </div>
+                  <span className={user.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+                    {user.isActive ? 'Activo' : user.hasDeviceAssignment ? 'Inactivo' : 'Sin asignar'}
+                  </span>
+                  <div className="crm-access-user-actions">
+                    <button aria-label="Editar usuario" className="crm-primary-button" disabled={disabled} onClick={() => startEditingUser(user)} title="Editar y reasignar" type="button"><Pencil className="h-4 w-4" /></button>
+                    <button className={user.isActive ? 'crm-danger-button' : 'crm-secondary-button'} disabled={disabled || !user.hasDeviceAssignment} onClick={() => void toggleUser(user.id, !user.isActive)} type="button">
+                      {user.isActive ? 'Desactivar' : 'Activar'}
+                    </button>
+                    <button aria-label="Eliminar usuario" className="crm-danger-button" disabled={disabled} onClick={() => void removeUser(user)} title="Eliminar usuario" type="button"><Trash2 className="h-4 w-4" /></button>
+                  </div>
+                </div>
+                {isEditing ? (
+                  <form className="crm-access-user-editor" onSubmit={(event) => void submitUserEdit(event)}>
+                    <Field label="Nombre">
+                      <input className="crm-input" disabled={disabled} onChange={(event) => setEditingUserName(event.target.value)} required value={editingUserName} />
+                    </Field>
+                    <Field label="Email">
+                      <input className="crm-input" disabled={disabled} onChange={(event) => setEditingUserEmail(event.target.value)} required type="email" value={editingUserEmail} />
+                    </Field>
+                    <Field label="Nueva contrasena (opcional)">
+                      <input className="crm-input" disabled={disabled} minLength={8} onChange={(event) => setEditingUserPassword(event.target.value)} placeholder="Dejar vacio para conservarla" type="password" value={editingUserPassword} />
+                    </Field>
+                    <Field label="Dispositivo">
+                      <select className="crm-input" disabled={disabled} onChange={(event) => changeEditingUserDevice(event.target.value)} required value={editingUserDeviceId}>
+                        <option disabled value="">Selecciona un dispositivo libre</option>
+                        {editDevices.map((candidate) => (
+                          <option key={candidate.id} value={candidate.id}>{venueById.get(candidate.venueId)?.name} / {candidate.name}</option>
+                        ))}
+                      </select>
+                    </Field>
+                    <Field label="Modo de trabajo">
+                      <select className="crm-input" disabled={disabled} onChange={(event) => setEditingUserDeviceMode(event.target.value as DeviceMode)} value={editingUserDeviceMode}>
+                        <option value="checkout">Caja</option>
+                        <option value="satellite">Satelite</option>
+                        <option value="hybrid">Hibrido</option>
+                      </select>
+                    </Field>
+                    <div className="crm-access-user-editor-actions">
+                      <button className="crm-secondary-button" disabled={disabled} onClick={cancelEditingUser} type="button"><X className="h-4 w-4" /> Cancelar</button>
+                      <button className="crm-primary-button" disabled={disabled || !editingUserName.trim() || !editingUserEmail.trim() || !editingUserDeviceId || (editingUserPassword.length > 0 && editingUserPassword.length < 8)} type="submit"><Save className="h-4 w-4" /> Guardar cambios</button>
+                    </div>
+                  </form>
+                ) : null}
               </div>
             )
           })}

@@ -288,6 +288,7 @@ Deno.serve(async (request) => {
             email: user.email ?? '',
             fullName: String(user.user_metadata?.full_name ?? ''),
             isActive: Boolean(userMembership?.is_active && assignment?.is_active),
+            hasDeviceAssignment: Boolean(assignment),
             venueId: assignment?.venue_id ?? '',
             deviceId: assignment?.device_id ?? '',
           }
@@ -379,6 +380,208 @@ Deno.serve(async (request) => {
       return response({ id: userId }, 201)
     }
 
+    if (action === 'update') {
+      const userId = String(body.userId ?? '')
+      const email = String(body.email ?? '').trim().toLowerCase()
+      const fullName = String(body.fullName ?? '').trim()
+      const password = String(body.password ?? '')
+      const deviceId = String(body.deviceId ?? '')
+      const deviceMode = String(body.deviceMode ?? '')
+
+      if (!userId || userId === authData.user.id || !email || !fullName || !deviceId || !['checkout', 'satellite', 'hybrid'].includes(deviceMode) || (password && password.length < 8)) {
+        return response({ error: 'Nombre, email, dispositivo y modo son obligatorios; la nueva contrasena debe tener al menos 8 caracteres' }, 400)
+      }
+
+      const [{ data: userMembership, error: userMembershipError }, { data: device, error: deviceError }, { data: currentAssignment, error: currentAssignmentError }] =
+        await Promise.all([
+          adminClient
+            .from('tenant_memberships')
+            .select('is_active')
+            .eq('tenant_id', tenantId)
+            .eq('user_id', userId)
+            .eq('role', 'cashier')
+            .maybeSingle(),
+          adminClient
+            .from('devices')
+            .select('id, venue_id, device_mode')
+            .eq('tenant_id', tenantId)
+            .eq('id', deviceId)
+            .eq('is_active', true)
+            .maybeSingle(),
+          adminClient
+            .from('device_user_assignments')
+            .select('device_id, venue_id, is_active')
+            .eq('tenant_id', tenantId)
+            .eq('user_id', userId)
+            .maybeSingle(),
+        ])
+
+      if (userMembershipError || deviceError || currentAssignmentError) {
+        throw userMembershipError ?? deviceError ?? currentAssignmentError
+      }
+      if (!userMembership) {
+        return response({ error: 'El usuario no es un cajero de este negocio' }, 404)
+      }
+      if (!device) {
+        return response({ error: 'El dispositivo seleccionado no existe o esta desactivado' }, 400)
+      }
+
+      const { data: occupied, error: occupiedError } = await adminClient
+        .from('device_user_assignments')
+        .select('user_id')
+        .eq('tenant_id', tenantId)
+        .eq('device_id', deviceId)
+        .eq('is_active', true)
+        .neq('user_id', userId)
+        .maybeSingle()
+
+      if (occupiedError) {
+        throw occupiedError
+      }
+      if (occupied) {
+        return response({ error: 'El dispositivo ya tiene un usuario activo asignado' }, 409)
+      }
+
+      const assignmentChanges = !currentAssignment
+        || currentAssignment.device_id !== device.id
+        || currentAssignment.venue_id !== device.venue_id
+      const deviceModeChanges = device.device_mode !== deviceMode
+
+      if (assignmentChanges || (deviceModeChanges && deviceMode === 'satellite')) {
+        const [{ data: openSession, error: openSessionError }, { data: openOrder, error: openOrderError }] = await Promise.all([
+          adminClient
+            .from('cash_sessions')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('opened_by', userId)
+            .eq('status', 'open')
+            .limit(1)
+            .maybeSingle(),
+          adminClient
+            .from('orders')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('opened_by_user_id', userId)
+            .eq('status', 'open')
+            .limit(1)
+            .maybeSingle(),
+        ])
+
+        if (openSessionError || openOrderError) {
+          throw openSessionError ?? openOrderError
+        }
+        if (openSession || openOrder) {
+          return response({ error: 'Cierra la caja y las comandas abiertas del usuario antes de reasignarlo o cambiarlo a modo satelite' }, 409)
+        }
+      }
+
+      const authAttributes: { email: string; password?: string; user_metadata: { full_name: string } } = {
+        email,
+        user_metadata: { full_name: fullName },
+      }
+      if (password) {
+        authAttributes.password = password
+      }
+
+      const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(userId, authAttributes)
+      if (authUpdateError) {
+        return response({ error: authUpdateError.message }, 409)
+      }
+
+      const [{ error: profileError }, { error: assignmentError }, { error: deviceUpdateError }] = await Promise.all([
+        adminClient.from('profiles').upsert({ id: userId, full_name: fullName }),
+        adminClient.from('device_user_assignments').upsert({
+          tenant_id: tenantId,
+          user_id: userId,
+          venue_id: device.venue_id,
+          device_id: device.id,
+          is_active: userMembership.is_active,
+        }, { onConflict: 'tenant_id,user_id' }),
+        adminClient.from('devices').update({
+          device_mode: deviceMode,
+          can_take_orders: true,
+          can_take_payments: deviceMode !== 'satellite',
+          can_open_cash_session: deviceMode !== 'satellite',
+          can_close_cash_session: deviceMode !== 'satellite',
+          can_manage_cash: deviceMode !== 'satellite',
+        }).eq('tenant_id', tenantId).eq('id', device.id),
+      ])
+
+      if (profileError || assignmentError || deviceUpdateError) {
+        throw profileError ?? assignmentError ?? deviceUpdateError
+      }
+
+      return response({ ok: true })
+    }
+
+    if (action === 'delete') {
+      const userId = String(body.userId ?? '')
+      if (!userId || userId === authData.user.id) {
+        return response({ error: 'Usuario no valido' }, 400)
+      }
+
+      const { data: targetMemberships, error: targetMembershipsError } = await adminClient
+        .from('tenant_memberships')
+        .select('tenant_id, role')
+        .eq('user_id', userId)
+
+      if (targetMembershipsError) {
+        throw targetMembershipsError
+      }
+      if (!targetMemberships?.some((item) => item.tenant_id === tenantId && item.role === 'cashier')) {
+        return response({ error: 'El usuario no es un cajero de este negocio' }, 404)
+      }
+      if (targetMemberships.length > 1) {
+        return response({ error: 'No se puede eliminar una cuenta vinculada a mas de un negocio' }, 409)
+      }
+
+      const [{ data: openSession, error: openSessionError }, { data: openOrder, error: openOrderError }] = await Promise.all([
+        adminClient
+          .from('cash_sessions')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('opened_by', userId)
+          .eq('status', 'open')
+          .limit(1)
+          .maybeSingle(),
+        adminClient
+          .from('orders')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('opened_by_user_id', userId)
+          .eq('status', 'open')
+          .limit(1)
+          .maybeSingle(),
+      ])
+
+      if (openSessionError || openOrderError) {
+        throw openSessionError ?? openOrderError
+      }
+      if (openSession || openOrder) {
+        return response({ error: 'Cierra la caja y las comandas abiertas del usuario antes de eliminarlo' }, 409)
+      }
+
+      const removalResults = await Promise.all([
+        adminClient.from('device_user_assignments').delete().eq('tenant_id', tenantId).eq('user_id', userId),
+        adminClient.from('tenant_memberships').delete().eq('tenant_id', tenantId).eq('user_id', userId).eq('role', 'cashier'),
+        adminClient.from('user_login_leases').delete().eq('user_id', userId),
+        adminClient.from('profiles').delete().eq('id', userId),
+      ])
+      const removalError = removalResults.find((result) => result.error)?.error
+      if (removalError) {
+        throw removalError
+      }
+
+      // El borrado logico conserva las claves foraneas del historico de ventas,
+      // pero anonimiza la cuenta Auth y le impide volver a iniciar sesion.
+      const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(userId, true)
+      if (deleteAuthError) {
+        throw deleteAuthError
+      }
+
+      return response({ ok: true })
+    }
+
     if (action === 'set-active') {
       const userId = String(body.userId ?? '')
       const isActive = Boolean(body.isActive)
@@ -387,34 +590,75 @@ Deno.serve(async (request) => {
         return response({ error: 'Usuario no valido' }, 400)
       }
 
-      if (!isActive) {
-        const { data: assignment, error: assignmentError } = await adminClient
+      const [{ data: targetMembership, error: targetMembershipError }, { data: assignment, error: assignmentError }] = await Promise.all([
+        adminClient
+          .from('tenant_memberships')
+          .select('is_active')
+          .eq('tenant_id', tenantId)
+          .eq('user_id', userId)
+          .eq('role', 'cashier')
+          .maybeSingle(),
+        adminClient
           .from('device_user_assignments')
           .select('device_id')
           .eq('tenant_id', tenantId)
           .eq('user_id', userId)
+          .maybeSingle(),
+      ])
+
+      if (targetMembershipError || assignmentError) {
+        throw targetMembershipError ?? assignmentError
+      }
+      if (!targetMembership) {
+        return response({ error: 'El usuario no es un cajero de este negocio' }, 404)
+      }
+      if (isActive && !assignment) {
+        return response({ error: 'Edita el usuario y asignale un dispositivo antes de activarlo' }, 409)
+      }
+
+      if (isActive && assignment) {
+        const { data: occupied, error: occupiedError } = await adminClient
+          .from('device_user_assignments')
+          .select('user_id')
+          .eq('tenant_id', tenantId)
+          .eq('device_id', assignment.device_id)
+          .eq('is_active', true)
+          .neq('user_id', userId)
           .maybeSingle()
 
-        if (assignmentError) {
-          throw assignmentError
+        if (occupiedError) {
+          throw occupiedError
         }
+        if (occupied) {
+          return response({ error: 'El dispositivo asignado ya esta ocupado; edita el usuario para elegir otro' }, 409)
+        }
+      }
 
-        if (assignment) {
-          const { data: openSession, error: openSessionError } = await adminClient
+      if (!isActive) {
+        const [{ data: openSession, error: openSessionError }, { data: openOrder, error: openOrderError }] = await Promise.all([
+          adminClient
             .from('cash_sessions')
             .select('id')
             .eq('tenant_id', tenantId)
-            .eq('device_id', assignment.device_id)
+            .eq('opened_by', userId)
             .eq('status', 'open')
-            .maybeSingle()
+            .limit(1)
+            .maybeSingle(),
+          adminClient
+            .from('orders')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('opened_by_user_id', userId)
+            .eq('status', 'open')
+            .limit(1)
+            .maybeSingle(),
+        ])
 
-          if (openSessionError) {
-            throw openSessionError
-          }
-
-          if (openSession) {
-            return response({ error: 'Cierra la caja del dispositivo antes de desactivar su usuario' }, 409)
-          }
+        if (openSessionError || openOrderError) {
+          throw openSessionError ?? openOrderError
+        }
+        if (openSession || openOrder) {
+          return response({ error: 'Cierra la caja y las comandas abiertas del usuario antes de desactivarlo' }, 409)
         }
       }
 

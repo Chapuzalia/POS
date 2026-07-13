@@ -25,12 +25,18 @@ function isClosedCashRejection(event: OfflineEvent, error: unknown): event is Re
 }
 
 export function useOfflineSync(isOnline: boolean) {
-  const [pendingCount, setPendingCount] = useState(() => getOfflineQueue().length)
+  const initialQueue = getOfflineQueue()
+  const [pendingCount, setPendingCount] = useState(() => initialQueue.length)
+  const [lastSyncError, setLastSyncError] = useState<string | null>(
+    () => initialQueue.find((event) => event.lastError)?.lastError ?? null,
+  )
   const [rejectedSaleEvent, setRejectedSaleEvent] = useState<RejectedSaleEvent | null>(null)
   const syncInFlightRef = useRef<Promise<void> | null>(null)
 
   const refreshPendingCount = useCallback(() => {
-    setPendingCount(getOfflineQueue().length)
+    const events = getOfflineQueue()
+    setPendingCount(events.length)
+    setLastSyncError(events.find((event) => event.lastError)?.lastError ?? null)
   }, [])
 
   const clearRejectedSaleEvent = useCallback(() => {
@@ -44,35 +50,38 @@ export function useOfflineSync(isOnline: boolean) {
     }
 
     if (syncInFlightRef.current) {
-      await syncInFlightRef.current
-      return
+      const activeTask = syncInFlightRef.current
+      await activeTask
+
+      if (syncInFlightRef.current === activeTask) {
+        syncInFlightRef.current = null
+      }
+
+      // Una venta puede haberse encolado justo cuando la sincronizacion
+      // anterior ya estaba terminando. En ese caso necesita una nueva pasada.
+      if (!getOfflineQueue().some((event) => event.attempts === 0)) {
+        refreshPendingCount()
+        return
+      }
     }
 
     const syncTask = (async () => {
-      let syncFailed = false
+      const events = getOfflineQueue()
 
-      while (!syncFailed) {
-        const events = getOfflineQueue()
-
-        if (!events.length) {
-          break
-        }
-
-        for (const event of events) {
-          try {
-            await syncEvent(event)
+      // Cada evento se intenta una vez por pasada. Un evento antiguo con error
+      // no debe bloquear las ventas posteriores de la misma cola.
+      for (const event of events) {
+        try {
+          await syncEvent(event)
+          forgetOfflineEvent(event.id)
+        } catch (syncError) {
+          if (isClosedCashRejection(event, syncError)) {
             forgetOfflineEvent(event.id)
-          } catch (syncError) {
-            if (isClosedCashRejection(event, syncError)) {
-              forgetOfflineEvent(event.id)
-              setRejectedSaleEvent(event)
-              continue
-            }
-
-            markOfflineEventFailed(event.id, getReadableError(syncError))
-            syncFailed = true
-            break
+            setRejectedSaleEvent(event)
+            continue
           }
+
+          markOfflineEventFailed(event.id, getReadableError(syncError))
         }
       }
 
@@ -98,6 +107,7 @@ export function useOfflineSync(isOnline: boolean) {
 
   return {
     clearRejectedSaleEvent,
+    lastSyncError,
     pendingCount,
     rejectedSaleEvent,
     refreshPendingCount,

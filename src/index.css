@@ -794,15 +794,45 @@ button {
 
 .crm-access-user-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.8fr) 90px 110px;
+  grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.8fr) 90px minmax(220px, auto);
   align-items: center;
   gap: 12px;
-  border-bottom: 1px solid #e1e8ef;
   padding: 10px 0;
 }
 
-.crm-access-user-row:last-child {
+.crm-access-user-entry {
+  border-bottom: 1px solid #e1e8ef;
+}
+
+.crm-access-user-entry:last-child {
   border-bottom: 0;
+}
+
+.crm-access-user-actions,
+.crm-access-user-editor-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.crm-access-user-editor {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin: 0 0 12px;
+  padding: 14px;
+  border: 1px solid #d8e2eb;
+  border-radius: 10px;
+  background: #f7fafc;
+}
+
+.crm-access-user-editor-actions {
+  grid-column: 1 / -1;
+}
+
+.crm-icon-button-danger {
+  color: #b42318;
 }
 
 .platform-tenant-row {
@@ -1166,6 +1196,13 @@ button {
   display: grid;
   gap: 12px;
   padding: 14px;
+}
+
+.crm-form-help {
+  margin: 0;
+  color: #617386;
+  font-size: 12px;
+  line-height: 1.5;
 }
 
 .crm-two-fields {
@@ -1697,6 +1734,24 @@ button {
   .crm-access-user-row > .crm-cell-main:nth-child(2) {
     grid-column: 1 / -1;
     grid-row: 2;
+  }
+
+  .crm-access-user-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
+  }
+
+  .crm-access-user-editor {
+    grid-template-columns: 1fr;
+  }
+
+  .crm-access-user-editor-actions {
+    grid-column: auto;
+    justify-content: stretch;
+  }
+
+  .crm-access-user-editor-actions > button {
+    flex: 1;
   }
 
   .platform-tenant-row {

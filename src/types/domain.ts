@@ -87,6 +87,7 @@ export type CrmPosUser = {
   email: string
   fullName: string
   isActive: boolean
+  hasDeviceAssignment: boolean
   venueId: string
   deviceId: string
 }
