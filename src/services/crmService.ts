@@ -28,6 +28,10 @@ type TicketLineStatsRow = {
   line_total_cents: number
 }
 
+type TicketWithLinesStatsRow = {
+  ticket_lines: TicketLineStatsRow[] | null
+}
+
 type OpenCashSessionRow = {
   id: string
   venue_id: string
@@ -153,6 +157,26 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
   }
 }
 
+export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]> {
+  const client = requireSupabase()
+  const { data, error } = await client
+    .from('venues')
+    .select('id, name, sort_order, is_active')
+    .eq('tenant_id', context.tenantId)
+    .order('sort_order')
+
+  if (error) {
+    throw error
+  }
+
+  return (data ?? []).map((venue) => ({
+    id: venue.id as string,
+    name: venue.name as string,
+    sortOrder: venue.sort_order as number,
+    isActive: venue.is_active as boolean,
+  }))
+}
+
 export async function createCrmVenue(context: TenantContext, name: string) {
   const client = requireSupabase()
   const { error } = await client.from('venues').insert({
@@ -246,6 +270,21 @@ export async function deleteProductImage(context: TenantContext, imagePath: stri
   }
 
   const client = requireSupabase()
+  const { data: references, error: referencesError } = await client
+    .from('products')
+    .select('id')
+    .eq('tenant_id', context.tenantId)
+    .eq('image_path', imagePath)
+    .limit(1)
+
+  if (referencesError) {
+    throw referencesError
+  }
+
+  if (references?.length) {
+    return
+  }
+
   const { error } = await client.storage.from(PRODUCT_IMAGE_BUCKET).remove([imagePath])
 
   if (error) {
@@ -390,6 +429,7 @@ export async function createProductWithVariant(context: TenantContext, input: Pr
     .from('products')
     .insert({
       tenant_id: context.tenantId,
+      venue_id: input.venueId,
       category_id: input.categoryId,
       name: input.name,
       description: input.description || null,
@@ -422,6 +462,7 @@ export async function createProductWithVariant(context: TenantContext, input: Pr
   if (variantError) {
     throw variantError
   }
+
 }
 
 export async function updateProduct(
@@ -463,6 +504,7 @@ export async function updateProduct(
   if (error) {
     throw error
   }
+
 }
 
 export async function deleteProduct(context: TenantContext, productId: string) {
@@ -540,6 +582,7 @@ export async function deleteVariant(context: TenantContext, variantId: string) {
 export async function importRevoCatalogProducts(
   context: TenantContext,
   products: RevoImportProduct[],
+  venueId: string,
 ): Promise<CatalogImportResult> {
   const client = requireSupabase()
   const result: CatalogImportResult = {
@@ -550,7 +593,6 @@ export async function importRevoCatalogProducts(
     variantsCreated: 0,
     variantsUpdated: 0,
   }
-
   const [{ data: categoryRows, error: categoriesError }, { data: productRows, error: productsError }] =
     await Promise.all([
       client
@@ -573,6 +615,7 @@ export async function importRevoCatalogProducts(
         `,
         )
         .eq('tenant_id', context.tenantId)
+        .eq('venue_id', venueId)
         .order('sort_order', { ascending: true }),
     ])
 
@@ -676,6 +719,7 @@ export async function importRevoCatalogProducts(
         .from('products')
         .insert({
           tenant_id: context.tenantId,
+          venue_id: venueId,
           category_id: category.id,
           name: product.name,
           description: null,
@@ -771,32 +815,43 @@ export async function importRevoCatalogProducts(
   return result
 }
 
-export async function loadCrmStats(context: TenantContext): Promise<CrmStats> {
+export async function loadCrmStats(context: TenantContext, venueId?: string): Promise<CrmStats> {
   const client = requireSupabase()
   const monthStart = getMonthStartIso()
+  let salesQuery = client
+    .from('sales')
+    .select('id, payment_method, total_cents')
+    .eq('tenant_id', context.tenantId)
+    .gte('created_at', monthStart)
+  let ticketsQuery = client
+    .from('tickets')
+    .select('ticket_lines(product_name, quantity, line_total_cents)')
+    .eq('tenant_id', context.tenantId)
+    .eq('status', 'paid')
+    .gte('created_at', monthStart)
+  let openSessionsQuery = client
+    .from('cash_sessions')
+    .select('id, venue_id, device_id, opened_at, opening_float_cents')
+    .eq('tenant_id', context.tenantId)
+    .eq('status', 'open')
+    .order('opened_at', { ascending: false })
+
+  if (venueId) {
+    salesQuery = salesQuery.eq('venue_id', venueId)
+    ticketsQuery = ticketsQuery.eq('venue_id', venueId)
+    openSessionsQuery = openSessionsQuery.eq('venue_id', venueId)
+  }
+
   const [
     { data: salesRows, error: salesError },
-    { data: lineRows, error: linesError },
+    { data: ticketRows, error: linesError },
     { data: openSessionRows, error: openSessionsError },
     { data: venueRows, error: venuesError },
     { data: deviceRows, error: devicesError },
   ] = await Promise.all([
-    client
-      .from('sales')
-      .select('id, payment_method, total_cents')
-      .eq('tenant_id', context.tenantId)
-      .gte('created_at', monthStart),
-    client
-      .from('ticket_lines')
-      .select('product_name, quantity, line_total_cents')
-      .eq('tenant_id', context.tenantId)
-      .gte('created_at', monthStart),
-    client
-      .from('cash_sessions')
-      .select('id, venue_id, device_id, opened_at, opening_float_cents')
-      .eq('tenant_id', context.tenantId)
-      .eq('status', 'open')
-      .order('opened_at', { ascending: false }),
+    salesQuery,
+    ticketsQuery,
+    openSessionsQuery,
     client.from('venues').select('id, name').eq('tenant_id', context.tenantId),
     client.from('devices').select('id, name').eq('tenant_id', context.tenantId),
   ])
@@ -822,7 +877,7 @@ export async function loadCrmStats(context: TenantContext): Promise<CrmStats> {
   }
 
   const sales = (salesRows ?? []) as SaleStatsRow[]
-  const lines = (lineRows ?? []) as TicketLineStatsRow[]
+  const lines = ((ticketRows ?? []) as TicketWithLinesStatsRow[]).flatMap((ticket) => ticket.ticket_lines ?? [])
   const openSessions = (openSessionRows ?? []) as OpenCashSessionRow[]
   const venuesById = new Map(((venueRows ?? []) as NameRow[]).map((venue) => [venue.id, venue.name]))
   const devicesById = new Map(((deviceRows ?? []) as NameRow[]).map((device) => [device.id, device.name]))

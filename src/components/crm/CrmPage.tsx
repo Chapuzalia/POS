@@ -52,6 +52,7 @@ import {
   importRevoCatalogProducts,
   loadCrmStats,
   loadCrmAccessData,
+  loadCrmVenues,
   setCrmPosUserActive,
   subscribeToCrmStatsChanges,
   updateCategory,
@@ -67,6 +68,7 @@ import type {
   CatalogKind,
   Category,
   CrmStats,
+  CrmVenue,
   PaymentMethod,
   Product,
   ProductVariant,
@@ -124,11 +126,16 @@ export function CrmPage({
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)
+  const [venues, setVenues] = useState<CrmVenue[]>([])
+  const [selectedVenueId, setSelectedVenueId] = useState('')
   const categories = catalog?.categories ?? []
   const products = catalog?.products ?? []
   const saleFormats = getAvailableSaleFormats(catalog?.saleFormats)
-  const activeProducts = products.filter((product) => product.isActive)
-  const activeCategories = categories.filter((category) => category.isActive)
+  const venueProducts = products.filter((product) => product.venueId === selectedVenueId)
+  const venueCategoryIds = new Set(venueProducts.map((product) => product.categoryId))
+  const venueCategories = categories.filter((category) => venueCategoryIds.has(category.id))
+  const activeProducts = venueProducts.filter((product) => product.isActive)
+  const activeCategories = venueCategories.filter((category) => category.isActive)
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
     setIsBusy(true)
@@ -142,10 +149,30 @@ export function CrmPage({
     }
   }, [onError])
 
+  useEffect(() => {
+    if (!isOnline) {
+      return
+    }
+
+    void runAction(async () => {
+      const nextVenues = await loadCrmVenues(context)
+      setVenues(nextVenues)
+      setSelectedVenueId((current) =>
+        nextVenues.some((venue) => venue.id === current && venue.isActive)
+          ? current
+          : (nextVenues.find((venue) => venue.isActive)?.id ?? ''),
+      )
+    })
+  }, [context, isOnline, runAction])
+
   const refreshStats = useCallback(async (options: { silent?: boolean } = {}) => {
     const loadStats = async () => {
       onError(null)
-      setStats(await loadCrmStats(context))
+      if (!selectedVenueId) {
+        setStats(null)
+        return
+      }
+      setStats(await loadCrmStats(context, selectedVenueId))
     }
 
     if (options.silent) {
@@ -158,13 +185,13 @@ export function CrmPage({
     }
 
     await runAction(loadStats)
-  }, [context, onError, runAction])
+  }, [context, onError, runAction, selectedVenueId])
 
   useEffect(() => {
-    if ((activeSection === 'dashboard' || activeSection === 'stats') && isOnline) {
+    if ((activeSection === 'dashboard' || activeSection === 'stats') && isOnline && selectedVenueId) {
       void refreshStats()
     }
-  }, [activeSection, isOnline, refreshStats])
+  }, [activeSection, isOnline, refreshStats, selectedVenueId])
 
   useEffect(() => {
     if (!isOnline || (activeSection !== 'dashboard' && activeSection !== 'stats')) {
@@ -239,6 +266,21 @@ export function CrmPage({
           </div>
 
           <div className="crm-topbar-actions">
+            <label className="crm-venue-selector">
+              <Building2 className="h-4 w-4" />
+              <select
+                disabled={!isOnline || isBusy}
+                onChange={(event) => {
+                  setStats(null)
+                  setSelectedVenueId(event.target.value)
+                }}
+                value={selectedVenueId}
+              >
+                {venues.filter((venue) => venue.isActive).map((venue) => (
+                  <option key={venue.id} value={venue.id}>{venue.name}</option>
+                ))}
+              </select>
+            </label>
             <div className="crm-date-chip">{new Intl.DateTimeFormat('es-ES').format(new Date())}</div>
             <div className={isOnline ? 'crm-status crm-status-online' : 'crm-status crm-status-offline'}>
               {isOnline ? 'Online' : 'Offline'}
@@ -258,10 +300,10 @@ export function CrmPage({
             <DashboardCrm
               activeCategories={activeCategories.length}
               activeProducts={activeProducts.length}
-              categories={categories}
+              categories={venueCategories}
               disabled={!isOnline || isBusy}
               onRefresh={refreshStats}
-              products={products}
+              products={venueProducts}
               stats={stats}
             />
           ) : null}
@@ -271,9 +313,10 @@ export function CrmPage({
               categories={categories}
               disabled={!isOnline || isBusy}
               onCatalogChanged={onCatalogChanged}
-              products={products}
+              products={venueProducts}
               runAction={runAction}
               saleFormats={saleFormats}
+              selectedVenueId={selectedVenueId}
               tenantContext={context}
             />
           ) : null}
@@ -313,6 +356,7 @@ export function CrmPage({
               disabled={!isOnline || isBusy}
               onCatalogChanged={onCatalogChanged}
               runAction={runAction}
+              selectedVenueId={selectedVenueId}
               tenantContext={context}
             />
           ) : null}
@@ -717,10 +761,11 @@ type RevoImportCrmProps = {
   disabled: boolean
   onCatalogChanged: () => Promise<void>
   runAction: RunAction
+  selectedVenueId: string
   tenantContext: TenantContext
 }
 
-function RevoImportCrm({ disabled, onCatalogChanged, runAction, tenantContext }: RevoImportCrmProps) {
+function RevoImportCrm({ disabled, onCatalogChanged, runAction, selectedVenueId, tenantContext }: RevoImportCrmProps) {
   const [fileError, setFileError] = useState<string | null>(null)
   const [fileName, setFileName] = useState('')
   const [importResult, setImportResult] = useState<CatalogImportResult | null>(null)
@@ -761,13 +806,13 @@ function RevoImportCrm({ disabled, onCatalogChanged, runAction, tenantContext }:
   }
 
   async function handleImport() {
-    if (!parseResult?.products.length) {
+    if (!parseResult?.products.length || !selectedVenueId) {
       return
     }
 
     setImportResult(null)
     await runAction(async () => {
-      const nextResult = await importRevoCatalogProducts(tenantContext, parseResult.products)
+      const nextResult = await importRevoCatalogProducts(tenantContext, parseResult.products, selectedVenueId)
       setImportResult(nextResult)
       await onCatalogChanged()
     })
@@ -799,7 +844,7 @@ function RevoImportCrm({ disabled, onCatalogChanged, runAction, tenantContext }:
             </label>
             <button
               className="crm-primary-button"
-              disabled={disabled || !parseResult?.products.length}
+              disabled={disabled || !parseResult?.products.length || !selectedVenueId}
               onClick={() => void handleImport()}
               type="button"
             >
@@ -905,6 +950,7 @@ type ProductsCrmProps = {
   products: Product[]
   runAction: RunAction
   saleFormats: SaleFormatDefinition[]
+  selectedVenueId: string
   tenantContext: TenantContext
 }
 
@@ -924,6 +970,7 @@ function ProductsCrm({
   products,
   runAction,
   saleFormats,
+  selectedVenueId,
   tenantContext,
 }: ProductsCrmProps) {
   const [query, setQuery] = useState('')
@@ -949,7 +996,7 @@ function ProductsCrm({
   const selectedProduct = editor?.mode === 'edit' ? products.find((product) => product.id === editor.productId) : null
 
   async function handleDeleteProduct(product: Product) {
-    if (!window.confirm(`Eliminar el producto "${product.name}" de forma permanente?`)) {
+    if (!window.confirm(`Eliminar el producto "${product.name}" de este local de forma permanente?`)) {
       return
     }
 
@@ -978,7 +1025,7 @@ function ProductsCrm({
             </label>
             <button
               className="crm-primary-button"
-              disabled={disabled || !categories.length}
+              disabled={disabled || !categories.length || !selectedVenueId}
               onClick={() => setEditor({ mode: 'create' })}
               type="button"
             >
@@ -1023,6 +1070,7 @@ function ProductsCrm({
           product={selectedProduct ?? undefined}
           runAction={runAction}
           saleFormats={saleFormats}
+          selectedVenueId={selectedVenueId}
           tenantContext={tenantContext}
         />
       ) : null}
@@ -1039,7 +1087,14 @@ type ProductListRowProps = {
   saleFormats: SaleFormatDefinition[]
 }
 
-function ProductListRow({ category, disabled, onDelete, onEdit, product, saleFormats }: ProductListRowProps) {
+function ProductListRow({
+  category,
+  disabled,
+  onDelete,
+  onEdit,
+  product,
+  saleFormats,
+}: ProductListRowProps) {
   const primaryVariant = product.variants.find((variant) => variant.isDefault) ?? product.variants[0]
   const usageLabel = canUseProductAsMixer(product)
     ? product.mixerSupplementCents
@@ -1100,6 +1155,7 @@ type ProductFormPanelProps = {
   product?: Product
   runAction: RunAction
   saleFormats: SaleFormatDefinition[]
+  selectedVenueId: string
   tenantContext: TenantContext
 }
 
@@ -1112,6 +1168,7 @@ function ProductFormPanel({
   product,
   runAction,
   saleFormats,
+  selectedVenueId,
   tenantContext,
 }: ProductFormPanelProps) {
   const firstCategory = categories[0]
@@ -1214,7 +1271,7 @@ function ProductFormPanel({
   }
 
   async function saveProduct() {
-    if (!selectedCategory || !name.trim()) {
+    if (!selectedCategory || !name.trim() || !selectedVenueId) {
       return
     }
 
@@ -1254,6 +1311,7 @@ function ProductFormPanel({
           }
         } else {
           await createProductWithVariant(tenantContext, {
+            venueId: selectedVenueId,
             canSellStandalone,
             canUseAsMixer,
             categoryId: selectedCategory.id,

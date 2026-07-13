@@ -121,6 +121,7 @@ export type ModifierGroup = {
 export type Product = {
   id: string
   tenantId: string
+  venueId: string
   categoryId: string
   name: string
   description: string | null
@@ -330,6 +331,7 @@ export type OfflineEvent =
     }
 
 export type ProductCreateInput = {
+  venueId: string
   canSellStandalone: boolean
   canUseAsMixer: boolean
   categoryId: string

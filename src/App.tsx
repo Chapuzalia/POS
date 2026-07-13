@@ -35,6 +35,7 @@ import { useOnlineStatus } from './hooks/useOnlineStatus'
 import { useThemeTokens } from './hooks/useThemeTokens'
 import {
   TenantSessionError,
+  LoginLeaseConflictError,
   buildSalePayload,
   hasValidOfflineSession,
   loadCatalogFromSupabase,
@@ -69,6 +70,7 @@ import type {
 } from './types'
 import { nowIso } from './utils/dates'
 import { getReadableError } from './utils/errors'
+import { heartbeatLoginLease, releaseLocalLoginLock } from './services/loginLeaseService'
 
 type ProductDialogState = {
   allowFormatSelection: boolean
@@ -145,6 +147,7 @@ function App() {
   const [ticketHistoryOpen, setTicketHistoryOpen] = useState(false)
   const [paidFeedback, setPaidFeedback] = useState<PaymentMethod | null>(null)
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
+  const [loginLeaseBlocked, setLoginLeaseBlocked] = useState(false)
   const [route, setRoute] = useState<AppRoute>(() => getAppRoute())
   const cashSummary = summarizeSales(cashSession?.openingFloatCents ?? 0, salesLedger)
 
@@ -169,6 +172,44 @@ function App() {
       setRoute(requiredRoute)
     }
   }, [context, route])
+
+  useEffect(() => {
+    if (!context || !isOnline) {
+      return undefined
+    }
+
+    let active = true
+
+    async function refreshLoginLease() {
+      try {
+        const ownsLease = await heartbeatLoginLease()
+
+        if (!ownsLease && active) {
+          releaseLocalLoginLock()
+          clearActiveState()
+          setLoginLeaseBlocked(true)
+          setError('La sesion se ha cerrado porque esta cuenta se ha abierto en otro dispositivo o pestana.')
+        }
+      } catch {
+        // Los fallos de red no deben cerrar una sesion que puede seguir trabajando offline.
+      }
+    }
+
+    const intervalId = window.setInterval(() => void refreshLoginLease(), 30_000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') {
+        void refreshLoginLease()
+      }
+    }
+
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [context, isOnline])
 
   useEffect(() => {
     if (!supabase) {
@@ -217,8 +258,10 @@ function App() {
         }
       } catch (restoreError) {
         if (!cancelled) {
+          const leaseConflict = restoreError instanceof LoginLeaseConflictError
           clearActiveState()
-          if (restoreError instanceof TenantSessionError) {
+          setLoginLeaseBlocked(leaseConflict)
+          if (restoreError instanceof TenantSessionError && !leaseConflict) {
             saveCachedContext(null)
           }
           setError(getReadableError(restoreError))
@@ -358,6 +401,7 @@ function App() {
     const previousSession = getCachedCashSession(nextContext)
 
     setContext(nextContext)
+    setLoginLeaseBlocked(false)
     saveCachedContext(nextContext)
     setCatalog(state.catalog)
     saveCachedCatalog(nextContext.tenantId, state.catalog)
@@ -428,6 +472,7 @@ function App() {
     setIsBusy(true)
     setIsLoading(true)
     setError(null)
+    setLoginLeaseBlocked(false)
 
     try {
       const nextContext = await loginTenant(input)
@@ -437,6 +482,7 @@ function App() {
       const nextState = await loadTenantState(nextContext)
       applyTenantState(nextContext, nextState)
     } catch (loginError) {
+      setLoginLeaseBlocked(loginError instanceof LoginLeaseConflictError)
       setError(getReadableError(loginError))
     } finally {
       setIsBusy(false)
@@ -445,6 +491,10 @@ function App() {
   }
 
   async function enterOffline() {
+    if (loginLeaseBlocked) {
+      return
+    }
+
     const cachedContext = getCachedContext()
 
     if (!cachedContext) {
@@ -877,10 +927,12 @@ function App() {
   if (!context) {
     return (
       <LoginScreen
+        allowOfflineEnter={!loginLeaseBlocked}
         cachedContext={getCachedContext()}
         error={error}
         isBusy={isBusy}
         isOnline={isOnline}
+        loginBlocked={loginLeaseBlocked}
         onLogin={handleLogin}
         onOfflineEnter={enterOffline}
       />

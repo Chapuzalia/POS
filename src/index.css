@@ -404,6 +404,30 @@ button {
   white-space: nowrap;
 }
 
+.crm-venue-selector {
+  display: inline-flex;
+  min-height: 34px;
+  min-width: 190px;
+  align-items: center;
+  gap: 7px;
+  border: 1px solid #9fb2c3;
+  border-radius: 4px;
+  background: #ffffff;
+  color: #082b4c;
+  padding: 0 9px;
+}
+
+.crm-venue-selector select {
+  min-width: 0;
+  flex: 1;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  outline: none;
+  font-size: 13px;
+  font-weight: 900;
+}
+
 .crm-status-online {
   border-color: #b9efcc;
   background: #ddf8e7;
@@ -1625,6 +1649,11 @@ button {
 @media (max-width: 760px) {
   .crm-shell {
     height: 100vh;
+  }
+
+  .crm-venue-selector {
+    width: 100%;
+    min-width: 0;
   }
 
   .crm-access-user-row {

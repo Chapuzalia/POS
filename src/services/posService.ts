@@ -40,6 +40,16 @@ import type {
 } from '../types/supabase'
 import { nowIso } from '../utils/dates'
 import { getReadableError } from '../utils/errors'
+import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
+
+async function requireExclusiveLogin() {
+  if (await claimLoginLease()) {
+    return
+  }
+
+  releaseLocalLoginLock()
+  throw new LoginLeaseConflictError('Esta cuenta ya esta abierta en otro dispositivo o pestana.')
+}
 
 function mapCategory(row: CategoryRow): Category {
   return {
@@ -128,6 +138,7 @@ function mapProduct(row: ProductRow): Product {
   return {
     id: row.id,
     tenantId: row.tenant_id,
+    venueId: row.venue_id,
     categoryId: row.category_id,
     name: row.name,
     description: row.description,
@@ -225,6 +236,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   }
 
   if (membership.role === 'owner' || membership.role === 'admin') {
+    await requireExclusiveLogin()
     return {
       tenantId: tenant.id,
       tenantName: tenant.name,
@@ -289,6 +301,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw new Error('El local o dispositivo asignado esta desactivado o ya no existe.')
   }
 
+  await requireExclusiveLogin()
   return {
     tenantId: tenant.id,
     tenantName: tenant.name,
@@ -307,6 +320,13 @@ export class TenantSessionError extends Error {
   constructor(message: string) {
     super(message)
     this.name = 'TenantSessionError'
+  }
+}
+
+export class LoginLeaseConflictError extends TenantSessionError {
+  constructor(message: string) {
+    super(message)
+    this.name = 'LoginLeaseConflictError'
   }
 }
 
@@ -356,6 +376,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   }
 
   if (membership.role === 'owner' || membership.role === 'admin') {
+    await requireExclusiveLogin()
     return {
       tenantId: tenant.id,
       tenantName: tenant.name,
@@ -412,6 +433,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new TenantSessionError('El local o dispositivo asignado esta desactivado.')
   }
 
+  await requireExclusiveLogin()
   return {
     tenantId: tenant.id,
     tenantName: tenant.name,
@@ -443,10 +465,19 @@ export async function logoutTenant() {
     return
   }
 
+  let leaseError: unknown = null
+
+  try {
+    await releaseLoginLease()
+  } catch (error) {
+    leaseError = error
+    releaseLocalLoginLock()
+  }
+
   const { error } = await supabase.auth.signOut({ scope: 'local' })
 
-  if (error) {
-    throw error
+  if (error || leaseError) {
+    throw error ?? leaseError
   }
 }
 
@@ -477,6 +508,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
           `
           id,
           tenant_id,
+          venue_id,
           category_id,
           name,
           description,
@@ -532,10 +564,17 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
   }
 
   const saleFormats = ((saleFormatRows ?? []) as SaleFormatRow[]).map(mapSaleFormat)
+  const allProducts = ((productRows ?? []) as ProductRow[]).map(mapProduct)
+  const products = context.venueId
+    ? allProducts.filter((product) => product.venueId === context.venueId)
+    : allProducts
+  const visibleCategoryIds = new Set(products.map((product) => product.categoryId))
 
   return {
-    categories: ((categoryRows ?? []) as CategoryRow[]).map(mapCategory),
-    products: ((productRows ?? []) as ProductRow[]).map(mapProduct),
+    categories: ((categoryRows ?? []) as CategoryRow[])
+      .map(mapCategory)
+      .filter((category) => !context.venueId || visibleCategoryIds.has(category.id)),
+    products,
     saleFormats: saleFormats.length ? saleFormats : defaultSaleFormats,
     updatedAt: nowIso(),
     source: 'supabase',

@@ -4,18 +4,22 @@ import type { LoginInput, TenantContext } from '../../types'
 import { Button, Chip } from '../ui'
 
 type LoginScreenProps = {
+  allowOfflineEnter: boolean
   cachedContext: TenantContext | null
   error: string | null
   isBusy: boolean
+  loginBlocked: boolean
   isOnline: boolean
   onLogin: (input: LoginInput) => Promise<void>
   onOfflineEnter: () => void
 }
 
 export function LoginScreen({
+  allowOfflineEnter,
   cachedContext,
   error,
   isBusy,
+  loginBlocked,
   isOnline,
   onLogin,
   onOfflineEnter,
@@ -72,13 +76,13 @@ export function LoginScreen({
             </div>
           ) : null}
 
-          <Button disabled={!isOnline || isBusy} fullWidth size="lg" type="submit" variant="primary">
+          <Button disabled={!isOnline || isBusy || loginBlocked} fullWidth size="lg" type="submit" variant="primary">
             <LogIn className="h-5 w-5" />
             Entrar
           </Button>
         </form>
 
-        {cachedContext?.role === 'cashier' ? (
+        {allowOfflineEnter && cachedContext?.role === 'cashier' ? (
           <Button className="mt-3" disabled={isBusy} fullWidth onClick={onOfflineEnter} type="button" variant="secondary">
             <WifiOff className="h-5 w-5" />
             Entrar offline en {cachedContext.tenantName}

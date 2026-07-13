@@ -30,6 +30,24 @@ asignacion, y no se eligen en la pantalla de login.
 Cada cuenta debe pertenecer a un solo negocio activo. Si una cuenta tiene varias
 membresias, el acceso se rechaza para no seleccionar un negocio de forma arbitraria.
 
+## Sesion unica
+
+`device-user-access-migration.sql` crea una concesion de login exclusiva por
+usuario. La aplicacion la renueva cada 30 segundos y rechaza el acceso desde otro
+dispositivo o pestana. Un cierre inesperado libera la cuenta automaticamente cuando
+la concesion deja de recibir renovaciones durante 90 segundos; un cierre de sesion
+normal la libera inmediatamente.
+
+## Catalogo por local
+
+La misma migracion anade `products.venue_id`. Cada producto pertenece a un unico
+local, con sus propias variantes, precios y modificadores. El desplegable superior
+del CRM selecciona el catalogo y las estadisticas que se consultan. Crear, importar,
+editar o eliminar un producto afecta solamente al local seleccionado.
+
+Al ejecutar la migracion, los productos del modelo compartido anterior se duplican
+en cada local donde estaban disponibles, incluyendo variantes y modificadores.
+
 ## Usuarios existentes
 
 Los usuarios `cashier` anteriores a esta migracion deben asignarse desde el CRM o

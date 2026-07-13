@@ -80,6 +80,7 @@ export type ModifierGroupRow = {
 export type ProductRow = {
   id: string
   tenant_id: string
+  venue_id: string
   category_id: string
   name: string
   description: string | null
