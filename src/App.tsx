@@ -3,6 +3,7 @@ import { AppHeader } from './components/layout/AppHeader'
 import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog, SessionTicketsModal } from './components/modals'
 import { CatalogPanel, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
 import { CrmPage } from './components/crm/CrmPage'
+import { SuperAdminPage } from './components/superadmin/SuperAdminPage'
 import { LoginScreen } from './components/screens/LoginScreen'
 import { LoadingScreen, MissingConfigScreen } from './components/screens/StateScreens'
 import themesData from './config/themes.json'
@@ -78,20 +79,41 @@ type ProductDialogState = {
   saleFormat: SaleFormat
 }
 
-type AppRoute = 'pos' | 'crm'
+type AppRoute = 'pos' | 'crm' | 'superadmin'
 
 const themes = themesData as ThemeDefinition[]
 const defaultThemeId = themes[0]?.id ?? 'hero-minimal'
 
 function getAppRoute(): AppRoute {
-  return window.location.pathname.replace(/\/+$/, '') === '/crm' ? 'crm' : 'pos'
+  const path = window.location.pathname.replace(/\/+$/, '')
+  if (path === '/superadmin') {
+    return 'superadmin'
+  }
+  return path === '/crm' ? 'crm' : 'pos'
 }
 
 function isCrmAdministrator(context: TenantContext) {
   return context.role === 'owner' || context.role === 'admin'
 }
 
+function isSuperadmin(context: TenantContext) {
+  return context.role === 'superadmin'
+}
+
+function isAdministrativeUser(context: TenantContext) {
+  return isSuperadmin(context) || isCrmAdministrator(context)
+}
+
 async function loadTenantState(activeContext: TenantContext) {
+  if (isSuperadmin(activeContext)) {
+    return {
+      catalog: null,
+      cashSession: null,
+      productSalesStats: [],
+      salesLedger: [],
+    }
+  }
+
   if (isCrmAdministrator(activeContext)) {
     const catalog = await loadCatalogFromSupabase(activeContext)
 
@@ -165,10 +187,10 @@ function App() {
       return
     }
 
-    const requiredRoute: AppRoute = isCrmAdministrator(context) ? 'crm' : 'pos'
+    const requiredRoute: AppRoute = isSuperadmin(context) ? 'superadmin' : isCrmAdministrator(context) ? 'crm' : 'pos'
 
     if (route !== requiredRoute) {
-      window.history.replaceState(null, '', requiredRoute === 'crm' ? '/crm' : '/')
+      window.history.replaceState(null, '', requiredRoute === 'superadmin' ? '/superadmin' : requiredRoute === 'crm' ? '/crm' : '/')
       setRoute(requiredRoute)
     }
   }, [context, route])
@@ -248,7 +270,7 @@ function App() {
 
       try {
         const restoredContext = await restoreTenantContext(cachedContext)
-        if (!isCrmAdministrator(restoredContext)) {
+        if (!isAdministrativeUser(restoredContext)) {
           await syncPendingEvents()
         }
         const restoredState = await loadTenantState(restoredContext)
@@ -283,7 +305,7 @@ function App() {
   }, [isOnline, syncPendingEvents])
 
   useEffect(() => {
-    if (!context || !isOnline || isCrmAdministrator(context)) {
+    if (!context || !isOnline || isAdministrativeUser(context)) {
       return undefined
     }
 
@@ -398,19 +420,28 @@ function App() {
     nextContext: TenantContext,
     state: Awaited<ReturnType<typeof loadTenantState>>,
   ) {
-    const previousSession = getCachedCashSession(nextContext)
-
     setContext(nextContext)
     setLoginLeaseBlocked(false)
     saveCachedContext(nextContext)
     setCatalog(state.catalog)
-    saveCachedCatalog(nextContext.tenantId, state.catalog)
     setProductSalesStats(state.productSalesStats)
-    saveCachedProductSalesStats(nextContext.tenantId, state.productSalesStats)
     setCashSession(state.cashSession)
-    saveCachedCashSession(nextContext, state.cashSession)
-    setTicketLines(isCrmAdministrator(nextContext) ? [] : getCachedTicket(nextContext))
+    setTicketLines(isAdministrativeUser(nextContext) ? [] : getCachedTicket(nextContext))
     setSalesLedger(state.salesLedger)
+
+    if (isSuperadmin(nextContext)) {
+      setSessionTickets([])
+      window.history.replaceState(null, '', '/superadmin')
+      setRoute('superadmin')
+      return
+    }
+
+    const previousSession = getCachedCashSession(nextContext)
+    if (state.catalog) {
+      saveCachedCatalog(nextContext.tenantId, state.catalog)
+    }
+    saveCachedProductSalesStats(nextContext.tenantId, state.productSalesStats)
+    saveCachedCashSession(nextContext, state.cashSession)
 
     if (isCrmAdministrator(nextContext)) {
       setSessionTickets([])
@@ -476,7 +507,7 @@ function App() {
 
     try {
       const nextContext = await loginTenant(input)
-      if (!isCrmAdministrator(nextContext)) {
+      if (!isAdministrativeUser(nextContext)) {
         await syncPendingEvents()
       }
       const nextState = await loadTenantState(nextContext)
@@ -505,7 +536,7 @@ function App() {
     setError(null)
 
     try {
-      if (isCrmAdministrator(cachedContext)) {
+      if (isAdministrativeUser(cachedContext)) {
         throw new TenantSessionError('El CRM de administracion requiere conexion.')
       }
 
@@ -940,6 +971,18 @@ function App() {
   }
 
   const canSell = Boolean(cashSession && ticketLines.length > 0 && !isBusy)
+
+  if (isSuperadmin(context)) {
+    return (
+      <SuperAdminPage
+        context={context}
+        error={error}
+        isOnline={isOnline}
+        onError={setError}
+        onLogout={handleLogout}
+      />
+    )
+  }
 
   if (isCrmAdministrator(context)) {
     return (

@@ -448,6 +448,7 @@ button {
 }
 
 .crm-error,
+.crm-success,
 .crm-warning {
   margin: 12px 14px 0;
   border-radius: 4px;
@@ -460,6 +461,12 @@ button {
   border: 1px solid #fecaca;
   background: #fff1f2;
   color: #b42318;
+}
+
+.crm-success {
+  border: 1px solid #b9efcc;
+  background: #ddf8e7;
+  color: #067647;
 }
 
 .crm-warning {
@@ -796,6 +803,33 @@ button {
 
 .crm-access-user-row:last-child {
   border-bottom: 0;
+}
+
+.platform-tenant-row {
+  display: grid;
+  grid-template-columns: minmax(150px, 0.8fr) minmax(220px, 1.1fr) 90px 100px 80px;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid #e1e8ef;
+  padding: 12px 0;
+  color: #52677a;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.platform-tenant-row:last-child {
+  border-bottom: 0;
+}
+
+.platform-empty {
+  display: grid;
+  min-height: 180px;
+  place-items: center;
+  align-content: center;
+  gap: 8px;
+  color: #617386;
+  font-size: 13px;
+  font-weight: 800;
 }
 
 .crm-entity-layout {
@@ -1661,6 +1695,15 @@ button {
   }
 
   .crm-access-user-row > .crm-cell-main:nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .platform-tenant-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .platform-tenant-row > .crm-cell-main:nth-child(2) {
     grid-column: 1 / -1;
     grid-row: 2;
   }

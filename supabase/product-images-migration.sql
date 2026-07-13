@@ -12,8 +12,16 @@ set public = excluded.public,
     allowed_mime_types = excluded.allowed_mime_types;
 
 drop policy if exists "product_images_public_read" on storage.objects;
--- El bucket publico permite getPublicUrl sin una politica SELECT. No crearla:
--- SELECT sobre storage.objects tambien habilitaria el listado global.
+-- El bucket publico permite getPublicUrl; el SELECT siguiente solo permite
+-- consultar metadatos dentro de la carpeta de un tenant autorizado.
+
+drop policy if exists "product_images_tenant_select" on storage.objects;
+create policy "product_images_tenant_select"
+on storage.objects for select to authenticated
+using (
+  bucket_id = 'product-images'
+  and public.user_has_tenant_access(((storage.foldername(name))[1])::uuid)
+);
 
 drop policy if exists "product_images_tenant_insert" on storage.objects;
 create policy "product_images_tenant_insert"

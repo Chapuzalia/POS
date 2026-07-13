@@ -60,6 +60,22 @@ begin
     where id = v_venue_id;
   end if;
 
+  insert into public.sale_formats (tenant_id, key, label, sort_order, is_active)
+  select v_tenant_id, format_key, format_label, format_sort_order, true
+  from (
+    values
+      ('cubata', 'Cubata', 1),
+      ('copa', 'Copa', 2),
+      ('shot', 'Chupito', 3),
+      ('beer_bottle', 'Botellin cerveza', 4),
+      ('soft_bottle', 'Botellin refresco', 5),
+      ('cocktail', 'Coctel', 6)
+  ) as default_formats(format_key, format_label, format_sort_order)
+  on conflict (tenant_id, key) do update
+  set label = excluded.label,
+      sort_order = excluded.sort_order,
+      is_active = true;
+
   select id into v_category_gin from public.categories where tenant_id = v_tenant_id and name = 'Ginebra' limit 1;
   if v_category_gin is null then
     insert into public.categories (tenant_id, name, kind, icon, sort_order)
@@ -104,8 +120,8 @@ begin
 
   select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Seagrams' limit 1;
   if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
-    values (v_tenant_id, v_category_gin, 'Seagrams', 'Ginebra', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1)
+    insert into public.products (tenant_id, venue_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_venue_id, v_category_gin, 'Seagrams', 'Ginebra', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1)
     returning id into v_product_id;
   end if;
   if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Cubata') then
@@ -123,8 +139,8 @@ begin
 
   select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Barcelo' limit 1;
   if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
-    values (v_tenant_id, v_category_rum, 'Barcelo', 'Ron', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 2)
+    insert into public.products (tenant_id, venue_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_venue_id, v_category_rum, 'Barcelo', 'Ron', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 2)
     returning id into v_product_id;
   end if;
   if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Cubata') then
@@ -138,8 +154,8 @@ begin
 
   select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Tonica' limit 1;
   if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
-    values (v_tenant_id, v_category_mixer, 'Tonica', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 1)
+    insert into public.products (tenant_id, venue_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_venue_id, v_category_mixer, 'Tonica', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 1)
     returning id into v_product_id;
   end if;
   if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Botellin') then
@@ -149,8 +165,8 @@ begin
 
   select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Coca-Cola' limit 1;
   if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
-    values (v_tenant_id, v_category_mixer, 'Coca-Cola', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 2)
+    insert into public.products (tenant_id, venue_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_venue_id, v_category_mixer, 'Coca-Cola', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 2)
     returning id into v_product_id;
   end if;
   if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Botellin') then
@@ -160,8 +176,8 @@ begin
 
   select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Estrella Damm' limit 1;
   if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
-    values (v_tenant_id, v_category_beer, 'Estrella Damm', 'Botellin de cerveza', 'beer_bottle', array['beer_bottle'], true, false, 1)
+    insert into public.products (tenant_id, venue_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_venue_id, v_category_beer, 'Estrella Damm', 'Botellin de cerveza', 'beer_bottle', array['beer_bottle'], true, false, 1)
     returning id into v_product_id;
   end if;
   if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Botellin') then
@@ -171,8 +187,8 @@ begin
 
   select id into v_product_id from public.products where tenant_id = v_tenant_id and name = 'Mojito' limit 1;
   if v_product_id is null then
-    insert into public.products (tenant_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
-    values (v_tenant_id, v_category_cocktail, 'Mojito', 'Coctel preparado', 'cocktail', array['cocktail'], true, false, 1)
+    insert into public.products (tenant_id, venue_id, category_id, name, description, kind, sale_formats, can_sell_standalone, can_use_as_mixer, sort_order)
+    values (v_tenant_id, v_venue_id, v_category_cocktail, 'Mojito', 'Coctel preparado', 'cocktail', array['cocktail'], true, false, 1)
     returning id into v_product_id;
   end if;
   if not exists (select 1 from public.product_variants where product_id = v_product_id and name = 'Coctel') then

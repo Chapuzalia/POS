@@ -3,6 +3,7 @@ import {
   Boxes,
   Building2,
   ChevronRight,
+  Download,
   LayoutDashboard,
   LogOut,
   MonitorSmartphone,
@@ -34,6 +35,7 @@ import {
   productKindOptions,
 } from '../../lib/catalog'
 import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
+import { exportCatalogZip, parseCatalogZip, type ParsedCatalogTransfer } from '../../lib/catalogTransfer'
 import { getDefaultProductImageFillColor } from '../../lib/productImages'
 import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImport'
 import {
@@ -50,6 +52,7 @@ import {
   deleteSaleFormat,
   deleteVariant,
   importRevoCatalogProducts,
+  importCatalogBackup,
   loadCrmStats,
   loadCrmAccessData,
   loadCrmVenues,
@@ -61,6 +64,7 @@ import {
   updateVariant,
   uploadProductImage,
   type CatalogImportResult,
+  type CatalogBackupImportResult,
   type CrmAccessData,
 } from '../../services/crmService'
 import type {
@@ -96,7 +100,7 @@ const navItems: Array<{ id: CrmSection; label: string; icon: LucideIcon }> = [
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'categories', label: 'Categorias', icon: Tags },
   { id: 'sale-formats', label: 'Formatos', icon: SlidersHorizontal },
-  { id: 'import', label: 'Importacion', icon: Upload },
+  { id: 'import', label: 'Importar / exportar', icon: Upload },
   { id: 'stats', label: 'Estadisticas', icon: BarChart3 },
 ]
 
@@ -353,11 +357,15 @@ export function CrmPage({
 
           {activeSection === 'import' ? (
             <RevoImportCrm
+              categories={categories}
               disabled={!isOnline || isBusy}
               onCatalogChanged={onCatalogChanged}
+              products={venueProducts}
               runAction={runAction}
+              saleFormats={saleFormats}
               selectedVenueId={selectedVenueId}
               tenantContext={context}
+              venueName={venues.find((venue) => venue.id === selectedVenueId)?.name ?? ''}
             />
           ) : null}
 
@@ -384,7 +392,7 @@ function getSectionTitle(section: CrmSection) {
     return 'Formatos de venta'
   }
   if (section === 'import') {
-    return 'Importacion REVO'
+    return 'Importar y exportar catalogo'
   }
   if (section === 'stats') {
     return 'Analitica comercial'
@@ -758,14 +766,32 @@ function MiniMetric({ label, value }: { label: string; value: string }) {
 }
 
 type RevoImportCrmProps = {
+  categories: Category[]
   disabled: boolean
   onCatalogChanged: () => Promise<void>
+  products: Product[]
   runAction: RunAction
+  saleFormats: SaleFormatDefinition[]
   selectedVenueId: string
   tenantContext: TenantContext
+  venueName: string
 }
 
-function RevoImportCrm({ disabled, onCatalogChanged, runAction, selectedVenueId, tenantContext }: RevoImportCrmProps) {
+function RevoImportCrm({
+  categories,
+  disabled,
+  onCatalogChanged,
+  products: catalogProducts,
+  runAction,
+  saleFormats,
+  selectedVenueId,
+  tenantContext,
+  venueName,
+}: RevoImportCrmProps) {
+  const [backupFileError, setBackupFileError] = useState<string | null>(null)
+  const [backupFileName, setBackupFileName] = useState('')
+  const [backupImportResult, setBackupImportResult] = useState<CatalogBackupImportResult | null>(null)
+  const [catalogTransfer, setCatalogTransfer] = useState<ParsedCatalogTransfer | null>(null)
   const [fileError, setFileError] = useState<string | null>(null)
   const [fileName, setFileName] = useState('')
   const [importResult, setImportResult] = useState<CatalogImportResult | null>(null)
@@ -778,6 +804,54 @@ function RevoImportCrm({ disabled, onCatalogChanged, runAction, selectedVenueId,
     )
     return [...(parseResult?.warnings ?? []), ...productWarnings]
   }, [parseResult?.warnings, products])
+
+  async function handleExportCatalog() {
+    if (!selectedVenueId) {
+      return
+    }
+
+    await runAction(async () => {
+      await exportCatalogZip({
+        categories,
+        products: catalogProducts,
+        saleFormats,
+        tenantName: tenantContext.tenantName,
+        venueName: venueName || 'local',
+      })
+    })
+  }
+
+  async function handleBackupFileChange(event: ChangeEvent<HTMLInputElement>) {
+    const file = event.currentTarget.files?.[0] ?? null
+    event.currentTarget.value = ''
+    setBackupFileError(null)
+    setBackupImportResult(null)
+
+    if (!file) {
+      return
+    }
+
+    setBackupFileName(file.name)
+    try {
+      setCatalogTransfer(await parseCatalogZip(file))
+    } catch (readError) {
+      setCatalogTransfer(null)
+      setBackupFileError(getReadableError(readError))
+    }
+  }
+
+  async function handleBackupImport() {
+    if (!catalogTransfer || !selectedVenueId) {
+      return
+    }
+
+    setBackupImportResult(null)
+    await runAction(async () => {
+      const nextResult = await importCatalogBackup(tenantContext, catalogTransfer, selectedVenueId)
+      setBackupImportResult(nextResult)
+      await onCatalogChanged()
+    })
+  }
 
   async function handleFileChange(event: ChangeEvent<HTMLInputElement>) {
     const file = event.currentTarget.files?.[0] ?? null
@@ -820,6 +894,89 @@ function RevoImportCrm({ disabled, onCatalogChanged, runAction, selectedVenueId,
 
   return (
     <div className="crm-dashboard-grid">
+      <section className="crm-panel crm-panel-span">
+        <div className="crm-list-toolbar">
+          <div className="crm-list-title">
+            <h2>Copia completa del catalogo</h2>
+            <p>
+              Exporta productos, categorias, formatos, precios, modificadores e imagenes a un ZIP, o importa uno en el local seleccionado.
+            </p>
+          </div>
+          <div className="crm-toolbar-actions">
+            <button
+              className="crm-secondary-button"
+              disabled={disabled || !selectedVenueId}
+              onClick={() => void handleExportCatalog()}
+              type="button"
+            >
+              <Download className="h-4 w-4" />
+              Exportar ZIP
+            </button>
+            <label
+              className={
+                disabled
+                  ? 'crm-secondary-button crm-file-button crm-file-button-disabled'
+                  : 'crm-secondary-button crm-file-button'
+              }
+            >
+              <Upload className="h-4 w-4" />
+              Seleccionar ZIP
+              <input accept=".zip,application/zip" disabled={disabled} onChange={handleBackupFileChange} type="file" />
+            </label>
+            <button
+              className="crm-primary-button"
+              disabled={disabled || !catalogTransfer || !selectedVenueId}
+              onClick={() => void handleBackupImport()}
+              type="button"
+            >
+              <Upload className="h-4 w-4" />
+              Importar ZIP
+            </button>
+          </div>
+        </div>
+
+        <div className="crm-kpi-strip">
+          <KpiCard color="green" label="Productos del local" value={catalogProducts.length} />
+          <KpiCard color="blue" label="Categorias" value={categories.length} />
+          <KpiCard color="orange" label="Formatos de venta" value={saleFormats.length} />
+          <KpiCard color="red" label="Imagenes" value={catalogProducts.filter((product) => product.imageUrl).length} />
+        </div>
+      </section>
+
+      {backupFileError ? <div className="crm-import-alert crm-import-alert-warning">{backupFileError}</div> : null}
+
+      {catalogTransfer ? (
+        <section className="crm-panel crm-panel-span">
+          <div className="crm-panel-header">
+            <span>ZIP preparado: {backupFileName}</span>
+          </div>
+          <div className="crm-import-result-grid">
+            <MiniMetric label="Origen" value={catalogTransfer.manifest.source.venueName} />
+            <MiniMetric label="Productos" value={String(catalogTransfer.manifest.products.length)} />
+            <MiniMetric label="Categorias" value={String(catalogTransfer.manifest.categories.length)} />
+            <MiniMetric label="Formatos de venta" value={String(catalogTransfer.manifest.saleFormats.length)} />
+            <MiniMetric label="Variantes" value={String(catalogTransfer.manifest.products.reduce((sum, product) => sum + product.variants.length, 0))} />
+            <MiniMetric label="Imagenes" value={String(catalogTransfer.images.size)} />
+          </div>
+        </section>
+      ) : null}
+
+      {backupImportResult ? (
+        <section className="crm-panel crm-panel-span">
+          <div className="crm-panel-header">
+            <span>Resultado de la importacion ZIP</span>
+          </div>
+          <div className="crm-import-result-grid">
+            <MiniMetric label="Categorias creadas / actualizadas" value={`${backupImportResult.categoriesCreated} / ${backupImportResult.categoriesUpdated}`} />
+            <MiniMetric label="Formatos creados / actualizados" value={`${backupImportResult.saleFormatsCreated} / ${backupImportResult.saleFormatsUpdated}`} />
+            <MiniMetric label="Productos creados / actualizados" value={`${backupImportResult.productsCreated} / ${backupImportResult.productsUpdated}`} />
+            <MiniMetric label="Variantes creadas / actualizadas" value={`${backupImportResult.variantsCreated} / ${backupImportResult.variantsUpdated}`} />
+            <MiniMetric label="Modificadores creados / actualizados" value={`${backupImportResult.modifiersCreated} / ${backupImportResult.modifiersUpdated}`} />
+            <MiniMetric label="Imagenes cargadas" value={String(backupImportResult.imagesUploaded)} />
+          </div>
+        </section>
+      ) : null}
+
       <section className="crm-panel crm-panel-span">
         <div className="crm-list-toolbar">
           <div className="crm-list-title">

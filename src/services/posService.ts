@@ -203,6 +203,32 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw new Error('No se ha recibido usuario autenticado.')
   }
 
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('full_name, is_superadmin')
+    .eq('id', user.id)
+    .maybeSingle<{ full_name: string | null; is_superadmin: boolean }>()
+
+  if (profileError) {
+    throw new Error(`No se pudo comprobar el perfil global: ${getReadableError(profileError)}`)
+  }
+
+  if (profile?.is_superadmin) {
+    await requireExclusiveLogin()
+    return {
+      tenantId: '',
+      tenantName: 'Plataforma CLUB POS',
+      tenantSlug: '',
+      venueId: '',
+      venueName: '',
+      deviceId: '',
+      deviceName: '',
+      userId: user.id,
+      userName: profile.full_name ?? user.user_metadata.full_name ?? user.email ?? 'Superadmin',
+      role: 'superadmin',
+    }
+  }
+
   const { data: memberships, error: membershipError } = await supabase
     .from('tenant_memberships')
     .select('tenant_id, role')
@@ -350,6 +376,32 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
 
   if (!user || user.id !== cachedContext.userId) {
     throw new TenantSessionError('La sesion guardada no pertenece al usuario de este TPV.')
+  }
+
+  const { data: profile, error: profileError } = await supabase
+    .from('profiles')
+    .select('full_name, is_superadmin')
+    .eq('id', user.id)
+    .maybeSingle<{ full_name: string | null; is_superadmin: boolean }>()
+
+  if (profileError) {
+    throw profileError
+  }
+
+  if (profile?.is_superadmin) {
+    await requireExclusiveLogin()
+    return {
+      tenantId: '',
+      tenantName: 'Plataforma CLUB POS',
+      tenantSlug: '',
+      venueId: '',
+      venueName: '',
+      deviceId: '',
+      deviceName: '',
+      userId: user.id,
+      userName: profile.full_name ?? user.user_metadata.full_name ?? user.email ?? 'Superadmin',
+      role: 'superadmin',
+    }
   }
 
   const [{ data: tenant, error: tenantError }, { data: membership, error: membershipError }] = await Promise.all([

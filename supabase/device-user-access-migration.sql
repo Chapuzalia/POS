@@ -754,9 +754,15 @@ create policy "offline_event_log_insert" on public.offline_event_log for insert 
 with check (public.user_can_access_offline_event(tenant_id, event_kind, payload, false));
 
 -- Las imagenes del catalogo solo pueden modificarlas owner/admin.
+drop policy if exists "product_images_tenant_select" on storage.objects;
 drop policy if exists "product_images_tenant_insert" on storage.objects;
 drop policy if exists "product_images_tenant_update" on storage.objects;
 drop policy if exists "product_images_tenant_delete" on storage.objects;
+create policy "product_images_tenant_select" on storage.objects for select to authenticated
+using (
+  bucket_id = 'product-images'
+  and public.user_is_tenant_admin(((storage.foldername(name))[1])::uuid)
+);
 create policy "product_images_tenant_insert" on storage.objects for insert to authenticated
 with check (
   bucket_id = 'product-images'

@@ -46,6 +46,188 @@ Deno.serve(async (request) => {
     const body = await request.json()
     const action = String(body.action ?? '')
     const tenantId = String(body.tenantId ?? '')
+    const { data: callerProfile, error: callerProfileError } = await adminClient
+      .from('profiles')
+      .select('is_superadmin')
+      .eq('id', authData.user.id)
+      .maybeSingle()
+
+    if (callerProfileError) {
+      throw callerProfileError
+    }
+
+    const isSuperadmin = callerProfile?.is_superadmin === true
+
+    if (action === 'platform-list') {
+      if (!isSuperadmin) {
+        return response({ error: 'Solo un superadmin puede consultar todos los negocios' }, 403)
+      }
+
+      const [tenantsResult, ownersResult, venuesResult] = await Promise.all([
+        adminClient.from('tenants').select('id, name, slug, created_at').order('created_at', { ascending: false }),
+        adminClient
+          .from('tenant_memberships')
+          .select('tenant_id, user_id, is_active')
+          .eq('role', 'owner'),
+        adminClient.from('venues').select('tenant_id'),
+      ])
+
+      if (tenantsResult.error || ownersResult.error || venuesResult.error) {
+        throw tenantsResult.error ?? ownersResult.error ?? venuesResult.error
+      }
+
+      const ownerIds = new Set((ownersResult.data ?? []).map((membership) => membership.user_id))
+      const ownerUsers = []
+      let page = 1
+
+      while (ownerIds.size) {
+        const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: 1000 })
+        if (error) {
+          throw error
+        }
+        ownerUsers.push(...data.users.filter((user) => ownerIds.has(user.id)))
+        if (data.users.length < 1000) {
+          break
+        }
+        page += 1
+      }
+
+      const ownerUserById = new Map(ownerUsers.map((user) => [user.id, user]))
+      const ownerByTenant = new Map(
+        (ownersResult.data ?? []).map((membership) => {
+          const owner = ownerUserById.get(membership.user_id)
+          return [membership.tenant_id, {
+            email: owner?.email ?? '',
+            fullName: String(owner?.user_metadata?.full_name ?? ''),
+            isActive: membership.is_active,
+          }]
+        }),
+      )
+      const venueCountByTenant = new Map<string, number>()
+      for (const venue of venuesResult.data ?? []) {
+        venueCountByTenant.set(venue.tenant_id, (venueCountByTenant.get(venue.tenant_id) ?? 0) + 1)
+      }
+
+      return response({
+        tenants: (tenantsResult.data ?? []).map((tenant) => ({
+          id: tenant.id,
+          name: tenant.name,
+          slug: tenant.slug,
+          createdAt: tenant.created_at,
+          owner: ownerByTenant.get(tenant.id) ?? null,
+          venueCount: venueCountByTenant.get(tenant.id) ?? 0,
+        })),
+      })
+    }
+
+    if (action === 'platform-create-tenant') {
+      if (!isSuperadmin) {
+        return response({ error: 'Solo un superadmin puede crear negocios' }, 403)
+      }
+
+      const tenantName = String(body.tenantName ?? '').trim()
+      const tenantSlug = String(body.tenantSlug ?? '').trim().toLowerCase()
+      const venueName = String(body.venueName ?? '').trim()
+      const ownerEmail = String(body.ownerEmail ?? '').trim().toLowerCase()
+      const ownerPassword = String(body.ownerPassword ?? '')
+      const ownerFullName = String(body.ownerFullName ?? '').trim()
+
+      if (
+        !tenantName || !venueName || !ownerEmail || !ownerFullName || ownerPassword.length < 8
+        || !/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(tenantSlug)
+      ) {
+        return response({ error: 'Completa todos los campos, usa un slug valido y una contrasena de al menos 8 caracteres' }, 400)
+      }
+
+      const { data: existingTenant, error: existingTenantError } = await adminClient
+        .from('tenants')
+        .select('id')
+        .eq('slug', tenantSlug)
+        .maybeSingle()
+
+      if (existingTenantError) {
+        throw existingTenantError
+      }
+      if (existingTenant) {
+        return response({ error: 'Ya existe un negocio con ese slug' }, 409)
+      }
+
+      const { data: createdOwner, error: ownerCreateError } = await adminClient.auth.admin.createUser({
+        email: ownerEmail,
+        password: ownerPassword,
+        email_confirm: true,
+        user_metadata: { full_name: ownerFullName },
+      })
+
+      if (ownerCreateError || !createdOwner.user) {
+        return response({ error: ownerCreateError?.message ?? 'No se pudo crear el usuario owner' }, 409)
+      }
+
+      const ownerId = createdOwner.user.id
+      let createdTenantId = ''
+
+      try {
+        const { data: createdTenant, error: tenantCreateError } = await adminClient
+          .from('tenants')
+          .insert({ name: tenantName, slug: tenantSlug })
+          .select('id, name, slug, created_at')
+          .single()
+
+        if (tenantCreateError || !createdTenant) {
+          throw tenantCreateError ?? new Error('No se pudo crear el negocio')
+        }
+        createdTenantId = createdTenant.id
+
+        const setupResults = await Promise.all([
+          adminClient.from('profiles').upsert({
+            id: ownerId,
+            full_name: ownerFullName,
+            is_superadmin: false,
+          }),
+          adminClient.from('tenant_memberships').insert({
+            tenant_id: createdTenant.id,
+            user_id: ownerId,
+            role: 'owner',
+            is_active: true,
+          }),
+          adminClient.from('venues').insert({
+            tenant_id: createdTenant.id,
+            name: venueName,
+            sort_order: 1,
+            is_active: true,
+          }),
+          adminClient.from('sale_formats').insert([
+            { tenant_id: createdTenant.id, key: 'cubata', label: 'Cubata', sort_order: 1, is_active: true },
+            { tenant_id: createdTenant.id, key: 'copa', label: 'Copa', sort_order: 2, is_active: true },
+            { tenant_id: createdTenant.id, key: 'shot', label: 'Chupito', sort_order: 3, is_active: true },
+            { tenant_id: createdTenant.id, key: 'beer_bottle', label: 'Botellin cerveza', sort_order: 4, is_active: true },
+            { tenant_id: createdTenant.id, key: 'soft_bottle', label: 'Botellin refresco', sort_order: 5, is_active: true },
+            { tenant_id: createdTenant.id, key: 'cocktail', label: 'Coctel', sort_order: 6, is_active: true },
+          ]),
+        ])
+        const setupError = setupResults.find((result) => result.error)?.error
+        if (setupError) {
+          throw setupError
+        }
+
+        return response({
+          tenant: {
+            id: createdTenant.id,
+            name: createdTenant.name,
+            slug: createdTenant.slug,
+            createdAt: createdTenant.created_at,
+          },
+          ownerId,
+        }, 201)
+      } catch (setupError) {
+        if (createdTenantId) {
+          await adminClient.from('tenants').delete().eq('id', createdTenantId)
+        }
+        await adminClient.auth.admin.deleteUser(ownerId)
+        throw setupError
+      }
+    }
+
     const { data: membership, error: membershipError } = await adminClient
       .from('tenant_memberships')
       .select('role, is_active')

@@ -24,7 +24,7 @@ export type CatalogFilter = CatalogStartTab | SaleFormat
 
 export type PaymentMethod = 'cash' | 'card' | 'invitation' | 'other'
 
-export type TenantRole = 'owner' | 'admin' | 'manager' | 'cashier'
+export type TenantRole = 'superadmin' | 'owner' | 'admin' | 'manager' | 'cashier'
 
 export type ThemeMode = 'light' | 'dark'
 

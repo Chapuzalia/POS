@@ -31,6 +31,7 @@ create table if not exists public.tenants (
 create table if not exists public.profiles (
   id uuid primary key references auth.users(id) on delete cascade,
   full_name text,
+  is_superadmin boolean not null default false,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -129,6 +130,7 @@ create table if not exists public.sale_formats (
 create table if not exists public.products (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
+  venue_id uuid not null references public.venues(id) on delete restrict,
   category_id uuid not null references public.categories(id) on delete restrict,
   name text not null,
   description text,
@@ -144,6 +146,12 @@ create table if not exists public.products (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
+
+-- Compatibilidad al ejecutar el esquema consolidado sobre una instalacion
+-- anterior; la migracion de acceso por dispositivo completa despues la FK y
+-- convierte la columna en obligatoria.
+alter table public.products
+add column if not exists venue_id uuid;
 
 alter table public.products
 drop constraint if exists products_sale_formats_check;
@@ -671,10 +679,8 @@ on public.profiles for select
 using (id = auth.uid());
 
 drop policy if exists "profiles_self_upsert" on public.profiles;
-create policy "profiles_self_upsert"
-on public.profiles for all
-using (id = auth.uid())
-with check (id = auth.uid());
+-- Los perfiles se escriben exclusivamente desde funciones de backend con
+-- service_role para impedir que un usuario se conceda is_superadmin.
 
 drop policy if exists "memberships_self_select" on public.tenant_memberships;
 create policy "memberships_self_select"
@@ -816,8 +822,16 @@ using (public.user_has_tenant_access(tenant_id))
 with check (public.user_has_tenant_access(tenant_id));
 
 drop policy if exists "product_images_public_read" on storage.objects;
--- El bucket es publico para descarga por URL, pero no se concede SELECT sobre
--- storage.objects porque ese permiso tambien permitiria listar sus archivos.
+-- El bucket es publico para descarga por URL. El SELECT de metadatos se limita
+-- a miembros del tenant porque Storage lo necesita para upload/upsert.
+
+drop policy if exists "product_images_tenant_select" on storage.objects;
+create policy "product_images_tenant_select"
+on storage.objects for select to authenticated
+using (
+  bucket_id = 'product-images'
+  and public.user_has_tenant_access(((storage.foldername(name))[1])::uuid)
+);
 
 drop policy if exists "product_images_tenant_insert" on storage.objects;
 create policy "product_images_tenant_insert"
@@ -896,8 +910,8 @@ values
 on conflict do nothing;
 
 insert into public.sale_formats (tenant_id, key, label, sort_order, is_active)
-select tenant_id, key, label, sort_order, true
-from public.tenants
+select tenants.id, defaults.key, defaults.label, defaults.sort_order, true
+from public.tenants as tenants
 cross join (
   values
     ('cubata', 'Cubata', 1),
@@ -912,6 +926,7 @@ on conflict (tenant_id, key) do nothing;
 insert into public.products (
   id,
   tenant_id,
+  venue_id,
   category_id,
   name,
   description,
@@ -922,11 +937,11 @@ insert into public.products (
   sort_order
 )
 values
-  ('44444444-4444-4444-4444-444444444441', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333331', 'Seagrams', 'Ginebra', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1),
-  ('44444444-4444-4444-4444-444444444442', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333332', 'Barcelo', 'Ron', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1),
-  ('44444444-4444-4444-4444-444444444443', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333333', 'Tonica', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 1),
-  ('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333334', 'Estrella Damm', 'Botellin de cerveza', 'beer_bottle', array['beer_bottle'], true, false, 1),
-  ('44444444-4444-4444-4444-444444444445', '11111111-1111-1111-1111-111111111111', '33333333-3333-3333-3333-333333333335', 'Mojito', 'Coctel preparado', 'cocktail', array['cocktail'], true, false, 1)
+  ('44444444-4444-4444-4444-444444444441', '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333331', 'Seagrams', 'Ginebra', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1),
+  ('44444444-4444-4444-4444-444444444442', '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333332', 'Barcelo', 'Ron', 'alcohol', array['cubata', 'copa', 'shot'], true, false, 1),
+  ('44444444-4444-4444-4444-444444444443', '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333333', 'Tonica', 'Botellin y mixer', 'mixer', array['soft_bottle'], true, true, 1),
+  ('44444444-4444-4444-4444-444444444444', '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333334', 'Estrella Damm', 'Botellin de cerveza', 'beer_bottle', array['beer_bottle'], true, false, 1),
+  ('44444444-4444-4444-4444-444444444445', '11111111-1111-1111-1111-111111111111', '22222222-2222-2222-2222-222222222222', '33333333-3333-3333-3333-333333333335', 'Mojito', 'Coctel preparado', 'cocktail', array['cocktail'], true, false, 1)
 on conflict do nothing;
 
 insert into public.product_variants (id, tenant_id, product_id, name, price_cents, is_default, sort_order)
