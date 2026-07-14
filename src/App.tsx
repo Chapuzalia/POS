@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from './components/layout/AppHeader'
 import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog, SessionTicketsModal } from './components/modals'
-import { CatalogPanel, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
+import { CatalogPanel, MobileTicketModal, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
 import { CrmPage } from './components/crm/CrmPage'
 import { SuperAdminPage } from './components/superadmin/SuperAdminPage'
 import { LoginScreen } from './components/screens/LoginScreen'
@@ -196,6 +196,7 @@ function App() {
   const [closeCashOpen, setCloseCashOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
   const [ticketHistoryOpen, setTicketHistoryOpen] = useState(false)
+  const [mobileTicketOpen, setMobileTicketOpen] = useState(false)
   const [paidFeedback, setPaidFeedback] = useState<PaymentMethod | null>(null)
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
   const [loginLeaseBlocked, setLoginLeaseBlocked] = useState(false)
@@ -642,6 +643,7 @@ function App() {
     setCloseCashOpen(false)
     setConfigOpen(false)
     setTicketHistoryOpen(false)
+    setMobileTicketOpen(false)
     setProductDialog(null)
     setPendingRestaurantPayment(null)
     setTablesEnabled(false)
@@ -1075,6 +1077,7 @@ function App() {
       setRestaurantOrder(null)
       restaurantOrderRef.current = null
       setPendingRestaurantPayment(null)
+      setMobileTicketOpen(false)
       updateRestaurantSaveState('saved')
       setPaidFeedback(paymentMethod)
       await refreshRestaurantState()
@@ -1295,6 +1298,7 @@ function App() {
     ])
     mergeProductSalesStats(ticketLines)
     persistTicket([])
+    setMobileTicketOpen(false)
     refreshPendingCount()
     setPaidFeedback(paymentMethod)
     window.setTimeout(() => setPaidFeedback(null), 500)
@@ -1487,6 +1491,47 @@ function App() {
     ? restaurantOrder.lines.map((line) => ({ id: line.id, productId: line.productId ?? '', productName: line.productName, variantId: line.variantId ?? '', variantName: line.variantName, unitPriceCents: line.unitPriceCents, quantity: line.quantity, modifiers: line.modifiers }))
     : ticketLines
   const canSell = Boolean(context.canTakePayments && cashSession && activeTicketLines.length > 0 && !isBusy && (posView.type !== 'table_order' || isOnline))
+  const activeTicketItemCount = activeTicketLines.reduce((total, line) => total + line.quantity, 0)
+  const activeTicketTotal = getTicketTotal(activeTicketLines)
+
+  function renderActiveTicketPanel() {
+    return posView.type === 'table_order' && restaurantOrder ? <RestaurantOrderPanel
+      isBusy={isBusy || !isOnline}
+      onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
+      onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
+      onRemove={(lineId) => {
+        const line = restaurantOrderRef.current?.lines.find((item) => item.id === lineId)
+        if (!line || !isLineRemovable(line)) {
+          setError('No puedes eliminar una linea con productos ya servidos.')
+          return
+        }
+        updateRestaurantDraft((detail) => ({ ...detail, lines: detail.lines.filter((item) => item.id !== lineId) }))
+      }}
+      onServeAll={serveRestaurantLineFully}
+      onServeAllOrder={serveRestaurantOrderFully}
+      onServeOne={serveRestaurantLineUnit}
+      order={restaurantOrder}
+    /> : <TicketPanel
+      isBusy={isBusy}
+      lines={activeTicketLines}
+      onClear={() => {
+        if (posView.type === 'table_order') {
+          updateRestaurantDraft((detail) => ({ ...detail, lines: [] }))
+        } else {
+          persistTicket([])
+        }
+      }}
+      onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
+      onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
+      onRemove={(lineId) => {
+        if (posView.type === 'table_order') {
+          updateRestaurantDraft((detail) => ({ ...detail, lines: detail.lines.filter((line) => line.id !== lineId) }))
+        } else {
+          persistTicket(ticketLines.filter((line) => line.id !== lineId))
+        }
+      }}
+    />
+  }
 
   if (isSuperadmin(context)) {
     return (
@@ -1587,43 +1632,8 @@ function App() {
       ) : null}
 
       <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 max-lg:flex-col ${tablesEnabled && posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
-        <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:w-full max-lg:min-w-0">
-          {posView.type === 'table_order' && restaurantOrder ? <RestaurantOrderPanel
-            isBusy={isBusy || !isOnline}
-            onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
-            onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
-            onRemove={(lineId) => {
-              const line = restaurantOrderRef.current?.lines.find((item) => item.id === lineId)
-              if (!line || !isLineRemovable(line)) {
-                setError('No puedes eliminar una linea con productos ya servidos.')
-                return
-              }
-              updateRestaurantDraft((detail) => ({ ...detail, lines: detail.lines.filter((item) => item.id !== lineId) }))
-            }}
-            onServeAll={serveRestaurantLineFully}
-            onServeAllOrder={serveRestaurantOrderFully}
-            onServeOne={serveRestaurantLineUnit}
-            order={restaurantOrder}
-          /> : <TicketPanel
-            isBusy={isBusy}
-            lines={activeTicketLines}
-            onClear={() => {
-              if (posView.type === 'table_order') {
-                updateRestaurantDraft((detail) => ({ ...detail, lines: [] }))
-              } else {
-                persistTicket([])
-              }
-            }}
-            onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
-            onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
-            onRemove={(lineId) => {
-              if (posView.type === 'table_order') {
-                updateRestaurantDraft((detail) => ({ ...detail, lines: detail.lines.filter((line) => line.id !== lineId) }))
-              } else {
-                persistTicket(ticketLines.filter((line) => line.id !== lineId))
-              }
-            }}
-          />}
+        <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
+          {renderActiveTicketPanel()}
           <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={posView.type === 'table_order' ? 'Cobrar todo' : undefined} onPayment={handlePayment} />
         </section>
 
@@ -1639,6 +1649,22 @@ function App() {
           <OpenCashPanel disabled={!context || isBusy} isBusy={isBusy} onOpen={handleOpenCash} />
         )}
       </main>
+
+      {tablesEnabled && posView.type === 'table_map' ? null : (
+        <MobileTicketModal
+          isOpen={mobileTicketOpen}
+          itemCount={activeTicketItemCount}
+          onClose={() => setMobileTicketOpen(false)}
+          onOpen={() => setMobileTicketOpen(true)}
+          title={posView.type === 'table_order' ? 'Comanda' : 'Ticket'}
+          totalCents={activeTicketTotal}
+        >
+          <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
+            {renderActiveTicketPanel()}
+            <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={posView.type === 'table_order' ? 'Cobrar todo' : undefined} onPayment={handlePayment} />
+          </div>
+        </MobileTicketModal>
+      )}
 
       {pendingRestaurantPayment ? <div className="table-modal-backdrop">
         <section className="table-modal" role="dialog" aria-modal="true" aria-labelledby="pending-service-title">
