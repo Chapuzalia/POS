@@ -78,7 +78,6 @@ import { TableOrderBar } from './features/tables/components/TableOrderBar'
 import { RestaurantOrderPanel } from './features/tables/components/RestaurantOrderPanel'
 import {
   closeRestaurantOrder,
-  groupRestaurantTables,
   loadOpenRestaurantOrders,
   loadRestaurantMap,
   loadRestaurantOrder,
@@ -93,6 +92,7 @@ import {
   subscribeToRestaurantMap,
 } from './features/tables/service'
 import type { PosView, RestaurantMap, RestaurantOrderDetail, RestaurantOrderSaveState } from './features/tables/types'
+import { applySessionLayout, loadSessionTableLayout, saveSessionTableLayout, subscribeToSessionTableLayout } from './features/tables/layout-service'
 import { canDecreaseLineQuantity, getOrderPendingUnits, isLineRemovable } from './features/tables/service-status'
 import { CashSessionGate } from './features/cash-registers/CashSessionGate'
 import { closeCashRegisterSession, loadCashRegisterOptions, openCashRegisterSession, subscribeToVenueCashSessions } from './features/cash-registers/service'
@@ -204,7 +204,7 @@ function App() {
   const [loginLeaseBlocked, setLoginLeaseBlocked] = useState(false)
   const [route, setRoute] = useState<AppRoute>(() => getAppRoute())
   const [tablesEnabled, setTablesEnabled] = useState(false)
-  const [restaurantMap, setRestaurantMap] = useState<RestaurantMap>({ areas: [], tables: [] })
+  const [restaurantMap, setRestaurantMap] = useState<RestaurantMap>({ areas: [], tables: [], layoutRevision: 0 })
   const [restaurantOrder, setRestaurantOrder] = useState<RestaurantOrderDetail | null>(null)
   const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
   const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
@@ -224,6 +224,13 @@ function App() {
     lastSyncedActivityAt: Date.now(),
   })
   const cashSummary = summarizeSales(cashSession?.openingFloatCents ?? 0, salesLedger)
+  const activeCashSessionId = cashSession?.id
+  async function loadCurrentRestaurantMap(activeContext: TenantContext, activeSessionId = cashSession?.id) {
+    const permanentMap = await loadRestaurantMap(activeContext)
+    if (!activeSessionId) return { ...permanentMap, layoutRevision: 0 }
+    const layout = await loadSessionTableLayout(activeContext, activeSessionId)
+    return applySessionLayout(permanentMap, layout)
+  }
 
   const refreshCashRegisterOptions = useCallback(async (activeContext = context) => {
     if (!activeContext || !isOnline || isAdministrativeUser(activeContext)) return
@@ -299,7 +306,7 @@ function App() {
           setTablesConfigLoaded(true)
           return
         }
-        const nextMap = await loadRestaurantMap(context)
+        const nextMap = await loadCurrentRestaurantMap(context, activeCashSessionId)
         if (active) {
           setRestaurantMap(nextMap)
           if (isInitialLoad) {
@@ -343,12 +350,16 @@ function App() {
         })()
       }, 250)
     })
+    const unsubscribeLayout = activeCashSessionId
+      ? subscribeToSessionTableLayout(context, activeCashSessionId, () => void refreshMap())
+      : () => undefined
     return () => {
       active = false
       if (realtimeTimer) window.clearTimeout(realtimeTimer)
       unsubscribe()
+      unsubscribeLayout()
     }
-  }, [context, isOnline])
+  }, [context, isOnline, activeCashSessionId])
 
   useEffect(() => {
     restaurantOrderRef.current = restaurantOrder
@@ -971,7 +982,7 @@ function App() {
   async function refreshRestaurantState(orderId?: string) {
     if (!context || !isOnline) return
     const [nextMap, nextOrder] = await Promise.all([
-      loadRestaurantMap(context),
+      loadCurrentRestaurantMap(context),
       orderId ? loadRestaurantOrder(context, orderId) : Promise.resolve(null),
     ])
     setRestaurantMap(nextMap)
@@ -1100,7 +1111,7 @@ function App() {
       if (!saved) return
     }
     try {
-      const nextMap = context && isOnline ? await loadRestaurantMap(context) : restaurantMap
+      const nextMap = context && isOnline ? await loadCurrentRestaurantMap(context) : restaurantMap
       setRestaurantOrder(null)
       restaurantOrderRef.current = null
       updateRestaurantSaveState('saved')
@@ -1118,17 +1129,6 @@ function App() {
     if (!saved) return
     setMoveOrderId(saved.order.id)
     setPosView({ type: 'table_map', areaId: saved.tables[0]?.areaId })
-  }
-
-  async function groupTables(tableIds: string[], guestCount: number) {
-    if (!context || !cashSession || !isOnline) return
-    setIsBusy(true); setError(null)
-    try {
-      await syncPendingEvents()
-      const orderId = await groupRestaurantTables({ tableIds, guestCount, cashSessionId: cashSession.id, deviceId: context.deviceId })
-      await refreshRestaurantState(orderId)
-      setPosView({ type: 'table_order', orderId })
-    } catch (groupError) { setError(getReadableError(groupError)) } finally { setIsBusy(false) }
   }
 
   async function moveTableOrder(tableId: string) {
@@ -1705,6 +1705,7 @@ function App() {
       {tablesEnabled && posView.type === 'table_map' ? (
         <TableMapView
           canOpen={Boolean(cashSession && context.canTakeOrders)}
+          cashSessionId={cashSession.id}
           canQuickSale={context.canTakePayments === true}
           isBusy={isBusy}
           isOnline={isOnline}
@@ -1712,7 +1713,17 @@ function App() {
           moveOrderId={moveOrderId}
           onAreaChange={(areaId) => setPosView({ type: 'table_map', areaId })}
           onCancelMove={() => setMoveOrderId(null)}
-          onGroup={groupTables}
+          onError={(message) => setError(message)}
+          onLayoutChange={async (tables, expectedRevision) => {
+            try {
+              const saved = await saveSessionTableLayout(cashSession.id, expectedRevision, tables)
+              setRestaurantMap((current) => applySessionLayout(current, saved))
+              return saved
+            } catch (layoutError) {
+              try { setRestaurantMap(await loadCurrentRestaurantMap(context, cashSession.id)) } catch { /* se conserva el ultimo mapa confirmado */ }
+              throw layoutError
+            }
+          }}
           onMove={moveTableOrder}
           onOpen={openTableOrder}
           onOpenOrder={(orderId) => void openExistingTableOrder(orderId)}
