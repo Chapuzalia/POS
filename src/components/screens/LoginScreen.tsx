@@ -8,7 +8,6 @@ type LoginScreenProps = {
   cachedContext: TenantContext | null
   error: string | null
   isBusy: boolean
-  loginBlocked: boolean
   isOnline: boolean
   onLogin: (input: LoginInput) => Promise<void>
   onOfflineEnter: () => void
@@ -19,7 +18,6 @@ export function LoginScreen({
   cachedContext,
   error,
   isBusy,
-  loginBlocked,
   isOnline,
   onLogin,
   onOfflineEnter,
@@ -76,7 +74,7 @@ export function LoginScreen({
             </div>
           ) : null}
 
-          <Button disabled={!isOnline || isBusy || loginBlocked} fullWidth size="lg" type="submit" variant="primary">
+          <Button disabled={!isOnline || isBusy} fullWidth size="lg" type="submit" variant="primary">
             <LogIn className="h-5 w-5" />
             Entrar
           </Button>

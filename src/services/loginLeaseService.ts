@@ -79,6 +79,20 @@ export async function heartbeatLoginLease() {
   return data === true
 }
 
+export async function checkLoginLease() {
+  if (!supabase || !activeClientId) {
+    return false
+  }
+
+  const { data, error } = await supabase.rpc('check_user_login', { p_client_id: activeClientId })
+
+  if (error) {
+    throw error
+  }
+
+  return data === true
+}
+
 export async function releaseLoginLease() {
   if (supabase && activeClientId) {
     const { error } = await supabase.rpc('release_user_login', { p_client_id: activeClientId })

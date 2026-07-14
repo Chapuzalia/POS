@@ -261,6 +261,21 @@ export async function setCrmPosUserActive(context: TenantContext, userId: string
   }
 }
 
+export async function releaseCrmPosUserLogin(context: TenantContext, userId: string) {
+  const client = requireSupabase()
+  const { data, error } = await client.functions.invoke<{ error?: string }>('manage-pos-users', {
+    body: { action: 'release-login', tenantId: context.tenantId, userId },
+  })
+
+  if (error) {
+    throw error
+  }
+
+  if (data?.error) {
+    throw new Error(data.error)
+  }
+}
+
 export async function updateCrmPosUser(
   context: TenantContext,
   userId: string,

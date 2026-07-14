@@ -71,7 +71,7 @@ export function TableMapView(props: Props) {
         <div><h1>Mapa de mesas</h1><p>Selecciona una mesa para abrir o recuperar su comanda.</p></div>
         <div className="table-map-actions">
           <button className="table-action secondary" disabled={!isOnline || isBusy || Boolean(moveOrderId)} onClick={() => { setGroupMode((value) => !value); setSelectedIds([]) }} type="button"><Link2 size={18} /> {groupMode ? 'Cancelar agrupacion' : 'Agrupar mesas'}</button>
-          <button className="table-action primary" disabled={!canQuickSale} onClick={onQuickSale} type="button"><ShoppingBag size={18} /> Venta rapida</button>
+          {canQuickSale ? <button className="table-action primary" disabled={!canQuickSale} onClick={onQuickSale} type="button"><ShoppingBag size={18} /> Venta rapida</button> : null}
         </div>
       </header>
       {!isOnline ? <div className="table-offline-warning">La gestion de mesas requiere conexion. La venta rapida sigue disponible.</div> : null}

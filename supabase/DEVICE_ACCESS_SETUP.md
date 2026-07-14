@@ -5,7 +5,8 @@
 1. Ejecuta `schema.sql` y las migraciones anteriores del proyecto.
 2. Ejecuta `pos-security-hardening-migration.sql`.
 3. Ejecuta `device-user-access-migration.sql`.
-4. Despliega la funcion de administracion:
+4. Ejecuta `5.login-lease-inactivity-migration.sql`.
+5. Despliega la funcion de administracion:
 
 ```bash
 supabase functions deploy manage-pos-users
@@ -33,10 +34,11 @@ membresias, el acceso se rechaza para no seleccionar un negocio de forma arbitra
 ## Sesion unica
 
 `device-user-access-migration.sql` crea una concesion de login exclusiva por
-usuario. La aplicacion la renueva cada 30 segundos y rechaza el acceso desde otro
-dispositivo o pestana. Un cierre inesperado libera la cuenta automaticamente cuando
-la concesion deja de recibir renovaciones durante 90 segundos; un cierre de sesion
-normal la libera inmediatamente.
+usuario y `5.login-lease-inactivity-migration.sql` anade su caducidad por inactividad.
+La aplicacion comprueba la concesion cada 30 segundos, pero solo la renueva cuando
+detecta una interaccion real. Tras 30 minutos sin actividad cierra la sesion y libera
+la cuenta; un cierre normal la libera inmediatamente. El owner tambien puede ver y
+liberar sesiones concretas desde **CRM > Accesos**.
 
 ## Catalogo por local
 

@@ -794,10 +794,16 @@ button {
 
 .crm-access-user-row {
   display: grid;
-  grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.8fr) 90px minmax(220px, auto);
+  grid-template-columns: minmax(180px, 1fr) minmax(170px, 0.8fr) 100px minmax(300px, auto);
   align-items: center;
   gap: 12px;
   padding: 10px 0;
+}
+
+.crm-user-statuses {
+  display: grid;
+  justify-items: start;
+  gap: 4px;
 }
 
 .crm-access-user-entry {
@@ -1714,6 +1720,22 @@ button {
   .crm-list-panel,
   .crm-editor-panel {
     min-height: 0;
+  }
+}
+
+@media (max-width: 900px) {
+  .crm-access-user-row {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .crm-access-user-row > .crm-cell-main:nth-child(2) {
+    grid-column: 1 / -1;
+    grid-row: 2;
+  }
+
+  .crm-access-user-actions {
+    grid-column: 1 / -1;
+    justify-content: flex-start;
   }
 }
 

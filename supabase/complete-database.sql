@@ -1636,7 +1636,7 @@ create table if not exists public.user_login_leases (
   auth_session_id text not null,
   client_id uuid not null,
   heartbeat_at timestamptz not null default now(),
-  expires_at timestamptz not null default (now() + interval '90 seconds')
+  expires_at timestamptz not null default (now() + interval '30 minutes')
 );
 
 create index if not exists user_login_leases_expiry_idx
@@ -1691,7 +1691,7 @@ begin
   insert into public.user_login_leases (
     user_id, auth_session_id, client_id, heartbeat_at, expires_at
   ) values (
-    current_user_id, current_session_id, p_client_id, now(), now() + interval '90 seconds'
+    current_user_id, current_session_id, p_client_id, now(), now() + interval '30 minutes'
   )
   on conflict (user_id) do update set
     auth_session_id = excluded.auth_session_id,
@@ -1721,14 +1721,32 @@ declare
 begin
   update public.user_login_leases
   set heartbeat_at = now(),
-      expires_at = now() + interval '90 seconds'
+      expires_at = now() + interval '30 minutes'
   where user_id = current_user_id
     and auth_session_id = current_session_id
     and client_id = p_client_id
+    and expires_at > now()
   returning true into refreshed;
 
   return coalesce(refreshed, false);
 end;
+$$;
+
+create or replace function public.check_user_login(p_client_id uuid)
+returns boolean
+language sql
+stable
+security definer
+set search_path = ''
+as $$
+  select exists (
+    select 1
+    from public.user_login_leases
+    where user_id = auth.uid()
+      and auth_session_id = (auth.jwt() ->> 'session_id')
+      and client_id = p_client_id
+      and expires_at > now()
+  );
 $$;
 
 create or replace function public.release_user_login(p_client_id uuid)
@@ -1745,9 +1763,11 @@ $$;
 
 revoke all on function public.claim_user_login(uuid) from public;
 revoke all on function public.heartbeat_user_login(uuid) from public;
+revoke all on function public.check_user_login(uuid) from public;
 revoke all on function public.release_user_login(uuid) from public;
 grant execute on function public.claim_user_login(uuid) to authenticated;
 grant execute on function public.heartbeat_user_login(uuid) to authenticated;
+grant execute on function public.check_user_login(uuid) to authenticated;
 grant execute on function public.release_user_login(uuid) to authenticated;
 
 create or replace function public.user_is_tenant_admin(target_tenant uuid)

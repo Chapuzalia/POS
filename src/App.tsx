@@ -72,7 +72,7 @@ import type {
 } from './types'
 import { nowIso } from './utils/dates'
 import { getReadableError } from './utils/errors'
-import { heartbeatLoginLease, releaseLocalLoginLock } from './services/loginLeaseService'
+import { checkLoginLease, heartbeatLoginLease, releaseLocalLoginLock } from './services/loginLeaseService'
 import { TableMapView } from './features/tables/components/TableMapView'
 import { TableOrderBar } from './features/tables/components/TableOrderBar'
 import { RestaurantOrderPanel } from './features/tables/components/RestaurantOrderPanel'
@@ -109,6 +109,8 @@ type AppRoute = 'pos' | 'crm' | 'superadmin'
 
 const themes = themesData as ThemeDefinition[]
 const defaultThemeId = themes[0]?.id ?? 'hero-minimal'
+const loginInactivityMs = 30 * 60 * 1000
+const loginLeaseCheckIntervalMs = 30_000
 
 function getAppRoute(): AppRoute {
   const path = window.location.pathname.replace(/\/+$/, '')
@@ -215,6 +217,12 @@ function App() {
   const restaurantSavePromiseRef = useRef<Promise<RestaurantOrderDetail | null> | null>(null)
   const flushRestaurantOrderDraftRef = useRef<() => Promise<RestaurantOrderDetail | null>>(async () => null)
   const posViewRef = useRef<PosView>(posView)
+  const loginActivityRef = useRef({
+    context: null as TenantContext | null,
+    lastActivityAt: Date.now(),
+    lastHeartbeatAt: Date.now(),
+    lastSyncedActivityAt: Date.now(),
+  })
   const cashSummary = summarizeSales(cashSession?.openingFloatCents ?? 0, salesLedger)
 
   const refreshCashRegisterOptions = useCallback(async (activeContext = context) => {
@@ -278,6 +286,9 @@ function App() {
     let initialized = false
     setTablesConfigLoaded(false)
     const refreshMap = async () => {
+      const isInitialLoad = !initialized
+      initialized = true
+
       try {
         const enabled = await loadVenueTablesEnabled(context)
         if (!active) return
@@ -286,18 +297,19 @@ function App() {
           setPosView({ type: 'quick_sale' })
           setRestaurantMap({ areas: [], tables: [] })
           setTablesConfigLoaded(true)
-          initialized = true
           return
         }
         const nextMap = await loadRestaurantMap(context)
         if (active) {
           setRestaurantMap(nextMap)
-          setPosView((current) => !initialized && current.type === 'quick_sale' ? { type: 'table_map', areaId: nextMap.areas[0]?.id } : current)
+          if (isInitialLoad) {
+            setPosView({ type: 'table_map', areaId: nextMap.areas[0]?.id })
+          }
           setTablesConfigLoaded(true)
-          initialized = true
         }
       } catch (mapError) {
         if (active) {
+          if (isInitialLoad) initialized = false
           setTablesConfigLoaded(true)
           setError(getReadableError(mapError))
         }
@@ -364,39 +376,118 @@ function App() {
   }, [isOnline])
 
   useEffect(() => {
-    if (!context || !isOnline) {
+    if (!context) {
+      loginActivityRef.current.context = null
       return undefined
     }
 
+    const activity = loginActivityRef.current
+    if (activity.context !== context) {
+      const now = Date.now()
+      activity.context = context
+      activity.lastActivityAt = now
+      activity.lastHeartbeatAt = now
+      activity.lastSyncedActivityAt = now
+    }
+
     let active = true
+    let closing = false
+    let leaseRequestInFlight = false
+    let idleTimeoutId: ReturnType<typeof window.setTimeout> | null = null
 
-    async function refreshLoginLease() {
+    async function closeLoginSession(message: string, leaseBlocked: boolean) {
+      if (!active || closing) return
+      closing = true
+
+      clearActiveState()
+      saveCachedContext(null)
+      setLoginLeaseBlocked(leaseBlocked)
+      setError(message)
+
       try {
-        const ownsLease = await heartbeatLoginLease()
+        await logoutTenant()
+      } catch {
+        releaseLocalLoginLock()
+      }
+    }
 
-        if (!ownsLease && active) {
-          releaseLocalLoginLock()
-          clearActiveState()
-          setLoginLeaseBlocked(true)
-          setError('La sesion se ha cerrado porque esta cuenta se ha abierto en otro dispositivo o pestana.')
+    function scheduleIdleClose() {
+      if (idleTimeoutId) window.clearTimeout(idleTimeoutId)
+      const remainingMs = Math.max(0, loginInactivityMs - (Date.now() - activity.lastActivityAt))
+      idleTimeoutId = window.setTimeout(() => {
+        void closeLoginSession('La sesion se ha cerrado tras 30 minutos sin actividad.', false)
+      }, remainingMs)
+    }
+
+    async function validateLoginLease(forceHeartbeat = false) {
+      if (!active || closing || leaseRequestInFlight) return
+
+      if (Date.now() - activity.lastActivityAt >= loginInactivityMs) {
+        await closeLoginSession('La sesion se ha cerrado tras 30 minutos sin actividad.', false)
+        return
+      }
+
+      if (!isOnline) return
+      leaseRequestInFlight = true
+
+      try {
+        const now = Date.now()
+        const hasUnsyncedActivity = activity.lastActivityAt > activity.lastSyncedActivityAt
+        const shouldHeartbeat = hasUnsyncedActivity
+          && (forceHeartbeat || now - activity.lastHeartbeatAt >= loginLeaseCheckIntervalMs)
+        const syncedActivityAt = activity.lastActivityAt
+        const ownsLease = shouldHeartbeat
+          ? await heartbeatLoginLease()
+          : await checkLoginLease()
+
+        if (shouldHeartbeat && ownsLease) {
+          activity.lastHeartbeatAt = Date.now()
+          activity.lastSyncedActivityAt = syncedActivityAt
+        }
+
+        if (!ownsLease) {
+          await closeLoginSession(
+            'La sesion se ha cerrado porque la cuenta se ha liberado o se ha abierto en otro dispositivo.',
+            true,
+          )
         }
       } catch {
         // Los fallos de red no deben cerrar una sesion que puede seguir trabajando offline.
+      } finally {
+        leaseRequestInFlight = false
       }
     }
 
-    const intervalId = window.setInterval(() => void refreshLoginLease(), 30_000)
-    const handleVisibilityChange = () => {
+    function recordActivity() {
+      activity.lastActivityAt = Date.now()
+      scheduleIdleClose()
+
+      if (activity.lastActivityAt - activity.lastHeartbeatAt >= loginLeaseCheckIntervalMs) {
+        void validateLoginLease(true)
+      }
+    }
+
+    function handleVisibilityChange() {
       if (document.visibilityState === 'visible') {
-        void refreshLoginLease()
+        void validateLoginLease()
       }
     }
 
+    scheduleIdleClose()
+    void validateLoginLease()
+    const intervalId = window.setInterval(() => void validateLoginLease(), loginLeaseCheckIntervalMs)
+    window.addEventListener('pointerdown', recordActivity, { passive: true })
+    window.addEventListener('keydown', recordActivity)
+    window.addEventListener('wheel', recordActivity, { passive: true })
     document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       active = false
+      if (idleTimeoutId) window.clearTimeout(idleTimeoutId)
       window.clearInterval(intervalId)
+      window.removeEventListener('pointerdown', recordActivity)
+      window.removeEventListener('keydown', recordActivity)
+      window.removeEventListener('wheel', recordActivity)
       document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [context, isOnline])
@@ -1480,7 +1571,6 @@ function App() {
         error={error}
         isBusy={isBusy}
         isOnline={isOnline}
-        loginBlocked={loginLeaseBlocked}
         onLogin={handleLogin}
         onOfflineEnter={enterOffline}
       />
@@ -1608,6 +1698,7 @@ function App() {
           order={posView.type === 'table_order' ? restaurantOrder : null}
           quickSale={posView.type === 'quick_sale'}
           saveState={restaurantSaveState}
+          canSell={canSell}
         />
       ) : null}
 

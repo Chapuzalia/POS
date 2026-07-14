@@ -386,7 +386,7 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
 
           {showProductGrid ? (
             visibleProducts.length ? (
-              <div className="grid grid-cols-2 gap-3 md:grid-cols-4 2xl:grid-cols-5">
+              <div className="grid grid-cols-3 gap-3 md:grid-cols-4 2xl:grid-cols-5">
                 {visibleProducts.map((product) => {
                   const saleFormat = getProductSaleFormat(product, productFilter)
                   const primaryVariant = getProductVariantForSaleFormat(product, saleFormat)

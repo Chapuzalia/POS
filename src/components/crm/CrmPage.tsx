@@ -58,6 +58,7 @@ import {
   loadCrmStats,
   loadCrmAccessData,
   loadCrmVenues,
+  releaseCrmPosUserLogin,
   setCrmPosUserActive,
   subscribeToCrmStatsChanges,
   updateCategory,
@@ -517,6 +518,15 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
     setEditingUserDeviceMode(assignedDevice?.deviceMode ?? 'checkout')
   }
 
+  async function releaseUserLogin(user: CrmPosUser) {
+    if (!window.confirm(`Liberar la sesion de "${user.fullName || user.email}"? El dispositivo se desconectara en menos de 30 segundos.`)) return
+
+    await runAction(async () => {
+      await releaseCrmPosUserLogin(tenantContext, user.id)
+      await refresh()
+    })
+  }
+
   function cancelEditingUser() {
     setEditingUserId(null)
     setEditingUserName('')
@@ -626,7 +636,7 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
 
       <section className="crm-panel crm-access-users">
         <div className="crm-list-toolbar">
-          <div className="crm-list-title"><h2>Usuarios de caja</h2><p>{data.users.length} cuentas configuradas</p></div>
+          <div className="crm-list-title"><h2>Usuarios de caja</h2><p>{data.users.length} cuentas configuradas · cierre tras 30 min sin actividad</p></div>
           <button className="crm-icon-button" disabled={disabled} onClick={() => void runAction(refresh)} type="button"><RefreshCw className="h-4 w-4" /></button>
         </div>
         <div className="crm-access-user-list">
@@ -647,11 +657,24 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
                     <strong>{venue?.name ?? (user.hasDeviceAssignment ? 'Local no disponible' : 'Pendiente de asignar')}</strong>
                     <span>{device ? `${device.name} · ${deviceModeLabel}` : user.hasDeviceAssignment ? 'Dispositivo no disponible' : 'Edita el usuario para asignarle un dispositivo'}</span>
                   </div>
-                  <span className={user.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
-                    {user.isActive ? 'Activo' : user.hasDeviceAssignment ? 'Inactivo' : 'Sin asignar'}
-                  </span>
+                  <div className="crm-user-statuses">
+                    <span className={user.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+                      {user.isActive ? 'Activo' : user.hasDeviceAssignment ? 'Inactivo' : 'Sin asignar'}
+                    </span>
+                    <span
+                      className={user.hasActiveLogin ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}
+                      title={user.loginHeartbeatAt ? `Ultima actividad: ${formatCrmDateTime(user.loginHeartbeatAt)}` : undefined}
+                    >
+                      {user.hasActiveLogin ? 'En sesion' : 'Libre'}
+                    </span>
+                  </div>
                   <div className="crm-access-user-actions">
                     <button aria-label="Editar usuario" className="crm-primary-button" disabled={disabled} onClick={() => startEditingUser(user)} title="Editar y reasignar" type="button"><Pencil className="h-4 w-4" /></button>
+                    {tenantContext.role === 'owner' ? (
+                      <button className="crm-secondary-button" disabled={disabled || !user.hasActiveLogin} onClick={() => void releaseUserLogin(user)} title="Cerrar la sesion abierta de este usuario" type="button">
+                        <LogOut className="h-4 w-4" /> Liberar
+                      </button>
+                    ) : null}
                     <button className={user.isActive ? 'crm-danger-button' : 'crm-secondary-button'} disabled={disabled || !user.hasDeviceAssignment} onClick={() => void toggleUser(user.id, !user.isActive)} type="button">
                       {user.isActive ? 'Desactivar' : 'Activar'}
                     </button>

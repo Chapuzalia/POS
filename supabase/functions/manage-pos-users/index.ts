@@ -239,6 +239,43 @@ Deno.serve(async (request) => {
       return response({ error: 'Solo administracion puede gestionar usuarios' }, 403)
     }
 
+    if (action === 'release-login') {
+      if (membership.role !== 'owner') {
+        return response({ error: 'Solo el owner puede liberar sesiones de usuario' }, 403)
+      }
+
+      const userId = String(body.userId ?? '')
+      if (!userId || userId === authData.user.id) {
+        return response({ error: 'Usuario no valido' }, 400)
+      }
+
+      const { data: targetMembership, error: targetMembershipError } = await adminClient
+        .from('tenant_memberships')
+        .select('user_id')
+        .eq('tenant_id', tenantId)
+        .eq('user_id', userId)
+        .eq('role', 'cashier')
+        .maybeSingle()
+
+      if (targetMembershipError) {
+        throw targetMembershipError
+      }
+      if (!targetMembership) {
+        return response({ error: 'El usuario no pertenece a este negocio' }, 404)
+      }
+
+      const { error: releaseError } = await adminClient
+        .from('user_login_leases')
+        .delete()
+        .eq('user_id', userId)
+
+      if (releaseError) {
+        throw releaseError
+      }
+
+      return response({ ok: true })
+    }
+
     if (action === 'list') {
       const [{ data: memberships, error: membershipsError }, { data: assignments, error: assignmentsError }] =
         await Promise.all([
@@ -258,6 +295,17 @@ Deno.serve(async (request) => {
       }
 
       const cashierIds = new Set((memberships ?? []).map((item) => item.user_id))
+      const { data: leases, error: leasesError } = cashierIds.size
+        ? await adminClient
+          .from('user_login_leases')
+          .select('user_id, heartbeat_at, expires_at')
+          .in('user_id', [...cashierIds])
+        : { data: [], error: null }
+
+      if (leasesError) {
+        throw leasesError
+      }
+
       const users = []
       let page = 1
 
@@ -277,18 +325,25 @@ Deno.serve(async (request) => {
 
       const membershipByUser = new Map((memberships ?? []).map((item) => [item.user_id, item]))
       const assignmentByUser = new Map((assignments ?? []).map((item) => [item.user_id, item]))
+      const leaseByUser = new Map((leases ?? []).map((item) => [item.user_id, item]))
+      const now = Date.now()
 
       return response({
         users: users.map((user) => {
           const userMembership = membershipByUser.get(user.id)
           const assignment = assignmentByUser.get(user.id)
+          const lease = leaseByUser.get(user.id)
+          const hasActiveLogin = Boolean(lease && new Date(lease.expires_at).getTime() > now)
 
           return {
             id: user.id,
             email: user.email ?? '',
             fullName: String(user.user_metadata?.full_name ?? ''),
+            hasActiveLogin,
             isActive: Boolean(userMembership?.is_active && assignment?.is_active),
             hasDeviceAssignment: Boolean(assignment),
+            loginExpiresAt: hasActiveLogin ? lease?.expires_at ?? null : null,
+            loginHeartbeatAt: hasActiveLogin ? lease?.heartbeat_at ?? null : null,
             venueId: assignment?.venue_id ?? '',
             deviceId: assignment?.device_id ?? '',
           }
