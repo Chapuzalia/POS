@@ -3,6 +3,28 @@ import { useState, type FormEvent } from 'react'
 import type { LoginInput, TenantContext } from '../../types'
 import { Button, Chip } from '../ui'
 
+const rememberedEmailKey = 'club-pos:remembered-email'
+
+function getRememberedEmail() {
+  try {
+    return window.localStorage.getItem(rememberedEmailKey) ?? ''
+  } catch {
+    return ''
+  }
+}
+
+function saveRememberedEmail(email: string, shouldRemember: boolean) {
+  try {
+    if (shouldRemember) {
+      window.localStorage.setItem(rememberedEmailKey, email)
+    } else {
+      window.localStorage.removeItem(rememberedEmailKey)
+    }
+  } catch {
+    // El acceso debe seguir funcionando aunque el navegador bloquee el almacenamiento local.
+  }
+}
+
 type LoginScreenProps = {
   allowOfflineEnter: boolean
   cachedContext: TenantContext | null
@@ -22,13 +44,16 @@ export function LoginScreen({
   onLogin,
   onOfflineEnter,
 }: LoginScreenProps) {
-  const [email, setEmail] = useState('')
+  const [email, setEmail] = useState(getRememberedEmail)
   const [password, setPassword] = useState('')
+  const [rememberAccount, setRememberAccount] = useState(() => Boolean(getRememberedEmail()))
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    const normalizedEmail = email.trim()
+    saveRememberedEmail(normalizedEmail, rememberAccount)
     void onLogin({
-      email: email.trim(),
+      email: normalizedEmail,
       password,
     })
   }
@@ -51,6 +76,7 @@ export function LoginScreen({
             <span className="text-sm font-semibold text-[var(--muted)]">Email</span>
             <input
               className="mt-1 h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              autoComplete="username"
               onChange={(event) => setEmail(event.target.value)}
               placeholder="usuario@negocio.com"
               required
@@ -62,11 +88,21 @@ export function LoginScreen({
             <span className="text-sm font-semibold text-[var(--muted)]">Contrasena</span>
             <input
               className="mt-1 h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              autoComplete="current-password"
               onChange={(event) => setPassword(event.target.value)}
               required
               type="password"
               value={password}
             />
+          </label>
+          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-[var(--foreground)]">
+            <input
+              checked={rememberAccount}
+              className="h-5 w-5 rounded border-[var(--field-border)] accent-[var(--accent)]"
+              onChange={(event) => setRememberAccount(event.target.checked)}
+              type="checkbox"
+            />
+            Recordar cuenta
           </label>
           {error ? (
             <div className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
