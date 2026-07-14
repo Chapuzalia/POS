@@ -42,13 +42,13 @@ import { nowIso } from '../utils/dates'
 import { getReadableError } from '../utils/errors'
 import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
 
-async function requireExclusiveLogin() {
+async function requireExclusiveLogin(context: TenantContext) {
   if (await claimLoginLease()) {
-    return
+    return context
   }
 
   releaseLocalLoginLock()
-  throw new LoginLeaseConflictError('Esta cuenta ya esta abierta en otro dispositivo o pestana.')
+  throw new LoginLeaseConflictError('Esta cuenta ya esta abierta en otro dispositivo o pestana.', context)
 }
 
 function mapCategory(row: CategoryRow): Category {
@@ -214,8 +214,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   }
 
   if (profile?.is_superadmin) {
-    await requireExclusiveLogin()
-    return {
+    return requireExclusiveLogin({
       tenantId: '',
       tenantName: 'Plataforma CLUB POS',
       tenantSlug: '',
@@ -226,7 +225,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
       userId: user.id,
       userName: profile.full_name ?? user.user_metadata.full_name ?? user.email ?? 'Superadmin',
       role: 'superadmin',
-    }
+    })
   }
 
   const { data: memberships, error: membershipError } = await supabase
@@ -262,8 +261,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   }
 
   if (membership.role === 'owner' || membership.role === 'admin') {
-    await requireExclusiveLogin()
-    return {
+    return requireExclusiveLogin({
       tenantId: tenant.id,
       tenantName: tenant.name,
       tenantSlug: tenant.slug,
@@ -274,7 +272,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
       userId: user.id,
       userName: user.user_metadata.full_name ?? user.email ?? 'Administrador',
       role: membership.role,
-    }
+    })
   }
 
   if (membership.role !== 'cashier') {
@@ -327,8 +325,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw new Error('El local o dispositivo asignado esta desactivado o ya no existe.')
   }
 
-  await requireExclusiveLogin()
-  return {
+  return requireExclusiveLogin({
     tenantId: tenant.id,
     tenantName: tenant.name,
     tenantSlug: tenant.slug,
@@ -346,7 +343,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
-  }
+  })
 }
 
 export class TenantSessionError extends Error {
@@ -357,9 +354,12 @@ export class TenantSessionError extends Error {
 }
 
 export class LoginLeaseConflictError extends TenantSessionError {
-  constructor(message: string) {
+  readonly context: TenantContext
+
+  constructor(message: string, context: TenantContext) {
     super(message)
     this.name = 'LoginLeaseConflictError'
+    this.context = context
   }
 }
 
@@ -396,8 +396,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   }
 
   if (profile?.is_superadmin) {
-    await requireExclusiveLogin()
-    return {
+    return requireExclusiveLogin({
       tenantId: '',
       tenantName: 'Plataforma CLUB POS',
       tenantSlug: '',
@@ -408,7 +407,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
       userId: user.id,
       userName: profile.full_name ?? user.user_metadata.full_name ?? user.email ?? 'Superadmin',
       role: 'superadmin',
-    }
+    })
   }
 
   const [{ data: tenant, error: tenantError }, { data: membership, error: membershipError }] = await Promise.all([
@@ -435,8 +434,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   }
 
   if (membership.role === 'owner' || membership.role === 'admin') {
-    await requireExclusiveLogin()
-    return {
+    return requireExclusiveLogin({
       tenantId: tenant.id,
       tenantName: tenant.name,
       tenantSlug: tenant.slug,
@@ -447,7 +445,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
       userId: user.id,
       userName: user.user_metadata.full_name ?? user.email ?? 'Administrador',
       role: membership.role,
-    }
+    })
   }
 
   const { data: assignment, error: assignmentError } = await supabase
@@ -492,8 +490,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new TenantSessionError('El local o dispositivo asignado esta desactivado.')
   }
 
-  await requireExclusiveLogin()
-  return {
+  return requireExclusiveLogin({
     tenantId: tenant.id,
     tenantName: tenant.name,
     tenantSlug: tenant.slug,
@@ -511,7 +508,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
-  }
+  })
 }
 
 export async function hasValidOfflineSession(context: TenantContext) {

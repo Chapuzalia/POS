@@ -1,5 +1,5 @@
-import { LogIn, WifiOff, Wifi } from 'lucide-react'
-import { useState, type FormEvent } from 'react'
+import { LogIn, TriangleAlert, WifiOff, Wifi } from 'lucide-react'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { LoginInput, TenantContext } from '../../types'
 import { Button, Chip } from '../ui'
 
@@ -28,9 +28,12 @@ function saveRememberedEmail(email: string, shouldRemember: boolean) {
 type LoginScreenProps = {
   allowOfflineEnter: boolean
   cachedContext: TenantContext | null
+  conflictAccountName: string | null
   error: string | null
   isBusy: boolean
   isOnline: boolean
+  onCancelLoginConflict: () => void
+  onForceLoginConflict: () => void
   onLogin: (input: LoginInput) => Promise<void>
   onOfflineEnter: () => void
 }
@@ -38,15 +41,34 @@ type LoginScreenProps = {
 export function LoginScreen({
   allowOfflineEnter,
   cachedContext,
+  conflictAccountName,
   error,
   isBusy,
   isOnline,
+  onCancelLoginConflict,
+  onForceLoginConflict,
   onLogin,
   onOfflineEnter,
 }: LoginScreenProps) {
   const [email, setEmail] = useState(getRememberedEmail)
   const [password, setPassword] = useState('')
   const [rememberAccount, setRememberAccount] = useState(() => Boolean(getRememberedEmail()))
+  const cancelConflictButtonRef = useRef<HTMLButtonElement>(null)
+
+  useEffect(() => {
+    if (!conflictAccountName) return undefined
+
+    cancelConflictButtonRef.current?.focus()
+
+    function handleKeyDown(event: KeyboardEvent) {
+      if (event.key === 'Escape' && !isBusy) {
+        onCancelLoginConflict()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [conflictAccountName, isBusy, onCancelLoginConflict])
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -123,6 +145,45 @@ export function LoginScreen({
           </Button>
         ) : null}
       </section>
+
+      {conflictAccountName ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <section
+            aria-describedby="login-conflict-description"
+            aria-labelledby="login-conflict-title"
+            aria-modal="true"
+            className="w-full max-w-lg rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)]"
+            role="dialog"
+          >
+            <div className="flex items-start gap-4">
+              <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[var(--danger-soft)] text-[var(--danger)]">
+                <TriangleAlert className="h-6 w-6" />
+              </span>
+              <div>
+                <h2 className="text-xl font-black" id="login-conflict-title">Esta cuenta ya esta conectada</h2>
+                <p className="mt-2 text-sm leading-6 text-[var(--muted)]" id="login-conflict-description">
+                  La cuenta <strong className="text-[var(--foreground)]">{conflictAccountName}</strong> esta abierta en otro dispositivo o pestana. Si fuerzas la conexion, la sesion anterior se cerrara y podria perder cambios que aun no haya guardado.
+                </p>
+              </div>
+            </div>
+
+            {error ? (
+              <div className="mt-4 rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
+                {error}
+              </div>
+            ) : null}
+
+            <div className="mt-6 grid gap-3 sm:grid-cols-2">
+              <Button disabled={isBusy} onClick={onCancelLoginConflict} ref={cancelConflictButtonRef} type="button" variant="secondary">
+                Cancelar login
+              </Button>
+              <Button disabled={isBusy} onClick={onForceLoginConflict} type="button" variant="danger">
+                {isBusy ? 'Conectando...' : 'Forzar conexion'}
+              </Button>
+            </div>
+          </section>
+        </div>
+      ) : null}
     </main>
   )
 }

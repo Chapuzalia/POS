@@ -72,7 +72,7 @@ import type {
 } from './types'
 import { nowIso } from './utils/dates'
 import { getReadableError } from './utils/errors'
-import { checkLoginLease, heartbeatLoginLease, releaseLocalLoginLock } from './services/loginLeaseService'
+import { checkLoginLease, forceClaimLoginLease, heartbeatLoginLease, releaseLocalLoginLock } from './services/loginLeaseService'
 import { TableMapView } from './features/tables/components/TableMapView'
 import { TableOrderBar } from './features/tables/components/TableOrderBar'
 import { RestaurantOrderPanel } from './features/tables/components/RestaurantOrderPanel'
@@ -202,6 +202,7 @@ function App() {
   const [paidFeedback, setPaidFeedback] = useState<PaymentMethod | null>(null)
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
   const [loginLeaseBlocked, setLoginLeaseBlocked] = useState(false)
+  const [pendingLoginContext, setPendingLoginContext] = useState<TenantContext | null>(null)
   const [route, setRoute] = useState<AppRoute>(() => getAppRoute())
   const [tablesEnabled, setTablesEnabled] = useState(false)
   const [restaurantMap, setRestaurantMap] = useState<RestaurantMap>({ areas: [], tables: [], layoutRevision: 0 })
@@ -553,10 +554,15 @@ function App() {
           const leaseConflict = restoreError instanceof LoginLeaseConflictError
           clearActiveState()
           setLoginLeaseBlocked(leaseConflict)
-          if (restoreError instanceof TenantSessionError && !leaseConflict) {
+          if (leaseConflict) {
+            setPendingLoginContext(restoreError.context)
+            setError(null)
+          } else if (restoreError instanceof TenantSessionError) {
             saveCachedContext(null)
+            setError(getReadableError(restoreError))
+          } else {
+            setError(getReadableError(restoreError))
           }
-          setError(getReadableError(restoreError))
         }
       } finally {
         if (!cancelled) {
@@ -748,6 +754,7 @@ function App() {
     setMobileTicketOpen(false)
     setProductDialog(null)
     setPendingRestaurantPayment(null)
+    setPendingLoginContext(null)
     setTablesEnabled(false)
     setRestaurantMap({ areas: [], tables: [] })
     setRestaurantOrder(null)
@@ -781,25 +788,71 @@ function App() {
     }
   }
 
+  async function activateAuthenticatedContext(nextContext: TenantContext) {
+    if (!isAdministrativeUser(nextContext)) {
+      await syncPendingEvents()
+    }
+    const nextState = await loadTenantState(nextContext)
+    applyTenantState(nextContext, nextState)
+  }
+
   async function handleLogin(input: LoginInput) {
     setIsBusy(true)
     setIsLoading(true)
     setError(null)
     setLoginLeaseBlocked(false)
+    setPendingLoginContext(null)
 
     try {
       const nextContext = await loginTenant(input)
-      if (!isAdministrativeUser(nextContext)) {
-        await syncPendingEvents()
-      }
-      const nextState = await loadTenantState(nextContext)
-      applyTenantState(nextContext, nextState)
+      await activateAuthenticatedContext(nextContext)
     } catch (loginError) {
-      setLoginLeaseBlocked(loginError instanceof LoginLeaseConflictError)
-      setError(getReadableError(loginError))
+      if (loginError instanceof LoginLeaseConflictError) {
+        setLoginLeaseBlocked(true)
+        setPendingLoginContext(loginError.context)
+        setError(null)
+      } else {
+        setError(getReadableError(loginError))
+      }
     } finally {
       setIsBusy(false)
       setIsLoading(false)
+    }
+  }
+
+  async function forcePendingLogin() {
+    if (!pendingLoginContext) return
+    setIsBusy(true)
+    setError(null)
+
+    try {
+      if (!(await forceClaimLoginLease())) {
+        throw new Error('No se ha podido sustituir la sesion anterior.')
+      }
+      await activateAuthenticatedContext(pendingLoginContext)
+      setPendingLoginContext(null)
+      setLoginLeaseBlocked(false)
+    } catch (forceError) {
+      setError(getReadableError(forceError))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function cancelPendingLogin() {
+    setIsBusy(true)
+    setError(null)
+
+    try {
+      await logoutTenant()
+    } catch (logoutError) {
+      releaseLocalLoginLock()
+      setError(getReadableError(logoutError))
+    } finally {
+      setPendingLoginContext(null)
+      setLoginLeaseBlocked(false)
+      saveCachedContext(null)
+      setIsBusy(false)
     }
   }
 
@@ -1568,9 +1621,12 @@ function App() {
       <LoginScreen
         allowOfflineEnter={!loginLeaseBlocked}
         cachedContext={getCachedContext()}
+        conflictAccountName={pendingLoginContext?.userName ?? null}
         error={error}
         isBusy={isBusy}
         isOnline={isOnline}
+        onCancelLoginConflict={() => void cancelPendingLogin()}
+        onForceLoginConflict={() => void forcePendingLogin()}
         onLogin={handleLogin}
         onOfflineEnter={enterOffline}
       />
@@ -1736,7 +1792,7 @@ function App() {
       <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 max-lg:flex-col ${tablesEnabled && posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {renderActiveTicketPanel()}
-          <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={posView.type === 'table_order' ? 'Cobrar todo' : undefined} onPayment={handlePayment} />
+          <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={undefined} onPayment={handlePayment} />
         </section>
 
         {cashSession ? (
@@ -1763,7 +1819,7 @@ function App() {
         >
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
             {renderActiveTicketPanel()}
-            <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={posView.type === 'table_order' ? 'Cobrar todo' : undefined} onPayment={handlePayment} />
+            <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={undefined} onPayment={handlePayment} />
           </div>
         </MobileTicketModal>
       )}

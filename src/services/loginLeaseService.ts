@@ -65,6 +65,21 @@ export async function claimLoginLease() {
   return data === true
 }
 
+export async function forceClaimLoginLease() {
+  if (!supabase) {
+    throw new Error('Supabase no esta configurado.')
+  }
+
+  const clientId = await getClientId()
+  const { data, error } = await supabase.rpc('force_claim_user_login', { p_client_id: clientId })
+
+  if (error) {
+    throw error
+  }
+
+  return data === true
+}
+
 export async function heartbeatLoginLease() {
   if (!supabase || !activeClientId) {
     return false

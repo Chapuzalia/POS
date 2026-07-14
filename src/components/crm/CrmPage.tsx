@@ -7,6 +7,7 @@ import {
   Download,
   LayoutDashboard,
   LogOut,
+  Menu,
   MonitorSmartphone,
   Pencil,
   Plus,
@@ -88,6 +89,7 @@ import type {
 } from '../../types'
 import { getReadableError } from '../../utils/errors'
 import { TableManagementPage } from '../../features/table-management/TableManagementPage'
+import './crm.css'
 
 type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'tables' | 'import' | 'stats'
 
@@ -136,6 +138,7 @@ export function CrmPage({
   onLogout,
 }: CrmPageProps) {
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
+  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)
   const [venues, setVenues] = useState<CrmVenue[]>([])
@@ -227,27 +230,59 @@ export function CrmPage({
     }
   }, [activeSection, context, isOnline, refreshStats])
 
+  useEffect(() => {
+    if (!isSidebarOpen) return undefined
+
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setIsSidebarOpen(false)
+    }
+
+    window.addEventListener('keydown', closeOnEscape)
+    return () => window.removeEventListener('keydown', closeOnEscape)
+  }, [isSidebarOpen])
+
   return (
-    <div className="crm-shell">
-      <aside className="crm-sidebar">
-        <div className="crm-brand">
-          <div className="crm-brand-mark">
-            <Store className="h-7 w-7" />
+    <div className="crm-shell crm-dashboard-shell flex h-dvh min-h-0 w-screen overflow-hidden bg-[var(--crm-canvas)] text-[var(--crm-text)] antialiased">
+      <button
+        aria-label="Cerrar menu de navegacion"
+        className={isSidebarOpen
+          ? 'crm-sidebar-backdrop crm-sidebar-backdrop-visible max-[1199px]:pointer-events-auto max-[1199px]:opacity-100'
+          : 'crm-sidebar-backdrop max-[1199px]:pointer-events-none max-[1199px]:opacity-0'}
+        onClick={() => setIsSidebarOpen(false)}
+        tabIndex={isSidebarOpen ? 0 : -1}
+        type="button"
+      />
+      <aside
+        className={isSidebarOpen
+          ? 'crm-sidebar crm-sidebar-open flex h-dvh flex-col overflow-y-auto border-r border-[var(--crm-border-subtle)] bg-[var(--crm-sidebar-bg)] px-5 pt-6 pb-[18px] text-[var(--crm-text)] max-[1199px]:translate-x-0'
+          : 'crm-sidebar flex h-dvh flex-col overflow-y-auto border-r border-[var(--crm-border-subtle)] bg-[var(--crm-sidebar-bg)] px-5 pt-6 pb-[18px] text-[var(--crm-text)]'}
+        id="crm-sidebar"
+      >
+        <div className="crm-brand grid min-h-11 grid-cols-[40px_minmax(0,1fr)] items-center gap-[11px]">
+          <div className="crm-brand-mark grid size-10 place-items-center rounded-[10px] border border-[var(--crm-border)] bg-[var(--crm-surface)] text-[var(--crm-blue)]">
+            <Store className="size-5 stroke-[1.8]" />
           </div>
           <div>
-            <p className="crm-brand-title">CLUB POS</p>
-            <p className="crm-brand-subtitle">Backoffice</p>
+            <p className="crm-brand-title overflow-hidden text-ellipsis whitespace-nowrap text-sm leading-tight font-semibold text-[var(--crm-text)]">{context.tenantName}</p>
+            <p className="crm-brand-subtitle mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium text-[var(--crm-text-muted)]">CRM · CLUB POS</p>
           </div>
         </div>
 
-        <nav className="crm-nav">
+        <nav aria-label="Navegacion del CRM" className="crm-nav mt-[30px] flex flex-col gap-[5px]">
+          <p className="crm-nav-label mx-0 mt-0 mb-[7px] ml-[3px] text-[11px] font-medium text-[var(--crm-text-muted)]">Menu principal</p>
           {navItems.map((item) => {
             const Icon = item.icon
             return (
               <button
-                className={activeSection === item.id ? 'crm-nav-item crm-nav-item-active' : 'crm-nav-item'}
+                aria-current={activeSection === item.id ? 'page' : undefined}
+                className={activeSection === item.id
+                  ? 'crm-nav-item crm-nav-item-active flex min-h-[46px] min-w-0 items-center gap-[13px] rounded-[10px] border-0 px-3.5 text-left text-sm font-medium shadow-none transition-[background-color,color,transform] duration-150'
+                  : 'crm-nav-item flex min-h-[46px] min-w-0 items-center gap-[13px] rounded-[10px] border-0 bg-transparent px-3.5 text-left text-sm font-medium text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150'}
                 key={item.id}
-                onClick={() => setActiveSection(item.id)}
+                onClick={() => {
+                  setActiveSection(item.id)
+                  setIsSidebarOpen(false)
+                }}
                 type="button"
               >
                 <Icon className="h-4 w-4" />
@@ -257,7 +292,7 @@ export function CrmPage({
           })}
         </nav>
 
-        <div className="crm-sidebar-footer">
+        <div className="crm-sidebar-footer mt-auto grid gap-[5px] pt-7">
           <button className="crm-nav-item" onClick={onLogout} type="button">
             <LogOut className="h-4 w-4" />
             <span>Cerrar sesion</span>
@@ -265,22 +300,33 @@ export function CrmPage({
         </div>
       </aside>
 
-      <section className="crm-workspace">
-        <header className="crm-topbar">
-          <div>
-            <div className="crm-breadcrumb">
-              <LayoutDashboard className="h-4 w-4" />
+      <section className="crm-workspace flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--crm-canvas)]">
+        <header className="crm-topbar relative z-30 flex min-h-20 w-full flex-[0_0_80px] items-center justify-between gap-[22px] border-b border-[var(--crm-border-subtle)] bg-[var(--crm-topbar-bg)] px-7 max-[767px]:min-h-16 max-[767px]:flex-[0_0_auto] max-[767px]:gap-2.5 max-[767px]:px-4 max-[767px]:py-2.5">
+          <button
+            aria-controls="crm-sidebar"
+            aria-expanded={isSidebarOpen}
+            aria-label="Abrir menu de navegacion"
+            className="crm-mobile-menu xl:hidden! size-10 min-w-10 items-center justify-center rounded-[10px] bg-[var(--crm-surface)] text-[var(--crm-text-secondary)]"
+            onClick={() => setIsSidebarOpen(true)}
+            type="button"
+          >
+            <Menu className="h-5 w-5" />
+          </button>
+          <div className="crm-page-heading min-w-[180px] max-[1199px]:mr-auto max-[767px]:min-w-0">
+            <div className="crm-breadcrumb flex items-center gap-1.5 text-[11px] font-medium text-[var(--crm-text-muted)] max-[767px]:hidden">
+              <LayoutDashboard className="size-3.5" />
               <span>{navItems.find((item) => item.id === activeSection)?.label}</span>
-              <ChevronRight className="h-4 w-4" />
+              <ChevronRight className="size-3.5" />
               <span>{context.tenantName}</span>
             </div>
-            <h1>{getSectionTitle(activeSection)}</h1>
+            <h1 className="mt-1 text-xl leading-tight font-bold tracking-[-0.025em] text-[var(--crm-text)] max-[767px]:mt-0 max-[767px]:overflow-hidden max-[767px]:text-[17px] max-[767px]:text-ellipsis max-[767px]:whitespace-nowrap">{getSectionTitle(activeSection)}</h1>
           </div>
 
-          <div className="crm-topbar-actions">
-            <label className="crm-venue-selector">
-              <Building2 className="h-4 w-4" />
+          <div className="crm-topbar-actions flex min-w-0 items-center justify-end gap-2.5 max-[767px]:basis-[180px] max-[479px]:basis-[130px]">
+            <label className="crm-venue-selector inline-flex min-h-[42px] min-w-[220px] items-center gap-2 rounded-[11px] border border-transparent bg-[var(--crm-input-bg)] px-[13px] text-[13px] font-semibold text-[var(--crm-text)] transition-[border-color,box-shadow] duration-150 max-[767px]:min-h-10 max-[767px]:w-full max-[767px]:min-w-0">
+              <Building2 className="h-4 w-4 max-[479px]:hidden" />
               <select
+                className="min-w-0 flex-1 border-0 bg-transparent text-[13px] font-semibold text-inherit outline-none"
                 disabled={!isOnline || isBusy}
                 onChange={(event) => {
                   setStats(null)
@@ -293,21 +339,29 @@ export function CrmPage({
                 ))}
               </select>
             </label>
-            <div className="crm-date-chip">{new Intl.DateTimeFormat('es-ES').format(new Date())}</div>
-            <div className={isOnline ? 'crm-status crm-status-online' : 'crm-status crm-status-offline'}>
+            <div className="crm-date-chip inline-flex min-h-[42px] items-center gap-2 rounded-[11px] border border-transparent bg-[var(--crm-input-bg)] px-[13px] text-xs font-medium whitespace-nowrap text-[var(--crm-text-secondary)] max-[899px]:hidden">{new Intl.DateTimeFormat('es-ES').format(new Date())}</div>
+            <div className={isOnline ? 'crm-status crm-status-online max-[767px]:hidden' : 'crm-status crm-status-offline max-[767px]:hidden'}>
               {isOnline ? 'Online' : 'Offline'}
             </div>
-            <div className="crm-user-chip">
+            <div className="crm-user-chip inline-flex min-h-[42px] items-center gap-2 rounded-[11px] border border-transparent bg-[var(--crm-input-bg)] px-[13px] text-xs font-medium whitespace-nowrap text-[var(--crm-text-secondary)] max-[767px]:hidden">
               <UserRound className="h-4 w-4" />
               <span>{context.userName}</span>
             </div>
           </div>
         </header>
 
-        {error ? <div className="crm-error">{error}</div> : null}
-        {!isOnline ? <div className="crm-warning">El CRM requiere conexion para guardar cambios en Supabase.</div> : null}
+        {error ? (
+          <div className="crm-error mx-auto mt-[18px] -mb-5 w-[calc(100%_-_56px)] max-w-[1664px] rounded-[14px] border-0 bg-[var(--crm-red-soft)] px-4 py-3 text-[13px] font-semibold text-[var(--crm-red)] max-[767px]:mt-3 max-[767px]:-mb-3 max-[767px]:w-[calc(100%_-_32px)]">
+            {error}
+          </div>
+        ) : null}
+        {!isOnline ? (
+          <div className="crm-warning mx-auto mt-[18px] -mb-5 w-[calc(100%_-_56px)] max-w-[1664px] rounded-[14px] border-0 bg-[var(--crm-yellow-soft)] px-4 py-3 text-[13px] font-semibold text-[var(--crm-yellow)] max-[767px]:mt-3 max-[767px]:-mb-3 max-[767px]:w-[calc(100%_-_32px)]">
+            El CRM requiere conexion para guardar cambios en Supabase.
+          </div>
+        ) : null}
 
-        <main className="crm-content">
+        <main className="crm-content mx-auto min-h-0 w-full max-w-[1720px] flex-1 overflow-auto px-7 pt-[42px] pb-9 max-[767px]:px-4 max-[767px]:pt-[26px] max-[767px]:pb-7">
           {activeSection === 'dashboard' ? (
             <DashboardCrm
               activeCategories={activeCategories.length}
@@ -637,7 +691,7 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
       <section className="crm-panel crm-access-users">
         <div className="crm-list-toolbar">
           <div className="crm-list-title"><h2>Usuarios de caja</h2><p>{data.users.length} cuentas configuradas · cierre tras 30 min sin actividad</p></div>
-          <button className="crm-icon-button" disabled={disabled} onClick={() => void runAction(refresh)} type="button"><RefreshCw className="h-4 w-4" /></button>
+          <button aria-label="Actualizar usuarios" className="crm-icon-button" disabled={disabled} onClick={() => void runAction(refresh)} type="button"><RefreshCw className="h-4 w-4" /></button>
         </div>
         <div className="crm-access-user-list">
           {data.users.map((user) => {
@@ -754,22 +808,22 @@ function DashboardCrm({
       <section className="crm-panel crm-panel-span">
         <div className="crm-panel-header">
           <span>Resumen del catalogo</span>
-          <button className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
+          <button aria-label="Actualizar resumen" className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
         <div className="crm-kpi-strip">
-          <KpiCard color="green" label="Productos activos" value={activeProducts} />
-          <KpiCard color="orange" label="Productos totales" value={products.length} />
-          <KpiCard color="red" label="Categorias" value={categories.length} />
-          <KpiCard color="blue" label="Activas" value={activeCategories} />
+          <KpiCard color="blue" label="Productos activos" value={activeProducts} />
+          <KpiCard color="neutral" label="Productos totales" value={products.length} />
+          <KpiCard color="neutral" label="Categorias" value={categories.length} />
+          <KpiCard color="green" label="Activas" value={activeCategories} />
         </div>
       </section>
 
       <section className="crm-panel crm-panel-span">
         <div className="crm-panel-header">
           <span>Cajas abiertas</span>
-          <button className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
+          <button aria-label="Actualizar cajas abiertas" className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
@@ -780,7 +834,7 @@ function DashboardCrm({
         <div className="crm-panel-header">
           <span>Estado de catalogo</span>
         </div>
-        <div className="crm-donut-row">
+        <div className="crm-donut-row grid grid-cols-[190px_minmax(0,1fr)] items-center gap-[18px] px-[22px] pt-[18px] pb-6 max-[767px]:grid-cols-1">
           <div className="crm-donut" style={{ '--crm-progress': `${activeRatio}%` } as CSSProperties}>
             <span>{activeRatio}%</span>
           </div>
@@ -899,20 +953,40 @@ function OpenCashSessionsList({ stats }: { stats: CrmStats | null }) {
   )
 }
 
-function KpiCard({ color, label, value }: { color: 'blue' | 'green' | 'orange' | 'red'; label: string; value: number | string }) {
+const kpiColorClasses = {
+  blue: {
+    card: '!bg-[var(--crm-blue)]',
+    label: '!text-white/85',
+    value: '!text-white',
+  },
+  green: {
+    card: '!bg-[var(--crm-green)]',
+    label: '!text-white/85',
+    value: '!text-white',
+  },
+  neutral: {
+    card: '!bg-[var(--crm-surface-soft)]',
+    label: '!text-[var(--crm-text-secondary)]',
+    value: '!text-[var(--crm-text)]',
+  },
+} as const
+
+function KpiCard({ color, label, value }: { color: keyof typeof kpiColorClasses; label: string; value: number | string }) {
+  const colorClasses = kpiColorClasses[color]
+
   return (
-    <div className={`crm-kpi crm-kpi-${color}`}>
-      <strong>{value}</strong>
-      <span>{label}</span>
+    <div className={`crm-kpi flex min-h-[150px] flex-col items-start justify-end rounded-[18px] border-0 p-[22px] text-left max-[767px]:min-h-[126px] ${colorClasses.card}`}>
+      <strong className={`text-[26px] leading-none font-bold tracking-[-0.04em] tabular-nums ${colorClasses.value}`}>{value}</strong>
+      <span className={`mt-[9px] text-xs font-medium ${colorClasses.label}`}>{label}</span>
     </div>
   )
 }
 
 function MiniMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="crm-mini-metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
+    <div className="crm-mini-metric flex min-h-[52px] min-w-0 items-center justify-between gap-3 rounded-[10px] border-0 bg-[var(--crm-surface-soft)] px-[13px] py-[11px]">
+      <span className="text-xs font-medium text-[var(--crm-text-secondary)]">{label}</span>
+      <strong className="text-[15px] font-semibold whitespace-nowrap text-[var(--crm-text)] tabular-nums">{value}</strong>
     </div>
   )
 }
@@ -1090,8 +1164,8 @@ function RevoImportCrm({
         <div className="crm-kpi-strip">
           <KpiCard color="green" label="Productos del local" value={catalogProducts.length} />
           <KpiCard color="blue" label="Categorias" value={categories.length} />
-          <KpiCard color="orange" label="Formatos de venta" value={saleFormats.length} />
-          <KpiCard color="red" label="Imagenes" value={catalogProducts.filter((product) => product.imageUrl).length} />
+          <KpiCard color="neutral" label="Formatos de venta" value={saleFormats.length} />
+          <KpiCard color="neutral" label="Imagenes" value={catalogProducts.filter((product) => product.imageUrl).length} />
         </div>
       </section>
 
@@ -1164,10 +1238,10 @@ function RevoImportCrm({
         </div>
 
         <div className="crm-kpi-strip">
-          <KpiCard color="green" label="Productos" value={products.length} />
-          <KpiCard color="blue" label="Formatos" value={variantCount} />
-          <KpiCard color="orange" label="Avisos" value={allWarnings.length} />
-          <KpiCard color="red" label="Filas omitidas" value={parseResult?.skippedRows ?? 0} />
+          <KpiCard color="blue" label="Productos" value={products.length} />
+          <KpiCard color="green" label="Formatos" value={variantCount} />
+          <KpiCard color="neutral" label="Avisos" value={allWarnings.length} />
+          <KpiCard color="neutral" label="Filas omitidas" value={parseResult?.skippedRows ?? 0} />
         </div>
       </section>
 
@@ -1712,7 +1786,7 @@ function ProductFormPanel({
           <span>{isEditing ? 'Editar producto' : 'Nuevo producto'}</span>
           <small>{isEditing ? product?.name : 'Alta rapida de catalogo'}</small>
         </div>
-        <button className="crm-editor-close" onClick={onClose} type="button">
+        <button aria-label="Cerrar editor de producto" className="crm-editor-close" onClick={onClose} type="button">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -2426,7 +2500,7 @@ function CategoryFormPanel({
           <span>{isEditing ? 'Editar categoria' : 'Nueva categoria'}</span>
           <small>{isEditing ? category?.name : 'Agrupa productos del TPV'}</small>
         </div>
-        <button className="crm-editor-close" onClick={onClose} type="button">
+        <button aria-label="Cerrar editor de categoria" className="crm-editor-close" onClick={onClose} type="button">
           <X className="h-4 w-4" />
         </button>
       </div>
@@ -2487,15 +2561,15 @@ function StatsCrm({ disabled, onRefresh, stats }: StatsCrmProps) {
       <section className="crm-panel crm-panel-span">
         <div className="crm-panel-header">
           <span>Ventas del mes</span>
-          <button className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
+          <button aria-label="Actualizar estadisticas" className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
         <div className="crm-kpi-strip">
           <KpiCard color="green" label="Ventas" value={formatMoney(stats?.monthSalesCents ?? 0)} />
           <KpiCard color="blue" label="Tickets" value={stats?.monthTicketCount ?? 0} />
-          <KpiCard color="orange" label="Ticket medio" value={formatMoney(stats?.averageTicketCents ?? 0)} />
-          <KpiCard color="red" label="Top productos" value={stats?.topProducts.length ?? 0} />
+          <KpiCard color="neutral" label="Ticket medio" value={formatMoney(stats?.averageTicketCents ?? 0)} />
+          <KpiCard color="neutral" label="Top productos" value={stats?.topProducts.length ?? 0} />
         </div>
       </section>
 
