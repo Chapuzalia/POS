@@ -11,6 +11,42 @@ function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { headers: corsHeaders, status })
 }
 
+function randomIndex(max: number) {
+  const value = new Uint32Array(1)
+  crypto.getRandomValues(value)
+  return value[0] % max
+}
+
+function generateLoginPassword() {
+  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
+  const lowercase = 'abcdefghijklmnopqrstuvwxyz'
+  const digits = '0123456789'
+  const allCharacters = `${uppercase}${lowercase}${digits}`
+  const password = [
+    uppercase[randomIndex(uppercase.length)],
+    lowercase[randomIndex(lowercase.length)],
+    digits[randomIndex(digits.length)],
+    ...Array.from({ length: 9 }, () => allCharacters[randomIndex(allCharacters.length)]),
+  ]
+
+  for (let index = password.length - 1; index > 0; index -= 1) {
+    const swapIndex = randomIndex(index + 1)
+    const current = password[index]
+    password[index] = password[swapIndex]
+    password[swapIndex] = current
+  }
+  return password.join('')
+}
+
+function normalizeEmailPart(value: string, separator: '' | '-' = '') {
+  return value
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, separator)
+    .replace(/^-+|-+$/g, '')
+}
+
 Deno.serve(async (request) => {
   if (request.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
@@ -63,20 +99,21 @@ Deno.serve(async (request) => {
         return response({ error: 'Solo un superadmin puede consultar todos los negocios' }, 403)
       }
 
-      const [tenantsResult, ownersResult, venuesResult] = await Promise.all([
-        adminClient.from('tenants').select('id, name, slug, created_at').order('created_at', { ascending: false }),
+      const [tenantsResult, ownersResult, venuesResult, devicesResult] = await Promise.all([
+        adminClient.from('tenants').select('id, name, slug, is_active, max_venues, max_devices, created_at').order('created_at', { ascending: false }),
         adminClient
           .from('tenant_memberships')
-          .select('tenant_id, user_id, is_active')
-          .eq('role', 'owner'),
-        adminClient.from('venues').select('tenant_id'),
+          .select('tenant_id, user_id, role, is_active'),
+        adminClient.from('venues').select('id, tenant_id, name, is_active').order('sort_order'),
+        adminClient.from('devices').select('tenant_id'),
       ])
 
-      if (tenantsResult.error || ownersResult.error || venuesResult.error) {
-        throw tenantsResult.error ?? ownersResult.error ?? venuesResult.error
+      if (tenantsResult.error || ownersResult.error || venuesResult.error || devicesResult.error) {
+        throw tenantsResult.error ?? ownersResult.error ?? venuesResult.error ?? devicesResult.error
       }
 
-      const ownerIds = new Set((ownersResult.data ?? []).map((membership) => membership.user_id))
+      const ownerMemberships = (ownersResult.data ?? []).filter((membership) => membership.role === 'owner')
+      const ownerIds = new Set(ownerMemberships.map((membership) => membership.user_id))
       const ownerUsers = []
       let page = 1
 
@@ -94,7 +131,7 @@ Deno.serve(async (request) => {
 
       const ownerUserById = new Map(ownerUsers.map((user) => [user.id, user]))
       const ownerByTenant = new Map(
-        (ownersResult.data ?? []).map((membership) => {
+        ownerMemberships.map((membership) => {
           const owner = ownerUserById.get(membership.user_id)
           return [membership.tenant_id, {
             email: owner?.email ?? '',
@@ -104,8 +141,20 @@ Deno.serve(async (request) => {
         }),
       )
       const venueCountByTenant = new Map<string, number>()
+      const venuesByTenant = new Map<string, Array<{ id: string; isActive: boolean; name: string }>>()
       for (const venue of venuesResult.data ?? []) {
         venueCountByTenant.set(venue.tenant_id, (venueCountByTenant.get(venue.tenant_id) ?? 0) + 1)
+        const tenantVenues = venuesByTenant.get(venue.tenant_id) ?? []
+        tenantVenues.push({ id: venue.id, isActive: venue.is_active, name: venue.name })
+        venuesByTenant.set(venue.tenant_id, tenantVenues)
+      }
+      const memberCountByTenant = new Map<string, number>()
+      for (const membership of ownersResult.data ?? []) {
+        memberCountByTenant.set(membership.tenant_id, (memberCountByTenant.get(membership.tenant_id) ?? 0) + 1)
+      }
+      const deviceCountByTenant = new Map<string, number>()
+      for (const device of devicesResult.data ?? []) {
+        deviceCountByTenant.set(device.tenant_id, (deviceCountByTenant.get(device.tenant_id) ?? 0) + 1)
       }
 
       return response({
@@ -113,9 +162,17 @@ Deno.serve(async (request) => {
           id: tenant.id,
           name: tenant.name,
           slug: tenant.slug,
+          isActive: tenant.is_active,
+          deviceCount: deviceCountByTenant.get(tenant.id) ?? 0,
           createdAt: tenant.created_at,
           owner: ownerByTenant.get(tenant.id) ?? null,
+          memberCount: memberCountByTenant.get(tenant.id) ?? 0,
           venueCount: venueCountByTenant.get(tenant.id) ?? 0,
+          venues: venuesByTenant.get(tenant.id) ?? [],
+          limits: {
+            devices: tenant.max_devices,
+            venues: tenant.max_venues,
+          },
         })),
       })
     }
@@ -131,12 +188,16 @@ Deno.serve(async (request) => {
       const ownerEmail = String(body.ownerEmail ?? '').trim().toLowerCase()
       const ownerPassword = String(body.ownerPassword ?? '')
       const ownerFullName = String(body.ownerFullName ?? '').trim()
+      const maxVenues = Number(body.maxVenues ?? 1)
+      const maxDevices = Number(body.maxDevices ?? 5)
 
       if (
         !tenantName || !venueName || !ownerEmail || !ownerFullName || ownerPassword.length < 8
         || !/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(tenantSlug)
+        || !Number.isInteger(maxVenues) || maxVenues < 1
+        || !Number.isInteger(maxDevices) || maxDevices < 0
       ) {
-        return response({ error: 'Completa todos los campos, usa un slug valido y una contrasena de al menos 8 caracteres' }, 400)
+        return response({ error: 'Completa todos los campos, usa un slug válido, una contraseña de al menos 8 caracteres y límites de plan válidos' }, 400)
       }
 
       const { data: existingTenant, error: existingTenantError } = await adminClient
@@ -169,7 +230,12 @@ Deno.serve(async (request) => {
       try {
         const { data: createdTenant, error: tenantCreateError } = await adminClient
           .from('tenants')
-          .insert({ name: tenantName, slug: tenantSlug })
+          .insert({
+            name: tenantName,
+            slug: tenantSlug,
+            max_venues: maxVenues,
+            max_devices: maxDevices,
+          })
           .select('id, name, slug, created_at')
           .single()
 
@@ -228,6 +294,112 @@ Deno.serve(async (request) => {
       }
     }
 
+    if (action === 'platform-update-tenant') {
+      if (!isSuperadmin) {
+        return response({ error: 'Solo un superadmin puede editar negocios' }, 403)
+      }
+
+      const targetTenantId = String(body.tenantId ?? '')
+      const tenantName = String(body.tenantName ?? '').trim()
+      const tenantSlug = String(body.tenantSlug ?? '').trim().toLowerCase()
+      const maxVenues = Number(body.maxVenues)
+      const maxDevices = Number(body.maxDevices)
+      if (
+        !targetTenantId || !tenantName || !/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(tenantSlug)
+        || !Number.isInteger(maxVenues) || maxVenues < 1
+        || !Number.isInteger(maxDevices) || maxDevices < 0
+      ) {
+        return response({ error: 'Nombre, slug o límites del plan no válidos' }, 400)
+      }
+
+      const [venueUsage, deviceUsage] = await Promise.all([
+        adminClient.from('venues').select('id', { count: 'exact', head: true }).eq('tenant_id', targetTenantId),
+        adminClient.from('devices').select('id', { count: 'exact', head: true }).eq('tenant_id', targetTenantId),
+      ])
+      const usageError = venueUsage.error ?? deviceUsage.error
+      if (usageError) throw usageError
+      if (maxVenues < (venueUsage.count ?? 0) || maxDevices < (deviceUsage.count ?? 0)) {
+        return response({ error: 'Los límites no pueden ser inferiores al uso actual del negocio' }, 400)
+      }
+
+      const { data: conflictingTenant, error: conflictError } = await adminClient
+        .from('tenants')
+        .select('id')
+        .eq('slug', tenantSlug)
+        .neq('id', targetTenantId)
+        .maybeSingle()
+      if (conflictError) throw conflictError
+      if (conflictingTenant) {
+        return response({ error: 'Ya existe un negocio con ese slug' }, 409)
+      }
+
+      const { data: updatedTenant, error: updateError } = await adminClient
+        .from('tenants')
+        .update({
+          name: tenantName,
+          slug: tenantSlug,
+          max_venues: maxVenues,
+          max_devices: maxDevices,
+        })
+        .eq('id', targetTenantId)
+        .select('id, name, slug')
+        .maybeSingle()
+      if (updateError) throw updateError
+      if (!updatedTenant) return response({ error: 'Negocio no encontrado' }, 404)
+      return response({ tenant: updatedTenant })
+    }
+
+    if (action === 'platform-set-tenant-active') {
+      if (!isSuperadmin) {
+        return response({ error: 'Solo un superadmin puede cambiar el estado de un negocio' }, 403)
+      }
+
+      const targetTenantId = String(body.tenantId ?? '')
+      const isActive = body.isActive === true
+      if (!targetTenantId) return response({ error: 'Negocio no valido' }, 400)
+
+      const { data: updatedTenant, error: updateError } = await adminClient
+        .from('tenants')
+        .update({ is_active: isActive })
+        .eq('id', targetTenantId)
+        .select('id')
+        .maybeSingle()
+      if (updateError) throw updateError
+      if (!updatedTenant) return response({ error: 'Negocio no encontrado' }, 404)
+      return response({ ok: true })
+    }
+
+    if (action === 'platform-delete-tenant') {
+      if (!isSuperadmin) {
+        return response({ error: 'Solo un superadmin puede eliminar negocios' }, 403)
+      }
+
+      const targetTenantId = String(body.tenantId ?? '')
+      if (!targetTenantId) return response({ error: 'Negocio no valido' }, 400)
+
+      const [{ data: targetTenant, error: tenantLookupError }, { data: tenantMembers, error: membersError }] = await Promise.all([
+        adminClient.from('tenants').select('id').eq('id', targetTenantId).maybeSingle(),
+        adminClient.from('tenant_memberships').select('user_id').eq('tenant_id', targetTenantId),
+      ])
+      if (tenantLookupError || membersError) throw tenantLookupError ?? membersError
+      if (!targetTenant) return response({ error: 'Negocio no encontrado' }, 404)
+
+      const { error: deleteError } = await adminClient.from('tenants').delete().eq('id', targetTenantId)
+      if (deleteError) throw deleteError
+
+      for (const member of tenantMembers ?? []) {
+        const [{ data: remainingMembership }, { data: memberProfile }] = await Promise.all([
+          adminClient.from('tenant_memberships').select('id').eq('user_id', member.user_id).limit(1).maybeSingle(),
+          adminClient.from('profiles').select('is_superadmin').eq('id', member.user_id).maybeSingle(),
+        ])
+        if (!remainingMembership && memberProfile?.is_superadmin !== true) {
+          await adminClient.auth.admin.deleteUser(member.user_id, true)
+        }
+      }
+
+      return response({ ok: true })
+    }
+
     const { data: membership, error: membershipError } = await adminClient
       .from('tenant_memberships')
       .select('role, is_active')
@@ -237,6 +409,32 @@ Deno.serve(async (request) => {
 
     if (membershipError || !membership?.is_active || !['owner', 'admin'].includes(membership.role)) {
       return response({ error: 'Solo administracion puede gestionar usuarios' }, 403)
+    }
+
+    if (action === 'tenant-plan') {
+      const [tenantResult, venueUsage, deviceUsage] = await Promise.all([
+        adminClient
+          .from('tenants')
+          .select('max_venues, max_devices')
+          .eq('id', tenantId)
+          .maybeSingle(),
+        adminClient.from('venues').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        adminClient.from('devices').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+      ])
+      const planError = tenantResult.error ?? venueUsage.error ?? deviceUsage.error
+      if (planError) throw planError
+      if (!tenantResult.data) return response({ error: 'Negocio no encontrado' }, 404)
+
+      return response({
+        limits: {
+          devices: tenantResult.data.max_devices,
+          venues: tenantResult.data.max_venues,
+        },
+        usage: {
+          devices: deviceUsage.count ?? 0,
+          venues: venueUsage.count ?? 0,
+        },
+      })
     }
 
     if (action === 'release-login') {
@@ -351,71 +549,73 @@ Deno.serve(async (request) => {
       })
     }
 
-    if (action === 'create') {
-      const email = String(body.email ?? '').trim().toLowerCase()
-      const password = String(body.password ?? '')
-      const fullName = String(body.fullName ?? '').trim()
-      const deviceId = String(body.deviceId ?? '')
-
-      if (!email || password.length < 8 || !fullName || !deviceId) {
-        return response({ error: 'Nombre, email, dispositivo y contrasena de al menos 8 caracteres son obligatorios' }, 400)
+    if (action === 'create-device-with-user') {
+      const venueId = String(body.venueId ?? '')
+      const deviceName = String(body.deviceName ?? '').trim()
+      const deviceMode = String(body.deviceMode ?? '')
+      if (!venueId || !deviceName || !['checkout', 'satellite', 'hybrid'].includes(deviceMode)) {
+        return response({ error: 'Local, nombre y modo del dispositivo son obligatorios' }, 400)
       }
+
+      const [{ data: venue, error: venueError }, { data: tenant, error: tenantError }] = await Promise.all([
+        adminClient.from('venues').select('id, name').eq('tenant_id', tenantId).eq('id', venueId).eq('is_active', true).maybeSingle(),
+        adminClient.from('tenants').select('slug').eq('id', tenantId).eq('is_active', true).maybeSingle(),
+      ])
+      if (venueError || tenantError) throw venueError ?? tenantError
+      if (!venue || !tenant) return response({ error: 'El local o el negocio no existen o están desactivados' }, 400)
+
+      const emailDevice = normalizeEmailPart(deviceName) || 'dispositivo'
+      const emailVenue = normalizeEmailPart(venue.name, '-') || 'local'
+      const emailTenant = normalizeEmailPart(tenant.slug, '-') || 'negocio'
+      const email = `${emailDevice}@${emailVenue}.${emailTenant}`
+      const password = generateLoginPassword()
 
       const { data: device, error: deviceError } = await adminClient
         .from('devices')
+        .insert({
+          tenant_id: tenantId,
+          venue_id: venue.id,
+          name: deviceName,
+          is_active: true,
+          device_mode: deviceMode,
+          default_cash_register_id: null,
+          can_take_orders: true,
+          can_take_payments: deviceMode !== 'satellite',
+          can_open_cash_session: deviceMode !== 'satellite',
+          can_close_cash_session: deviceMode !== 'satellite',
+          can_manage_cash: deviceMode !== 'satellite',
+        })
         .select('id, venue_id')
-        .eq('tenant_id', tenantId)
-        .eq('id', deviceId)
-        .eq('is_active', true)
         .single()
-
-      if (deviceError || !device) {
-        return response({ error: 'El dispositivo seleccionado no existe o esta desactivado' }, 400)
-      }
-
-      const { data: occupied } = await adminClient
-        .from('device_user_assignments')
-        .select('user_id')
-        .eq('tenant_id', tenantId)
-        .eq('device_id', deviceId)
-        .eq('is_active', true)
-        .maybeSingle()
-
-      if (occupied) {
-        return response({ error: 'El dispositivo ya tiene un usuario activo asignado' }, 409)
-      }
+      if (deviceError || !device) throw deviceError ?? new Error('No se pudo crear el dispositivo')
 
       const { data: created, error: createError } = await adminClient.auth.admin.createUser({
         email,
         password,
         email_confirm: true,
-        user_metadata: { full_name: fullName },
+        user_metadata: { full_name: deviceName },
       })
-
       if (createError || !created.user) {
-        throw createError ?? new Error('No se pudo crear el usuario')
+        await adminClient.from('devices').delete().eq('id', device.id)
+        return response({ error: createError?.message ?? 'No se pudo crear el usuario del dispositivo' }, 409)
       }
 
       const userId = created.user.id
-      const { error: setupError } = await adminClient.from('tenant_memberships').insert({
-        tenant_id: tenantId,
-        user_id: userId,
-        role: 'cashier',
-        is_active: true,
-      })
+      try {
+        const { error: membershipSetupError } = await adminClient.from('tenant_memberships').insert({
+          tenant_id: tenantId,
+          user_id: userId,
+          role: 'cashier',
+          is_active: true,
+        })
+        if (membershipSetupError) throw membershipSetupError
 
-      if (!setupError) {
         const { error: profileError } = await adminClient.from('profiles').upsert({
           id: userId,
-          full_name: fullName,
+          full_name: deviceName,
         })
-        if (profileError) {
-          await adminClient.auth.admin.deleteUser(userId)
-          throw profileError
-        }
-      }
+        if (profileError) throw profileError
 
-      if (!setupError) {
         const { error: assignmentError } = await adminClient.from('device_user_assignments').insert({
           tenant_id: tenantId,
           user_id: userId,
@@ -423,16 +623,14 @@ Deno.serve(async (request) => {
           device_id: device.id,
           is_active: true,
         })
-        if (assignmentError) {
-          await adminClient.auth.admin.deleteUser(userId)
-          throw assignmentError
-        }
-      } else {
+        if (assignmentError) throw assignmentError
+      } catch (setupError) {
         await adminClient.auth.admin.deleteUser(userId)
+        await adminClient.from('devices').delete().eq('id', device.id)
         throw setupError
       }
 
-      return response({ id: userId }, 201)
+      return response({ credentials: { email, password }, deviceId: device.id, userId }, 201)
     }
 
     if (action === 'update') {

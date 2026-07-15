@@ -6,9 +6,12 @@ import {
   Armchair,
   Boxes,
   Building2,
+  ChevronDown,
   ChevronLeft,
   ChevronRight,
+  Copy,
   Download,
+  Gauge,
   LayoutDashboard,
   LogOut,
   Menu,
@@ -19,6 +22,7 @@ import {
   RefreshCw,
   Save,
   Search,
+  Settings,
   SlidersHorizontal,
   Store,
   Tags,
@@ -57,7 +61,6 @@ import {
 import {
   createCategory,
   createCrmDevice,
-  createCrmPosUser,
   createCrmVenue,
   createProductWithVariant,
   createSaleFormat,
@@ -73,6 +76,7 @@ import {
   loadCrmStats,
   loadCrmSalesReports,
   loadCrmAccessData,
+  loadCrmPlan,
   loadCrmVenues,
   releaseCrmPosUserLogin,
   setCrmPosUserActive,
@@ -87,6 +91,7 @@ import {
   type CatalogImportResult,
   type CatalogBackupImportResult,
   type CrmAccessData,
+  type CrmPlan,
 } from '../../services/crmService'
 import type {
   Catalog,
@@ -109,7 +114,7 @@ import { getReadableError } from '../../utils/errors'
 import { TableManagementPage } from '../../features/table-management/TableManagementPage'
 import './crm.css'
 
-type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'tables' | 'reports' | 'import' | 'stats'
+type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'tables' | 'reports' | 'import' | 'stats' | 'settings' | 'plan'
 
 type CrmPageProps = {
   catalog: Catalog | null
@@ -121,17 +126,27 @@ type CrmPageProps = {
   onLogout: () => void
 }
 
-const navItems: Array<{ id: CrmSection; label: string; icon: LucideIcon }> = [
-  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
-  { id: 'access', label: 'Accesos', icon: Users },
+type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
+
+const productNavItems: CrmNavItem[] = [
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'categories', label: 'Categorias', icon: Tags },
   { id: 'sale-formats', label: 'Formatos', icon: SlidersHorizontal },
+]
+
+const navItems: CrmNavItem[] = [
+  { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
+  { id: 'access', label: 'Accesos', icon: Users },
   { id: 'tables', label: 'Mesas y zonas', icon: Armchair },
   { id: 'reports', label: 'Informes de ventas', icon: ReceiptText },
   { id: 'import', label: 'Importar / exportar', icon: Upload },
   { id: 'stats', label: 'Estadisticas', icon: BarChart3 },
+  { id: 'plan', label: 'Mi Plan', icon: Gauge },
+  { id: 'settings', label: 'Configuración', icon: Settings },
 ]
+
+const allNavItems = [...navItems, ...productNavItems]
+const productSections = new Set<CrmSection>(productNavItems.map((item) => item.id))
 
 const crmDateTimeFormatter = new Intl.DateTimeFormat('es-ES', {
   day: '2-digit',
@@ -307,6 +322,7 @@ export function CrmPage({
 }: CrmPageProps) {
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [isProductsMenuOpen, setIsProductsMenuOpen] = useState(false)
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)
   const [venues, setVenues] = useState<CrmVenue[]>([])
@@ -440,7 +456,66 @@ export function CrmPage({
 
         <nav aria-label="Navegacion del CRM" className="crm-nav !mt-[30px] !flex !flex-col !gap-[5px]">
           <p className="crm-nav-label !mx-0 !mt-0 !mb-[7px] !ml-[3px] !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Menu principal</p>
-          {navItems.map((item) => {
+          {navItems.slice(0, 2).map((item) => {
+            const Icon = item.icon
+            return (
+              <button
+                aria-current={activeSection === item.id ? 'page' : undefined}
+                className={activeSection === item.id
+                  ? 'crm-nav-item crm-nav-item-active !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none !transition-[background-color,color,transform] !duration-150'
+                  : 'hover:bg-white/5 !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+                key={item.id}
+                onClick={() => {
+                  setActiveSection(item.id)
+                  setIsSidebarOpen(false)
+                }}
+                type="button"
+              >
+                <Icon className="h-4 w-4" />
+                <span className="!inline">{item.label}</span>
+              </button>
+            )
+          })}
+          <div className="!grid !gap-[5px]">
+            <button
+              aria-controls="crm-products-submenu"
+              aria-expanded={isProductsMenuOpen}
+              className={productSections.has(activeSection)
+                ? 'crm-nav-item crm-nav-item-active !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none !transition-[background-color,color,transform] !duration-150'
+                : 'hover:bg-white/5 !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+              onClick={() => setIsProductsMenuOpen((isOpen) => !isOpen)}
+              type="button"
+            >
+              <Boxes className="h-4 w-4" />
+              <span className="!inline">Productos</span>
+              <ChevronDown className={`!ml-auto !size-4 !transition-transform !duration-200 ${isProductsMenuOpen ? '!rotate-180' : ''}`} />
+            </button>
+            {isProductsMenuOpen ? (
+              <div className="!grid !gap-1 !pl-3" id="crm-products-submenu">
+                {productNavItems.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <button
+                      aria-current={activeSection === item.id ? 'page' : undefined}
+                      className={activeSection === item.id
+                        ? 'crm-nav-item crm-nav-item-active !flex !min-h-10 !min-w-0 !items-center !justify-start !gap-3 !rounded-[10px] !border-0 !px-3.5 !text-left !text-[13px] !font-medium !shadow-none !transition-[background-color,color,transform] !duration-150'
+                        : 'hover:bg-white/5 !flex !min-h-10 !min-w-0 !items-center !justify-start !gap-3 !rounded-[10px] !border-0 !px-3.5 !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+                      key={item.id}
+                      onClick={() => {
+                        setActiveSection(item.id)
+                        setIsSidebarOpen(false)
+                      }}
+                      type="button"
+                    >
+                      <Icon className="!size-3.5" />
+                      <span>{item.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
+          {navItems.slice(2).map((item) => {
             const Icon = item.icon
             return (
               <button
@@ -485,7 +560,7 @@ export function CrmPage({
           <div className="crm-page-heading !mr-auto !min-w-0 md:!min-w-[180px] xl:!mr-0">
             <div className="crm-breadcrumb !hidden !items-center !gap-1.5 !text-[11px] !font-medium !text-[var(--crm-text-muted)] md:!flex">
               <LayoutDashboard className="size-3.5" />
-              <span>{navItems.find((item) => item.id === activeSection)?.label}</span>
+              <span>{allNavItems.find((item) => item.id === activeSection)?.label}</span>
               <ChevronRight className="size-3.5" />
               <span>{context.tenantName}</span>
             </div>
@@ -624,6 +699,24 @@ export function CrmPage({
           {activeSection === 'stats' ? (
             <StatsCrm disabled={!isOnline || isBusy} onRefresh={refreshStats} stats={stats} />
           ) : null}
+
+          {activeSection === 'settings' ? (
+            <SettingsCrm
+              disabled={!isOnline || isBusy}
+              onVenuesChanged={refreshVenues}
+              runAction={runAction}
+              tenantContext={context}
+              venues={venues}
+            />
+          ) : null}
+
+          {activeSection === 'plan' ? (
+            <PlanCrm
+              disabled={!isOnline || isBusy}
+              runAction={runAction}
+              tenantContext={context}
+            />
+          ) : null}
         </main>
       </section>
     </div>
@@ -655,11 +748,126 @@ function getSectionTitle(section: CrmSection) {
   if (section === 'stats') {
     return 'Analitica comercial'
   }
+  if (section === 'settings') {
+    return 'Configuración de locales'
+  }
+  if (section === 'plan') {
+    return 'Mi Plan'
+  }
 
   return 'Panel de control'
 }
 
 type RunAction = (action: () => Promise<void>) => Promise<void>
+
+type PlanCrmProps = {
+  disabled: boolean
+  runAction: RunAction
+  tenantContext: TenantContext
+}
+
+function PlanCrm({ disabled, runAction, tenantContext }: PlanCrmProps) {
+  const [plan, setPlan] = useState<CrmPlan | null>(null)
+
+  const refresh = useCallback(async () => {
+    setPlan(await loadCrmPlan(tenantContext))
+  }, [tenantContext])
+
+  useEffect(() => {
+    void runAction(refresh)
+  }, [refresh, runAction])
+
+  const resources = plan ? [
+    { icon: Building2, label: 'Locales', limit: plan.limits.venues, usage: plan.usage.venues },
+    { icon: MonitorSmartphone, label: 'Dispositivos', limit: plan.limits.devices, usage: plan.usage.devices },
+  ] : []
+
+  return (
+    <div className="!grid !gap-5">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[72px] !items-center !justify-between !gap-4 !border-0 !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
+          <div><h2 className="!m-0 !text-lg !font-bold">Mi Plan</h2><p>Consulta los recursos incluidos y el uso actual de tu negocio.</p></div>
+          <button aria-label="Actualizar plan" className="crm-icon-button !inline-flex !size-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" disabled={disabled} onClick={() => void runAction(refresh)} title="Actualizar" type="button"><RefreshCw className="!size-4" /></button>
+        </div>
+
+        {plan ? (
+          <div className="!grid !grid-cols-1 !gap-4 !px-[18px] !pb-[22px] md:!grid-cols-2 md:!px-[22px]">
+            {resources.map(({ icon: Icon, label, limit, usage }) => {
+              const percentage = limit > 0 ? Math.min(100, Math.round((usage / limit) * 100)) : usage > 0 ? 100 : 0
+              const remaining = Math.max(0, limit - usage)
+              return (
+                <article className="!grid !gap-4 !rounded-[14px] !bg-[var(--crm-surface-soft)] !p-5" key={label}>
+                  <div className="!flex !items-center !justify-between !gap-3"><div className="!grid !size-10 !place-items-center !rounded-[10px] !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]"><Icon className="!size-5" /></div><span className="!text-xs !font-semibold !text-[var(--crm-text-muted)]">{remaining} disponibles</span></div>
+                  <div><p className="!m-0 !text-xs !font-semibold !text-[var(--crm-text-muted)]">{label}</p><strong className="!mt-1 !block !text-3xl !font-bold !tracking-tight">{usage} <span className="!text-base !font-medium !text-[var(--crm-text-muted)]">/ {limit}</span></strong></div>
+                  <div className="!h-2 !overflow-hidden !rounded-full !bg-[var(--crm-border)]"><i className="!block !h-full !rounded-full !bg-[var(--crm-blue)] !transition-[width] !duration-300" style={{ width: `${percentage}%` }} /></div>
+                </article>
+              )
+            })}
+          </div>
+        ) : <div className="!grid !min-h-[180px] !place-items-center !px-5 !pb-5 !text-sm !font-medium !text-[var(--crm-text-muted)]">Cargando información del plan...</div>}
+      </section>
+      <p className="!m-0 !px-1 !text-xs !font-medium !text-[var(--crm-text-muted)]">Si necesitas ampliar alguno de estos límites, contacta con el administrador de la plataforma.</p>
+    </div>
+  )
+}
+
+type SettingsCrmProps = {
+  disabled: boolean
+  onVenuesChanged: () => Promise<void>
+  runAction: RunAction
+  tenantContext: TenantContext
+  venues: CrmVenue[]
+}
+
+function SettingsCrm({ disabled, onVenuesChanged, runAction, tenantContext, venues }: SettingsCrmProps) {
+  async function submitVenueTax(event: FormEvent<HTMLFormElement>, venue: CrmVenue) {
+    event.preventDefault()
+    const defaultTaxRate = Number(new FormData(event.currentTarget).get('defaultTaxRate'))
+
+    await runAction(async () => {
+      await updateCrmVenueDefaultTaxRate(tenantContext, venue.id, defaultTaxRate)
+      await onVenuesChanged()
+      sileo.success({
+        description: `Los productos que heredan IVA en ${venue.name} usarán el ${defaultTaxRate} % en futuras ventas.`,
+        title: 'IVA por defecto actualizado',
+      })
+    })
+  }
+
+  return (
+    <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+      <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
+        <div>
+          <h2 className="!m-0 !text-base !font-bold">Configuración de locales</h2>
+          <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Define el IVA por defecto de cada local.</p>
+        </div>
+        <Settings className="h-4 w-4" />
+      </div>
+      <div className="!grid !grid-cols-1 !gap-4 !px-[18px] !pt-5 !pb-[22px] md:!grid-cols-2 md:!px-[22px] xl:!grid-cols-3">
+        {venues.map((venue) => (
+          <form className="!grid !gap-3 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)] !p-4" key={venue.id} onSubmit={(event) => void submitVenueTax(event, venue)}>
+            <strong className="!text-[13px] !text-[var(--crm-text)]">{venue.name}</strong>
+            <Field label="IVA por defecto">
+              <select
+                className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
+                defaultValue={String(venue.defaultTaxRate)}
+                disabled={disabled}
+                name="defaultTaxRate"
+              >
+                {COMMON_TAX_RATES.map((rate) => <option key={rate} value={rate}>{rate} %</option>)}
+              </select>
+            </Field>
+            <p className="crm-form-help">Se aplicará a los productos que no tengan un IVA específico.</p>
+            <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled} type="submit">
+              <Save className="h-4 w-4" /> Guardar IVA
+            </button>
+          </form>
+        ))}
+        {!venues.length ? <EmptyList message="No hay locales configurados." /> : null}
+      </div>
+    </section>
+  )
+}
 
 type AccessManagementCrmProps = {
   disabled: boolean
@@ -679,10 +887,7 @@ function AccessManagementCrm({
   const [deviceName, setDeviceName] = useState('')
   const [deviceVenueId, setDeviceVenueId] = useState('')
   const [deviceMode, setDeviceMode] = useState<'satellite' | 'checkout' | 'hybrid'>('checkout')
-  const [userName, setUserName] = useState('')
-  const [userEmail, setUserEmail] = useState('')
-  const [userPassword, setUserPassword] = useState('')
-  const [userDeviceId, setUserDeviceId] = useState('')
+  const [generatedCredentials, setGeneratedCredentials] = useState<{ email: string; password: string } | null>(null)
   const [editingUserId, setEditingUserId] = useState<string | null>(null)
   const [editingUserName, setEditingUserName] = useState('')
   const [editingUserEmail, setEditingUserEmail] = useState('')
@@ -702,14 +907,7 @@ function AccessManagementCrm({
     if (!deviceVenueId && data.venues.length) {
       setDeviceVenueId(data.venues[0].id)
     }
-
-    const assignedDevices = new Set(data.users.filter((user) => user.isActive).map((user) => user.deviceId))
-    const firstAvailableDevice = data.devices.find((device) => device.isActive && !assignedDevices.has(device.id))
-
-    if (!userDeviceId || assignedDevices.has(userDeviceId)) {
-      setUserDeviceId(firstAvailableDevice?.id ?? '')
-    }
-  }, [data, deviceVenueId, userDeviceId])
+  }, [data.venues, deviceVenueId])
 
   async function submitVenue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -720,43 +918,23 @@ function AccessManagementCrm({
     })
   }
 
-  async function submitVenueTax(event: FormEvent<HTMLFormElement>, venue: CrmVenue) {
-    event.preventDefault()
-    const defaultTaxRate = Number(new FormData(event.currentTarget).get('defaultTaxRate'))
-
-    await runAction(async () => {
-      await updateCrmVenueDefaultTaxRate(tenantContext, venue.id, defaultTaxRate)
-      await Promise.all([refresh(), onVenuesChanged()])
-      sileo.success({
-        description: `Los productos que heredan IVA en ${venue.name} usaran el ${defaultTaxRate} % en futuras ventas.`,
-        title: 'IVA por defecto actualizado',
-      })
-    })
-  }
-
   async function submitDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     await runAction(async () => {
-      await createCrmDevice(tenantContext, deviceVenueId, deviceName, deviceMode)
+      const credentials = await createCrmDevice(tenantContext, deviceVenueId, deviceName, deviceMode)
       setDeviceName('')
       await refresh()
+      setGeneratedCredentials(credentials)
     })
   }
 
-  async function submitUser(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    await runAction(async () => {
-      await createCrmPosUser(tenantContext, {
-        deviceId: userDeviceId,
-        email: userEmail.trim(),
-        fullName: userName.trim(),
-        password: userPassword,
-      })
-      setUserName('')
-      setUserEmail('')
-      setUserPassword('')
-      await refresh()
-    })
+  async function copyCredential(value: string, label: string) {
+    try {
+      await navigator.clipboard.writeText(value)
+      sileo.success({ title: `${label} copiado` })
+    } catch {
+      sileo.error({ title: `No se pudo copiar ${label.toLowerCase()}` })
+    }
   }
 
   async function toggleUser(userId: string, isActive: boolean) {
@@ -830,10 +1008,10 @@ function AccessManagementCrm({
   const venueById = new Map(data.venues.map((venue) => [venue.id, venue]))
   const deviceById = new Map(data.devices.map((device) => [device.id, device]))
   const assignedDeviceIds = new Set(data.users.filter((user) => user.isActive).map((user) => user.deviceId))
-  const availableDevices = data.devices.filter((device) => device.isActive && !assignedDeviceIds.has(device.id))
 
   return (
-    <div className="crm-access-layout !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[340px_minmax(0,1fr)] xl:!gap-6">
+    <>
+      <div className="crm-access-layout !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[340px_minmax(0,1fr)] xl:!gap-6">
       <div className="crm-access-forms">
         <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
           <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Nuevo local</span><Building2 className="h-4 w-4" /></div>
@@ -848,31 +1026,6 @@ function AccessManagementCrm({
         </section>
 
         <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Configuracion de locales</span><Building2 className="h-4 w-4" /></div>
-          <div className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]">
-            {data.venues.map((venue) => (
-              <form className="!grid !gap-2 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)] !p-3.5" key={venue.id} onSubmit={(event) => void submitVenueTax(event, venue)}>
-                <strong className="!text-[13px] !text-[var(--crm-text)]">{venue.name}</strong>
-                <Field label="IVA por defecto">
-                  <select
-                    className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
-                    defaultValue={String(venue.defaultTaxRate)}
-                    disabled={disabled}
-                    name="defaultTaxRate"
-                  >
-                    {COMMON_TAX_RATES.map((rate) => <option key={rate} value={rate}>{rate} %</option>)}
-                  </select>
-                </Field>
-                <p className="crm-form-help">Se aplicara a los productos que no tengan un IVA especifico.</p>
-                <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled} type="submit">
-                  <Save className="h-4 w-4" /> Guardar IVA
-                </button>
-              </form>
-            ))}
-          </div>
-        </section>
-
-        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
           <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Nuevo dispositivo</span><MonitorSmartphone className="h-4 w-4" /></div>
           <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]" onSubmit={(event) => void submitDevice(event)}>
             <Field label="Local">
@@ -884,34 +1037,8 @@ function AccessManagementCrm({
               <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setDeviceName(event.target.value)} required value={deviceName} />
             </Field>
             <Field label="Modo"><select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setDeviceMode(event.target.value as typeof deviceMode)} value={deviceMode}><option value="satellite">Satelite</option><option value="checkout">Caja</option><option value="hybrid">Hibrido</option></select></Field>
-            <p className="crm-form-help">Los dispositivos Caja e Hibrido crean automaticamente su propio punto de caja. Los Satelite solo trabajan con cajas ya abiertas.</p>
             <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !deviceVenueId || !deviceName.trim()} type="submit">
               <Plus className="h-4 w-4" /> Crear dispositivo
-            </button>
-          </form>
-        </section>
-
-        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Nuevo usuario TPV</span><UserRound className="h-4 w-4" /></div>
-          <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]" onSubmit={(event) => void submitUser(event)}>
-            <Field label="Nombre">
-              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setUserName(event.target.value)} required value={userName} />
-            </Field>
-            <Field label="Email">
-              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setUserEmail(event.target.value)} required type="email" value={userEmail} />
-            </Field>
-            <Field label="Contrasena inicial">
-              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} minLength={8} onChange={(event) => setUserPassword(event.target.value)} required type="password" value={userPassword} />
-            </Field>
-            <Field label="Dispositivo">
-              <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setUserDeviceId(event.target.value)} required value={userDeviceId}>
-                {availableDevices.map((device) => (
-                  <option key={device.id} value={device.id}>{venueById.get(device.venueId)?.name} / {device.name}</option>
-                ))}
-              </select>
-            </Field>
-            <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !userDeviceId || userPassword.length < 8} type="submit">
-              <Plus className="h-4 w-4" /> Crear usuario
             </button>
           </form>
         </section>
@@ -1001,8 +1128,23 @@ function AccessManagementCrm({
           })}
           {!data.users.length ? <EmptyList message="No hay usuarios TPV creados." /> : null}
         </div>
-      </section>
-    </div>
+        </section>
+      </div>
+
+      {generatedCredentials ? (
+        <CrmModal label="Credenciales del nuevo dispositivo" onClose={() => setGeneratedCredentials(null)}>
+          <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
+            <div><h2 className="!m-0 !text-lg !font-bold">Dispositivo y usuario creados</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Guarda estas credenciales: la contraseña solo se muestra ahora.</p></div>
+            <button aria-label="Cerrar" className="crm-icon-button !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={() => setGeneratedCredentials(null)} type="button"><X className="!size-4" /></button>
+          </div>
+          <div className="!grid !gap-4 !px-5 !py-5">
+            <div className="!grid !gap-2"><span className="!text-[11px] !font-semibold !text-[var(--crm-text-muted)]">Email de acceso</span><div className="!flex !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-surface-soft)] !p-3"><code className="!min-w-0 !flex-1 !overflow-hidden !text-ellipsis !text-sm !font-semibold">{generatedCredentials.email}</code><button aria-label="Copiar email" className="crm-icon-button !inline-flex !size-9 !shrink-0 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-input-bg)] !p-0 !text-[var(--crm-text-secondary)]" onClick={() => void copyCredential(generatedCredentials.email, 'Email')} type="button"><Copy className="!size-4" /></button></div></div>
+            <div className="!grid !gap-2"><span className="!text-[11px] !font-semibold !text-[var(--crm-text-muted)]">Contraseña temporal</span><div className="!flex !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-surface-soft)] !p-3"><code className="!min-w-0 !flex-1 !text-lg !font-bold !tracking-[0.08em]">{generatedCredentials.password}</code><button aria-label="Copiar contraseña" className="crm-icon-button !inline-flex !size-9 !shrink-0 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-input-bg)] !p-0 !text-[var(--crm-text-secondary)]" onClick={() => void copyCredential(generatedCredentials.password, 'Contraseña')} type="button"><Copy className="!size-4" /></button></div></div>
+            <button className="crm-primary-button !mt-1 !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" onClick={() => setGeneratedCredentials(null)} type="button">He guardado las credenciales</button>
+          </div>
+        </CrmModal>
+      ) : null}
+    </>
   )
 }
 

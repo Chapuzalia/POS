@@ -42,6 +42,9 @@ create table if not exists public.tenants (
   id uuid primary key default gen_random_uuid(),
   name text not null,
   slug text not null unique,
+  is_active boolean not null default true,
+  max_venues integer not null default 1 check (max_venues >= 1),
+  max_devices integer not null default 5 check (max_devices >= 0),
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now()
 );
@@ -75,9 +78,11 @@ as $$
   select exists (
     select 1
     from public.tenant_memberships tm
+    join public.tenants t on t.id = tm.tenant_id
     where tm.tenant_id = target_tenant
       and tm.user_id = auth.uid()
       and tm.is_active = true
+      and t.is_active = true
   );
 $$;
 
@@ -91,10 +96,12 @@ as $$
   select exists (
     select 1
     from public.tenant_memberships tm
+    join public.tenants t on t.id = tm.tenant_id
     where tm.tenant_id = target_tenant
       and tm.user_id = auth.uid()
       and tm.role = any(allowed_roles)
       and tm.is_active = true
+      and t.is_active = true
   );
 $$;
 
@@ -119,6 +126,58 @@ create table if not exists public.devices (
   updated_at timestamptz not null default now(),
   unique (tenant_id, venue_id, name)
 );
+
+create or replace function public.enforce_tenant_plan_limit()
+returns trigger
+language plpgsql
+security definer
+set search_path = public
+as $$
+declare
+  current_usage integer;
+  resource_limit integer;
+  resource_label text;
+begin
+  if tg_table_name = 'venues' then
+    select max_venues into resource_limit from public.tenants where id = new.tenant_id for update;
+    select count(*) into current_usage from public.venues where tenant_id = new.tenant_id;
+    resource_label := 'locales';
+  elsif tg_table_name = 'devices' then
+    select max_devices into resource_limit from public.tenants where id = new.tenant_id for update;
+    select count(*) into current_usage from public.devices where tenant_id = new.tenant_id;
+    resource_label := 'dispositivos';
+  elsif tg_table_name = 'tenant_memberships' then
+    if new.role <> 'cashier' then
+      return new;
+    end if;
+    select max_devices into resource_limit from public.tenants where id = new.tenant_id for update;
+    select count(*) into current_usage from public.tenant_memberships where tenant_id = new.tenant_id and role = 'cashier';
+    resource_label := 'usuarios';
+  else
+    return new;
+  end if;
+
+  if resource_limit is null then
+    raise exception 'El negocio no existe.' using errcode = 'P0001';
+  end if;
+  if current_usage >= resource_limit then
+    raise exception 'Has alcanzado el límite de % de tu plan (%).', resource_label, resource_limit using errcode = 'P0001';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_venue_plan_limit on public.venues;
+create trigger enforce_venue_plan_limit before insert on public.venues
+for each row execute function public.enforce_tenant_plan_limit();
+
+drop trigger if exists enforce_device_plan_limit on public.devices;
+create trigger enforce_device_plan_limit before insert on public.devices
+for each row execute function public.enforce_tenant_plan_limit();
+
+drop trigger if exists enforce_user_plan_limit on public.tenant_memberships;
+create trigger enforce_user_plan_limit before insert on public.tenant_memberships
+for each row execute function public.enforce_tenant_plan_limit();
 
 create table if not exists public.categories (
   id uuid primary key default gen_random_uuid(),

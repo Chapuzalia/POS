@@ -272,11 +272,11 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   const membership = activeMemberships[0]
   const { data: tenant, error: tenantError } = await supabase
     .from('tenants')
-    .select('id, name, slug')
+    .select('id, name, slug, is_active')
     .eq('id', membership.tenant_id)
     .single<TenantRow>()
 
-  if (tenantError || !tenant) {
+  if (tenantError || !tenant || tenant.is_active === false) {
     throw new Error(`No se pudo cargar el negocio asignado: ${getReadableError(tenantError)}`)
   }
 
@@ -433,7 +433,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   const [{ data: tenant, error: tenantError }, { data: membership, error: membershipError }] = await Promise.all([
     supabase
       .from('tenants')
-      .select('id, name, slug')
+      .select('id, name, slug, is_active')
       .eq('id', cachedContext.tenantId)
       .maybeSingle<TenantRow>(),
     supabase
@@ -449,7 +449,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw tenantError ?? membershipError
   }
 
-  if (!tenant || !membership) {
+  if (!tenant || tenant.is_active === false || !membership) {
     throw new TenantSessionError('El usuario ya no tiene acceso activo a este negocio.')
   }
 

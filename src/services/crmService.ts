@@ -147,6 +147,17 @@ export type CrmAccessData = {
   users: CrmPosUser[]
 }
 
+export type CrmPlan = {
+  limits: {
+    devices: number
+    venues: number
+  }
+  usage: {
+    devices: number
+    venues: number
+  }
+}
+
 function requireSupabase() {
   if (!supabase) {
     throw new Error('Supabase no esta configurado.')
@@ -217,6 +228,21 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
   }
 }
 
+export async function loadCrmPlan(context: TenantContext): Promise<CrmPlan> {
+  const client = requireSupabase()
+  const { data, error } = await client.functions.invoke<CrmPlan & { error?: string }>('manage-pos-users', {
+    body: { action: 'tenant-plan', tenantId: context.tenantId },
+  })
+
+  if (error || data?.error) {
+    throw new Error(data?.error ?? error?.message ?? 'No se pudo cargar la información del plan.')
+  }
+  if (!data?.limits || !data.usage) {
+    throw new Error('La función no devolvió la información del plan.')
+  }
+  return data
+}
+
 export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]> {
   const client = requireSupabase()
   const { data, error } = await client
@@ -275,41 +301,23 @@ export async function updateCrmVenueDefaultTaxRate(
 
 export async function createCrmDevice(context: TenantContext, venueId: string, name: string, deviceMode: DeviceMode) {
   const client = requireSupabase()
-  const { error } = await client.from('devices').insert({
-    tenant_id: context.tenantId,
-    venue_id: venueId,
-    name: name.trim(),
-    is_active: true,
-    device_mode: deviceMode,
-    default_cash_register_id: null,
-    can_take_orders: true,
-    can_take_payments: deviceMode !== 'satellite',
-    can_open_cash_session: deviceMode !== 'satellite',
-    can_close_cash_session: deviceMode !== 'satellite',
-    can_manage_cash: deviceMode !== 'satellite',
+  const { data, error } = await client.functions.invoke<{
+    credentials?: { email: string; password: string }
+    error?: string
+  }>('manage-pos-users', {
+    body: {
+      action: 'create-device-with-user',
+      deviceMode,
+      deviceName: name.trim(),
+      tenantId: context.tenantId,
+      venueId,
+    },
   })
 
-  if (error) {
-    throw error
+  if (error || data?.error || !data?.credentials) {
+    throw new Error(data?.error ?? error?.message ?? 'No se pudieron crear el dispositivo y su usuario.')
   }
-}
-
-export async function createCrmPosUser(
-  context: TenantContext,
-  input: { deviceId: string; email: string; fullName: string; password: string },
-) {
-  const client = requireSupabase()
-  const { data, error } = await client.functions.invoke<{ error?: string }>('manage-pos-users', {
-    body: { action: 'create', tenantId: context.tenantId, ...input },
-  })
-
-  if (error) {
-    throw error
-  }
-
-  if (data?.error) {
-    throw new Error(data.error)
-  }
+  return data.credentials
 }
 
 export async function setCrmPosUserActive(context: TenantContext, userId: string, isActive: boolean) {

@@ -2,6 +2,7 @@ import type { CatalogKind, DeviceMode, PaymentMethod, SaleFormat, TenantRole } f
 
 export type TenantRow = {
   id: string
+  is_active: boolean
   name: string
   slug: string
 }
