@@ -1,8 +1,12 @@
 import {
+  ArrowDown,
+  ArrowUp,
+  ArrowUpDown,
   BarChart3,
   Armchair,
   Boxes,
   Building2,
+  ChevronLeft,
   ChevronRight,
   Download,
   LayoutDashboard,
@@ -11,6 +15,7 @@ import {
   MonitorSmartphone,
   Pencil,
   Plus,
+  ReceiptText,
   RefreshCw,
   Save,
   Search,
@@ -24,11 +29,14 @@ import {
   X,
   type LucideIcon,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type ChangeEvent, type CSSProperties, type FormEvent, type ReactNode } from 'react'
+import { createPortal } from 'react-dom'
+import { sileo } from 'sileo'
 import {
   canSellProductStandalone,
   canUseProductAsMixer,
   categoryKindOptions,
+  findProductVariantForSaleFormat,
   getAvailableSaleFormats,
   getDefaultSaleFormatsForKind,
   getKindLabel,
@@ -36,7 +44,7 @@ import {
   getSaleFormatLabel,
   productKindOptions,
 } from '../../lib/catalog'
-import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
+import { centsToInput, formatMoney, normalizeText, parseMoneyToCents } from '../../lib/format'
 import { exportCatalogZip, parseCatalogZip, type ParsedCatalogTransfer } from '../../lib/catalogTransfer'
 import { getDefaultProductImageFillColor } from '../../lib/productImages'
 import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImport'
@@ -57,6 +65,7 @@ import {
   importRevoCatalogProducts,
   importCatalogBackup,
   loadCrmStats,
+  loadCrmSalesReports,
   loadCrmAccessData,
   loadCrmVenues,
   releaseCrmPosUserLogin,
@@ -77,6 +86,8 @@ import type {
   CatalogKind,
   Category,
   CrmPosUser,
+  CrmSalesReportAggregate,
+  CrmSalesReports,
   CrmStats,
   CrmVenue,
   DeviceMode,
@@ -91,7 +102,7 @@ import { getReadableError } from '../../utils/errors'
 import { TableManagementPage } from '../../features/table-management/TableManagementPage'
 import './crm.css'
 
-type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'tables' | 'import' | 'stats'
+type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'tables' | 'reports' | 'import' | 'stats'
 
 type CrmPageProps = {
   catalog: Catalog | null
@@ -110,6 +121,7 @@ const navItems: Array<{ id: CrmSection; label: string; icon: LucideIcon }> = [
   { id: 'categories', label: 'Categorias', icon: Tags },
   { id: 'sale-formats', label: 'Formatos', icon: SlidersHorizontal },
   { id: 'tables', label: 'Mesas y zonas', icon: Armchair },
+  { id: 'reports', label: 'Informes de ventas', icon: ReceiptText },
   { id: 'import', label: 'Importar / exportar', icon: Upload },
   { id: 'stats', label: 'Estadisticas', icon: BarChart3 },
 ]
@@ -121,11 +133,160 @@ const crmDateTimeFormatter = new Intl.DateTimeFormat('es-ES', {
   month: '2-digit',
 })
 
+const crmReportDateTimeFormatter = new Intl.DateTimeFormat('es-ES', {
+  dateStyle: 'medium',
+  timeStyle: 'short',
+})
+
 const paymentLabels: Record<PaymentMethod, string> = {
   card: 'Tarjeta',
   cash: 'Efectivo',
   invitation: 'Invitacion',
   other: 'Otros',
+}
+
+const CRM_PAGE_SIZE = 12
+
+type CrmPaginationProps = {
+  currentPage: number
+  onPageChange: (page: number) => void
+  totalResults: number
+}
+
+function CrmPagination({ currentPage, onPageChange, totalResults }: CrmPaginationProps) {
+  const totalPages = Math.max(1, Math.ceil(totalResults / CRM_PAGE_SIZE))
+  const firstResult = totalResults ? (currentPage - 1) * CRM_PAGE_SIZE + 1 : 0
+  const lastResult = Math.min(currentPage * CRM_PAGE_SIZE, totalResults)
+  const firstVisiblePage = Math.max(1, Math.min(currentPage - 2, totalPages - 4))
+  const lastVisiblePage = Math.min(totalPages, firstVisiblePage + 4)
+  const visiblePages = Array.from(
+    { length: lastVisiblePage - firstVisiblePage + 1 },
+    (_, index) => firstVisiblePage + index,
+  )
+
+  return (
+    <div className="!flex !min-h-[68px] !flex-col !items-center !justify-between !gap-3 !border-t !border-[var(--crm-border-subtle)] !px-[18px] !py-3.5 sm:!flex-row md:!px-[22px]">
+      <p className="!m-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">
+        Mostrando {firstResult}-{lastResult} de {totalResults} resultados
+      </p>
+      <nav aria-label="Paginacion de resultados" className="!flex !flex-wrap !items-center !justify-center !gap-1.5">
+        <button
+          aria-label="Pagina anterior"
+          className="crm-secondary-button !inline-flex !min-h-9 !items-center !justify-center !gap-1.5 !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !px-2.5 !text-xs !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150"
+          disabled={currentPage === 1}
+          onClick={() => onPageChange(currentPage - 1)}
+          type="button"
+        >
+          <ChevronLeft className="!size-4" />
+          <span className="!hidden sm:!inline">Anterior</span>
+        </button>
+        {visiblePages.map((page) => (
+          <button
+            aria-current={page === currentPage ? 'page' : undefined}
+            aria-label={`Pagina ${page}`}
+            className={page === currentPage
+              ? '!inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-blue)] !p-0 !text-xs !font-bold !text-white !shadow-none !transition-[background-color,color,transform] !duration-150'
+              : 'crm-secondary-button !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-xs !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+            key={page}
+            onClick={() => onPageChange(page)}
+            type="button"
+          >
+            {page}
+          </button>
+        ))}
+        <button
+          aria-label="Pagina siguiente"
+          className="crm-secondary-button !inline-flex !min-h-9 !items-center !justify-center !gap-1.5 !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !px-2.5 !text-xs !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150"
+          disabled={currentPage === totalPages}
+          onClick={() => onPageChange(currentPage + 1)}
+          type="button"
+        >
+          <span className="!hidden sm:!inline">Siguiente</span>
+          <ChevronRight className="!size-4" />
+        </button>
+      </nav>
+    </div>
+  )
+}
+
+type CrmModalProps = {
+  children: ReactNode
+  label: string
+  onClose: () => void
+  size?: 'compact' | 'large'
+}
+
+const crmModalWidths = {
+  compact: '!max-w-[520px]',
+  large: '!max-w-[820px]',
+} as const
+
+function CrmModal({ children, label, onClose, size = 'compact' }: CrmModalProps) {
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  const onCloseRef = useRef(onClose)
+  const modalRoot = document.querySelector<HTMLElement>('.crm-shell') ?? document.body
+  onCloseRef.current = onClose
+
+  useEffect(() => {
+    const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null
+    const handleModalKeyboard = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onCloseRef.current()
+        return
+      }
+
+      if (event.key === 'Tab' && dialogRef.current) {
+        const focusableElements = Array.from(dialogRef.current.querySelectorAll<HTMLElement>(
+          'button:not(:disabled), input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])',
+        ))
+        const firstElement = focusableElements[0]
+        const lastElement = focusableElements.at(-1)
+
+        if (!firstElement || !lastElement) {
+          event.preventDefault()
+        } else if (event.shiftKey && document.activeElement === firstElement) {
+          event.preventDefault()
+          lastElement.focus()
+        } else if (!event.shiftKey && document.activeElement === lastElement) {
+          event.preventDefault()
+          firstElement.focus()
+        }
+      }
+    }
+
+    window.addEventListener('keydown', handleModalKeyboard)
+    return () => {
+      window.removeEventListener('keydown', handleModalKeyboard)
+      previouslyFocused?.focus()
+    }
+  }, [])
+
+  return createPortal(
+    <div
+      className="!fixed !inset-0 !z-[80] !grid !place-items-center !overflow-y-auto !bg-black/55 !p-3 !backdrop-blur-sm sm:!p-6"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) {
+          onClose()
+        }
+      }}
+    >
+      <dialog
+        aria-label={label}
+        aria-modal="true"
+        className={`crm-panel !relative !m-0 !flex !max-h-[calc(100dvh-24px)] !w-full !flex-col !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !p-0 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] sm:!max-h-[calc(100dvh-48px)] sm:!rounded-[var(--crm-radius-lg)] ${crmModalWidths[size]}`}
+        onCancel={(event) => {
+          event.preventDefault()
+          onClose()
+        }}
+        open
+        ref={dialogRef}
+      >
+        {children}
+      </dialog>
+    </div>,
+    modalRoot,
+  )
 }
 
 export function CrmPage({
@@ -242,42 +403,42 @@ export function CrmPage({
   }, [isSidebarOpen])
 
   return (
-    <div className="crm-shell crm-dashboard-shell flex h-dvh min-h-0 w-screen overflow-hidden bg-[var(--crm-canvas)] text-[var(--crm-text)] antialiased">
+    <div className="crm-shell crm-dashboard-shell !flex !h-dvh !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased">
       <button
         aria-label="Cerrar menu de navegacion"
         className={isSidebarOpen
-          ? 'crm-sidebar-backdrop crm-sidebar-backdrop-visible max-[1199px]:pointer-events-auto max-[1199px]:opacity-100'
-          : 'crm-sidebar-backdrop max-[1199px]:pointer-events-none max-[1199px]:opacity-0'}
+          ? 'crm-sidebar-backdrop !fixed !inset-0 !z-[39] !block !border-0 !bg-[rgba(0,0,0,0.52)] !opacity-100 !transition-opacity !duration-200 xl:!hidden'
+          : 'crm-sidebar-backdrop !pointer-events-none !fixed !inset-0 !z-[39] !block !border-0 !bg-[rgba(0,0,0,0.52)] !opacity-0 !transition-opacity !duration-200 xl:!hidden'}
         onClick={() => setIsSidebarOpen(false)}
         tabIndex={isSidebarOpen ? 0 : -1}
         type="button"
       />
       <aside
         className={isSidebarOpen
-          ? 'crm-sidebar crm-sidebar-open flex h-dvh flex-col overflow-y-auto border-r border-[var(--crm-border-subtle)] bg-[var(--crm-sidebar-bg)] px-5 pt-6 pb-[18px] text-[var(--crm-text)] max-[1199px]:translate-x-0'
-          : 'crm-sidebar flex h-dvh flex-col overflow-y-auto border-r border-[var(--crm-border-subtle)] bg-[var(--crm-sidebar-bg)] px-5 pt-6 pb-[18px] text-[var(--crm-text)]'}
+          ? 'crm-sidebar crm-sidebar-open !fixed !top-0 !bottom-0 !left-0 !z-40 !flex !h-dvh !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !translate-x-0 !flex-col !overflow-y-auto !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !px-5 !pt-6 !pb-[18px] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] !transition-transform !duration-200 xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none'
+          : 'crm-sidebar !fixed !top-0 !bottom-0 !left-0 !z-40 !flex !h-dvh !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !-translate-x-[102%] !flex-col !overflow-y-auto !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !px-5 !pt-6 !pb-[18px] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] !transition-transform !duration-200 xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none'}
         id="crm-sidebar"
       >
-        <div className="crm-brand grid min-h-11 grid-cols-[40px_minmax(0,1fr)] items-center gap-[11px]">
-          <div className="crm-brand-mark grid size-10 place-items-center rounded-[10px] border border-[var(--crm-border)] bg-[var(--crm-surface)] text-[var(--crm-blue)]">
+        <div className="crm-brand !grid !min-h-11 !grid-cols-[40px_minmax(0,1fr)] !items-center !justify-stretch !gap-[11px] !border-0 !p-0">
+          <div className="crm-brand-mark !grid !size-10 !place-items-center !rounded-[10px] !border !border-[var(--crm-border)] !bg-[var(--crm-surface)] !text-[var(--crm-blue)]">
             <Store className="size-5 stroke-[1.8]" />
           </div>
           <div>
-            <p className="crm-brand-title overflow-hidden text-ellipsis whitespace-nowrap text-sm leading-tight font-semibold text-[var(--crm-text)]">{context.tenantName}</p>
-            <p className="crm-brand-subtitle mt-0.5 overflow-hidden text-ellipsis whitespace-nowrap text-[11px] font-medium text-[var(--crm-text-muted)]">CRM · CLUB POS</p>
+            <p className="crm-brand-title !m-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-sm !leading-tight !font-semibold !text-[var(--crm-text)]">{context.tenantName}</p>
+            <p className="crm-brand-subtitle !mt-0.5 !mb-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-[11px] !font-medium !text-[var(--crm-text-muted)]">CRM · CLUB POS</p>
           </div>
         </div>
 
-        <nav aria-label="Navegacion del CRM" className="crm-nav mt-[30px] flex flex-col gap-[5px]">
-          <p className="crm-nav-label mx-0 mt-0 mb-[7px] ml-[3px] text-[11px] font-medium text-[var(--crm-text-muted)]">Menu principal</p>
+        <nav aria-label="Navegacion del CRM" className="crm-nav !mt-[30px] !flex !flex-col !gap-[5px]">
+          <p className="crm-nav-label !mx-0 !mt-0 !mb-[7px] !ml-[3px] !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Menu principal</p>
           {navItems.map((item) => {
             const Icon = item.icon
             return (
               <button
                 aria-current={activeSection === item.id ? 'page' : undefined}
                 className={activeSection === item.id
-                  ? 'crm-nav-item crm-nav-item-active flex min-h-[46px] min-w-0 items-center gap-[13px] rounded-[10px] border-0 px-3.5 text-left text-sm font-medium shadow-none transition-[background-color,color,transform] duration-150'
-                  : 'crm-nav-item flex min-h-[46px] min-w-0 items-center gap-[13px] rounded-[10px] border-0 bg-transparent px-3.5 text-left text-sm font-medium text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150'}
+                  ? 'crm-nav-item crm-nav-item-active !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none !transition-[background-color,color,transform] !duration-150'
+                  : 'hover:bg-white/5 !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
                 key={item.id}
                 onClick={() => {
                   setActiveSection(item.id)
@@ -286,45 +447,45 @@ export function CrmPage({
                 type="button"
               >
                 <Icon className="h-4 w-4" />
-                <span>{item.label}</span>
+                <span className="!inline">{item.label}</span>
               </button>
             )
           })}
         </nav>
 
-        <div className="crm-sidebar-footer mt-auto grid gap-[5px] pt-7">
-          <button className="crm-nav-item" onClick={onLogout} type="button">
+        <div className="crm-sidebar-footer !mt-auto !grid !gap-[5px] !pt-7">
+          <button className="crm-nav-item !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150" onClick={onLogout} type="button">
             <LogOut className="h-4 w-4" />
-            <span>Cerrar sesion</span>
+            <span className="!inline">Cerrar sesion</span>
           </button>
         </div>
       </aside>
 
-      <section className="crm-workspace flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden bg-[var(--crm-canvas)]">
-        <header className="crm-topbar relative z-30 flex min-h-20 w-full flex-[0_0_80px] items-center justify-between gap-[22px] border-b border-[var(--crm-border-subtle)] bg-[var(--crm-topbar-bg)] px-7 max-[767px]:min-h-16 max-[767px]:flex-[0_0_auto] max-[767px]:gap-2.5 max-[767px]:px-4 max-[767px]:py-2.5">
+      <section className="crm-workspace !flex !min-h-0 !min-w-0 !flex-1 !flex-col !overflow-hidden !bg-[var(--crm-canvas)]">
+        <header className="crm-topbar !relative !z-30 !flex !min-h-16 !w-full !flex-[0_0_auto] !flex-row !items-center !justify-between !gap-2.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-topbar-bg)] !px-4 !py-2.5 md:!min-h-20 md:!flex-[0_0_80px] md:!gap-[22px] md:!px-7 md:!py-0">
           <button
             aria-controls="crm-sidebar"
             aria-expanded={isSidebarOpen}
             aria-label="Abrir menu de navegacion"
-            className="crm-mobile-menu xl:hidden! size-10 min-w-10 items-center justify-center rounded-[10px] bg-[var(--crm-surface)] text-[var(--crm-text-secondary)]"
+            className="crm-mobile-menu !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface)] !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 xl:!hidden"
             onClick={() => setIsSidebarOpen(true)}
             type="button"
           >
             <Menu className="h-5 w-5" />
           </button>
-          <div className="crm-page-heading min-w-[180px] max-[1199px]:mr-auto max-[767px]:min-w-0">
-            <div className="crm-breadcrumb flex items-center gap-1.5 text-[11px] font-medium text-[var(--crm-text-muted)] max-[767px]:hidden">
+          <div className="crm-page-heading !mr-auto !min-w-0 md:!min-w-[180px] xl:!mr-0">
+            <div className="crm-breadcrumb !hidden !items-center !gap-1.5 !text-[11px] !font-medium !text-[var(--crm-text-muted)] md:!flex">
               <LayoutDashboard className="size-3.5" />
               <span>{navItems.find((item) => item.id === activeSection)?.label}</span>
               <ChevronRight className="size-3.5" />
               <span>{context.tenantName}</span>
             </div>
-            <h1 className="mt-1 text-xl leading-tight font-bold tracking-[-0.025em] text-[var(--crm-text)] max-[767px]:mt-0 max-[767px]:overflow-hidden max-[767px]:text-[17px] max-[767px]:text-ellipsis max-[767px]:whitespace-nowrap">{getSectionTitle(activeSection)}</h1>
+            <h1 className="!mt-0 !min-h-0 !overflow-hidden !text-[17px] !leading-tight !font-bold !tracking-[-0.025em] !text-ellipsis !whitespace-nowrap !text-[var(--crm-text)] md:!mt-1 md:!text-xl">{getSectionTitle(activeSection)}</h1>
           </div>
 
-          <div className="crm-topbar-actions flex min-w-0 items-center justify-end gap-2.5 max-[767px]:basis-[180px] max-[479px]:basis-[130px]">
-            <label className="crm-venue-selector inline-flex min-h-[42px] min-w-[220px] items-center gap-2 rounded-[11px] border border-transparent bg-[var(--crm-input-bg)] px-[13px] text-[13px] font-semibold text-[var(--crm-text)] transition-[border-color,box-shadow] duration-150 max-[767px]:min-h-10 max-[767px]:w-full max-[767px]:min-w-0">
-              <Building2 className="h-4 w-4 max-[479px]:hidden" />
+          <div className="crm-topbar-actions !flex !w-auto !min-w-0 !basis-[130px] !items-center !justify-end !gap-2.5 !overflow-visible sm:!basis-[180px] md:!basis-auto">
+            <label className="crm-venue-selector !inline-flex !min-h-10 !w-full !min-w-0 !items-center !gap-2 !rounded-[11px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !transition-[border-color,box-shadow] !duration-150 md:!min-h-[42px] md:!w-auto md:!min-w-[220px]">
+              <Building2 className="hidden h-4 w-4 sm:block" />
               <select
                 className="min-w-0 flex-1 border-0 bg-transparent text-[13px] font-semibold text-inherit outline-none"
                 disabled={!isOnline || isBusy}
@@ -339,11 +500,11 @@ export function CrmPage({
                 ))}
               </select>
             </label>
-            <div className="crm-date-chip inline-flex min-h-[42px] items-center gap-2 rounded-[11px] border border-transparent bg-[var(--crm-input-bg)] px-[13px] text-xs font-medium whitespace-nowrap text-[var(--crm-text-secondary)] max-[899px]:hidden">{new Intl.DateTimeFormat('es-ES').format(new Date())}</div>
-            <div className={isOnline ? 'crm-status crm-status-online max-[767px]:hidden' : 'crm-status crm-status-offline max-[767px]:hidden'}>
+            <div className="crm-date-chip !hidden !min-h-[42px] !items-center !gap-2 !rounded-[11px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-xs !font-medium !whitespace-nowrap !text-[var(--crm-text-secondary)] lg:!inline-flex">{new Intl.DateTimeFormat('es-ES').format(new Date())}</div>
+            <div className={isOnline ? 'crm-status crm-status-online !hidden !min-h-7 !items-center !gap-2 !rounded-full !border !border-transparent !bg-[var(--crm-green-soft)] !px-2.5 !text-[11px] !font-semibold !whitespace-nowrap !text-[var(--crm-green)] md:!inline-flex' : 'crm-status crm-status-offline !hidden !min-h-7 !items-center !gap-2 !rounded-full !border !border-transparent !bg-[var(--crm-red-soft)] !px-2.5 !text-[11px] !font-semibold !whitespace-nowrap !text-[var(--crm-red)] md:!inline-flex'}>
               {isOnline ? 'Online' : 'Offline'}
             </div>
-            <div className="crm-user-chip inline-flex min-h-[42px] items-center gap-2 rounded-[11px] border border-transparent bg-[var(--crm-input-bg)] px-[13px] text-xs font-medium whitespace-nowrap text-[var(--crm-text-secondary)] max-[767px]:hidden">
+            <div className="crm-user-chip !hidden !min-h-[42px] !items-center !gap-2 !rounded-[11px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-xs !font-medium !whitespace-nowrap !text-[var(--crm-text-secondary)] md:!inline-flex">
               <UserRound className="h-4 w-4" />
               <span>{context.userName}</span>
             </div>
@@ -351,17 +512,17 @@ export function CrmPage({
         </header>
 
         {error ? (
-          <div className="crm-error mx-auto mt-[18px] -mb-5 w-[calc(100%_-_56px)] max-w-[1664px] rounded-[14px] border-0 bg-[var(--crm-red-soft)] px-4 py-3 text-[13px] font-semibold text-[var(--crm-red)] max-[767px]:mt-3 max-[767px]:-mb-3 max-[767px]:w-[calc(100%_-_32px)]">
+          <div className="crm-error !mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-red-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-red)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">
             {error}
           </div>
         ) : null}
         {!isOnline ? (
-          <div className="crm-warning mx-auto mt-[18px] -mb-5 w-[calc(100%_-_56px)] max-w-[1664px] rounded-[14px] border-0 bg-[var(--crm-yellow-soft)] px-4 py-3 text-[13px] font-semibold text-[var(--crm-yellow)] max-[767px]:mt-3 max-[767px]:-mb-3 max-[767px]:w-[calc(100%_-_32px)]">
+          <div className="crm-warning !mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">
             El CRM requiere conexion para guardar cambios en Supabase.
           </div>
         ) : null}
 
-        <main className="crm-content mx-auto min-h-0 w-full max-w-[1720px] flex-1 overflow-auto px-7 pt-[42px] pb-9 max-[767px]:px-4 max-[767px]:pt-[26px] max-[767px]:pb-7">
+        <main className="crm-content !mx-auto !min-h-0 !w-full !max-w-[1720px] !flex-1 !overflow-auto !px-4 !pt-[26px] !pb-7 md:!px-7 md:!pt-[42px] md:!pb-9">
           {activeSection === 'dashboard' ? (
             <DashboardCrm
               activeCategories={activeCategories.length}
@@ -440,6 +601,15 @@ export function CrmPage({
             />
           ) : null}
 
+          {activeSection === 'reports' ? (
+            <SalesReportsCrm
+              disabled={!isOnline || isBusy}
+              runAction={runAction}
+              selectedVenueId={selectedVenueId}
+              tenantContext={context}
+            />
+          ) : null}
+
           {activeSection === 'stats' ? (
             <StatsCrm disabled={!isOnline || isBusy} onRefresh={refreshStats} stats={stats} />
           ) : null}
@@ -467,6 +637,9 @@ function getSectionTitle(section: CrmSection) {
   }
   if (section === 'tables') {
     return 'Mesas y zonas del local'
+  }
+  if (section === 'reports') {
+    return 'Informes de ventas'
   }
   if (section === 'stats') {
     return 'Analitica comercial'
@@ -629,69 +802,69 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
   const availableDevices = data.devices.filter((device) => device.isActive && !assignedDeviceIds.has(device.id))
 
   return (
-    <div className="crm-access-layout">
+    <div className="crm-access-layout !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[340px_minmax(0,1fr)] xl:!gap-6">
       <div className="crm-access-forms">
-        <section className="crm-panel">
-          <div className="crm-panel-header"><span>Nuevo local</span><Building2 className="h-4 w-4" /></div>
-          <form className="crm-form-stack" onSubmit={(event) => void submitVenue(event)}>
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Nuevo local</span><Building2 className="h-4 w-4" /></div>
+          <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]" onSubmit={(event) => void submitVenue(event)}>
             <Field label="Nombre del local">
-              <input className="crm-input" disabled={disabled} onChange={(event) => setVenueName(event.target.value)} required value={venueName} />
+              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setVenueName(event.target.value)} required value={venueName} />
             </Field>
-            <button className="crm-primary-button" disabled={disabled || !venueName.trim()} type="submit">
+            <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !venueName.trim()} type="submit">
               <Plus className="h-4 w-4" /> Crear local
             </button>
           </form>
         </section>
 
-        <section className="crm-panel">
-          <div className="crm-panel-header"><span>Nuevo dispositivo</span><MonitorSmartphone className="h-4 w-4" /></div>
-          <form className="crm-form-stack" onSubmit={(event) => void submitDevice(event)}>
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Nuevo dispositivo</span><MonitorSmartphone className="h-4 w-4" /></div>
+          <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]" onSubmit={(event) => void submitDevice(event)}>
             <Field label="Local">
-              <select className="crm-input" disabled={disabled} onChange={(event) => setDeviceVenueId(event.target.value)} required value={deviceVenueId}>
+              <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setDeviceVenueId(event.target.value)} required value={deviceVenueId}>
                 {data.venues.filter((venue) => venue.isActive).map((venue) => <option key={venue.id} value={venue.id}>{venue.name}</option>)}
               </select>
             </Field>
             <Field label="Nombre del dispositivo">
-              <input className="crm-input" disabled={disabled} onChange={(event) => setDeviceName(event.target.value)} required value={deviceName} />
+              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setDeviceName(event.target.value)} required value={deviceName} />
             </Field>
-            <Field label="Modo"><select className="crm-input" onChange={(event) => setDeviceMode(event.target.value as typeof deviceMode)} value={deviceMode}><option value="satellite">Satelite</option><option value="checkout">Caja</option><option value="hybrid">Hibrido</option></select></Field>
+            <Field label="Modo"><select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setDeviceMode(event.target.value as typeof deviceMode)} value={deviceMode}><option value="satellite">Satelite</option><option value="checkout">Caja</option><option value="hybrid">Hibrido</option></select></Field>
             <p className="crm-form-help">Los dispositivos Caja e Hibrido crean automaticamente su propio punto de caja. Los Satelite solo trabajan con cajas ya abiertas.</p>
-            <button className="crm-primary-button" disabled={disabled || !deviceVenueId || !deviceName.trim()} type="submit">
+            <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !deviceVenueId || !deviceName.trim()} type="submit">
               <Plus className="h-4 w-4" /> Crear dispositivo
             </button>
           </form>
         </section>
 
-        <section className="crm-panel">
-          <div className="crm-panel-header"><span>Nuevo usuario TPV</span><UserRound className="h-4 w-4" /></div>
-          <form className="crm-form-stack" onSubmit={(event) => void submitUser(event)}>
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Nuevo usuario TPV</span><UserRound className="h-4 w-4" /></div>
+          <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]" onSubmit={(event) => void submitUser(event)}>
             <Field label="Nombre">
-              <input className="crm-input" disabled={disabled} onChange={(event) => setUserName(event.target.value)} required value={userName} />
+              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setUserName(event.target.value)} required value={userName} />
             </Field>
             <Field label="Email">
-              <input className="crm-input" disabled={disabled} onChange={(event) => setUserEmail(event.target.value)} required type="email" value={userEmail} />
+              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setUserEmail(event.target.value)} required type="email" value={userEmail} />
             </Field>
             <Field label="Contrasena inicial">
-              <input className="crm-input" disabled={disabled} minLength={8} onChange={(event) => setUserPassword(event.target.value)} required type="password" value={userPassword} />
+              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} minLength={8} onChange={(event) => setUserPassword(event.target.value)} required type="password" value={userPassword} />
             </Field>
             <Field label="Dispositivo">
-              <select className="crm-input" disabled={disabled} onChange={(event) => setUserDeviceId(event.target.value)} required value={userDeviceId}>
+              <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setUserDeviceId(event.target.value)} required value={userDeviceId}>
                 {availableDevices.map((device) => (
                   <option key={device.id} value={device.id}>{venueById.get(device.venueId)?.name} / {device.name}</option>
                 ))}
               </select>
             </Field>
-            <button className="crm-primary-button" disabled={disabled || !userDeviceId || userPassword.length < 8} type="submit">
+            <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !userDeviceId || userPassword.length < 8} type="submit">
               <Plus className="h-4 w-4" /> Crear usuario
             </button>
           </form>
         </section>
       </div>
 
-      <section className="crm-panel crm-access-users">
-        <div className="crm-list-toolbar">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-access-users">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
           <div className="crm-list-title"><h2>Usuarios de caja</h2><p>{data.users.length} cuentas configuradas · cierre tras 30 min sin actividad</p></div>
-          <button aria-label="Actualizar usuarios" className="crm-icon-button" disabled={disabled} onClick={() => void runAction(refresh)} type="button"><RefreshCw className="h-4 w-4" /></button>
+          <button aria-label="Actualizar usuarios" className="crm-icon-button !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => void runAction(refresh)} type="button"><RefreshCw className="h-4 w-4" /></button>
         </div>
         <div className="crm-access-user-list">
           {data.users.map((user) => {
@@ -705,49 +878,49 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
             const isEditing = editingUserId === user.id
             return (
               <div className="crm-access-user-entry" key={user.id}>
-                <div className="crm-access-user-row">
+                <div className="crm-access-user-row !grid !min-h-[72px] !grid-cols-1 !items-center !gap-3.5 !py-2.5 sm:!grid-cols-[minmax(0,1fr)_auto] lg:!grid-cols-[minmax(180px,1fr)_minmax(170px,0.8fr)_100px_minmax(300px,auto)]">
                   <div className="crm-cell-main"><strong>{user.fullName || user.email}</strong><span>{user.email}</span></div>
-                  <div className="crm-cell-main">
+                  <div className="crm-cell-main !col-span-1 sm:!col-span-full lg:!col-span-1">
                     <strong>{venue?.name ?? (user.hasDeviceAssignment ? 'Local no disponible' : 'Pendiente de asignar')}</strong>
                     <span>{device ? `${device.name} · ${deviceModeLabel}` : user.hasDeviceAssignment ? 'Dispositivo no disponible' : 'Edita el usuario para asignarle un dispositivo'}</span>
                   </div>
-                  <div className="crm-user-statuses">
-                    <span className={user.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+                  <div className="crm-user-statuses !col-start-1 !grid !justify-items-start !gap-[5px] sm:!col-auto">
+                    <span className={user.isActive ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-active !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]' : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-muted !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-secondary)]'}>
                       {user.isActive ? 'Activo' : user.hasDeviceAssignment ? 'Inactivo' : 'Sin asignar'}
                     </span>
                     <span
-                      className={user.hasActiveLogin ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}
+                      className={user.hasActiveLogin ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-active !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]' : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-muted !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-secondary)]'}
                       title={user.loginHeartbeatAt ? `Ultima actividad: ${formatCrmDateTime(user.loginHeartbeatAt)}` : undefined}
                     >
                       {user.hasActiveLogin ? 'En sesion' : 'Libre'}
                     </span>
                   </div>
-                  <div className="crm-access-user-actions">
-                    <button aria-label="Editar usuario" className="crm-primary-button" disabled={disabled} onClick={() => startEditingUser(user)} title="Editar y reasignar" type="button"><Pencil className="h-4 w-4" /></button>
+                  <div className="crm-access-user-actions !col-start-1 !flex !items-center !justify-start !gap-2 sm:!col-span-full lg:!col-auto lg:!justify-end">
+                    <button aria-label="Editar usuario" className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => startEditingUser(user)} title="Editar y reasignar" type="button"><Pencil className="h-4 w-4" /></button>
                     {tenantContext.role === 'owner' ? (
-                      <button className="crm-secondary-button" disabled={disabled || !user.hasActiveLogin} onClick={() => void releaseUserLogin(user)} title="Cerrar la sesion abierta de este usuario" type="button">
+                      <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !user.hasActiveLogin} onClick={() => void releaseUserLogin(user)} title="Cerrar la sesion abierta de este usuario" type="button">
                         <LogOut className="h-4 w-4" /> Liberar
                       </button>
                     ) : null}
-                    <button className={user.isActive ? 'crm-danger-button' : 'crm-secondary-button'} disabled={disabled || !user.hasDeviceAssignment} onClick={() => void toggleUser(user.id, !user.isActive)} type="button">
+                    <button className={user.isActive ? 'crm-danger-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-[11px] !text-[13px] !font-semibold !text-[var(--crm-red)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150' : 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150'} disabled={disabled || !user.hasDeviceAssignment} onClick={() => void toggleUser(user.id, !user.isActive)} type="button">
                       {user.isActive ? 'Desactivar' : 'Activar'}
                     </button>
-                    <button aria-label="Eliminar usuario" className="crm-danger-button" disabled={disabled} onClick={() => void removeUser(user)} title="Eliminar usuario" type="button"><Trash2 className="h-4 w-4" /></button>
+                    <button aria-label="Eliminar usuario" className="crm-danger-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-[11px] !text-[13px] !font-semibold !text-[var(--crm-red)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => void removeUser(user)} title="Eliminar usuario" type="button"><Trash2 className="h-4 w-4" /></button>
                   </div>
                 </div>
                 {isEditing ? (
-                  <form className="crm-access-user-editor" onSubmit={(event) => void submitUserEdit(event)}>
+                  <form className="crm-access-user-editor !grid !grid-cols-1 !gap-3 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-surface-soft)] !p-4 !mb-3.5 md:!grid-cols-2" onSubmit={(event) => void submitUserEdit(event)}>
                     <Field label="Nombre">
-                      <input className="crm-input" disabled={disabled} onChange={(event) => setEditingUserName(event.target.value)} required value={editingUserName} />
+                      <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setEditingUserName(event.target.value)} required value={editingUserName} />
                     </Field>
                     <Field label="Email">
-                      <input className="crm-input" disabled={disabled} onChange={(event) => setEditingUserEmail(event.target.value)} required type="email" value={editingUserEmail} />
+                      <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setEditingUserEmail(event.target.value)} required type="email" value={editingUserEmail} />
                     </Field>
                     <Field label="Nueva contrasena (opcional)">
-                      <input className="crm-input" disabled={disabled} minLength={8} onChange={(event) => setEditingUserPassword(event.target.value)} placeholder="Dejar vacio para conservarla" type="password" value={editingUserPassword} />
+                      <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} minLength={8} onChange={(event) => setEditingUserPassword(event.target.value)} placeholder="Dejar vacio para conservarla" type="password" value={editingUserPassword} />
                     </Field>
                     <Field label="Dispositivo">
-                      <select className="crm-input" disabled={disabled} onChange={(event) => changeEditingUserDevice(event.target.value)} required value={editingUserDeviceId}>
+                      <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => changeEditingUserDevice(event.target.value)} required value={editingUserDeviceId}>
                         <option disabled value="">Selecciona un dispositivo libre</option>
                         {editDevices.map((candidate) => (
                           <option key={candidate.id} value={candidate.id}>{venueById.get(candidate.venueId)?.name} / {candidate.name}</option>
@@ -755,15 +928,15 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
                       </select>
                     </Field>
                     <Field label="Modo de trabajo">
-                      <select className="crm-input" disabled={disabled} onChange={(event) => setEditingUserDeviceMode(event.target.value as DeviceMode)} value={editingUserDeviceMode}>
+                      <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setEditingUserDeviceMode(event.target.value as DeviceMode)} value={editingUserDeviceMode}>
                         <option value="checkout">Caja</option>
                         <option value="satellite">Satelite</option>
                         <option value="hybrid">Hibrido</option>
                       </select>
                     </Field>
-                    <div className="crm-access-user-editor-actions">
-                      <button className="crm-secondary-button" disabled={disabled} onClick={cancelEditingUser} type="button"><X className="h-4 w-4" /> Cancelar</button>
-                      <button className="crm-primary-button" disabled={disabled || !editingUserName.trim() || !editingUserEmail.trim() || !editingUserDeviceId || (editingUserPassword.length > 0 && editingUserPassword.length < 8)} type="submit"><Save className="h-4 w-4" /> Guardar cambios</button>
+                    <div className="crm-access-user-editor-actions !col-auto !flex !items-center !justify-stretch !gap-2 [&>button]:!flex-1 md:!col-span-full md:!justify-end md:[&>button]:!flex-none">
+                      <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={cancelEditingUser} type="button"><X className="h-4 w-4" /> Cancelar</button>
+                      <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !editingUserName.trim() || !editingUserEmail.trim() || !editingUserDeviceId || (editingUserPassword.length > 0 && editingUserPassword.length < 8)} type="submit"><Save className="h-4 w-4" /> Guardar cambios</button>
                     </div>
                   </form>
                 ) : null}
@@ -804,15 +977,15 @@ function DashboardCrm({
   const activeRatio = products.length ? Math.round((activeProducts / products.length) * 100) : 0
 
   return (
-    <div className="crm-dashboard-grid">
-      <section className="crm-panel crm-panel-span">
-        <div className="crm-panel-header">
+    <div className="crm-dashboard-grid !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] xl:!gap-6">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Resumen del catalogo</span>
-          <button aria-label="Actualizar resumen" className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
+          <button aria-label="Actualizar resumen" className="crm-icon-button !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => void onRefresh()} type="button">
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
-        <div className="crm-kpi-strip">
+        <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] md:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
           <KpiCard color="blue" label="Productos activos" value={activeProducts} />
           <KpiCard color="neutral" label="Productos totales" value={products.length} />
           <KpiCard color="neutral" label="Categorias" value={categories.length} />
@@ -820,21 +993,21 @@ function DashboardCrm({
         </div>
       </section>
 
-      <section className="crm-panel crm-panel-span">
-        <div className="crm-panel-header">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Cajas abiertas</span>
-          <button aria-label="Actualizar cajas abiertas" className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
+          <button aria-label="Actualizar cajas abiertas" className="crm-icon-button !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => void onRefresh()} type="button">
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
         <OpenCashSessionsList stats={stats} />
       </section>
 
-      <section className="crm-panel">
-        <div className="crm-panel-header">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Estado de catalogo</span>
         </div>
-        <div className="crm-donut-row grid grid-cols-[190px_minmax(0,1fr)] items-center gap-[18px] px-[22px] pt-[18px] pb-6 max-[767px]:grid-cols-1">
+        <div className="crm-donut-row !grid !grid-cols-1 !items-center !gap-[18px] !px-[22px] !pt-[18px] !pb-6 md:!grid-cols-[190px_minmax(0,1fr)]">
           <div className="crm-donut" style={{ '--crm-progress': `${activeRatio}%` } as CSSProperties}>
             <span>{activeRatio}%</span>
           </div>
@@ -855,8 +1028,8 @@ function DashboardCrm({
         </div>
       </section>
 
-      <section className="crm-panel">
-        <div className="crm-panel-header">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Actividad del mes</span>
         </div>
         <div className="crm-mini-metrics">
@@ -866,8 +1039,8 @@ function DashboardCrm({
         </div>
       </section>
 
-      <section className="crm-panel">
-        <div className="crm-panel-header">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Productos por categoria</span>
         </div>
         <div className="crm-horizontal-bars">
@@ -883,8 +1056,8 @@ function DashboardCrm({
         </div>
       </section>
 
-      <section className="crm-panel">
-        <div className="crm-panel-header">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Productos top</span>
         </div>
         <TopProductsList stats={stats} />
@@ -917,14 +1090,14 @@ function OpenCashSessionsList({ stats }: { stats: CrmStats | null }) {
 
   return (
     <div className="crm-open-cash">
-      <div className="crm-open-cash-summary">
+      <div className="crm-open-cash-summary !flex !min-h-[62px] !flex-col !items-start !justify-between !gap-3 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-green-soft)] !px-4 !py-3 md:!flex-row md:!items-center">
         <span>{sessions.length} cajas abiertas</span>
         <strong>{formatMoney(totalOpenSalesCents)}</strong>
       </div>
       <div className="crm-open-cash-list">
         {sessions.map((session) => (
-          <div className="crm-open-cash-row" key={session.id}>
-            <div className="crm-cell-main">
+          <div className="crm-open-cash-row !grid !grid-cols-2 !items-center !gap-3.5 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !py-[13px] md:!grid-cols-[minmax(0,1fr)_repeat(3,minmax(80px,max-content))] xl:!grid-cols-[minmax(210px,1fr)_minmax(104px,0.32fr)_minmax(78px,0.2fr)_minmax(92px,0.26fr)_minmax(240px,0.8fr)]" key={session.id}>
+            <div className="crm-cell-main !col-span-full md:!col-span-1">
               <strong>{session.deviceName}</strong>
               <span>{`${session.venueName} - abierta ${formatCrmDateTime(session.openedAt)}`}</span>
             </div>
@@ -940,7 +1113,7 @@ function OpenCashSessionsList({ stats }: { stats: CrmStats | null }) {
               <span>Fondo</span>
               <strong>{formatMoney(session.openingFloatCents)}</strong>
             </div>
-            <div className="crm-open-cash-breakdown">
+            <div className="crm-open-cash-breakdown !col-span-full !flex !min-w-0 !flex-wrap !justify-start !gap-[5px] xl:!col-span-1 xl:!justify-end">
               <span>{`${paymentLabels.cash}: ${formatMoney(session.cashCents)}`}</span>
               <span>{`${paymentLabels.card}: ${formatMoney(session.cardCents)}`}</span>
               <span>{`${paymentLabels.invitation}: ${formatMoney(session.invitationCents)}`}</span>
@@ -975,18 +1148,18 @@ function KpiCard({ color, label, value }: { color: keyof typeof kpiColorClasses;
   const colorClasses = kpiColorClasses[color]
 
   return (
-    <div className={`crm-kpi flex min-h-[150px] flex-col items-start justify-end rounded-[18px] border-0 p-[22px] text-left max-[767px]:min-h-[126px] ${colorClasses.card}`}>
-      <strong className={`text-[26px] leading-none font-bold tracking-[-0.04em] tabular-nums ${colorClasses.value}`}>{value}</strong>
-      <span className={`mt-[9px] text-xs font-medium ${colorClasses.label}`}>{label}</span>
+    <div className={`crm-kpi !flex !min-h-[126px] !flex-col !items-start !justify-end !rounded-[18px] !border-0 !p-[22px] !text-left md:!min-h-[150px] ${colorClasses.card}`}>
+      <strong className={`!text-[26px] !leading-none !font-bold !tracking-[-0.04em] !tabular-nums ${colorClasses.value}`}>{value}</strong>
+      <span className={`!mt-[9px] !text-xs !font-medium ${colorClasses.label}`}>{label}</span>
     </div>
   )
 }
 
 function MiniMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="crm-mini-metric flex min-h-[52px] min-w-0 items-center justify-between gap-3 rounded-[10px] border-0 bg-[var(--crm-surface-soft)] px-[13px] py-[11px]">
-      <span className="text-xs font-medium text-[var(--crm-text-secondary)]">{label}</span>
-      <strong className="text-[15px] font-semibold whitespace-nowrap text-[var(--crm-text)] tabular-nums">{value}</strong>
+    <div className="crm-mini-metric !flex !min-h-[52px] !min-w-0 !items-center !justify-between !gap-3 !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !py-[11px]">
+      <span className="!text-xs !font-medium !text-[var(--crm-text-secondary)]">{label}</span>
+      <strong className="!text-[15px] !font-semibold !whitespace-nowrap !text-[var(--crm-text)] !tabular-nums">{value}</strong>
     </div>
   )
 }
@@ -1119,18 +1292,18 @@ function RevoImportCrm({
   }
 
   return (
-    <div className="crm-dashboard-grid">
-      <section className="crm-panel crm-panel-span">
-        <div className="crm-list-toolbar">
+    <div className="crm-dashboard-grid !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] xl:!gap-6">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
           <div className="crm-list-title">
             <h2>Copia completa del catalogo</h2>
             <p>
               Exporta productos, categorias, formatos, precios, modificadores e imagenes a un ZIP, o importa uno en el local seleccionado.
             </p>
           </div>
-          <div className="crm-toolbar-actions">
+          <div className="crm-toolbar-actions !flex !min-w-0 !flex-col !items-stretch !justify-end !gap-[9px] md:!flex-row md:!items-center">
             <button
-              className="crm-secondary-button"
+              className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
               disabled={disabled || !selectedVenueId}
               onClick={() => void handleExportCatalog()}
               type="button"
@@ -1141,8 +1314,8 @@ function RevoImportCrm({
             <label
               className={
                 disabled
-                  ? 'crm-secondary-button crm-file-button crm-file-button-disabled'
-                  : 'crm-secondary-button crm-file-button'
+                  ? 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-file-button crm-file-button-disabled'
+                  : 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-file-button'
               }
             >
               <Upload className="h-4 w-4" />
@@ -1150,7 +1323,7 @@ function RevoImportCrm({
               <input accept=".zip,application/zip" disabled={disabled} onChange={handleBackupFileChange} type="file" />
             </label>
             <button
-              className="crm-primary-button"
+              className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
               disabled={disabled || !catalogTransfer || !selectedVenueId}
               onClick={() => void handleBackupImport()}
               type="button"
@@ -1161,7 +1334,7 @@ function RevoImportCrm({
           </div>
         </div>
 
-        <div className="crm-kpi-strip">
+        <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] md:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
           <KpiCard color="green" label="Productos del local" value={catalogProducts.length} />
           <KpiCard color="blue" label="Categorias" value={categories.length} />
           <KpiCard color="neutral" label="Formatos de venta" value={saleFormats.length} />
@@ -1172,11 +1345,11 @@ function RevoImportCrm({
       {backupFileError ? <div className="crm-import-alert crm-import-alert-warning">{backupFileError}</div> : null}
 
       {catalogTransfer ? (
-        <section className="crm-panel crm-panel-span">
-          <div className="crm-panel-header">
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
             <span>ZIP preparado: {backupFileName}</span>
           </div>
-          <div className="crm-import-result-grid">
+          <div className="crm-import-result-grid !grid !grid-cols-1 !gap-3 !px-[22px] !pt-3.5 !pb-[22px] md:!grid-cols-3">
             <MiniMetric label="Origen" value={catalogTransfer.manifest.source.venueName} />
             <MiniMetric label="Productos" value={String(catalogTransfer.manifest.products.length)} />
             <MiniMetric label="Categorias" value={String(catalogTransfer.manifest.categories.length)} />
@@ -1188,11 +1361,11 @@ function RevoImportCrm({
       ) : null}
 
       {backupImportResult ? (
-        <section className="crm-panel crm-panel-span">
-          <div className="crm-panel-header">
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
             <span>Resultado de la importacion ZIP</span>
           </div>
-          <div className="crm-import-result-grid">
+          <div className="crm-import-result-grid !grid !grid-cols-1 !gap-3 !px-[22px] !pt-3.5 !pb-[22px] md:!grid-cols-3">
             <MiniMetric label="Categorias creadas / actualizadas" value={`${backupImportResult.categoriesCreated} / ${backupImportResult.categoriesUpdated}`} />
             <MiniMetric label="Formatos creados / actualizados" value={`${backupImportResult.saleFormatsCreated} / ${backupImportResult.saleFormatsUpdated}`} />
             <MiniMetric label="Productos creados / actualizados" value={`${backupImportResult.productsCreated} / ${backupImportResult.productsUpdated}`} />
@@ -1203,8 +1376,8 @@ function RevoImportCrm({
         </section>
       ) : null}
 
-      <section className="crm-panel crm-panel-span">
-        <div className="crm-list-toolbar">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
           <div className="crm-list-title">
             <h2>Importar articulos REVO</h2>
             <p>
@@ -1213,12 +1386,12 @@ function RevoImportCrm({
                 : 'Selecciona el CSV de articulos exportado desde REVO.'}
             </p>
           </div>
-          <div className="crm-toolbar-actions">
+          <div className="crm-toolbar-actions !flex !min-w-0 !flex-col !items-stretch !justify-end !gap-[9px] md:!flex-row md:!items-center">
             <label
               className={
                 disabled
-                  ? 'crm-secondary-button crm-file-button crm-file-button-disabled'
-                  : 'crm-secondary-button crm-file-button'
+                  ? 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-file-button crm-file-button-disabled'
+                  : 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-file-button'
               }
             >
               <Upload className="h-4 w-4" />
@@ -1226,7 +1399,7 @@ function RevoImportCrm({
               <input accept=".csv,text/csv" disabled={disabled} onChange={handleFileChange} type="file" />
             </label>
             <button
-              className="crm-primary-button"
+              className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
               disabled={disabled || !parseResult?.products.length || !selectedVenueId}
               onClick={() => void handleImport()}
               type="button"
@@ -1237,7 +1410,7 @@ function RevoImportCrm({
           </div>
         </div>
 
-        <div className="crm-kpi-strip">
+        <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] md:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
           <KpiCard color="blue" label="Productos" value={products.length} />
           <KpiCard color="green" label="Formatos" value={variantCount} />
           <KpiCard color="neutral" label="Avisos" value={allWarnings.length} />
@@ -1248,8 +1421,8 @@ function RevoImportCrm({
       {fileError ? <div className="crm-import-alert crm-import-alert-warning">{fileError}</div> : null}
 
       {allWarnings.length ? (
-        <section className="crm-panel crm-panel-span">
-          <div className="crm-panel-header">
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
             <span>Avisos de interpretacion</span>
           </div>
           <ul className="crm-import-warning-list">
@@ -1262,11 +1435,11 @@ function RevoImportCrm({
       ) : null}
 
       {importResult ? (
-        <section className="crm-panel crm-panel-span">
-          <div className="crm-panel-header">
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
             <span>Resultado de importacion</span>
           </div>
-          <div className="crm-import-result-grid">
+          <div className="crm-import-result-grid !grid !grid-cols-1 !gap-3 !px-[22px] !pt-3.5 !pb-[22px] md:!grid-cols-3">
             <MiniMetric label="Categorias creadas" value={String(importResult.categoriesCreated)} />
             <MiniMetric label="Categorias actualizadas" value={String(importResult.categoriesUpdated)} />
             <MiniMetric label="Productos creados" value={String(importResult.productsCreated)} />
@@ -1278,12 +1451,12 @@ function RevoImportCrm({
       ) : null}
 
       {parseResult ? (
-        <section className="crm-panel crm-panel-span">
-          <div className="crm-panel-header">
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
             <span>Previsualizacion</span>
           </div>
-          <div className="crm-data-table crm-import-table">
-            <div className="crm-data-head">
+          <div className="crm-data-table !grid !overflow-auto crm-import-table">
+            <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
               <span>Producto</span>
               <span>Categoria destino</span>
               <span>Formatos</span>
@@ -1292,7 +1465,7 @@ function RevoImportCrm({
               <span>Avisos</span>
             </div>
             {products.map((product) => (
-              <div className="crm-data-row" key={`${product.categoryName}:${product.name}`}>
+              <div className="crm-data-row !grid !min-h-[72px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]" key={`${product.categoryName}:${product.name}`}>
                 <div className="crm-cell-main">
                   <strong>{product.name}</strong>
                   <span>{product.sourceCategories.join(', ') || 'REVO'}</span>
@@ -1310,7 +1483,7 @@ function RevoImportCrm({
                     </span>
                   ))}
                 </div>
-                <span className={product.active ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+                <span className={product.active ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-active !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]' : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-muted !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-secondary)]'}>
                   {product.active ? 'Activo' : 'Oculto'}
                 </span>
                 <span className="crm-import-warning-cell">
@@ -1357,6 +1530,7 @@ function ProductsCrm({
   tenantContext,
 }: ProductsCrmProps) {
   const [query, setQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
   const [editor, setEditor] = useState<ProductEditorState | null>(null)
   const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories])
   const filteredProducts = useMemo(() => {
@@ -1376,7 +1550,17 @@ function ProductsCrm({
         .includes(normalizedQuery)
     })
   }, [categoryById, products, query, saleFormats])
+  const totalPages = Math.max(1, Math.ceil(filteredProducts.length / CRM_PAGE_SIZE))
+  const visiblePage = Math.min(currentPage, totalPages)
+  const paginatedProducts = filteredProducts.slice(
+    (visiblePage - 1) * CRM_PAGE_SIZE,
+    visiblePage * CRM_PAGE_SIZE,
+  )
   const selectedProduct = editor?.mode === 'edit' ? products.find((product) => product.id === editor.productId) : null
+
+  useEffect(() => {
+    setCurrentPage(1)
+  }, [selectedVenueId])
 
   async function handleDeleteProduct(product: Product) {
     if (!window.confirm(`Eliminar el producto "${product.name}" de este local de forma permanente?`)) {
@@ -1394,20 +1578,27 @@ function ProductsCrm({
   }
 
   return (
-    <div className={editor ? 'crm-entity-layout' : 'crm-entity-layout crm-entity-layout-full'}>
-      <section className="crm-panel crm-list-panel">
-        <div className="crm-list-toolbar">
+    <div className="crm-entity-layout crm-entity-layout-full !grid !grid-cols-1 !items-start !gap-4">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-list-panel !min-h-0 xl:!min-h-[calc(100dvh-var(--crm-topbar-height)-78px)]">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
           <div className="crm-list-title">
             <h2>Productos</h2>
             <p>{filteredProducts.length} de {products.length} productos</p>
           </div>
-          <div className="crm-toolbar-actions">
-            <label className="crm-search">
+          <div className="crm-toolbar-actions !flex !min-w-0 !flex-col !items-stretch !justify-end !gap-[9px] md:!flex-row md:!items-center">
+            <label className="crm-search !flex !h-11 !w-full !items-center !gap-2 !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-medium !text-[var(--crm-text-muted)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150 md:!w-[min(320px,100%)]">
               <Search className="h-4 w-4" />
-              <input onChange={(event) => setQuery(event.target.value)} placeholder="Buscar producto" value={query} />
+              <input
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setCurrentPage(1)
+                }}
+                placeholder="Buscar producto"
+                value={query}
+              />
             </label>
             <button
-              className="crm-primary-button"
+              className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
               disabled={disabled || !categories.length || !selectedVenueId}
               onClick={() => setEditor({ mode: 'create' })}
               type="button"
@@ -1418,8 +1609,8 @@ function ProductsCrm({
           </div>
         </div>
 
-        <div className="crm-data-table crm-products-table">
-          <div className="crm-data-head">
+        <div className="crm-data-table !grid !overflow-auto crm-products-table">
+          <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
             <span>Producto</span>
             <span>Formatos</span>
             <span>Categoria / Tipo</span>
@@ -1427,7 +1618,7 @@ function ProductsCrm({
             <span>Uso</span>
             <span>Acciones</span>
           </div>
-          {filteredProducts.map((product) => (
+          {paginatedProducts.map((product) => (
             <ProductListRow
               category={categoryById.get(product.categoryId)}
               disabled={disabled}
@@ -1440,6 +1631,11 @@ function ProductsCrm({
           ))}
           {!filteredProducts.length ? <EmptyList message="No hay productos que coincidan con la busqueda." /> : null}
         </div>
+        <CrmPagination
+          currentPage={visiblePage}
+          onPageChange={setCurrentPage}
+          totalResults={filteredProducts.length}
+        />
       </section>
 
       {editor && (editor.mode === 'create' || selectedProduct) ? (
@@ -1488,7 +1684,7 @@ function ProductListRow({
       : 'Interno'
 
   return (
-    <div className="crm-data-row">
+    <div className="crm-data-row !grid !min-h-[72px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]">
       <div className="crm-product-cell">
         {product.imageUrl ? (
           <img alt="" className="crm-product-thumb" src={product.imageUrl} />
@@ -1512,15 +1708,15 @@ function ProductListRow({
       </div>
       <span>{category?.name ?? 'Sin categoria'} · {getKindLabel(product.kind)}</span>
       <strong>{formatMoney(primaryVariant?.priceCents ?? 0)}</strong>
-      <span className={product.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+      <span className={product.isActive ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-active !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]' : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-muted !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-secondary)]'}>
         {usageLabel}
       </span>
       <div className="crm-action-group">
-        <button className="crm-action-button" disabled={disabled} onClick={onEdit} type="button">
+        <button className="crm-action-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[11px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={onEdit} type="button">
           <Pencil className="h-4 w-4" />
           Editar
         </button>
-        <button className="crm-danger-button" disabled={disabled} onClick={onDelete} type="button">
+        <button className="crm-danger-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-[11px] !text-[13px] !font-semibold !text-[var(--crm-red)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={onDelete} type="button">
           <Trash2 className="h-4 w-4" />
           Eliminar
         </button>
@@ -1542,6 +1738,31 @@ type ProductFormPanelProps = {
   tenantContext: TenantContext
 }
 
+function assignProductVariantsToSaleFormats(product: Product, formats: SaleFormat[]) {
+  const assignedVariants = new Map<SaleFormat, ProductVariant>()
+  const usedVariantIds = new Set<string>()
+
+  formats.forEach((format) => {
+    const matchingVariant = findProductVariantForSaleFormat(product, format)
+    if (matchingVariant && !usedVariantIds.has(matchingVariant.id)) {
+      assignedVariants.set(format, matchingVariant)
+      usedVariantIds.add(matchingVariant.id)
+    }
+  })
+
+  const remainingVariants = product.variants.filter((variant) => !usedVariantIds.has(variant.id))
+  formats.forEach((format) => {
+    if (assignedVariants.has(format)) return
+    const fallbackVariant = remainingVariants.shift()
+    if (fallbackVariant) {
+      assignedVariants.set(format, fallbackVariant)
+      usedVariantIds.add(fallbackVariant.id)
+    }
+  })
+
+  return assignedVariants
+}
+
 function ProductFormPanel({
   categories,
   disabled,
@@ -1559,22 +1780,26 @@ function ProductFormPanel({
   const primaryVariant = product?.variants.find((variant) => variant.isDefault) ?? product?.variants[0]
   const initialKind = product?.kind ?? firstCategory?.kind ?? 'other'
   const initialMixerSupplementCents = product?.mixerSupplementCents ?? 0
+  const initialSaleFormats = product ? getProductSaleFormats(product) : getDefaultSaleFormatsForKind(initialKind)
+  const initialVariantByFormat = product
+    ? assignProductVariantsToSaleFormats(product, initialSaleFormats)
+    : new Map<SaleFormat, ProductVariant>()
   const [name, setName] = useState(product?.name ?? '')
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? firstCategory?.id ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
   const [kind, setKind] = useState<CatalogKind>(initialKind)
-  const [selectedSaleFormats, setSelectedSaleFormats] = useState<SaleFormat[]>(
-    product ? getProductSaleFormats(product) : getDefaultSaleFormatsForKind(initialKind),
-  )
+  const [selectedSaleFormats, setSelectedSaleFormats] = useState<SaleFormat[]>(initialSaleFormats)
+  const [saleFormatPrices, setSaleFormatPrices] = useState<Record<SaleFormat, string>>(() => Object.fromEntries(
+    saleFormats.map((format) => [
+      format.key,
+      centsToInput(initialVariantByFormat.get(format.key)?.priceCents ?? primaryVariant?.priceCents ?? 0),
+    ]),
+  ))
   const [isFeatured, setIsFeatured] = useState(product?.isFeatured ?? false)
   const [canSellStandalone, setCanSellStandalone] = useState(product ? canSellProductStandalone(product) : true)
   const [canUseAsMixer, setCanUseAsMixer] = useState(product ? canUseProductAsMixer(product) : initialKind === 'mixer')
   const [hasMixerSupplement, setHasMixerSupplement] = useState(initialMixerSupplementCents > 0)
   const [mixerSupplement, setMixerSupplement] = useState(centsToInput(initialMixerSupplementCents || 100))
-  const [variantName, setVariantName] = useState('Normal')
-  const [price, setPrice] = useState(centsToInput(primaryVariant?.priceCents ?? 0))
-  const [newVariantName, setNewVariantName] = useState('')
-  const [newVariantPrice, setNewVariantPrice] = useState('0.00')
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [imagePreviewUrl, setImagePreviewUrl] = useState(product?.imageUrl ?? '')
   const [imageObjectUrl, setImageObjectUrl] = useState<string | null>(null)
@@ -1616,6 +1841,10 @@ function ProductFormPanel({
     )
   }
 
+  function updateSaleFormatPrice(format: SaleFormat, nextPrice: string) {
+    setSaleFormatPrices((current) => ({ ...current, [format]: nextPrice }))
+  }
+
   function handleCanUseAsMixerChange(nextCanUseAsMixer: boolean) {
     setCanUseAsMixer(nextCanUseAsMixer)
 
@@ -1655,8 +1884,26 @@ function ProductFormPanel({
 
   async function saveProduct() {
     if (!selectedCategory || !name.trim() || !selectedVenueId) {
+      sileo.error({
+        description: 'Revisa el nombre, la categoria y el local antes de guardar.',
+        title: 'No se ha podido guardar el producto',
+      })
       return
     }
+
+    if (!selectedSaleFormats.length || selectedSaleFormats.some((format) => !saleFormatPrices[format]?.trim())) {
+      sileo.error({
+        description: 'Selecciona al menos un formato e introduce su precio.',
+        title: 'Faltan precios de venta',
+      })
+      return
+    }
+
+    const formatVariants = selectedSaleFormats.map((format) => ({
+      format,
+      name: getSaleFormatLabel(format, saleFormats),
+      priceCents: parseMoneyToCents(saleFormatPrices[format]),
+    }))
 
     const mixerSupplementCents =
       canUseAsMixer && hasMixerSupplement ? parseMoneyToCents(mixerSupplement) : 0
@@ -1687,10 +1934,29 @@ function ProductFormPanel({
             name: name.trim(),
             saleFormats: selectedSaleFormats,
           })
-          if (primaryVariant) {
-            await updateVariant(tenantContext, primaryVariant.id, {
-              priceCents: parseMoneyToCents(price),
-            })
+
+          const assignedVariants = assignProductVariantsToSaleFormats(product, selectedSaleFormats)
+          const assignedVariantIds = new Set<string>()
+          for (const [index, formatVariant] of formatVariants.entries()) {
+            const existingVariant = assignedVariants.get(formatVariant.format)
+            if (existingVariant) {
+              assignedVariantIds.add(existingVariant.id)
+              await updateVariant(tenantContext, existingVariant.id, {
+                isDefault: index === 0,
+                name: formatVariant.name,
+                priceCents: formatVariant.priceCents,
+              })
+            } else {
+              await createVariant(tenantContext, product.id, {
+                isDefault: index === 0,
+                name: formatVariant.name,
+                priceCents: formatVariant.priceCents,
+              })
+            }
+          }
+
+          for (const obsoleteVariant of product.variants.filter((variant) => !assignedVariantIds.has(variant.id))) {
+            await deleteVariant(tenantContext, obsoleteVariant.id)
           }
         } else {
           await createProductWithVariant(tenantContext, {
@@ -1704,9 +1970,11 @@ function ProductFormPanel({
             kind,
             mixerSupplementCents,
             name: name.trim(),
-            priceCents: parseMoneyToCents(price),
             saleFormats: selectedSaleFormats,
-            variantName: variantName.trim() || 'Normal',
+            variants: formatVariants.map(({ name: variantLabel, priceCents }) => ({
+              name: variantLabel,
+              priceCents,
+            })),
           })
         }
 
@@ -1715,9 +1983,17 @@ function ProductFormPanel({
         }
 
         await onCatalogChanged()
+        sileo.success({
+          description: `${name.trim()} se ha guardado correctamente.`,
+          title: isEditing ? 'Producto actualizado' : 'Producto creado',
+        })
         onClose()
       } catch (saveError) {
         await deleteProductImage(tenantContext, uploadedImagePath).catch(() => undefined)
+        sileo.error({
+          description: getReadableError(saveError),
+          title: 'No se ha podido guardar el producto',
+        })
         throw saveError
       }
     })
@@ -1736,73 +2012,31 @@ function ProductFormPanel({
     })
   }
 
-  async function addVariant() {
-    if (!product || !newVariantName.trim()) {
-      return
-    }
-
-    await runAction(async () => {
-      await createVariant(tenantContext, product.id, {
-        name: newVariantName.trim(),
-        priceCents: parseMoneyToCents(newVariantPrice),
-      })
-      setNewVariantName('')
-      setNewVariantPrice('0.00')
-      await onCatalogChanged()
-    })
-  }
-
-  async function handleDeleteVariant(variant: ProductVariant) {
-    if (!product) {
-      return
-    }
-
-    if (product.variants.length <= 1) {
-      window.alert('No se puede eliminar el unico formato del producto.')
-      return
-    }
-
-    if (!window.confirm(`Eliminar el formato "${variant.name}"?`)) {
-      return
-    }
-
-    const nextDefaultVariant = variant.isDefault ? product.variants.find((item) => item.id !== variant.id) : null
-
-    await runAction(async () => {
-      await deleteVariant(tenantContext, variant.id)
-      if (nextDefaultVariant) {
-        await updateVariant(tenantContext, nextDefaultVariant.id, {
-          isDefault: true,
-        })
-      }
-      await onCatalogChanged()
-    })
-  }
-
-  return (
-    <aside className="crm-panel crm-editor-panel">
-      <div className="crm-editor-header">
+  const editorContent = (
+    <>
+      <div className="crm-editor-header !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
         <div>
           <span>{isEditing ? 'Editar producto' : 'Nuevo producto'}</span>
           <small>{isEditing ? product?.name : 'Alta rapida de catalogo'}</small>
         </div>
-        <button aria-label="Cerrar editor de producto" className="crm-editor-close" onClick={onClose} type="button">
+        <button aria-label="Cerrar editor de producto" className="crm-editor-close !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" onClick={onClose} type="button">
           <X className="h-4 w-4" />
         </button>
       </div>
 
+      <div className="!min-h-0 !flex-1 !overflow-y-auto">
       <form
-        className="crm-form-stack"
+        className="crm-form-stack !grid !min-h-0 !gap-3.5 !px-[22px] !pt-5 !pb-[22px]"
         onSubmit={(event) => {
           event.preventDefault()
           void saveProduct()
         }}
       >
         <Field label="Producto">
-          <input className="crm-input" onChange={(event) => setName(event.target.value)} value={name} />
+          <input autoFocus={!isEditing} className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setName(event.target.value)} value={name} />
         </Field>
         <Field label="Categoria">
-          <select className="crm-input" onChange={(event) => handleCategoryChange(event.target.value)} value={categoryId}>
+          <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => handleCategoryChange(event.target.value)} value={categoryId}>
             {categories.map((category) => (
               <option key={category.id} value={category.id}>
                 {category.name}
@@ -1811,7 +2045,7 @@ function ProductFormPanel({
           </select>
         </Field>
         <Field label="Tipo de producto">
-          <select className="crm-input" onChange={(event) => setKind(event.target.value as CatalogKind)} value={kind}>
+          <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setKind(event.target.value as CatalogKind)} value={kind}>
             {productKindOptions.map((option) => (
               <option key={option.value} value={option.value}>
                 {option.label}
@@ -1820,11 +2054,11 @@ function ProductFormPanel({
           </select>
         </Field>
         <Field label="Descripcion">
-          <input className="crm-input" onChange={(event) => setDescription(event.target.value)} value={description} />
+          <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setDescription(event.target.value)} value={description} />
         </Field>
         <div>
-          <span className="crm-field-label">Imagen</span>
-          <div className="crm-image-field">
+          <span className="crm-field-label !mb-1.5 !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">Imagen</span>
+          <div className="crm-image-field !grid !grid-cols-1 !gap-3 md:!grid-cols-[96px_minmax(0,1fr)]">
             <div className="crm-image-preview" style={{ backgroundColor: imageFillColor }}>
               {imagePreviewUrl ? (
                 <img alt="" src={imagePreviewUrl} />
@@ -1836,8 +2070,8 @@ function ProductFormPanel({
               <label
                 className={
                   disabled
-                    ? 'crm-secondary-button crm-file-button crm-file-button-disabled'
-                    : 'crm-secondary-button crm-file-button'
+                    ? 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-file-button crm-file-button-disabled'
+                    : 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-file-button'
                 }
               >
                 <Upload className="h-4 w-4" />
@@ -1854,7 +2088,7 @@ function ProductFormPanel({
                 />
               </label>
               {imagePreviewUrl ? (
-                <button className="crm-state-button crm-state-button-danger" disabled={disabled} onClick={removeSelectedImage} type="button">
+                <button className="crm-state-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-green-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-green)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-state-button-danger !bg-[var(--crm-red-soft)] !text-[var(--crm-red)]" disabled={disabled} onClick={removeSelectedImage} type="button">
                   <X className="h-4 w-4" />
                   Quitar
                 </button>
@@ -1864,22 +2098,43 @@ function ProductFormPanel({
           {imageError ? <div className="crm-field-error">{imageError}</div> : null}
         </div>
         <div>
-          <span className="crm-field-label">Formatos de venta</span>
-          <div className="crm-checkbox-list">
-            {saleFormats.map((option) => (
-              <label key={option.key}>
-                <input
-                  checked={selectedSaleFormats.includes(option.key)}
-                  onChange={() => toggleSaleFormat(option.key)}
-                  type="checkbox"
-                />
-                <span>{option.label}</span>
-              </label>
-            ))}
+          <span className="crm-field-label !mb-1.5 !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">Formatos de venta</span>
+          <div className="!grid !gap-2">
+            {saleFormats.map((option) => {
+              const isSelected = selectedSaleFormats.includes(option.key)
+              return (
+                <div className="!grid !min-h-[58px] !grid-cols-[minmax(0,1fr)_120px] !items-center !gap-3 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)] !px-3.5 !py-2" key={option.key}>
+                  <label className="!flex !min-w-0 !cursor-pointer !items-center !gap-2.5 !text-[13px] !font-semibold !text-[var(--crm-text)]">
+                    <input
+                      checked={isSelected}
+                      className="!size-4 !shrink-0 !accent-[var(--crm-blue)]"
+                      onChange={() => toggleSaleFormat(option.key)}
+                      type="checkbox"
+                    />
+                    <span className="!truncate">{option.label}</span>
+                  </label>
+                  {isSelected ? (
+                    <label className="!relative !block">
+                      <span className="sr-only">Precio de {option.label}</span>
+                      <input
+                        className="crm-input !h-10 !w-full !rounded-[9px] !border !border-transparent !bg-[var(--crm-input-bg)] !pr-8 !pl-3 !text-right !font-mono !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+                        inputMode="decimal"
+                        onChange={(event) => updateSaleFormatPrice(option.key, event.target.value)}
+                        placeholder="0,00"
+                        value={saleFormatPrices[option.key] ?? ''}
+                      />
+                      <span className="!pointer-events-none !absolute !top-1/2 !right-3 !-translate-y-1/2 !text-xs !font-semibold !text-[var(--crm-text-muted)]">€</span>
+                    </label>
+                  ) : (
+                    <span className="!pr-3 !text-right !text-xs !font-medium !text-[var(--crm-text-muted)]">Sin precio</span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
         <div>
-          <span className="crm-field-label">Catalogo</span>
+          <span className="crm-field-label !mb-1.5 !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">Catalogo</span>
           <div className="crm-checkbox-list">
             <label>
               <input
@@ -1892,7 +2147,7 @@ function ProductFormPanel({
           </div>
         </div>
         <div>
-          <span className="crm-field-label">Usos</span>
+          <span className="crm-field-label !mb-1.5 !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">Usos</span>
           <div className="crm-checkbox-list">
             <label>
               <input
@@ -1914,7 +2169,7 @@ function ProductFormPanel({
         </div>
         {canUseAsMixer ? (
           <div>
-            <span className="crm-field-label">Suplemento en cubatas</span>
+            <span className="crm-field-label !mb-1.5 !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">Suplemento en cubatas</span>
             <div className="crm-checkbox-list">
               <label>
                 <input
@@ -1930,37 +2185,21 @@ function ProductFormPanel({
         {canUseAsMixer && hasMixerSupplement ? (
           <Field label="Importe suplemento">
             <input
-              className="crm-input font-mono"
+              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150 !font-mono"
               inputMode="decimal"
               onChange={(event) => setMixerSupplement(event.target.value)}
               value={mixerSupplement}
             />
           </Field>
         ) : null}
-        <div className={isEditing ? 'crm-one-field' : 'crm-two-fields'}>
-          {isEditing ? (
-            <Field label="Precio base">
-              <input className="crm-input font-mono" inputMode="decimal" onChange={(event) => setPrice(event.target.value)} value={price} />
-            </Field>
-          ) : (
-            <>
-              <Field label="Formato">
-              <input className="crm-input" onChange={(event) => setVariantName(event.target.value)} value={variantName} />
-              </Field>
-              <Field label="Precio">
-                <input className="crm-input font-mono" inputMode="decimal" onChange={(event) => setPrice(event.target.value)} value={price} />
-              </Field>
-            </>
-          )}
-        </div>
         <div className="crm-editor-actions">
-          <button className="crm-primary-button" disabled={disabled || !categories.length} type="submit">
+          <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !categories.length} type="submit">
             <Save className="h-4 w-4" />
             Guardar
           </button>
           {isEditing && product ? (
             <button
-              className={product.isActive ? 'crm-state-button' : 'crm-state-button crm-state-button-danger'}
+              className={product.isActive ? 'crm-state-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-green-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-green)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150' : 'crm-state-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-green-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-green)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-state-button-danger !bg-[var(--crm-red-soft)] !text-[var(--crm-red)]'}
               disabled={disabled}
               onClick={toggleProduct}
               type="button"
@@ -1970,103 +2209,14 @@ function ProductFormPanel({
           ) : null}
         </div>
       </form>
-
-      {isEditing && product ? (
-        <div className="crm-editor-section">
-          <h3>Formatos y precios</h3>
-          <div className="crm-variant-grid">
-            {product.variants.map((variant) => (
-              <VariantEditor
-                canDelete={product.variants.length > 1}
-                disabled={disabled}
-                key={variant.id}
-                onDelete={() => void handleDeleteVariant(variant)}
-                onCatalogChanged={onCatalogChanged}
-                runAction={runAction}
-                tenantContext={tenantContext}
-                variant={variant}
-              />
-            ))}
-          </div>
-
-          <div className="crm-new-variant">
-            <input
-              className="crm-input"
-              onChange={(event) => setNewVariantName(event.target.value)}
-              placeholder="Nuevo formato"
-              value={newVariantName}
-            />
-            <input
-              className="crm-input font-mono"
-              inputMode="decimal"
-              onChange={(event) => setNewVariantPrice(event.target.value)}
-              value={newVariantPrice}
-            />
-            <button className="crm-secondary-button" disabled={disabled || !newVariantName.trim()} onClick={addVariant} type="button">
-              Anadir
-            </button>
-          </div>
-        </div>
-      ) : null}
-    </aside>
+      </div>
+    </>
   )
-}
-
-type VariantEditorProps = {
-  canDelete: boolean
-  disabled: boolean
-  onDelete: () => void
-  onCatalogChanged: () => Promise<void>
-  runAction: RunAction
-  tenantContext: TenantContext
-  variant: ProductVariant
-}
-
-function VariantEditor({
-  canDelete,
-  disabled,
-  onDelete,
-  onCatalogChanged,
-  runAction,
-  tenantContext,
-  variant,
-}: VariantEditorProps) {
-  const [name, setName] = useState(variant.name)
-  const [price, setPrice] = useState(centsToInput(variant.priceCents))
-
-  async function saveVariant() {
-    await runAction(async () => {
-      await updateVariant(tenantContext, variant.id, {
-        name: name.trim() || variant.name,
-        priceCents: parseMoneyToCents(price),
-      })
-      await onCatalogChanged()
-    })
-  }
 
   return (
-    <div className="crm-variant-editor">
-      <label className="crm-variant-field">
-        <span>Formato</span>
-        <input className="crm-input" onChange={(event) => setName(event.target.value)} value={name} />
-      </label>
-      <button
-        className="crm-delete-square-button"
-        disabled={disabled || !canDelete}
-        onClick={onDelete}
-        title={canDelete ? `Eliminar ${variant.name}` : 'No se puede eliminar el unico formato.'}
-        type="button"
-      >
-        <Trash2 className="h-4 w-4" />
-      </button>
-      <label className="crm-variant-field">
-        <span>Precio</span>
-        <input className="crm-input font-mono" inputMode="decimal" onChange={(event) => setPrice(event.target.value)} value={price} />
-      </label>
-      <button className="crm-save-button" disabled={disabled} onClick={saveVariant} type="button">
-        <Save className="h-4 w-4" />
-      </button>
-    </div>
+    <CrmModal label={isEditing ? 'Editar producto' : 'Anadir producto'} onClose={onClose} size="large">
+      {editorContent}
+    </CrmModal>
   )
 }
 
@@ -2088,6 +2238,8 @@ function SaleFormatsCrm({
   tenantContext,
 }: SaleFormatsCrmProps) {
   const [query, setQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [newLabel, setNewLabel] = useState('')
   const productsByFormat = useMemo(() => {
     const nextMap = new Map<SaleFormat, number>()
@@ -2109,7 +2261,18 @@ function SaleFormatsCrm({
       [format.label, format.key].join(' ').toLowerCase().includes(normalizedQuery),
     )
   }, [query, saleFormats])
+  const totalPages = Math.max(1, Math.ceil(filteredSaleFormats.length / CRM_PAGE_SIZE))
+  const visiblePage = Math.min(currentPage, totalPages)
+  const paginatedSaleFormats = filteredSaleFormats.slice(
+    (visiblePage - 1) * CRM_PAGE_SIZE,
+    visiblePage * CRM_PAGE_SIZE,
+  )
   const nextSortOrder = Math.max(0, ...saleFormats.map((format) => format.sortOrder)) + 1
+
+  function closeCreateDialog() {
+    setIsCreateOpen(false)
+    setNewLabel('')
+  }
 
   async function addSaleFormat() {
     if (!newLabel.trim()) {
@@ -2121,8 +2284,9 @@ function SaleFormatsCrm({
         label: newLabel,
         sortOrder: nextSortOrder,
       })
-      setNewLabel('')
       await onCatalogChanged()
+      setNewLabel('')
+      setIsCreateOpen(false)
     })
   }
 
@@ -2143,35 +2307,39 @@ function SaleFormatsCrm({
   }
 
   return (
-    <div className="crm-entity-layout crm-entity-layout-full">
-      <section className="crm-panel crm-list-panel">
-        <div className="crm-list-toolbar">
+    <div className="crm-entity-layout crm-entity-layout-full !grid !grid-cols-1 !items-start !gap-4">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-list-panel !min-h-0 xl:!min-h-[calc(100dvh-var(--crm-topbar-height)-78px)]">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
           <div className="crm-list-title">
             <h2>Formatos de venta</h2>
             <p>{filteredSaleFormats.length} de {saleFormats.length} formatos</p>
           </div>
-          <div className="crm-toolbar-actions">
-            <label className="crm-search">
+          <div className="crm-toolbar-actions !flex !min-w-0 !flex-col !items-stretch !justify-end !gap-[9px] md:!flex-row md:!items-center">
+            <label className="crm-search !flex !h-11 !w-full !items-center !gap-2 !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-medium !text-[var(--crm-text-muted)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150 md:!w-[min(320px,100%)]">
               <Search className="h-4 w-4" />
-              <input onChange={(event) => setQuery(event.target.value)} placeholder="Buscar formato" value={query} />
-            </label>
-            <div className="crm-inline-create">
               <input
-                className="crm-input"
-                onChange={(event) => setNewLabel(event.target.value)}
-                placeholder="Nuevo formato"
-                value={newLabel}
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setCurrentPage(1)
+                }}
+                placeholder="Buscar formato"
+                value={query}
               />
-              <button className="crm-primary-button" disabled={disabled || !newLabel.trim()} onClick={() => void addSaleFormat()} type="button">
-                <Plus className="h-4 w-4" />
-                Anadir
-              </button>
-            </div>
+            </label>
+            <button
+              className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
+              disabled={disabled}
+              onClick={() => setIsCreateOpen(true)}
+              type="button"
+            >
+              <Plus className="h-4 w-4" />
+              Anadir formato
+            </button>
           </div>
         </div>
 
-        <div className="crm-data-table crm-sale-formats-table">
-          <div className="crm-data-head">
+        <div className="crm-data-table !grid !overflow-auto crm-sale-formats-table">
+          <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
             <span>Formato</span>
             <span>Clave</span>
             <span>Productos</span>
@@ -2179,7 +2347,7 @@ function SaleFormatsCrm({
             <span>Estado</span>
             <span>Acciones</span>
           </div>
-          {filteredSaleFormats.map((saleFormat) => (
+          {paginatedSaleFormats.map((saleFormat) => (
             <SaleFormatListRow
               disabled={disabled}
               key={saleFormat.key}
@@ -2193,7 +2361,65 @@ function SaleFormatsCrm({
           ))}
           {!filteredSaleFormats.length ? <EmptyList message="No hay formatos que coincidan con la busqueda." /> : null}
         </div>
+        <CrmPagination
+          currentPage={visiblePage}
+          onPageChange={setCurrentPage}
+          totalResults={filteredSaleFormats.length}
+        />
       </section>
+
+      {isCreateOpen ? (
+        <CrmModal label="Anadir formato de venta" onClose={closeCreateDialog}>
+          <div className="crm-editor-header !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
+            <div>
+              <span>Nuevo formato de venta</span>
+              <small>Define el nombre que aparecera en el catalogo.</small>
+            </div>
+            <button
+              aria-label="Cerrar dialogo de formato"
+              className="crm-editor-close !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
+              onClick={closeCreateDialog}
+              type="button"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+          <form
+            className="crm-form-stack !grid !min-h-0 !gap-3.5 !overflow-y-auto !px-[22px] !pt-5 !pb-[22px]"
+            onSubmit={(event) => {
+              event.preventDefault()
+              void addSaleFormat()
+            }}
+          >
+            <Field label="Nombre">
+              <input
+                autoFocus
+                className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+                onChange={(event) => setNewLabel(event.target.value)}
+                placeholder="Por ejemplo, Copa"
+                value={newLabel}
+              />
+            </Field>
+            <div className="crm-editor-actions">
+              <button
+                className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
+                onClick={closeCreateDialog}
+                type="button"
+              >
+                Cancelar
+              </button>
+              <button
+                className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
+                disabled={disabled || !newLabel.trim()}
+                type="submit"
+              >
+                <Plus className="h-4 w-4" />
+                Crear formato
+              </button>
+            </div>
+          </form>
+        </CrmModal>
+      ) : null}
     </div>
   )
 }
@@ -2240,28 +2466,28 @@ function SaleFormatListRow({
   }
 
   return (
-    <div className="crm-data-row">
-      <input className="crm-input" onChange={(event) => setLabel(event.target.value)} value={label} />
+    <div className="crm-data-row !grid !min-h-[72px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]">
+      <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setLabel(event.target.value)} value={label} />
       <code className="crm-code-cell">{saleFormat.key}</code>
       <strong>{productCount}</strong>
-      <input className="crm-input font-mono" inputMode="numeric" onChange={(event) => setSortOrder(event.target.value)} value={sortOrder} />
-      <span className={saleFormat.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+      <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150 !font-mono" inputMode="numeric" onChange={(event) => setSortOrder(event.target.value)} value={sortOrder} />
+      <span className={saleFormat.isActive ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-active !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]' : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-muted !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-secondary)]'}>
         {saleFormat.isActive ? 'Activo' : 'Oculto'}
       </span>
       <div className="crm-action-group">
-        <button className="crm-action-button" disabled={disabled} onClick={() => void saveSaleFormat()} type="button">
+        <button className="crm-action-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[11px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => void saveSaleFormat()} type="button">
           <Save className="h-4 w-4" />
           Guardar
         </button>
         <button
-          className={saleFormat.isActive ? 'crm-state-button' : 'crm-state-button crm-state-button-danger'}
+          className={saleFormat.isActive ? 'crm-state-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-green-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-green)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150' : 'crm-state-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-green-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-green)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-state-button-danger !bg-[var(--crm-red-soft)] !text-[var(--crm-red)]'}
           disabled={disabled}
           onClick={() => void toggleSaleFormat()}
           type="button"
         >
           {saleFormat.isActive ? 'Ocultar' : 'Activar'}
         </button>
-        <button className="crm-danger-button" disabled={disabled} onClick={onDelete} type="button">
+        <button className="crm-danger-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-[11px] !text-[13px] !font-semibold !text-[var(--crm-red)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={onDelete} type="button">
           <Trash2 className="h-4 w-4" />
           Eliminar
         </button>
@@ -2290,6 +2516,7 @@ type CategoryEditorState =
 
 function CategoriesCrm({ categories, disabled, onCatalogChanged, products, runAction, tenantContext }: CategoriesCrmProps) {
   const [query, setQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
   const [editor, setEditor] = useState<CategoryEditorState | null>(null)
   const productsByCategory = useMemo(() => {
     const nextMap = new Map<string, number>()
@@ -2309,6 +2536,12 @@ function CategoriesCrm({ categories, disabled, onCatalogChanged, products, runAc
       [category.name, category.kind, getKindLabel(category.kind)].join(' ').toLowerCase().includes(normalizedQuery),
     )
   }, [categories, query])
+  const totalPages = Math.max(1, Math.ceil(filteredCategories.length / CRM_PAGE_SIZE))
+  const visiblePage = Math.min(currentPage, totalPages)
+  const paginatedCategories = filteredCategories.slice(
+    (visiblePage - 1) * CRM_PAGE_SIZE,
+    visiblePage * CRM_PAGE_SIZE,
+  )
   const selectedCategory =
     editor?.mode === 'edit' ? categories.find((category) => category.id === editor.categoryId) : null
 
@@ -2329,34 +2562,41 @@ function CategoriesCrm({ categories, disabled, onCatalogChanged, products, runAc
   }
 
   return (
-    <div className={editor ? 'crm-entity-layout' : 'crm-entity-layout crm-entity-layout-full'}>
-      <section className="crm-panel crm-list-panel">
-        <div className="crm-list-toolbar">
+    <div className={editor?.mode === 'edit' ? 'crm-entity-layout !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[minmax(0,1fr)_410px] xl:!gap-6' : 'crm-entity-layout crm-entity-layout-full !grid !grid-cols-1 !items-start !gap-4'}>
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-list-panel !min-h-0 xl:!min-h-[calc(100dvh-var(--crm-topbar-height)-78px)]">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
           <div className="crm-list-title">
             <h2>Categorias</h2>
             <p>{filteredCategories.length} de {categories.length} categorias</p>
           </div>
-          <div className="crm-toolbar-actions">
-            <label className="crm-search">
+          <div className="crm-toolbar-actions !flex !min-w-0 !flex-col !items-stretch !justify-end !gap-[9px] md:!flex-row md:!items-center">
+            <label className="crm-search !flex !h-11 !w-full !items-center !gap-2 !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-medium !text-[var(--crm-text-muted)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150 md:!w-[min(320px,100%)]">
               <Search className="h-4 w-4" />
-              <input onChange={(event) => setQuery(event.target.value)} placeholder="Buscar categoria" value={query} />
+              <input
+                onChange={(event) => {
+                  setQuery(event.target.value)
+                  setCurrentPage(1)
+                }}
+                placeholder="Buscar categoria"
+                value={query}
+              />
             </label>
-            <button className="crm-primary-button" disabled={disabled} onClick={() => setEditor({ mode: 'create' })} type="button">
+            <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => setEditor({ mode: 'create' })} type="button">
               <Plus className="h-4 w-4" />
               Anadir categoria
             </button>
           </div>
         </div>
 
-        <div className="crm-data-table crm-categories-table">
-          <div className="crm-data-head">
+        <div className="crm-data-table !grid !overflow-auto crm-categories-table">
+          <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
             <span>Categoria</span>
             <span>Tipo</span>
             <span>Productos</span>
             <span>Estado</span>
             <span>Acciones</span>
           </div>
-          {filteredCategories.map((category) => {
+          {paginatedCategories.map((category) => {
             const productCount = productsByCategory.get(category.id) ?? 0
             return (
               <CategoryListRow
@@ -2371,6 +2611,11 @@ function CategoriesCrm({ categories, disabled, onCatalogChanged, products, runAc
           })}
           {!filteredCategories.length ? <EmptyList message="No hay categorias que coincidan con la busqueda." /> : null}
         </div>
+        <CrmPagination
+          currentPage={visiblePage}
+          onPageChange={setCurrentPage}
+          totalResults={filteredCategories.length}
+        />
       </section>
 
       {editor && (editor.mode === 'create' || selectedCategory) ? (
@@ -2400,23 +2645,23 @@ type CategoryListRowProps = {
 
 function CategoryListRow({ category, disabled, onDelete, onEdit, productCount }: CategoryListRowProps) {
   return (
-    <div className="crm-data-row">
+    <div className="crm-data-row !grid !min-h-[72px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]">
       <div className="crm-cell-main">
         <strong>{category.name}</strong>
         <span>Orden {category.sortOrder}</span>
       </div>
       <span>{getKindLabel(category.kind)}</span>
       <strong>{productCount}</strong>
-      <span className={category.isActive ? 'crm-status-pill crm-status-pill-active' : 'crm-status-pill crm-status-pill-muted'}>
+      <span className={category.isActive ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-active !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]' : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-muted !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-secondary)]'}>
         {category.isActive ? 'Activa' : 'Oculta'}
       </span>
       <div className="crm-action-group">
-        <button className="crm-action-button" disabled={disabled} onClick={onEdit} type="button">
+        <button className="crm-action-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[11px] !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={onEdit} type="button">
           <Pencil className="h-4 w-4" />
           Editar
         </button>
         <button
-          className="crm-danger-button"
+          className="crm-danger-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-[11px] !text-[13px] !font-semibold !text-[var(--crm-red)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
           disabled={disabled || productCount > 0}
           onClick={onDelete}
           title={productCount > 0 ? 'No se puede eliminar una categoria con productos asociados.' : undefined}
@@ -2493,30 +2738,30 @@ function CategoryFormPanel({
     })
   }
 
-  return (
-    <aside className="crm-panel crm-editor-panel">
-      <div className="crm-editor-header">
+  const editorContent = (
+    <>
+      <div className="crm-editor-header !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
         <div>
           <span>{isEditing ? 'Editar categoria' : 'Nueva categoria'}</span>
           <small>{isEditing ? category?.name : 'Agrupa productos del TPV'}</small>
         </div>
-        <button aria-label="Cerrar editor de categoria" className="crm-editor-close" onClick={onClose} type="button">
+        <button aria-label="Cerrar editor de categoria" className="crm-editor-close !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" onClick={onClose} type="button">
           <X className="h-4 w-4" />
         </button>
       </div>
 
       <form
-        className="crm-form-stack"
+        className="crm-form-stack !grid !min-h-0 !gap-3.5 !overflow-y-auto !px-[22px] !pt-5 !pb-[22px]"
         onSubmit={(event) => {
           event.preventDefault()
           void saveCategory()
         }}
       >
       <Field label="Nombre">
-        <input className="crm-input" onChange={(event) => setName(event.target.value)} value={name} />
+        <input autoFocus={!isEditing} className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setName(event.target.value)} value={name} />
       </Field>
       <Field label="Tipo">
-        <select className="crm-input" onChange={(event) => setKind(event.target.value as CatalogKind)} value={kind}>
+        <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setKind(event.target.value as CatalogKind)} value={kind}>
           {categoryKindOptions.map((option) => (
             <option key={option.value} value={option.value}>
               {option.label}
@@ -2525,13 +2770,13 @@ function CategoryFormPanel({
         </select>
       </Field>
       <div className="crm-editor-actions">
-        <button className="crm-primary-button" disabled={disabled} type="submit">
+        <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} type="submit">
           <Save className="h-4 w-4" />
           Guardar
         </button>
         {isEditing && category ? (
           <button
-            className={category.isActive ? 'crm-state-button' : 'crm-state-button crm-state-button-danger'}
+            className={category.isActive ? 'crm-state-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-green-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-green)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150' : 'crm-state-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-green-soft)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-green)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 crm-state-button-danger !bg-[var(--crm-red-soft)] !text-[var(--crm-red)]'}
             disabled={disabled}
             onClick={toggleCategory}
             type="button"
@@ -2541,12 +2786,652 @@ function CategoryFormPanel({
         ) : null}
       </div>
       </form>
+    </>
+  )
+
+  if (!isEditing) {
+    return (
+      <CrmModal label="Anadir categoria" onClose={onClose}>
+        {editorContent}
+      </CrmModal>
+    )
+  }
+
+  return (
+    <aside className="crm-panel !flex !min-w-0 !flex-col !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-editor-panel !min-h-0 xl:!min-h-[calc(100dvh-var(--crm-topbar-height)-78px)]">
+      {editorContent}
     </aside>
   )
 }
 
 function EmptyList({ message }: { message: string }) {
   return <div className="crm-empty-row">{message}</div>
+}
+
+type SalesReportView = 'tickets' | 'products' | 'categories' | 'formats'
+type SalesReportAggregateView = Exclude<SalesReportView, 'tickets'>
+type SalesReportSortDirection = 'asc' | 'desc'
+type SalesReportSortKey =
+  | 'average'
+  | 'createdAt'
+  | 'label'
+  | 'paymentMethod'
+  | 'quantity'
+  | 'status'
+  | 'ticketCount'
+  | 'ticketId'
+  | 'totalCents'
+
+type SalesReportLine = CrmSalesReports['tickets'][number]['lines'][number]
+
+function salesReportLineMatches(line: SalesReportLine, productQuery: string, categoryQuery: string) {
+  return (!productQuery || normalizeText(line.productName).includes(productQuery))
+    && (!categoryQuery || normalizeText(line.categoryName).includes(categoryQuery))
+}
+
+function buildSalesReportAggregates(
+  tickets: CrmSalesReports['tickets'],
+  view: SalesReportAggregateView,
+  productQuery: string,
+  categoryQuery: string,
+) {
+  const report = new Map<string, CrmSalesReportAggregate & { ticketIds: Set<string> }>()
+
+  tickets.forEach((ticket) => {
+    if (ticket.status !== 'paid') return
+
+    ticket.lines.forEach((line) => {
+      if (!salesReportLineMatches(line, productQuery, categoryQuery)) return
+
+      const id = view === 'products'
+        ? line.productId ?? `deleted:${normalizeText(line.productName)}`
+        : view === 'categories'
+          ? line.categoryId ?? 'uncategorized'
+          : normalizeText(line.variantName) || 'sin-formato'
+      const label = view === 'products'
+        ? line.productName
+        : view === 'categories'
+          ? line.categoryName
+          : line.variantName || 'Sin formato'
+      const current = report.get(id) ?? {
+        id,
+        label,
+        quantity: 0,
+        ticketCount: 0,
+        ticketIds: new Set<string>(),
+        totalCents: 0,
+      }
+
+      current.quantity += line.quantity
+      current.totalCents += line.lineTotalCents
+      current.ticketIds.add(ticket.id)
+      current.ticketCount = current.ticketIds.size
+      report.set(id, current)
+    })
+  })
+
+  return [...report.values()].map((item) => ({
+    id: item.id,
+    label: item.label,
+    quantity: item.quantity,
+    ticketCount: item.ticketCount,
+    totalCents: item.totalCents,
+  }))
+}
+
+function compareSalesReportValues(
+  left: number | string,
+  right: number | string,
+  direction: SalesReportSortDirection,
+) {
+  const comparison = typeof left === 'number' && typeof right === 'number'
+    ? left - right
+    : String(left).localeCompare(String(right), 'es', { sensitivity: 'base' })
+
+  return direction === 'asc' ? comparison : -comparison
+}
+
+const salesReportTabs: Array<{ id: SalesReportView; label: string }> = [
+  { id: 'tickets', label: 'Todos los tickets' },
+  { id: 'products', label: 'Por producto' },
+  { id: 'categories', label: 'Por categoría' },
+  { id: 'formats', label: 'Por formato' },
+]
+
+type SalesReportsCrmProps = {
+  disabled: boolean
+  runAction: RunAction
+  selectedVenueId: string
+  tenantContext: TenantContext
+}
+
+function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }: SalesReportsCrmProps) {
+  const [activeView, setActiveView] = useState<SalesReportView>('tickets')
+  const [categoryQuery, setCategoryQuery] = useState('')
+  const [currentPage, setCurrentPage] = useState(1)
+  const [dateFrom, setDateFrom] = useState('')
+  const [dateTo, setDateTo] = useState('')
+  const [isFiltersOpen, setIsFiltersOpen] = useState(false)
+  const [productQuery, setProductQuery] = useState('')
+  const [reports, setReports] = useState<CrmSalesReports | null>(null)
+  const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
+  const [sortDirection, setSortDirection] = useState<SalesReportSortDirection>('desc')
+  const [sortKey, setSortKey] = useState<SalesReportSortKey>('createdAt')
+  const refresh = useCallback(async () => {
+    setReports(await loadCrmSalesReports(tenantContext, selectedVenueId))
+  }, [selectedVenueId, tenantContext])
+
+  useEffect(() => {
+    setReports(null)
+    setCurrentPage(1)
+    setSelectedTicketId(null)
+    void runAction(refresh)
+  }, [refresh, runAction])
+
+  const normalizedProductQuery = normalizeText(productQuery.trim())
+  const normalizedCategoryQuery = normalizeText(categoryQuery.trim())
+  const ticketsInDateRange = useMemo(() => {
+    const startAt = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY
+    const endAt = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY
+
+    return (reports?.tickets ?? []).filter((ticket) => {
+      const createdAt = new Date(ticket.createdAt).getTime()
+      return createdAt >= startAt && createdAt <= endAt
+    })
+  }, [dateFrom, dateTo, reports])
+  const filteredTickets = useMemo(() => ticketsInDateRange.filter((ticket) => {
+    if (!normalizedProductQuery && !normalizedCategoryQuery) return true
+    return ticket.lines.some((line) => salesReportLineMatches(line, normalizedProductQuery, normalizedCategoryQuery))
+  }), [normalizedCategoryQuery, normalizedProductQuery, ticketsInDateRange])
+  const activeAggregateView: SalesReportAggregateView = activeView === 'tickets' ? 'products' : activeView
+  const activeAggregates = useMemo(() => buildSalesReportAggregates(
+    ticketsInDateRange,
+    activeAggregateView,
+    normalizedProductQuery,
+    normalizedCategoryQuery,
+  ), [activeAggregateView, normalizedCategoryQuery, normalizedProductQuery, ticketsInDateRange])
+  const sortedTickets = useMemo(() => [...filteredTickets].sort((left, right) => {
+    const leftValue = sortKey === 'ticketId'
+      ? left.id
+      : sortKey === 'createdAt'
+        ? new Date(left.createdAt).getTime()
+        : sortKey === 'quantity'
+          ? left.quantity
+          : sortKey === 'paymentMethod'
+            ? left.paymentMethod ?? ''
+            : sortKey === 'status'
+              ? left.status
+              : left.totalCents
+    const rightValue = sortKey === 'ticketId'
+      ? right.id
+      : sortKey === 'createdAt'
+        ? new Date(right.createdAt).getTime()
+        : sortKey === 'quantity'
+          ? right.quantity
+          : sortKey === 'paymentMethod'
+            ? right.paymentMethod ?? ''
+            : sortKey === 'status'
+              ? right.status
+              : right.totalCents
+
+    return compareSalesReportValues(leftValue, rightValue, sortDirection)
+  }), [filteredTickets, sortDirection, sortKey])
+  const sortedAggregates = useMemo(() => [...activeAggregates].sort((left, right) => {
+    const leftValue = sortKey === 'label'
+      ? left.label
+      : sortKey === 'ticketCount'
+        ? left.ticketCount
+        : sortKey === 'quantity'
+          ? left.quantity
+          : sortKey === 'average'
+            ? left.quantity ? left.totalCents / left.quantity : 0
+            : left.totalCents
+    const rightValue = sortKey === 'label'
+      ? right.label
+      : sortKey === 'ticketCount'
+        ? right.ticketCount
+        : sortKey === 'quantity'
+          ? right.quantity
+          : sortKey === 'average'
+            ? right.quantity ? right.totalCents / right.quantity : 0
+            : right.totalCents
+
+    return compareSalesReportValues(leftValue, rightValue, sortDirection)
+  }), [activeAggregates, sortDirection, sortKey])
+  const matchingPaidTickets = filteredTickets.filter((ticket) => ticket.status === 'paid')
+  const salesCents = ticketsInDateRange
+    .filter((ticket) => ticket.status === 'paid')
+    .flatMap((ticket) => ticket.lines)
+    .filter((line) => salesReportLineMatches(line, normalizedProductQuery, normalizedCategoryQuery))
+    .reduce((total, line) => total + line.lineTotalCents, 0)
+  const totalResults = activeView === 'tickets' ? sortedTickets.length : sortedAggregates.length
+  const totalPages = Math.max(1, Math.ceil(totalResults / CRM_PAGE_SIZE))
+  const visiblePage = Math.min(currentPage, totalPages)
+  const pageStart = (visiblePage - 1) * CRM_PAGE_SIZE
+  const visibleTickets = sortedTickets.slice(pageStart, pageStart + CRM_PAGE_SIZE)
+  const visibleAggregates = sortedAggregates.slice(pageStart, pageStart + CRM_PAGE_SIZE)
+  const activeTab = salesReportTabs.find((tab) => tab.id === activeView) ?? salesReportTabs[0]
+  const selectedTicket = reports?.tickets.find((ticket) => ticket.id === selectedTicketId) ?? null
+  const productOptions = useMemo(() => [...new Set(
+    (reports?.tickets ?? []).flatMap((ticket) => ticket.lines.map((line) => line.productName)),
+  )].sort((a, b) => a.localeCompare(b, 'es')), [reports])
+  const categoryOptions = useMemo(() => [...new Set(
+    (reports?.tickets ?? []).flatMap((ticket) => ticket.lines.map((line) => line.categoryName)),
+  )].sort((a, b) => a.localeCompare(b, 'es')), [reports])
+  const hasActiveFilters = Boolean(dateFrom || dateTo || productQuery || categoryQuery)
+  const activeFilterCount = [dateFrom || dateTo, productQuery, categoryQuery].filter(Boolean).length
+
+  function handleSort(nextSortKey: SalesReportSortKey) {
+    setCurrentPage(1)
+    if (sortKey === nextSortKey) {
+      setSortDirection((current) => current === 'asc' ? 'desc' : 'asc')
+      return
+    }
+
+    setSortKey(nextSortKey)
+    setSortDirection(nextSortKey === 'label' || nextSortKey === 'ticketId' || nextSortKey === 'paymentMethod' || nextSortKey === 'status' ? 'asc' : 'desc')
+  }
+
+  function clearFilters() {
+    setCategoryQuery('')
+    setDateFrom('')
+    setDateTo('')
+    setProductQuery('')
+    setCurrentPage(1)
+  }
+
+  return (
+    <div className="!grid !grid-cols-1 !items-start !gap-4 xl:!gap-6">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
+          <div>
+            <h2>Resumen histórico</h2>
+            <p>Datos del local seleccionado</p>
+          </div>
+          <button
+            aria-label="Actualizar informes de ventas"
+            className="crm-icon-button !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
+            disabled={disabled}
+            onClick={() => void runAction(refresh)}
+            type="button"
+          >
+            <RefreshCw className="h-4 w-4" />
+          </button>
+        </div>
+        <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
+          <KpiCard color="green" label="Ventas filtradas" value={formatMoney(salesCents)} />
+          <KpiCard color="blue" label="Tickets cobrados" value={matchingPaidTickets.length} />
+          <KpiCard color="neutral" label="Ticket medio" value={formatMoney(matchingPaidTickets.length ? Math.round(salesCents / matchingPaidTickets.length) : 0)} />
+          <KpiCard color="neutral" label="Tickets anulados" value={filteredTickets.filter((ticket) => ticket.status === 'void').length} />
+        </div>
+      </section>
+
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
+          <div className="crm-list-title">
+            <h2>{activeTab.label}</h2>
+            <p>{reports ? `${totalResults} resultados` : 'Cargando información de ventas...'}</p>
+          </div>
+          <button
+            aria-controls="crm-sales-report-filters"
+            aria-expanded={isFiltersOpen}
+            className={isFiltersOpen
+              ? '!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-blue)] !shadow-none !transition-[background-color,color,transform] !duration-150'
+              : 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+            onClick={() => setIsFiltersOpen((current) => !current)}
+            type="button"
+          >
+            <SlidersHorizontal className="!size-4" />
+            Filtros
+            {activeFilterCount ? (
+              <span className="!inline-grid !size-5 !place-items-center !rounded-full !bg-[var(--crm-blue)] !text-[10px] !font-bold !text-white">
+                {activeFilterCount}
+              </span>
+            ) : null}
+          </button>
+        </div>
+
+        <div aria-label="Subsecciones de informes" className="!flex !gap-2 !overflow-x-auto !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-3 md:!px-[22px]" role="tablist">
+          {salesReportTabs.map((tab) => (
+            <button
+              aria-selected={activeView === tab.id}
+              className={activeView === tab.id
+                ? '!inline-flex !min-h-10 !shrink-0 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-blue-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-blue)] !shadow-none !transition-[background-color,color,transform] !duration-150'
+                : 'crm-secondary-button !inline-flex !min-h-10 !shrink-0 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+              key={tab.id}
+              onClick={() => {
+                setActiveView(tab.id)
+                setCurrentPage(1)
+                setSortDirection('desc')
+                setSortKey(tab.id === 'tickets' ? 'createdAt' : 'totalCents')
+              }}
+              role="tab"
+              type="button"
+            >
+              {tab.label}
+            </button>
+          ))}
+        </div>
+
+        {isFiltersOpen ? (
+        <div className="!grid !grid-cols-1 !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[18px] !py-4 sm:!grid-cols-2 lg:!grid-cols-4 xl:!grid-cols-[minmax(150px,0.65fr)_minmax(150px,0.65fr)_minmax(210px,1fr)_minmax(210px,1fr)_auto] md:!px-[22px]" id="crm-sales-report-filters">
+          <Field label="Desde">
+            <input
+              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+              max={dateTo || undefined}
+              onChange={(event) => {
+                setDateFrom(event.target.value)
+                setCurrentPage(1)
+              }}
+              type="date"
+              value={dateFrom}
+            />
+          </Field>
+          <Field label="Hasta">
+            <input
+              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+              min={dateFrom || undefined}
+              onChange={(event) => {
+                setDateTo(event.target.value)
+                setCurrentPage(1)
+              }}
+              type="date"
+              value={dateTo}
+            />
+          </Field>
+          <Field label="Producto">
+            <input
+              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+              list="crm-report-products"
+              onChange={(event) => {
+                setProductQuery(event.target.value)
+                setCurrentPage(1)
+              }}
+              placeholder="Buscar producto"
+              type="search"
+              value={productQuery}
+            />
+            <datalist id="crm-report-products">
+              {productOptions.map((product) => <option key={product} value={product} />)}
+            </datalist>
+          </Field>
+          <Field label="Categoría">
+            <input
+              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+              list="crm-report-categories"
+              onChange={(event) => {
+                setCategoryQuery(event.target.value)
+                setCurrentPage(1)
+              }}
+              placeholder="Buscar categoría"
+              type="search"
+              value={categoryQuery}
+            />
+            <datalist id="crm-report-categories">
+              {categoryOptions.map((category) => <option key={category} value={category} />)}
+            </datalist>
+          </Field>
+          <div className="!flex !items-end sm:!col-span-2 lg:!col-span-4 xl:!col-span-1">
+            <button
+              className="crm-secondary-button !inline-flex !h-11 !w-full !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150 xl:!w-auto"
+              disabled={!hasActiveFilters}
+              onClick={clearFilters}
+              type="button"
+            >
+              <X className="!size-4" />
+              Limpiar
+            </button>
+          </div>
+        </div>
+        ) : null}
+
+        {activeView === 'tickets' ? (
+          <SalesReportTicketsTable
+            isLoading={!reports}
+            onSelect={setSelectedTicketId}
+            onSort={handleSort}
+            sortDirection={sortDirection}
+            sortKey={sortKey}
+            tickets={visibleTickets}
+          />
+        ) : (
+          <SalesReportAggregateTable
+            items={visibleAggregates}
+            labelHeading={activeView === 'products' ? 'Producto' : activeView === 'categories' ? 'Categoría' : 'Formato'}
+            loading={!reports}
+            onSort={handleSort}
+            sortDirection={sortDirection}
+            sortKey={sortKey}
+          />
+        )}
+        <CrmPagination currentPage={visiblePage} onPageChange={setCurrentPage} totalResults={totalResults} />
+      </section>
+
+      {selectedTicket ? (
+        <SalesReportTicketModal onClose={() => setSelectedTicketId(null)} ticket={selectedTicket} />
+      ) : null}
+    </div>
+  )
+}
+
+function SalesReportTicketsTable({
+  isLoading,
+  onSelect,
+  onSort,
+  sortDirection,
+  sortKey,
+  tickets,
+}: {
+  isLoading: boolean
+  onSelect: (ticketId: string) => void
+  onSort: (sortKey: SalesReportSortKey) => void
+  sortDirection: SalesReportSortDirection
+  sortKey: SalesReportSortKey
+  tickets: CrmSalesReports['tickets']
+}) {
+  return (
+    <div className="crm-data-table !grid !overflow-auto">
+      <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[900px] !grid-cols-[minmax(180px,0.85fr)_minmax(190px,1fr)_110px_130px_110px_130px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ticket" onSort={onSort} sortKey="ticketId" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Fecha" onSort={onSort} sortKey="createdAt" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Artículos" onSort={onSort} sortKey="quantity" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Método" onSort={onSort} sortKey="paymentMethod" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Estado" onSort={onSort} sortKey="status" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Total" onSort={onSort} sortKey="totalCents" />
+      </div>
+      {tickets.map((ticket) => (
+        <button
+          aria-label={`Ver detalles del ticket ${ticket.id.slice(0, 8)}`}
+          className="crm-data-row !grid !min-h-[72px] !w-full !min-w-[900px] !cursor-pointer !grid-cols-[minmax(180px,0.85fr)_minmax(190px,1fr)_110px_130px_110px_130px] !items-center !gap-3.5 !border-0 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]"
+          key={ticket.id}
+          onClick={() => onSelect(ticket.id)}
+          type="button"
+        >
+          <div className="crm-cell-main">
+            <strong>#{ticket.id.slice(0, 8).toUpperCase()}</strong>
+            <span>{ticket.lineCount} líneas</span>
+          </div>
+          <span>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</span>
+          <span>{ticket.quantity} uds.</span>
+          <span>{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'}</span>
+          <span className={ticket.status === 'paid'
+            ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
+            : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>
+            {ticket.status === 'paid' ? 'Cobrado' : 'Anulado'}
+          </span>
+          <strong className="!font-mono !text-[var(--crm-text)]">{formatMoney(ticket.totalCents)}</strong>
+        </button>
+      ))}
+      {!tickets.length ? <EmptyList message={isLoading ? 'Cargando tickets...' : 'No hay tickets para este local.'} /> : null}
+    </div>
+  )
+}
+
+function SalesReportSortHeader({
+  currentDirection,
+  currentKey,
+  label,
+  onSort,
+  sortKey,
+}: {
+  currentDirection: SalesReportSortDirection
+  currentKey: SalesReportSortKey
+  label: string
+  onSort: (sortKey: SalesReportSortKey) => void
+  sortKey: SalesReportSortKey
+}) {
+  const isActive = currentKey === sortKey
+  const SortIcon = isActive ? currentDirection === 'asc' ? ArrowUp : ArrowDown : ArrowUpDown
+
+  return (
+    <button
+      aria-label={`Ordenar por ${label}`}
+      className={isActive
+        ? '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-secondary)] !shadow-none'
+        : '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)] !shadow-none'}
+      onClick={() => onSort(sortKey)}
+      type="button"
+    >
+      <span>{label}</span>
+      <SortIcon className="!size-3.5" />
+    </button>
+  )
+}
+
+function SalesReportTicketModal({
+  onClose,
+  ticket,
+}: {
+  onClose: () => void
+  ticket: CrmSalesReports['tickets'][number]
+}) {
+  return (
+    <CrmModal label={`Detalle del ticket ${ticket.id.slice(0, 8)}`} onClose={onClose} size="large">
+      <div className="crm-editor-header !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
+        <div>
+          <span>Ticket #{ticket.id.slice(0, 8).toUpperCase()}</span>
+          <small>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</small>
+        </div>
+        <button
+          aria-label="Cerrar detalle del ticket"
+          className="crm-editor-close !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,transform] !duration-150"
+          onClick={onClose}
+          type="button"
+        >
+          <X className="h-4 w-4" />
+        </button>
+      </div>
+
+      <div className="!min-h-0 !overflow-y-auto !px-[18px] !py-5 md:!px-[22px]">
+        <div className="!mb-5 !grid !grid-cols-1 !gap-2.5 sm:!grid-cols-2 lg:!grid-cols-4">
+          <TicketDetailSummary label="Estado">
+            <span className={ticket.status === 'paid'
+              ? '!inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
+              : '!inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>
+              {ticket.status === 'paid' ? 'Cobrado' : 'Anulado'}
+            </span>
+          </TicketDetailSummary>
+          <TicketDetailSummary label="Método de pago">
+            <strong>{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'}</strong>
+          </TicketDetailSummary>
+          <TicketDetailSummary label="Productos">
+            <strong>{ticket.lineCount} líneas · {ticket.quantity} uds.</strong>
+          </TicketDetailSummary>
+          <TicketDetailSummary label="Total">
+            <strong className="!font-mono !text-base">{formatMoney(ticket.totalCents)}</strong>
+          </TicketDetailSummary>
+        </div>
+
+        {ticket.status === 'void' ? (
+          <div className="!mb-4 !rounded-[10px] !bg-[var(--crm-red-soft)] !px-3.5 !py-3 !text-xs !font-semibold !text-[var(--crm-red)]">
+            Este ticket fue anulado y no se contabiliza en los informes de ventas.
+          </div>
+        ) : null}
+
+        <div className="!overflow-x-auto !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)]">
+          <div className="!grid !min-h-11 !min-w-[660px] !grid-cols-[minmax(240px,1fr)_minmax(150px,0.65fr)_80px_120px_120px] !items-center !gap-3 !border-b !border-[var(--crm-border)] !px-4 !text-[10px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
+            <span>Producto</span>
+            <span>Formato</span>
+            <span>Cantidad</span>
+            <span>Precio / ud.</span>
+            <span>Total</span>
+          </div>
+          {ticket.lines.map((line) => (
+            <div className="!grid !min-h-[68px] !min-w-[660px] !grid-cols-[minmax(240px,1fr)_minmax(150px,0.65fr)_80px_120px_120px] !items-center !gap-3 !border-b !border-[var(--crm-border)] !px-4 !py-3 !text-[13px] !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={line.id}>
+              <div className="crm-cell-main">
+                <strong>{line.productName}</strong>
+                {line.modifiers.length ? (
+                  <span>{line.modifiers.map((modifier) => `+ ${modifier.name}${modifier.priceCents ? ` (${formatMoney(modifier.priceCents)})` : ''}`).join(' · ')}</span>
+                ) : (
+                  <span>Sin modificadores</span>
+                )}
+              </div>
+              <span>{line.variantName || 'Sin formato'}</span>
+              <span>{line.quantity}</span>
+              <span className="!font-mono">{formatMoney(line.quantity ? Math.round(line.lineTotalCents / line.quantity) : line.unitPriceCents)}</span>
+              <strong className="!font-mono !text-[var(--crm-text)]">{formatMoney(line.lineTotalCents)}</strong>
+            </div>
+          ))}
+          {!ticket.lines.length ? <EmptyList message="Este ticket no contiene líneas de producto." /> : null}
+        </div>
+      </div>
+
+      <div className="!flex !items-center !justify-between !gap-4 !border-t !border-[var(--crm-border-subtle)] !px-[18px] !py-4 md:!px-[22px]">
+        <span className="!text-sm !font-semibold !text-[var(--crm-text-secondary)]">Total del ticket</span>
+        <strong className="!font-mono !text-xl !text-[var(--crm-text)]">{formatMoney(ticket.totalCents)}</strong>
+      </div>
+    </CrmModal>
+  )
+}
+
+function TicketDetailSummary({ children, label }: { children: ReactNode; label: string }) {
+  return (
+    <div className="!grid !min-h-[76px] !content-center !gap-1.5 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)] !px-3.5 !py-3">
+      <span className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">{label}</span>
+      <div className="!text-[13px] !font-semibold !text-[var(--crm-text)]">{children}</div>
+    </div>
+  )
+}
+
+function SalesReportAggregateTable({
+  items,
+  labelHeading,
+  loading,
+  onSort,
+  sortDirection,
+  sortKey,
+}: {
+  items: CrmSalesReportAggregate[]
+  labelHeading: string
+  loading: boolean
+  onSort: (sortKey: SalesReportSortKey) => void
+  sortDirection: SalesReportSortDirection
+  sortKey: SalesReportSortKey
+}) {
+  return (
+    <div className="crm-data-table !grid !overflow-auto">
+      <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[760px] !grid-cols-[minmax(250px,1fr)_120px_120px_150px_150px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label={labelHeading} onSort={onSort} sortKey="label" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Tickets" onSort={onSort} sortKey="ticketCount" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Unidades" onSort={onSort} sortKey="quantity" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Media / unidad" onSort={onSort} sortKey="average" />
+        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ventas" onSort={onSort} sortKey="totalCents" />
+      </div>
+      {items.map((item) => (
+        <div className="crm-data-row !grid !min-h-[72px] !min-w-[760px] !grid-cols-[minmax(250px,1fr)_120px_120px_150px_150px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]" key={item.id}>
+          <div className="crm-cell-main">
+            <strong>{item.label}</strong>
+            <span>{item.ticketCount === 1 ? '1 operación' : `${item.ticketCount} operaciones`}</span>
+          </div>
+          <span>{item.ticketCount}</span>
+          <span>{item.quantity}</span>
+          <span className="!font-mono">{formatMoney(item.quantity ? Math.round(item.totalCents / item.quantity) : 0)}</span>
+          <strong className="!font-mono !text-[var(--crm-text)]">{formatMoney(item.totalCents)}</strong>
+        </div>
+      ))}
+      {!items.length ? <EmptyList message={loading ? 'Calculando informe...' : `No hay ventas agrupadas por ${labelHeading.toLowerCase()}.`} /> : null}
+    </div>
+  )
 }
 
 type StatsCrmProps = {
@@ -2557,15 +3442,15 @@ type StatsCrmProps = {
 
 function StatsCrm({ disabled, onRefresh, stats }: StatsCrmProps) {
   return (
-    <div className="crm-dashboard-grid">
-      <section className="crm-panel crm-panel-span">
-        <div className="crm-panel-header">
+    <div className="crm-dashboard-grid !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] xl:!gap-6">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Ventas del mes</span>
-          <button aria-label="Actualizar estadisticas" className="crm-icon-button" disabled={disabled} onClick={() => void onRefresh()} type="button">
+          <button aria-label="Actualizar estadisticas" className="crm-icon-button !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => void onRefresh()} type="button">
             <RefreshCw className="h-4 w-4" />
           </button>
         </div>
-        <div className="crm-kpi-strip">
+        <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] md:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
           <KpiCard color="green" label="Ventas" value={formatMoney(stats?.monthSalesCents ?? 0)} />
           <KpiCard color="blue" label="Tickets" value={stats?.monthTicketCount ?? 0} />
           <KpiCard color="neutral" label="Ticket medio" value={formatMoney(stats?.averageTicketCents ?? 0)} />
@@ -2573,15 +3458,15 @@ function StatsCrm({ disabled, onRefresh, stats }: StatsCrmProps) {
         </div>
       </section>
 
-      <section className="crm-panel">
-        <div className="crm-panel-header">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Por metodo de pago</span>
         </div>
         <PaymentBreakdown stats={stats} />
       </section>
 
-      <section className="crm-panel">
-        <div className="crm-panel-header">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Productos top</span>
         </div>
         <TopProductsList stats={stats} />
@@ -2632,7 +3517,7 @@ type FieldProps = {
 function Field({ children, className, label }: FieldProps) {
   return (
     <label className={className ? `block ${className}` : 'block'}>
-      <span className="crm-field-label">{label}</span>
+      <span className="crm-field-label !mb-1.5 !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">{label}</span>
       {children}
     </label>
   )

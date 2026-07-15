@@ -362,9 +362,11 @@ export type ProductCreateInput = {
   kind: CatalogKind
   mixerSupplementCents: number
   name: string
-  priceCents: number
   saleFormats: SaleFormat[]
-  variantName: string
+  variants: Array<{
+    name: string
+    priceCents: number
+  }>
 }
 
 export type CategoryCreateInput = {
@@ -400,4 +402,44 @@ export type CrmStats = {
     quantity: number
     totalCents: number
   }>
+}
+
+export type CrmSalesReportTicket = {
+  id: string
+  createdAt: string
+  lineCount: number
+  lines: Array<{
+    categoryId: string | null
+    categoryName: string
+    id: string
+    lineTotalCents: number
+    modifiers: Array<{
+      name: string
+      priceCents: number
+    }>
+    productId: string | null
+    productName: string
+    quantity: number
+    unitPriceCents: number
+    variantName: string
+  }>
+  paymentMethod: PaymentMethod | null
+  quantity: number
+  status: 'paid' | 'void'
+  totalCents: number
+}
+
+export type CrmSalesReportAggregate = {
+  id: string
+  label: string
+  quantity: number
+  ticketCount: number
+  totalCents: number
+}
+
+export type CrmSalesReports = {
+  byCategory: CrmSalesReportAggregate[]
+  byFormat: CrmSalesReportAggregate[]
+  byProduct: CrmSalesReportAggregate[]
+  tickets: CrmSalesReportTicket[]
 }

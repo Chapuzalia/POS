@@ -15,7 +15,8 @@
     "fflate": "^0.8.3",
     "lucide-react": "^1.23.0",
     "react": "^19.2.7",
-    "react-dom": "^19.2.7"
+    "react-dom": "^19.2.7",
+    "sileo": "^0.1.5"
   },
   "devDependencies": {
     "@tailwindcss/vite": "^4.3.2",

@@ -85,14 +85,22 @@ export function canUseProductAsMixer(product: Product) {
   return product.canUseAsMixer ?? product.kind === 'mixer'
 }
 
-export function getProductVariantForSaleFormat(product: Product, saleFormat: SaleFormat): ProductVariant | null {
-  const aliases = (saleFormatVariantAliases[saleFormat] ?? [saleFormat]).map(normalizeText)
-  const matchingVariant = product.variants.find((variant) => {
+export function findProductVariantForSaleFormat(product: Product, saleFormat: SaleFormat): ProductVariant | null {
+  const aliases = (saleFormatVariantAliases[saleFormat] ?? [saleFormat]).flatMap((alias) => {
+    const normalizedAlias = normalizeText(alias)
+    return [normalizedAlias, normalizedAlias.replace(/[_-]+/g, ' ')]
+  })
+  return product.variants.find((variant) => {
     const normalizedName = normalizeText(variant.name)
     return aliases.some((alias) => normalizedName.includes(alias))
-  })
+  }) ?? null
+}
 
-  return matchingVariant ?? product.variants.find((variant) => variant.isDefault) ?? product.variants[0] ?? null
+export function getProductVariantForSaleFormat(product: Product, saleFormat: SaleFormat): ProductVariant | null {
+  return findProductVariantForSaleFormat(product, saleFormat)
+    ?? product.variants.find((variant) => variant.isDefault)
+    ?? product.variants[0]
+    ?? null
 }
 
 export function getDefaultSaleFormatsForKind(kind: CatalogKind): SaleFormat[] {

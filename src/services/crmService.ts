@@ -8,6 +8,8 @@ import type {
   CategoryCreateInput,
   CrmDevice,
   CrmPosUser,
+  CrmSalesReportAggregate,
+  CrmSalesReports,
   CrmStats,
   CrmVenue,
   DeviceMode,
@@ -32,6 +34,44 @@ type TicketLineStatsRow = {
 
 type TicketWithLinesStatsRow = {
   ticket_lines: TicketLineStatsRow[] | null
+}
+
+type SalesReportLineRow = {
+  id: string
+  line_total_cents: number
+  modifiers: Array<{
+    name?: string
+    priceCents?: number
+    price_cents?: number
+  }> | null
+  product_id: string | null
+  product_name: string
+  quantity: number
+  unit_price_cents: number
+  variant_name: string
+}
+
+type SalesReportTicketRow = {
+  id: string
+  local_created_at: string
+  sales: Array<{ payment_method: PaymentMethod }> | null
+  status: 'paid' | 'void'
+  ticket_lines: SalesReportLineRow[] | null
+  total_cents: number
+}
+
+type SalesReportProductRow = {
+  category_id: string
+  id: string
+}
+
+type SalesReportCategoryRow = {
+  id: string
+  name: string
+}
+
+type MutableSalesReportAggregate = CrmSalesReportAggregate & {
+  ticketIds: Set<string>
 }
 
 type OpenCashSessionRow = {
@@ -497,6 +537,11 @@ export async function deleteSaleFormat(context: TenantContext, saleFormat: SaleF
 
 export async function createProductWithVariant(context: TenantContext, input: ProductCreateInput) {
   const client = requireSupabase()
+
+  if (!input.variants.length) {
+    throw new Error('Selecciona al menos un formato de venta con su precio.')
+  }
+
   const { data: product, error: productError } = await client
     .from('products')
     .insert({
@@ -522,14 +567,16 @@ export async function createProductWithVariant(context: TenantContext, input: Pr
     throw productError
   }
 
-  const { error: variantError } = await client.from('product_variants').insert({
-    tenant_id: context.tenantId,
-    product_id: product.id,
-    name: input.variantName,
-    price_cents: input.priceCents,
-    is_default: true,
-    sort_order: 0,
-  })
+  const { error: variantError } = await client.from('product_variants').insert(
+    input.variants.map((variant, index) => ({
+      tenant_id: context.tenantId,
+      product_id: product.id,
+      name: variant.name,
+      price_cents: variant.priceCents,
+      is_default: index === 0,
+      sort_order: index * 10,
+    })),
+  )
 
   if (variantError) {
     throw variantError
@@ -619,6 +666,7 @@ export async function createVariant(
   context: TenantContext,
   productId: string,
   input: {
+    isDefault?: boolean
     name: string
     priceCents: number
   },
@@ -629,7 +677,7 @@ export async function createVariant(
     product_id: productId,
     name: input.name,
     price_cents: input.priceCents,
-    is_default: false,
+    is_default: input.isDefault ?? false,
     sort_order: 10,
   })
 
@@ -1232,6 +1280,174 @@ export async function importRevoCatalogProducts(
   }
 
   return result
+}
+
+function addSalesReportLine(
+  report: Map<string, MutableSalesReportAggregate>,
+  id: string,
+  label: string,
+  ticketId: string,
+  line: SalesReportLineRow,
+) {
+  const current = report.get(id) ?? {
+    id,
+    label,
+    quantity: 0,
+    ticketCount: 0,
+    ticketIds: new Set<string>(),
+    totalCents: 0,
+  }
+
+  current.quantity += line.quantity
+  current.totalCents += line.line_total_cents
+  current.ticketIds.add(ticketId)
+  current.ticketCount = current.ticketIds.size
+  report.set(id, current)
+}
+
+function finalizeSalesReport(report: Map<string, MutableSalesReportAggregate>): CrmSalesReportAggregate[] {
+  return [...report.values()]
+    .map((item) => ({
+      id: item.id,
+      label: item.label,
+      quantity: item.quantity,
+      ticketCount: item.ticketCount,
+      totalCents: item.totalCents,
+    }))
+    .sort((a, b) => b.totalCents - a.totalCents || b.quantity - a.quantity || a.label.localeCompare(b.label, 'es'))
+}
+
+export async function loadCrmSalesReports(context: TenantContext, venueId?: string): Promise<CrmSalesReports> {
+  const client = requireSupabase()
+  let productsQuery = client
+    .from('products')
+    .select('id, category_id')
+    .eq('tenant_id', context.tenantId)
+
+  if (venueId) {
+    productsQuery = productsQuery.eq('venue_id', venueId)
+  }
+
+  const ticketRowsPromise = (async () => {
+    const rows: SalesReportTicketRow[] = []
+    const batchSize = 1000
+    let offset = 0
+
+    while (true) {
+      let ticketBatchQuery = client
+        .from('tickets')
+        .select(`
+          id,
+          status,
+          total_cents,
+          local_created_at,
+          ticket_lines (
+            id,
+            product_id,
+            product_name,
+            variant_name,
+            quantity,
+            unit_price_cents,
+            modifiers,
+            line_total_cents
+          ),
+          sales (
+            payment_method
+          )
+        `)
+        .eq('tenant_id', context.tenantId)
+        .order('local_created_at', { ascending: false })
+        .range(offset, offset + batchSize - 1)
+
+      if (venueId) {
+        ticketBatchQuery = ticketBatchQuery.eq('venue_id', venueId)
+      }
+
+      const { data, error } = await ticketBatchQuery
+      if (error) throw error
+
+      const batch = (data ?? []) as SalesReportTicketRow[]
+      rows.push(...batch)
+
+      if (batch.length < batchSize) break
+      offset += batchSize
+    }
+
+    return rows
+  })()
+
+  const [
+    ticketRows,
+    { data: productRows, error: productsError },
+    { data: categoryRows, error: categoriesError },
+  ] = await Promise.all([
+    ticketRowsPromise,
+    productsQuery,
+    client.from('categories').select('id, name').eq('tenant_id', context.tenantId),
+  ])
+
+  if (productsError) throw productsError
+  if (categoriesError) throw categoriesError
+
+  const tickets = ticketRows
+  const categoryIdByProductId = new Map(
+    ((productRows ?? []) as SalesReportProductRow[]).map((product) => [product.id, product.category_id]),
+  )
+  const categoryNameById = new Map(
+    ((categoryRows ?? []) as SalesReportCategoryRow[]).map((category) => [category.id, category.name]),
+  )
+  const byProduct = new Map<string, MutableSalesReportAggregate>()
+  const byCategory = new Map<string, MutableSalesReportAggregate>()
+  const byFormat = new Map<string, MutableSalesReportAggregate>()
+
+  tickets.forEach((ticket) => {
+    if (ticket.status !== 'paid') return
+
+    ;(ticket.ticket_lines ?? []).forEach((line) => {
+      const productId = line.product_id ?? `deleted:${normalizeText(line.product_name)}`
+      const categoryId = line.product_id ? categoryIdByProductId.get(line.product_id) : undefined
+      const categoryName = categoryId ? categoryNameById.get(categoryId) : undefined
+      const formatName = line.variant_name.trim() || 'Sin formato'
+
+      addSalesReportLine(byProduct, productId, line.product_name, ticket.id, line)
+      addSalesReportLine(byCategory, categoryId ?? 'uncategorized', categoryName ?? 'Sin categoría', ticket.id, line)
+      addSalesReportLine(byFormat, normalizeText(formatName) || 'sin-formato', formatName, ticket.id, line)
+    })
+  })
+
+  return {
+    byCategory: finalizeSalesReport(byCategory),
+    byFormat: finalizeSalesReport(byFormat),
+    byProduct: finalizeSalesReport(byProduct),
+    tickets: tickets.map((ticket) => ({
+      id: ticket.id,
+      createdAt: ticket.local_created_at,
+      lineCount: ticket.ticket_lines?.length ?? 0,
+      lines: (ticket.ticket_lines ?? []).map((line) => {
+        const categoryId = line.product_id ? categoryIdByProductId.get(line.product_id) ?? null : null
+
+        return {
+          categoryId,
+          categoryName: categoryId ? categoryNameById.get(categoryId) ?? 'Sin categoría' : 'Sin categoría',
+          id: line.id,
+          lineTotalCents: line.line_total_cents,
+          modifiers: (line.modifiers ?? []).map((modifier) => ({
+            name: modifier.name?.trim() || 'Modificador',
+            priceCents: modifier.priceCents ?? modifier.price_cents ?? 0,
+          })),
+          productId: line.product_id,
+          productName: line.product_name,
+          quantity: line.quantity,
+          unitPriceCents: line.unit_price_cents,
+          variantName: line.variant_name,
+        }
+      }),
+      paymentMethod: ticket.sales?.[0]?.payment_method ?? null,
+      quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + line.quantity, 0),
+      status: ticket.status,
+      totalCents: ticket.total_cents,
+    })),
+  }
 }
 
 export async function loadCrmStats(context: TenantContext, venueId?: string): Promise<CrmStats> {
