@@ -64,6 +64,79 @@ button {
   touch-action: pan-y;
 }
 
+.product-dialog-backdrop-closing {
+  animation: product-dialog-backdrop-close 170ms ease-out forwards;
+}
+
+.product-dialog-closing {
+  pointer-events: none;
+  animation: product-dialog-close 170ms ease-out forwards;
+}
+
+.pos-add-product-fly {
+  position: fixed;
+  z-index: 60;
+  width: 24px;
+  height: 24px;
+  margin: -12px;
+  border-radius: 999px;
+  background: var(--accent);
+  box-shadow: 0 6px 16px color-mix(in srgb, var(--accent) 40%, transparent);
+  pointer-events: none;
+  animation: pos-add-product-fly 320ms cubic-bezier(.2, .8, .2, 1) forwards;
+}
+
+.ticket-feedback-success {
+  animation: ticket-feedback-success 150ms ease-out;
+}
+
+.ticket-feedback-icon,
+.ticket-panel-success {
+  animation: ticket-feedback-icon 150ms ease-out;
+}
+
+.ticket-count-pop {
+  animation: ticket-count-pop 210ms ease-out;
+}
+
+@keyframes product-dialog-backdrop-close {
+  to { opacity: 0; }
+}
+
+@keyframes product-dialog-close {
+  to { opacity: 0; transform: translateY(6px) scale(.96); }
+}
+
+@keyframes pos-add-product-fly {
+  from { opacity: 1; transform: scale(1); }
+  to { opacity: 0; transform: translate(var(--add-feedback-x), var(--add-feedback-y)) scale(.5); }
+}
+
+@keyframes ticket-feedback-success {
+  50% { transform: scale(1.08); }
+}
+
+@keyframes ticket-feedback-icon {
+  from { opacity: .45; transform: scale(.8); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+@keyframes ticket-count-pop {
+  50% { transform: scale(1.25); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .product-dialog-backdrop-closing,
+  .product-dialog-closing,
+  .pos-add-product-fly,
+  .ticket-feedback-success,
+  .ticket-feedback-icon,
+  .ticket-panel-success,
+  .ticket-count-pop {
+    animation-duration: 0.01ms;
+  }
+}
+
 .catalog-tabs-scroll {
   scrollbar-width: none;
   -ms-overflow-style: none;

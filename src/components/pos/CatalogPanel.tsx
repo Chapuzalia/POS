@@ -111,7 +111,7 @@ type CatalogPanelProps = {
   catalog: Catalog | null
   catalogStartTab: CatalogStartTab
   disabled: boolean
-  onSelectProduct: (product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean) => void
+  onSelectProduct: (product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean, sourceElement: HTMLElement) => void
   productSalesStats: ProductSalesStat[]
 }
 
@@ -398,7 +398,7 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
                       className="flex min-h-8 flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
                       disabled={disabled || !primaryVariant}
                       key={product.id}
-                      onClick={() => onSelectProduct(product, saleFormat, allowFormatSelection)}
+                      onClick={(event) => onSelectProduct(product, saleFormat, allowFormatSelection, event.currentTarget)}
                       type="button"
                     >
                       <span className="grid aspect-square w-full place-items-center overflow-hidden bg-[var(--surface-secondary)] text-[var(--accent)]">

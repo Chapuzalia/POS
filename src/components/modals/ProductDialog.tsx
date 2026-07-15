@@ -1,5 +1,5 @@
 import { GlassWater, X } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   canUseProductAsMixer,
   getProductSaleFormats,
@@ -17,7 +17,7 @@ type ProductDialogProps = {
   initialSelection?: ProductLineSelection
   initialVariantId?: string
   isBusy: boolean
-  onAdd: (product: Product, variant: ProductVariant, selection: ProductLineSelection) => void
+  onAdd: (product: Product, variant: ProductVariant, selection: ProductLineSelection, sourceElement?: HTMLElement | null) => boolean
   onCancel: () => void
   product: Product
   saleFormat: SaleFormat
@@ -70,7 +70,9 @@ export function ProductDialog({
   )
   const [hasChosenFormat, setHasChosenFormat] = useState(!startsWithFormatSelection)
   const [hasSubmitted, setHasSubmitted] = useState(false)
+  const [isClosing, setIsClosing] = useState(false)
   const submittedRef = useRef(false)
+  const dialogRef = useRef<HTMLElement>(null)
   const isChoosingFormat = startsWithFormatSelection && !hasChosenFormat
   const isChoosingMixer = !isChoosingFormat && selectedSaleFormat === 'cubata'
   const selectedVariant =
@@ -106,10 +108,23 @@ export function ProductDialog({
     return selectedCount >= group.minSelect && selectedCount <= group.maxSelect
   })
 
+  useEffect(() => {
+    if (!isClosing) return
+
+    if (window.matchMedia('(prefers-reduced-motion: reduce)').matches) {
+      onCancel()
+      return
+    }
+
+    const timeout = window.setTimeout(onCancel, 170)
+    return () => window.clearTimeout(timeout)
+  }, [isClosing, onCancel])
+
   function submitSelection(
     variant = selectedVariant,
     submitSaleFormat = selectedSaleFormat,
     mixer = selectedMixer,
+    sourceElement?: HTMLElement | null,
   ) {
     if (!variant || !isModifierValid || submittedRef.current || isBusy) {
       return
@@ -119,19 +134,22 @@ export function ProductDialog({
       return
     }
 
+    const wasAdded = onAdd(product, variant, getProductLineSelection(explicitModifierList, submitSaleFormat, mixer), sourceElement ?? dialogRef.current)
+    if (!wasAdded) return
+
     submittedRef.current = true
     setHasSubmitted(true)
-    onAdd(product, variant, getProductLineSelection(explicitModifierList, submitSaleFormat, mixer))
+    setIsClosing(true)
   }
 
-  function handleMixerSelect(mixer: Product) {
+  function handleMixerSelect(mixer: Product, sourceElement: HTMLElement) {
     setSelectedMixerId(mixer.id)
-    if (!product.modifierGroups.length && !initialSelection) submitSelection(selectedVariant, selectedSaleFormat, mixer)
+    if (!product.modifierGroups.length && !initialSelection) submitSelection(selectedVariant, selectedSaleFormat, mixer, sourceElement)
   }
 
-  function handleNoMixer() {
+  function handleNoMixer(sourceElement: HTMLElement) {
     setSelectedMixerId('')
-    if (!product.modifierGroups.length) submitSelection(selectedVariant, selectedSaleFormat, null)
+    if (!product.modifierGroups.length) submitSelection(selectedVariant, selectedSaleFormat, null, sourceElement)
   }
 
   function toggleModifier(group: ModifierGroup, modifierId: string) {
@@ -151,7 +169,7 @@ export function ProductDialog({
     })
   }
 
-  function handleVariantSelect(variant: ProductVariant) {
+  function handleVariantSelect(variant: ProductVariant, sourceElement: HTMLElement) {
     const nextSaleFormat = getSaleFormatForVariant(product, variant, selectedSaleFormat)
 
     setSelectedVariantId(variant.id)
@@ -160,16 +178,18 @@ export function ProductDialog({
     setHasChosenFormat(true)
 
     if (nextSaleFormat !== 'cubata' && product.modifierGroups.length === 0) {
-      submitSelection(variant, nextSaleFormat, null)
+      submitSelection(variant, nextSaleFormat, null, sourceElement)
     }
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+    <div className={cx('fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4', isClosing && 'product-dialog-backdrop-closing')}>
       <section
+        ref={dialogRef}
         className={cx(
           'max-h-[calc(100svh-32px)] w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]',
           isChoosingMixer ? 'max-w-5xl' : 'max-w-xl',
+          isClosing && 'product-dialog-closing',
         )}
       >
         <div className="flex items-start justify-between gap-4">
@@ -192,7 +212,7 @@ export function ProductDialog({
                   disabled={hasSubmitted}
                   fullWidth
                   key={variant.id}
-                  onClick={() => handleVariantSelect(variant)}
+                  onClick={(event) => handleVariantSelect(variant, event.currentTarget)}
                   type="button"
                   variant="tertiary"
                   size="lg"
@@ -215,7 +235,7 @@ export function ProductDialog({
                   active={!selectedMixerId}
                   disabled={isBusy || hasSubmitted}
                   fullWidth
-                  onClick={handleNoMixer}
+                  onClick={(event) => handleNoMixer(event.currentTarget)}
                   type="button"
                   variant="tertiary"
                   className="h-28"
@@ -226,7 +246,7 @@ export function ProductDialog({
                     disabled={isBusy || hasSubmitted}
                     fullWidth
                     key={mixer.id}
-                    onClick={() => handleMixerSelect(mixer)}
+                    onClick={(event) => handleMixerSelect(mixer, event.currentTarget)}
                     type="button"
                     variant="tertiary"
                     className="h-28 overflow-hidden !justify-start !p-0"
@@ -294,7 +314,7 @@ export function ProductDialog({
             <Button
               disabled={isBusy || hasSubmitted || !selectedVariant || !isModifierValid || (selectedSaleFormat === 'cubata' && !selectedMixer && !initialSelection)}
               fullWidth
-              onClick={() => submitSelection()}
+              onClick={(event) => submitSelection(selectedVariant, selectedSaleFormat, selectedMixer, event.currentTarget)}
               size="lg"
               type="button"
               variant="primary"

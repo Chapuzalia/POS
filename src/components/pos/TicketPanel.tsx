@@ -1,4 +1,4 @@
-import { Minus, Plus, Trash2 } from 'lucide-react'
+import { Check, Minus, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { formatMoney, getLineTotal, getTicketTotal } from '../../lib/format'
 import { getLineAdditionNames } from '../../lib/mixers'
@@ -8,6 +8,7 @@ import { Button } from '../ui'
 
 type TicketPanelProps = {
   isBusy: boolean
+  isAddSuccess?: boolean
   lines: TicketLine[]
   onClear: () => void
   onDecrement: (lineId: string) => void
@@ -23,7 +24,7 @@ function isTicketLineActionTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('[data-ticket-line-action="true"]'))
 }
 
-export function TicketPanel({ isBusy, lines, onDecrement, onIncrement, onRemove }: TicketPanelProps) {
+export function TicketPanel({ isAddSuccess = false, isBusy, lines, onDecrement, onIncrement, onRemove }: TicketPanelProps) {
   const total = getTicketTotal(lines)
 
   return (
@@ -51,7 +52,7 @@ export function TicketPanel({ isBusy, lines, onDecrement, onIncrement, onRemove 
 
       <div className="border-t border-[var(--separator)] p-4">
         <div className="flex items-center justify-between gap-4">
-          <span className="text-lg font-bold">Total</span>
+          <span className="flex items-center gap-2 text-lg font-bold">Total {isAddSuccess ? <Check aria-label="Producto añadido al ticket" className="ticket-panel-success h-5 w-5 text-[var(--success)]" /> : null}</span>
           <span className="font-mono text-3xl font-black tabular-nums">{formatMoney(total)}</span>
         </div>
       </div>

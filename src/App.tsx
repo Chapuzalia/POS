@@ -34,6 +34,7 @@ import {
 import { supabase, supabaseConfig } from './lib/supabase'
 import { useOfflineSync } from './hooks/useOfflineSync'
 import { useOnlineStatus } from './hooks/useOnlineStatus'
+import { useAddProductFeedback } from './hooks/useAddProductFeedback'
 import { useThemeTokens } from './hooks/useThemeTokens'
 import {
   TenantSessionError,
@@ -96,6 +97,7 @@ import type { PosView, RestaurantMap, RestaurantOrderDetail, RestaurantOrderSave
 import { applySessionLayout, loadSessionTableLayout, saveSessionTableLayout, subscribeToSessionTableLayout } from './features/tables/layout-service'
 import { canDecreaseLineQuantity, getOrderPendingUnits, isLineRemovable } from './features/tables/service-status'
 import { CashSessionGate } from './features/cash-registers/CashSessionGate'
+import { AddProductFlyAnimation } from './components/feedback/AddProductFlyAnimation'
 import { closeCashRegisterSession, loadCashRegisterOptions, openCashRegisterSession, subscribeToVenueCashSessions } from './features/cash-registers/service'
 
 type ProductDialogState = {
@@ -216,6 +218,8 @@ function App() {
   const [tablesConfigLoaded, setTablesConfigLoaded] = useState(false)
   const [restaurantSaveState, setRestaurantSaveState] = useState<RestaurantOrderSaveState>('saved')
   const [pendingRestaurantPayment, setPendingRestaurantPayment] = useState<PendingRestaurantPayment | null>(null)
+  const floatingTicketButtonRef = useRef<HTMLButtonElement>(null)
+  const { announcement, flyFeedback, isAddSuccess, shouldAnimateCount, successId, triggerAddFeedback } = useAddProductFeedback(floatingTicketButtonRef)
   const restaurantOrderRef = useRef<RestaurantOrderDetail | null>(null)
   const restaurantEditGenerationRef = useRef(0)
   const restaurantSaveStateRef = useRef<RestaurantOrderSaveState>('saved')
@@ -1254,12 +1258,12 @@ function App() {
     setCloseCashOpen(true)
   }
 
-  function addTicketLine(product: Product, variant: ProductVariant, selection: ProductLineSelection) {
+  function addTicketLine(product: Product, variant: ProductVariant, selection: ProductLineSelection, sourceElement?: HTMLElement | null) {
     const { modifiers, mixerProductId, mixer } = selection
     if (posView.type === 'table_order') {
-      if (!isOnline) { setError('La gestion de mesas requiere conexion.'); return }
+      if (!isOnline) { setError('La gestion de mesas requiere conexion.'); return false }
       const current = restaurantOrderRef.current
-      if (!current || !context) return
+      if (!current || !context) return false
       const additionsTotal = modifiers.reduce((total, modifier) => total + modifier.priceCents, 0) + (mixer?.priceCents ?? 0)
       if (productDialog?.lineId) {
         const timestamp = nowIso()
@@ -1278,8 +1282,8 @@ function App() {
             updatedAt: timestamp,
           } : line),
         }))
-        setProductDialog(null)
-        return
+        triggerAddFeedback({ feedbackType: 'updated', productName: product.name, sourceElement })
+        return true
       }
       const signature = getLineSignature({ productId: product.id, variantId: variant.id, modifiers, mixerProductId })
       const existing = current.lines.find((line) =>
@@ -1313,8 +1317,8 @@ function App() {
               updatedAt: timestamp,
             }],
       }))
-      setProductDialog(null)
-      return
+      triggerAddFeedback({ feedbackType: 'added', productName: product.name, sourceElement })
+      return true
     }
     const quickSaleModifiers = toQuickSaleModifiers(modifiers, mixer)
     const modifierTotal = quickSaleModifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
@@ -1335,10 +1339,11 @@ function App() {
       : [...ticketLines, candidate]
 
     persistTicket(nextLines)
-    setProductDialog(null)
+    triggerAddFeedback({ feedbackType: 'added', productName: product.name, sourceElement })
+    return true
   }
 
-  function handleSelectProduct(product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean) {
+  function handleSelectProduct(product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean, sourceElement: HTMLElement) {
     const firstVariant = getProductVariantForSaleFormat(product, saleFormat)
 
     if (!firstVariant) {
@@ -1349,13 +1354,12 @@ function App() {
       saleFormat === 'cubata' || product.modifierGroups.length > 0 || (allowFormatSelection && product.variants.length > 1)
 
     if (!needsDialog) {
-      addTicketLine(product, firstVariant, { modifiers: [], mixerProductId: null, mixer: null })
+      addTicketLine(product, firstVariant, { modifiers: [], mixerProductId: null, mixer: null }, sourceElement)
       return
     }
 
     setProductDialog({ allowFormatSelection, product, saleFormat })
   }
-
   function updateLineQuantity(lineId: string, direction: 1 | -1) {
     if (posView.type === 'table_order') {
       if (!isOnline) return
@@ -1670,6 +1674,7 @@ function App() {
 
   function renderActiveTicketPanel() {
     return posView.type === 'table_order' && restaurantOrder ? <RestaurantOrderPanel
+      isAddSuccess={isAddSuccess}
       isBusy={isBusy || !isOnline}
       onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
       onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
@@ -1700,6 +1705,7 @@ function App() {
       onServeOne={serveRestaurantLineUnit}
       order={restaurantOrder}
     /> : <TicketPanel
+      isAddSuccess={isAddSuccess}
       isBusy={isBusy}
       lines={activeTicketLines}
       onClear={() => {
@@ -1767,6 +1773,8 @@ function App() {
 
   return (
     <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+      <div aria-atomic="true" aria-live="polite" className="sr-only">{announcement}</div>
+
       <AppHeader
         cashSession={cashSession}
         canCloseCash={context.canCloseCashSession === true}
@@ -1786,6 +1794,8 @@ function App() {
           </div>
         </div>
       ) : null}
+
+      <AddProductFlyAnimation feedback={flyFeedback} />
 
       {tablesEnabled && posView.type !== 'table_map' ? (
         <TableOrderBar
@@ -1852,10 +1862,14 @@ function App() {
 
       {tablesEnabled && posView.type === 'table_map' ? null : (
         <MobileTicketModal
+          floatingButtonRef={floatingTicketButtonRef}
+          isAddSuccess={isAddSuccess}
           isOpen={mobileTicketOpen}
           itemCount={activeTicketItemCount}
           onClose={() => setMobileTicketOpen(false)}
           onOpen={() => setMobileTicketOpen(true)}
+          shouldAnimateCount={shouldAnimateCount}
+          successId={successId}
           title={posView.type === 'table_order' ? 'Comanda' : 'Ticket'}
           totalCents={activeTicketTotal}
         >

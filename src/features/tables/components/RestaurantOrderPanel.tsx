@@ -6,6 +6,7 @@ import { canDecreaseLineQuantity, getOrderPendingUnits, getPendingQuantity, isLi
 import type { RestaurantOrderDetail, RestaurantOrderLine } from '../types'
 
 type Props = {
+  isAddSuccess?: boolean
   isBusy: boolean
   order: RestaurantOrderDetail
   onDecrement: (lineId: string) => void
@@ -49,7 +50,7 @@ function OrderLineRow({ isBusy, line, onDecrement, onEdit, onIncrement, onRemove
 }
 
 export function RestaurantOrderPanel(props: Props) {
-  const { isBusy, order, onServeAllOrder, ...lineProps } = props
+  const { isAddSuccess = false, isBusy, order, onServeAllOrder, ...lineProps } = props
   const pendingLines = order.lines.filter((line) => getPendingQuantity(line) > 0)
   const servedLines = order.lines.filter((line) => getPendingQuantity(line) === 0)
   const pendingUnits = getOrderPendingUnits(order.lines)
@@ -62,7 +63,7 @@ export function RestaurantOrderPanel(props: Props) {
       </div>
       <div className="space-y-3 border-t border-[var(--separator)] p-4">
         {pendingUnits > 0 ? <Button disabled={isBusy} fullWidth onClick={onServeAllOrder} size="lg" type="button" variant="primary"><CheckCheck className="h-5 w-5" /> Marcar {pendingUnits} {pendingUnits === 1 ? 'producto' : 'productos'} como servidos</Button> : order.lines.length ? <p className="text-center font-bold text-[var(--success)]">Todo servido OK</p> : null}
-        <div className="flex items-center justify-between gap-4"><span className="text-lg font-bold">Total</span><span className="font-mono text-3xl font-black tabular-nums">{formatMoney(order.totalCents)}</span></div>
+        <div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2 text-lg font-bold">Total {isAddSuccess ? <Check aria-label="Producto añadido a la comanda" className="ticket-panel-success h-5 w-5 text-[var(--success)]" /> : null}</span><span className="font-mono text-3xl font-black tabular-nums">{formatMoney(order.totalCents)}</span></div>
       </div>
     </section>
   )
