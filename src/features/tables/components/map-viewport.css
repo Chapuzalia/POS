@@ -1,4 +1,4 @@
-.map-transform-layer{position:absolute;inset:0;width:100%;height:100%;transform-origin:0 0;will-change:transform}
+.map-transform-layer{position:absolute;z-index:2;inset:0;width:100%;height:100%;transform-origin:0 0;will-change:transform}
 .map-viewport-controls{position:absolute;z-index:20;right:12px;bottom:12px;display:flex;align-items:center;gap:4px;border:1px solid var(--separator);border-radius:10px;background:color-mix(in srgb,var(--surface) 94%,transparent);padding:5px;box-shadow:var(--shadow);backdrop-filter:blur(8px)}
 .map-viewport-controls button{display:inline-flex;min-width:38px;min-height:38px;align-items:center;justify-content:center;gap:6px;border:0;border-radius:7px;background:transparent;color:var(--foreground);font-size:12px;font-weight:800}.map-viewport-controls button:hover,.map-viewport-controls button:focus-visible{background:var(--accent-soft);outline:2px solid color-mix(in srgb,var(--accent) 50%,transparent);outline-offset:1px}.map-viewport-controls .map-zoom-value{min-width:54px}.map-reset-control{display:none!important}
 .table-map-canvas{cursor:grab;touch-action:none}.table-map-canvas:active{cursor:grabbing}.table-map-canvas.editing .pos-table{cursor:grab;touch-action:none}.table-map-canvas.editing .pos-table:active{cursor:grabbing}
@@ -8,3 +8,17 @@
 .table-group-menu{position:absolute;z-index:30;right:12px;top:12px;display:grid;min-width:220px;gap:5px;border:1px solid var(--separator);border-radius:10px;background:var(--surface);padding:8px;box-shadow:var(--shadow)}.table-group-menu strong{padding:6px 8px;font-size:13px}.table-group-menu button{display:flex;min-height:40px;align-items:center;gap:8px;border:0;border-radius:7px;background:transparent;padding:0 9px;color:var(--foreground);font-weight:750;text-align:left}.table-group-menu button:hover,.table-group-menu button:focus-visible{background:var(--accent-soft);outline:2px solid var(--accent)}
 .table-map-canvas.compact-labels .pos-table small,.table-map-canvas.compact-labels .pos-table em{display:none}.table-map-canvas.compact-labels .pos-table b{font-size:12px}.table-map-canvas.compact-labels .pos-table{gap:1px}
 @media(max-width:760px){.map-viewport-controls{right:8px;bottom:8px}.map-viewport-controls button{min-width:42px;min-height:42px}.map-viewport-controls button span{display:none}.map-viewport-controls .map-reset-control{display:inline-flex!important}.table-group-menu{right:8px;top:8px;min-width:min(230px,calc(100% - 16px))}}
+
+/* A joined composition is compact and secondary to each table's own status. */
+.table-group-outline{border:1px solid color-mix(in srgb,var(--foreground) 18%,transparent);border-radius:12px;box-shadow:0 0 0 6px color-mix(in srgb,var(--surface) 55%,transparent);opacity:.35}
+.table-map-canvas:not(.editing) .table-group-outline{opacity:.16}
+.table-map-canvas.editing .table-group-outline{opacity:.55}
+.table-join-preview{position:absolute;z-index:4;border:2px solid color-mix(in srgb,var(--accent) 72%,transparent);border-radius:9px;background:color-mix(in srgb,var(--accent) 12%,transparent);pointer-events:none}
+.table-map-canvas.editing:has(.table-join-preview) .pos-table:not(.drop-target){opacity:.72}
+.pos-table.drop-target{outline:3px solid color-mix(in srgb,var(--accent) 38%,transparent);box-shadow:0 0 0 5px color-mix(in srgb,var(--accent) 10%,transparent)}
+.pos-table .drop-message{right:7px;bottom:7px;left:7px;min-height:22px;padding:4px 7px;font-size:10px;line-height:14px}
+.table-map-guideline{position:absolute;z-index:20;pointer-events:none;background:color-mix(in srgb,var(--accent) 72%,transparent);box-shadow:0 0 0 1px color-mix(in srgb,var(--surface) 55%,transparent)}
+.table-map-guideline.vertical{top:0;bottom:0;width:1px;transform:translateX(-.5px)}
+.table-map-guideline.horizontal{right:0;left:0;height:1px;transform:translateY(-.5px)}
+.table-group-menu{right:auto}
+.table-group-menu p{max-width:230px;margin:0;padding:4px 8px 7px;color:var(--muted);font-size:12px;line-height:1.35}.table-group-menu button:disabled{cursor:not-allowed;opacity:.42}.table-group-menu button:disabled:hover{background:transparent;outline:0}

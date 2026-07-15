@@ -1,5 +1,7 @@
 import { supabase } from '../../lib/supabase'
 import type { TenantContext } from '../../types/domain'
+import { getReadableError } from '../../utils/errors'
+import { compactJoinedCompositions } from './joined-layout'
 import type { RestaurantMap, SessionTableLayout, TableLayoutEntry } from './types'
 
 function client() { if (!supabase) throw new Error('Supabase no esta configurado.'); return supabase }
@@ -14,7 +16,7 @@ export async function loadSessionTableLayout(_context: TenantContext, cashSessio
 
 export async function saveSessionTableLayout(cashSessionId: string, expectedRevision: number, tables: Record<string, TableLayoutEntry>): Promise<SessionTableLayout> {
   const { data, error } = await client().rpc('save_cash_session_table_layout', { p_cash_session_id: cashSessionId, p_expected_revision: expectedRevision, p_tables: tables })
-  if (error) throw error
+  if (error) throw new Error(getReadableError(error))
   return data as SessionTableLayout
 }
 
@@ -26,7 +28,7 @@ export function applySessionLayout(map: RestaurantMap, layout: SessionTableLayou
   return {
     ...map,
     layoutRevision: layout.revision,
-    tables: map.tables.map((table) => {
+    tables: compactJoinedCompositions(map.tables.map((table) => {
       const entry = layout.tables[table.id]
       return {
         ...table,
@@ -35,7 +37,7 @@ export function applySessionLayout(map: RestaurantMap, layout: SessionTableLayou
         layoutGroupId: entry?.groupId ?? null,
         layoutGroupTableIds: entry?.groupId ? (groupMembers.get(entry.groupId) ?? [table.id]) : [],
       }
-    }),
+    })),
   }
 }
 

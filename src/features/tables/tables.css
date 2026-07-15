@@ -1,2 +1,42 @@
 .table-map-screen{display:flex;min-height:0;flex:1;flex-direction:column;gap:14px;padding:18px;overflow:auto}.table-map-toolbar{display:flex;align-items:center;justify-content:space-between;gap:18px}.table-map-toolbar h1{margin:0;font-size:24px}.table-map-toolbar p{margin:4px 0 0;color:var(--muted)}.table-map-actions{display:flex;gap:10px}.table-action{display:inline-flex;min-height:44px;align-items:center;justify-content:center;gap:8px;border:1px solid var(--separator);border-radius:var(--radius);padding:0 16px;font-weight:800}.table-action.primary{border-color:var(--accent);background:var(--accent);color:var(--accent-foreground)}.table-action.secondary{background:var(--surface);color:var(--foreground)}.table-action:disabled{opacity:.45}.table-offline-warning{border:1px solid var(--warning);border-radius:var(--radius);background:color-mix(in srgb,var(--warning) 12%,var(--surface));padding:11px 14px;color:var(--warning);font-weight:700}.table-mode-banner{display:flex;align-items:center;gap:10px;border-radius:var(--radius);background:var(--accent-soft);padding:10px 14px;color:var(--foreground);font-weight:700}.table-mode-banner span{flex:1}.table-mode-banner button{display:inline-flex;align-items:center;gap:6px;border:0;border-radius:6px;background:var(--surface);padding:8px 12px;color:var(--foreground);font-weight:800}.table-area-tabs{display:flex;gap:8px;overflow-x:auto;padding-bottom:2px}.table-area-tabs button{min-height:42px;white-space:nowrap;border:1px solid var(--separator);border-radius:999px;background:var(--surface);padding:0 18px;color:var(--foreground);font-weight:800}.table-area-tabs button.active{border-color:var(--accent);background:var(--accent);color:var(--accent-foreground)}.table-map-canvas{position:relative;min-height:560px;flex:1;overflow:hidden;border:1px solid var(--separator);border-radius:var(--radius);background-color:var(--surface-secondary);background-image:radial-gradient(var(--separator) 1px,transparent 1px);background-size:22px 22px;box-shadow:var(--shadow)}.pos-table{position:absolute;display:flex;min-width:72px;min-height:72px;flex-direction:column;align-items:center;justify-content:center;gap:2px;overflow:hidden;border:2px solid var(--separator);background:var(--surface);padding:6px;color:var(--foreground);box-shadow:0 8px 18px rgba(17,24,39,.12)}.pos-table.shape-round{border-radius:50%}.pos-table.shape-square{border-radius:10px}.pos-table.shape-rectangle{border-radius:7px}.pos-table.status-free{border-color:var(--success);background:var(--success-soft)}.pos-table.status-occupied{border-color:var(--danger);background:var(--danger-soft)}.pos-table.status-reserved{border-color:var(--warning);background:color-mix(in srgb,var(--warning) 15%,var(--surface))}.pos-table.selected{outline:4px solid color-mix(in srgb,var(--accent) 40%,transparent)}.pos-table.unavailable{opacity:.35}.pos-table strong,.pos-table b,.pos-table span,.pos-table small,.pos-table em{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}.pos-table span{font-size:11px;font-weight:800;text-transform:uppercase}.pos-table b{font-size:14px}.pos-table small{display:flex;align-items:center;gap:3px;color:var(--muted);font-size:10px}.pos-table em{border-radius:999px;background:var(--surface);padding:2px 6px;font-size:9px;font-style:normal;font-weight:800}.table-map-empty{position:absolute;inset:0;display:grid;place-items:center;color:var(--muted);font-weight:800}.table-modal-backdrop{position:fixed;z-index:50;inset:0;display:grid;place-items:center;background:rgba(17,24,39,.55);padding:20px}.table-modal{width:min(440px,100%);border:1px solid var(--separator);border-radius:var(--radius);background:var(--surface);padding:24px;color:var(--foreground);box-shadow:var(--shadow)}.table-modal h2{margin:0 0 8px}.table-modal p{margin:0 0 18px;color:var(--muted);line-height:1.5}.table-modal label{display:grid;gap:7px;font-weight:800}.table-modal input{min-height:48px;border:1px solid var(--field-border);border-radius:var(--radius);background:var(--field);padding:0 12px;color:var(--field-foreground);font-size:18px}.table-modal>div{display:flex;justify-content:flex-end;gap:10px;margin-top:22px}
 @media(max-width:760px){.table-map-screen{padding:12px}.table-map-toolbar{align-items:stretch;flex-direction:column}.table-map-actions{display:grid;grid-template-columns:1fr 1fr}.table-map-canvas{min-height:500px}.table-mode-banner{align-items:flex-start;flex-wrap:wrap}.table-mode-banner span{min-width:70%}.pos-table{min-width:58px;min-height:58px}.pos-table small,.pos-table em{display:none}}
+
+/* Stable hierarchy for touch-friendly tables at every supported zoom. */
+.pos-table{min-width:0;min-height:0;gap:3px;padding:9px 8px;line-height:1.2}
+.pos-table strong{display:block;width:100%;font-size:15px;font-weight:800;line-height:1.2;white-space:nowrap}
+.pos-table span{font-size:11px;font-weight:700;line-height:1.25;text-transform:none}
+.pos-table b{font-size:15px;line-height:1.25}
+.pos-table small{max-width:100%;font-size:11px;line-height:1.25}
+.pos-table small svg{flex:0 0 auto}
+.table-map-canvas.compact-labels .pos-table{min-width:0;min-height:0;padding:6px}
+.table-map-canvas.compact-labels .pos-table span{font-size:10px}
+@media(max-width:760px){.pos-table{min-width:0;min-height:0;padding:6px}.pos-table strong{font-size:13px}.pos-table span{font-size:10px}}
+
+/* The map zoom changes table geometry, while typography stays stable on screen. */
+.pos-table{overflow:hidden;padding:0}
+.pos-table-content{position:absolute;top:50%;left:50%;display:flex;max-width:none;box-sizing:border-box;flex-direction:column;align-items:center;justify-content:center;gap:3px;overflow:hidden;padding:9px 8px;transform-origin:center;pointer-events:none}
+.pos-table .pos-table-content,.pos-table .pos-table-primary{max-width:none;white-space:normal}
+.pos-table-primary{display:flex;width:100%;flex-direction:column;align-items:center;gap:1px}
+.pos-table-primary strong,.pos-table-primary .pos-table-status{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.pos-table.content-compact .pos-table-content{padding:5px}
+.pos-table.content-compact .pos-table-primary{gap:0}
+.pos-table.content-compact .pos-table-status{font-size:9px}
+.pos-table-status-mark{display:block;width:9px;height:9px;border:2px solid color-mix(in srgb,var(--surface) 75%,transparent);border-radius:50%;box-shadow:0 0 0 1px color-mix(in srgb,var(--foreground) 35%,transparent)}
+.pos-table.status-free .pos-table-status-mark{background:var(--success)}
+.pos-table.status-occupied .pos-table-status-mark{background:var(--danger)}
+.pos-table.status-reserved .pos-table-status-mark{background:var(--warning)}
+
+.table-label-connectors,.table-external-label-layer{position:absolute;inset:0;width:100%;height:100%;pointer-events:none}
+.table-label-connectors{z-index:1;overflow:hidden}
+.table-label-connectors line{stroke:color-mix(in srgb,var(--foreground) 52%,transparent);stroke-width:1.25;vector-effect:non-scaling-stroke}
+.table-label-connectors circle{fill:var(--foreground);stroke:var(--surface);stroke-width:1}
+.table-label-connectors .status-free line,.table-label-connectors .status-free circle{stroke:var(--success)}
+.table-label-connectors .status-occupied line,.table-label-connectors .status-occupied circle{stroke:var(--danger)}
+.table-label-connectors .status-reserved line,.table-label-connectors .status-reserved circle{stroke:var(--warning)}
+.table-external-label-layer{z-index:5;overflow:hidden}
+.table-external-label{position:absolute;display:flex;box-sizing:border-box;min-width:96px;max-width:168px;flex-direction:column;justify-content:center;border:1px solid var(--separator);border-left-width:3px;border-radius:8px;background:color-mix(in srgb,var(--surface) 97%,transparent);padding:5px 9px;color:var(--foreground);box-shadow:0 3px 10px rgba(0,0,0,.16);line-height:1.2;pointer-events:none}
+.table-external-label.status-free{border-left-color:var(--success)}
+.table-external-label.status-occupied{border-left-color:var(--danger)}
+.table-external-label.status-reserved{border-left-color:var(--warning)}
+.table-external-label strong{display:block;overflow:hidden;font-size:13px;font-weight:850;text-overflow:ellipsis;white-space:nowrap}
+.table-external-label span{overflow:hidden;color:var(--muted);font-size:10px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}

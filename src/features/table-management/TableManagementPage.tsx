@@ -6,7 +6,7 @@ import { createDiningArea, createRestaurantTable, loadDiningAreas, loadRestauran
 import type { DiningArea, RestaurantTable, RestaurantTableShape } from '../tables/types'
 import { useMapViewport } from '../tables/useMapViewport'
 import { clamp, screenToMap } from '../tables/viewport'
-import { snapTableCenter } from '../tables/alignment'
+import { snapTableAlignment } from '../tables/alignment'
 import './table-management.css'
 import './table-management-viewport.css'
 
@@ -52,7 +52,7 @@ export function TableManagementPage({ context, disabled, venueId, onError }: Pro
     let patch: Pick<RestaurantTable, 'positionX' | 'positionY'> | Pick<RestaurantTable, 'width' | 'height'>
     if (state.mode === 'move') {
       const candidate = { ...state.initial, positionX: clamp(state.initial.positionX + dx, 0, 100 - state.initial.width), positionY: clamp(state.initial.positionY + dy, 0, 100 - state.initial.height) }
-      const snapped = snapTableCenter(candidate, areaTables, SNAP_TOLERANCE)
+      const snapped = snapTableAlignment(candidate, areaTables, SNAP_TOLERANCE)
       nextGuidelines = { x: snapped.guidelineX, y: snapped.guidelineY }
       patch = { positionX: clamp(snapped.positionX, 0, 100 - state.initial.width), positionY: clamp(snapped.positionY, 0, 100 - state.initial.height) }
     } else patch = { width: Math.max(4, Math.min(100 - state.initial.positionX, state.initial.width + dx)), height: Math.max(4, Math.min(100 - state.initial.positionY, state.initial.height + dy)) }

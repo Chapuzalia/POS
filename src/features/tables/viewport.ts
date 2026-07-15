@@ -42,3 +42,18 @@ export function intersectionRatio(a: { positionX: number; positionY: number; wid
   const height = Math.max(0, Math.min(a.positionY + a.height, b.positionY + b.height) - Math.max(a.positionY, b.positionY))
   return (width * height) / Math.max(1, Math.min(a.width * a.height, b.width * b.height))
 }
+
+export function positionFloatingPanel(
+  pointer: Point,
+  bounds: { width: number; height: number },
+  panel: { width: number; height: number },
+  offset = 10,
+  padding = 8,
+): Point {
+  const preferredX = pointer.x + offset + panel.width <= bounds.width - padding ? pointer.x + offset : pointer.x - panel.width - offset
+  const preferredY = pointer.y + offset + panel.height <= bounds.height - padding ? pointer.y + offset : pointer.y - panel.height - offset
+  return {
+    x: Math.max(padding, Math.min(bounds.width - panel.width - padding, preferredX)),
+    y: Math.max(padding, Math.min(bounds.height - panel.height - padding, preferredY)),
+  }
+}
