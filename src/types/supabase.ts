@@ -25,6 +25,7 @@ export type DeviceAssignmentRow = {
 export type VenueRow = {
   id: string
   name: string
+  default_tax_rate: number
 }
 
 export type DeviceRow = {
@@ -98,6 +99,7 @@ export type ProductRow = {
   can_use_as_mixer?: boolean | null
   is_featured?: boolean | null
   mixer_supplement_cents?: number | null
+  tax_rate: number | null
   is_active: boolean
   sort_order: number
   product_variants: VariantRow[] | null

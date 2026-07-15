@@ -3,6 +3,7 @@ import type { ParsedCatalogTransfer } from '../lib/catalogTransfer'
 import { normalizeText } from '../lib/format'
 import { PRODUCT_IMAGE_BUCKET, resizeProductImageToWebp } from '../lib/productImages'
 import type { RevoImportProduct } from '../lib/revoImport'
+import { isValidTaxRate } from '../lib/tax'
 import type {
   CatalogKind,
   CategoryCreateInput,
@@ -39,6 +40,9 @@ type TicketWithLinesStatsRow = {
 type SalesReportLineRow = {
   id: string
   line_total_cents: number
+  tax_amount_cents: number | null
+  tax_rate: number | null
+  taxable_base_cents: number | null
   modifiers: Array<{
     name?: string
     priceCents?: number
@@ -170,7 +174,7 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
     await Promise.all([
       client
         .from('venues')
-        .select('id, name, sort_order, is_active, tables_enabled')
+        .select('id, name, sort_order, is_active, tables_enabled, default_tax_rate')
         .eq('tenant_id', context.tenantId)
         .order('sort_order'),
       client
@@ -199,6 +203,7 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
       sortOrder: venue.sort_order as number,
       isActive: venue.is_active as boolean,
       tablesEnabled: venue.tables_enabled as boolean,
+      defaultTaxRate: Number(venue.default_tax_rate),
     })),
     devices: (deviceRows ?? []).map((device) => ({
       id: device.id as string,
@@ -216,7 +221,7 @@ export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]>
   const client = requireSupabase()
   const { data, error } = await client
     .from('venues')
-    .select('id, name, sort_order, is_active, tables_enabled')
+    .select('id, name, sort_order, is_active, tables_enabled, default_tax_rate')
     .eq('tenant_id', context.tenantId)
     .order('sort_order')
 
@@ -230,6 +235,7 @@ export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]>
     sortOrder: venue.sort_order as number,
     isActive: venue.is_active as boolean,
     tablesEnabled: venue.tables_enabled as boolean,
+    defaultTaxRate: Number(venue.default_tax_rate),
   }))
 }
 
@@ -241,6 +247,26 @@ export async function createCrmVenue(context: TenantContext, name: string) {
     sort_order: 0,
     is_active: true,
   })
+
+  if (error) {
+    throw error
+  }
+}
+
+export async function updateCrmVenueDefaultTaxRate(
+  context: TenantContext,
+  venueId: string,
+  defaultTaxRate: number,
+) {
+  if (!isValidTaxRate(defaultTaxRate)) {
+    throw new Error('El tipo de IVA debe estar entre 0 y 100.')
+  }
+
+  const { error } = await requireSupabase()
+    .from('venues')
+    .update({ default_tax_rate: defaultTaxRate })
+    .eq('tenant_id', context.tenantId)
+    .eq('id', venueId)
 
   if (error) {
     throw error
@@ -557,6 +583,7 @@ export async function createProductWithVariant(context: TenantContext, input: Pr
       can_use_as_mixer: input.canUseAsMixer,
       is_featured: input.isFeatured,
       mixer_supplement_cents: input.canUseAsMixer ? input.mixerSupplementCents : 0,
+      tax_rate: input.taxRate,
       is_active: true,
       sort_order: 0,
     })
@@ -599,6 +626,7 @@ export async function updateProduct(
     canSellStandalone?: boolean
     canUseAsMixer?: boolean
     mixerSupplementCents?: number
+    taxRate?: number | null
   },
 ) {
   const client = requireSupabase()
@@ -616,6 +644,7 @@ export async function updateProduct(
       ...(input.canSellStandalone !== undefined ? { can_sell_standalone: input.canSellStandalone } : {}),
       ...(input.canUseAsMixer !== undefined ? { can_use_as_mixer: input.canUseAsMixer } : {}),
       ...(input.mixerSupplementCents !== undefined ? { mixer_supplement_cents: input.mixerSupplementCents } : {}),
+      ...(input.taxRate !== undefined ? { tax_rate: input.taxRate } : {}),
     })
     .eq('tenant_id', context.tenantId)
     .eq('id', productId)
@@ -899,6 +928,7 @@ export async function importCatalogBackup(
       can_use_as_mixer: product.canUseAsMixer,
       is_featured: product.isFeatured,
       mixer_supplement_cents: product.canUseAsMixer ? product.mixerSupplementCents : 0,
+      tax_rate: product.taxRate,
       is_active: product.isActive,
       sort_order: product.sortOrder,
     }
@@ -1349,7 +1379,10 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
             quantity,
             unit_price_cents,
             modifiers,
-            line_total_cents
+            line_total_cents,
+            tax_rate,
+            taxable_base_cents,
+            tax_amount_cents
           ),
           sales (
             payment_method
@@ -1440,6 +1473,16 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
           quantity: line.quantity,
           unitPriceCents: line.unit_price_cents,
           variantName: line.variant_name,
+          fiscalSnapshot: line.tax_rate === null
+            || line.taxable_base_cents === null
+            || line.tax_amount_cents === null
+            ? null
+            : {
+                taxRate: Number(line.tax_rate),
+                taxableBaseCents: line.taxable_base_cents,
+                taxAmountCents: line.tax_amount_cents,
+                grossTotalCents: line.line_total_cents,
+              },
         }
       }),
       paymentMethod: ticket.sales?.[0]?.payment_method ?? null,

@@ -1,5 +1,6 @@
-import { Check, CheckCheck, Minus, Plus, Trash2 } from 'lucide-react'
+import { Check, CheckCheck, Minus, Pencil, Plus, Trash2 } from 'lucide-react'
 import { formatMoney } from '../../../lib/format'
+import { getLineAdditionNames } from '../../../lib/mixers'
 import { Button } from '../../../components/ui'
 import { canDecreaseLineQuantity, getOrderPendingUnits, getPendingQuantity, isLineRemovable } from '../service-status'
 import type { RestaurantOrderDetail, RestaurantOrderLine } from '../types'
@@ -8,6 +9,7 @@ type Props = {
   isBusy: boolean
   order: RestaurantOrderDetail
   onDecrement: (lineId: string) => void
+  onEdit: (line: RestaurantOrderLine) => void
   onIncrement: (lineId: string) => void
   onRemove: (lineId: string) => void
   onServeAll: (lineId: string) => void
@@ -15,21 +17,23 @@ type Props = {
   onServeOne: (lineId: string) => void
 }
 
-function OrderLineRow({ isBusy, line, onDecrement, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder'> & { line: RestaurantOrderLine }) {
+function OrderLineRow({ isBusy, line, onDecrement, onEdit, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder'> & { line: RestaurantOrderLine }) {
   const pending = getPendingQuantity(line)
   const removable = isLineRemovable(line)
+  const additionNames = getLineAdditionNames(line.modifiers, line.mixer)
   return (
     <article className={`rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 ${pending === 0 ? 'opacity-65' : ''}`}>
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <p className="truncate font-bold">{line.quantity}x - {line.productName}</p>
-          {line.modifiers.length ? <p className="text-sm text-[var(--muted)]">+ {line.modifiers.map((modifier) => modifier.name).join(', ')}</p> : null}
+          {additionNames.length ? <p className="text-sm text-[var(--muted)]">+ {additionNames.join(', ')}</p> : null}
           <p className="mt-1 text-sm font-semibold text-[var(--muted)]">
             {pending === 0 ? 'Todo servido' : `${line.servedQuantity} servidas - ${pending} ${pending === 1 ? 'pendiente' : 'pendientes'}`}
           </p>
           <p className="mt-1 font-mono text-sm">{formatMoney(line.unitPriceCents * line.quantity)}</p>
         </div>
         <div className="flex items-center gap-1">
+          <Button aria-label="Editar linea" disabled={isBusy || line.servedQuantity > 0} onClick={() => onEdit(line)} size="sm" title="Editar producto, modificadores o mixer" type="button" variant="tertiary"><Pencil className="h-4 w-4" /></Button>
           <Button aria-label="Reducir cantidad" disabled={isBusy || !canDecreaseLineQuantity(line)} onClick={() => onDecrement(line.id)} size="sm" type="button" variant="tertiary"><Minus className="h-4 w-4" /></Button>
           <span className="w-7 text-center font-mono font-bold">{line.quantity}</span>
           <Button aria-label="Aumentar cantidad" disabled={isBusy} onClick={() => onIncrement(line.id)} size="sm" type="button" variant="tertiary"><Plus className="h-4 w-4" /></Button>

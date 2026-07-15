@@ -49,6 +49,12 @@ import { exportCatalogZip, parseCatalogZip, type ParsedCatalogTransfer } from '.
 import { getDefaultProductImageFillColor } from '../../lib/productImages'
 import { parseRevoItemsCsv, type RevoImportParseResult } from '../../lib/revoImport'
 import {
+  calculateGrossFromNet,
+  calculateTaxFromGross,
+  COMMON_TAX_RATES,
+  resolveEffectiveTaxRate,
+} from '../../lib/tax'
+import {
   createCategory,
   createCrmDevice,
   createCrmPosUser,
@@ -72,6 +78,7 @@ import {
   setCrmPosUserActive,
   subscribeToCrmStatsChanges,
   updateCategory,
+  updateCrmVenueDefaultTaxRate,
   updateCrmPosUser,
   updateProduct,
   updateSaleFormat,
@@ -325,21 +332,23 @@ export function CrmPage({
     }
   }, [onError])
 
+  const refreshVenues = useCallback(async () => {
+    const nextVenues = await loadCrmVenues(context)
+    setVenues(nextVenues)
+    setSelectedVenueId((current) =>
+      nextVenues.some((venue) => venue.id === current && venue.isActive)
+        ? current
+        : (nextVenues.find((venue) => venue.isActive)?.id ?? ''),
+    )
+  }, [context])
+
   useEffect(() => {
     if (!isOnline) {
       return
     }
 
-    void runAction(async () => {
-      const nextVenues = await loadCrmVenues(context)
-      setVenues(nextVenues)
-      setSelectedVenueId((current) =>
-        nextVenues.some((venue) => venue.id === current && venue.isActive)
-          ? current
-          : (nextVenues.find((venue) => venue.isActive)?.id ?? ''),
-      )
-    })
-  }, [context, isOnline, runAction])
+    void runAction(refreshVenues)
+  }, [isOnline, refreshVenues, runAction])
 
   const refreshStats = useCallback(async (options: { silent?: boolean } = {}) => {
     const loadStats = async () => {
@@ -537,6 +546,7 @@ export function CrmPage({
 
           {activeSection === 'products' ? (
             <ProductsCrm
+              defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21}
               categories={categories}
               disabled={!isOnline || isBusy}
               onCatalogChanged={onCatalogChanged}
@@ -551,6 +561,7 @@ export function CrmPage({
           {activeSection === 'access' ? (
             <AccessManagementCrm
               disabled={!isOnline || isBusy}
+              onVenuesChanged={refreshVenues}
               runAction={runAction}
               tenantContext={context}
             />
@@ -652,11 +663,17 @@ type RunAction = (action: () => Promise<void>) => Promise<void>
 
 type AccessManagementCrmProps = {
   disabled: boolean
+  onVenuesChanged: () => Promise<void>
   runAction: RunAction
   tenantContext: TenantContext
 }
 
-function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManagementCrmProps) {
+function AccessManagementCrm({
+  disabled,
+  onVenuesChanged,
+  runAction,
+  tenantContext,
+}: AccessManagementCrmProps) {
   const [data, setData] = useState<CrmAccessData>({ devices: [], users: [], venues: [] })
   const [venueName, setVenueName] = useState('')
   const [deviceName, setDeviceName] = useState('')
@@ -699,7 +716,21 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
     await runAction(async () => {
       await createCrmVenue(tenantContext, venueName)
       setVenueName('')
-      await refresh()
+      await Promise.all([refresh(), onVenuesChanged()])
+    })
+  }
+
+  async function submitVenueTax(event: FormEvent<HTMLFormElement>, venue: CrmVenue) {
+    event.preventDefault()
+    const defaultTaxRate = Number(new FormData(event.currentTarget).get('defaultTaxRate'))
+
+    await runAction(async () => {
+      await updateCrmVenueDefaultTaxRate(tenantContext, venue.id, defaultTaxRate)
+      await Promise.all([refresh(), onVenuesChanged()])
+      sileo.success({
+        description: `Los productos que heredan IVA en ${venue.name} usaran el ${defaultTaxRate} % en futuras ventas.`,
+        title: 'IVA por defecto actualizado',
+      })
     })
   }
 
@@ -814,6 +845,31 @@ function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManag
               <Plus className="h-4 w-4" /> Crear local
             </button>
           </form>
+        </section>
+
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Configuracion de locales</span><Building2 className="h-4 w-4" /></div>
+          <div className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]">
+            {data.venues.map((venue) => (
+              <form className="!grid !gap-2 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)] !p-3.5" key={venue.id} onSubmit={(event) => void submitVenueTax(event, venue)}>
+                <strong className="!text-[13px] !text-[var(--crm-text)]">{venue.name}</strong>
+                <Field label="IVA por defecto">
+                  <select
+                    className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
+                    defaultValue={String(venue.defaultTaxRate)}
+                    disabled={disabled}
+                    name="defaultTaxRate"
+                  >
+                    {COMMON_TAX_RATES.map((rate) => <option key={rate} value={rate}>{rate} %</option>)}
+                  </select>
+                </Field>
+                <p className="crm-form-help">Se aplicara a los productos que no tengan un IVA especifico.</p>
+                <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled} type="submit">
+                  <Save className="h-4 w-4" /> Guardar IVA
+                </button>
+              </form>
+            ))}
+          </div>
         </section>
 
         <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
@@ -1500,6 +1556,7 @@ function RevoImportCrm({
 }
 
 type ProductsCrmProps = {
+  defaultTaxRate: number
   categories: Category[]
   disabled: boolean
   onCatalogChanged: () => Promise<void>
@@ -1520,6 +1577,7 @@ type ProductEditorState =
     }
 
 function ProductsCrm({
+  defaultTaxRate,
   categories,
   disabled,
   onCatalogChanged,
@@ -1614,7 +1672,7 @@ function ProductsCrm({
             <span>Producto</span>
             <span>Formatos</span>
             <span>Categoria / Tipo</span>
-            <span>Precio base</span>
+            <span>Precio final</span>
             <span>Uso</span>
             <span>Acciones</span>
           </div>
@@ -1641,6 +1699,7 @@ function ProductsCrm({
       {editor && (editor.mode === 'create' || selectedProduct) ? (
         <ProductFormPanel
           categories={categories}
+          defaultTaxRate={defaultTaxRate}
           disabled={disabled}
           key={editor.mode === 'edit' ? editor.productId : 'create'}
           mode={editor.mode}
@@ -1725,8 +1784,11 @@ function ProductListRow({
   )
 }
 
+type PriceInputMode = 'gross' | 'net'
+
 type ProductFormPanelProps = {
   categories: Category[]
+  defaultTaxRate: number
   disabled: boolean
   mode: 'create' | 'edit'
   onCatalogChanged: () => Promise<void>
@@ -1765,6 +1827,7 @@ function assignProductVariantsToSaleFormats(product: Product, formats: SaleForma
 
 function ProductFormPanel({
   categories,
+  defaultTaxRate,
   disabled,
   mode,
   onCatalogChanged,
@@ -1784,16 +1847,27 @@ function ProductFormPanel({
   const initialVariantByFormat = product
     ? assignProductVariantsToSaleFormats(product, initialSaleFormats)
     : new Map<SaleFormat, ProductVariant>()
+  const initialProductTaxRate = product?.taxRate ?? null
+  const initialEffectiveTaxRate = resolveEffectiveTaxRate(initialProductTaxRate, defaultTaxRate)
+  const initialGrossPrices = Object.fromEntries(
+    saleFormats.map((format) => [
+      format.key,
+      centsToInput(initialVariantByFormat.get(format.key)?.priceCents ?? primaryVariant?.priceCents ?? 0),
+    ]),
+  ) as Record<SaleFormat, string>
   const [name, setName] = useState(product?.name ?? '')
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? firstCategory?.id ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
   const [kind, setKind] = useState<CatalogKind>(initialKind)
   const [selectedSaleFormats, setSelectedSaleFormats] = useState<SaleFormat[]>(initialSaleFormats)
-  const [saleFormatPrices, setSaleFormatPrices] = useState<Record<SaleFormat, string>>(() => Object.fromEntries(
-    saleFormats.map((format) => [
-      format.key,
-      centsToInput(initialVariantByFormat.get(format.key)?.priceCents ?? primaryVariant?.priceCents ?? 0),
-    ]),
+  const [taxRateInput, setTaxRateInput] = useState(initialProductTaxRate === null ? 'inherit' : String(initialProductTaxRate))
+  const [priceInputMode, setPriceInputMode] = useState<PriceInputMode>('gross')
+  const [saleFormatPrices, setSaleFormatPrices] = useState<Record<SaleFormat, string>>(initialGrossPrices)
+  const [saleFormatNetPrices, setSaleFormatNetPrices] = useState<Record<SaleFormat, string>>(() => Object.fromEntries(
+    saleFormats.map((format) => {
+      const grossCents = parseMoneyToCents(initialGrossPrices[format.key] ?? '')
+      return [format.key, centsToInput(calculateTaxFromGross(grossCents, initialEffectiveTaxRate).taxableBaseCents)]
+    }),
   ))
   const [isFeatured, setIsFeatured] = useState(product?.isFeatured ?? false)
   const [canSellStandalone, setCanSellStandalone] = useState(product ? canSellProductStandalone(product) : true)
@@ -1807,6 +1881,8 @@ function ProductFormPanel({
   const [imageError, setImageError] = useState<string | null>(null)
   const [shouldRemoveImage, setShouldRemoveImage] = useState(false)
   const selectedCategory = categories.find((category) => category.id === categoryId)
+  const selectedTaxRate = taxRateInput === 'inherit' ? null : Number(taxRateInput)
+  const effectiveTaxRate = resolveEffectiveTaxRate(selectedTaxRate, defaultTaxRate)
 
   useEffect(() => {
     if (!categoryId && firstCategory) {
@@ -1841,8 +1917,44 @@ function ProductFormPanel({
     )
   }
 
+  function handleTaxRateChange(nextTaxRateInput: string) {
+    const nextProductTaxRate = nextTaxRateInput === 'inherit' ? null : Number(nextTaxRateInput)
+    const nextEffectiveTaxRate = resolveEffectiveTaxRate(nextProductTaxRate, defaultTaxRate)
+    setTaxRateInput(nextTaxRateInput)
+
+    if (priceInputMode === 'gross') {
+      setSaleFormatNetPrices(Object.fromEntries(saleFormats.map((format) => {
+        const grossCents = parseMoneyToCents(saleFormatPrices[format.key] ?? '')
+        return [format.key, centsToInput(calculateTaxFromGross(grossCents, nextEffectiveTaxRate).taxableBaseCents)]
+      })))
+      return
+    }
+
+    setSaleFormatPrices(Object.fromEntries(saleFormats.map((format) => {
+      const netCents = parseMoneyToCents(saleFormatNetPrices[format.key] ?? '')
+      return [format.key, centsToInput(calculateGrossFromNet(netCents, nextEffectiveTaxRate).grossTotalCents)]
+    })))
+  }
+
   function updateSaleFormatPrice(format: SaleFormat, nextPrice: string) {
-    setSaleFormatPrices((current) => ({ ...current, [format]: nextPrice }))
+    if (priceInputMode === 'gross') {
+      setSaleFormatPrices((current) => ({ ...current, [format]: nextPrice }))
+      setSaleFormatNetPrices((current) => ({
+        ...current,
+        [format]: centsToInput(calculateTaxFromGross(parseMoneyToCents(nextPrice), effectiveTaxRate).taxableBaseCents),
+      }))
+      return
+    }
+
+    setSaleFormatNetPrices((current) => ({ ...current, [format]: nextPrice }))
+    setSaleFormatPrices((current) => ({
+      ...current,
+      [format]: centsToInput(calculateGrossFromNet(parseMoneyToCents(nextPrice), effectiveTaxRate).grossTotalCents),
+    }))
+  }
+
+  function getSaleFormatTaxBreakdown(format: SaleFormat) {
+    return calculateTaxFromGross(parseMoneyToCents(saleFormatPrices[format] ?? ''), effectiveTaxRate)
   }
 
   function handleCanUseAsMixerChange(nextCanUseAsMixer: boolean) {
@@ -1891,7 +2003,8 @@ function ProductFormPanel({
       return
     }
 
-    if (!selectedSaleFormats.length || selectedSaleFormats.some((format) => !saleFormatPrices[format]?.trim())) {
+    const activePriceInputs = priceInputMode === 'gross' ? saleFormatPrices : saleFormatNetPrices
+    if (!selectedSaleFormats.length || selectedSaleFormats.some((format) => !activePriceInputs[format]?.trim())) {
       sileo.error({
         description: 'Selecciona al menos un formato e introduce su precio.',
         title: 'Faltan precios de venta',
@@ -1933,6 +2046,7 @@ function ProductFormPanel({
             mixerSupplementCents,
             name: name.trim(),
             saleFormats: selectedSaleFormats,
+            taxRate: selectedTaxRate,
           })
 
           const assignedVariants = assignProductVariantsToSaleFormats(product, selectedSaleFormats)
@@ -1971,6 +2085,7 @@ function ProductFormPanel({
             mixerSupplementCents,
             name: name.trim(),
             saleFormats: selectedSaleFormats,
+            taxRate: selectedTaxRate,
             variants: formatVariants.map(({ name: variantLabel, priceCents }) => ({
               name: variantLabel,
               priceCents,
@@ -2098,12 +2213,42 @@ function ProductFormPanel({
           {imageError ? <div className="crm-field-error">{imageError}</div> : null}
         </div>
         <div>
-          <span className="crm-field-label !mb-1.5 !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">Formatos de venta</span>
+          <Field label="IVA aplicado">
+            <select
+              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
+              onChange={(event) => handleTaxRateChange(event.target.value)}
+              value={taxRateInput}
+            >
+              <option value="inherit">Usar IVA por defecto del local</option>
+              {COMMON_TAX_RATES.map((rate) => <option key={rate} value={rate}>{rate} %</option>)}
+            </select>
+          </Field>
+          {selectedTaxRate === null ? (
+            <p className="crm-form-help">Se aplicara el IVA por defecto del local: {defaultTaxRate} %.</p>
+          ) : null}
+        </div>
+        <div>
+          <div className="!mb-1.5 !flex !items-center !justify-between !gap-3">
+            <span className="crm-field-label !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">
+              {priceInputMode === 'gross' ? 'Formatos y precio final' : 'Formatos y base imponible'}
+            </span>
+            <button
+              className="!border-0 !bg-transparent !p-0 !text-xs !font-semibold !text-[var(--crm-blue)]"
+              onClick={() => setPriceInputMode((current) => current === 'gross' ? 'net' : 'gross')}
+              type="button"
+            >
+              {priceInputMode === 'gross' ? 'Editar base imponible' : 'Volver a precio final'}
+            </button>
+          </div>
+          {priceInputMode === 'net' ? (
+            <p className="crm-form-help !mb-2">Estas editando la base; el precio final se recalcula con el IVA efectivo.</p>
+          ) : null}
           <div className="!grid !gap-2">
             {saleFormats.map((option) => {
               const isSelected = selectedSaleFormats.includes(option.key)
+              const breakdown = getSaleFormatTaxBreakdown(option.key)
               return (
-                <div className="!grid !min-h-[58px] !grid-cols-[minmax(0,1fr)_120px] !items-center !gap-3 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)] !px-3.5 !py-2" key={option.key}>
+                <div className="!grid !min-h-[58px] !grid-cols-[minmax(0,1fr)_120px] !items-center !gap-x-3 !gap-y-1 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)] !px-3.5 !py-2" key={option.key}>
                   <label className="!flex !min-w-0 !cursor-pointer !items-center !gap-2.5 !text-[13px] !font-semibold !text-[var(--crm-text)]">
                     <input
                       checked={isSelected}
@@ -2115,19 +2260,25 @@ function ProductFormPanel({
                   </label>
                   {isSelected ? (
                     <label className="!relative !block">
-                      <span className="sr-only">Precio de {option.label}</span>
+                      <span className="sr-only">{priceInputMode === 'gross' ? 'Precio final' : 'Base imponible'} de {option.label}</span>
                       <input
-                        className="crm-input !h-10 !w-full !rounded-[9px] !border !border-transparent !bg-[var(--crm-input-bg)] !pr-8 !pl-3 !text-right !font-mono !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+                        className="crm-input !h-10 !w-full !rounded-[9px] !border !border-transparent !bg-[var(--crm-input-bg)] !pr-10 !pl-3 !text-right !font-mono !text-[13px] !font-semibold !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
                         inputMode="decimal"
                         onChange={(event) => updateSaleFormatPrice(option.key, event.target.value)}
                         placeholder="0,00"
-                        value={saleFormatPrices[option.key] ?? ''}
+                        value={(priceInputMode === 'gross' ? saleFormatPrices : saleFormatNetPrices)[option.key] ?? ''}
                       />
-                      <span className="!pointer-events-none !absolute !top-1/2 !right-3 !-translate-y-1/2 !text-xs !font-semibold !text-[var(--crm-text-muted)]">€</span>
+                      <span className="!pointer-events-none !absolute !top-1/2 !right-3 !-translate-y-1/2 !text-[10px] !font-semibold !text-[var(--crm-text-muted)]">EUR</span>
                     </label>
                   ) : (
                     <span className="!pr-3 !text-right !text-xs !font-medium !text-[var(--crm-text-muted)]">Sin precio</span>
                   )}
+                  {isSelected ? (
+                    <small className="!col-span-2 !text-[11px] !font-medium !text-[var(--crm-text-muted)]">
+                      {priceInputMode === 'net' ? `Precio final: ${formatMoney(breakdown.grossTotalCents)} · ` : ''}
+                      Base imponible: {formatMoney(breakdown.taxableBaseCents)} · IVA {effectiveTaxRate} %: {formatMoney(breakdown.taxAmountCents)}
+                    </small>
+                  ) : null}
                 </div>
               )
             })}

@@ -6,15 +6,18 @@ import {
   getProductVariantForSaleFormat,
 } from '../../lib/catalog'
 import { formatMoney } from '../../lib/format'
-import type { Catalog, ModifierGroup, Product, ProductVariant, SaleFormat, TicketLineModifier } from '../../types'
+import { mixerFromProduct } from '../../lib/mixers'
+import type { Catalog, ModifierGroup, Product, ProductLineSelection, ProductVariant, SaleFormat, TicketLineModifier } from '../../types'
 import { cx } from '../../utils/cx'
 import { Button } from '../ui'
 
 type ProductDialogProps = {
   allowFormatSelection: boolean
   catalog: Catalog | null
+  initialSelection?: ProductLineSelection
+  initialVariantId?: string
   isBusy: boolean
-  onAdd: (product: Product, variant: ProductVariant, modifiers: TicketLineModifier[]) => void
+  onAdd: (product: Product, variant: ProductVariant, selection: ProductLineSelection) => void
   onCancel: () => void
   product: Product
   saleFormat: SaleFormat
@@ -24,28 +27,15 @@ function compareProductNames(a: Product, b: Product) {
   return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }) || a.sortOrder - b.sortOrder
 }
 
-function getMixerSupplementCents(mixer: Product) {
-  return mixer.canUseAsMixer ? (mixer.mixerSupplementCents ?? 0) : 0
-}
-
-function getModifierListWithMixer(
+function getProductLineSelection(
   explicitModifierList: TicketLineModifier[],
   saleFormat: SaleFormat,
   mixer: Product | null,
-): TicketLineModifier[] {
+): ProductLineSelection {
   if (saleFormat !== 'cubata' || !mixer) {
-    return explicitModifierList
+    return { modifiers: explicitModifierList, mixerProductId: null, mixer: null }
   }
-
-  return [
-    ...explicitModifierList,
-    {
-      groupId: 'mixer',
-      id: `mixer:${mixer.id}`,
-      name: mixer.name,
-      priceCents: getMixerSupplementCents(mixer),
-    },
-  ]
+  return { modifiers: explicitModifierList, mixerProductId: mixer.id, mixer: mixerFromProduct(mixer) }
 }
 
 function getSaleFormatForVariant(product: Product, variant: ProductVariant, fallbackSaleFormat: SaleFormat) {
@@ -59,6 +49,8 @@ function getSaleFormatForVariant(product: Product, variant: ProductVariant, fall
 export function ProductDialog({
   allowFormatSelection,
   catalog,
+  initialSelection,
+  initialVariantId,
   isBusy,
   onAdd,
   onCancel,
@@ -66,11 +58,16 @@ export function ProductDialog({
   saleFormat,
 }: ProductDialogProps) {
   const defaultVariant = getProductVariantForSaleFormat(product, saleFormat)
-  const startsWithFormatSelection = allowFormatSelection && product.variants.length > 1
+  const startsWithFormatSelection = !initialSelection && allowFormatSelection && product.variants.length > 1
   const [selectedSaleFormat, setSelectedSaleFormat] = useState(saleFormat)
-  const [selectedVariantId, setSelectedVariantId] = useState(startsWithFormatSelection ? '' : defaultVariant?.id ?? '')
-  const [selectedMixerId, setSelectedMixerId] = useState('')
-  const [selectedModifiers, setSelectedModifiers] = useState<Record<string, string[]>>({})
+  const [selectedVariantId, setSelectedVariantId] = useState(startsWithFormatSelection ? '' : initialVariantId ?? defaultVariant?.id ?? '')
+  const [selectedMixerId, setSelectedMixerId] = useState(initialSelection?.mixerProductId ?? '')
+  const [selectedModifiers, setSelectedModifiers] = useState<Record<string, string[]>>(() =>
+    Object.fromEntries(product.modifierGroups.map((group) => [
+      group.id,
+      initialSelection?.modifiers.filter((modifier) => modifier.groupId === group.id).map((modifier) => modifier.id) ?? [],
+    ])),
+  )
   const [hasChosenFormat, setHasChosenFormat] = useState(!startsWithFormatSelection)
   const [hasSubmitted, setHasSubmitted] = useState(false)
   const submittedRef = useRef(false)
@@ -118,18 +115,23 @@ export function ProductDialog({
       return
     }
 
-    if (submitSaleFormat === 'cubata' && !mixer) {
+    if (submitSaleFormat === 'cubata' && !mixer && !initialSelection) {
       return
     }
 
     submittedRef.current = true
     setHasSubmitted(true)
-    onAdd(product, variant, getModifierListWithMixer(explicitModifierList, submitSaleFormat, mixer))
+    onAdd(product, variant, getProductLineSelection(explicitModifierList, submitSaleFormat, mixer))
   }
 
   function handleMixerSelect(mixer: Product) {
     setSelectedMixerId(mixer.id)
-    submitSelection(selectedVariant, selectedSaleFormat, mixer)
+    if (!product.modifierGroups.length && !initialSelection) submitSelection(selectedVariant, selectedSaleFormat, mixer)
+  }
+
+  function handleNoMixer() {
+    setSelectedMixerId('')
+    if (!product.modifierGroups.length) submitSelection(selectedVariant, selectedSaleFormat, null)
   }
 
   function toggleModifier(group: ModifierGroup, modifierId: string) {
@@ -209,6 +211,15 @@ export function ProductDialog({
           <div className="mt-5">
             {mixerProducts.length ? (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                {initialSelection ? <Button
+                  active={!selectedMixerId}
+                  disabled={isBusy || hasSubmitted}
+                  fullWidth
+                  onClick={handleNoMixer}
+                  type="button"
+                  variant="tertiary"
+                  className="h-28"
+                >Sin mixer</Button> : null}
                 {mixerProducts.map((mixer) => (
                   <Button
                     active={mixer.id === selectedMixerId}
@@ -275,6 +286,19 @@ export function ProductDialog({
                 </div>
               </div>
             ))}
+          </div>
+        ) : null}
+
+        {!isChoosingFormat && (product.modifierGroups.length > 0 || initialSelection) ? (
+          <div className="mt-5">
+            <Button
+              disabled={isBusy || hasSubmitted || !selectedVariant || !isModifierValid || (selectedSaleFormat === 'cubata' && !selectedMixer && !initialSelection)}
+              fullWidth
+              onClick={() => submitSelection()}
+              size="lg"
+              type="button"
+              variant="primary"
+            >{initialSelection ? 'Guardar cambios' : 'Anadir producto'}</Button>
           </div>
         ) : null}
 

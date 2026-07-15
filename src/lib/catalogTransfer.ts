@@ -7,6 +7,7 @@ import type {
   ProductVariant,
   SaleFormatDefinition,
 } from '../types'
+import { isValidTaxRate } from './tax'
 
 const CATALOG_FORMAT = 'club-pos-catalog'
 const CATALOG_VERSION = 1
@@ -147,6 +148,7 @@ function toTransferProduct(product: Product, imageFile: string | null): CatalogT
     canUseAsMixer: product.canUseAsMixer,
     isFeatured: product.isFeatured,
     mixerSupplementCents: product.mixerSupplementCents,
+    taxRate: product.taxRate,
     isActive: product.isActive,
     sortOrder: product.sortOrder,
     variants: product.variants.map(({ productId: _productId, ...variant }) => variant),
@@ -235,6 +237,18 @@ function readInteger(value: unknown, label: string, minimum = 0) {
     throw new Error(`El campo ${label} no es valido.`)
   }
   return value as number
+}
+
+function readTaxRate(value: unknown, label: string) {
+  if (value === null || value === undefined) {
+    return null
+  }
+
+  if (typeof value !== 'number' || !isValidTaxRate(value)) {
+    throw new Error(`El campo ${label} no es valido.`)
+  }
+
+  return value
 }
 
 function readKind(value: unknown, label: string) {
@@ -351,6 +365,7 @@ function parseManifest(value: unknown): CatalogTransferManifest {
       canUseAsMixer: readBoolean(product.canUseAsMixer, `${prefix}.canUseAsMixer`),
       isFeatured: readBoolean(product.isFeatured, `${prefix}.isFeatured`),
       mixerSupplementCents: readInteger(product.mixerSupplementCents, `${prefix}.mixerSupplementCents`),
+      taxRate: readTaxRate(product.taxRate, `${prefix}.taxRate`),
       isActive: readBoolean(product.isActive, `${prefix}.isActive`),
       sortOrder: readInteger(product.sortOrder, `${prefix}.sortOrder`),
       variants: readArray(product.variants, `${prefix}.variants`).map((variant, variantIndex) =>

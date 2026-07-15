@@ -52,11 +52,11 @@ export function getTicketTotal(lines: TicketLine[]) {
   return lines.reduce((total, line) => total + getLineTotal(line), 0)
 }
 
-export function getLineSignature(line: Pick<TicketLine, 'productId' | 'variantId' | 'modifiers'>) {
+export function getLineSignature(line: Pick<TicketLine, 'productId' | 'variantId' | 'modifiers'> & Pick<Partial<TicketLine>, 'mixerProductId'>) {
   const modifierIds = line.modifiers
     .map((modifier) => modifier.id)
     .sort()
     .join('|')
 
-  return `${line.productId}:${line.variantId}:${modifierIds}`
+  return `${line.productId}:${line.variantId}:${modifierIds}:${line.mixerProductId ?? ''}`
 }

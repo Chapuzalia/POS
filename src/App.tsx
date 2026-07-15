@@ -9,6 +9,7 @@ import { LoadingScreen, MissingConfigScreen } from './components/screens/StateSc
 import themesData from './config/themes.json'
 import { createId, getLineSignature, getTicketTotal } from './lib/format'
 import { getProductVariantForSaleFormat } from './lib/catalog'
+import { toQuickSaleModifiers } from './lib/mixers'
 import {
   clearSaleLedger,
   clearSessionTickets,
@@ -60,6 +61,7 @@ import type {
   LoginInput,
   PaymentMethod,
   Product,
+  ProductLineSelection,
   ProductSalesStat,
   ProductVariant,
   SaleRecord,
@@ -68,7 +70,6 @@ import type {
   TenantContext,
   ThemeDefinition,
   TicketLine,
-  TicketLineModifier,
 } from './types'
 import { nowIso } from './utils/dates'
 import { getReadableError } from './utils/errors'
@@ -99,6 +100,9 @@ import { closeCashRegisterSession, loadCashRegisterOptions, openCashRegisterSess
 
 type ProductDialogState = {
   allowFormatSelection: boolean
+  initialSelection?: ProductLineSelection
+  initialVariantId?: string
+  lineId?: string
   product: Product
   saleFormat: SaleFormat
 }
@@ -1250,18 +1254,39 @@ function App() {
     setCloseCashOpen(true)
   }
 
-  function addTicketLine(product: Product, variant: ProductVariant, modifiers: TicketLineModifier[]) {
+  function addTicketLine(product: Product, variant: ProductVariant, selection: ProductLineSelection) {
+    const { modifiers, mixerProductId, mixer } = selection
     if (posView.type === 'table_order') {
       if (!isOnline) { setError('La gestion de mesas requiere conexion.'); return }
       const current = restaurantOrderRef.current
       if (!current || !context) return
-      const signature = getLineSignature({ productId: product.id, variantId: variant.id, modifiers })
+      const additionsTotal = modifiers.reduce((total, modifier) => total + modifier.priceCents, 0) + (mixer?.priceCents ?? 0)
+      if (productDialog?.lineId) {
+        const timestamp = nowIso()
+        updateRestaurantDraft((detail) => ({
+          ...detail,
+          lines: detail.lines.map((line) => line.id === productDialog.lineId ? {
+            ...line,
+            productId: product.id,
+            variantId: variant.id,
+            productName: product.name,
+            variantName: variant.name,
+            unitPriceCents: variant.priceCents + additionsTotal,
+            modifiers,
+            mixerProductId,
+            mixer,
+            updatedAt: timestamp,
+          } : line),
+        }))
+        setProductDialog(null)
+        return
+      }
+      const signature = getLineSignature({ productId: product.id, variantId: variant.id, modifiers, mixerProductId })
       const existing = current.lines.find((line) =>
         line.productId !== null
         && line.note === null
-        && getLineSignature({ productId: line.productId, variantId: line.variantId ?? '', modifiers: line.modifiers }) === signature
+        && getLineSignature({ productId: line.productId, variantId: line.variantId ?? '', modifiers: line.modifiers, mixerProductId: line.mixerProductId }) === signature
       )
-      const modifierTotal = modifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
       const timestamp = nowIso()
       updateRestaurantDraft((detail) => ({
         ...detail,
@@ -1276,11 +1301,13 @@ function App() {
               variantId: variant.id,
               productName: product.name,
               variantName: variant.name,
-              unitPriceCents: variant.priceCents + modifierTotal,
+              unitPriceCents: variant.priceCents + additionsTotal,
               quantity: 1,
               servedQuantity: 0,
               fullyServedAt: null,
               modifiers,
+              mixerProductId,
+              mixer,
               note: null,
               createdAt: timestamp,
               updatedAt: timestamp,
@@ -1289,7 +1316,8 @@ function App() {
       setProductDialog(null)
       return
     }
-    const modifierTotal = modifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
+    const quickSaleModifiers = toQuickSaleModifiers(modifiers, mixer)
+    const modifierTotal = quickSaleModifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
     const candidate: TicketLine = {
       id: createId(),
       productId: product.id,
@@ -1298,7 +1326,7 @@ function App() {
       variantName: variant.name,
       unitPriceCents: variant.priceCents + modifierTotal,
       quantity: 1,
-      modifiers,
+      modifiers: quickSaleModifiers,
     }
     const candidateSignature = getLineSignature(candidate)
     const existing = ticketLines.find((line) => getLineSignature(line) === candidateSignature)
@@ -1321,7 +1349,7 @@ function App() {
       saleFormat === 'cubata' || product.modifierGroups.length > 0 || (allowFormatSelection && product.variants.length > 1)
 
     if (!needsDialog) {
-      addTicketLine(product, firstVariant, [])
+      addTicketLine(product, firstVariant, { modifiers: [], mixerProductId: null, mixer: null })
       return
     }
 
@@ -1634,7 +1662,7 @@ function App() {
   }
 
   const activeTicketLines: TicketLine[] = posView.type === 'table_order' && restaurantOrder
-    ? restaurantOrder.lines.map((line) => ({ id: line.id, productId: line.productId ?? '', productName: line.productName, variantId: line.variantId ?? '', variantName: line.variantName, unitPriceCents: line.unitPriceCents, quantity: line.quantity, modifiers: line.modifiers }))
+    ? restaurantOrder.lines.map((line) => ({ id: line.id, productId: line.productId ?? '', productName: line.productName, variantId: line.variantId ?? '', variantName: line.variantName, unitPriceCents: line.unitPriceCents, quantity: line.quantity, modifiers: line.modifiers, mixerProductId: line.mixerProductId, mixer: line.mixer }))
     : ticketLines
   const canSell = Boolean(context.canTakePayments && cashSession && activeTicketLines.length > 0 && !isBusy && (posView.type !== 'table_order' || isOnline))
   const activeTicketItemCount = activeTicketLines.reduce((total, line) => total + line.quantity, 0)
@@ -1645,6 +1673,20 @@ function App() {
       isBusy={isBusy || !isOnline}
       onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
       onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
+      onEdit={(line) => {
+        if (line.servedQuantity > 0) { setError('No se puede editar una linea con productos ya servidos.'); return }
+        const product = catalog?.products.find((candidate) => candidate.id === line.productId)
+        if (!product) { setError('El producto de esta linea ya no esta disponible.'); return }
+        const saleFormat = product.saleFormats.find((format) => getProductVariantForSaleFormat(product, format)?.id === line.variantId) ?? product.saleFormats[0] ?? 'other'
+        setProductDialog({
+          allowFormatSelection: false,
+          initialSelection: { modifiers: line.modifiers, mixerProductId: line.mixerProductId, mixer: line.mixer },
+          initialVariantId: line.variantId ?? undefined,
+          lineId: line.id,
+          product,
+          saleFormat,
+        })
+      }}
       onRemove={(lineId) => {
         const line = restaurantOrderRef.current?.lines.find((item) => item.id === lineId)
         if (!line || !isLineRemovable(line)) {
@@ -1856,7 +1898,9 @@ function App() {
           allowFormatSelection={productDialog.allowFormatSelection}
           isBusy={isBusy}
           catalog={catalog}
-          key={`${productDialog.product.id}-${productDialog.saleFormat}-${productDialog.allowFormatSelection}`}
+          initialSelection={productDialog.initialSelection}
+          initialVariantId={productDialog.initialVariantId}
+          key={`${productDialog.product.id}-${productDialog.saleFormat}-${productDialog.allowFormatSelection}-${productDialog.lineId ?? 'new'}`}
           onAdd={addTicketLine}
           onCancel={() => setProductDialog(null)}
           product={productDialog.product}

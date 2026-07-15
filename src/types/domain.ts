@@ -71,6 +71,7 @@ export type CrmVenue = {
   sortOrder: number
   isActive: boolean
   tablesEnabled: boolean
+  defaultTaxRate: number
 }
 
 export type CrmDevice = {
@@ -148,6 +149,7 @@ export type Product = {
   canUseAsMixer: boolean
   isFeatured: boolean
   mixerSupplementCents: number
+  taxRate: number | null
   isActive: boolean
   sortOrder: number
   variants: ProductVariant[]
@@ -169,6 +171,18 @@ export type TicketLineModifier = {
   priceCents: number
 }
 
+export type TicketLineMixer = {
+  productId: string
+  name: string
+  priceCents: number
+}
+
+export type ProductLineSelection = {
+  modifiers: TicketLineModifier[]
+  mixerProductId: string | null
+  mixer: TicketLineMixer | null
+}
+
 export type TicketLine = {
   id: string
   productId: string
@@ -178,6 +192,16 @@ export type TicketLine = {
   unitPriceCents: number
   quantity: number
   modifiers: TicketLineModifier[]
+  mixerProductId?: string | null
+  mixer?: TicketLineMixer | null
+  fiscalSnapshot?: TicketLineFiscalSnapshot | null
+}
+
+export type TicketLineFiscalSnapshot = {
+  taxRate: number
+  taxableBaseCents: number
+  taxAmountCents: number
+  grossTotalCents: number
 }
 
 export type CashSession = {
@@ -239,6 +263,7 @@ export type SaleLinePayload = {
   unitPriceCents: number
   lineTotalCents: number
   modifiers: TicketLineModifier[]
+  fiscalSnapshot: TicketLineFiscalSnapshot | null
 }
 
 export type SaleCreatedPayload = {
@@ -363,6 +388,7 @@ export type ProductCreateInput = {
   mixerSupplementCents: number
   name: string
   saleFormats: SaleFormat[]
+  taxRate: number | null
   variants: Array<{
     name: string
     priceCents: number
@@ -422,6 +448,7 @@ export type CrmSalesReportTicket = {
     quantity: number
     unitPriceCents: number
     variantName: string
+    fiscalSnapshot: TicketLineFiscalSnapshot | null
   }>
   paymentMethod: PaymentMethod | null
   quantity: number

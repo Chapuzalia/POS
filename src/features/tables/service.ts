@@ -1,18 +1,22 @@
 import { supabase } from '../../lib/supabase'
-import type { PaymentMethod, TenantContext, TicketLineModifier } from '../../types/domain'
+import { splitLegacyMixerModifiers } from '../../lib/mixers'
+import type { PaymentMethod, TenantContext, TicketLineMixer, TicketLineModifier } from '../../types/domain'
 import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, OpenRestaurantOrderInput, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderLine, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult } from './types'
 import { getOrderPendingUnits } from './service-status'
+import { buildRestaurantOrderLinesPayload } from './order-line-payload'
+
+export { buildRestaurantOrderLinesPayload } from './order-line-payload'
 
 type AreaRow = { id: string; tenant_id: string; venue_id: string; name: string; sort_order: number; is_active: boolean; canvas_width: number; canvas_height: number; created_at: string; updated_at: string }
 type TableRow = { id: string; tenant_id: string; venue_id: string; area_id: string; name: string; capacity: number; shape: RestaurantTable['shape']; position_x: number; position_y: number; width: number; height: number; is_active: boolean; sort_order: number; reserved_until: string | null; reservation_note: string | null; created_at: string; updated_at: string }
 type OrderRow = { id: string; tenant_id: string; venue_id: string; cash_session_id: string; cash_register_id: string; opened_by_user_id: string; opened_by_device_id: string; guest_count: number; status: RestaurantOrder['status']; revision: number; opened_at: string; updated_at: string; closed_at: string | null }
 type OrderTableRow = { order_id: string; table_id: string; joined_at: string; released_at: string | null }
-type OrderLineRow = { id: string; tenant_id: string; venue_id: string; order_id: string; product_id: string | null; variant_id: string | null; product_name: string; variant_name: string; unit_price_cents: number; quantity: number; served_quantity: number; fully_served_at: string | null; modifiers: TicketLineModifier[]; note: string | null; created_at: string; updated_at: string }
+type OrderLineRow = { id: string; tenant_id: string; venue_id: string; order_id: string; product_id: string | null; variant_id: string | null; product_name: string; variant_name: string; unit_price_cents: number; quantity: number; served_quantity: number; fully_served_at: string | null; modifiers: TicketLineModifier[]; mixer_product_id: string | null; mixer: TicketLineMixer | null; note: string | null; created_at: string; updated_at: string }
 
 const areaColumns = 'id, tenant_id, venue_id, name, sort_order, is_active, canvas_width, canvas_height, created_at, updated_at'
 const tableColumns = 'id, tenant_id, venue_id, area_id, name, capacity, shape, position_x, position_y, width, height, is_active, sort_order, reserved_until, reservation_note, created_at, updated_at'
 const orderColumns = 'id, tenant_id, venue_id, cash_session_id, cash_register_id, opened_by_user_id, opened_by_device_id, guest_count, status, revision, opened_at, updated_at, closed_at'
-const lineColumns = 'id, tenant_id, venue_id, order_id, product_id, variant_id, product_name, variant_name, unit_price_cents, quantity, served_quantity, fully_served_at, modifiers, note, created_at, updated_at'
+const lineColumns = 'id, tenant_id, venue_id, order_id, product_id, variant_id, product_name, variant_name, unit_price_cents, quantity, served_quantity, fully_served_at, modifiers, mixer_product_id, mixer, note, created_at, updated_at'
 
 function requireSupabase() {
   if (!supabase) throw new Error('Supabase no esta configurado.')
@@ -22,7 +26,10 @@ function requireSupabase() {
 const mapArea = (row: AreaRow): DiningArea => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, sortOrder: row.sort_order, isActive: row.is_active, canvasWidth: row.canvas_width, canvasHeight: row.canvas_height, createdAt: row.created_at, updatedAt: row.updated_at })
 const mapTable = (row: TableRow): RestaurantTable => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, areaId: row.area_id, name: row.name, capacity: row.capacity, shape: row.shape, positionX: Number(row.position_x), positionY: Number(row.position_y), width: Number(row.width), height: Number(row.height), isActive: row.is_active, sortOrder: row.sort_order, reservedUntil: row.reserved_until, reservationNote: row.reservation_note, createdAt: row.created_at, updatedAt: row.updated_at })
 const mapOrder = (row: OrderRow): RestaurantOrder => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, cashSessionId: row.cash_session_id, cashRegisterId: row.cash_register_id, openedByUserId: row.opened_by_user_id, openedByDeviceId: row.opened_by_device_id, guestCount: row.guest_count, status: row.status, revision: row.revision, openedAt: row.opened_at, updatedAt: row.updated_at, closedAt: row.closed_at })
-const mapLine = (row: OrderLineRow): RestaurantOrderLine => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, orderId: row.order_id, productId: row.product_id, variantId: row.variant_id, productName: row.product_name, variantName: row.variant_name, unitPriceCents: row.unit_price_cents, quantity: row.quantity, servedQuantity: Number(row.served_quantity), fullyServedAt: row.fully_served_at, modifiers: row.modifiers ?? [], note: row.note, createdAt: row.created_at, updatedAt: row.updated_at })
+const mapLine = (row: OrderLineRow): RestaurantOrderLine => {
+  const selection = splitLegacyMixerModifiers(row.modifiers, row.mixer_product_id, row.mixer)
+  return { id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, orderId: row.order_id, productId: row.product_id, variantId: row.variant_id, productName: row.product_name, variantName: row.variant_name, unitPriceCents: row.unit_price_cents, quantity: row.quantity, servedQuantity: Number(row.served_quantity), fullyServedAt: row.fully_served_at, modifiers: selection.modifiers, mixerProductId: selection.mixerProductId, mixer: selection.mixer, note: row.note, createdAt: row.created_at, updatedAt: row.updated_at }
+}
 
 export async function loadVenueTablesEnabled(context: TenantContext, venueId = context.venueId) {
   const { data, error } = await requireSupabase().from('venues').select('tables_enabled').eq('tenant_id', context.tenantId).eq('id', venueId).single<{ tables_enabled: boolean }>()
@@ -129,7 +136,7 @@ export async function updateRestaurantTable(context: TenantContext, tableId: str
 }
 
 export async function openRestaurantOrder(input: OpenRestaurantOrderInput) { const { data, error } = await requireSupabase().rpc('open_restaurant_order', { p_table_ids: input.tableIds, p_guest_count: input.guestCount, p_cash_session_id: input.cashSessionId, p_device_id: input.deviceId }); if (error) throw error; return String(data) }
-export async function addRestaurantOrderLine(orderId: string, productId: string, variantId: string, modifiers: TicketLineModifier[]) { const { data, error } = await requireSupabase().rpc('add_restaurant_order_line', { p_order_id: orderId, p_product_id: productId, p_variant_id: variantId, p_modifier_ids: modifiers.map((modifier) => modifier.id), p_quantity: 1, p_note: null }); if (error) throw error; return String(data) }
+export async function addRestaurantOrderLine(orderId: string, productId: string, variantId: string, modifiers: TicketLineModifier[], mixerProductId: string | null = null) { const { data, error } = await requireSupabase().rpc('add_restaurant_order_line_with_mixer', { p_order_id: orderId, p_product_id: productId, p_variant_id: variantId, p_modifier_ids: modifiers.map((modifier) => modifier.id), p_quantity: 1, p_note: null, p_mixer_product_id: mixerProductId }); if (error) throw error; return String(data) }
 export async function setRestaurantOrderLineQuantity(lineId: string, quantity: number) { const { error } = await requireSupabase().rpc('set_restaurant_order_line_quantity', { p_line_id: lineId, p_quantity: quantity }); if (error) throw error }
 export async function removeRestaurantOrderLine(lineId: string) { const { error } = await requireSupabase().rpc('remove_restaurant_order_line', { p_line_id: lineId }); if (error) throw error }
 export async function moveRestaurantOrder(orderId: string, tableId: string) { const { error } = await requireSupabase().rpc('move_restaurant_order', { p_order_id: orderId, p_target_table_id: tableId }); if (error) throw error }
@@ -139,14 +146,7 @@ export async function saveRestaurantOrderLines(detail: RestaurantOrderDetail): P
   const { data, error } = await requireSupabase().rpc('save_restaurant_order_lines', {
     p_order_id: detail.order.id,
     p_expected_revision: detail.order.revision,
-    p_lines: detail.lines.map((line) => ({
-      id: line.id,
-      productId: line.productId,
-      variantId: line.variantId,
-      modifierIds: line.modifiers.map((modifier) => modifier.id),
-      quantity: line.quantity,
-      note: line.note,
-    })),
+    p_lines: buildRestaurantOrderLinesPayload(detail),
   })
   if (error) throw error
   return data as SaveRestaurantOrderLinesResult

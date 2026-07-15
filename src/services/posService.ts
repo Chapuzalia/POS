@@ -21,6 +21,7 @@ import type {
   SessionTicketRecord,
   TenantContext,
   TicketLine,
+  TicketLineFiscalSnapshot,
   TicketLineModifier,
 } from '../types'
 import type {
@@ -150,10 +151,29 @@ function mapProduct(row: ProductRow): Product {
     canUseAsMixer: row.can_use_as_mixer ?? row.kind === 'mixer',
     isFeatured: row.is_featured ?? false,
     mixerSupplementCents: row.mixer_supplement_cents ?? 0,
+    taxRate: row.tax_rate === null ? null : Number(row.tax_rate),
     isActive: row.is_active,
     sortOrder: row.sort_order,
     variants: (row.product_variants ?? []).map(mapVariant).sort((a, b) => a.sortOrder - b.sortOrder),
     modifierGroups: mapModifierGroups(row.modifier_groups),
+  }
+}
+
+function mapFiscalSnapshot(row: {
+  line_total_cents: number
+  tax_amount_cents: number | null
+  tax_rate: number | null
+  taxable_base_cents: number | null
+}): TicketLineFiscalSnapshot | null {
+  if (row.tax_rate === null || row.taxable_base_cents === null || row.tax_amount_cents === null) {
+    return null
+  }
+
+  return {
+    taxRate: Number(row.tax_rate),
+    taxableBaseCents: row.taxable_base_cents,
+    taxAmountCents: row.tax_amount_cents,
+    grossTotalCents: row.line_total_cents,
   }
 }
 
@@ -582,6 +602,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
           can_use_as_mixer,
           is_featured,
           mixer_supplement_cents,
+          tax_rate,
           is_active,
           sort_order,
           product_variants (
@@ -727,6 +748,9 @@ type SessionTicketQueryRow = {
     quantity: number
     unit_price_cents: number
     line_total_cents: number
+    tax_rate: number | null
+    taxable_base_cents: number | null
+    tax_amount_cents: number | null
     modifiers: TicketLineModifier[]
   }> | null
   sales: Array<{
@@ -775,6 +799,9 @@ export async function loadSessionTicketsFromSupabase(
           quantity,
           unit_price_cents,
           line_total_cents,
+          tax_rate,
+          taxable_base_cents,
+          tax_amount_cents,
           modifiers
         ),
         sales (
@@ -837,6 +864,7 @@ export async function loadSessionTicketsFromSupabase(
         quantity: line.quantity,
         unitPriceCents: line.unit_price_cents,
         lineTotalCents: line.line_total_cents,
+        fiscalSnapshot: mapFiscalSnapshot(line),
         modifiers: line.modifiers ?? [],
       }
     })
@@ -963,6 +991,7 @@ export function buildSalePayload(
     unitPriceCents: line.unitPriceCents,
     lineTotalCents: getLineTotal(line),
     modifiers: line.modifiers,
+    fiscalSnapshot: null,
   }))
 
   return {

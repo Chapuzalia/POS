@@ -1,6 +1,7 @@
 import { Minus, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState, type MouseEvent, type PointerEvent } from 'react'
 import { formatMoney, getLineTotal, getTicketTotal } from '../../lib/format'
+import { getLineAdditionNames } from '../../lib/mixers'
 import type { TicketLine } from '../../types'
 import { cx } from '../../utils/cx'
 import { Button } from '../ui'
@@ -67,6 +68,7 @@ type TicketLineRowProps = {
 }
 
 function TicketLineRow({ isBusy, line, onDecrement, onIncrement, onRemove }: TicketLineRowProps) {
+  const additionNames = getLineAdditionNames(line.modifiers, line.mixer)
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(null)
   const [offsetX, setOffsetX] = useState(0)
   const lastActionRef = useRef<{ action: 'decrement' | 'increment'; at: number } | null>(null)
@@ -163,7 +165,7 @@ function TicketLineRow({ isBusy, line, onDecrement, onIncrement, onRemove }: Tic
         <div className="min-w-0">
           <p className="truncate font-bold text-[var(--foreground)]">{line.quantity}x - {line.productName}</p>
           <p className="text-sm text-[var(--muted)]">
-            {line.modifiers.length ? ` + ${line.modifiers.map((modifier) => modifier.name).join(', ')}` : ''}
+            {additionNames.length ? ` + ${additionNames.join(', ')}` : ''}
           </p>
           <p className="mt-1 font-mono text-sm tabular-nums text-[var(--muted)]">
             {formatMoney(line.unitPriceCents)}/u
