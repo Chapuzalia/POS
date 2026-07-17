@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { AppHeader } from './components/layout/AppHeader'
-import { CashPaymentModal, CloseCashModal, ConfigModal, ProductDialog, SessionTicketsModal } from './components/modals'
+import { CashPaymentModal, CloseCashModal, ConfigModal, DiscountModal, ProductDialog, SessionTicketsModal } from './components/modals'
 import { CatalogPanel, MobileTicketModal, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
 import { CrmPage } from './components/crm/CrmPage'
 import { SuperAdminPage } from './components/superadmin/SuperAdminPage'
@@ -8,6 +8,7 @@ import { LoginScreen } from './components/screens/LoginScreen'
 import { LoadingScreen, MissingConfigScreen } from './components/screens/StateScreens'
 import themesData from './config/themes.json'
 import { createId, getLineSignature, getTicketTotal } from './lib/format'
+import { calculateAppliedDiscount } from './lib/discounts'
 import { getProductVariantForSaleFormat } from './lib/catalog'
 import { toQuickSaleModifiers } from './lib/mixers'
 import {
@@ -54,6 +55,7 @@ import {
   summarizeSales,
 } from './services/posService'
 import type {
+  AppliedDiscount,
   CashClosedPayload,
   CashSession,
   CashRegister,
@@ -109,7 +111,7 @@ type ProductDialogState = {
   saleFormat: SaleFormat
 }
 
-type PendingRestaurantPayment = { method: PaymentMethod; receivedCents: number | null; pendingUnits: number }
+type PendingRestaurantPayment = { method: PaymentMethod | null; receivedCents: number | null; pendingUnits: number }
 
 type AppRoute = 'pos' | 'crm' | 'superadmin'
 
@@ -201,6 +203,8 @@ function App() {
   const [isLoading, setIsLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const [cashPaymentOpen, setCashPaymentOpen] = useState(false)
+  const [discountModalOpen, setDiscountModalOpen] = useState(false)
+  const [appliedDiscount, setAppliedDiscount] = useState<AppliedDiscount | null>(null)
   const [closeCashOpen, setCloseCashOpen] = useState(false)
   const [configOpen, setConfigOpen] = useState(false)
   const [ticketHistoryOpen, setTicketHistoryOpen] = useState(false)
@@ -680,6 +684,8 @@ function App() {
       setTicketLines(restoredLines)
       saveCachedTicket(context, restoredLines)
     }
+    const restoredDiscount = rejectedSaleEvent.payload.ticket.discount
+    setAppliedDiscount(restoredDiscount ?? null)
 
     if (cashSession?.id === rejectedSessionId) {
       setCashSession(null)
@@ -757,11 +763,13 @@ function App() {
     setProductSalesStats([])
     setCashPaymentOpen(false)
     setCloseCashOpen(false)
+    setDiscountModalOpen(false)
     setConfigOpen(false)
     setTicketHistoryOpen(false)
     setMobileTicketOpen(false)
     setProductDialog(null)
     setPendingRestaurantPayment(null)
+    setAppliedDiscount(null)
     setPendingLoginContext(null)
     setTablesEnabled(false)
     setRestaurantMap({ areas: [], tables: [] })
@@ -1149,6 +1157,7 @@ function App() {
       await syncPendingEvents()
       const orderId = await openRestaurantOrder({ tableIds, guestCount, cashSessionId: cashSession.id, deviceId: context.deviceId })
       await refreshRestaurantState(orderId)
+      setAppliedDiscount(null)
       setPosView({ type: 'table_order', orderId })
     } catch (orderError) { setError(getReadableError(orderError)) } finally { setIsBusy(false) }
   }
@@ -1161,6 +1170,7 @@ function App() {
       restaurantOrderRef.current = detail
       setRestaurantOrder(detail)
       updateRestaurantSaveState('saved')
+      setAppliedDiscount(null)
       setPosView({ type: 'table_order', orderId })
     }
     catch (orderError) { setError(getReadableError(orderError)) } finally { setIsBusy(false) }
@@ -1173,6 +1183,7 @@ function App() {
     }
     try {
       const nextMap = context && isOnline ? await loadCurrentRestaurantMap(context) : restaurantMap
+      setAppliedDiscount(null)
       setRestaurantOrder(null)
       restaurantOrderRef.current = null
       updateRestaurantSaveState('saved')
@@ -1203,7 +1214,7 @@ function App() {
     } catch (moveError) { setError(getReadableError(moveError)) } finally { setIsBusy(false) }
   }
 
-  async function completeRestaurantPayment(paymentMethod: PaymentMethod, receivedCents: number | null, forceWithPending = false) {
+  async function completeRestaurantPayment(paymentMethod: PaymentMethod | null, receivedCents: number | null, forceWithPending = false) {
     if (!context || !context.canTakePayments || !cashSession || !restaurantOrderRef.current || !isOnline) return
     setIsBusy(true); setError(null)
     try {
@@ -1217,7 +1228,7 @@ function App() {
         setPendingRestaurantPayment({ method: paymentMethod, receivedCents, pendingUnits: pendingCheck.pendingUnits })
         return
       }
-      const paymentResult = await closeRestaurantOrder(savedOrder.order.id, paymentMethod, receivedCents, forceWithPending)
+      const paymentResult = await closeRestaurantOrder(savedOrder.order.id, paymentMethod, receivedCents, forceWithPending, appliedDiscount)
       if (paymentResult.requiresConfirmation) {
         setPendingRestaurantPayment({ method: paymentMethod, receivedCents, pendingUnits: paymentResult.pendingUnits })
         return
@@ -1231,6 +1242,7 @@ function App() {
       setPendingRestaurantPayment(null)
       setMobileTicketOpen(false)
       updateRestaurantSaveState('saved')
+      setAppliedDiscount(null)
       setPaidFeedback(paymentMethod)
       await refreshRestaurantState()
       setPosView({ type: 'table_map', areaId: restaurantMap.areas[0]?.id })
@@ -1433,7 +1445,7 @@ function App() {
     void runRestaurantServiceAction(async (order) => markRestaurantOrderFullyServed(order.order.id))
   }
 
-  function completePayment(paymentMethod: PaymentMethod, receivedCents: number | null) {
+  function completePayment(paymentMethod: PaymentMethod | null, receivedCents: number | null) {
     if (posView.type === 'table_order') {
       void completeRestaurantPayment(paymentMethod, receivedCents)
       return
@@ -1442,7 +1454,7 @@ function App() {
       return
     }
 
-    const payload = buildSalePayload(context, cashSession, ticketLines, paymentMethod, receivedCents)
+    const payload = buildSalePayload(context, cashSession, ticketLines, paymentMethod, receivedCents, appliedDiscount)
     const saleRecord: SaleRecord = {
       id: payload.sale.id,
       cashSessionId: cashSession.id,
@@ -1476,12 +1488,14 @@ function App() {
     persistTicket([])
     setMobileTicketOpen(false)
     refreshPendingCount()
+    setAppliedDiscount(null)
+    setDiscountModalOpen(false)
     setPaidFeedback(paymentMethod)
     window.setTimeout(() => setPaidFeedback(null), 500)
     void syncPendingEvents()
   }
 
-  function handlePayment(paymentMethod: PaymentMethod) {
+  function handlePayment(paymentMethod: PaymentMethod | null) {
     if (paymentMethod === 'cash') {
       setCashPaymentOpen(true)
       return
@@ -1517,7 +1531,8 @@ function App() {
   }
 
   function changeTicketPayment(ticket: SessionTicketRecord, paymentMethod: PaymentMethod) {
-    if (!context || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod) {
+    const currentPayment = ticket.payload.payment
+    if (!context || !currentPayment || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod) {
       return
     }
 
@@ -1535,7 +1550,7 @@ function App() {
                 paymentMethod,
               },
               payment: {
-                ...item.payload.payment,
+                ...currentPayment,
                 method: paymentMethod,
                 receivedCents,
                 changeCents,
@@ -1555,7 +1570,7 @@ function App() {
       attempts: 0,
       payload: {
         saleId: ticket.payload.sale.id,
-        paymentId: ticket.payload.payment.id,
+        paymentId: currentPayment.id,
         paymentMethod,
         receivedCents,
         changeCents,
@@ -1670,7 +1685,9 @@ function App() {
     : ticketLines
   const canSell = Boolean(context.canTakePayments && cashSession && activeTicketLines.length > 0 && !isBusy && (posView.type !== 'table_order' || isOnline))
   const activeTicketItemCount = activeTicketLines.reduce((total, line) => total + line.quantity, 0)
-  const activeTicketTotal = getTicketTotal(activeTicketLines)
+  const activeTicketSubtotal = getTicketTotal(activeTicketLines)
+  const activeDiscountCalculation = calculateAppliedDiscount(activeTicketSubtotal, appliedDiscount)
+  const activeTicketTotal = activeDiscountCalculation.totalCents
 
   function renderActiveTicketPanel() {
     return posView.type === 'table_order' && restaurantOrder ? <RestaurantOrderPanel
@@ -1714,6 +1731,7 @@ function App() {
         } else {
           persistTicket([])
         }
+        setAppliedDiscount(null)
       }}
       onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
       onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
@@ -1835,7 +1853,12 @@ function App() {
           onMove={moveTableOrder}
           onOpen={openTableOrder}
           onOpenOrder={(orderId) => void openExistingTableOrder(orderId)}
-          onQuickSale={() => { if (context.canTakePayments) { setRestaurantOrder(null); setPosView({ type: 'quick_sale' }) } }}
+          onQuickSale={() => {
+            if (!context.canTakePayments) return
+            setRestaurantOrder(null)
+            setAppliedDiscount(null)
+            setPosView({ type: 'quick_sale' })
+          }}
           openCashPanel={!cashSession ? <OpenCashPanel disabled={!context || isBusy} isBusy={isBusy} onOpen={handleOpenCash} /> : undefined}
           selectedAreaId={posView.areaId}
         />
@@ -1844,7 +1867,17 @@ function App() {
       <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 max-lg:flex-col ${tablesEnabled && posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {renderActiveTicketPanel()}
-          <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={undefined} onPayment={handlePayment} />
+          <PaymentPanel
+            discount={appliedDiscount}
+            disabled={!canSell}
+            feedback={paidFeedback}
+            heading={undefined}
+            onOpenDiscount={() => setDiscountModalOpen(true)}
+            onPayment={handlePayment}
+            onRemoveDiscount={() => setAppliedDiscount(null)}
+            subtotalCents={activeTicketSubtotal}
+            totalCents={activeTicketTotal}
+          />
         </section>
 
         {cashSession ? (
@@ -1875,7 +1908,17 @@ function App() {
         >
           <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
             {renderActiveTicketPanel()}
-            <PaymentPanel disabled={!canSell} feedback={paidFeedback} heading={undefined} onPayment={handlePayment} />
+            <PaymentPanel
+              discount={appliedDiscount}
+              disabled={!canSell}
+              feedback={paidFeedback}
+              heading={undefined}
+              onOpenDiscount={() => setDiscountModalOpen(true)}
+              onPayment={handlePayment}
+              onRemoveDiscount={() => setAppliedDiscount(null)}
+              subtotalCents={activeTicketSubtotal}
+              totalCents={activeTicketTotal}
+            />
           </div>
         </MobileTicketModal>
       )}
@@ -1903,12 +1946,12 @@ function App() {
             setCashPaymentOpen(false)
             completePayment('cash', receivedCents)
           }}
-          totalCents={getTicketTotal(activeTicketLines)}
+          totalCents={activeTicketTotal}
         />
       ) : null}
-
       {productDialog ? (
         <ProductDialog
+
           allowFormatSelection={productDialog.allowFormatSelection}
           isBusy={isBusy}
           catalog={catalog}
@@ -1919,6 +1962,18 @@ function App() {
           onCancel={() => setProductDialog(null)}
           product={productDialog.product}
           saleFormat={productDialog.saleFormat}
+        />
+      ) : null}
+
+      {discountModalOpen ? (
+        <DiscountModal
+          discounts={catalog?.discounts ?? []}
+          isBusy={isBusy}
+          manualDiscountEnabled={catalog?.manualDiscountEnabled ?? false}
+          onCancel={() => setDiscountModalOpen(false)}
+          onSelect={(discount) => { setAppliedDiscount(discount); setDiscountModalOpen(false) }}
+          subtotalCents={activeTicketSubtotal}
+          venueId={context.venueId}
         />
       ) : null}
 

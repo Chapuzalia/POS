@@ -22,7 +22,41 @@ export type CatalogStartTab = 'all' | 'top'
 
 export type CatalogFilter = CatalogStartTab | SaleFormat
 
-export type PaymentMethod = 'cash' | 'card' | 'invitation' | 'other'
+export type PaymentMethod = 'cash' | 'card'
+export type HistoricalPaymentMethod = PaymentMethod | 'invitation' | 'other'
+
+export type DiscountCalculationType = 'percentage' | 'fixed'
+export type DiscountSnapshotType = DiscountCalculationType | 'manual'
+
+export type Discount = {
+  id: string
+  tenantId: string
+  venueId: string
+  name: string
+  type: DiscountCalculationType
+  value: number
+  color: string | null
+  isActive: boolean
+  sortOrder: number
+}
+
+export type DiscountCreateInput = {
+  venueId: string
+  name: string
+  type: DiscountCalculationType
+  value: number
+  color: string | null
+  isActive: boolean
+}
+
+export type AppliedDiscount = {
+  discountId: string | null
+  name: string
+  type: DiscountSnapshotType
+  calculationType: DiscountCalculationType
+  value: number
+  color: string | null
+}
 
 export type TenantRole = 'superadmin' | 'owner' | 'admin' | 'manager' | 'cashier'
 export type DeviceMode = 'satellite' | 'checkout' | 'hybrid'
@@ -158,6 +192,8 @@ export type Product = {
 
 export type Catalog = {
   categories: Category[]
+  discounts: Discount[]
+  manualDiscountEnabled: boolean
   products: Product[]
   saleFormats: SaleFormatDefinition[]
   updatedAt: string
@@ -222,7 +258,7 @@ export type CashRegister = { id: string; tenantId: string; venueId: string; name
 export type SaleRecord = {
   id: string
   cashSessionId: string
-  paymentMethod: PaymentMethod
+  paymentMethod: HistoricalPaymentMethod | null
   totalCents: number
   createdAt: string
 }
@@ -230,7 +266,7 @@ export type SaleRecord = {
 export type SessionTicketRecord = {
   id: string
   cashSessionId: string
-  paymentMethod: PaymentMethod
+  paymentMethod: HistoricalPaymentMethod | null
   totalCents: number
   createdAt: string
   status: 'active' | 'voided'
@@ -275,6 +311,9 @@ export type SaleCreatedPayload = {
     venueId: string
     deviceId: string
     userId: string
+    subtotalCents: number
+    discount: AppliedDiscount | null
+    discountAmountCents: number
     totalCents: number
     createdAt: string
   }
@@ -289,7 +328,7 @@ export type SaleCreatedPayload = {
     deviceId: string
     userId: string
     totalCents: number
-    paymentMethod: PaymentMethod
+    paymentMethod: HistoricalPaymentMethod | null
     createdAt: string
   }
   payment: {
@@ -300,7 +339,7 @@ export type SaleCreatedPayload = {
     amountCents: number
     receivedCents: number | null
     changeCents: number
-  }
+  } | null
 }
 
 export type CashClosedPayload = {
@@ -408,6 +447,16 @@ export type CrmStats = {
     totalCents: number
     count: number
   }>
+  discountApplications: Array<{
+    id: string
+    name: string
+    applications: number
+    discountedCents: number
+    netSalesCents: number
+    ticketPercentage: number
+  }>
+  discountedTicketCount: number
+  discountsCents: number
   monthSalesCents: number
   monthTicketCount: number
   openCashSessions: Array<{
@@ -450,9 +499,16 @@ export type CrmSalesReportTicket = {
     variantName: string
     fiscalSnapshot: TicketLineFiscalSnapshot | null
   }>
-  paymentMethod: PaymentMethod | null
+  discountAmountCents: number
+  discountId: string | null
+  discountName: string | null
+  discountType: DiscountSnapshotType | null
+  discountValue: number | null
+  discountValueType: DiscountCalculationType | null
+  paymentMethod: HistoricalPaymentMethod | null
   quantity: number
   status: 'paid' | 'void'
+  subtotalCents: number
   totalCents: number
 }
 

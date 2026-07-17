@@ -17,16 +17,11 @@ type CloseCashModalProps = {
 export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summary, userId }: CloseCashModalProps) {
   const [countedCash, setCountedCash] = useState(centsToInput(summary.cashCents))
   const [countedCard, setCountedCard] = useState(centsToInput(summary.cardCents))
-  const [countedInvitation, setCountedInvitation] = useState(centsToInput(summary.invitationCents))
-  const [countedOther, setCountedOther] = useState(centsToInput(summary.otherCents))
   const [notes, setNotes] = useState('')
   const countedCashCents = parseMoneyToCents(countedCash)
   const countedCardCents = parseMoneyToCents(countedCard)
-  const countedInvitationCents = parseMoneyToCents(countedInvitation)
-  const countedOtherCents = parseMoneyToCents(countedOther)
-  const expectedTotal =
-    summary.cashCents + summary.cardCents + summary.invitationCents + summary.otherCents
-  const countedTotal = countedCashCents + countedCardCents + countedInvitationCents + countedOtherCents
+  const expectedTotal = summary.cashCents + summary.cardCents
+  const countedTotal = countedCashCents + countedCardCents
   const discrepancy = countedTotal - expectedTotal
   const notesRequired = discrepancy !== 0 && !notes.trim()
 
@@ -42,8 +37,8 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
       expectedOtherCents: summary.otherCents,
       countedCashCents,
       countedCardCents,
-      countedInvitationCents,
-      countedOtherCents,
+      countedInvitationCents: summary.invitationCents,
+      countedOtherCents: summary.otherCents,
       discrepancyCents: discrepancy,
       notes: notes.trim(),
     })
@@ -62,19 +57,15 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
           </Button>
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2">
           <Metric label="Efectivo esperado" value={formatMoney(summary.cashCents)} />
           <Metric label="Tarjeta TPV" value={formatMoney(summary.cardCents)} />
-          <Metric label="Invitacion TPV" value={formatMoney(summary.invitationCents)} />
-          <Metric label="Otros TPV" value={formatMoney(summary.otherCents)} />
         </div>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           {[
             ['Efectivo', countedCash, setCountedCash],
             ['Datafono', countedCard, setCountedCard],
-            ['Invitacion', countedInvitation, setCountedInvitation],
-            ['Otros', countedOther, setCountedOther],
           ].map(([label, value, setter]) => (
             <label className="block" key={label as string}>
               <span className="text-sm font-semibold text-[var(--muted)]">{label as string}</span>

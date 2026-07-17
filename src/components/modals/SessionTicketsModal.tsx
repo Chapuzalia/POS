@@ -1,16 +1,16 @@
 import { CreditCard, Trash2, X } from 'lucide-react'
 import { formatMoney } from '../../lib/format'
-import type { PaymentMethod, SessionTicketRecord } from '../../types'
+import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from '../../types'
 import { Button } from '../ui'
 
-const paymentLabels: Record<PaymentMethod, string> = {
+const paymentLabels: Record<HistoricalPaymentMethod, string> = {
   card: 'Tarjeta',
   cash: 'Efectivo',
   invitation: 'Invitacion',
   other: 'Otros',
 }
 
-const paymentMethods: PaymentMethod[] = ['cash', 'card', 'invitation', 'other']
+const paymentMethods: PaymentMethod[] = ['cash', 'card']
 
 type SessionTicketsModalProps = {
   isBusy: boolean
@@ -71,21 +71,26 @@ export function SessionTicketsModal({
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
-                      <label className="flex min-h-10 items-center gap-2 rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
-                        <CreditCard className="h-4 w-4 text-[var(--muted)]" />
-                        <select
-                          className="bg-transparent text-sm font-semibold text-[var(--field-foreground)] outline-none"
-                          disabled={isBusy || ticket.status !== 'active'}
-                          onChange={(event) => onChangePayment(ticket, event.target.value as PaymentMethod)}
-                          value={ticket.paymentMethod}
-                        >
-                          {paymentMethods.map((method) => (
-                            <option key={method} value={method}>
-                              {paymentLabels[method]}
-                            </option>
-                          ))}
-                        </select>
-                      </label>
+                      {ticket.totalCents === 0 ? (
+                        <span className="text-sm font-semibold text-[var(--muted)]">Pago no requerido</span>
+                      ) : (
+                        <label className="flex min-h-10 items-center gap-2 rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
+                          <CreditCard className="h-4 w-4 text-[var(--muted)]" />
+                          <select
+                            className="bg-transparent text-sm font-semibold text-[var(--field-foreground)] outline-none"
+                            disabled={isBusy || ticket.status !== 'active'}
+                            onChange={(event) => onChangePayment(ticket, event.target.value as PaymentMethod)}
+                            value={ticket.paymentMethod ?? ''}
+                          >
+                            {ticket.paymentMethod === 'invitation' || ticket.paymentMethod === 'other' ? (
+                              <option disabled value={ticket.paymentMethod}>{paymentLabels[ticket.paymentMethod]} (histórico)</option>
+                            ) : null}
+                            {paymentMethods.map((method) => (
+                              <option key={method} value={method}>{paymentLabels[method]}</option>
+                            ))}
+                          </select>
+                        </label>
+                      )}
                       <Button
                         disabled={isBusy || ticket.status !== 'active'}
                         onClick={() => onVoidTicket(ticket)}

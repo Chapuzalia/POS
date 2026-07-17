@@ -1,8 +1,10 @@
 import { createId, getLineTotal, getTicketTotal } from '../lib/format'
+import { assertValidTicketPayment, calculateAppliedDiscount } from '../lib/discounts'
 import { defaultSaleFormats } from '../lib/catalog'
 import { PRODUCT_IMAGE_BUCKET } from '../lib/productImages'
 import { supabase } from '../lib/supabase'
 import type {
+  AppliedDiscount,
   CashClosedPayload,
   CashSession,
   CashSummary,
@@ -11,6 +13,7 @@ import type {
   LoginInput,
   ModifierGroup,
   OfflineEvent,
+  HistoricalPaymentMethod,
   PaymentMethod,
   Product,
   ProductSalesStat,
@@ -42,6 +45,18 @@ import type {
 import { nowIso } from '../utils/dates'
 import { getReadableError } from '../utils/errors'
 import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
+
+type DiscountRow = {
+  id: string
+  tenant_id: string
+  venue_id: string
+  name: string
+  type: 'percentage' | 'fixed'
+  value: number | string
+  color: string | null
+  is_active: boolean
+  sort_order: number
+}
 
 async function requireExclusiveLogin(context: TenantContext) {
   if (await claimLoginLease()) {
@@ -569,10 +584,20 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
     throw new Error('Supabase no esta configurado.')
   }
 
+  let discountsQuery = supabase
+    .from('discounts')
+    .select('id, tenant_id, venue_id, name, type, value, color, is_active, sort_order')
+    .eq('tenant_id', context.tenantId)
+    .eq('is_active', true)
+    .order('sort_order', { ascending: true })
+  if (context.venueId) discountsQuery = discountsQuery.eq('venue_id', context.venueId)
+
   const [
     { data: categoryRows, error: categoriesError },
+    { data: discountRows, error: discountsError },
     { data: saleFormatRows, error: saleFormatsError },
     { data: productRows, error: productsError },
+    { data: venueSettings, error: venueSettingsError },
   ] =
     await Promise.all([
       supabase
@@ -580,6 +605,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
         .select('id, tenant_id, name, kind, icon, is_active, sort_order')
         .eq('tenant_id', context.tenantId)
         .order('sort_order', { ascending: true }),
+      discountsQuery,
       supabase
         .from('sale_formats')
         .select('key, label, is_active, sort_order')
@@ -633,11 +659,16 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
         )
         .eq('tenant_id', context.tenantId)
         .order('sort_order', { ascending: true }),
+      context.venueId
+        ? supabase.from('venues').select('manual_discount_enabled').eq('tenant_id', context.tenantId).eq('id', context.venueId).maybeSingle()
+        : Promise.resolve({ data: null, error: null }),
     ])
 
   if (categoriesError) {
     throw categoriesError
   }
+  if (discountsError) throw discountsError
+  if (venueSettingsError) throw venueSettingsError
 
   if (saleFormatsError) {
     throw saleFormatsError
@@ -658,6 +689,18 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
     categories: ((categoryRows ?? []) as CategoryRow[])
       .map(mapCategory)
       .filter((category) => !context.venueId || visibleCategoryIds.has(category.id)),
+    discounts: ((discountRows ?? []) as DiscountRow[]).map((discount) => ({
+      id: discount.id,
+      tenantId: discount.tenant_id,
+      venueId: discount.venue_id,
+      name: discount.name,
+      type: discount.type,
+      value: discount.type === 'fixed' ? Math.round(Number(discount.value) * 100) : Number(discount.value),
+      color: discount.color,
+      isActive: discount.is_active,
+      sortOrder: discount.sort_order,
+    })),
+    manualDiscountEnabled: Boolean((venueSettings as { manual_discount_enabled?: boolean } | null)?.manual_discount_enabled),
     products,
     saleFormats: saleFormats.length ? saleFormats : defaultSaleFormats,
     updatedAt: nowIso(),
@@ -737,6 +780,13 @@ type SessionTicketQueryRow = {
   device_id: string
   user_id: string
   status: 'paid' | 'void'
+  subtotal_cents: number
+  discount_id: string | null
+  discount_name: string | null
+  discount_type: 'percentage' | 'fixed' | 'manual' | null
+  discount_value_type: 'percentage' | 'fixed' | null
+  discount_value: number | string | null
+  discount_amount_cents: number | null
   total_cents: number
   local_created_at: string
   ticket_lines: Array<{
@@ -755,12 +805,12 @@ type SessionTicketQueryRow = {
   }> | null
   sales: Array<{
     id: string
-    payment_method: PaymentMethod
+    payment_method: HistoricalPaymentMethod | null
     total_cents: number
     local_created_at: string
     sale_payments: Array<{
       id: string
-      method: PaymentMethod
+      method: HistoricalPaymentMethod
       amount_cents: number
       received_cents: number | null
       change_cents: number
@@ -788,6 +838,13 @@ export async function loadSessionTicketsFromSupabase(
         device_id,
         user_id,
         status,
+        subtotal_cents,
+        discount_id,
+        discount_name,
+        discount_type,
+        discount_value_type,
+        discount_value,
+        discount_amount_cents,
         total_cents,
         local_created_at,
         ticket_lines (
@@ -848,7 +905,7 @@ export async function loadSessionTicketsFromSupabase(
     const sale = ticket.sales?.[0]
     const payment = sale?.sale_payments?.[0]
     const saleId = sale?.id ?? loggedPayload?.sale.id ?? ticket.id
-    const paymentMethod = sale?.payment_method ?? loggedPayload?.sale.paymentMethod ?? 'other'
+    const paymentMethod = sale?.payment_method ?? loggedPayload?.sale.paymentMethod ?? null
     const createdAt = sale?.local_created_at ?? loggedPayload?.sale.createdAt ?? ticket.local_created_at
     const lines = (ticket.ticket_lines ?? []).map((line) => {
       const loggedLine = loggedPayload?.lines.find((item) => item.id === line.id)
@@ -877,6 +934,20 @@ export async function loadSessionTicketsFromSupabase(
         venueId: ticket.venue_id,
         deviceId: ticket.device_id,
         userId: ticket.user_id,
+        subtotalCents: ticket.subtotal_cents,
+        discount: ticket.discount_type && ticket.discount_name && ticket.discount_value_type && ticket.discount_value !== null
+          ? {
+              discountId: ticket.discount_id,
+              name: ticket.discount_name,
+              type: ticket.discount_type,
+              calculationType: ticket.discount_value_type,
+              value: ticket.discount_value_type === 'fixed'
+                ? Math.round(Number(ticket.discount_value) * 100)
+                : Number(ticket.discount_value),
+              color: null,
+            }
+          : null,
+        discountAmountCents: ticket.discount_amount_cents ?? 0,
         totalCents: ticket.total_cents,
         createdAt: ticket.local_created_at,
       },
@@ -894,15 +965,15 @@ export async function loadSessionTicketsFromSupabase(
         paymentMethod,
         createdAt,
       },
-      payment: {
-        id: payment?.id ?? loggedPayload?.payment.id ?? ticket.id,
+      payment: payment && (payment.method === 'cash' || payment.method === 'card') ? {
+        id: payment.id,
         tenantId: ticket.tenant_id,
         saleId,
-        method: payment?.method ?? paymentMethod,
-        amountCents: payment?.amount_cents ?? ticket.total_cents,
-        receivedCents: payment?.received_cents ?? loggedPayload?.payment.receivedCents ?? null,
-        changeCents: payment?.change_cents ?? loggedPayload?.payment.changeCents ?? 0,
-      },
+        method: payment.method,
+        amountCents: payment.amount_cents,
+        receivedCents: payment.received_cents,
+        changeCents: payment.change_cents,
+      } : null,
     }
 
     return {
@@ -972,13 +1043,16 @@ export function buildSalePayload(
   context: TenantContext,
   cashSession: CashSession,
   lines: TicketLine[],
-  paymentMethod: PaymentMethod,
+  paymentMethod: PaymentMethod | null,
   receivedCents: number | null,
+  discount: AppliedDiscount | null,
 ): SaleCreatedPayload {
   const createdAt = nowIso()
   const ticketId = createId()
   const saleId = createId()
-  const totalCents = getTicketTotal(lines)
+  const subtotalCents = getTicketTotal(lines)
+  const { discountAmountCents, totalCents } = calculateAppliedDiscount(subtotalCents, discount)
+  assertValidTicketPayment(totalCents, paymentMethod)
   const saleLines: SaleLinePayload[] = lines.map((line) => ({
     id: createId(),
     ticketId,
@@ -1003,6 +1077,9 @@ export function buildSalePayload(
       venueId: context.venueId,
       deviceId: context.deviceId,
       userId: context.userId,
+      subtotalCents,
+      discount,
+      discountAmountCents,
       totalCents,
       createdAt,
     },
@@ -1020,7 +1097,7 @@ export function buildSalePayload(
       paymentMethod,
       createdAt,
     },
-    payment: {
+    payment: paymentMethod ? {
       id: createId(),
       tenantId: context.tenantId,
       saleId,
@@ -1028,7 +1105,7 @@ export function buildSalePayload(
       amountCents: totalCents,
       receivedCents,
       changeCents: Math.max(0, (receivedCents ?? totalCents) - totalCents),
-    },
+    } : null,
   }
 }
 
@@ -1062,7 +1139,10 @@ export async function syncEvent(event: OfflineEvent) {
   }
 
   if (event.kind === 'sale_created') {
-    const { error } = await supabase.rpc('sync_sale_created', {
+    const rpcName = 'subtotalCents' in event.payload.ticket
+      ? 'sync_sale_created_v2'
+      : 'sync_sale_created'
+    const { error } = await supabase.rpc(rpcName, {
       p_event_id: event.id,
       p_payload: event.payload,
     })

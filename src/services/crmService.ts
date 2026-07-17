@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { validateDiscountDefinition } from '../lib/discounts'
 import type { ParsedCatalogTransfer } from '../lib/catalogTransfer'
 import { normalizeText } from '../lib/format'
 import { PRODUCT_IMAGE_BUCKET, resizeProductImageToWebp } from '../lib/productImages'
@@ -14,6 +15,9 @@ import type {
   CrmStats,
   CrmVenue,
   DeviceMode,
+  Discount,
+  DiscountCreateInput,
+  HistoricalPaymentMethod,
   PaymentMethod,
   ProductCreateInput,
   SaleFormatDefinition,
@@ -23,7 +27,7 @@ import type {
 
 type SaleStatsRow = {
   id: string
-  payment_method: PaymentMethod
+  payment_method: HistoricalPaymentMethod | null
   total_cents: number
 }
 
@@ -34,6 +38,11 @@ type TicketLineStatsRow = {
 }
 
 type TicketWithLinesStatsRow = {
+  id: string
+  total_cents: number
+  discount_id: string | null
+  discount_name: string | null
+  discount_amount_cents: number | null
   ticket_lines: TicketLineStatsRow[] | null
 }
 
@@ -58,8 +67,15 @@ type SalesReportLineRow = {
 type SalesReportTicketRow = {
   id: string
   local_created_at: string
-  sales: Array<{ payment_method: PaymentMethod }> | null
+  sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
   status: 'paid' | 'void'
+  subtotal_cents: number
+  discount_id: string | null
+  discount_name: string | null
+  discount_type: 'percentage' | 'fixed' | 'manual' | null
+  discount_value_type: 'percentage' | 'fixed' | null
+  discount_value: number | string | null
+  discount_amount_cents: number | null
   ticket_lines: SalesReportLineRow[] | null
   total_cents: number
 }
@@ -88,7 +104,7 @@ type OpenCashSessionRow = {
 
 type OpenCashSessionSaleRow = {
   cash_session_id: string
-  payment_method: PaymentMethod
+  payment_method: HistoricalPaymentMethod | null
   total_cents: number
 }
 
@@ -1377,6 +1393,13 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
         .select(`
           id,
           status,
+          subtotal_cents,
+          discount_id,
+          discount_name,
+          discount_type,
+          discount_value_type,
+          discount_value,
+          discount_amount_cents,
           total_cents,
           local_created_at,
           ticket_lines (
@@ -1493,9 +1516,17 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
               },
         }
       }),
+      discountAmountCents: ticket.discount_amount_cents ?? 0,
+      discountId: ticket.discount_id,
+      discountName: ticket.discount_name,
+      discountType: ticket.discount_type,
+      discountValue: ticket.discount_value === null ? null : ticket.discount_value_type === 'fixed'
+        ? Math.round(Number(ticket.discount_value) * 100) : Number(ticket.discount_value),
+      discountValueType: ticket.discount_value_type,
       paymentMethod: ticket.sales?.[0]?.payment_method ?? null,
       quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + line.quantity, 0),
       status: ticket.status,
+      subtotalCents: ticket.subtotal_cents,
       totalCents: ticket.total_cents,
     })),
   }
@@ -1511,7 +1542,7 @@ export async function loadCrmStats(context: TenantContext, venueId?: string): Pr
     .gte('created_at', monthStart)
   let ticketsQuery = client
     .from('tickets')
-    .select('ticket_lines(product_name, quantity, line_total_cents)')
+    .select('id, total_cents, discount_id, discount_name, discount_amount_cents, ticket_lines(product_name, quantity, line_total_cents)')
     .eq('tenant_id', context.tenantId)
     .eq('status', 'paid')
     .gte('created_at', monthStart)
@@ -1563,12 +1594,16 @@ export async function loadCrmStats(context: TenantContext, venueId?: string): Pr
   }
 
   const sales = (salesRows ?? []) as SaleStatsRow[]
-  const lines = ((ticketRows ?? []) as TicketWithLinesStatsRow[]).flatMap((ticket) => ticket.ticket_lines ?? [])
+  const paidTickets = (ticketRows ?? []) as TicketWithLinesStatsRow[]
+  const lines = paidTickets.flatMap((ticket) => ticket.ticket_lines ?? [])
   const openSessions = (openSessionRows ?? []) as OpenCashSessionRow[]
   const venuesById = new Map(((venueRows ?? []) as NameRow[]).map((venue) => [venue.id, venue.name]))
   const devicesById = new Map(((deviceRows ?? []) as NameRow[]).map((device) => [device.id, device.name]))
-  const monthSalesCents = sales.reduce((total, sale) => total + sale.total_cents, 0)
+  const monthSalesCents = paidTickets.reduce((total, ticket) => total + ticket.total_cents, 0)
+  const discountsCents = paidTickets.reduce((total, ticket) => total + (ticket.discount_amount_cents ?? 0), 0)
+  const discountedTicketCount = paidTickets.filter((ticket) => (ticket.discount_amount_cents ?? 0) > 0).length
   const byPaymentMap = new Map<PaymentMethod, { method: PaymentMethod; totalCents: number; count: number }>()
+  const discountMap = new Map<string, CrmStats['discountApplications'][number]>()
   const topProductMap = new Map<string, { productName: string; quantity: number; totalCents: number }>()
   const openCashSessions = openSessions.map((session) => ({
     id: session.id,
@@ -1586,6 +1621,7 @@ export async function loadCrmStats(context: TenantContext, venueId?: string): Pr
   const openCashSessionById = new Map(openCashSessions.map((session) => [session.id, session]))
 
   sales.forEach((sale) => {
+    if (sale.payment_method !== 'cash' && sale.payment_method !== 'card') return
     const current = byPaymentMap.get(sale.payment_method) ?? {
       method: sale.payment_method,
       totalCents: 0,
@@ -1598,6 +1634,23 @@ export async function loadCrmStats(context: TenantContext, venueId?: string): Pr
     })
   })
 
+
+  paidTickets.forEach((ticket) => {
+    if (!ticket.discount_name || !ticket.discount_amount_cents) return
+    const id = ticket.discount_id ?? 'manual'
+    const current = discountMap.get(id) ?? {
+      id,
+      name: ticket.discount_name,
+      applications: 0,
+      discountedCents: 0,
+      netSalesCents: 0,
+      ticketPercentage: 0,
+    }
+    current.applications += 1
+    current.discountedCents += ticket.discount_amount_cents
+    current.netSalesCents += ticket.total_cents
+    discountMap.set(id, current)
+  })
   lines.forEach((line) => {
     const current = topProductMap.get(line.product_name) ?? {
       productName: line.product_name,
@@ -1650,10 +1703,16 @@ export async function loadCrmStats(context: TenantContext, venueId?: string): Pr
   }
 
   return {
-    averageTicketCents: sales.length ? Math.round(monthSalesCents / sales.length) : 0,
+    averageTicketCents: paidTickets.length ? Math.round(monthSalesCents / paidTickets.length) : 0,
     byPayment: [...byPaymentMap.values()].sort((a, b) => b.totalCents - a.totalCents),
+    discountApplications: [...discountMap.values()].map((item) => ({
+      ...item,
+      ticketPercentage: paidTickets.length ? Math.round((item.applications / paidTickets.length) * 1000) / 10 : 0,
+    })).sort((a, b) => b.discountedCents - a.discountedCents),
+    discountedTicketCount,
+    discountsCents,
     monthSalesCents,
-    monthTicketCount: sales.length,
+    monthTicketCount: paidTickets.length,
     openCashSessions,
     topProducts: [...topProductMap.values()].sort((a, b) => b.totalCents - a.totalCents).slice(0, 8),
   }
@@ -1678,9 +1737,105 @@ export function subscribeToCrmStatsChanges(context: TenantContext, onChange: () 
       { event: '*', schema: 'public', table: 'sales', filter: `tenant_id=eq.${context.tenantId}` },
       onChange,
     )
+    .on(
+      'postgres_changes',
+      { event: '*', schema: 'public', table: 'tickets', filter: `tenant_id=eq.${context.tenantId}` },
+      onChange,
+    )
     .subscribe()
 
   return () => {
     void client.removeChannel(channel)
   }
+}
+type DiscountRow = {
+  id: string
+  tenant_id: string
+  venue_id: string
+  name: string
+  type: 'percentage' | 'fixed'
+  value: number | string
+  color: string | null
+  is_active: boolean
+  sort_order: number
+}
+
+function mapDiscount(row: DiscountRow): Discount {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    venueId: row.venue_id,
+    name: row.name,
+    type: row.type,
+    value: row.type === 'fixed' ? Math.round(Number(row.value) * 100) : Number(row.value),
+    color: row.color,
+    isActive: row.is_active,
+    sortOrder: row.sort_order,
+  }
+}
+
+function serializeDiscountValue(type: DiscountCreateInput['type'], value: number) {
+  if (!Number.isFinite(value) || value <= 0 || (type === 'percentage' && value > 100)) {
+    throw new Error(type === 'percentage' ? 'El porcentaje debe estar entre 0 y 100.' : 'El importe debe ser mayor que 0.')
+  }
+  if (type === 'fixed' && !Number.isInteger(value)) throw new Error('El importe debe expresarse en céntimos.')
+  return type === 'fixed' ? (value / 100).toFixed(2) : value
+}
+
+export async function loadCrmDiscounts(context: TenantContext, venueId: string): Promise<Discount[]> {
+  const { data, error } = await requireSupabase()
+    .from('discounts')
+    .select('id, tenant_id, venue_id, name, type, value, color, is_active, sort_order')
+    .eq('tenant_id', context.tenantId)
+    .eq('venue_id', venueId)
+    .order('sort_order')
+    .order('name')
+  if (error) throw error
+  return ((data ?? []) as DiscountRow[]).map(mapDiscount)
+}
+
+export async function createDiscount(context: TenantContext, input: DiscountCreateInput) {
+  const name = validateDiscountDefinition(input.name, input.type, input.value)
+  const { error } = await requireSupabase().from('discounts').insert({
+    tenant_id: context.tenantId,
+    venue_id: input.venueId,
+    name,
+    type: input.type,
+    value: serializeDiscountValue(input.type, input.value),
+    color: input.color || null,
+    is_active: input.isActive,
+    sort_order: 0,
+  })
+  if (error) throw error
+}
+
+export async function updateDiscount(context: TenantContext, discountId: string, input: Omit<DiscountCreateInput, 'venueId'>) {
+  const name = validateDiscountDefinition(input.name, input.type, input.value)
+  const { error } = await requireSupabase().from('discounts').update({
+    name,
+    type: input.type,
+    value: serializeDiscountValue(input.type, input.value),
+    color: input.color || null,
+    is_active: input.isActive,
+  }).eq('tenant_id', context.tenantId).eq('id', discountId)
+  if (error) throw error
+}
+
+export async function setDiscountActive(context: TenantContext, discountId: string, isActive: boolean) {
+  const { error } = await requireSupabase().from('discounts').update({ is_active: isActive })
+    .eq('tenant_id', context.tenantId).eq('id', discountId)
+  if (error) throw error
+}
+
+export async function loadManualDiscountEnabled(context: TenantContext, venueId: string) {
+  const { data, error } = await requireSupabase().from('venues').select('manual_discount_enabled')
+    .eq('tenant_id', context.tenantId).eq('id', venueId).single<{ manual_discount_enabled: boolean }>()
+  if (error) throw error
+  return data.manual_discount_enabled
+}
+
+export async function setManualDiscountEnabled(context: TenantContext, venueId: string, enabled: boolean) {
+  const { error } = await requireSupabase().from('venues').update({ manual_discount_enabled: enabled })
+    .eq('tenant_id', context.tenantId).eq('id', venueId)
+  if (error) throw error
 }

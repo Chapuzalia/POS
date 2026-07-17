@@ -48,6 +48,7 @@ import {
   getSaleFormatLabel,
   productKindOptions,
 } from '../../lib/catalog'
+import { allocateNetTotalToLines } from '../../lib/discounts'
 import { centsToInput, formatMoney, normalizeText, parseMoneyToCents } from '../../lib/format'
 import { exportCatalogZip, parseCatalogZip, type ParsedCatalogTransfer } from '../../lib/catalogTransfer'
 import { getDefaultProductImageFillColor } from '../../lib/productImages'
@@ -59,6 +60,7 @@ import {
   resolveEffectiveTaxRate,
 } from '../../lib/tax'
 import {
+  createDiscount,
   createCategory,
   createCrmDevice,
   createCrmVenue,
@@ -73,15 +75,20 @@ import {
   deleteVariant,
   importRevoCatalogProducts,
   importCatalogBackup,
+  loadCrmDiscounts,
+  loadManualDiscountEnabled,
   loadCrmStats,
   loadCrmSalesReports,
   loadCrmAccessData,
   loadCrmPlan,
   loadCrmVenues,
   releaseCrmPosUserLogin,
+  setDiscountActive,
+  setManualDiscountEnabled,
   setCrmPosUserActive,
   subscribeToCrmStatsChanges,
   updateCategory,
+  updateDiscount,
   updateCrmVenueDefaultTaxRate,
   updateCrmPosUser,
   updateProduct,
@@ -103,7 +110,9 @@ import type {
   CrmStats,
   CrmVenue,
   DeviceMode,
-  PaymentMethod,
+  Discount,
+  DiscountCalculationType,
+  HistoricalPaymentMethod,
   Product,
   ProductVariant,
   SaleFormat,
@@ -114,7 +123,7 @@ import { getReadableError } from '../../utils/errors'
 import { TableManagementPage } from '../../features/table-management/TableManagementPage'
 import './crm.css'
 
-type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'tables' | 'reports' | 'import' | 'stats' | 'settings' | 'plan'
+type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'discounts' | 'tables' | 'reports' | 'import' | 'stats' | 'settings' | 'plan'
 
 type CrmPageProps = {
   catalog: Catalog | null
@@ -131,6 +140,7 @@ type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 const productNavItems: CrmNavItem[] = [
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'categories', label: 'Categorias', icon: Tags },
+  { id: 'discounts', label: 'Descuentos', icon: Tags },
   { id: 'sale-formats', label: 'Formatos', icon: SlidersHorizontal },
 ]
 
@@ -160,7 +170,7 @@ const crmReportDateTimeFormatter = new Intl.DateTimeFormat('es-ES', {
   timeStyle: 'short',
 })
 
-const paymentLabels: Record<PaymentMethod, string> = {
+const paymentLabels: Record<HistoricalPaymentMethod, string> = {
   card: 'Tarjeta',
   cash: 'Efectivo',
   invitation: 'Invitacion',
@@ -664,6 +674,16 @@ export function CrmPage({
             />
           ) : null}
 
+          {activeSection === 'discounts' ? (
+            <DiscountsCrm
+              disabled={!isOnline || isBusy}
+              onCatalogChanged={onCatalogChanged}
+              runAction={runAction}
+              selectedVenueId={selectedVenueId}
+              tenantContext={context}
+            />
+          ) : null}
+
           {activeSection === 'import' ? (
             <RevoImportCrm
               categories={categories}
@@ -741,6 +761,9 @@ function getSectionTitle(section: CrmSection) {
   }
   if (section === 'tables') {
     return 'Mesas y zonas del local'
+  }
+  if (section === 'discounts') {
+    return 'Descuentos del local'
   }
   if (section === 'reports') {
     return 'Informes de ventas'
@@ -1314,8 +1337,6 @@ function OpenCashSessionsList({ stats }: { stats: CrmStats | null }) {
             <div className="crm-open-cash-breakdown !col-span-full !flex !min-w-0 !flex-wrap !justify-start !gap-[5px] xl:!col-span-1 xl:!justify-end">
               <span>{`${paymentLabels.cash}: ${formatMoney(session.cashCents)}`}</span>
               <span>{`${paymentLabels.card}: ${formatMoney(session.cardCents)}`}</span>
-              <span>{`${paymentLabels.invitation}: ${formatMoney(session.invitationCents)}`}</span>
-              <span>{`${paymentLabels.other}: ${formatMoney(session.otherCents)}`}</span>
             </div>
           </div>
         ))}
@@ -3122,6 +3143,11 @@ function salesReportLineMatches(line: SalesReportLine, productQuery: string, cat
     && (!categoryQuery || normalizeText(line.categoryName).includes(categoryQuery))
 }
 
+function allocateTicketNetLines(ticket: CrmSalesReports['tickets'][number]) {
+  const netLineTotals = allocateNetTotalToLines(ticket.lines.map((line) => line.lineTotalCents), ticket.totalCents)
+  return ticket.lines.map((line, index) => ({ line, netCents: netLineTotals[index] }))
+}
+
 function buildSalesReportAggregates(
   tickets: CrmSalesReports['tickets'],
   view: SalesReportAggregateView,
@@ -3133,7 +3159,7 @@ function buildSalesReportAggregates(
   tickets.forEach((ticket) => {
     if (ticket.status !== 'paid') return
 
-    ticket.lines.forEach((line) => {
+    allocateTicketNetLines(ticket).forEach(({ line, netCents }) => {
       if (!salesReportLineMatches(line, productQuery, categoryQuery)) return
 
       const id = view === 'products'
@@ -3156,7 +3182,7 @@ function buildSalesReportAggregates(
       }
 
       current.quantity += line.quantity
-      current.totalCents += line.lineTotalCents
+      current.totalCents += netCents
       current.ticketIds.add(ticket.id)
       current.ticketCount = current.ticketIds.size
       report.set(id, current)
@@ -3204,6 +3230,7 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
   const [currentPage, setCurrentPage] = useState(1)
   const [dateFrom, setDateFrom] = useState('')
   const [dateTo, setDateTo] = useState('')
+  const [discountFilter, setDiscountFilter] = useState('all')
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [productQuery, setProductQuery] = useState('')
   const [reports, setReports] = useState<CrmSalesReports | null>(null)
@@ -3233,16 +3260,21 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
     })
   }, [dateFrom, dateTo, reports])
   const filteredTickets = useMemo(() => ticketsInDateRange.filter((ticket) => {
+    const matchesDiscount = discountFilter === 'all'
+      || (discountFilter === 'with' && (ticket.discountAmountCents > 0 || ticket.paymentMethod === 'invitation'))
+      || (discountFilter === 'without' && ticket.discountAmountCents === 0 && ticket.paymentMethod !== 'invitation')
+      || (discountFilter.startsWith('id:') && ticket.discountId === discountFilter.slice(3))
+    if (!matchesDiscount) return false
     if (!normalizedProductQuery && !normalizedCategoryQuery) return true
     return ticket.lines.some((line) => salesReportLineMatches(line, normalizedProductQuery, normalizedCategoryQuery))
-  }), [normalizedCategoryQuery, normalizedProductQuery, ticketsInDateRange])
+  }), [discountFilter, normalizedCategoryQuery, normalizedProductQuery, ticketsInDateRange])
   const activeAggregateView: SalesReportAggregateView = activeView === 'tickets' ? 'products' : activeView
   const activeAggregates = useMemo(() => buildSalesReportAggregates(
-    ticketsInDateRange,
+    filteredTickets,
     activeAggregateView,
     normalizedProductQuery,
     normalizedCategoryQuery,
-  ), [activeAggregateView, normalizedCategoryQuery, normalizedProductQuery, ticketsInDateRange])
+  ), [activeAggregateView, filteredTickets, normalizedCategoryQuery, normalizedProductQuery])
   const sortedTickets = useMemo(() => [...filteredTickets].sort((left, right) => {
     const leftValue = sortKey === 'ticketId'
       ? left.id
@@ -3292,11 +3324,10 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
     return compareSalesReportValues(leftValue, rightValue, sortDirection)
   }), [activeAggregates, sortDirection, sortKey])
   const matchingPaidTickets = filteredTickets.filter((ticket) => ticket.status === 'paid')
-  const salesCents = ticketsInDateRange
-    .filter((ticket) => ticket.status === 'paid')
-    .flatMap((ticket) => ticket.lines)
-    .filter((line) => salesReportLineMatches(line, normalizedProductQuery, normalizedCategoryQuery))
-    .reduce((total, line) => total + line.lineTotalCents, 0)
+  const salesCents = matchingPaidTickets.reduce((total, ticket) => total + allocateTicketNetLines(ticket)
+    .filter(({ line }) => salesReportLineMatches(line, normalizedProductQuery, normalizedCategoryQuery))
+    .reduce((ticketTotal, { netCents }) => ticketTotal + netCents, 0),
+  0)
   const totalResults = activeView === 'tickets' ? sortedTickets.length : sortedAggregates.length
   const totalPages = Math.max(1, Math.ceil(totalResults / CRM_PAGE_SIZE))
   const visiblePage = Math.min(currentPage, totalPages)
@@ -3311,8 +3342,12 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
   const categoryOptions = useMemo(() => [...new Set(
     (reports?.tickets ?? []).flatMap((ticket) => ticket.lines.map((line) => line.categoryName)),
   )].sort((a, b) => a.localeCompare(b, 'es')), [reports])
-  const hasActiveFilters = Boolean(dateFrom || dateTo || productQuery || categoryQuery)
-  const activeFilterCount = [dateFrom || dateTo, productQuery, categoryQuery].filter(Boolean).length
+  const discountOptions = useMemo(() => [...new Map(
+    (reports?.tickets ?? []).filter((ticket) => ticket.discountId && ticket.discountName)
+      .map((ticket) => [ticket.discountId as string, ticket.discountName as string]),
+  ).entries()].sort((left, right) => left[1].localeCompare(right[1], 'es')), [reports])
+  const hasActiveFilters = Boolean(dateFrom || dateTo || productQuery || categoryQuery || discountFilter !== 'all')
+  const activeFilterCount = [dateFrom || dateTo, productQuery, categoryQuery, discountFilter !== 'all'].filter(Boolean).length
 
   function handleSort(nextSortKey: SalesReportSortKey) {
     setCurrentPage(1)
@@ -3329,6 +3364,7 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
     setCategoryQuery('')
     setDateFrom('')
     setDateTo('')
+    setDiscountFilter('all')
     setProductQuery('')
     setCurrentPage(1)
   }
@@ -3407,7 +3443,7 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
         </div>
 
         {isFiltersOpen ? (
-        <div className="!grid !grid-cols-1 !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[18px] !py-4 sm:!grid-cols-2 lg:!grid-cols-4 xl:!grid-cols-[minmax(150px,0.65fr)_minmax(150px,0.65fr)_minmax(210px,1fr)_minmax(210px,1fr)_auto] md:!px-[22px]" id="crm-sales-report-filters">
+        <div className="!grid !grid-cols-1 !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[18px] !py-4 sm:!grid-cols-2 lg:!grid-cols-5 md:!px-[22px]" id="crm-sales-report-filters">
           <Field label="Desde">
             <input
               className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
@@ -3464,6 +3500,14 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
               {categoryOptions.map((category) => <option key={category} value={category} />)}
             </datalist>
           </Field>
+          <Field label="Descuento">
+            <select className="crm-input !h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px]" onChange={(event) => { setDiscountFilter(event.target.value); setCurrentPage(1) }} value={discountFilter}>
+              <option value="all">Todos</option>
+              <option value="with">Con descuento</option>
+              <option value="without">Sin descuento</option>
+              {discountOptions.map(([id, name]) => <option key={id} value={`id:${id}`}>{name}</option>)}
+            </select>
+          </Field>
           <div className="!flex !items-end sm:!col-span-2 lg:!col-span-4 xl:!col-span-1">
             <button
               className="crm-secondary-button !inline-flex !h-11 !w-full !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150 xl:!w-auto"
@@ -3507,6 +3551,18 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
   )
 }
 
+function getReportDiscountLabel(ticket: CrmSalesReports['tickets'][number]) {
+  if (ticket.discountName && ticket.discountAmountCents > 0) {
+    return `${ticket.discountName} · −${formatMoney(ticket.discountAmountCents)}`
+  }
+  return ticket.paymentMethod === 'invitation' ? 'Invitación (histórico)' : '—'
+}
+
+function getReportPaymentLabel(ticket: CrmSalesReports['tickets'][number]) {
+  if (ticket.totalCents === 0 && !ticket.paymentMethod) return 'No requerido'
+  return ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'
+}
+
 function SalesReportTicketsTable({
   isLoading,
   onSelect,
@@ -3524,18 +3580,19 @@ function SalesReportTicketsTable({
 }) {
   return (
     <div className="crm-data-table !grid !overflow-auto">
-      <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[900px] !grid-cols-[minmax(180px,0.85fr)_minmax(190px,1fr)_110px_130px_110px_130px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
+      <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[1040px] !grid-cols-[minmax(160px,0.8fr)_minmax(170px,1fr)_90px_120px_minmax(170px,1fr)_100px_120px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ticket" onSort={onSort} sortKey="ticketId" />
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Fecha" onSort={onSort} sortKey="createdAt" />
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Artículos" onSort={onSort} sortKey="quantity" />
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Método" onSort={onSort} sortKey="paymentMethod" />
+        <span>Descuento</span>
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Estado" onSort={onSort} sortKey="status" />
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Total" onSort={onSort} sortKey="totalCents" />
       </div>
       {tickets.map((ticket) => (
         <button
           aria-label={`Ver detalles del ticket ${ticket.id.slice(0, 8)}`}
-          className="crm-data-row !grid !min-h-[72px] !w-full !min-w-[900px] !cursor-pointer !grid-cols-[minmax(180px,0.85fr)_minmax(190px,1fr)_110px_130px_110px_130px] !items-center !gap-3.5 !border-0 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]"
+          className="crm-data-row !grid !min-h-[72px] !w-full !min-w-[1040px] !cursor-pointer !grid-cols-[minmax(160px,0.8fr)_minmax(170px,1fr)_90px_120px_minmax(170px,1fr)_100px_120px] !items-center !gap-3.5 !border-0 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]"
           key={ticket.id}
           onClick={() => onSelect(ticket.id)}
           type="button"
@@ -3546,7 +3603,8 @@ function SalesReportTicketsTable({
           </div>
           <span>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</span>
           <span>{ticket.quantity} uds.</span>
-          <span>{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'}</span>
+          <span>{getReportPaymentLabel(ticket)}</span>
+          <span className="!truncate">{getReportDiscountLabel(ticket)}</span>
           <span className={ticket.status === 'paid'
             ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
             : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>
@@ -3616,7 +3674,7 @@ function SalesReportTicketModal({
       </div>
 
       <div className="!min-h-0 !overflow-y-auto !px-[18px] !py-5 md:!px-[22px]">
-        <div className="!mb-5 !grid !grid-cols-1 !gap-2.5 sm:!grid-cols-2 lg:!grid-cols-4">
+        <div className="!mb-5 !grid !grid-cols-1 !gap-2.5 sm:!grid-cols-2 lg:!grid-cols-6">
           <TicketDetailSummary label="Estado">
             <span className={ticket.status === 'paid'
               ? '!inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
@@ -3625,12 +3683,18 @@ function SalesReportTicketModal({
             </span>
           </TicketDetailSummary>
           <TicketDetailSummary label="Método de pago">
-            <strong>{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'}</strong>
+            <strong>{getReportPaymentLabel(ticket)}</strong>
           </TicketDetailSummary>
           <TicketDetailSummary label="Productos">
             <strong>{ticket.lineCount} líneas · {ticket.quantity} uds.</strong>
           </TicketDetailSummary>
-          <TicketDetailSummary label="Total">
+          <TicketDetailSummary label="Subtotal">
+            <strong className="!font-mono">{formatMoney(ticket.subtotalCents)}</strong>
+          </TicketDetailSummary>
+          <TicketDetailSummary label="Descuento">
+            <strong>{getReportDiscountLabel(ticket)}</strong>
+          </TicketDetailSummary>
+          <TicketDetailSummary label="Total cobrado">
             <strong className="!font-mono !text-base">{formatMoney(ticket.totalCents)}</strong>
           </TicketDetailSummary>
         </div>
@@ -3747,7 +3811,7 @@ function StatsCrm({ disabled, onRefresh, stats }: StatsCrmProps) {
           <KpiCard color="green" label="Ventas" value={formatMoney(stats?.monthSalesCents ?? 0)} />
           <KpiCard color="blue" label="Tickets" value={stats?.monthTicketCount ?? 0} />
           <KpiCard color="neutral" label="Ticket medio" value={formatMoney(stats?.averageTicketCents ?? 0)} />
-          <KpiCard color="neutral" label="Top productos" value={stats?.topProducts.length ?? 0} />
+          <KpiCard color="neutral" label="Descuentos hechos" value={formatMoney(stats?.discountsCents ?? 0)} />
         </div>
       </section>
 
@@ -3764,6 +3828,27 @@ function StatsCrm({ disabled, onRefresh, stats }: StatsCrmProps) {
         </div>
         <TopProductsList stats={stats} />
       </section>
+
+      <section className="crm-panel !col-span-full !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold md:!px-[22px]">
+          <div><span>Descuentos</span><p className="!mt-1 !text-xs !font-medium !text-[var(--crm-text-muted)]">{stats?.discountedTicketCount ?? 0} tickets con descuento</p></div>
+        </div>
+        <div className="!overflow-x-auto !px-[18px] !pb-[18px] md:!px-[22px] md:!pb-[22px]">
+          <div className="!grid !min-w-[760px] !grid-cols-[minmax(220px,1fr)_120px_150px_150px_110px] !gap-3 !border-b !border-[var(--crm-border-subtle)] !py-3 !text-[11px] !font-semibold !uppercase !text-[var(--crm-text-muted)]">
+            <span>Descuento</span><span>Aplicaciones</span><span>Total descontado</span><span>Ventas asociadas</span><span>% tickets</span>
+          </div>
+          {(stats?.discountApplications ?? []).map((discount) => (
+            <div className="!grid !min-h-14 !min-w-[760px] !grid-cols-[minmax(220px,1fr)_120px_150px_150px_110px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !text-[13px]" key={discount.id}>
+              <strong>{discount.name}</strong>
+              <span>{discount.applications}</span>
+              <span className="!font-mono">{formatMoney(discount.discountedCents)}</span>
+              <span className="!font-mono">{formatMoney(discount.netSalesCents)}</span>
+              <span>{discount.ticketPercentage} %</span>
+            </div>
+          ))}
+          {!stats?.discountApplications.length ? <EmptyList message="No hay descuentos en el periodo actual." /> : null}
+        </div>
+      </section>
     </div>
   )
 }
@@ -3774,7 +3859,7 @@ function PaymentBreakdown({ stats }: { stats: CrmStats | null }) {
       {(stats?.byPayment ?? []).map((payment) => (
         <div className="crm-payment-row" key={payment.method}>
           <div>
-            <strong>{payment.method}</strong>
+            <strong>{paymentLabels[payment.method]}</strong>
             <span>{payment.count} operaciones</span>
           </div>
           <b>{formatMoney(payment.totalCents)}</b>
@@ -3813,5 +3898,154 @@ function Field({ children, className, label }: FieldProps) {
       <span className="crm-field-label !mb-1.5 !block !text-xs !font-medium !text-[var(--crm-text-secondary)]">{label}</span>
       {children}
     </label>
+  )
+}
+
+type DiscountsCrmProps = {
+  disabled: boolean
+  onCatalogChanged: () => Promise<void>
+  runAction: RunAction
+  selectedVenueId: string
+  tenantContext: TenantContext
+}
+
+function DiscountsCrm({ disabled, onCatalogChanged, runAction, selectedVenueId, tenantContext }: DiscountsCrmProps) {
+  const [discounts, setDiscounts] = useState<Discount[]>([])
+  const [editor, setEditor] = useState<Discount | 'new' | null>(null)
+  const [manualEnabled, setManualEnabled] = useState(false)
+
+  const refresh = useCallback(async () => {
+    if (!selectedVenueId) {
+      setDiscounts([])
+      setManualEnabled(false)
+      return
+    }
+    const [nextDiscounts, nextManualEnabled] = await Promise.all([
+      loadCrmDiscounts(tenantContext, selectedVenueId),
+      loadManualDiscountEnabled(tenantContext, selectedVenueId),
+    ])
+    setDiscounts(nextDiscounts)
+    setManualEnabled(nextManualEnabled)
+  }, [selectedVenueId, tenantContext])
+
+  useEffect(() => {
+    setEditor(null)
+    void runAction(refresh)
+  }, [refresh, runAction])
+
+  async function toggleManual() {
+    await runAction(async () => {
+      await setManualDiscountEnabled(tenantContext, selectedVenueId, !manualEnabled)
+      setManualEnabled((current) => !current)
+      await onCatalogChanged()
+    })
+  }
+
+  async function toggleDiscount(discount: Discount) {
+    await runAction(async () => {
+      await setDiscountActive(tenantContext, discount.id, !discount.isActive)
+      await refresh()
+      await onCatalogChanged()
+    })
+  }
+
+  return (
+    <div className="!grid !grid-cols-1 !items-start !gap-4 xl:!gap-6">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
+          <div className="crm-list-title">
+            <h2>Descuentos</h2>
+            <p>{discounts.length} configurados para el local seleccionado</p>
+          </div>
+          <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !selectedVenueId} onClick={() => setEditor('new')} type="button">
+            <Plus className="h-4 w-4" /> Añadir descuento
+          </button>
+        </div>
+
+        <div className="!grid !gap-2 !p-[18px] md:!p-[22px]">
+          {discounts.map((discount) => (
+            <div className="!grid !min-h-[68px] !grid-cols-[minmax(0,1fr)_130px_100px_auto] !items-center !gap-3 !rounded-[12px] !bg-[var(--crm-surface-soft)] !px-4 !py-3 !text-[13px]" key={discount.id}>
+              <div className="!flex !min-w-0 !items-center !gap-3">
+                <span className="!size-3 !shrink-0 !rounded-full !border !border-black/10" style={{ backgroundColor: discount.color ?? 'var(--crm-blue)' }} />
+                <div className="crm-cell-main"><strong>{discount.name}</strong><span>{discount.type === 'percentage' ? 'Porcentaje' : 'Importe fijo'}</span></div>
+              </div>
+              <strong className="!font-mono">{discount.type === 'percentage' ? `${discount.value} %` : formatMoney(discount.value)}</strong>
+              <span className={discount.isActive ? 'crm-status-pill !w-fit !rounded-full !bg-[var(--crm-green-soft)] !px-2.5 !py-1 !text-[11px] !font-semibold !text-[var(--crm-green)]' : 'crm-status-pill !w-fit !rounded-full !bg-[var(--crm-input-bg)] !px-2.5 !py-1 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]'}>{discount.isActive ? 'Activo' : 'Inactivo'}</span>
+              <div className="!flex !justify-end !gap-2">
+                <button className="crm-action-button !min-h-9 !rounded-[9px] !border-0 !bg-[var(--crm-surface)] !px-3 !font-semibold" disabled={disabled} onClick={() => setEditor(discount)} type="button"><Pencil className="!mr-1 !inline !size-3.5" />Editar</button>
+                <button className="crm-action-button !min-h-9 !rounded-[9px] !border-0 !bg-[var(--crm-surface)] !px-3 !font-semibold" disabled={disabled} onClick={() => void toggleDiscount(discount)} type="button">{discount.isActive ? 'Desactivar' : 'Activar'}</button>
+              </div>
+            </div>
+          ))}
+          {!discounts.length ? <EmptyList message="No hay descuentos configurados para este local." /> : null}
+        </div>
+      </section>
+
+      <section className="crm-panel !rounded-2xl !border-0 !bg-[var(--crm-surface)] !p-[18px] !shadow-[var(--crm-shadow-card)] md:!p-[22px]">
+        <div className="!flex !flex-col !items-start !justify-between !gap-4 sm:!flex-row sm:!items-center">
+          <div><h2 className="!text-base !font-bold">Permitir descuento manual</h2><p className="!mt-1 !text-xs !text-[var(--crm-text-muted)]">Disponible para cualquier usuario del POS en este local.</p></div>
+          <button aria-pressed={manualEnabled} className={manualEnabled ? '!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-green-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-green)]' : '!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)]'} disabled={disabled || !selectedVenueId} onClick={() => void toggleManual()} type="button">{manualEnabled ? 'Activado' : 'Desactivado'}</button>
+        </div>
+      </section>
+
+      {editor ? (
+        <DiscountEditor
+          disabled={disabled}
+          discount={editor === 'new' ? null : editor}
+          key={editor === 'new' ? 'new' : editor.id}
+          onClose={() => setEditor(null)}
+          onSaved={async () => { await refresh(); await onCatalogChanged(); setEditor(null) }}
+          runAction={runAction}
+          selectedVenueId={selectedVenueId}
+          tenantContext={tenantContext}
+        />
+      ) : null}
+    </div>
+  )
+}
+
+function DiscountEditor({ disabled, discount, onClose, onSaved, runAction, selectedVenueId, tenantContext }: {
+  disabled: boolean
+  discount: Discount | null
+  onClose: () => void
+  onSaved: () => Promise<void>
+  runAction: RunAction
+  selectedVenueId: string
+  tenantContext: TenantContext
+}) {
+  const [name, setName] = useState(discount?.name ?? '')
+  const [type, setType] = useState<DiscountCalculationType>(discount?.type ?? 'percentage')
+  const [value, setValue] = useState(discount ? (discount.type === 'fixed' ? centsToInput(discount.value) : String(discount.value)) : '')
+  const [color, setColor] = useState(discount?.color ?? '#2563eb')
+  const [isActive, setIsActive] = useState(discount?.isActive ?? true)
+  const [validationError, setValidationError] = useState<string | null>(null)
+
+  async function save() {
+    const parsedValue = type === 'fixed' ? parseMoneyToCents(value) : Number(value.replace(',', '.'))
+    if (!name.trim() || !Number.isFinite(parsedValue) || parsedValue <= 0 || (type === 'percentage' && parsedValue > 100)) {
+      setValidationError(type === 'percentage' ? 'Indica un nombre y un porcentaje entre 0 y 100.' : 'Indica un nombre y un importe mayor que 0.')
+      return
+    }
+    await runAction(async () => {
+      const input = { name: name.trim(), type, value: parsedValue, color: color || null, isActive }
+      if (discount) await updateDiscount(tenantContext, discount.id, input)
+      else await createDiscount(tenantContext, { ...input, venueId: selectedVenueId })
+      await onSaved()
+    })
+  }
+
+  return (
+    <CrmModal label={discount ? 'Editar descuento' : 'Añadir descuento'} onClose={onClose}>
+      <div className="crm-editor-header !flex !items-center !justify-between !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]"><div><span>{discount ? 'Editar descuento' : 'Nuevo descuento'}</span><small>Aplicable a la cuenta completa</small></div><button aria-label="Cerrar" className="crm-editor-close" onClick={onClose} type="button"><X className="h-4 w-4" /></button></div>
+      <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !py-5" onSubmit={(event) => { event.preventDefault(); void save() }}>
+        <Field label="Nombre"><input autoFocus className="crm-input !h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5" onChange={(event) => setName(event.target.value)} value={name} /></Field>
+        <Field label="Tipo"><select className="crm-input !h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5" onChange={(event) => { setType(event.target.value as DiscountCalculationType); setValue('') }} value={type}><option value="percentage">Porcentaje</option><option value="fixed">Importe fijo</option></select></Field>
+        <Field label={type === 'percentage' ? 'Porcentaje' : 'Importe'}><input className="crm-input !h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5" inputMode="decimal" onChange={(event) => { setValue(event.target.value); setValidationError(null) }} value={value} /></Field>
+        <Field label="Color"><input className="!h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !p-1" onChange={(event) => setColor(event.target.value)} type="color" value={color} /></Field>
+        <label className="!flex !items-center !gap-2 !text-sm !font-semibold"><input checked={isActive} onChange={(event) => setIsActive(event.target.checked)} type="checkbox" /> Activo</label>
+        {validationError ? <p className="!text-sm !font-semibold !text-[var(--crm-red)]">{validationError}</p> : null}
+        <button className="crm-primary-button !min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !font-semibold !text-white" disabled={disabled} type="submit"><Save className="!mr-2 !inline !size-4" />Guardar</button>
+      </form>
+    </CrmModal>
   )
 }

@@ -1,6 +1,6 @@
 import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
-import type { PaymentMethod, TenantContext, TicketLineMixer, TicketLineModifier } from '../../types/domain'
+import type { AppliedDiscount, PaymentMethod, TenantContext, TicketLineMixer, TicketLineModifier } from '../../types/domain'
 import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, OpenRestaurantOrderInput, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderLine, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult } from './types'
 import { getOrderPendingUnits } from './service-status'
 import { buildRestaurantOrderLinesPayload } from './order-line-payload'
@@ -140,7 +140,17 @@ export async function addRestaurantOrderLine(orderId: string, productId: string,
 export async function setRestaurantOrderLineQuantity(lineId: string, quantity: number) { const { error } = await requireSupabase().rpc('set_restaurant_order_line_quantity', { p_line_id: lineId, p_quantity: quantity }); if (error) throw error }
 export async function removeRestaurantOrderLine(lineId: string) { const { error } = await requireSupabase().rpc('remove_restaurant_order_line', { p_line_id: lineId }); if (error) throw error }
 export async function moveRestaurantOrder(orderId: string, tableId: string) { const { error } = await requireSupabase().rpc('move_restaurant_order', { p_order_id: orderId, p_target_table_id: tableId }); if (error) throw error }
-export async function closeRestaurantOrder(orderId: string, paymentMethod: PaymentMethod, receivedCents: number | null, allowPending = false) { const { data, error } = await requireSupabase().rpc('close_restaurant_order_checked', { p_order_id: orderId, p_payment_method: paymentMethod, p_received_cents: receivedCents, p_allow_pending: allowPending }); if (error) throw error; return data as CloseRestaurantOrderResult }
+export async function closeRestaurantOrder(orderId: string, paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending = false, discount: AppliedDiscount | null = null) {
+  const { data, error } = await requireSupabase().rpc('close_restaurant_order_checked_v2', {
+    p_order_id: orderId,
+    p_payment_method: paymentMethod,
+    p_received_cents: receivedCents,
+    p_allow_pending: allowPending,
+    p_discount: discount,
+  })
+  if (error) throw error
+  return data as CloseRestaurantOrderResult
+}
 
 export async function saveRestaurantOrderLines(detail: RestaurantOrderDetail): Promise<SaveRestaurantOrderLinesResult> {
   const { data, error } = await requireSupabase().rpc('save_restaurant_order_lines', {

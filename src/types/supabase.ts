@@ -110,7 +110,7 @@ export type ProductRow = {
 export type SaleRow = {
   id: string
   cash_session_id: string
-  payment_method: PaymentMethod
+  payment_method: PaymentMethod | 'invitation' | 'other' | null
   total_cents: number
   created_at: string
 }
