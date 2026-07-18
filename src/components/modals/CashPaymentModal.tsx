@@ -1,8 +1,9 @@
 import { X } from 'lucide-react'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
 import { cx } from '../../utils/cx'
 import { Button } from '../ui'
+import { addCashDenomination, cashDenominationsCents } from './cash-payment'
 
 type CashPaymentModalProps = {
   isBusy: boolean
@@ -15,7 +16,17 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
   const [delivered, setDelivered] = useState(centsToInput(totalCents))
   const deliveredCents = parseMoneyToCents(delivered)
   const difference = deliveredCents - totalCents
-  const quickAmounts = [totalCents, 500, 1000, 2000, 5000, 10000, 20000]
+  const initialExactRef = useRef(true)
+
+  function selectExactAmount() {
+    initialExactRef.current = true
+    setDelivered(centsToInput(totalCents))
+  }
+
+  function addDenomination(amount: number) {
+    setDelivered((current) => centsToInput(addCashDenomination(parseMoneyToCents(current), amount, initialExactRef.current)))
+    initialExactRef.current = false
+  }
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
@@ -50,15 +61,16 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
           <p className="mt-1 font-mono text-4xl font-black tabular-nums">{formatMoney(totalCents)}</p>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-7">
-          {quickAmounts.map((amount) => (
+        <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
+          <Button onClick={selectExactAmount} type="button" variant="primary">Exacto</Button>
+          {cashDenominationsCents.map((amount) => (
             <Button
               key={amount}
-              onClick={() => setDelivered(centsToInput(amount))}
+              onClick={() => addDenomination(amount)}
               type="button"
-              variant={amount === totalCents ? 'primary' : 'tertiary'}
+              variant="tertiary"
             >
-              {amount === totalCents ? 'Exacto' : formatMoney(amount)}
+              {formatMoney(amount)}
             </Button>
           ))}
         </div>
@@ -70,10 +82,10 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
             <input
               className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none"
               inputMode="decimal"
-              onChange={(event) => setDelivered(event.target.value)}
+              onChange={(event) => { initialExactRef.current = false; setDelivered(event.target.value) }}
               value={delivered}
             />
-            <Button className="mr-1" onClick={() => setDelivered('0.00')} size="sm" type="button" variant="tertiary">
+            <Button className="mr-1" onClick={() => { initialExactRef.current = false; setDelivered('0.00') }} size="sm" type="button" variant="tertiary">
               <X className="h-4 w-4" />
             </Button>
           </div>

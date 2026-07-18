@@ -5,6 +5,7 @@ import { readFileSync } from 'node:fs'
 const migration = readFileSync(new URL('../supabase/16.ticket-discounts-migration.sql', import.meta.url), 'utf8')
 const posService = readFileSync(new URL('../src/services/posService.ts', import.meta.url), 'utf8')
 const crmService = readFileSync(new URL('../src/services/crmService.ts', import.meta.url), 'utf8')
+const paymentPanel = readFileSync(new URL('../src/components/pos/PaymentPanel.tsx', import.meta.url), 'utf8')
 
 test('la migracion conserva snapshots y permite pago nulo sin reescribir el historico', () => {
   assert.match(migration, /add column if not exists discount_name text/)
@@ -39,4 +40,8 @@ test('estadisticas usan tickets netos y excluyen metodos historicos del desglose
   assert.match(crmService, /ticket\.discount_amount_cents/)
   assert.match(crmService, /sale\.payment_method !== 'cash' && sale\.payment_method !== 'card'/)
   assert.match(crmService, /discountMap/)
+})
+
+test('oculta el panel de cobro cuando el dispositivo no puede cobrar', () => {
+  assert.match(paymentPanel, /if \(disabled\) \{\s*return null\s*\}/)
 })

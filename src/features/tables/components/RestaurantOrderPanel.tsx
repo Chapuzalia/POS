@@ -34,7 +34,6 @@ function OrderLineRow({ isBusy, line, onDecrement, onEdit, onIncrement, onRemove
           <p className="mt-1 font-mono text-sm">{formatMoney(line.unitPriceCents * line.quantity)}</p>
         </div>
         <div className="flex items-center gap-1">
-          <Button aria-label="Editar linea" disabled={isBusy || line.servedQuantity > 0} onClick={() => onEdit(line)} size="sm" title="Editar producto, modificadores o mixer" type="button" variant="tertiary"><Pencil className="h-4 w-4" /></Button>
           <Button aria-label="Reducir cantidad" disabled={isBusy || !canDecreaseLineQuantity(line)} onClick={() => onDecrement(line.id)} size="sm" type="button" variant="tertiary"><Minus className="h-4 w-4" /></Button>
           <span className="w-7 text-center font-mono font-bold">{line.quantity}</span>
           <Button aria-label="Aumentar cantidad" disabled={isBusy} onClick={() => onIncrement(line.id)} size="sm" type="button" variant="tertiary"><Plus className="h-4 w-4" /></Button>
@@ -63,7 +62,6 @@ export function RestaurantOrderPanel(props: Props) {
       </div>
       <div className="space-y-3 border-t border-[var(--separator)] p-4">
         {pendingUnits > 0 ? <Button disabled={isBusy} fullWidth onClick={onServeAllOrder} size="lg" type="button" variant="primary"><CheckCheck className="h-5 w-5" /> Marcar {pendingUnits} {pendingUnits === 1 ? 'producto' : 'productos'} como servidos</Button> : order.lines.length ? <p className="text-center font-bold text-[var(--success)]">Todo servido OK</p> : null}
-        <div className="flex items-center justify-between gap-4"><span className="flex items-center gap-2 text-lg font-bold">Total {isAddSuccess ? <Check aria-label="Producto añadido a la comanda" className="ticket-panel-success h-5 w-5 text-[var(--success)]" /> : null}</span><span className="font-mono text-3xl font-black tabular-nums">{formatMoney(order.totalCents)}</span></div>
       </div>
     </section>
   )

@@ -1,5 +1,5 @@
 import { useCallback, useRef, useState, type PointerEvent as ReactPointerEvent, type WheelEvent as ReactWheelEvent } from 'react'
-import { contentBounds, fitBounds, MAX_ZOOM, MIN_ZOOM, zoomAtPoint, type Point, type Viewport } from './viewport'
+import { contentBounds, fitBounds, MAX_ZOOM, MIN_ZOOM, zoomAtPoint, type MapPlaneSize, type Point, type Viewport } from './viewport'
 
 const DEFAULT_VIEWPORT: Viewport = { zoom: 1, panX: 0, panY: 0 }
 
@@ -30,6 +30,6 @@ export function useMapViewport(storageKey: string) {
     else if (panRef.current?.id === event.pointerId) update({ ...panRef.current.initial, panX: panRef.current.initial.panX + event.clientX - panRef.current.start.x, panY: panRef.current.initial.panY + event.clientY - panRef.current.start.y })
   }, [update])
   const endBackgroundPointer = useCallback((event: ReactPointerEvent<HTMLElement>) => { pointersRef.current.delete(event.pointerId); if (panRef.current?.id === event.pointerId) panRef.current = null; if (pointersRef.current.size < 2) pinchRef.current = null }, [])
-  const fit = useCallback((element: HTMLElement, items: Array<{ positionX: number; positionY: number; width: number; height: number }>) => { const bounds = element.getBoundingClientRect(); update(fitBounds(contentBounds(items), bounds.width, bounds.height)) }, [update])
+  const fit = useCallback((element: HTMLElement, items: Array<{ positionX: number; positionY: number; width: number; height: number }>, planeSize?: MapPlaneSize) => { const bounds = element.getBoundingClientRect(); update(fitBounds(contentBounds(items), bounds.width, bounds.height, 32, planeSize?.width ?? bounds.width, planeSize?.height ?? bounds.height)) }, [update])
   return { viewport, setViewport: update, zoomBy, fit, onWheel, startBackgroundPointer, moveBackgroundPointer, endBackgroundPointer, minZoom: MIN_ZOOM, maxZoom: MAX_ZOOM }
 }

@@ -1,4 +1,4 @@
-import { CheckCircle2, Coins, CreditCard, Tags, X, type LucideIcon } from 'lucide-react'
+import { CheckCircle2, Coins, CreditCard, Tags, X, Percent, type LucideIcon } from 'lucide-react'
 import { formatDiscountValue, getDiscountLabel } from '../../lib/discounts'
 import { formatMoney } from '../../lib/format'
 import type { AppliedDiscount, PaymentMethod } from '../../types'
@@ -32,6 +32,10 @@ export function PaymentPanel({
   subtotalCents,
   totalCents,
 }: PaymentPanelProps) {
+  if (disabled) {
+    return null
+  }
+
   return (
     <section className="space-y-3">
       {heading ? <h2 className="text-sm font-black uppercase tracking-wide text-[var(--foreground)]">{heading}</h2> : null}
@@ -52,7 +56,7 @@ export function PaymentPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className="grid grid-cols-3 gap-2">
         {paymentOptions.map((payment) => {
           const Icon = feedback === payment.id ? CheckCircle2 : payment.icon
           return (
@@ -71,12 +75,17 @@ export function PaymentPanel({
             </Button>
           )
         })}
-      </div>
-
-      <div className="flex gap-2">
-        <Button disabled={disabled} fullWidth onClick={onOpenDiscount} type="button" variant="tertiary">
-          <Tags className="h-4 w-4" />
-          {discount ? getDiscountLabel(discount) : 'Aplicar descuento'}
+        <div className="flex gap-2 flex-row">
+        <Button className="flex flex-col items-center justify-center"
+              disabled={disabled || totalCents === 0}
+              fullWidth
+              onClick={onOpenDiscount}
+              size="lg"
+              type="button"
+              variant="tertiary"
+          >
+          <Percent className="flex flex-col items-center justify-center fullWidth"  />
+          <span>{discount ? getDiscountLabel(discount) : 'Descuento'}</span>
         </Button>
         {discount ? (
           <Button aria-label="Eliminar descuento" disabled={disabled} onClick={onRemoveDiscount} type="button" variant="tertiary">
@@ -84,6 +93,9 @@ export function PaymentPanel({
           </Button>
         ) : null}
       </div>
+      </div>
+
+      
 
       {totalCents === 0 ? (
         <Button disabled={disabled} fullWidth onClick={() => onPayment(null)} size="lg" type="button" variant="primary">

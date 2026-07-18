@@ -3,10 +3,15 @@ import assert from 'node:assert/strict'
 import { snapTableAlignment, snapTableCenter } from '../src/features/tables/alignment.ts'
 import { placeExternalLabels, rectsOverlap, tableContentMode, tableVisualRect } from '../src/features/tables/external-label-layout.ts'
 import { compactJoinedCompositions, compositionHasOpenOrder, findJoinProposal, isCompactComposition, separateFromComposition, translateComposition } from '../src/features/tables/joined-layout.ts'
-import { fitBounds, intersectionRatio, mapToScreen, positionFloatingPanel, screenToMap, zoomAtPoint } from '../src/features/tables/viewport.ts'
+import { fitBounds, getMapPlaneSize, intersectionRatio, mapToScreen, positionFloatingPanel, screenToMap, zoomAtPoint } from '../src/features/tables/viewport.ts'
 import { getReadableError } from '../src/utils/errors.ts'
 
 const bounds = { left: 100, top: 50, width: 1000, height: 600 }
+
+test('el plano conserva su proporcion en viewports panoramicos y moviles', () => {
+  assert.deepEqual(getMapPlaneSize(1200, 600, 1200, 800), { width: 900, height: 600 })
+  assert.deepEqual(getMapPlaneSize(320, 500, 1200, 800), { width: 320, height: 320 / 1.5 })
+})
 
 test('screenToMap y mapToScreen conservan coordenadas al 50, 100 y 200 por ciento con pan', () => {
   for (const zoom of [.5, 1, 2]) {

@@ -49,13 +49,6 @@ export function TicketPanel({ isAddSuccess = false, isBusy, lines, onDecrement, 
           </div>
         )}
       </div>
-
-      <div className="border-t border-[var(--separator)] p-4">
-        <div className="flex items-center justify-between gap-4">
-          <span className="flex items-center gap-2 text-lg font-bold">Total {isAddSuccess ? <Check aria-label="Producto añadido al ticket" className="ticket-panel-success h-5 w-5 text-[var(--success)]" /> : null}</span>
-          <span className="font-mono text-3xl font-black tabular-nums">{formatMoney(total)}</span>
-        </div>
-      </div>
     </section>
   )
 }

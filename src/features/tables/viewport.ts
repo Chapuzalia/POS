@@ -1,12 +1,20 @@
 export type Point = { x: number; y: number }
 export type Viewport = { zoom: number; panX: number; panY: number }
 export type MapBounds = { minX: number; minY: number; maxX: number; maxY: number }
+export type MapPlaneSize = { width: number; height: number }
 
 export const MIN_ZOOM = 0.5
 export const MAX_ZOOM = 2
 
 export function clamp(value: number, min: number, max: number) {
   return Math.min(max, Math.max(min, value))
+}
+
+export function getMapPlaneSize(viewportWidth: number, viewportHeight: number, designWidth: number, designHeight: number): MapPlaneSize {
+  if (viewportWidth <= 0 || viewportHeight <= 0) return { width: 0, height: 0 }
+  const aspectRatio = Math.max(0.1, designWidth) / Math.max(0.1, designHeight)
+  const width = Math.min(viewportWidth, viewportHeight * aspectRatio)
+  return { width, height: width / aspectRatio }
 }
 
 export function screenToMap(point: Point, bounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>, viewport: Viewport): Point {
@@ -23,10 +31,10 @@ export function zoomAtPoint(viewport: Viewport, nextZoom: number, anchor: Point,
   return { zoom, panX: localX - (localX - viewport.panX) * ratio, panY: localY - (localY - viewport.panY) * ratio }
 }
 
-export function fitBounds(content: MapBounds, viewportWidth: number, viewportHeight: number, padding = 32): Viewport {
+export function fitBounds(content: MapBounds, viewportWidth: number, viewportHeight: number, padding = 32, mapWidth = viewportWidth, mapHeight = viewportHeight): Viewport {
   const widthRatio = Math.max(0.01, (content.maxX - content.minX) / 100), heightRatio = Math.max(0.01, (content.maxY - content.minY) / 100)
-  const zoom = clamp(Math.min((viewportWidth - padding * 2) / (viewportWidth * widthRatio), (viewportHeight - padding * 2) / (viewportHeight * heightRatio)), MIN_ZOOM, MAX_ZOOM)
-  const centerX = ((content.minX + content.maxX) / 2 / 100) * viewportWidth * zoom, centerY = ((content.minY + content.maxY) / 2 / 100) * viewportHeight * zoom
+  const zoom = clamp(Math.min((viewportWidth - padding * 2) / (mapWidth * widthRatio), (viewportHeight - padding * 2) / (mapHeight * heightRatio)), MIN_ZOOM, MAX_ZOOM)
+  const centerX = ((content.minX + content.maxX) / 2 / 100) * mapWidth * zoom, centerY = ((content.minY + content.maxY) / 2 / 100) * mapHeight * zoom
   return { zoom, panX: viewportWidth / 2 - centerX, panY: viewportHeight / 2 - centerY }
 }
 

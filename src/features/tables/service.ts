@@ -4,16 +4,17 @@ import type { AppliedDiscount, PaymentMethod, TenantContext, TicketLineMixer, Ti
 import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, OpenRestaurantOrderInput, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderLine, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult } from './types'
 import { getOrderPendingUnits } from './service-status'
 import { buildRestaurantOrderLinesPayload } from './order-line-payload'
+import { normalizeMapElements } from './map-elements'
 
 export { buildRestaurantOrderLinesPayload } from './order-line-payload'
 
-type AreaRow = { id: string; tenant_id: string; venue_id: string; name: string; sort_order: number; is_active: boolean; canvas_width: number; canvas_height: number; created_at: string; updated_at: string }
+type AreaRow = { id: string; tenant_id: string; venue_id: string; name: string; sort_order: number; is_active: boolean; canvas_width: number; canvas_height: number; map_elements: unknown; created_at: string; updated_at: string }
 type TableRow = { id: string; tenant_id: string; venue_id: string; area_id: string; name: string; capacity: number; shape: RestaurantTable['shape']; position_x: number; position_y: number; width: number; height: number; is_active: boolean; sort_order: number; reserved_until: string | null; reservation_note: string | null; created_at: string; updated_at: string }
 type OrderRow = { id: string; tenant_id: string; venue_id: string; cash_session_id: string; cash_register_id: string; opened_by_user_id: string; opened_by_device_id: string; guest_count: number; status: RestaurantOrder['status']; revision: number; opened_at: string; updated_at: string; closed_at: string | null }
 type OrderTableRow = { order_id: string; table_id: string; joined_at: string; released_at: string | null }
 type OrderLineRow = { id: string; tenant_id: string; venue_id: string; order_id: string; product_id: string | null; variant_id: string | null; product_name: string; variant_name: string; unit_price_cents: number; quantity: number; served_quantity: number; fully_served_at: string | null; modifiers: TicketLineModifier[]; mixer_product_id: string | null; mixer: TicketLineMixer | null; note: string | null; created_at: string; updated_at: string }
 
-const areaColumns = 'id, tenant_id, venue_id, name, sort_order, is_active, canvas_width, canvas_height, created_at, updated_at'
+const areaColumns = 'id, tenant_id, venue_id, name, sort_order, is_active, canvas_width, canvas_height, map_elements, created_at, updated_at'
 const tableColumns = 'id, tenant_id, venue_id, area_id, name, capacity, shape, position_x, position_y, width, height, is_active, sort_order, reserved_until, reservation_note, created_at, updated_at'
 const orderColumns = 'id, tenant_id, venue_id, cash_session_id, cash_register_id, opened_by_user_id, opened_by_device_id, guest_count, status, revision, opened_at, updated_at, closed_at'
 const lineColumns = 'id, tenant_id, venue_id, order_id, product_id, variant_id, product_name, variant_name, unit_price_cents, quantity, served_quantity, fully_served_at, modifiers, mixer_product_id, mixer, note, created_at, updated_at'
@@ -23,7 +24,7 @@ function requireSupabase() {
   return supabase
 }
 
-const mapArea = (row: AreaRow): DiningArea => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, sortOrder: row.sort_order, isActive: row.is_active, canvasWidth: row.canvas_width, canvasHeight: row.canvas_height, createdAt: row.created_at, updatedAt: row.updated_at })
+const mapArea = (row: AreaRow): DiningArea => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, sortOrder: row.sort_order, isActive: row.is_active, canvasWidth: row.canvas_width, canvasHeight: row.canvas_height, mapElements: normalizeMapElements(row.map_elements), createdAt: row.created_at, updatedAt: row.updated_at })
 const mapTable = (row: TableRow): RestaurantTable => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, areaId: row.area_id, name: row.name, capacity: row.capacity, shape: row.shape, positionX: Number(row.position_x), positionY: Number(row.position_y), width: Number(row.width), height: Number(row.height), isActive: row.is_active, sortOrder: row.sort_order, reservedUntil: row.reserved_until, reservationNote: row.reservation_note, createdAt: row.created_at, updatedAt: row.updated_at })
 const mapOrder = (row: OrderRow): RestaurantOrder => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, cashSessionId: row.cash_session_id, cashRegisterId: row.cash_register_id, openedByUserId: row.opened_by_user_id, openedByDeviceId: row.opened_by_device_id, guestCount: row.guest_count, status: row.status, revision: row.revision, openedAt: row.opened_at, updatedAt: row.updated_at, closedAt: row.closed_at })
 const mapLine = (row: OrderLineRow): RestaurantOrderLine => {
@@ -122,7 +123,7 @@ export async function createDiningArea(context: TenantContext, input: DiningArea
   return mapArea(data)
 }
 export async function updateDiningArea(context: TenantContext, areaId: string, input: DiningAreaUpdateInput) {
-  const { error } = await requireSupabase().from('dining_areas').update({ name: input.name?.trim(), sort_order: input.sortOrder, is_active: input.isActive, canvas_width: input.canvasWidth, canvas_height: input.canvasHeight }).eq('tenant_id', context.tenantId).eq('id', areaId)
+  const { error } = await requireSupabase().from('dining_areas').update({ name: input.name?.trim(), sort_order: input.sortOrder, is_active: input.isActive, canvas_width: input.canvasWidth, canvas_height: input.canvasHeight, map_elements: input.mapElements }).eq('tenant_id', context.tenantId).eq('id', areaId)
   if (error) throw error
 }
 export async function createRestaurantTable(context: TenantContext, input: RestaurantTableCreateInput) {

@@ -8,7 +8,7 @@ import { boundsOf, compositionHasOpenOrder, findJoinProposal, getJoinedIds, sepa
 import { layoutFromMap } from '../layout-service'
 import type { RestaurantMap, RestaurantTableMapItem, SessionTableLayout, TableLayoutEntry } from '../types'
 import { useMapViewport } from '../useMapViewport'
-import { positionFloatingPanel, screenToMap } from '../viewport'
+import { getMapPlaneSize, positionFloatingPanel, screenToMap } from '../viewport'
 import { MapViewportControls } from './MapViewportControls'
 import '../tables.css'
 
@@ -72,13 +72,19 @@ export function TableMapView(props: Props) {
   const viewportApi = useMapViewport(`table-map:${cashSessionId}:${selectedAreaId ?? 'default'}`)
   const { viewport } = viewportApi
   const activeAreaId = selectedAreaId && map.areas.some((area) => area.id === selectedAreaId) ? selectedAreaId : map.areas[0]?.id
+  const activeArea = map.areas.find((area) => area.id === activeAreaId)
+  const mapElements = activeArea?.mapElements ?? []
+  const planeSize = useMemo(
+    () => getMapPlaneSize(canvasSize.width, canvasSize.height, activeArea?.canvasWidth ?? 1200, activeArea?.canvasHeight ?? 800),
+    [activeArea?.canvasHeight, activeArea?.canvasWidth, canvasSize.height, canvasSize.width],
+  )
   const tables = useMemo(() => displayTables.filter((table) => table.areaId === activeAreaId), [activeAreaId, displayTables])
   const layoutGroups = useMemo(() => {
     const groups = new Map<string, RestaurantTableMapItem[]>()
     tables.forEach((table) => { if (table.layoutGroupId) groups.set(table.layoutGroupId, [...(groups.get(table.layoutGroupId) ?? []), table]) })
     return [...groups.entries()].filter(([, members]) => members.length > 1)
   }, [tables])
-  const visualTables = useMemo(() => tables.map((table) => ({ table, rect: tableVisualRect(table, canvasSize, viewport) })), [canvasSize, tables, viewport])
+  const visualTables = useMemo(() => tables.map((table) => ({ table, rect: tableVisualRect(table, planeSize, viewport) })), [planeSize, tables, viewport])
   const contentModes = useMemo(() => new Map(visualTables.map(({ table, rect }) => [table.id, tableContentMode(rect, table.name)])), [visualTables])
   const externalLabels = useMemo(() => {
     const inputs = visualTables.filter(({ table }) => contentModes.get(table.id) === 'external').map(({ table, rect }) => ({ id: table.id, table: rect, label: externalLabelSize(table.name) }))
@@ -136,8 +142,9 @@ export function TableMapView(props: Props) {
     if (!editMode || savingLayout || !isOnline) return
     event.preventDefault(); event.stopPropagation(); event.currentTarget.setPointerCapture(event.pointerId)
     const bounds = canvasRef.current?.getBoundingClientRect(); if (!bounds) return
+    const dragPlane = getMapPlaneSize(bounds.width, bounds.height, activeArea?.canvasWidth ?? 1200, activeArea?.canvasHeight ?? 800)
     const memberIds = new Set(getJoinedIds(table, displayTables))
-    dragRef.current = { pointerId: event.pointerId, tableId: table.id, start: screenToMap({ x: event.clientX, y: event.clientY }, bounds, viewport), initialTables: displayTables, currentTables: displayTables, memberIds, moved: false, proposal: null }
+    dragRef.current = { pointerId: event.pointerId, tableId: table.id, start: screenToMap({ x: event.clientX, y: event.clientY }, { left: bounds.left, top: bounds.top, ...dragPlane }, viewport), initialTables: displayTables, currentTables: displayTables, memberIds, moved: false, proposal: null }
     setGroupMenu(null)
   }
 
@@ -145,7 +152,9 @@ export function TableMapView(props: Props) {
     const drag = dragRef.current, canvas = canvasRef.current
     if (!drag || !canvas || drag.pointerId !== event.pointerId) return
     event.preventDefault()
-    const current = screenToMap({ x: event.clientX, y: event.clientY }, canvas.getBoundingClientRect(), viewport)
+    const bounds = canvas.getBoundingClientRect()
+    const dragPlane = getMapPlaneSize(bounds.width, bounds.height, activeArea?.canvasWidth ?? 1200, activeArea?.canvasHeight ?? 800)
+    const current = screenToMap({ x: event.clientX, y: event.clientY }, { left: bounds.left, top: bounds.top, ...dragPlane }, viewport)
     const dx = current.x - drag.start.x, dy = current.y - drag.start.y
     if (Math.hypot(dx, dy) > .25) drag.moved = true
     const moved = translateComposition(drag.initialTables, drag.memberIds, dx, dy)
@@ -261,7 +270,8 @@ export function TableMapView(props: Props) {
           return <g className={`status-${table?.status ?? 'free'}`} key={label.id}><line x1={label.connector.from.x} x2={label.connector.to.x} y1={label.connector.from.y} y2={label.connector.to.y} /><circle cx={label.connector.from.x} cy={label.connector.from.y} r="2.5" /></g>
         })}
       </svg>
-      <div className="map-transform-layer" style={{ transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})` }}>
+      <div className="map-transform-layer" style={{ width: planeSize.width, height: planeSize.height, transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})` }}>
+        {mapElements.map((element) => <div aria-hidden="true" className={`table-map-element kind-${element.kind}`} key={element.id} style={{ left: `${element.positionX}%`, top: `${element.positionY}%`, width: `${element.width}%`, height: `${element.height}%` }}>{element.kind === 'text' ? <span>{element.text}</span> : null}</div>)}
         {guidelines.x !== null ? <div aria-hidden="true" className="table-map-guideline vertical" style={{ left: `${guidelines.x}%` }} /> : null}
         {guidelines.y !== null ? <div aria-hidden="true" className="table-map-guideline horizontal" style={{ top: `${guidelines.y}%` }} /> : null}
         {layoutGroups.map(([groupId, members]) => { const bounds = boundsOf(members); return <div aria-hidden="true" className="table-group-outline" key={groupId} style={{ left: `${bounds.left}%`, top: `${bounds.top}%`, width: `${bounds.right - bounds.left}%`, height: `${bounds.bottom - bounds.top}%` }} /> })}
@@ -287,7 +297,7 @@ export function TableMapView(props: Props) {
           </div>
         })}
       </div>
-      <MapViewportControls zoom={viewport.zoom} onFit={() => canvasRef.current && viewportApi.fit(canvasRef.current, tables)} onReset={() => viewportApi.setViewport({ zoom: 1, panX: 0, panY: 0 })} onZoomIn={() => canvasRef.current && viewportApi.zoomBy(1.2, canvasRef.current)} onZoomOut={() => canvasRef.current && viewportApi.zoomBy(1 / 1.2, canvasRef.current)} />
+      <MapViewportControls zoom={viewport.zoom} onFit={() => canvasRef.current && viewportApi.fit(canvasRef.current, [...tables, ...mapElements], planeSize)} onReset={() => viewportApi.setViewport({ zoom: 1, panX: 0, panY: 0 })} onZoomIn={() => canvasRef.current && viewportApi.zoomBy(1.2, canvasRef.current)} onZoomOut={() => canvasRef.current && viewportApi.zoomBy(1 / 1.2, canvasRef.current)} />
       {editMode && groupMenu ? <div className="table-group-menu" style={{ left: groupMenu.left, top: groupMenu.top }}><strong>{groupMenuTable?.name}</strong>{groupMenuLocked ? <p>La comanda esta abierta. Cobra o cancela la comanda antes de separar las mesas.</p> : null}<button disabled={groupMenuLocked} onClick={() => separate(groupMenu.tableId, false)} type="button"><Unlink size={16} /> Separar esta mesa</button><button disabled={groupMenuLocked} onClick={() => separate(groupMenu.tableId, true)} type="button"><Unlink size={16} /> Separar todas las mesas</button></div> : null}
     </section>
     {pendingIds ? <div className="table-modal-backdrop"><section className="table-modal"><h2>{pendingIds.length > 1 ? `Abrir ${pendingIds.length} mesas juntas` : map.tables.find((table) => table.id === pendingIds[0])?.name}</h2><p>La comanda se guardara automaticamente y quedara disponible para los dispositivos del local.</p><label>Numero de comensales<input autoFocus min="1" onChange={(event) => setGuestCount(Math.max(1, Number(event.target.value)))} type="number" value={guestCount} /></label><div><button className="table-action secondary" onClick={() => setPendingIds(null)} type="button">Cancelar</button><button className="table-action primary" disabled={isBusy || !isOnline || !canOpen} onClick={() => void confirmOpen()} type="button">Abrir mesa</button></div></section></div> : null}
