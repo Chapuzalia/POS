@@ -1,4 +1,4 @@
-import { CheckCircle2, Coins, CreditCard, Tags, X, Percent, type LucideIcon } from 'lucide-react'
+import { CheckCircle2, Coins, CreditCard, X, Percent, type LucideIcon } from 'lucide-react'
 import { formatDiscountValue, getDiscountLabel } from '../../lib/discounts'
 import { formatMoney } from '../../lib/format'
 import type { AppliedDiscount, PaymentMethod } from '../../types'

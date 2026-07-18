@@ -1,4 +1,4 @@
-import { Check, CheckCheck, Minus, Pencil, Plus, Trash2 } from 'lucide-react'
+import { Check, CheckCheck, Minus, Plus, Trash2 } from 'lucide-react'
 import { formatMoney } from '../../../lib/format'
 import { getLineAdditionNames } from '../../../lib/mixers'
 import { Button } from '../../../components/ui'
@@ -6,7 +6,6 @@ import { canDecreaseLineQuantity, getOrderPendingUnits, getPendingQuantity } fro
 import type { RestaurantOrderDetail, RestaurantOrderLine } from '../types'
 
 type Props = {
-  isAddSuccess?: boolean
   isBusy: boolean
   order: RestaurantOrderDetail
   onDecrement: (lineId: string) => void
@@ -18,7 +17,7 @@ type Props = {
   onServeOne: (lineId: string) => void
 }
 
-function OrderLineRow({ isBusy, line, onDecrement, onEdit, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder'> & { line: RestaurantOrderLine }) {
+function OrderLineRow({ isBusy, line, onDecrement, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder'> & { line: RestaurantOrderLine }) {
   const pending = getPendingQuantity(line)
   const additionNames = getLineAdditionNames(line.modifiers, line.mixer)
   return (
@@ -48,7 +47,7 @@ function OrderLineRow({ isBusy, line, onDecrement, onEdit, onIncrement, onRemove
 }
 
 export function RestaurantOrderPanel(props: Props) {
-  const { isAddSuccess = false, isBusy, order, onServeAllOrder, ...lineProps } = props
+  const { isBusy, order, onServeAllOrder, ...lineProps } = props
   const pendingLines = order.lines.filter((line) => getPendingQuantity(line) > 0)
   const servedLines = order.lines.filter((line) => getPendingQuantity(line) === 0)
   const pendingUnits = getOrderPendingUnits(order.lines)

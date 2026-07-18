@@ -81,24 +81,27 @@ import { TableMapView } from './features/tables/components/TableMapView'
 import { TableOrderBar } from './features/tables/components/TableOrderBar'
 import { RestaurantOrderPanel } from './features/tables/components/RestaurantOrderPanel'
 import { RemoveOrderLineModal } from './features/tables/components/RemoveOrderLineModal'
+import { SplitOrderModal } from './features/tables/components/SplitOrderModal'
 import {
   cancelEmptyRestaurantOrder,
   closeRestaurantOrder,
   loadOpenRestaurantOrders,
   loadRestaurantMap,
   loadRestaurantOrder,
+  loadRestaurantOrderGroup,
   loadRestaurantOrderPendingUnits,
   loadVenueTablesEnabled,
   markRestaurantOrderFullyServed,
   markRestaurantOrderLineFullyServed,
   markRestaurantOrderLineUnitsServed,
   moveRestaurantOrder,
+  moveRestaurantOrderLines,
   openRestaurantOrder,
   removeRestaurantOrderLineConfirmed,
   saveRestaurantOrderLines,
   subscribeToRestaurantMap,
 } from './features/tables/service'
-import type { PosView, RestaurantMap, RestaurantOrderDetail, RestaurantOrderSaveState } from './features/tables/types'
+import type { PosView, RestaurantMap, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLineMove, RestaurantOrderSaveState } from './features/tables/types'
 import { applySessionLayout, loadSessionTableLayout, saveSessionTableLayout, subscribeToSessionTableLayout } from './features/tables/layout-service'
 import { canDecreaseLineQuantity, getOrderPendingUnits } from './features/tables/service-status'
 import { CashSessionGate } from './features/cash-registers/CashSessionGate'
@@ -226,9 +229,11 @@ function App() {
   const [restaurantSaveState, setRestaurantSaveState] = useState<RestaurantOrderSaveState>('saved')
   const [pendingRestaurantPayment, setPendingRestaurantPayment] = useState<PendingRestaurantPayment | null>(null)
   const [pendingOrderLineRemoval, setPendingOrderLineRemoval] = useState<RestaurantOrderDetail['lines'][number] | null>(null)
+  const [splitOrderGroup, setSplitOrderGroup] = useState<RestaurantOrderGroupDetail | null>(null)
   const floatingTicketButtonRef = useRef<HTMLButtonElement>(null)
   const { announcement, flyFeedback, isAddSuccess, shouldAnimateCount, successId, triggerAddFeedback } = useAddProductFeedback(floatingTicketButtonRef)
   const restaurantOrderRef = useRef<RestaurantOrderDetail | null>(null)
+  const splitOrderGroupRef = useRef<RestaurantOrderGroupDetail | null>(null)
   const restaurantEditGenerationRef = useRef(0)
   const restaurantSaveStateRef = useRef<RestaurantOrderSaveState>('saved')
   const restaurantSavePromiseRef = useRef<Promise<RestaurantOrderDetail | null> | null>(null)
@@ -354,14 +359,27 @@ function App() {
             const detail = await loadRestaurantOrder(context, currentView.orderId)
             if (!active || restaurantSaveStateRef.current !== 'saved') return
             if (detail.order.status !== 'open') {
-              restaurantOrderRef.current = null
-              setRestaurantOrder(null)
+              const group = await loadRestaurantOrderGroup(context, detail.order.id)
+              const nextOrder = group.orders.find((candidate) => candidate.order.status === 'open')
+              restaurantOrderRef.current = nextOrder ?? null
+              setRestaurantOrder(nextOrder ?? null)
               updateRestaurantSaveState('saved')
-              setPosView({ type: 'table_map', areaId: detail.tables[0]?.areaId })
+              setPosView(nextOrder
+                ? { type: 'table_order', orderId: nextOrder.order.id }
+                : { type: 'table_map', areaId: detail.tables[0]?.areaId })
+              if (splitOrderGroupRef.current) {
+                splitOrderGroupRef.current = nextOrder ? group : null
+                setSplitOrderGroup(nextOrder ? group : null)
+              }
               return
             }
             restaurantOrderRef.current = detail
             setRestaurantOrder(detail)
+            if (splitOrderGroupRef.current) {
+              const group = await loadRestaurantOrderGroup(context, detail.order.id)
+              splitOrderGroupRef.current = group
+              setSplitOrderGroup(group)
+            }
           } catch (orderError) {
             if (active) setError(getReadableError(orderError))
           }
@@ -395,6 +413,10 @@ function App() {
   useEffect(() => {
     restaurantOrderRef.current = restaurantOrder
   }, [restaurantOrder])
+
+  useEffect(() => {
+    splitOrderGroupRef.current = splitOrderGroup
+  }, [splitOrderGroup])
 
   useEffect(() => {
     posViewRef.current = posView
@@ -1298,6 +1320,74 @@ function App() {
     } catch (moveError) { setError(getReadableError(moveError)) } finally { setIsBusy(false) }
   }
 
+  async function openSplitOrder() {
+    if (!context || !isOnline || !restaurantOrderRef.current) return
+    setIsBusy(true); setError(null)
+    try {
+      const saved = await flushRestaurantOrderDraft()
+      if (!saved) return
+      const group = await loadRestaurantOrderGroup(context, saved.order.id)
+      splitOrderGroupRef.current = group
+      setSplitOrderGroup(group)
+    } catch (splitError) {
+      setError(getReadableError(splitError))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function splitRestaurantOrder(sourceOrderId: string, targetOrderId: string | null, moves: RestaurantOrderLineMove[]) {
+    if (!context || !isOnline || !splitOrderGroupRef.current) return
+    const group = splitOrderGroupRef.current
+    const source = group.orders.find((detail) => detail.order.id === sourceOrderId)
+    const target = targetOrderId ? group.orders.find((detail) => detail.order.id === targetOrderId) : null
+    if (!source || (targetOrderId && !target)) return
+    setIsBusy(true); setError(null)
+    try {
+      const result = await moveRestaurantOrderLines(sourceOrderId, targetOrderId, source.order.revision, target?.order.revision ?? null, moves)
+      const refreshedGroup = await loadRestaurantOrderGroup(context, result.targetOrderId)
+      splitOrderGroupRef.current = refreshedGroup
+      setSplitOrderGroup(refreshedGroup)
+      const currentId = restaurantOrderRef.current?.order.id
+      const nextCurrentId = result.sourceCancelled && currentId === sourceOrderId ? result.targetOrderId : currentId ?? result.targetOrderId
+      const nextCurrent = refreshedGroup.orders.find((detail) => detail.order.id === nextCurrentId && detail.order.status === 'open')
+        ?? refreshedGroup.orders.find((detail) => detail.order.status === 'open')
+      if (nextCurrent) {
+        restaurantOrderRef.current = nextCurrent
+        setRestaurantOrder(nextCurrent)
+        setPosView({ type: 'table_order', orderId: nextCurrent.order.id })
+        updateRestaurantSaveState('saved')
+      }
+      setRestaurantMap(await loadCurrentRestaurantMap(context))
+    } catch (splitError) {
+      if ((splitError as { code?: string }).code === '40001') {
+        try {
+          const currentId = restaurantOrderRef.current?.order.id ?? sourceOrderId
+          const refreshedGroup = await loadRestaurantOrderGroup(context, currentId)
+          splitOrderGroupRef.current = refreshedGroup
+          setSplitOrderGroup(refreshedGroup)
+          const refreshedCurrent = refreshedGroup.orders.find((detail) => detail.order.id === currentId && detail.order.status === 'open')
+          if (refreshedCurrent) { restaurantOrderRef.current = refreshedCurrent; setRestaurantOrder(refreshedCurrent) }
+          setError('Las comandas cambiaron en otro dispositivo. Se ha recargado la version mas reciente.')
+        } catch (reloadError) { setError(getReadableError(reloadError)) }
+      } else setError(getReadableError(splitError))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  function openOrderFromSplit(orderId: string) {
+    const detail = splitOrderGroupRef.current?.orders.find((candidate) => candidate.order.id === orderId && candidate.order.status === 'open')
+    if (!detail) return
+    restaurantOrderRef.current = detail
+    setRestaurantOrder(detail)
+    setAppliedDiscount(null)
+    updateRestaurantSaveState('saved')
+    setPosView({ type: 'table_order', orderId })
+    splitOrderGroupRef.current = null
+    setSplitOrderGroup(null)
+  }
+
   async function completeRestaurantPayment(paymentMethod: PaymentMethod | null, receivedCents: number | null, forceWithPending = false) {
     if (!context || !context.canTakePayments || !cashSession || !restaurantOrderRef.current || !isOnline) return
     setIsBusy(true); setError(null)
@@ -1321,15 +1411,17 @@ function App() {
         loadSalesLedgerFromSupabase(context, cashSession.id), loadProductSalesStatsFromSupabase(context),
       ])
       persistLedger(nextLedger); persistProductSalesStats(nextStats)
-      setRestaurantOrder(null)
-      restaurantOrderRef.current = null
+      const nextOrderId = paymentResult.nextOrderId ?? null
+      const nextOrder = nextOrderId ? await loadRestaurantOrder(context, nextOrderId) : null
+      setRestaurantOrder(nextOrder)
+      restaurantOrderRef.current = nextOrder
       setPendingRestaurantPayment(null)
       setMobileTicketOpen(false)
       updateRestaurantSaveState('saved')
       setAppliedDiscount(null)
       setPaidFeedback(paymentMethod)
-      await refreshRestaurantState()
-      setPosView({ type: 'table_map', areaId: restaurantMap.areas[0]?.id })
+      await refreshRestaurantState(nextOrderId ?? undefined)
+      setPosView(nextOrderId ? { type: 'table_order', orderId: nextOrderId } : { type: 'table_map', areaId: restaurantMap.areas[0]?.id })
       window.setTimeout(() => setPaidFeedback(null), 500)
     } catch (paymentError) { setError(getReadableError(paymentError)) } finally { setIsBusy(false) }
   }
@@ -1775,7 +1867,6 @@ function App() {
 
   function renderActiveTicketPanel() {
     return posView.type === 'table_order' && restaurantOrder ? <RestaurantOrderPanel
-      isAddSuccess={isAddSuccess}
       isBusy={isBusy || !isOnline}
       onDecrement={(lineId) => updateLineQuantity(lineId, -1)}
       onIncrement={(lineId) => updateLineQuantity(lineId, 1)}
@@ -1802,7 +1893,6 @@ function App() {
       onServeOne={serveRestaurantLineUnit}
       order={restaurantOrder}
     /> : <TicketPanel
-      isAddSuccess={isAddSuccess}
       isBusy={isBusy}
       lines={activeTicketLines}
       onClear={() => {
@@ -1902,6 +1992,7 @@ function App() {
           onBack={() => void returnToTableMap()}
           onCancelEmpty={() => void cancelEmptyTableOrder()}
           onMove={() => void prepareMoveTableOrder()}
+          onSplit={() => void openSplitOrder()}
           order={posView.type === 'table_order' ? restaurantOrder : null}
           quickSale={posView.type === 'quick_sale'}
           saveState={restaurantSaveState}
@@ -2024,6 +2115,15 @@ function App() {
         line={pendingOrderLineRemoval}
         onCancel={() => setPendingOrderLineRemoval(null)}
         onConfirm={() => void confirmRestaurantOrderLineRemoval()}
+      /> : null}
+
+      {splitOrderGroup && restaurantOrder ? <SplitOrderModal
+        currentOrderId={restaurantOrder.order.id}
+        group={splitOrderGroup}
+        isBusy={isBusy}
+        onClose={() => { splitOrderGroupRef.current = null; setSplitOrderGroup(null) }}
+        onMove={splitRestaurantOrder}
+        onOpenOrder={openOrderFromSplit}
       /> : null}
 
       {cashPaymentOpen ? (

@@ -1,6 +1,6 @@
-import { Check, Minus, Plus, Trash2 } from 'lucide-react'
+import { Minus, Plus, Trash2 } from 'lucide-react'
 import { useRef, useState, type MouseEvent, type PointerEvent } from 'react'
-import { formatMoney, getLineTotal, getTicketTotal } from '../../lib/format'
+import { formatMoney, getLineTotal } from '../../lib/format'
 import { getLineAdditionNames } from '../../lib/mixers'
 import type { TicketLine } from '../../types'
 import { cx } from '../../utils/cx'
@@ -8,7 +8,6 @@ import { Button } from '../ui'
 
 type TicketPanelProps = {
   isBusy: boolean
-  isAddSuccess?: boolean
   lines: TicketLine[]
   onClear: () => void
   onDecrement: (lineId: string) => void
@@ -24,9 +23,7 @@ function isTicketLineActionTarget(target: EventTarget | null) {
   return target instanceof Element && Boolean(target.closest('[data-ticket-line-action="true"]'))
 }
 
-export function TicketPanel({ isAddSuccess = false, isBusy, lines, onDecrement, onIncrement, onRemove }: TicketPanelProps) {
-  const total = getTicketTotal(lines)
-
+export function TicketPanel({ isBusy, lines, onDecrement, onIncrement, onRemove }: TicketPanelProps) {
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
       <div className="min-h-0 flex-1 overflow-y-auto p-3">
