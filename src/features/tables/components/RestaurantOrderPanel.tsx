@@ -2,7 +2,7 @@ import { Check, CheckCheck, Minus, Pencil, Plus, Trash2 } from 'lucide-react'
 import { formatMoney } from '../../../lib/format'
 import { getLineAdditionNames } from '../../../lib/mixers'
 import { Button } from '../../../components/ui'
-import { canDecreaseLineQuantity, getOrderPendingUnits, getPendingQuantity, isLineRemovable } from '../service-status'
+import { canDecreaseLineQuantity, getOrderPendingUnits, getPendingQuantity } from '../service-status'
 import type { RestaurantOrderDetail, RestaurantOrderLine } from '../types'
 
 type Props = {
@@ -20,7 +20,6 @@ type Props = {
 
 function OrderLineRow({ isBusy, line, onDecrement, onEdit, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder'> & { line: RestaurantOrderLine }) {
   const pending = getPendingQuantity(line)
-  const removable = isLineRemovable(line)
   const additionNames = getLineAdditionNames(line.modifiers, line.mixer)
   return (
     <article className={`rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 ${pending === 0 ? 'opacity-65' : ''}`}>
@@ -37,7 +36,7 @@ function OrderLineRow({ isBusy, line, onDecrement, onEdit, onIncrement, onRemove
           <Button aria-label="Reducir cantidad" disabled={isBusy || !canDecreaseLineQuantity(line)} onClick={() => onDecrement(line.id)} size="sm" type="button" variant="tertiary"><Minus className="h-4 w-4" /></Button>
           <span className="w-7 text-center font-mono font-bold">{line.quantity}</span>
           <Button aria-label="Aumentar cantidad" disabled={isBusy} onClick={() => onIncrement(line.id)} size="sm" type="button" variant="tertiary"><Plus className="h-4 w-4" /></Button>
-          <Button aria-label="Eliminar linea" disabled={isBusy || !removable} onClick={() => onRemove(line.id)} size="sm" title={removable ? 'Eliminar linea' : 'No se puede eliminar una linea con productos ya servidos.'} type="button" variant="tertiary"><Trash2 className="h-4 w-4" /></Button>
+          <Button aria-label="Eliminar linea" disabled={isBusy} onClick={() => onRemove(line.id)} size="sm" title="Eliminar linea" type="button" variant="tertiary"><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
       {pending > 0 ? <div className="mt-3 grid grid-cols-2 gap-2">

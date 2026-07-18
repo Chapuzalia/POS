@@ -80,6 +80,7 @@ import { checkLoginLease, forceClaimLoginLease, heartbeatLoginLease, releaseLoca
 import { TableMapView } from './features/tables/components/TableMapView'
 import { TableOrderBar } from './features/tables/components/TableOrderBar'
 import { RestaurantOrderPanel } from './features/tables/components/RestaurantOrderPanel'
+import { RemoveOrderLineModal } from './features/tables/components/RemoveOrderLineModal'
 import {
   cancelEmptyRestaurantOrder,
   closeRestaurantOrder,
@@ -93,12 +94,13 @@ import {
   markRestaurantOrderLineUnitsServed,
   moveRestaurantOrder,
   openRestaurantOrder,
+  removeRestaurantOrderLineConfirmed,
   saveRestaurantOrderLines,
   subscribeToRestaurantMap,
 } from './features/tables/service'
 import type { PosView, RestaurantMap, RestaurantOrderDetail, RestaurantOrderSaveState } from './features/tables/types'
 import { applySessionLayout, loadSessionTableLayout, saveSessionTableLayout, subscribeToSessionTableLayout } from './features/tables/layout-service'
-import { canDecreaseLineQuantity, getOrderPendingUnits, isLineRemovable } from './features/tables/service-status'
+import { canDecreaseLineQuantity, getOrderPendingUnits } from './features/tables/service-status'
 import { CashSessionGate } from './features/cash-registers/CashSessionGate'
 import { AddProductFlyAnimation } from './components/feedback/AddProductFlyAnimation'
 import { closeCashRegisterSession, loadCashRegisterOptions, openCashRegisterSession, subscribeToVenueCashSessions } from './features/cash-registers/service'
@@ -223,6 +225,7 @@ function App() {
   const [tablesConfigLoaded, setTablesConfigLoaded] = useState(false)
   const [restaurantSaveState, setRestaurantSaveState] = useState<RestaurantOrderSaveState>('saved')
   const [pendingRestaurantPayment, setPendingRestaurantPayment] = useState<PendingRestaurantPayment | null>(null)
+  const [pendingOrderLineRemoval, setPendingOrderLineRemoval] = useState<RestaurantOrderDetail['lines'][number] | null>(null)
   const floatingTicketButtonRef = useRef<HTMLButtonElement>(null)
   const { announcement, flyFeedback, isAddSuccess, shouldAnimateCount, successId, triggerAddFeedback } = useAddProductFeedback(floatingTicketButtonRef)
   const restaurantOrderRef = useRef<RestaurantOrderDetail | null>(null)
@@ -1244,6 +1247,46 @@ function App() {
     setPosView({ type: 'table_map', areaId: saved.tables[0]?.areaId })
   }
 
+  async function confirmRestaurantOrderLineRemoval() {
+    const line = pendingOrderLineRemoval
+    if (!context || !isOnline || !line) return
+
+    setIsBusy(true)
+    setError(null)
+    try {
+      const saved = await flushRestaurantOrderDraft()
+      if (!saved) return
+      const currentLine = saved.lines.find((candidate) => candidate.id === line.id)
+      if (!currentLine) {
+        setPendingOrderLineRemoval(null)
+        return
+      }
+      await removeRestaurantOrderLineConfirmed(currentLine.id, saved.order.revision)
+      const refreshed = await loadRestaurantOrder(context, saved.order.id)
+      restaurantOrderRef.current = refreshed
+      setRestaurantOrder(refreshed)
+      updateRestaurantSaveState('saved')
+      setPendingOrderLineRemoval(null)
+    } catch (removeError) {
+      if ((removeError as { code?: string }).code === '40001' && restaurantOrderRef.current) {
+        try {
+          const refreshed = await loadRestaurantOrder(context, restaurantOrderRef.current.order.id)
+          restaurantOrderRef.current = refreshed
+          setRestaurantOrder(refreshed)
+          updateRestaurantSaveState('saved')
+          setPendingOrderLineRemoval(null)
+          setError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
+        } catch (reloadError) {
+          setError(getReadableError(reloadError))
+        }
+      } else {
+        setError(getReadableError(removeError))
+      }
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   async function moveTableOrder(tableId: string) {
     if (!moveOrderId || !isOnline) return
     setIsBusy(true); setError(null)
@@ -1752,11 +1795,7 @@ function App() {
       }}
       onRemove={(lineId) => {
         const line = restaurantOrderRef.current?.lines.find((item) => item.id === lineId)
-        if (!line || !isLineRemovable(line)) {
-          setError('No puedes eliminar una linea con productos ya servidos.')
-          return
-        }
-        updateRestaurantDraft((detail) => ({ ...detail, lines: detail.lines.filter((item) => item.id !== lineId) }))
+        if (line) setPendingOrderLineRemoval(line)
       }}
       onServeAll={serveRestaurantLineFully}
       onServeAllOrder={serveRestaurantOrderFully}
@@ -1979,6 +2018,13 @@ function App() {
           </div>
         </section>
       </div> : null}
+
+      {pendingOrderLineRemoval ? <RemoveOrderLineModal
+        isBusy={isBusy}
+        line={pendingOrderLineRemoval}
+        onCancel={() => setPendingOrderLineRemoval(null)}
+        onConfirm={() => void confirmRestaurantOrderLineRemoval()}
+      /> : null}
 
       {cashPaymentOpen ? (
         <CashPaymentModal

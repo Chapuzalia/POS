@@ -15,6 +15,7 @@ import {
   LayoutDashboard,
   LogOut,
   Menu,
+  Moon,
   MonitorSmartphone,
   Pencil,
   Plus,
@@ -25,6 +26,7 @@ import {
   Settings,
   SlidersHorizontal,
   Store,
+  Sun,
   Tags,
   Trash2,
   Upload,
@@ -121,6 +123,7 @@ import type {
 } from '../../types'
 import { getReadableError } from '../../utils/errors'
 import { TableManagementPage } from '../../features/table-management/TableManagementPage'
+import { CrmVenueSelector } from './CrmVenueSelector'
 import './crm.css'
 
 type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'discounts' | 'tables' | 'reports' | 'import' | 'stats' | 'settings' | 'plan'
@@ -178,6 +181,18 @@ const paymentLabels: Record<HistoricalPaymentMethod, string> = {
 }
 
 const CRM_PAGE_SIZE = 12
+const CRM_THEME_STORAGE_KEY = 'pos:crm-theme'
+type CrmTheme = 'light' | 'dark'
+
+function getInitialCrmTheme(): CrmTheme {
+  try {
+    const storedTheme = window.localStorage.getItem(CRM_THEME_STORAGE_KEY)
+    if (storedTheme === 'light' || storedTheme === 'dark') return storedTheme
+  } catch {
+    // El almacenamiento puede no estar disponible en navegacion privada.
+  }
+  return document.documentElement.dataset.theme === 'club-night' ? 'dark' : 'light'
+}
 
 type CrmPaginationProps = {
   currentPage: number
@@ -333,6 +348,7 @@ export function CrmPage({
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isProductsMenuOpen, setIsProductsMenuOpen] = useState(false)
+  const [crmTheme, setCrmTheme] = useState<CrmTheme>(getInitialCrmTheme)
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)
   const [venues, setVenues] = useState<CrmVenue[]>([])
@@ -345,6 +361,16 @@ export function CrmPage({
   const venueCategories = categories.filter((category) => venueCategoryIds.has(category.id))
   const activeProducts = venueProducts.filter((product) => product.isActive)
   const activeCategories = venueCategories.filter((category) => category.isActive)
+
+  function toggleCrmTheme() {
+    const nextTheme: CrmTheme = crmTheme === 'dark' ? 'light' : 'dark'
+    setCrmTheme(nextTheme)
+    try {
+      window.localStorage.setItem(CRM_THEME_STORAGE_KEY, nextTheme)
+    } catch {
+      // El cambio sigue activo durante la sesion aunque no pueda persistirse.
+    }
+  }
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
     setIsBusy(true)
@@ -438,7 +464,7 @@ export function CrmPage({
   }, [isSidebarOpen])
 
   return (
-    <div className="crm-shell crm-dashboard-shell !flex !h-dvh !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased">
+    <div className="crm-shell crm-dashboard-shell !flex !h-dvh !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased" data-crm-theme={crmTheme}>
       <button
         aria-label="Cerrar menu de navegacion"
         className={isSidebarOpen
@@ -547,10 +573,14 @@ export function CrmPage({
           })}
         </nav>
 
-        <div className="crm-sidebar-footer !mt-auto !grid !gap-[5px] !pt-7">
+        <div className="crm-sidebar-footer !mt-auto !grid !grid-cols-2 !gap-[5px] !pt-7">
+          <button aria-label={crmTheme === 'dark' ? 'Cambiar CRM a modo claro' : 'Cambiar CRM a modo oscuro'} className="crm-nav-item !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-2 !rounded-[10px] !border-0 !bg-transparent !px-3 !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150" onClick={toggleCrmTheme} title={crmTheme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'} type="button">
+            {crmTheme === 'dark' ? <Sun className="h-4 w-4" /> : <Moon className="h-4 w-4" />}
+            <span className="!truncate">{crmTheme === 'dark' ? 'Claro' : 'Oscuro'}</span>
+          </button>
           <button className="crm-nav-item !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150" onClick={onLogout} type="button">
             <LogOut className="h-4 w-4" />
-            <span className="!inline">Cerrar sesion</span>
+            <span className="!truncate">Salir</span>
           </button>
         </div>
       </aside>
@@ -578,22 +608,15 @@ export function CrmPage({
           </div>
 
           <div className="crm-topbar-actions !flex !w-auto !min-w-0 !basis-[130px] !items-center !justify-end !gap-2.5 !overflow-visible sm:!basis-[180px] md:!basis-auto">
-            <label className="crm-venue-selector !inline-flex !min-h-10 !w-full !min-w-0 !items-center !gap-2 !rounded-[11px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)] !transition-[border-color,box-shadow] !duration-150 md:!min-h-[42px] md:!w-auto md:!min-w-[220px]">
-              <Building2 className="hidden h-4 w-4 sm:block" />
-              <select
-                className="min-w-0 flex-1 border-0 bg-transparent text-[13px] font-semibold text-inherit outline-none"
-                disabled={!isOnline || isBusy}
-                onChange={(event) => {
-                  setStats(null)
-                  setSelectedVenueId(event.target.value)
-                }}
-                value={selectedVenueId}
-              >
-                {venues.filter((venue) => venue.isActive).map((venue) => (
-                  <option key={venue.id} value={venue.id}>{venue.name}</option>
-                ))}
-              </select>
-            </label>
+            <CrmVenueSelector
+              disabled={!isOnline || isBusy}
+              onChange={(venueId) => {
+                setStats(null)
+                setSelectedVenueId(venueId)
+              }}
+              value={selectedVenueId}
+              venues={venues}
+            />
             <div className="crm-date-chip !hidden !min-h-[42px] !items-center !gap-2 !rounded-[11px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-xs !font-medium !whitespace-nowrap !text-[var(--crm-text-secondary)] lg:!inline-flex">{new Intl.DateTimeFormat('es-ES').format(new Date())}</div>
             <div className={isOnline ? 'crm-status crm-status-online !hidden !min-h-7 !items-center !gap-2 !rounded-full !border !border-transparent !bg-[var(--crm-green-soft)] !px-2.5 !text-[11px] !font-semibold !whitespace-nowrap !text-[var(--crm-green)] md:!inline-flex' : 'crm-status crm-status-offline !hidden !min-h-7 !items-center !gap-2 !rounded-full !border !border-transparent !bg-[var(--crm-red-soft)] !px-2.5 !text-[11px] !font-semibold !whitespace-nowrap !text-[var(--crm-red)] md:!inline-flex'}>
               {isOnline ? 'Online' : 'Offline'}
@@ -3952,7 +3975,7 @@ function DiscountsCrm({ disabled, onCatalogChanged, runAction, selectedVenueId, 
   return (
     <div className="!grid !grid-cols-1 !items-start !gap-4 xl:!gap-6">
       <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
+        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!flex-row md:!items-center md:!px-[22px]">
           <div className="crm-list-title">
             <h2>Descuentos</h2>
             <p>{discounts.length} configurados para el local seleccionado</p>
@@ -3964,16 +3987,16 @@ function DiscountsCrm({ disabled, onCatalogChanged, runAction, selectedVenueId, 
 
         <div className="!grid !gap-2 !p-[18px] md:!p-[22px]">
           {discounts.map((discount) => (
-            <div className="!grid !min-h-[68px] !grid-cols-[minmax(0,1fr)_130px_100px_auto] !items-center !gap-3 !rounded-[12px] !bg-[var(--crm-surface-soft)] !px-4 !py-3 !text-[13px]" key={discount.id}>
+            <div className="!grid !min-h-[68px] !grid-cols-[minmax(0,1fr)_130px_100px_auto] !items-center !gap-3 !rounded-[12px] !bg-[var(--crm-surface-soft)] !px-4 !py-3 !text-[13px] !text-[var(--crm-text)]" key={discount.id}>
               <div className="!flex !min-w-0 !items-center !gap-3">
                 <span className="!size-3 !shrink-0 !rounded-full !border !border-black/10" style={{ backgroundColor: discount.color ?? 'var(--crm-blue)' }} />
                 <div className="crm-cell-main"><strong>{discount.name}</strong><span>{discount.type === 'percentage' ? 'Porcentaje' : 'Importe fijo'}</span></div>
               </div>
-              <strong className="!font-mono">{discount.type === 'percentage' ? `${discount.value} %` : formatMoney(discount.value)}</strong>
+              <strong className="!font-mono !text-[var(--crm-text)]">{discount.type === 'percentage' ? `${discount.value} %` : formatMoney(discount.value)}</strong>
               <span className={discount.isActive ? 'crm-status-pill !w-fit !rounded-full !bg-[var(--crm-green-soft)] !px-2.5 !py-1 !text-[11px] !font-semibold !text-[var(--crm-green)]' : 'crm-status-pill !w-fit !rounded-full !bg-[var(--crm-input-bg)] !px-2.5 !py-1 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]'}>{discount.isActive ? 'Activo' : 'Inactivo'}</span>
               <div className="!flex !justify-end !gap-2">
-                <button className="crm-action-button !min-h-9 !rounded-[9px] !border-0 !bg-[var(--crm-surface)] !px-3 !font-semibold" disabled={disabled} onClick={() => setEditor(discount)} type="button"><Pencil className="!mr-1 !inline !size-3.5" />Editar</button>
-                <button className="crm-action-button !min-h-9 !rounded-[9px] !border-0 !bg-[var(--crm-surface)] !px-3 !font-semibold" disabled={disabled} onClick={() => void toggleDiscount(discount)} type="button">{discount.isActive ? 'Desactivar' : 'Activar'}</button>
+                <button className="crm-action-button !min-h-9 !rounded-[9px] !border-0 !bg-[var(--crm-surface)] !px-3 !font-semibold !text-[var(--crm-text-secondary)]" disabled={disabled} onClick={() => setEditor(discount)} type="button"><Pencil className="!mr-1 !inline !size-3.5" />Editar</button>
+                <button className="crm-action-button !min-h-9 !rounded-[9px] !border-0 !bg-[var(--crm-surface)] !px-3 !font-semibold !text-[var(--crm-text-secondary)]" disabled={disabled} onClick={() => void toggleDiscount(discount)} type="button">{discount.isActive ? 'Desactivar' : 'Activar'}</button>
               </div>
             </div>
           ))}
@@ -4036,13 +4059,13 @@ function DiscountEditor({ disabled, discount, onClose, onSaved, runAction, selec
 
   return (
     <CrmModal label={discount ? 'Editar descuento' : 'Añadir descuento'} onClose={onClose}>
-      <div className="crm-editor-header !flex !items-center !justify-between !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]"><div><span>{discount ? 'Editar descuento' : 'Nuevo descuento'}</span><small>Aplicable a la cuenta completa</small></div><button aria-label="Cerrar" className="crm-editor-close" onClick={onClose} type="button"><X className="h-4 w-4" /></button></div>
+      <div className="crm-editor-header !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]"><div><span>{discount ? 'Editar descuento' : 'Nuevo descuento'}</span><small>Aplicable a la cuenta completa</small></div><button aria-label="Cerrar" className="crm-editor-close !inline-flex !size-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={onClose} type="button"><X className="h-4 w-4" /></button></div>
       <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !py-5" onSubmit={(event) => { event.preventDefault(); void save() }}>
-        <Field label="Nombre"><input autoFocus className="crm-input !h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5" onChange={(event) => setName(event.target.value)} value={name} /></Field>
-        <Field label="Tipo"><select className="crm-input !h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5" onChange={(event) => { setType(event.target.value as DiscountCalculationType); setValue('') }} value={type}><option value="percentage">Porcentaje</option><option value="fixed">Importe fijo</option></select></Field>
-        <Field label={type === 'percentage' ? 'Porcentaje' : 'Importe'}><input className="crm-input !h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5" inputMode="decimal" onChange={(event) => { setValue(event.target.value); setValidationError(null) }} value={value} /></Field>
-        <Field label="Color"><input className="!h-11 !w-full !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !p-1" onChange={(event) => setColor(event.target.value)} type="color" value={color} /></Field>
-        <label className="!flex !items-center !gap-2 !text-sm !font-semibold"><input checked={isActive} onChange={(event) => setIsActive(event.target.checked)} type="checkbox" /> Activo</label>
+        <Field label="Nombre"><input autoFocus className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none" onChange={(event) => setName(event.target.value)} value={name} /></Field>
+        <Field label="Tipo"><select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none" onChange={(event) => { setType(event.target.value as DiscountCalculationType); setValue('') }} value={type}><option value="percentage">Porcentaje</option><option value="fixed">Importe fijo</option></select></Field>
+        <Field label={type === 'percentage' ? 'Porcentaje' : 'Importe'}><input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none" inputMode="decimal" onChange={(event) => { setValue(event.target.value); setValidationError(null) }} value={value} /></Field>
+        <Field label="Color"><div className="crm-color-field"><span>{color.toUpperCase()}</span><input aria-label="Color del descuento" onChange={(event) => setColor(event.target.value)} type="color" value={color} /></div></Field>
+        <label className="!flex !min-h-11 !items-center !gap-2.5 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3.5 !text-sm !font-semibold !text-[var(--crm-text)]"><input className="!size-4 !accent-[var(--crm-blue)]" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} type="checkbox" /> Activo</label>
         {validationError ? <p className="!text-sm !font-semibold !text-[var(--crm-red)]">{validationError}</p> : null}
         <button className="crm-primary-button !min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !font-semibold !text-white" disabled={disabled} type="submit"><Save className="!mr-2 !inline !size-4" />Guardar</button>
       </form>
