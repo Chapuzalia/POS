@@ -796,6 +796,7 @@ type SessionTicketQueryRow = {
     product_name: string
     variant_name: string
     quantity: number
+    allocated_quantity: number | null
     unit_price_cents: number
     line_total_cents: number
     tax_rate: number | null
@@ -854,6 +855,7 @@ export async function loadSessionTicketsFromSupabase(
           product_name,
           variant_name,
           quantity,
+          allocated_quantity,
           unit_price_cents,
           line_total_cents,
           tax_rate,
@@ -918,7 +920,7 @@ export async function loadSessionTicketsFromSupabase(
         variantId: line.variant_id ?? loggedLine?.variantId ?? '',
         productName: line.product_name,
         variantName: line.variant_name,
-        quantity: line.quantity,
+        quantity: Number(line.allocated_quantity ?? line.quantity),
         unitPriceCents: line.unit_price_cents,
         lineTotalCents: line.line_total_cents,
         fiscalSnapshot: mapFiscalSnapshot(line),
@@ -995,7 +997,7 @@ export async function loadProductSalesStatsFromSupabase(context: TenantContext):
 
   const { data, error } = await supabase
     .from('ticket_lines')
-    .select('product_id, quantity, line_total_cents, tickets!inner(status)')
+    .select('product_id, quantity, allocated_quantity, line_total_cents, tickets!inner(status)')
     .eq('tenant_id', context.tenantId)
     .eq('tickets.status', 'paid')
     .not('product_id', 'is', null)
@@ -1020,7 +1022,7 @@ export async function loadProductSalesStatsFromSupabase(context: TenantContext):
 
     statsByProduct.set(line.product_id, {
       ...current,
-      quantity: current.quantity + line.quantity,
+      quantity: current.quantity + Number(line.allocated_quantity ?? line.quantity),
       totalCents: current.totalCents + line.line_total_cents,
     })
   })

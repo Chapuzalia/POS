@@ -10,6 +10,7 @@ const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: LucideIcon
 ]
 
 type PaymentPanelProps = {
+  allowDiscount?: boolean
   discount: AppliedDiscount | null
   disabled: boolean
   feedback: PaymentMethod | null
@@ -22,6 +23,7 @@ type PaymentPanelProps = {
 }
 
 export function PaymentPanel({
+  allowDiscount = true,
   discount,
   disabled,
   feedback,
@@ -56,7 +58,7 @@ export function PaymentPanel({
         </div>
       </div>
 
-      <div className="grid grid-cols-3 gap-2">
+      <div className={allowDiscount ? 'grid grid-cols-3 gap-2' : 'grid grid-cols-2 gap-2'}>
         {paymentOptions.map((payment) => {
           const Icon = feedback === payment.id ? CheckCircle2 : payment.icon
           return (
@@ -75,7 +77,7 @@ export function PaymentPanel({
             </Button>
           )
         })}
-        <div className="flex gap-2 flex-row">
+        {allowDiscount ? <div className="flex gap-2 flex-row">
         <Button className="flex flex-col items-center justify-center"
               disabled={disabled || totalCents === 0}
               fullWidth
@@ -92,7 +94,7 @@ export function PaymentPanel({
             <X className="h-4 w-4" />
           </Button>
         ) : null}
-      </div>
+      </div> : null}
       </div>
 
       

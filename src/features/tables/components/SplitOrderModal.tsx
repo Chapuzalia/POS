@@ -1,6 +1,6 @@
-import { useEffect, useMemo, useState } from 'react'
-import { Check, ChevronLeft, Minus, Plus, ReceiptEuro, Scissors, X } from 'lucide-react'
-import { formatMoney } from '../../../lib/format'
+import { useDeferredValue, useEffect, useMemo, useState } from 'react'
+import { Check, ChevronLeft, Minus, Plus, ReceiptEuro, Scissors, Search, X } from 'lucide-react'
+import { formatMoney, normalizeText } from '../../../lib/format'
 import type { RestaurantOrderGroupDetail, RestaurantOrderLineMove } from '../types'
 
 type Props = {
@@ -8,7 +8,7 @@ type Props = {
   group: RestaurantOrderGroupDetail
   isBusy: boolean
   onClose: () => void
-  onMove: (sourceOrderId: string, targetOrderId: string | null, moves: RestaurantOrderLineMove[]) => Promise<void>
+  onMove: (sourceOrderId: string, targetOrderId: string | null, moves: RestaurantOrderLineMove[]) => Promise<string | null>
   onOpenOrder: (orderId: string) => void
 }
 
@@ -19,13 +19,18 @@ export function SplitOrderModal({ currentOrderId, group, isBusy, onClose, onMove
   )
   const [targetOrderId, setTargetOrderId] = useState<string>('new')
   const [quantities, setQuantities] = useState<Record<string, number>>({})
+  const [searchQuery, setSearchQuery] = useState('')
   const source = group.orders.find((detail) => detail.order.id === sourceOrderId)
+  const deferredSearchQuery = useDeferredValue(searchQuery)
 
   useEffect(() => {
     if (!openOrders.some((detail) => detail.order.id === sourceOrderId)) setSourceOrderId(openOrders[0]?.order.id ?? '')
   }, [openOrders, sourceOrderId])
 
-  useEffect(() => setQuantities({}), [sourceOrderId])
+  useEffect(() => {
+    setQuantities({})
+    setSearchQuery('')
+  }, [sourceOrderId])
 
   useEffect(() => {
     if (targetOrderId === sourceOrderId) setTargetOrderId('new')
@@ -36,15 +41,28 @@ export function SplitOrderModal({ currentOrderId, group, isBusy, onClose, onMove
     .map(([lineId, quantity]) => ({ lineId, quantity })), [quantities])
   const movedTotal = source?.lines.reduce((sum, line) => sum + (quantities[line.id] ?? 0) * line.unitPriceCents, 0) ?? 0
   const target = group.orders.find((detail) => detail.order.id === targetOrderId)
+  const normalizedSearchQuery = normalizeText(deferredSearchQuery.trim())
+  const visibleLines = useMemo(() => {
+    if (!source || !normalizedSearchQuery) return source?.lines ?? []
+    return source.lines.filter((line) => normalizeText([
+      line.productName,
+      line.variantName,
+      ...line.modifiers.map((modifier) => modifier.name),
+      line.mixer?.name,
+      line.note,
+    ].filter(Boolean).join(' ')).includes(normalizedSearchQuery))
+  }, [normalizedSearchQuery, source])
 
   function setLineQuantity(lineId: string, maximum: number, quantity: number) {
     setQuantities((current) => ({ ...current, [lineId]: Math.max(0, Math.min(maximum, quantity)) }))
   }
 
-  async function submitMove() {
+  async function submitMove(openForPayment = false) {
     if (!source || moves.length === 0) return
-    await onMove(source.order.id, targetOrderId === 'new' ? null : targetOrderId, moves)
+    const movedOrderId = await onMove(source.order.id, targetOrderId === 'new' ? null : targetOrderId, moves)
+    if (!movedOrderId) return
     setQuantities({})
+    if (openForPayment) onOpenOrder(movedOrderId)
   }
 
   return (
@@ -75,12 +93,18 @@ export function SplitOrderModal({ currentOrderId, group, isBusy, onClose, onMove
           </aside>
 
           <main className="min-h-0 overflow-y-auto p-4 sm:p-5">
-            <div className="mb-4 flex items-center justify-between gap-3">
-              <div><h3 className="font-black">Comanda {source?.order.splitSequence}</h3><p className="text-sm text-[var(--muted)]">Marca las unidades que quieres trasladar.</p></div>
-              {source?.lines.length ? <button className="rounded-[var(--radius)] border border-[var(--separator)] px-3 py-2 text-sm font-bold" disabled={isBusy} onClick={() => setQuantities(Object.fromEntries(source.lines.map((line) => [line.id, line.quantity])))} type="button">Seleccionar todo</button> : null}
+            <div className="mb-4">
+              <div className="flex items-center justify-between gap-3">
+                <div><h3 className="font-black">Comanda {source?.order.splitSequence}</h3><p className="text-sm text-[var(--muted)]">Marca las unidades que quieras cobrar.</p></div>
+                {source?.lines.length ? <button className="rounded-[var(--radius)] border border-[var(--separator)] px-3 py-2 text-sm font-bold" disabled={isBusy || visibleLines.length === 0} onClick={() => setQuantities((current) => ({ ...current, ...Object.fromEntries(visibleLines.map((line) => [line.id, line.quantity])) }))} type="button">{normalizedSearchQuery ? 'Seleccionar visibles' : 'Seleccionar todo'}</button> : null}
+              </div>
+              {source?.lines.length ? <label className="relative mt-3 block">
+                <Search aria-hidden="true" className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]" size={18} />
+                <input aria-label="Buscar productos de la comanda" autoComplete="off" className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] py-2 pl-10 pr-3 outline-none focus:border-[var(--accent)]" onChange={(event) => setSearchQuery(event.target.value)} placeholder="Buscar producto, modificación o nota…" type="search" value={searchQuery} />
+              </label> : null}
             </div>
             <div className="grid gap-2">
-              {source?.lines.map((line) => {
+              {visibleLines.map((line) => {
                 const selected = quantities[line.id] ?? 0
                 return <article className={`rounded-[var(--radius)] border p-3 ${selected ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--separator)] bg-[var(--surface)]'}`} key={line.id}>
                   <div className="flex items-center justify-between gap-3">
@@ -94,7 +118,7 @@ export function SplitOrderModal({ currentOrderId, group, isBusy, onClose, onMove
                   {line.servedQuantity > 0 ? <p className="mt-2 text-xs font-semibold text-[var(--success)]"><Check className="mr-1 inline" size={13} />{line.servedQuantity} servidas; su estado se conserva al moverlas.</p> : null}
                 </article>
               })}
-              {!source?.lines.length ? <div className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-8 text-center text-[var(--muted)]">Esta subcomanda no contiene productos.</div> : null}
+              {!source?.lines.length ? <div className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-8 text-center text-[var(--muted)]">Esta subcomanda no contiene productos.</div> : visibleLines.length === 0 ? <div className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-8 text-center text-[var(--muted)]">No hay productos que coincidan con la búsqueda.</div> : null}
             </div>
           </main>
 
@@ -108,7 +132,10 @@ export function SplitOrderModal({ currentOrderId, group, isBusy, onClose, onMove
               <span className="flex justify-between"><span>Seleccionado</span><strong className="font-mono">{formatMoney(movedTotal)}</strong></span>
               <span className="mt-1 flex justify-between text-[var(--muted)]"><span>Total destino</span><strong className="font-mono">{formatMoney((target?.totalCents ?? 0) + movedTotal)}</strong></span>
             </div>
-            <button className="mt-3 inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-[var(--radius)] bg-[var(--accent)] px-4 font-black text-[var(--accent-contrast)] disabled:opacity-50" disabled={isBusy || moves.length === 0} onClick={() => void submitMove()} type="button"><Scissors size={18} />{isBusy ? 'Moviendo…' : targetOrderId === 'new' ? 'Crear y mover' : 'Mover productos'}</button>
+            <div className={`mt-3 grid gap-2 ${targetOrderId === 'new' ? 'grid-cols-2' : 'grid-cols-1'}`}>
+              <button className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] px-3 text-sm font-black text-[var(--accent)] disabled:opacity-50" disabled={isBusy || moves.length === 0} onClick={() => void submitMove()} type="button"><Scissors size={17} />{isBusy ? 'Moviendo…' : targetOrderId === 'new' ? 'Crear y mover' : 'Mover productos'}</button>
+              {targetOrderId === 'new' ? <button className="inline-flex min-h-12 items-center justify-center gap-2 rounded-[var(--radius)] bg-[var(--accent)] px-3 text-sm font-black text-[var(--accent-contrast)] disabled:opacity-50" disabled={isBusy || moves.length === 0} onClick={() => void submitMove(true)} type="button"><ReceiptEuro size={17} />Cobrar selección</button> : null}
+            </div>
             <div className="mt-4 grid gap-2 border-t border-[var(--separator)] pt-4">
               {openOrders.map((detail) => <button className="inline-flex min-h-11 items-center justify-between rounded-[var(--radius)] border border-[var(--separator)] px-3 font-bold" key={detail.order.id} onClick={() => onOpenOrder(detail.order.id)} type="button"><span>Comanda {detail.order.splitSequence}</span><span className="flex items-center gap-1"><ReceiptEuro size={16} />Cobrar</span></button>)}
             </div>

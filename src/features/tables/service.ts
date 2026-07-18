@@ -1,7 +1,7 @@
 import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import type { AppliedDiscount, PaymentMethod, TenantContext, TicketLineMixer, TicketLineModifier } from '../../types/domain'
-import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult } from './types'
+import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult } from './types'
 import { getOrderPendingUnits } from './service-status'
 import { buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
@@ -62,13 +62,15 @@ export async function loadRestaurantTables(context: TenantContext, venueId = con
 
 export async function loadRestaurantMap(context: TenantContext): Promise<RestaurantMap> {
   const client = requireSupabase()
-  const [areas, tables, linksResult, ordersResult] = await Promise.all([
+  const [areas, tables, linksResult, ordersResult, equalSplitsResult] = await Promise.all([
     loadDiningAreas(context), loadRestaurantTables(context),
     client.from('order_tables').select('order_id, order_group_id, table_id, joined_at, released_at').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).is('released_at', null),
     client.from('orders').select(orderColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'open'),
+    client.from('restaurant_order_equal_splits').select('order_group_id, paid_cents').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'open'),
   ])
   if (linksResult.error) throw linksResult.error
   if (ordersResult.error) throw ordersResult.error
+  if (equalSplitsResult.error) throw equalSplitsResult.error
   const links = (linksResult.data ?? []) as OrderTableRow[]
   const orders = ((ordersResult.data ?? []) as OrderRow[]).map(mapOrder)
   let lines: RestaurantOrderLine[] = []
@@ -83,6 +85,8 @@ export async function loadRestaurantMap(context: TenantContext): Promise<Restaur
   const groupByOrder = new Map(orders.map((order) => [order.id, order.orderGroupId]))
   const totals = new Map<string, number>()
   const pendingUnits = new Map<string, number>()
+  const paidCents = new Map<string, number>()
+  ;((equalSplitsResult.data ?? []) as Array<{ order_group_id: string; paid_cents: number }>).forEach((split) => paidCents.set(split.order_group_id, (paidCents.get(split.order_group_id) ?? 0) + Number(split.paid_cents)))
   lines.forEach((line) => {
     const groupId = groupByOrder.get(line.orderId)
     if (!groupId) return
@@ -98,7 +102,7 @@ export async function loadRestaurantMap(context: TenantContext): Promise<Restaur
     const order = link ? orderByGroup.get(link.order_group_id)?.[0] : undefined
     const groupId = order?.orderGroupId
     const reserved = table.reservedUntil ? new Date(table.reservedUntil).getTime() > now : false
-    return { ...table, status: order ? 'occupied' : reserved ? 'reserved' : 'free', orderId: order?.id ?? null, orderOpenedAt: order?.openedAt ?? null, guestCount: order?.guestCount ?? null, totalCents: groupId ? (totals.get(groupId) ?? 0) : 0, pendingUnits: groupId ? (pendingUnits.get(groupId) ?? 0) : 0, groupTableIds: groupId ? (tableIdsByGroup.get(groupId) ?? []) : [] }
+    return { ...table, status: order ? 'occupied' : reserved ? 'reserved' : 'free', orderId: order?.id ?? null, orderOpenedAt: order?.openedAt ?? null, guestCount: order?.guestCount ?? null, totalCents: groupId ? Math.max(0, (totals.get(groupId) ?? 0) - (paidCents.get(groupId) ?? 0)) : 0, pendingUnits: groupId ? (pendingUnits.get(groupId) ?? 0) : 0, groupTableIds: groupId ? (tableIdsByGroup.get(groupId) ?? []) : [] }
   })
   return { areas, tables: mappedTables }
 }
@@ -155,6 +159,25 @@ export async function removeRestaurantOrderLineConfirmed(lineId: string, expecte
   })
   if (error) throw error
   return Number(data)
+}
+
+function mapEqualSplit(value: unknown): RestaurantEqualSplit {
+  const row = value as Record<string, unknown>
+  const read = (camel: string, snake: string) => row[camel] ?? row[snake]
+  const totalCents = Number(read('totalCents', 'total_cents'))
+  const partCount = Number(read('partCount', 'part_count'))
+  const paidParts = Number(read('paidParts', 'paid_parts'))
+  const paidCents = Number(read('paidCents', 'paid_cents'))
+  const nextPartCents = paidParts >= partCount ? 0 : Math.floor(totalCents / partCount) + (paidParts + 1 <= totalCents % partCount ? 1 : 0)
+  return {
+    id: String(row.id), orderId: String(read('orderId', 'order_id')), orderGroupId: String(read('orderGroupId', 'order_group_id')),
+    totalCents, partCount, paidParts, paidCents,
+    remainingParts: Number(read('remainingParts', 'remaining_parts') ?? partCount - paidParts),
+    remainingCents: Number(read('remainingCents', 'remaining_cents') ?? totalCents - paidCents),
+    nextPartCents: Number(read('nextPartCents', 'next_part_cents') ?? nextPartCents),
+    status: row.status as RestaurantEqualSplit['status'], revision: Number(row.revision),
+    allowPendingService: Boolean(read('allowPendingService', 'allow_pending_service')),
+  }
 }
 
 export async function loadRestaurantOrderGroup(context: TenantContext, orderId: string): Promise<RestaurantOrderGroupDetail> {
@@ -221,6 +244,26 @@ export async function cancelEmptyRestaurantOrder(orderId: string, expectedRevisi
   return Number(data)
 }
 
+export async function loadRestaurantEqualSplit(context: TenantContext, orderId: string): Promise<RestaurantEqualSplit | null> {
+  const { data, error } = await requireSupabase().from('restaurant_order_equal_splits').select('*')
+    .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('order_id', orderId).eq('status', 'open').maybeSingle()
+  if (error) throw error
+  return data ? mapEqualSplit(data) : null
+}
+
+export async function configureRestaurantEqualSplit(orderId: string, partCount: number, expectedRevision: number) {
+  const { data, error } = await requireSupabase().rpc('configure_restaurant_order_equal_split', { p_order_id: orderId, p_part_count: partCount, p_expected_order_revision: expectedRevision })
+  if (error) throw error
+  return mapEqualSplit(data)
+}
+
+export async function payRestaurantEqualPart(splitId: string, paymentMethod: PaymentMethod, receivedCents: number | null, allowPending = false): Promise<PayRestaurantEqualPartResult> {
+  const { data, error } = await requireSupabase().rpc('pay_restaurant_order_equal_part', { p_split_id: splitId, p_payment_method: paymentMethod, p_received_cents: receivedCents, p_allow_pending: allowPending })
+  if (error) throw error
+  const result = data as Record<string, unknown>
+  return { ...result, requiresConfirmation: Boolean(result.requiresConfirmation), pendingUnits: Number(result.pendingUnits), split: mapEqualSplit(result.split) } as PayRestaurantEqualPartResult
+}
+
 export async function saveRestaurantOrderLines(detail: RestaurantOrderDetail): Promise<SaveRestaurantOrderLinesResult> {
   const { data, error } = await requireSupabase().rpc('save_restaurant_order_lines', {
     p_order_id: detail.order.id,
@@ -266,7 +309,7 @@ export function subscribeToRestaurantMap(
 ) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`restaurant-map:${context.tenantId}:${context.venueId}`)
-  ;(['order_groups', 'orders', 'order_tables', 'order_lines'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
+  ;(['order_groups', 'orders', 'order_tables', 'order_lines', 'restaurant_order_equal_splits', 'restaurant_order_equal_split_payments'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
   channel.subscribe((status, error) => onStatus?.(status, error))
   return () => { void supabase?.removeChannel(channel) }
 }

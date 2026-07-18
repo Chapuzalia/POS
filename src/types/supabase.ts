@@ -118,5 +118,6 @@ export type SaleRow = {
 export type TicketLineProductSalesRow = {
   product_id: string | null
   quantity: number
+  allocated_quantity: number | null
   line_total_cents: number
 }

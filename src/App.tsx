@@ -82,10 +82,13 @@ import { TableOrderBar } from './features/tables/components/TableOrderBar'
 import { RestaurantOrderPanel } from './features/tables/components/RestaurantOrderPanel'
 import { RemoveOrderLineModal } from './features/tables/components/RemoveOrderLineModal'
 import { SplitOrderModal } from './features/tables/components/SplitOrderModal'
+import { EqualSplitOrderModal } from './features/tables/components/EqualSplitOrderModal'
 import {
   cancelEmptyRestaurantOrder,
   closeRestaurantOrder,
+  configureRestaurantEqualSplit,
   loadOpenRestaurantOrders,
+  loadRestaurantEqualSplit,
   loadRestaurantMap,
   loadRestaurantOrder,
   loadRestaurantOrderGroup,
@@ -97,11 +100,12 @@ import {
   moveRestaurantOrder,
   moveRestaurantOrderLines,
   openRestaurantOrder,
+  payRestaurantEqualPart,
   removeRestaurantOrderLineConfirmed,
   saveRestaurantOrderLines,
   subscribeToRestaurantMap,
 } from './features/tables/service'
-import type { PosView, RestaurantMap, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLineMove, RestaurantOrderSaveState } from './features/tables/types'
+import type { PayRestaurantEqualPartResult, PosView, RestaurantEqualSplit, RestaurantMap, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLineMove, RestaurantOrderSaveState } from './features/tables/types'
 import { applySessionLayout, loadSessionTableLayout, saveSessionTableLayout, subscribeToSessionTableLayout } from './features/tables/layout-service'
 import { canDecreaseLineQuantity, getOrderPendingUnits } from './features/tables/service-status'
 import { CashSessionGate } from './features/cash-registers/CashSessionGate'
@@ -230,10 +234,13 @@ function App() {
   const [pendingRestaurantPayment, setPendingRestaurantPayment] = useState<PendingRestaurantPayment | null>(null)
   const [pendingOrderLineRemoval, setPendingOrderLineRemoval] = useState<RestaurantOrderDetail['lines'][number] | null>(null)
   const [splitOrderGroup, setSplitOrderGroup] = useState<RestaurantOrderGroupDetail | null>(null)
+  const [equalSplitOpen, setEqualSplitOpen] = useState(false)
+  const [equalSplit, setEqualSplit] = useState<RestaurantEqualSplit | null>(null)
   const floatingTicketButtonRef = useRef<HTMLButtonElement>(null)
   const { announcement, flyFeedback, isAddSuccess, shouldAnimateCount, successId, triggerAddFeedback } = useAddProductFeedback(floatingTicketButtonRef)
   const restaurantOrderRef = useRef<RestaurantOrderDetail | null>(null)
   const splitOrderGroupRef = useRef<RestaurantOrderGroupDetail | null>(null)
+  const equalSplitOpenRef = useRef(false)
   const restaurantEditGenerationRef = useRef(0)
   const restaurantSaveStateRef = useRef<RestaurantOrderSaveState>('saved')
   const restaurantSavePromiseRef = useRef<Promise<RestaurantOrderDetail | null> | null>(null)
@@ -375,6 +382,7 @@ function App() {
             }
             restaurantOrderRef.current = detail
             setRestaurantOrder(detail)
+            if (equalSplitOpenRef.current) setEqualSplit(await loadRestaurantEqualSplit(context, detail.order.id))
             if (splitOrderGroupRef.current) {
               const group = await loadRestaurantOrderGroup(context, detail.order.id)
               splitOrderGroupRef.current = group
@@ -417,6 +425,10 @@ function App() {
   useEffect(() => {
     splitOrderGroupRef.current = splitOrderGroup
   }, [splitOrderGroup])
+
+  useEffect(() => {
+    equalSplitOpenRef.current = equalSplitOpen
+  }, [equalSplitOpen])
 
   useEffect(() => {
     posViewRef.current = posView
@@ -1206,12 +1218,19 @@ function App() {
     if (!context || !isOnline) return
     setIsBusy(true); setError(null)
     try {
-      const detail = await loadRestaurantOrder(context, orderId)
+      const [detail, activeEqualSplit] = await Promise.all([
+        loadRestaurantOrder(context, orderId),
+        loadRestaurantEqualSplit(context, orderId),
+      ])
       restaurantOrderRef.current = detail
       setRestaurantOrder(detail)
       updateRestaurantSaveState('saved')
       setAppliedDiscount(null)
       setPosView({ type: 'table_order', orderId })
+      if (activeEqualSplit?.paidParts) {
+        setEqualSplit(activeEqualSplit)
+        setEqualSplitOpen(true)
+      }
     }
     catch (orderError) { setError(getReadableError(orderError)) } finally { setIsBusy(false) }
   }
@@ -1250,6 +1269,8 @@ function App() {
       setAppliedDiscount(null)
       setRestaurantOrder(null)
       restaurantOrderRef.current = null
+      setEqualSplitOpen(false)
+      setEqualSplit(null)
       updateRestaurantSaveState('saved')
       setRestaurantMap(nextMap)
       setPosView({ type: 'table_map', areaId: areaId ?? nextMap.areas[0]?.id })
@@ -1336,12 +1357,76 @@ function App() {
     }
   }
 
-  async function splitRestaurantOrder(sourceOrderId: string, targetOrderId: string | null, moves: RestaurantOrderLineMove[]) {
-    if (!context || !isOnline || !splitOrderGroupRef.current) return
+  async function openEqualSplitOrder() {
+    if (!context || !isOnline || !restaurantOrderRef.current) return
+    setIsBusy(true); setError(null)
+    try {
+      const saved = await flushRestaurantOrderDraft()
+      if (!saved) return
+      const currentSplit = await loadRestaurantEqualSplit(context, saved.order.id)
+      restaurantOrderRef.current = saved
+      setRestaurantOrder(saved)
+      setEqualSplit(currentSplit)
+      setEqualSplitOpen(true)
+    } catch (splitError) {
+      setError(getReadableError(splitError))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function configureEqualSplit(partCount: number) {
+    const current = restaurantOrderRef.current
+    if (!current) throw new Error('No hay una comanda abierta.')
+    setIsBusy(true); setError(null)
+    try {
+      const configured = await configureRestaurantEqualSplit(current.order.id, partCount, current.order.revision)
+      setEqualSplit(configured)
+      return configured
+    } catch (splitError) {
+      setError(getReadableError(splitError))
+      throw splitError
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function payEqualSplitPart(method: PaymentMethod, receivedCents: number | null, allowPending: boolean): Promise<PayRestaurantEqualPartResult> {
+    if (!context || !cashSession || !equalSplit) throw new Error('No hay una división activa.')
+    setIsBusy(true); setError(null)
+    try {
+      const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending)
+      setEqualSplit(result.split)
+      if (!result.requiresConfirmation) {
+        const [nextLedger, nextStats] = await Promise.all([loadSalesLedgerFromSupabase(context, cashSession.id), loadProductSalesStatsFromSupabase(context)])
+        persistLedger(nextLedger)
+        persistProductSalesStats(nextStats)
+        setRestaurantMap(await loadCurrentRestaurantMap(context, cashSession.id))
+        if (result.completed) {
+          const nextOrder = result.nextOrderId ? await loadRestaurantOrder(context, result.nextOrderId) : null
+          restaurantOrderRef.current = nextOrder
+          setRestaurantOrder(nextOrder)
+          updateRestaurantSaveState('saved')
+          setAppliedDiscount(null)
+          setMobileTicketOpen(false)
+          setPosView(nextOrder ? { type: 'table_order', orderId: nextOrder.order.id } : { type: 'table_map', areaId: restaurantMap.areas[0]?.id })
+        }
+      }
+      return result
+    } catch (splitError) {
+      setError(getReadableError(splitError))
+      throw splitError
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
+  async function splitRestaurantOrder(sourceOrderId: string, targetOrderId: string | null, moves: RestaurantOrderLineMove[]): Promise<string | null> {
+    if (!context || !isOnline || !splitOrderGroupRef.current) return null
     const group = splitOrderGroupRef.current
     const source = group.orders.find((detail) => detail.order.id === sourceOrderId)
     const target = targetOrderId ? group.orders.find((detail) => detail.order.id === targetOrderId) : null
-    if (!source || (targetOrderId && !target)) return
+    if (!source || (targetOrderId && !target)) return null
     setIsBusy(true); setError(null)
     try {
       const result = await moveRestaurantOrderLines(sourceOrderId, targetOrderId, source.order.revision, target?.order.revision ?? null, moves)
@@ -1359,6 +1444,7 @@ function App() {
         updateRestaurantSaveState('saved')
       }
       setRestaurantMap(await loadCurrentRestaurantMap(context))
+      return result.targetOrderId
     } catch (splitError) {
       if ((splitError as { code?: string }).code === '40001') {
         try {
@@ -1371,6 +1457,7 @@ function App() {
           setError('Las comandas cambiaron en otro dispositivo. Se ha recargado la version mas reciente.')
         } catch (reloadError) { setError(getReadableError(reloadError)) }
       } else setError(getReadableError(splitError))
+      return null
     } finally {
       setIsBusy(false)
     }
@@ -1382,6 +1469,7 @@ function App() {
     restaurantOrderRef.current = detail
     setRestaurantOrder(detail)
     setAppliedDiscount(null)
+    setMobileTicketOpen(true)
     updateRestaurantSaveState('saved')
     setPosView({ type: 'table_order', orderId })
     splitOrderGroupRef.current = null
@@ -1992,7 +2080,8 @@ function App() {
           onBack={() => void returnToTableMap()}
           onCancelEmpty={() => void cancelEmptyTableOrder()}
           onMove={() => void prepareMoveTableOrder()}
-          onSplit={() => void openSplitOrder()}
+          onSplitItems={() => void openSplitOrder()}
+          onSplitEqual={() => void openEqualSplitOrder()}
           order={posView.type === 'table_order' ? restaurantOrder : null}
           quickSale={posView.type === 'quick_sale'}
           saveState={restaurantSaveState}
@@ -2124,6 +2213,16 @@ function App() {
         onClose={() => { splitOrderGroupRef.current = null; setSplitOrderGroup(null) }}
         onMove={splitRestaurantOrder}
         onOpenOrder={openOrderFromSplit}
+      /> : null}
+
+      {equalSplitOpen && restaurantOrder ? <EqualSplitOrderModal
+        isBusy={isBusy}
+        onClose={() => { setEqualSplitOpen(false); setEqualSplit(null) }}
+        onCompleted={() => { setEqualSplitOpen(false); setEqualSplit(null) }}
+        onConfigure={configureEqualSplit}
+        onPay={payEqualSplitPart}
+        order={restaurantOrder}
+        split={equalSplit}
       /> : null}
 
       {cashPaymentOpen ? (

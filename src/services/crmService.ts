@@ -34,6 +34,7 @@ type SaleStatsRow = {
 type TicketLineStatsRow = {
   product_name: string
   quantity: number
+  allocated_quantity: number | null
   line_total_cents: number
 }
 
@@ -60,6 +61,7 @@ type SalesReportLineRow = {
   product_id: string | null
   product_name: string
   quantity: number
+  allocated_quantity: number | null
   unit_price_cents: number
   variant_name: string
 }
@@ -1352,7 +1354,7 @@ function addSalesReportLine(
     totalCents: 0,
   }
 
-  current.quantity += line.quantity
+  current.quantity += Number(line.allocated_quantity ?? line.quantity)
   current.totalCents += line.line_total_cents
   current.ticketIds.add(ticketId)
   current.ticketCount = current.ticketIds.size
@@ -1408,6 +1410,7 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
             product_name,
             variant_name,
             quantity,
+            allocated_quantity,
             unit_price_cents,
             modifiers,
             line_total_cents,
@@ -1501,7 +1504,7 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
           })),
           productId: line.product_id,
           productName: line.product_name,
-          quantity: line.quantity,
+          quantity: Number(line.allocated_quantity ?? line.quantity),
           unitPriceCents: line.unit_price_cents,
           variantName: line.variant_name,
           fiscalSnapshot: line.tax_rate === null
@@ -1524,7 +1527,7 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
         ? Math.round(Number(ticket.discount_value) * 100) : Number(ticket.discount_value),
       discountValueType: ticket.discount_value_type,
       paymentMethod: ticket.sales?.[0]?.payment_method ?? null,
-      quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + line.quantity, 0),
+      quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + Number(line.allocated_quantity ?? line.quantity), 0),
       status: ticket.status,
       subtotalCents: ticket.subtotal_cents,
       totalCents: ticket.total_cents,
@@ -1542,7 +1545,7 @@ export async function loadCrmStats(context: TenantContext, venueId?: string): Pr
     .gte('created_at', monthStart)
   let ticketsQuery = client
     .from('tickets')
-    .select('id, total_cents, discount_id, discount_name, discount_amount_cents, ticket_lines(product_name, quantity, line_total_cents)')
+    .select('id, total_cents, discount_id, discount_name, discount_amount_cents, ticket_lines(product_name, quantity, allocated_quantity, line_total_cents)')
     .eq('tenant_id', context.tenantId)
     .eq('status', 'paid')
     .gte('created_at', monthStart)
@@ -1659,7 +1662,7 @@ export async function loadCrmStats(context: TenantContext, venueId?: string): Pr
     }
     topProductMap.set(line.product_name, {
       ...current,
-      quantity: current.quantity + line.quantity,
+      quantity: current.quantity + Number(line.allocated_quantity ?? line.quantity),
       totalCents: current.totalCents + line.line_total_cents,
     })
   })
