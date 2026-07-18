@@ -153,6 +153,15 @@ export async function closeRestaurantOrder(orderId: string, paymentMethod: Payme
   return data as CloseRestaurantOrderResult
 }
 
+export async function cancelEmptyRestaurantOrder(orderId: string, expectedRevision: number) {
+  const { data, error } = await requireSupabase().rpc('cancel_empty_restaurant_order', {
+    p_order_id: orderId,
+    p_expected_revision: expectedRevision,
+  })
+  if (error) throw error
+  return Number(data)
+}
+
 export async function saveRestaurantOrderLines(detail: RestaurantOrderDetail): Promise<SaveRestaurantOrderLinesResult> {
   const { data, error } = await requireSupabase().rpc('save_restaurant_order_lines', {
     p_order_id: detail.order.id,

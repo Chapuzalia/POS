@@ -81,6 +81,7 @@ import { TableMapView } from './features/tables/components/TableMapView'
 import { TableOrderBar } from './features/tables/components/TableOrderBar'
 import { RestaurantOrderPanel } from './features/tables/components/RestaurantOrderPanel'
 import {
+  cancelEmptyRestaurantOrder,
   closeRestaurantOrder,
   loadOpenRestaurantOrders,
   loadRestaurantMap,
@@ -1208,6 +1209,32 @@ function App() {
     }
   }
 
+  async function cancelEmptyTableOrder() {
+    const current = restaurantOrderRef.current
+    if (!context || !isOnline || !current || current.lines.length > 0) return
+    if (!window.confirm('¿Cerrar esta mesa vacía? La comanda se cancelará y la mesa volverá a quedar libre.')) return
+
+    setIsBusy(true)
+    setError(null)
+    try {
+      const saved = await flushRestaurantOrderDraft()
+      if (!saved || saved.lines.length > 0) return
+      const areaId = saved.tables[0]?.areaId
+      await cancelEmptyRestaurantOrder(saved.order.id, saved.order.revision)
+      const nextMap = await loadCurrentRestaurantMap(context)
+      setAppliedDiscount(null)
+      setRestaurantOrder(null)
+      restaurantOrderRef.current = null
+      updateRestaurantSaveState('saved')
+      setRestaurantMap(nextMap)
+      setPosView({ type: 'table_map', areaId: areaId ?? nextMap.areas[0]?.id })
+    } catch (cancelError) {
+      setError(getReadableError(cancelError))
+    } finally {
+      setIsBusy(false)
+    }
+  }
+
   async function prepareMoveTableOrder() {
     const current = restaurantOrderRef.current
     if (!current) return
@@ -1834,6 +1861,7 @@ function App() {
           isBusy={isBusy}
           isOnline={isOnline}
           onBack={() => void returnToTableMap()}
+          onCancelEmpty={() => void cancelEmptyTableOrder()}
           onMove={() => void prepareMoveTableOrder()}
           order={posView.type === 'table_order' ? restaurantOrder : null}
           quickSale={posView.type === 'quick_sale'}

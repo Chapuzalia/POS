@@ -302,7 +302,7 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
           onScroll={updateTabScrollState}
           ref={tabsScrollerRef}
         >
-          <div className="grid min-w-full grid-flow-col auto-cols-[calc((100%-3rem)/7)] gap-2">
+          <div className="grid min-w-full grid-flow-col lg:auto-cols-[calc((100%-3rem)/7)] gap-2">
           {filterOptions.map((option) => {
             const Icon = option.icon
             return (
