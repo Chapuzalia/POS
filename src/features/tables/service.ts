@@ -191,10 +191,14 @@ export async function loadOpenRestaurantOrders(context: TenantContext, cashSessi
   return ((data ?? []) as OrderRow[]).map(mapOrder)
 }
 
-export function subscribeToRestaurantMap(context: TenantContext, onChange: () => void) {
+export function subscribeToRestaurantMap(
+  context: TenantContext,
+  onChange: () => void,
+  onStatus?: (status: string, error?: Error) => void,
+) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`restaurant-map:${context.tenantId}:${context.venueId}`)
   ;(['orders', 'order_tables', 'order_lines'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
-  channel.subscribe()
+  channel.subscribe((status, error) => onStatus?.(status, error))
   return () => { void supabase?.removeChannel(channel) }
 }

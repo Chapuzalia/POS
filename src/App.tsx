@@ -338,7 +338,8 @@ function App() {
 
     void refreshMap()
     let realtimeTimer: ReturnType<typeof window.setTimeout> | null = null
-    const unsubscribe = subscribeToRestaurantMap(context, () => {
+    let realtimeFallbackTimer: ReturnType<typeof window.setInterval> | null = null
+    const scheduleRealtimeRefresh = () => {
       if (realtimeTimer) window.clearTimeout(realtimeTimer)
       realtimeTimer = window.setTimeout(() => {
         void (async () => {
@@ -362,6 +363,18 @@ function App() {
           }
         })()
       }, 250)
+    }
+    const unsubscribe = subscribeToRestaurantMap(context, scheduleRealtimeRefresh, (status, channelError) => {
+      if (status === 'SUBSCRIBED') {
+        if (realtimeFallbackTimer) window.clearInterval(realtimeFallbackTimer)
+        realtimeFallbackTimer = null
+        scheduleRealtimeRefresh()
+        return
+      }
+      if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && !realtimeFallbackTimer) {
+        console.warn('Realtime de comandas no disponible; se activa la resincronizacion periodica.', channelError)
+        realtimeFallbackTimer = window.setInterval(scheduleRealtimeRefresh, 3000)
+      }
     })
     const unsubscribeLayout = activeCashSessionId
       ? subscribeToSessionTableLayout(context, activeCashSessionId, () => void refreshMap())
@@ -369,6 +382,7 @@ function App() {
     return () => {
       active = false
       if (realtimeTimer) window.clearTimeout(realtimeTimer)
+      if (realtimeFallbackTimer) window.clearInterval(realtimeFallbackTimer)
       unsubscribe()
       unsubscribeLayout()
     }

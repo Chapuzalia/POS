@@ -140,13 +140,13 @@ function TicketLineRow({ isBusy, line, onDecrement, onIncrement, onRemove }: Tic
   }
 
   return (
-    <div className="ticket-line-swipe relative overflow-hidden rounded-[var(--radius)]">
-      <div className="absolute inset-y-0 right-0 flex w-24 items-center justify-center rounded-r-[var(--radius)] bg-[var(--danger)] text-white">
+    <div className="ticket-line-swipe relative overflow-hidden rounded-[var(--radius)] bg-[var(--background)]">
+      <div className="absolute inset-y-px right-px flex w-24 items-center justify-center rounded-r-[calc(var(--radius)-1px)] bg-[var(--danger)] text-white">
         <Trash2 className="h-5 w-5" />
       </div>
       <article
         className={cx(
-          'relative grid grid-cols-[1fr_auto] gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3',
+          'relative z-[1] grid grid-cols-[1fr_auto] gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3',
           isDragging ? 'transition-none' : 'transition-transform duration-150 ease-out',
           isBusy && 'opacity-60',
         )}
