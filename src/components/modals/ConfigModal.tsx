@@ -3,6 +3,7 @@ import { useState } from 'react'
 import type { CatalogStartTab, TenantContext, ThemeDefinition } from '../../types'
 import { PrintAgentSettings } from '../../features/local-printing'
 import { Button, Metric } from '../ui'
+import { Select } from '../ui/Select'
 
 type ConfigModalProps = {
   catalogStartTab: CatalogStartTab
@@ -92,17 +93,12 @@ export function ConfigModal({
               <Palette className="h-4 w-4" />
               Tema
             </span>
-            <select
-              className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 font-semibold text-[var(--field-foreground)] outline-none"
-              onChange={(event) => onThemeChange(event.target.value)}
+            <Select
+              ariaLabel="Tema"
+              onChange={onThemeChange}
+              options={themes.map((item) => ({ label: item.name, value: item.id }))}
               value={theme?.id ?? themeId}
-            >
-              {themes.map((item) => (
-                <option key={item.id} value={item.id}>
-                  {item.name}
-                </option>
-              ))}
-            </select>
+            />
           </label>
 
           <label className="mt-5 block">
@@ -110,14 +106,15 @@ export function ConfigModal({
               <LayoutList className="h-4 w-4" />
               Primera pestana del catalogo
             </span>
-            <select
-              className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 font-semibold text-[var(--field-foreground)] outline-none"
-              onChange={(event) => onCatalogStartTabChange(event.target.value as CatalogStartTab)}
+            <Select
+              ariaLabel="Primera pestana del catalogo"
+              onChange={(value) => onCatalogStartTabChange(value as CatalogStartTab)}
+              options={[
+                { label: 'Todo', value: 'all' },
+                { label: 'Top items', value: 'top' },
+              ]}
               value={catalogStartTab}
-            >
-              <option value="all">Todo</option>
-              <option value="top">Top items</option>
-            </select>
+            />
           </label>
         </div>
 
