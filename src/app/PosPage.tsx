@@ -313,12 +313,14 @@ export function PosPage(props: Props) {
         onConfirm={() => void restaurant.confirmLineRemoval()}
       /> : null}
       {restaurant.splitOrderGroup && restaurant.order ? <SplitOrderModal
-        currentOrderId={restaurant.order.order.id}
-        group={restaurant.splitOrderGroup}
+        defaultDiscount={quickSale.discount}
+        discounts={props.catalog?.discounts ?? []}
         isBusy={props.isBusy}
+        manualDiscountEnabled={props.catalog?.manualDiscountEnabled ?? false}
         onClose={() => restaurant.setSplitOrderGroup(null)}
-        onMove={restaurant.splitOrder}
-        onOpenOrder={restaurant.openOrderFromSplit}
+        onPay={restaurant.paySelectedOrderItems}
+        order={restaurant.order}
+        venueId={props.context.venueId}
       /> : null}
       {restaurant.equalSplitOpen && restaurant.order ? <EqualSplitOrderModal
         defaultDiscount={quickSale.discount}

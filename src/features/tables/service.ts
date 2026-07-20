@@ -1,7 +1,7 @@
 import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import type { AppliedDiscount, PaymentMethod, TenantContext, TicketLineMixer, TicketLineModifier } from '../../types/domain'
-import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult } from './types'
+import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult } from './types'
 import { getOrderPendingUnits } from './service-status'
 import { buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
@@ -286,6 +286,20 @@ export async function payRestaurantEqualPart(splitId: string, paymentMethod: Pay
   return { ...result, requiresConfirmation: Boolean(result.requiresConfirmation), pendingUnits: Number(result.pendingUnits), split: mapEqualSplit(result.split) } as PayRestaurantEqualPartResult
 }
 
+export async function payRestaurantOrderItems(orderId: string, expectedRevision: number, moves: RestaurantOrderLineMove[], paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending: boolean, discount: AppliedDiscount | null): Promise<PayRestaurantOrderItemsResult> {
+  const { data, error } = await requireSupabase().rpc('pay_restaurant_order_items', {
+    p_order_id: orderId,
+    p_expected_revision: expectedRevision,
+    p_items: moves.map((move) => ({ lineId: move.lineId, quantity: move.quantity })),
+    p_payment_method: paymentMethod,
+    p_received_cents: receivedCents,
+    p_allow_pending: allowPending,
+    p_discount: discount,
+  })
+  if (error) throw error
+  const result = data as Record<string, unknown>
+  return { ...result, requiresConfirmation: Boolean(result.requiresConfirmation), pendingUnits: Number(result.pendingUnits) } as PayRestaurantOrderItemsResult
+}
 export async function saveRestaurantOrderLines(detail: RestaurantOrderDetail): Promise<SaveRestaurantOrderLinesResult> {
   const { data, error } = await requireSupabase().rpc('save_restaurant_order_lines', {
     p_order_id: detail.order.id,

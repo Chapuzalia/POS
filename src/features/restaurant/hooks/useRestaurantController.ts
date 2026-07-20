@@ -27,12 +27,14 @@ import {
   moveRestaurantOrderLines,
   openRestaurantOrder,
   payRestaurantEqualPart,
+  payRestaurantOrderItems,
   removeRestaurantOrderLineConfirmed,
   saveRestaurantOrderLines,
 } from '../../tables/service'
 import { canDecreaseLineQuantity } from '../../tables/service-status'
 import type {
   PayRestaurantEqualPartResult,
+  PayRestaurantOrderItemsResult,
   PosView,
   RestaurantEqualSplit,
   RestaurantOrderDetail,
@@ -303,6 +305,51 @@ export function useRestaurantController(options: Options) {
     }
   }, [draft, equalSplit, options, realtime, refreshSales])
 
+  const paySelectedOrderItems = useCallback(async (
+    moves: RestaurantOrderLineMove[],
+    method: PaymentMethod | null,
+    receivedCents: number | null,
+    allowPending: boolean,
+    discount: AppliedDiscount | null,
+  ): Promise<PayRestaurantOrderItemsResult> => {
+    const current = draft.getCurrentOrder()
+    if (!options.context || !options.cashSession || !options.isOnline || !current) throw new Error('No hay una comanda abierta.')
+    options.setBusy(true)
+    options.onError(null)
+    try {
+      const saved = await draft.flush()
+      if (!saved) throw new Error('No se pudo guardar la comanda antes del cobro.')
+      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, receivedCents, allowPending, discount)
+      if (!result.requiresConfirmation) {
+        await refreshSales(result.saleId, 'Cobro completado sin imprimir')
+        const [nextOrder, nextMap] = await Promise.all([
+          loadRestaurantOrder(options.context, saved.order.id),
+          realtime.loadCurrentMap(options.context, options.cashSession.id),
+        ])
+        draft.replaceOrder(nextOrder)
+        realtime.setMap(nextMap)
+        options.setAppliedDiscount(null)
+        options.setMobileTicketOpen(false)
+        setSplitOrderGroup(null)
+        setPosView({ type: 'table_order', orderId: nextOrder.order.id })
+      }
+      return result
+    } catch (error) {
+      if (isRestaurantRevisionConflict(error)) {
+        try {
+          draft.replaceOrder(await loadRestaurantOrder(options.context, current.order.id))
+          options.onError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
+        } catch (reloadError) {
+          options.onError(getReadableError(reloadError))
+        }
+      } else {
+        options.onError(getReadableError(error))
+      }
+      throw error
+    } finally {
+      options.setBusy(false)
+    }
+  }, [draft, options, realtime, refreshSales])
   const splitOrder = useCallback(async (
     sourceOrderId: string,
     targetOrderId: string | null,
@@ -552,6 +599,7 @@ export function useRestaurantController(options: Options) {
     openTableOrder,
     order: draft.order,
     payEqualSplitPart,
+    paySelectedOrderItems,
     pendingLineRemoval,
     pendingPayment,
     posView,
