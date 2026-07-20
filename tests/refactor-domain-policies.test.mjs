@@ -5,6 +5,7 @@ import { applyPrintFailure } from '../src/features/local-printing/services/print
 import { getRejectedSaleRecovery } from '../src/features/offline/services/rejectedSaleRecovery.ts'
 import {
   isRestaurantRevisionConflict,
+  requiresConfirmedRestaurantLineRemoval,
   shouldFlushRestaurantDraft,
   shouldSaveBeforeLeavingOrder,
 } from '../src/features/restaurant/draft-policy.ts'
@@ -56,6 +57,8 @@ test('restaurant draft policy covers dirty state, revision conflicts, and save-b
   assert.equal(shouldFlushRestaurantDraft('saved'), false)
   assert.equal(isRestaurantRevisionConflict({ code: '40001' }), true)
   assert.equal(isRestaurantRevisionConflict({ code: 'PGRST116' }), false)
+  assert.equal(requiresConfirmedRestaurantLineRemoval(0), false)
+  assert.equal(requiresConfirmedRestaurantLineRemoval(1), true)
   assert.equal(shouldSaveBeforeLeavingOrder({ type: 'table_order', orderId: 'order-1' }, 'dirty'), true)
   assert.equal(shouldSaveBeforeLeavingOrder({ type: 'table_order', orderId: 'order-1' }, 'saving'), true)
   assert.equal(shouldSaveBeforeLeavingOrder({ type: 'table_order', orderId: 'order-1' }, 'saved'), false)

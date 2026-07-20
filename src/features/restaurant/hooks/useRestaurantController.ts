@@ -28,6 +28,7 @@ import {
   openRestaurantOrder,
   payRestaurantEqualPart,
   removeRestaurantOrderLineConfirmed,
+  saveRestaurantOrderLines,
 } from '../../tables/service'
 import { canDecreaseLineQuantity } from '../../tables/service-status'
 import type {
@@ -39,7 +40,7 @@ import type {
   RestaurantOrderLineMove,
 } from '../../tables/types'
 import { useRestaurantDraft } from './useRestaurantDraft'
-import { isRestaurantRevisionConflict, shouldSaveBeforeLeavingOrder } from '../draft-policy'
+import { isRestaurantRevisionConflict, requiresConfirmedRestaurantLineRemoval, shouldSaveBeforeLeavingOrder } from '../draft-policy'
 import { getRestaurantCashClosureError } from '../services/validateCashClosure'
 import { useRestaurantRealtime } from './useRestaurantRealtime'
 
@@ -204,7 +205,14 @@ export function useRestaurantController(options: Options) {
       return
     }
     try {
-      await removeRestaurantOrderLineConfirmed(currentLine.id, saved.order.revision)
+      if (requiresConfirmedRestaurantLineRemoval(currentLine.servedQuantity)) {
+        await removeRestaurantOrderLineConfirmed(currentLine.id, saved.order.revision)
+      } else {
+        await saveRestaurantOrderLines({
+          ...saved,
+          lines: saved.lines.filter((candidate) => candidate.id !== currentLine.id),
+        })
+      }
       draft.replaceOrder(await loadRestaurantOrder(options.context, saved.order.id))
       setPendingLineRemoval(null)
     } catch (error) {

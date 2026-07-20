@@ -11,3 +11,7 @@ export function isRestaurantRevisionConflict(error: unknown) {
 export function shouldSaveBeforeLeavingOrder(view: PosView, saveState: RestaurantOrderSaveState) {
   return view.type === 'table_order' && saveState !== 'saved'
 }
+
+export function requiresConfirmedRestaurantLineRemoval(servedQuantity: number) {
+  return servedQuantity > 0
+}
