@@ -5,7 +5,7 @@ import test from 'node:test'
 const migration = await readFile(new URL('../supabase/22.equal-order-splits-migration.sql', import.meta.url), 'utf8')
 const discountMigration = await readFile(new URL('../supabase/23.equal-split-discounts-migration.sql', import.meta.url), 'utf8')
 const completeDatabase = await readFile(new URL('../supabase/0.complete-database.sql', import.meta.url), 'utf8')
-const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const app = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const bar = await readFile(new URL('../src/features/tables/components/TableOrderBar.tsx', import.meta.url), 'utf8')
 const modal = await readFile(new URL('../src/features/tables/components/EqualSplitOrderModal.tsx', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
@@ -56,7 +56,7 @@ test('el descuento previo se hereda sin multiplicar importes fijos', () => {
   assert.match(discountMigration, /default_discount = excluded\.default_discount/)
   assert.match(discountMigration, /default_discount ->> 'amountCents'\)::integer, 0\) \/ p_split\.part_count/)
   assert.match(discountMigration, /nextDefaultDiscount/)
-  assert.match(app, /configureRestaurantEqualSplit\(current\.order\.id, partCount, current\.order\.revision, appliedDiscount\)/)
+  assert.match(app, /configureRestaurantEqualSplit\([\s\S]+current\.order\.id,[\s\S]+partCount,[\s\S]+current\.order\.revision,[\s\S]+options\.appliedDiscount/)
 
   const allocate = (cents, parts) => Array.from({ length: parts }, (_, index) =>
     Math.floor(cents / parts) + (index < cents % parts ? 1 : 0))

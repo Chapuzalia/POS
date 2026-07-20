@@ -4,7 +4,7 @@ import test from 'node:test'
 
 const migration = await readFile(new URL('../supabase/21.split-restaurant-orders-migration.sql', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
-const app = await readFile(new URL('../src/App.tsx', import.meta.url), 'utf8')
+const app = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const modal = await readFile(new URL('../src/features/tables/components/SplitOrderModal.tsx', import.meta.url), 'utf8')
 
 test('cada ocupacion tiene un grupo y las comandas existentes se migran uno a uno', () => {
@@ -37,7 +37,7 @@ test('cobrar una subcomanda solo libera las mesas al cerrar la ultima', () => {
   assert.match(migration, /where o\.order_group_id = order_row\.order_group_id and o\.status = 'open'/)
   assert.match(migration, /if remaining_orders = 0 then[\s\S]+set released_at = now\(\)/)
   assert.match(migration, /'nextOrderId'/)
-  assert.match(app, /paymentResult\.nextOrderId/)
+  assert.match(app, /result\.nextOrderId/)
 })
 
 test('mapa, detalle y realtime trabajan por grupo de ocupacion', () => {
