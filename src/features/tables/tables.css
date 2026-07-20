@@ -14,7 +14,7 @@
 
 /* The map zoom changes table geometry, while typography stays stable on screen. */
 .pos-table{overflow:hidden;padding:0}
-.pos-table-content{position:absolute;top:50%;left:50%;display:flex;max-width:none;box-sizing:border-box;flex-direction:column;align-items:center;justify-content:center;gap:3px;overflow:hidden;padding:9px 8px;transform-origin:center;pointer-events:none}
+.pos-table-content{position:absolute;inset:0;display:flex;max-width:none;box-sizing:border-box;flex-direction:column;align-items:center;justify-content:center;gap:3px;overflow:hidden;padding:9px 8px;pointer-events:none}
 .pos-table .pos-table-content,.pos-table .pos-table-primary{max-width:none;white-space:normal}
 .pos-table-primary{display:flex;width:100%;flex-direction:column;align-items:center;gap:1px}
 .pos-table-primary strong,.pos-table-primary .pos-table-status{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
@@ -41,3 +41,9 @@
 .table-external-label strong{display:block;overflow:hidden;font-size:13px;font-weight:850;text-overflow:ellipsis;white-space:nowrap}
 .table-external-label span{overflow:hidden;color:var(--muted);font-size:10px;font-weight:700;text-overflow:ellipsis;white-space:nowrap}
 .table-map-element{position:absolute;z-index:0;pointer-events:none}.table-map-element.kind-wall{border-radius:3px;background:repeating-linear-gradient(90deg,#64748b 0 18px,#94a3b8 18px 20px);box-shadow:inset 0 0 0 1px rgba(15,23,42,.28)}.table-map-element.kind-column{box-sizing:border-box;border:3px solid #64748b;border-radius:50%;background:repeating-linear-gradient(45deg,#cbd5e1 0 5px,#94a3b8 5px 7px)}.table-map-element.kind-text{display:flex;align-items:center;justify-content:center;overflow:hidden;color:var(--muted);font-weight:900;letter-spacing:.04em;text-align:center}.table-map-element.kind-text span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+
+/* Service state: occupied tables with pending items are warning-orange. */
+.pos-table.status-occupied-pending{border-color:var(--warning);background:color-mix(in srgb,var(--warning) 15%,var(--surface))}
+.pos-table.status-occupied-pending .pos-table-status-mark{background:var(--warning)}
+.table-label-connectors .status-occupied-pending line,.table-label-connectors .status-occupied-pending circle{stroke:var(--warning)}
+.table-external-label.status-occupied-pending{border-left-color:var(--warning)}

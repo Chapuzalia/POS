@@ -1,4 +1,4 @@
-import type { PaymentMethod, TicketLineMixer, TicketLineModifier } from '../../types/domain'
+import type { AppliedDiscount, PaymentMethod, TicketLineMixer, TicketLineModifier } from '../../types/domain'
 
 export type RestaurantTableShape = 'square' | 'rectangle' | 'round'
 export type RestaurantMapElementKind = 'wall' | 'column' | 'text'
@@ -18,8 +18,8 @@ export type RestaurantOrderDetail = { order: RestaurantOrder; cashRegisterName: 
 export type RestaurantOrderGroupDetail = { id: string; orders: RestaurantOrderDetail[]; tables: RestaurantTable[] }
 export type RestaurantOrderLineMove = { lineId: string; quantity: number }
 export type MoveRestaurantOrderLinesResult = { sourceOrderId: string; targetOrderId: string; sourceCancelled: boolean; sourceRevision: number; targetRevision: number }
-export type RestaurantEqualSplit = { id: string; orderId: string; orderGroupId: string; totalCents: number; partCount: number; paidParts: number; paidCents: number; remainingParts: number; remainingCents: number; nextPartCents: number; status: 'open' | 'completed' | 'cancelled'; revision: number; allowPendingService: boolean }
-export type PayRestaurantEqualPartResult = { requiresConfirmation: true; pendingUnits: number; split: RestaurantEqualSplit } | { requiresConfirmation: false; pendingUnits: number; split: RestaurantEqualSplit; ticketId: string; saleId: string; paymentId: string; paidAmountCents: number; completed: boolean; nextOrderId: string | null }
+export type RestaurantEqualSplit = { id: string; orderId: string; orderGroupId: string; totalCents: number; partCount: number; paidParts: number; paidCents: number; remainingParts: number; remainingCents: number; nextPartCents: number; nextDefaultDiscount: AppliedDiscount | null; nextDefaultDiscountAmountCents: number; nextDefaultTotalCents: number; status: 'open' | 'completed' | 'cancelled'; revision: number; allowPendingService: boolean }
+export type PayRestaurantEqualPartResult = { requiresConfirmation: true; pendingUnits: number; split: RestaurantEqualSplit } | { requiresConfirmation: false; pendingUnits: number; split: RestaurantEqualSplit; ticketId: string; saleId: string; paymentId: string | null; paidAmountCents: number; completed: boolean; nextOrderId: string | null }
 export type DiningAreaCreateInput = { venueId: string; name: string; sortOrder: number }
 export type DiningAreaUpdateInput = Partial<Pick<DiningArea, 'name' | 'sortOrder' | 'isActive' | 'canvasWidth' | 'canvasHeight' | 'mapElements'>>
 export type RestaurantTableCreateInput = { venueId: string; areaId: string; name: string; capacity: number; shape: RestaurantTableShape; positionX: number; positionY: number; width: number; height: number; sortOrder: number }

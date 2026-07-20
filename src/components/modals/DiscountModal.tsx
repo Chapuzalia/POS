@@ -6,6 +6,7 @@ import type { AppliedDiscount, Discount, DiscountCalculationType } from '../../t
 import { Button } from '../ui'
 
 type DiscountModalProps = {
+  description?: string
   discounts: Discount[]
   isBusy: boolean
   manualDiscountEnabled: boolean
@@ -16,6 +17,7 @@ type DiscountModalProps = {
 }
 
 export function DiscountModal({
+  description = 'Se aplicará a la cuenta completa.',
   discounts,
   isBusy,
   manualDiscountEnabled,
@@ -56,7 +58,7 @@ export function DiscountModal({
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold" id="discount-title">Aplicar descuento</h2>
-            <p className="text-sm text-[var(--muted)]">Se aplicará a la cuenta completa.</p>
+            <p className="text-sm text-[var(--muted)]">{description}</p>
           </div>
           <Button disabled={isBusy} onClick={onCancel} size="sm" type="button" variant="tertiary">
             <X className="h-4 w-4" />

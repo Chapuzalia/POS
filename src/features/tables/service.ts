@@ -169,12 +169,34 @@ function mapEqualSplit(value: unknown): RestaurantEqualSplit {
   const paidParts = Number(read('paidParts', 'paid_parts'))
   const paidCents = Number(read('paidCents', 'paid_cents'))
   const nextPartCents = paidParts >= partCount ? 0 : Math.floor(totalCents / partCount) + (paidParts + 1 <= totalCents % partCount ? 1 : 0)
+  const explicitDefaultDiscount = read('nextDefaultDiscount', 'next_default_discount') as AppliedDiscount | null | undefined
+  const storedDefault = read('defaultDiscount', 'default_discount') as Record<string, unknown> | null | undefined
+  const calculationType = storedDefault?.calculationType as AppliedDiscount['calculationType'] | undefined
+  const allocatedDefaultCents = calculationType
+    ? Math.floor(Number(storedDefault?.amountCents ?? 0) / partCount) + (paidParts + 1 <= Number(storedDefault?.amountCents ?? 0) % partCount ? 1 : 0)
+    : 0
+  const fallbackDefaultDiscount: AppliedDiscount | null = storedDefault && calculationType
+    ? {
+        discountId: storedDefault.discountId ? String(storedDefault.discountId) : null,
+        name: String(storedDefault.name ?? 'Descuento'),
+        type: storedDefault.type as AppliedDiscount['type'],
+        calculationType,
+        value: calculationType === 'fixed' ? allocatedDefaultCents : Number(storedDefault.value),
+        color: storedDefault.color ? String(storedDefault.color) : null,
+      }
+    : null
+  const nextDefaultDiscount = explicitDefaultDiscount ?? fallbackDefaultDiscount
+  const fallbackDiscountAmount = nextDefaultDiscount ? Math.min(nextPartCents, allocatedDefaultCents) : 0
+  const nextDefaultDiscountAmountCents = Number(read('nextDefaultDiscountAmountCents', 'next_default_discount_amount_cents') ?? fallbackDiscountAmount)
   return {
     id: String(row.id), orderId: String(read('orderId', 'order_id')), orderGroupId: String(read('orderGroupId', 'order_group_id')),
     totalCents, partCount, paidParts, paidCents,
     remainingParts: Number(read('remainingParts', 'remaining_parts') ?? partCount - paidParts),
     remainingCents: Number(read('remainingCents', 'remaining_cents') ?? totalCents - paidCents),
     nextPartCents: Number(read('nextPartCents', 'next_part_cents') ?? nextPartCents),
+    nextDefaultDiscount,
+    nextDefaultDiscountAmountCents,
+    nextDefaultTotalCents: Number(read('nextDefaultTotalCents', 'next_default_total_cents') ?? Math.max(0, nextPartCents - nextDefaultDiscountAmountCents)),
     status: row.status as RestaurantEqualSplit['status'], revision: Number(row.revision),
     allowPendingService: Boolean(read('allowPendingService', 'allow_pending_service')),
   }
@@ -251,14 +273,14 @@ export async function loadRestaurantEqualSplit(context: TenantContext, orderId: 
   return data ? mapEqualSplit(data) : null
 }
 
-export async function configureRestaurantEqualSplit(orderId: string, partCount: number, expectedRevision: number) {
-  const { data, error } = await requireSupabase().rpc('configure_restaurant_order_equal_split', { p_order_id: orderId, p_part_count: partCount, p_expected_order_revision: expectedRevision })
+export async function configureRestaurantEqualSplit(orderId: string, partCount: number, expectedRevision: number, defaultDiscount: AppliedDiscount | null) {
+  const { data, error } = await requireSupabase().rpc('configure_restaurant_order_equal_split', { p_order_id: orderId, p_part_count: partCount, p_expected_order_revision: expectedRevision, p_default_discount: defaultDiscount })
   if (error) throw error
   return mapEqualSplit(data)
 }
 
-export async function payRestaurantEqualPart(splitId: string, paymentMethod: PaymentMethod, receivedCents: number | null, allowPending = false): Promise<PayRestaurantEqualPartResult> {
-  const { data, error } = await requireSupabase().rpc('pay_restaurant_order_equal_part', { p_split_id: splitId, p_payment_method: paymentMethod, p_received_cents: receivedCents, p_allow_pending: allowPending })
+export async function payRestaurantEqualPart(splitId: string, paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending: boolean, discount: AppliedDiscount | null, useDefaultDiscount: boolean): Promise<PayRestaurantEqualPartResult> {
+  const { data, error } = await requireSupabase().rpc('pay_restaurant_order_equal_part', { p_split_id: splitId, p_payment_method: paymentMethod, p_received_cents: receivedCents, p_allow_pending: allowPending, p_discount: discount, p_use_default_discount: useDefaultDiscount })
   if (error) throw error
   const result = data as Record<string, unknown>
   return { ...result, requiresConfirmation: Boolean(result.requiresConfirmation), pendingUnits: Number(result.pendingUnits), split: mapEqualSplit(result.split) } as PayRestaurantEqualPartResult

@@ -1463,7 +1463,7 @@ function App() {
     if (!current) throw new Error('No hay una comanda abierta.')
     setIsBusy(true); setError(null)
     try {
-      const configured = await configureRestaurantEqualSplit(current.order.id, partCount, current.order.revision)
+      const configured = await configureRestaurantEqualSplit(current.order.id, partCount, current.order.revision, appliedDiscount)
       setEqualSplit(configured)
       return configured
     } catch (splitError) {
@@ -1474,11 +1474,11 @@ function App() {
     }
   }
 
-  async function payEqualSplitPart(method: PaymentMethod, receivedCents: number | null, allowPending: boolean): Promise<PayRestaurantEqualPartResult> {
+  async function payEqualSplitPart(method: PaymentMethod | null, receivedCents: number | null, allowPending: boolean, discount: AppliedDiscount | null, useDefaultDiscount: boolean): Promise<PayRestaurantEqualPartResult> {
     if (!context || !cashSession || !equalSplit) throw new Error('No hay una división activa.')
     setIsBusy(true); setError(null)
     try {
-      const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending)
+      const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending, discount, useDefaultDiscount)
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
         const [nextLedger, nextStats, confirmedTickets] = await Promise.all([
@@ -2347,13 +2347,17 @@ function App() {
       /> : null}
 
       {equalSplitOpen && restaurantOrder ? <EqualSplitOrderModal
+        defaultDiscount={appliedDiscount}
+        discounts={catalog?.discounts ?? []}
         isBusy={isBusy}
+        manualDiscountEnabled={catalog?.manualDiscountEnabled ?? false}
         onClose={() => { setEqualSplitOpen(false); setEqualSplit(null) }}
         onCompleted={() => { setEqualSplitOpen(false); setEqualSplit(null) }}
         onConfigure={configureEqualSplit}
         onPay={payEqualSplitPart}
         order={restaurantOrder}
         split={equalSplit}
+        venueId={context.venueId}
       /> : null}
 
       {cashPaymentOpen ? (

@@ -1,10 +1,14 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFile } from 'node:fs/promises'
 import { snapTableAlignment, snapTableCenter } from '../src/features/tables/alignment.ts'
 import { placeExternalLabels, rectsOverlap, tableContentMode, tableVisualRect } from '../src/features/tables/external-label-layout.ts'
 import { compactJoinedCompositions, compositionHasOpenOrder, findJoinProposal, isCompactComposition, separateFromComposition, translateComposition } from '../src/features/tables/joined-layout.ts'
 import { fitBounds, getMapPlaneSize, intersectionRatio, mapToScreen, positionFloatingPanel, screenToMap, zoomAtPoint } from '../src/features/tables/viewport.ts'
+import { getRestaurantTableVisualStatus } from '../src/features/tables/table-visual-status.ts'
 import { getReadableError } from '../src/utils/errors.ts'
+
+const tableMapViewSource = await readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8')
 
 const bounds = { left: 100, top: 50, width: 1000, height: 600 }
 
@@ -274,4 +278,22 @@ test('mantiene etiquetas dentro del canvas y evita la zona reservada de controle
 test('los errores de Supabase conservan mensaje, detalle y codigo al guardar el mapa', () => {
   const message = getReadableError({ message: 'La distribucion no es valida', details: 'Mesa 2', code: '23514' })
   assert.equal(message, 'La distribucion no es valida - Mesa 2 - Codigo: 23514')
+})
+
+test('las mesas ocupadas usan naranja con pendientes y rojo cuando todo esta servido', () => {
+  assert.equal(getRestaurantTableVisualStatus({ status: 'free', pendingUnits: 0 }), 'free')
+  assert.equal(getRestaurantTableVisualStatus({ status: 'occupied', pendingUnits: 2 }), 'occupied-pending')
+  assert.equal(getRestaurantTableVisualStatus({ status: 'occupied', pendingUnits: 0 }), 'occupied')
+  assert.equal(getRestaurantTableVisualStatus({ status: 'reserved', pendingUnits: 0 }), 'reserved')
+})
+test('cada zona se abre una vez con la vista ajustada', () => {
+  assert.match(tableMapViewSource, /fittedAreaRef\.current === activeAreaId/)
+  assert.match(tableMapViewSource, /fitViewport\(canvas, \[\.\.\.tables, \.\.\.mapElements\], planeSize\)/)
+})
+
+test('el zoom escala la geometria sin rasterizar ni escalar inversamente el texto', () => {
+  assert.match(tableMapViewSource, /width: planeSize\.width \* viewport\.zoom/)
+  assert.match(tableMapViewSource, /height: planeSize\.height \* viewport\.zoom/)
+  assert.doesNotMatch(tableMapViewSource, /scale\(\$\{viewport\.zoom\}\)/)
+  assert.doesNotMatch(tableMapViewSource, /scale\(\$\{1 \/ viewport\.zoom\}\)/)
 })

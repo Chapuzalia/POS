@@ -6,6 +6,7 @@ import { snapTableAlignment } from '../alignment'
 import { externalLabelSize, placeExternalLabels, tableContentMode, tableVisualRect, type LabelSide } from '../external-label-layout'
 import { boundsOf, compositionHasOpenOrder, findJoinProposal, getJoinedIds, separateFromComposition, translateComposition, type JoinProposal } from '../joined-layout'
 import { layoutFromMap } from '../layout-service'
+import { getRestaurantTableVisualStatus } from '../table-visual-status'
 import type { RestaurantMap, RestaurantTableMapItem, SessionTableLayout, TableLayoutEntry } from '../types'
 import { useMapViewport } from '../useMapViewport'
 import { getMapPlaneSize, positionFloatingPanel, screenToMap } from '../viewport'
@@ -69,11 +70,12 @@ export function TableMapView(props: Props) {
   const dragRef = useRef<DragState | null>(null)
   const previousLabelSidesRef = useRef(new Map<string, LabelSide>())
   const latestRevisionRef = useRef(map.layoutRevision ?? 0)
+  const fittedAreaRef = useRef<string | null>(null)
   const viewportApi = useMapViewport(`table-map:${cashSessionId}:${selectedAreaId ?? 'default'}`)
-  const { viewport } = viewportApi
+  const { fit: fitViewport, viewport } = viewportApi
   const activeAreaId = selectedAreaId && map.areas.some((area) => area.id === selectedAreaId) ? selectedAreaId : map.areas[0]?.id
   const activeArea = map.areas.find((area) => area.id === activeAreaId)
-  const mapElements = activeArea?.mapElements ?? []
+  const mapElements = useMemo(() => activeArea?.mapElements ?? [], [activeArea?.mapElements])
   const planeSize = useMemo(
     () => getMapPlaneSize(canvasSize.width, canvasSize.height, activeArea?.canvasWidth ?? 1200, activeArea?.canvasHeight ?? 800),
     [activeArea?.canvasHeight, activeArea?.canvasWidth, canvasSize.height, canvasSize.width],
@@ -111,6 +113,13 @@ export function TableMapView(props: Props) {
   useEffect(() => {
     previousLabelSidesRef.current = new Map(externalLabels.map((label) => [label.id, label.side]))
   }, [externalLabels])
+
+  useEffect(() => {
+    const canvas = canvasRef.current
+    if (!canvas || !activeAreaId || !canvasSize.width || !canvasSize.height || fittedAreaRef.current === activeAreaId) return
+    fittedAreaRef.current = activeAreaId
+    fitViewport(canvas, [...tables, ...mapElements], planeSize)
+  }, [activeAreaId, canvasSize.height, canvasSize.width, fitViewport, mapElements, planeSize, tables])
 
   useEffect(() => {
     const revision = map.layoutRevision ?? 0
@@ -267,10 +276,10 @@ export function TableMapView(props: Props) {
       <svg aria-hidden="true" className="table-label-connectors">
         {externalLabels.map((label) => {
           const table = externalLabelTables.get(label.id)
-          return <g className={`status-${table?.status ?? 'free'}`} key={label.id}><line x1={label.connector.from.x} x2={label.connector.to.x} y1={label.connector.from.y} y2={label.connector.to.y} /><circle cx={label.connector.from.x} cy={label.connector.from.y} r="2.5" /></g>
+          return <g className={`status-${table ? getRestaurantTableVisualStatus(table) : 'free'}`} key={label.id}><line x1={label.connector.from.x} x2={label.connector.to.x} y1={label.connector.from.y} y2={label.connector.to.y} /><circle cx={label.connector.from.x} cy={label.connector.from.y} r="2.5" /></g>
         })}
       </svg>
-      <div className="map-transform-layer" style={{ width: planeSize.width, height: planeSize.height, transform: `translate(${viewport.panX}px, ${viewport.panY}px) scale(${viewport.zoom})` }}>
+      <div className="map-transform-layer" style={{ width: planeSize.width * viewport.zoom, height: planeSize.height * viewport.zoom, left: viewport.panX, top: viewport.panY }}>
         {mapElements.map((element) => <div aria-hidden="true" className={`table-map-element kind-${element.kind}`} key={element.id} style={{ left: `${element.positionX}%`, top: `${element.positionY}%`, width: `${element.width}%`, height: `${element.height}%` }}>{element.kind === 'text' ? <span>{element.text}</span> : null}</div>)}
         {guidelines.x !== null ? <div aria-hidden="true" className="table-map-guideline vertical" style={{ left: `${guidelines.x}%` }} /> : null}
         {guidelines.y !== null ? <div aria-hidden="true" className="table-map-guideline horizontal" style={{ top: `${guidelines.y}%` }} /> : null}
@@ -278,8 +287,9 @@ export function TableMapView(props: Props) {
         {joinPreview ? joinPreview.tables.filter((table) => dragRef.current?.memberIds.has(table.id)).map((table) => <div aria-hidden="true" className="table-join-preview" key={`preview-${table.id}`} style={{ left: `${table.positionX}%`, top: `${table.positionY}%`, width: `${table.width}%`, height: `${table.height}%` }} />) : null}
         {tables.map((table) => {
           const mode = contentModes.get(table.id) ?? 'full'
-          return <button aria-label={`${table.name}, ${statusLabel(table.status)}${table.layoutGroupId ? ', juntada' : ''}`} className={`pos-table content-${mode} status-${table.status} shape-${table.shape}${dropTargetId === table.id || (table.layoutGroupId && displayTables.find((item) => item.id === dropTargetId)?.layoutGroupId === table.layoutGroupId) ? ' drop-target' : ''}${moveOrderId && table.status !== 'free' ? ' unavailable' : ''}`} key={table.id} onClick={() => chooseTable(table)} onPointerDown={(event) => startTableDrag(event, table)} style={{ left: `${table.positionX}%`, top: `${table.positionY}%`, width: `${table.width}%`, height: `${table.height}%` }} type="button">
-            {mode !== 'external' ? <span className="pos-table-content" style={{ width: `${viewport.zoom * 100}%`, height: `${viewport.zoom * 100}%`, transform: `translate(-50%, -50%) scale(${1 / viewport.zoom})` }}>
+          const visualStatus = getRestaurantTableVisualStatus(table)
+          return <button aria-label={`${table.name}, ${statusLabel(table.status)}${table.layoutGroupId ? ', juntada' : ''}`} className={`pos-table content-${mode} status-${visualStatus} shape-${table.shape}${dropTargetId === table.id || (table.layoutGroupId && displayTables.find((item) => item.id === dropTargetId)?.layoutGroupId === table.layoutGroupId) ? ' drop-target' : ''}${moveOrderId && table.status !== 'free' ? ' unavailable' : ''}`} key={table.id} onClick={() => chooseTable(table)} onPointerDown={(event) => startTableDrag(event, table)} style={{ left: `${table.positionX}%`, top: `${table.positionY}%`, width: `${table.width}%`, height: `${table.height}%` }} type="button">
+            {mode !== 'external' ? <span className="pos-table-content">
               <span className="pos-table-primary"><strong title={table.name}>{table.name}</strong><span className="pos-table-status">{statusLabel(table.status)}</span></span>
               {mode === 'full' && table.status === 'occupied' ? <><b>{formatCurrency(table.totalCents)}</b><small><Users aria-hidden="true" size={14} /> {table.guestCount} comensales · {elapsed(table.orderOpenedAt)}</small><small>{table.pendingUnits ? `${table.pendingUnits} por servir` : 'Todo servido'}</small></> : mode === 'full' ? <small><Users aria-hidden="true" size={14} /> {table.capacity} plazas</small> : null}
               {dropTargetId === table.id ? <em className="drop-message">Soltar para juntar</em> : null}
@@ -292,7 +302,7 @@ export function TableMapView(props: Props) {
         {externalLabels.map((label) => {
           const table = externalLabelTables.get(label.id)
           if (!table) return null
-          return <div className={`table-external-label status-${table.status} side-${label.side}${label.forced ? ' forced' : ''}`} key={label.id} style={{ left: label.rect.x, top: label.rect.y, width: label.rect.width, height: label.rect.height }}>
+          return <div className={`table-external-label status-${getRestaurantTableVisualStatus(table)} side-${label.side}${label.forced ? ' forced' : ''}`} key={label.id} style={{ left: label.rect.x, top: label.rect.y, width: label.rect.width, height: label.rect.height }}>
             <strong title={table.name}>{table.name}</strong><span>{statusLabel(table.status)}</span>
           </div>
         })}
