@@ -2,7 +2,7 @@ import type { ComponentProps } from 'react'
 import { cx } from '../../utils/cx'
 
 export type ButtonProps = ComponentProps<'button'> & {
-  variant?: 'primary' | 'secondary' | 'tertiary' | 'danger'
+  variant?: 'primary' | 'secondary' | 'tertiary' | 'danger' | 'dangerSoft'
   size?: 'sm' | 'md' | 'lg'
   fullWidth?: boolean
   active?: boolean
@@ -36,6 +36,10 @@ export function Button({
           'bg-[var(--surface)] text-[var(--foreground)] hover:border-[var(--accent)] hover:bg-[var(--accent-soft)]',
         variant === 'danger' &&
           'border-[var(--danger)] bg-[var(--danger)] text-white hover:brightness-105',
+        variant === 'dangerSoft' &&
+        !active &&
+        'border-[var(--danger)] bg-[var(--surface)] text-[var(--danger)] hover:brightness-95 hover:border-[var(--danger)] ',
+
         className,
       )}
     />
