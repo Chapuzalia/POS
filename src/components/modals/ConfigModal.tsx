@@ -1,5 +1,7 @@
-import { LayoutList, Palette, RefreshCw, X } from 'lucide-react'
+import { ArrowLeft, LayoutList, Palette, Printer, RefreshCw, X } from 'lucide-react'
+import { useState } from 'react'
 import type { CatalogStartTab, TenantContext, ThemeDefinition } from '../../types'
+import { PrintAgentSettings } from '../../features/local-printing'
 import { Button, Metric } from '../ui'
 
 type ConfigModalProps = {
@@ -29,7 +31,23 @@ export function ConfigModal({
   themeId,
   themes,
 }: ConfigModalProps) {
+  const [section, setSection] = useState<'general' | 'printing'>('general')
   const theme = themes.find((item) => item.id === themeId)
+  const canManageHardware = context.canManageCash === true || ['manager', 'admin', 'owner', 'superadmin'].includes(context.role)
+
+  if (section === 'printing') {
+    return (
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 sm:items-center sm:p-4">
+        <section className="flex max-h-[100svh] w-full flex-col bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[94svh] sm:max-w-5xl sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]">
+          <div className="flex items-center justify-between gap-3 border-b border-[var(--separator)] p-4">
+            <Button onClick={() => setSection('general')} size="sm" type="button" variant="tertiary"><ArrowLeft className="h-4 w-4" />Ajustes</Button>
+            <Button onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
+          </div>
+          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5"><PrintAgentSettings canConfigure={canManageHardware} canOpenDrawer={canManageHardware} /></div>
+        </section>
+      </div>
+    )
+  }
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
@@ -51,6 +69,11 @@ export function ConfigModal({
           <Metric label="Usuario" value={context.userName} />
           <Metric label="Pendiente sync" value={String(pendingCount)} tone={pendingCount ? 'danger' : 'success'} />
         </div>
+
+        <button className="mt-5 flex min-h-14 w-full items-center justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-left transition hover:border-[var(--accent)]" onClick={() => setSection('printing')} type="button">
+          <span className="flex items-center gap-3"><Printer className="h-5 w-5 text-[var(--accent)]" /><span><strong className="block">Hardware · Impresion</strong><small className="text-[var(--muted)]">Agente local, impresoras, cajon y diagnostico</small></span></span>
+          <span aria-hidden="true">›</span>
+        </button>
 
         {lastSyncError ? (
           <div className="mt-4 rounded-[var(--radius)] border border-red-400/45 bg-red-500/10 p-3 text-sm">

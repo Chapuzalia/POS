@@ -271,6 +271,12 @@ export type SessionTicketRecord = {
   createdAt: string
   status: 'active' | 'voided'
   payload: SaleCreatedPayload
+  printStatus?: 'not_requested' | 'pending' | 'printed' | 'failed' | 'unknown'
+  printJobId?: string | null
+  printRequestId?: string | null
+  printedAt?: string | null
+  printErrorCode?: string | null
+  printAttempts?: number
 }
 
 export type ProductSalesStat = {

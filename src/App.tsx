@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import { sileo } from 'sileo'
 import { AppHeader } from './components/layout/AppHeader'
 import { CashPaymentModal, CloseCashModal, ConfigModal, DiscountModal, ProductDialog, SessionTicketsModal } from './components/modals'
 import { CatalogPanel, MobileTicketModal, OpenCashPanel, PaymentPanel, TicketPanel } from './components/pos'
@@ -111,6 +112,12 @@ import { canDecreaseLineQuantity, getOrderPendingUnits } from './features/tables
 import { CashSessionGate } from './features/cash-registers/CashSessionGate'
 import { AddProductFlyAnimation } from './components/feedback/AddProductFlyAnimation'
 import { closeCashRegisterSession, loadCashRegisterOptions, openCashRegisterSession, subscribeToVenueCashSessions } from './features/cash-registers/service'
+import {
+  getPrintAgentErrorMessage,
+  nextPrintCopyNumber,
+  printCompletedSale,
+  usePrintAgentStore,
+} from './features/local-printing'
 
 type ProductDialogState = {
   allowFormatSelection: boolean
@@ -254,6 +261,23 @@ function App() {
   })
   const cashSummary = summarizeSales(cashSession?.openingFloatCents ?? 0, salesLedger)
   const activeCashSessionId = cashSession?.id
+
+  useEffect(() => {
+    if (!context || isAdministrativeUser(context) || !context.venueId || !context.deviceId) return undefined
+    const abortController = new AbortController()
+    const store = usePrintAgentStore.getState()
+    store.configureScope({ tenantId: context.tenantId, establishmentId: context.venueId, terminalId: context.deviceId })
+    void (async () => {
+      if (await usePrintAgentStore.getState().checkConnection(abortController.signal)) {
+        const configured = usePrintAgentStore.getState()
+        if (configured.token) await Promise.allSettled([
+          configured.loadServerInfo(abortController.signal),
+          configured.loadPrinters(abortController.signal),
+        ])
+      }
+    })()
+    return () => abortController.abort()
+  }, [context])
   async function loadCurrentRestaurantMap(activeContext: TenantContext, activeSessionId = cashSession?.id) {
     const permanentMap = await loadRestaurantMap(activeContext)
     if (!activeSessionId) return { ...permanentMap, layoutRevision: 0 }
@@ -990,6 +1014,65 @@ function App() {
     }
   }
 
+  function updateTicketPrintState(saleId: string, patch: Partial<Pick<SessionTicketRecord,
+    'printStatus' | 'printJobId' | 'printRequestId' | 'printedAt' | 'printErrorCode' | 'printAttempts'>>) {
+    setSessionTickets((current) => {
+      const next = current.map((ticket) => ticket.id === saleId ? { ...ticket, ...patch } : ticket)
+      if (context && cashSession) saveSessionTickets(context, cashSession.id, next)
+      return next
+    })
+  }
+
+  function mergeRemoteTicketPrintStates(remoteTickets: SessionTicketRecord[]) {
+    const localById = new Map(sessionTickets.map((ticket) => [ticket.id, ticket]))
+    return remoteTickets.map((ticket) => {
+      const local = localById.get(ticket.id)
+      return local ? {
+        ...ticket,
+        printStatus: local.printStatus,
+        printJobId: local.printJobId,
+        printRequestId: local.printRequestId,
+        printedAt: local.printedAt,
+        printErrorCode: local.printErrorCode,
+        printAttempts: local.printAttempts,
+      } : ticket
+    })
+  }
+
+  async function printSalePayload(payload: SessionTicketRecord['payload'], options: { isReprint?: boolean; copyNumber?: number } = {}) {
+    if (!context) return
+    const printState = usePrintAgentStore.getState()
+    const requestId = options.isReprint
+      ? `print:${payload.sale.id}:copy:${options.copyNumber || 1}`
+      : `print:${payload.sale.id}:original`
+    if (!printState.token || !printState.selectedPrinterId) {
+      updateTicketPrintState(payload.sale.id, { printStatus: 'not_requested', printRequestId: requestId })
+      sileo.warning({ title: 'Venta completada sin imprimir', description: 'Configura el servidor y la impresora desde Ajustes > Hardware > Impresion.' })
+      return
+    }
+    updateTicketPrintState(payload.sale.id, {
+      printStatus: 'pending', printRequestId: requestId, printErrorCode: null,
+      printAttempts: (sessionTickets.find((ticket) => ticket.id === payload.sale.id)?.printAttempts || 0) + 1,
+    })
+    try {
+      const job = await printCompletedSale({
+        sale: payload,
+        establishment: { name: context.venueName },
+        isReprint: options.isReprint,
+        copyNumber: options.copyNumber,
+      })
+      updateTicketPrintState(payload.sale.id, {
+        printStatus: 'printed', printJobId: job.jobId || job.id || null,
+        printRequestId: job.requestId || requestId, printedAt: job.printedAt || new Date().toISOString(), printErrorCode: null,
+      })
+      sileo.success({ title: options.isReprint ? 'Copia impresa correctamente' : 'Ticket impreso correctamente' })
+    } catch (printError) {
+      const code = printError && typeof printError === 'object' && 'code' in printError ? String(printError.code) : 'PRINT_FAILED'
+      updateTicketPrintState(payload.sale.id, { printStatus: code === 'PRINT_STATUS_UNKNOWN' ? 'unknown' : 'failed', printErrorCode: code, printRequestId: requestId })
+      sileo.warning({ title: 'La venta se ha completado, pero el ticket no se ha podido imprimir', description: getPrintAgentErrorMessage(printError) })
+    }
+  }
+
   function updateCatalogStartTab(nextStartTab: CatalogStartTab) {
     setCatalogStartTab(nextStartTab)
     saveCatalogStartTab(nextStartTab)
@@ -1398,9 +1481,17 @@ function App() {
       const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending)
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
-        const [nextLedger, nextStats] = await Promise.all([loadSalesLedgerFromSupabase(context, cashSession.id), loadProductSalesStatsFromSupabase(context)])
+        const [nextLedger, nextStats, confirmedTickets] = await Promise.all([
+          loadSalesLedgerFromSupabase(context, cashSession.id),
+          loadProductSalesStatsFromSupabase(context),
+          loadSessionTicketsFromSupabase(context, cashSession.id),
+        ])
         persistLedger(nextLedger)
         persistProductSalesStats(nextStats)
+        persistSessionTickets(mergeRemoteTicketPrintStates(confirmedTickets))
+        const confirmedTicket = confirmedTickets.find((ticket) => ticket.id === result.saleId)
+        if (confirmedTicket) void printSalePayload(confirmedTicket.payload)
+        else sileo.warning({ title: 'Pago completado sin imprimir', description: 'No se ha podido recuperar el ticket confirmado.' })
         setRestaurantMap(await loadCurrentRestaurantMap(context, cashSession.id))
         if (result.completed) {
           const nextOrder = result.nextOrderId ? await loadRestaurantOrder(context, result.nextOrderId) : null
@@ -1495,10 +1586,16 @@ function App() {
         setPendingRestaurantPayment({ method: paymentMethod, receivedCents, pendingUnits: paymentResult.pendingUnits })
         return
       }
-      const [nextLedger, nextStats] = await Promise.all([
-        loadSalesLedgerFromSupabase(context, cashSession.id), loadProductSalesStatsFromSupabase(context),
+      const [nextLedger, nextStats, confirmedTickets] = await Promise.all([
+        loadSalesLedgerFromSupabase(context, cashSession.id),
+        loadProductSalesStatsFromSupabase(context),
+        loadSessionTicketsFromSupabase(context, cashSession.id),
       ])
       persistLedger(nextLedger); persistProductSalesStats(nextStats)
+      persistSessionTickets(mergeRemoteTicketPrintStates(confirmedTickets))
+      const confirmedTicket = confirmedTickets.find((ticket) => ticket.id === paymentResult.saleId)
+      if (confirmedTicket) void printSalePayload(confirmedTicket.payload)
+      else sileo.warning({ title: 'Cobro completado sin imprimir', description: 'No se ha podido recuperar el ticket confirmado.' })
       const nextOrderId = paymentResult.nextOrderId ?? null
       const nextOrder = nextOrderId ? await loadRestaurantOrder(context, nextOrderId) : null
       setRestaurantOrder(nextOrder)
@@ -1709,7 +1806,7 @@ function App() {
     void runRestaurantServiceAction(async (order) => markRestaurantOrderFullyServed(order.order.id))
   }
 
-  function completePayment(paymentMethod: PaymentMethod | null, receivedCents: number | null) {
+  async function completePayment(paymentMethod: PaymentMethod | null, receivedCents: number | null) {
     if (posView.type === 'table_order') {
       void completeRestaurantPayment(paymentMethod, receivedCents)
       return
@@ -1745,6 +1842,8 @@ function App() {
         createdAt: payload.sale.createdAt,
         status: 'active',
         payload,
+        printStatus: 'not_requested',
+        printAttempts: 0,
       },
       ...sessionTickets,
     ])
@@ -1756,7 +1855,22 @@ function App() {
     setDiscountModalOpen(false)
     setPaidFeedback(paymentMethod)
     window.setTimeout(() => setPaidFeedback(null), 500)
-    void syncPendingEvents()
+    if (!isOnline) {
+      sileo.warning({ title: 'Venta guardada sin imprimir', description: 'Revisa los tickets pendientes cuando vuelva la conexion; no se imprimiran automaticamente.' })
+      return
+    }
+    await syncPendingEvents()
+    try {
+      const confirmedTickets = await loadSessionTicketsFromSupabase(context, cashSession.id)
+      const confirmed = confirmedTickets.some((ticket) => ticket.id === payload.sale.id)
+      if (!confirmed) {
+        sileo.warning({ title: 'Venta pendiente de confirmar', description: 'El ticket no se imprimira hasta que la venta conste en la base de datos.' })
+        return
+      }
+      await printSalePayload(payload)
+    } catch (confirmationError) {
+      sileo.warning({ title: 'Venta guardada sin imprimir', description: `No se ha podido confirmar la venta: ${getReadableError(confirmationError)}` })
+    }
   }
 
   function handlePayment(paymentMethod: PaymentMethod | null) {
@@ -1765,7 +1879,7 @@ function App() {
       return
     }
 
-    completePayment(paymentMethod, null)
+    void completePayment(paymentMethod, null)
   }
 
   async function openTicketHistory() {
@@ -1784,14 +1898,31 @@ function App() {
     try {
       await syncPendingEvents()
       const remoteTickets = await loadSessionTicketsFromSupabase(context, cashSession.id)
-      setSessionTickets(remoteTickets)
-      saveSessionTickets(context, cashSession.id, remoteTickets)
+      const mergedTickets = mergeRemoteTicketPrintStates(remoteTickets)
+      setSessionTickets(mergedTickets)
+      saveSessionTickets(context, cashSession.id, mergedTickets)
       setTicketHistoryOpen(true)
     } catch (historyError) {
       setError(getReadableError(historyError))
     } finally {
       setIsBusy(false)
     }
+  }
+
+  async function reprintSessionTicket(ticket: SessionTicketRecord) {
+    if (!context || !(context.canManageCash || context.canCloseCashSession || ['manager', 'admin', 'owner'].includes(context.role))) {
+      setError('Tu usuario no tiene permiso para reimprimir tickets.')
+      return
+    }
+    const currentJob = usePrintAgentStore.getState().currentJob
+    if (currentJob?.status === 'unknown' && currentJob.requestId?.startsWith(`print:${ticket.id}:`)) {
+      const confirmed = window.confirm('La impresion anterior tiene estado desconocido y podria haber salido. Comprueba la impresora. ¿Quieres crear una nueva copia igualmente?')
+      if (!confirmed) return
+    }
+    const scope = usePrintAgentStore.getState().scope
+    if (!scope) { setError('No se ha inicializado la configuracion de impresion de esta terminal.'); return }
+    const copyNumber = nextPrintCopyNumber(scope, ticket.id)
+    await printSalePayload(ticket.payload, { isReprint: true, copyNumber })
   }
 
   function changeTicketPayment(ticket: SessionTicketRecord, paymentMethod: PaymentMethod) {
@@ -2231,7 +2362,7 @@ function App() {
           onCancel={() => setCashPaymentOpen(false)}
           onConfirm={(receivedCents) => {
             setCashPaymentOpen(false)
-            completePayment('cash', receivedCents)
+            void completePayment('cash', receivedCents)
           }}
           totalCents={activeTicketTotal}
         />
@@ -2277,9 +2408,11 @@ function App() {
 
       {ticketHistoryOpen ? (
         <SessionTicketsModal
+          canReprint={Boolean(context.canManageCash || context.canCloseCashSession || ['manager', 'admin', 'owner'].includes(context.role))}
           isBusy={isBusy}
           onChangePayment={changeTicketPayment}
           onClose={() => setTicketHistoryOpen(false)}
+          onReprint={(ticket) => void reprintSessionTicket(ticket)}
           onVoidTicket={voidSessionTicket}
           tickets={sessionTickets}
         />

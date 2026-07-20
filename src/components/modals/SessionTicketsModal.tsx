@@ -1,7 +1,8 @@
-import { CreditCard, Trash2, X } from 'lucide-react'
+import { CreditCard, Printer, Trash2, X } from 'lucide-react'
 import { formatMoney } from '../../lib/format'
 import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from '../../types'
 import { Button } from '../ui'
+import { usePrintAgent } from '../../features/local-printing'
 
 const paymentLabels: Record<HistoricalPaymentMethod, string> = {
   card: 'Tarjeta',
@@ -13,20 +14,25 @@ const paymentLabels: Record<HistoricalPaymentMethod, string> = {
 const paymentMethods: PaymentMethod[] = ['cash', 'card']
 
 type SessionTicketsModalProps = {
+  canReprint: boolean
   isBusy: boolean
   onChangePayment: (ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => void
   onClose: () => void
+  onReprint: (ticket: SessionTicketRecord) => void
   onVoidTicket: (ticket: SessionTicketRecord) => void
   tickets: SessionTicketRecord[]
 }
 
 export function SessionTicketsModal({
+  canReprint,
   isBusy,
   onChangePayment,
   onClose,
+  onReprint,
   onVoidTicket,
   tickets,
 }: SessionTicketsModalProps) {
+  const { isPrintingTicket } = usePrintAgent()
   const activeTickets = tickets.filter((ticket) => ticket.status === 'active')
   const totalCents = activeTickets.reduce((total, ticket) => total + ticket.totalCents, 0)
 
@@ -68,9 +74,21 @@ export function SessionTicketsModal({
                           month: '2-digit',
                         }).format(new Date(ticket.createdAt))}
                       </p>
+                      <p className="mt-1 text-xs font-bold text-[var(--muted)]">
+                        Impresion: {ticket.printStatus || 'no solicitada'}{ticket.printErrorCode ? ` · ${ticket.printErrorCode}` : ''}
+                      </p>
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
+                      <Button
+                        disabled={isBusy || isPrintingTicket || !canReprint || ticket.status !== 'active'}
+                        onClick={() => onReprint(ticket)}
+                        type="button"
+                        variant="secondary"
+                      >
+                        <Printer className="h-4 w-4" />
+                        Reimprimir
+                      </Button>
                       {ticket.totalCents === 0 ? (
                         <span className="text-sm font-semibold text-[var(--muted)]">Pago no requerido</span>
                       ) : (

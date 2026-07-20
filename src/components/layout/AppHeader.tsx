@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import type { CashSession } from '../../types'
 import { cx } from '../../utils/cx'
 import { Chip } from '../ui'
+import { PrintAgentStatusBadge } from '../../features/local-printing'
 
 type AppHeaderProps = {
   cashSession: CashSession | null
@@ -133,6 +134,7 @@ export function AppHeader({
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           {cashSession ? <Chip>{`Caja: ${cashSession.cashRegisterName}`}</Chip> : null}
+          <PrintAgentStatusBadge />
           <Chip icon={isOnline ? Wifi : WifiOff} tone={isOnline ? 'success' : 'danger'} />
           {pendingCount ? <Chip tone="warning">{`${pendingCount} pendientes`}</Chip> : null}
         </div>
