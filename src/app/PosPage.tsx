@@ -3,6 +3,8 @@ import { useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
 import {
   CashPaymentModal,
+  CashClosingResultModal,
+  CashClosingsHistoryModal,
   CloseCashModal,
   ConfigModal,
   DiscountModal,
@@ -186,9 +188,12 @@ export function PosPage(props: Props) {
           if (await restaurant.requestCloseCash()) cash.openCloseModal()
         })()}
         onOpenConfig={() => setConfigOpen(true)}
+        onOpenCashClosingHistory={() => void cash.openClosingHistory()}
         onOpenTicketHistory={() => void cash.ticketActions.openHistory()}
         onRefreshCatalog={() => void props.onRefreshCatalog()}
+        onLogout={() => void props.onLogout()}
         pendingCount={props.offline.pendingCount}
+        themeMode={props.themes.find((theme) => theme.id === props.selectedThemeId)?.mode ?? 'light'}
       />
       {props.error ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
         <div className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
@@ -391,13 +396,25 @@ export function PosPage(props: Props) {
         onVoidTicket={cash.ticketActions.voidTicket}
         tickets={cash.tickets}
       /> : null}
+      {cash.completedClosing ? <CashClosingResultModal
+        closing={cash.completedClosing}
+        isPrinting={cash.printingClosingId === cash.completedClosing.id}
+        onClose={() => cash.setCompletedClosing(null)}
+        onPrint={() => void cash.printClosing(cash.completedClosing!)}
+      /> : null}
+      {cash.closingHistoryOpen ? <CashClosingsHistoryModal
+        canReprint={Boolean(props.context.canManageCash || ['manager', 'admin', 'owner'].includes(props.context.role))}
+        closings={cash.cashClosings}
+        onClose={() => cash.setClosingHistoryOpen(false)}
+        onReprint={(closing) => void cash.printClosing(closing, { isReprint: true, copyNumber: closing.printCopies + 1 })}
+        printingClosingId={cash.printingClosingId}
+      /> : null}
       {configOpen ? <ConfigModal
         context={props.context}
         catalogStartTab={props.catalogStartTab}
         lastSyncError={props.offline.lastSyncError}
         onClose={() => setConfigOpen(false)}
         onCatalogStartTabChange={props.onUpdateCatalogStartTab}
-        onLogout={props.onLogout}
         onRetrySync={() => void props.offline.retry()}
         onThemeChange={props.setThemeId}
         pendingCount={props.offline.pendingCount}

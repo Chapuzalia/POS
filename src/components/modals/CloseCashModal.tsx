@@ -17,6 +17,7 @@ type CloseCashModalProps = {
 export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summary, userId }: CloseCashModalProps) {
   const [countedCash, setCountedCash] = useState(centsToInput(summary.cashCents))
   const [countedCard, setCountedCard] = useState(centsToInput(summary.cardCents))
+  const [finalCashFund, setFinalCashFund] = useState(centsToInput(cashSession.openingFloatCents))
   const [notes, setNotes] = useState('')
   const countedCashCents = parseMoneyToCents(countedCash)
   const countedCardCents = parseMoneyToCents(countedCard)
@@ -40,6 +41,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
       countedInvitationCents: summary.invitationCents,
       countedOtherCents: summary.otherCents,
       discrepancyCents: discrepancy,
+      finalCashFundCents: parseMoneyToCents(finalCashFund),
       notes: notes.trim(),
     })
   }
@@ -61,6 +63,19 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
           <Metric label="Efectivo esperado" value={formatMoney(summary.cashCents)} />
           <Metric label="Tarjeta TPV" value={formatMoney(summary.cardCents)} />
         </div>
+
+        <label className="mt-5 block">
+          <span className="text-sm font-semibold text-[var(--muted)]">Fondo que se deja para el siguiente turno</span>
+          <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]">
+            <span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">EUR</span>
+            <input
+              className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none"
+              inputMode="decimal"
+              onChange={(event) => setFinalCashFund(event.target.value)}
+              value={finalCashFund}
+            />
+          </div>
+        </label>
 
         <div className="mt-5 grid gap-3 sm:grid-cols-2">
           {[
@@ -102,7 +117,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
 
         <Button
           className="mt-4"
-          disabled={isBusy || notesRequired}
+          disabled={isBusy || notesRequired || parseMoneyToCents(finalCashFund) < 0}
           fullWidth
           onClick={handleConfirm}
           size="lg"

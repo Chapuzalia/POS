@@ -294,14 +294,22 @@ export function AppShell() {
     />
     if (isOnline && !restaurant.tablesConfigLoaded) return <LoadingScreen />
     if (!cash.session) return <CashSessionGate
+      cashClosings={cash.cashClosings}
+      closingHistoryOpen={cash.closingHistoryOpen}
+      completedClosing={cash.completedClosing}
       context={context}
       isBusy={isBusy}
       isOnline={isOnline}
       onJoin={(nextSession) => void cash.join(nextSession)}
+      onCloseClosingHistory={() => cash.setClosingHistoryOpen(false)}
+      onCloseCompletedClosing={() => cash.setCompletedClosing(null)}
       onLogout={() => void session.logout()}
       onOpen={cash.open}
+      onOpenClosingHistory={() => void cash.openClosingHistory()}
+      onPrintClosing={(closing, isReprint) => void cash.printClosing(closing, isReprint ? { isReprint: true, copyNumber: closing.printCopies + 1 } : {})}
       onRefresh={() => void cash.options.refresh(context)}
       registers={cash.options.registers}
+      printingClosingId={cash.printingClosingId}
       sessions={cash.options.sessions}
     />
     return <PosPage

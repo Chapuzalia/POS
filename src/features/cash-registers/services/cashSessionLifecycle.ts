@@ -15,5 +15,5 @@ export async function joinCashSession(context: TenantContext, session: CashSessi
 }
 
 export async function closeCashSession(context: TenantContext, payload: CashClosedPayload) {
-  await closeCashRegisterSession(context, payload.sessionId, payload)
+  return closeCashRegisterSession(context, payload.sessionId, payload)
 }

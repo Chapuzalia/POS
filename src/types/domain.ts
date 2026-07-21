@@ -372,7 +372,50 @@ export type CashClosedPayload = {
   countedInvitationCents: number
   countedOtherCents: number
   discrepancyCents: number
+  finalCashFundCents: number
   notes: string
+}
+
+export type CashClosingPrintSnapshot = {
+  reportTitle: string
+  companyName: string
+  registerName: string
+  shiftLabel: string
+  openedAt: string
+  closedAt: string
+  timezone: string
+  currency: string
+  locale: string
+  openedBy?: string
+  closedBy?: string
+  summary: { totalSalesCents: number; salesCount: number; averageSaleCents: number }
+  payments: Array<{ code: string; label: string; amountCents: number }>
+  cashMovements: { entriesCents: number; exitsCents: number }
+  cashFund: { openingCashFundCents: number; finalCashFundCents: number }
+  expectedAndCounted: {
+    expectedCashCents: number
+    countedCashCents: number
+    expectedCardCents: number
+    countedCardCents: number
+  }
+  differences: { cashDifferenceCents: number; cardDifferenceCents: number }
+}
+
+export type CashClosingRecord = {
+  id: string
+  tenantId: string
+  venueId: string
+  cashRegisterId: string
+  closedAt: string
+  closedBy: string
+  printSnapshot: CashClosingPrintSnapshot
+  printStatus: 'not_requested' | 'pending' | 'printed' | 'failed' | 'unknown'
+  printJobId: string | null
+  printRequestId: string | null
+  printedAt: string | null
+  printErrorCode: string | null
+  printAttempts: number
+  printCopies: number
 }
 
 export type OfflineEvent =

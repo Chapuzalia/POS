@@ -15,6 +15,7 @@ import {
 } from '../../../services/posService'
 import type {
   CashClosedPayload,
+  CashClosingRecord,
   CashSession,
   SaleRecord,
   SessionTicketRecord,
@@ -22,6 +23,9 @@ import type {
 } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
 import { usePrintAgentScope } from '../../local-printing/hooks/usePrintAgentScope'
+import { cashClosingRequestId } from '../../local-printing/services/cashClosingPrintMapper'
+import { printCashClosing } from '../../local-printing/services/printCashClosing'
+import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
 import {
   mergeRemoteTicketPrintStates,
   printTicket,
@@ -35,6 +39,7 @@ import { useActiveCashSession } from './useActiveCashSession'
 import { useCashRegisterOptions } from './useCashRegisterOptions'
 import { useCashTicketActions } from './useCashTicketActions'
 import { getClosedCashState } from '../services/cashState'
+import { loadCashClosing, loadCashClosingHistory, recordCashClosingPrintResult } from '../service'
 
 type Options = {
   context: TenantContext | null
@@ -53,6 +58,10 @@ export function useCashSession(options: Options) {
   const ticketsRef = useRef<SessionTicketRecord[]>([])
   const [closeModalOpen, setCloseModalOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
+  const [closingHistoryOpen, setClosingHistoryOpen] = useState(false)
+  const [cashClosings, setCashClosings] = useState<CashClosingRecord[]>([])
+  const [completedClosing, setCompletedClosing] = useState<CashClosingRecord | null>(null)
+  const [printingClosingId, setPrintingClosingId] = useState<string | null>(null)
   usePrintAgentScope(options.context)
 
   const setTickets = useCallback((value: SetStateAction<SessionTicketRecord[]>) => {
@@ -214,6 +223,7 @@ export function useCashSession(options: Options) {
     try {
       const nextSession = await openCashSessionLifecycle(options.context, registerId, openingFloatCents)
       persistSession(nextSession)
+      setCompletedClosing(null)
       persistLedger([])
       setTickets([])
       saveSessionTickets(options.context, nextSession.id, [])
@@ -248,11 +258,81 @@ export function useCashSession(options: Options) {
     if (registerId) void open(registerId, openingFloatCents)
   }, [cashOptions.registers, open, options.context?.defaultCashRegisterId])
 
+  const printClosing = useCallback(async (closing: CashClosingRecord, printOptions: { isReprint?: boolean; copyNumber?: number } = {}) => {
+    if (!options.context || printingClosingId) return false
+    const state = usePrintAgentStore.getState()
+    const printerId = state.selectedPrinterId || state.selectedPrinter?.id
+    if (!state.token) { sileo.warning({ title: 'Servidor de impresion no configurado.' }); return false }
+    if (!printerId) { sileo.warning({ title: 'No hay una impresora configurada.' }); return false }
+    if (!printOptions.isReprint && closing.printStatus === 'printed') {
+      sileo.warning({ title: 'Este cierre ya se imprimio.', description: 'Usa la accion de reimpresion para generar una copia.' })
+      return false
+    }
+    if (closing.printStatus === 'unknown') {
+      sileo.warning({ title: 'No se puede confirmar si el cierre se imprimio.', description: 'Comprueba la impresora antes de volver a imprimir.' })
+      return false
+    }
+    const copyNumber = printOptions.isReprint ? Math.max(1, printOptions.copyNumber || closing.printCopies + 1) : 0
+    const requestId = cashClosingRequestId(closing.id, Boolean(printOptions.isReprint), copyNumber)
+    setPrintingClosingId(closing.id)
+    try {
+      const claimed = await recordCashClosingPrintResult(options.context, {
+        closingId: closing.id, printerId, requestId, status: 'pending',
+        isReprint: Boolean(printOptions.isReprint), copyNumber,
+      })
+      if (!claimed) {
+        sileo.warning({ title: 'La impresion ya fue solicitada.', description: 'Actualiza el historico antes de crear otra copia.' })
+        return false
+      }
+      const result = await printCashClosing({ closing, context: options.context, isReprint: printOptions.isReprint, copyNumber })
+      await recordCashClosingPrintResult(options.context, {
+        closingId: closing.id, printerId, requestId,
+        printJobId: result.job.jobId || result.job.id || null, status: 'printed',
+        isReprint: Boolean(printOptions.isReprint), copyNumber,
+      })
+      const refreshed = await loadCashClosing(options.context, closing.id)
+      setCompletedClosing((current) => current?.id === refreshed.id ? refreshed : current)
+      setCashClosings((current) => current.map((item) => item.id === refreshed.id ? refreshed : item))
+      return true
+    } catch (error) {
+      const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'PRINT_FAILED'
+      const status = errorCode === 'PRINT_STATUS_UNKNOWN' ? 'unknown' : 'failed'
+      try {
+        await recordCashClosingPrintResult(options.context, {
+          closingId: closing.id, printerId, requestId, status, errorCode,
+          isReprint: Boolean(printOptions.isReprint), copyNumber,
+        })
+        const refreshed = await loadCashClosing(options.context, closing.id)
+        setCompletedClosing((current) => current?.id === refreshed.id ? refreshed : current)
+        setCashClosings((current) => current.map((item) => item.id === refreshed.id ? refreshed : item))
+      } catch { /* el fallo de auditoria no cambia el cierre ya guardado */ }
+      return false
+    } finally {
+      setPrintingClosingId(null)
+    }
+  }, [options.context, printingClosingId])
+
+  const openClosingHistory = useCallback(async () => {
+    if (!options.context || !options.isOnline) {
+      options.onError('El historico de cierres requiere conexion.')
+      return
+    }
+    options.setBusy(true)
+    try {
+      setCashClosings(await loadCashClosingHistory(options.context))
+      setClosingHistoryOpen(true)
+    } catch (error) {
+      options.onError(getReadableError(error))
+    } finally {
+      options.setBusy(false)
+    }
+  }, [options])
+
   const close = useCallback(async (payload: CashClosedPayload) => {
     if (!options.context?.canCloseCashSession || !options.isOnline) return false
     options.setBusy(true)
     try {
-      await closeCashSessionLifecycle(options.context, payload)
+      const closing = await closeCashSessionLifecycle(options.context, payload)
       persistSession(null)
       setLedger([])
       clearSaleLedger(options.context)
@@ -261,6 +341,10 @@ export function useCashSession(options: Options) {
       setCloseModalOpen(false)
       options.refreshPendingCount()
       await cashOptions.refresh(options.context)
+      setCompletedClosing(closing)
+      if (usePrintAgentStore.getState().preferences.printCashClosingAutomatically) {
+        await printClosing(closing)
+      }
       return true
     } catch (error) {
       options.onError(getReadableError(error))
@@ -268,7 +352,7 @@ export function useCashSession(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [cashOptions, options, persistSession, setTickets])
+  }, [cashOptions, options, persistSession, printClosing, setTickets])
 
   const reset = useCallback(() => {
     const closed = getClosedCashState()
@@ -277,6 +361,9 @@ export function useCashSession(options: Options) {
     setTickets([...closed.tickets])
     setCloseModalOpen(false)
     setHistoryOpen(false)
+    setClosingHistoryOpen(false)
+    setCashClosings([])
+    setCompletedClosing(null)
   }, [setTickets])
 
   const hydrate = useCallback((
@@ -287,6 +374,9 @@ export function useCashSession(options: Options) {
     setSession(nextSession)
     setLedger(nextLedger)
     setTickets(nextTickets)
+    setClosingHistoryOpen(false)
+    setCashClosings([])
+    setCompletedClosing(null)
   }, [setTickets])
 
   const clearRejectedSession = useCallback((closedSessionId: string) => {
@@ -305,6 +395,9 @@ export function useCashSession(options: Options) {
     clearRejectedSession,
     close,
     closeModalOpen,
+    closingHistoryOpen,
+    cashClosings,
+    completedClosing,
     hydrate,
     historyOpen,
     join,
@@ -312,15 +405,20 @@ export function useCashSession(options: Options) {
     mergeRemotePrintStates,
     open,
     openCloseModal: () => setCloseModalOpen(true),
+    openClosingHistory,
     openDefault,
     options: cashOptions,
     persistLedger,
     persistTickets,
     printSale,
+    printClosing,
+    printingClosingId,
     refreshConfirmedSale,
     reset,
     session,
     setCloseModalOpen,
+    setClosingHistoryOpen,
+    setCompletedClosing,
     setHistoryOpen,
     setLedger,
     setSession,

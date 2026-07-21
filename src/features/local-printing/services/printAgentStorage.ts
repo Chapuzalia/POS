@@ -9,6 +9,15 @@ export const defaultPrintAgentPreferences = {
   cut: true,
   copies: 1,
   footer: 'Gracias por tu visita',
+  printCashClosingAutomatically: true,
+  includeExpectedAndCountedAmounts: false,
+  includeUserNames: true,
+  includeOpeningAndClosingTimes: false,
+  includeZeroPaymentMethods: false,
+  includeTotalPayments: false,
+  cashClosingCopies: 1,
+  cashClosingPaperWidth: 42 as const,
+  moneySymbol: 'currency' as const,
 }
 
 export function getPrintAgentStorageKey(scope: PrintAgentScope) {
@@ -50,13 +59,21 @@ export function clearPrintAgentConfig(scope: PrintAgentScope) {
   window.localStorage.removeItem(getPrintAgentStorageKey(scope))
 }
 
-function copyCounterKey(scope: PrintAgentScope, saleId: string) {
-  return `${getPrintAgentStorageKey(scope)}:copy:${saleId}`
+function copyCounterKey(scope: PrintAgentScope, documentId: string, kind = 'sale') {
+  return `${getPrintAgentStorageKey(scope)}:copy:${kind}:${documentId}`
 }
 
 export function nextPrintCopyNumber(scope: PrintAgentScope, saleId: string) {
   if (typeof window === 'undefined') return 1
   const key = copyCounterKey(scope, saleId)
+  const next = Number(window.localStorage.getItem(key) || '0') + 1
+  window.localStorage.setItem(key, String(next))
+  return next
+}
+
+export function nextCashClosingCopyNumber(scope: PrintAgentScope, closingId: string) {
+  if (typeof window === 'undefined') return 1
+  const key = copyCounterKey(scope, closingId, 'cash-closing')
   const next = Number(window.localStorage.getItem(key) || '0') + 1
   window.localStorage.setItem(key, String(next))
   return next

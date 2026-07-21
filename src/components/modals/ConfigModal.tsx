@@ -11,7 +11,6 @@ type ConfigModalProps = {
   lastSyncError: string | null
   onCatalogStartTabChange: (startTab: CatalogStartTab) => void
   onClose: () => void
-  onLogout: () => void
   onRetrySync: () => void
   onThemeChange: (themeId: string) => void
   pendingCount: number
@@ -25,7 +24,6 @@ export function ConfigModal({
   lastSyncError,
   onCatalogStartTabChange,
   onClose,
-  onLogout,
   onRetrySync,
   onThemeChange,
   pendingCount,
@@ -117,10 +115,6 @@ export function ConfigModal({
             />
           </label>
         </div>
-
-        <Button className="mt-5" fullWidth onClick={onLogout} type="button" variant="secondary">
-          Cambiar negocio
-        </Button>
       </section>
     </div>
   )

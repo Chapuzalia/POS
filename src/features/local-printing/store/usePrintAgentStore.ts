@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { createPrintAgentClient } from '../api/printAgentClient'
 import { PrintAgentError, toPrintAgentError } from '../api/PrintAgentError'
 import { DEFAULT_PRINT_AGENT_URL, PRINT_AGENT_ENABLED } from '../constants/config'
-import { printRequestSchema, printerActionSchema, selectPrinterSchema } from '../schemas/printSchemas'
+import { printDocumentRequestSchema, printerActionSchema, selectPrinterSchema } from '../schemas/printSchemas'
 import { pollPrintJob } from '../services/jobPolling'
 import {
   clearPrintAgentConfig,
@@ -12,7 +12,7 @@ import {
 } from '../services/printAgentStorage'
 import type {
   ConnectionStatus, DiscoveryProgress, DiscoveryStatus, PrintAgentPreferences, PrintAgentScope,
-  PrintAgentServerInfo, PrintJob, Printer, PrintRequest,
+  PrintAgentServerInfo, PrintDocumentRequest, PrintJob, Printer,
 } from '../types'
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl'
 import { sanitizePrintDiagnostics } from '../utils/sanitizePrintDiagnostics'
@@ -56,7 +56,7 @@ type StoreState = {
   discoverPrinters: (signal?: AbortSignal) => Promise<Printer[]>
   selectPrinter: (printerId: string, signal?: AbortSignal) => Promise<Printer>
   testPrinter: (printerId?: string, signal?: AbortSignal) => Promise<unknown>
-  printTicket: (payload: PrintRequest, signal?: AbortSignal) => Promise<PrintJob>
+  printTicket: (payload: PrintDocumentRequest, signal?: AbortSignal) => Promise<PrintJob>
   openCashDrawer: (payload?: { requestId?: string; printerId?: string }, signal?: AbortSignal) => Promise<unknown>
   loadJobs: (signal?: AbortSignal) => Promise<PrintJob[]>
   clearError: () => void
@@ -246,7 +246,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     },
 
     async printTicket(rawPayload, signal) {
-      const payload = printRequestSchema.parse(rawPayload)
+      const payload = printDocumentRequestSchema.parse(rawPayload)
       set({ isPrintingTicket: true, lastConnectionError: null, currentJob: { requestId: payload.requestId, status: 'pending' } })
       const activeClient = client()
       try {

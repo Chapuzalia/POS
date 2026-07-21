@@ -1,6 +1,7 @@
 import { useState } from 'react'
-import type { CashRegister, CashSession, TenantContext } from '../../types'
+import type { CashClosingRecord, CashRegister, CashSession, TenantContext } from '../../types'
 import { formatMoney, parseMoneyToCents } from '../../lib/format'
+import { CashClosingResultModal, CashClosingsHistoryModal } from '../../components/modals'
 
 type Props = {
   context: TenantContext
@@ -12,9 +13,17 @@ type Props = {
   onLogout: () => void
   onOpen: (registerId: string, openingFloatCents: number) => Promise<void>
   onRefresh: () => void
+  cashClosings: CashClosingRecord[]
+  closingHistoryOpen: boolean
+  completedClosing: CashClosingRecord | null
+  printingClosingId: string | null
+  onOpenClosingHistory: () => void
+  onCloseClosingHistory: () => void
+  onCloseCompletedClosing: () => void
+  onPrintClosing: (closing: CashClosingRecord, isReprint: boolean) => void
 }
 
-export function CashSessionGate({ context, isBusy, isOnline, onJoin, onLogout, onOpen, onRefresh, registers, sessions }: Props) {
+export function CashSessionGate({ cashClosings, closingHistoryOpen, completedClosing, context, isBusy, isOnline, onCloseClosingHistory, onCloseCompletedClosing, onJoin, onLogout, onOpen, onOpenClosingHistory, onPrintClosing, onRefresh, printingClosingId, registers, sessions }: Props) {
   const openRegisterIds = new Set(sessions.map((session) => session.cashRegisterId))
   const available = registers.filter((register) => register.isActive && !openRegisterIds.has(register.id))
   const [registerId, setRegisterId] = useState(context.defaultCashRegisterId ?? available[0]?.id ?? '')
@@ -26,8 +35,16 @@ export function CashSessionGate({ context, isBusy, isOnline, onJoin, onLogout, o
         <div><h1 className="text-2xl font-black">{sessions.length ? 'Cajas abiertas' : 'No hay ninguna caja abierta'}</h1><p className="mt-2 text-[var(--muted)]">{sessions.length ? 'Selecciona la caja con la que vas a trabajar.' : canOpen ? 'Abre un punto de caja para comenzar.' : 'Abre una caja desde un dispositivo autorizado para comenzar a trabajar.'}</p></div>
         {sessions.length ? <div className="grid gap-3">{sessions.map((session) => <button className="min-h-16 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface-secondary)] p-4 text-left hover:border-[var(--accent)]" disabled={isBusy || !isOnline} key={session.id} onClick={() => onJoin(session)} type="button"><strong className="block">{session.cashRegisterName}</strong><span className="text-sm text-[var(--muted)]">Abierta {new Date(session.openedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} - Fondo {formatMoney(session.openingFloatCents)}</span></button>)}</div> : null}
         {canOpen ? <form className="space-y-3 border-t border-[var(--separator)] pt-5" onSubmit={(event) => { event.preventDefault(); void onOpen(registerId, parseMoneyToCents(openingFloat)) }}><h2 className="font-black">Abrir nueva caja</h2><select className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3" disabled={!available.length || isBusy} onChange={(event) => setRegisterId(event.target.value)} value={registerId}>{available.map((register) => <option key={register.id} value={register.id}>{register.name}</option>)}</select><input className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3" inputMode="decimal" onChange={(event) => setOpeningFloat(event.target.value)} value={openingFloat} /><button className="min-h-12 w-full rounded-[var(--radius)] bg-[var(--accent)] font-bold text-[var(--accent-foreground)] disabled:opacity-45" disabled={!isOnline || isBusy || !registerId || !available.length} type="submit">{available.length ? 'Abrir caja' : 'Todos los puntos de caja ya estan abiertos'}</button></form> : null}
-        <div className="grid grid-cols-2 gap-3"><button className="min-h-11 rounded-[var(--radius)] border border-[var(--separator)]" disabled={isBusy || !isOnline} onClick={onRefresh} type="button">Comprobar de nuevo</button><button className="min-h-11 rounded-[var(--radius)] border border-[var(--separator)]" onClick={onLogout} type="button">Cerrar sesion</button></div>
+        <div className="grid gap-3 sm:grid-cols-3"><button className="min-h-11 rounded-[var(--radius)] border border-[var(--separator)]" disabled={isBusy || !isOnline} onClick={onRefresh} type="button">Comprobar de nuevo</button><button className="min-h-11 rounded-[var(--radius)] border border-[var(--separator)]" disabled={!isOnline} onClick={onOpenClosingHistory} type="button">Historico de cierres</button><button className="min-h-11 rounded-[var(--radius)] border border-[var(--separator)]" onClick={onLogout} type="button">Cerrar sesion</button></div>
       </section>
+      {completedClosing ? <CashClosingResultModal closing={completedClosing} isPrinting={printingClosingId === completedClosing.id} onClose={onCloseCompletedClosing} onPrint={() => onPrintClosing(completedClosing, false)} /> : null}
+      {closingHistoryOpen ? <CashClosingsHistoryModal
+        canReprint={Boolean(context.canManageCash || ['manager', 'admin', 'owner'].includes(context.role))}
+        closings={cashClosings}
+        onClose={onCloseClosingHistory}
+        onReprint={(closing) => onPrintClosing(closing, true)}
+        printingClosingId={printingClosingId}
+      /> : null}
     </main>
   )
 }

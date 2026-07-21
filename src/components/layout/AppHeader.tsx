@@ -1,4 +1,4 @@
-import { ChevronDown, Euro, ReceiptText, RefreshCw, Settings, Store, Wifi, WifiOff } from 'lucide-react'
+import { ChevronDown, Euro, LogOut, ReceiptText, RefreshCw, Settings, WalletCards, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { CashSession } from '../../types'
 import { cx } from '../../utils/cx'
@@ -14,8 +14,11 @@ type AppHeaderProps = {
   onCloseCash: () => void
   onOpenConfig: () => void
   onOpenTicketHistory: () => void
+  onOpenCashClosingHistory: () => void
   onRefreshCatalog: () => void
+  onLogout: () => void
   pendingCount: number
+  themeMode: 'light' | 'dark'
 }
 
 export function AppHeader({
@@ -27,8 +30,11 @@ export function AppHeader({
   onCloseCash,
   onOpenConfig,
   onOpenTicketHistory,
+  onOpenCashClosingHistory,
   onRefreshCatalog,
+  onLogout,
   pendingCount,
+  themeMode,
 }: AppHeaderProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const menuRef = useRef<HTMLDivElement>(null)
@@ -77,10 +83,11 @@ export function AppHeader({
             onClick={() => setMenuOpen((current) => !current)}
             type="button"
           >
-            <span className="inline-flex h-9 w-9 items-center justify-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface-secondary)]">
-              <Store className="h-5 w-5" />
-            </span>
-            <span className="text-2xl font-black">TPV</span>
+            <img
+              src={themeMode === 'dark' ? '/logo_white.png' : '/logo_black.png'}
+              alt="TICKIT"
+              className="h-6 w-auto max-w-36 object-contain"
+            />
             <ChevronDown className={cx('h-4 w-4 transition-transform', menuOpen && 'rotate-180')} />
           </button>
 
@@ -89,6 +96,16 @@ export function AppHeader({
               className="absolute left-0 top-full z-50 mt-2 flex flex-col gap-2 w-64 max-w-[calc(100vw-2rem)] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-2 shadow-xl"
               role="menu"
             >
+              <button
+                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45"
+                disabled={isLoading || !isOnline}
+                onClick={() => runMenuAction(onRefreshCatalog)}
+                role="menuitem"
+                type="button"
+              >
+                <RefreshCw className={cx('h-4 w-4', isLoading && 'animate-spin')} />
+                <span>Recargar catalogo</span>
+              </button>
               {cashSession ? (
                 <>
                   {canCloseCash ? <button
@@ -111,6 +128,15 @@ export function AppHeader({
                   </button>
                 </>
               ) : null}
+              {canCloseCash ? <button
+                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)]"
+                onClick={() => runMenuAction(onOpenCashClosingHistory)}
+                role="menuitem"
+                type="button"
+              >
+                <WalletCards className="h-4 w-4" />
+                <span>Historico de cierres</span>
+              </button> : null}
               <button
                 className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
                 onClick={() => runMenuAction(onOpenConfig)}
@@ -120,15 +146,15 @@ export function AppHeader({
                 <Settings className="h-4 w-4" />
                 <span>Ajustes</span>
               </button>
+              
               <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45"
-                disabled={isLoading || !isOnline}
-                onClick={() => runMenuAction(onRefreshCatalog)}
+                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--danger)] transition hover:bg-[var(--danger-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--danger)]"
+                onClick={() => runMenuAction(onLogout)}
                 role="menuitem"
                 type="button"
               >
-                <RefreshCw className={cx('h-4 w-4', isLoading && 'animate-spin')} />
-                <span>Recargar catalogo</span>
+                <LogOut className="h-4 w-4" />
+                <span>Cerrar sesión</span>
               </button>
             </div>
           ) : null}

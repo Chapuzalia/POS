@@ -14,6 +14,15 @@ export type PrintAgentPreferences = {
   cut: boolean
   copies: number
   footer: string
+  printCashClosingAutomatically: boolean
+  includeExpectedAndCountedAmounts: boolean
+  includeUserNames: boolean
+  includeOpeningAndClosingTimes: boolean
+  includeZeroPaymentMethods: boolean
+  includeTotalPayments: boolean
+  cashClosingCopies: number
+  cashClosingPaperWidth: 32 | 42 | 48
+  moneySymbol: 'currency' | 'code'
 }
 
 export type PrintAgentPersistedConfig = {
@@ -102,6 +111,43 @@ export type PrintRequest = {
   ticket: PrintTicket
   options: { cut: boolean; openCashDrawer: boolean; copies: number }
 }
+
+export type CashClosingPrintDocument = {
+  reportTitle: string
+  companyName: string
+  registerName: string
+  shiftLabel: string
+  closedAt: string
+  timezone: string
+  currency: string
+  locale: string
+  copyLabel?: string
+  summary: { totalSalesCents: number; salesCount: number; averageSaleCents: number }
+  payments: Array<{ code: string; label: string; amountCents: number }>
+  cashMovements: { entriesCents: number; exitsCents: number }
+  cashFund: { openingCashFundCents: number; finalCashFundCents: number }
+  differences: { cashDifferenceCents: number; cardDifferenceCents: number }
+  expectedAndCounted?: {
+    expectedCashCents: number
+    countedCashCents: number
+    expectedCardCents: number
+    countedCardCents: number
+  }
+  users?: { openedBy?: string; closedBy?: string }
+  times?: { openedAt: string; closedAt: string }
+  includeTotalPayments?: boolean
+  paperWidth: 32 | 42 | 48
+}
+
+export type CashClosingPrintRequest = {
+  requestId: string
+  printerId: string
+  documentType: 'cash-closing'
+  cashClosing: CashClosingPrintDocument
+  options: { cut: boolean; openCashDrawer: false; copies: number }
+}
+
+export type PrintDocumentRequest = PrintRequest | CashClosingPrintRequest
 
 export type DiscoveryProgress = { scanned?: number; total?: number; found?: number; message?: string }
 
