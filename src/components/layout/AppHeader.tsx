@@ -3,11 +3,12 @@ import { useEffect, useRef, useState } from 'react'
 import type { CashSession } from '../../types'
 import { cx } from '../../utils/cx'
 import { Chip } from '../ui'
-import { PrintAgentStatusBadge } from '../../features/local-printing'
+import { ManualCashDrawerButton, PrintAgentStatusBadge } from '../../features/local-printing'
 
 type AppHeaderProps = {
   cashSession: CashSession | null
   canCloseCash: boolean
+  canOpenCashDrawer: boolean
   isLoading: boolean
   isOnline: boolean
   onCloseCash: () => void
@@ -20,6 +21,7 @@ type AppHeaderProps = {
 export function AppHeader({
   cashSession,
   canCloseCash,
+  canOpenCashDrawer,
   isLoading,
   isOnline,
   onCloseCash,
@@ -134,6 +136,7 @@ export function AppHeader({
 
         <div className="flex flex-wrap items-center justify-end gap-2">
           {cashSession ? <Chip>{`Caja: ${cashSession.cashRegisterName}`}</Chip> : null}
+          <ManualCashDrawerButton canOpenDrawer={canOpenCashDrawer} />
           <PrintAgentStatusBadge />
           <Chip icon={isOnline ? Wifi : WifiOff} tone={isOnline ? 'success' : 'danger'} />
           {pendingCount ? <Chip tone="warning">{`${pendingCount} pendientes`}</Chip> : null}

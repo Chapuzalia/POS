@@ -179,6 +179,7 @@ export function PosPage(props: Props) {
       <AppHeader
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true}
+        canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'admin', 'owner'].includes(props.context.role))}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
         onCloseCash={() => void (async () => {
