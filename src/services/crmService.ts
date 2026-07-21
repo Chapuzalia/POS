@@ -77,6 +77,7 @@ type SalesReportTicketRow = {
   discount_type: 'percentage' | 'fixed' | 'manual' | null
   discount_value_type: 'percentage' | 'fixed' | null
   discount_value: number | string | null
+  discount_rounding_increment_cents: 5 | 10 | 50 | 100 | null
   discount_amount_cents: number | null
   ticket_lines: SalesReportLineRow[] | null
   total_cents: number
@@ -1401,6 +1402,7 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
           discount_type,
           discount_value_type,
           discount_value,
+          discount_rounding_increment_cents,
           discount_amount_cents,
           total_cents,
           local_created_at,
@@ -1526,6 +1528,7 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
       discountValue: ticket.discount_value === null ? null : ticket.discount_value_type === 'fixed'
         ? Math.round(Number(ticket.discount_value) * 100) : Number(ticket.discount_value),
       discountValueType: ticket.discount_value_type,
+      discountRoundingIncrementCents: ticket.discount_rounding_increment_cents,
       paymentMethod: ticket.sales?.[0]?.payment_method ?? null,
       quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + Number(line.allocated_quantity ?? line.quantity), 0),
       status: ticket.status,
@@ -1758,6 +1761,7 @@ type DiscountRow = {
   name: string
   type: 'percentage' | 'fixed'
   value: number | string
+  rounding_increment_cents: 5 | 10 | 50 | 100 | null
   color: string | null
   is_active: boolean
   sort_order: number
@@ -1771,6 +1775,7 @@ function mapDiscount(row: DiscountRow): Discount {
     name: row.name,
     type: row.type,
     value: row.type === 'fixed' ? Math.round(Number(row.value) * 100) : Number(row.value),
+    roundingIncrementCents: row.rounding_increment_cents,
     color: row.color,
     isActive: row.is_active,
     sortOrder: row.sort_order,
@@ -1788,7 +1793,7 @@ function serializeDiscountValue(type: DiscountCreateInput['type'], value: number
 export async function loadCrmDiscounts(context: TenantContext, venueId: string): Promise<Discount[]> {
   const { data, error } = await requireSupabase()
     .from('discounts')
-    .select('id, tenant_id, venue_id, name, type, value, color, is_active, sort_order')
+    .select('id, tenant_id, venue_id, name, type, value, rounding_increment_cents, color, is_active, sort_order')
     .eq('tenant_id', context.tenantId)
     .eq('venue_id', venueId)
     .order('sort_order')
@@ -1805,6 +1810,7 @@ export async function createDiscount(context: TenantContext, input: DiscountCrea
     name,
     type: input.type,
     value: serializeDiscountValue(input.type, input.value),
+    rounding_increment_cents: input.roundingIncrementCents,
     color: input.color || null,
     is_active: input.isActive,
     sort_order: 0,
@@ -1818,6 +1824,7 @@ export async function updateDiscount(context: TenantContext, discountId: string,
     name,
     type: input.type,
     value: serializeDiscountValue(input.type, input.value),
+    rounding_increment_cents: input.roundingIncrementCents,
     color: input.color || null,
     is_active: input.isActive,
   }).eq('tenant_id', context.tenantId).eq('id', discountId)

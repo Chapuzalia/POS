@@ -50,7 +50,7 @@ import {
   getSaleFormatLabel,
   productKindOptions,
 } from '../../lib/catalog'
-import { allocateNetTotalToLines } from '../../lib/discounts'
+import { allocateNetTotalToLines, discountRoundingOptions, formatDiscountRounding } from '../../lib/discounts'
 import { centsToInput, formatMoney, normalizeText, parseMoneyToCents } from '../../lib/format'
 import { exportCatalogZip, parseCatalogZip, type ParsedCatalogTransfer } from '../../lib/catalogTransfer'
 import { getDefaultProductImageFillColor } from '../../lib/productImages'
@@ -114,6 +114,7 @@ import type {
   DeviceMode,
   Discount,
   DiscountCalculationType,
+  DiscountRoundingIncrementCents,
   HistoricalPaymentMethod,
   Product,
   ProductVariant,
@@ -3575,8 +3576,11 @@ function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }
 }
 
 function getReportDiscountLabel(ticket: CrmSalesReports['tickets'][number]) {
-  if (ticket.discountName && ticket.discountAmountCents > 0) {
-    return `${ticket.discountName} · −${formatMoney(ticket.discountAmountCents)}`
+  if (ticket.discountName) {
+    const rounding = ticket.discountRoundingIncrementCents
+      ? ` · ${formatDiscountRounding(ticket.discountRoundingIncrementCents)}`
+      : ''
+    return `${ticket.discountName} · −${formatMoney(ticket.discountAmountCents)}${rounding}`
   }
   return ticket.paymentMethod === 'invitation' ? 'Invitación (histórico)' : '—'
 }
@@ -3990,7 +3994,7 @@ function DiscountsCrm({ disabled, onCatalogChanged, runAction, selectedVenueId, 
             <div className="!grid !min-h-[68px] !grid-cols-[minmax(0,1fr)_130px_100px_auto] !items-center !gap-3 !rounded-[12px] !bg-[var(--crm-surface-soft)] !px-4 !py-3 !text-[13px] !text-[var(--crm-text)]" key={discount.id}>
               <div className="!flex !min-w-0 !items-center !gap-3">
                 <span className="!size-3 !shrink-0 !rounded-full !border !border-black/10" style={{ backgroundColor: discount.color ?? 'var(--crm-blue)' }} />
-                <div className="crm-cell-main"><strong>{discount.name}</strong><span>{discount.type === 'percentage' ? 'Porcentaje' : 'Importe fijo'}</span></div>
+                <div className="crm-cell-main"><strong>{discount.name}</strong><span>{discount.type === 'percentage' ? 'Porcentaje' : 'Importe fijo'} · {formatDiscountRounding(discount.roundingIncrementCents)}</span></div>
               </div>
               <strong className="!font-mono !text-[var(--crm-text)]">{discount.type === 'percentage' ? `${discount.value} %` : formatMoney(discount.value)}</strong>
               <span className={discount.isActive ? 'crm-status-pill !w-fit !rounded-full !bg-[var(--crm-green-soft)] !px-2.5 !py-1 !text-[11px] !font-semibold !text-[var(--crm-green)]' : 'crm-status-pill !w-fit !rounded-full !bg-[var(--crm-input-bg)] !px-2.5 !py-1 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]'}>{discount.isActive ? 'Activo' : 'Inactivo'}</span>
@@ -4039,6 +4043,7 @@ function DiscountEditor({ disabled, discount, onClose, onSaved, runAction, selec
   const [name, setName] = useState(discount?.name ?? '')
   const [type, setType] = useState<DiscountCalculationType>(discount?.type ?? 'percentage')
   const [value, setValue] = useState(discount ? (discount.type === 'fixed' ? centsToInput(discount.value) : String(discount.value)) : '')
+  const [roundingIncrementCents, setRoundingIncrementCents] = useState<DiscountRoundingIncrementCents | null>(discount?.roundingIncrementCents ?? null)
   const [color, setColor] = useState(discount?.color ?? '#2563eb')
   const [isActive, setIsActive] = useState(discount?.isActive ?? true)
   const [validationError, setValidationError] = useState<string | null>(null)
@@ -4050,7 +4055,7 @@ function DiscountEditor({ disabled, discount, onClose, onSaved, runAction, selec
       return
     }
     await runAction(async () => {
-      const input = { name: name.trim(), type, value: parsedValue, color: color || null, isActive }
+      const input = { name: name.trim(), type, value: parsedValue, roundingIncrementCents, color: color || null, isActive }
       if (discount) await updateDiscount(tenantContext, discount.id, input)
       else await createDiscount(tenantContext, { ...input, venueId: selectedVenueId })
       await onSaved()
@@ -4064,6 +4069,14 @@ function DiscountEditor({ disabled, discount, onClose, onSaved, runAction, selec
         <Field label="Nombre"><input autoFocus className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none" onChange={(event) => setName(event.target.value)} value={name} /></Field>
         <Field label="Tipo"><select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none" onChange={(event) => { setType(event.target.value as DiscountCalculationType); setValue('') }} value={type}><option value="percentage">Porcentaje</option><option value="fixed">Importe fijo</option></select></Field>
         <Field label={type === 'percentage' ? 'Porcentaje' : 'Importe'}><input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none" inputMode="decimal" onChange={(event) => { setValue(event.target.value); setValidationError(null) }} value={value} /></Field>
+        <Field label="Redondeo del total">
+          <select className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none" onChange={(event) => setRoundingIncrementCents(event.target.value ? Number(event.target.value) as DiscountRoundingIncrementCents : null)} value={roundingIncrementCents ?? ''}>
+            {discountRoundingOptions.map((option) => (
+              <option key={option.value ?? 'none'} value={option.value ?? ''}>{option.label}</option>
+            ))}
+          </select>
+          <small className="!mt-1.5 !block !text-xs !text-[var(--crm-text-muted)]">Se redondeará el total final tras aplicar el descuento.</small>
+        </Field>
         <Field label="Color"><div className="crm-color-field"><span>{color.toUpperCase()}</span><input aria-label="Color del descuento" onChange={(event) => setColor(event.target.value)} type="color" value={color} /></div></Field>
         <label className="!flex !min-h-11 !items-center !gap-2.5 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3.5 !text-sm !font-semibold !text-[var(--crm-text)]"><input className="!size-4 !accent-[var(--crm-blue)]" checked={isActive} onChange={(event) => setIsActive(event.target.checked)} type="checkbox" /> Activo</label>
         {validationError ? <p className="!text-sm !font-semibold !text-[var(--crm-red)]">{validationError}</p> : null}

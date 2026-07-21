@@ -27,6 +27,7 @@ export type HistoricalPaymentMethod = PaymentMethod | 'invitation' | 'other'
 
 export type DiscountCalculationType = 'percentage' | 'fixed'
 export type DiscountSnapshotType = DiscountCalculationType | 'manual'
+export type DiscountRoundingIncrementCents = 5 | 10 | 50 | 100
 
 export type Discount = {
   id: string
@@ -35,6 +36,7 @@ export type Discount = {
   name: string
   type: DiscountCalculationType
   value: number
+  roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
   isActive: boolean
   sortOrder: number
@@ -45,6 +47,7 @@ export type DiscountCreateInput = {
   name: string
   type: DiscountCalculationType
   value: number
+  roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
   isActive: boolean
 }
@@ -55,6 +58,7 @@ export type AppliedDiscount = {
   type: DiscountSnapshotType
   calculationType: DiscountCalculationType
   value: number
+  roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
 }
 
@@ -511,6 +515,7 @@ export type CrmSalesReportTicket = {
   discountType: DiscountSnapshotType | null
   discountValue: number | null
   discountValueType: DiscountCalculationType | null
+  discountRoundingIncrementCents: DiscountRoundingIncrementCents | null
   paymentMethod: HistoricalPaymentMethod | null
   quantity: number
   status: 'paid' | 'void'

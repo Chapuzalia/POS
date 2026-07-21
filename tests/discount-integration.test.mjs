@@ -3,8 +3,11 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const migration = readFileSync(new URL('../supabase/16.ticket-discounts-migration.sql', import.meta.url), 'utf8')
+const roundingMigration = readFileSync(new URL('../supabase/25.discount-total-rounding-migration.sql', import.meta.url), 'utf8')
 const posService = readFileSync(new URL('../src/services/posService.ts', import.meta.url), 'utf8')
 const crmService = readFileSync(new URL('../src/services/crmService.ts', import.meta.url), 'utf8')
+const crmPage = readFileSync(new URL('../src/components/crm/CrmPage.tsx', import.meta.url), 'utf8')
+const discountLib = readFileSync(new URL('../src/lib/discounts.ts', import.meta.url), 'utf8')
 const paymentPanel = readFileSync(new URL('../src/components/pos/PaymentPanel.tsx', import.meta.url), 'utf8')
 
 test('la migracion conserva snapshots y permite pago nulo sin reescribir el historico', () => {
@@ -40,6 +43,19 @@ test('estadisticas usan tickets netos y excluyen metodos historicos del desglose
   assert.match(crmService, /ticket\.discount_amount_cents/)
   assert.match(crmService, /sale\.payment_method !== 'cash' && sale\.payment_method !== 'card'/)
   assert.match(crmService, /discountMap/)
+})
+
+test('el owner configura el redondeo y el servidor lo recalcula y conserva en el ticket', () => {
+  assert.match(roundingMigration, /add column if not exists rounding_increment_cents integer/)
+  assert.match(roundingMigration, /add column if not exists discount_rounding_increment_cents integer/)
+  assert.match(roundingMigration, /rounding_increment_cents in \(5, 10, 50, 100\)/)
+  assert.match(roundingMigration, /rounding_increment_cents := configured\.rounding_increment_cents/)
+  assert.match(roundingMigration, /round\(total_cents::numeric \/ rounding_increment_cents\)/)
+  assert.match(roundingMigration, /set_ticket_discount_rounding_snapshot/)
+  assert.match(posService, /rounding_increment_cents/)
+  assert.match(crmService, /rounding_increment_cents: input\.roundingIncrementCents/)
+  assert.match(crmPage, /discountRoundingOptions/)
+  assert.match(discountLib, /Math\.round\(totalCents \/ roundingIncrementCents\)/)
 })
 
 test('oculta el panel de cobro cuando el dispositivo no puede cobrar', () => {

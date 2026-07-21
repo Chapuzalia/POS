@@ -23,6 +23,22 @@ test('calcula porcentajes y redondea siempre a centimos', () => {
   })
 })
 
+test('redondea el total final al incremento configurado y nunca supera el subtotal', () => {
+  assert.deepEqual(calculateDiscount(3137, 'percentage', 20, 50), {
+    discountAmountCents: 637,
+    totalCents: 2500,
+  })
+  assert.deepEqual(calculateDiscount(999, 'percentage', 20, 100), {
+    discountAmountCents: 199,
+    totalCents: 800,
+  })
+  assert.deepEqual(calculateDiscount(99, 'percentage', 1, 100), {
+    discountAmountCents: 0,
+    totalCents: 99,
+  })
+  assert.throws(() => calculateDiscount(1000, 'percentage', 20, 25), /redondeo/)
+})
+
 test('limita un descuento fijo al subtotal', () => {
   assert.deepEqual(calculateDiscount(3000, 'fixed', 500), {
     discountAmountCents: 500,

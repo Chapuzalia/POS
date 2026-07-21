@@ -1,4 +1,10 @@
-import type { AppliedDiscount, Discount, DiscountCalculationType, PaymentMethod } from '../types'
+import type {
+  AppliedDiscount,
+  Discount,
+  DiscountCalculationType,
+  DiscountRoundingIncrementCents,
+  PaymentMethod,
+} from '../types'
 import { formatMoney } from './format.ts'
 
 export type DiscountCalculation = {
@@ -6,10 +12,24 @@ export type DiscountCalculation = {
   totalCents: number
 }
 
+export const discountRoundingOptions: Array<{
+  label: string
+  value: DiscountRoundingIncrementCents | null
+}> = [
+  { label: 'Sin redondeo', value: null },
+  { label: 'A los 0,05 € más cercanos', value: 5 },
+  { label: 'A los 0,10 € más cercanos', value: 10 },
+  { label: 'A los 0,50 € más cercanos', value: 50 },
+  { label: 'Al euro más cercano', value: 100 },
+]
+
+const validRoundingIncrements = new Set<DiscountRoundingIncrementCents>([5, 10, 50, 100])
+
 export function calculateDiscount(
   subtotalCents: number,
   calculationType?: DiscountCalculationType | null,
   value?: number | null,
+  roundingIncrementCents?: DiscountRoundingIncrementCents | null,
 ): DiscountCalculation {
   if (!Number.isInteger(subtotalCents) || subtotalCents < 0) {
     throw new Error('El subtotal debe expresarse en céntimos enteros.')
@@ -38,9 +58,18 @@ export function calculateDiscount(
   }
 
   const discountAmountCents = Math.min(subtotalCents, requestedAmountCents)
+  let totalCents = subtotalCents - discountAmountCents
+
+  if (roundingIncrementCents !== null && roundingIncrementCents !== undefined) {
+    if (!validRoundingIncrements.has(roundingIncrementCents)) {
+      throw new Error('El incremento de redondeo no es válido.')
+    }
+    totalCents = Math.min(subtotalCents, Math.round(totalCents / roundingIncrementCents) * roundingIncrementCents)
+  }
+
   return {
-    discountAmountCents,
-    totalCents: subtotalCents - discountAmountCents,
+    discountAmountCents: subtotalCents - totalCents,
+    totalCents,
   }
 }
 export function allocateNetTotalToLines(grossLineCents: number[], netTotalCents: number) {
@@ -95,13 +124,22 @@ export function validateDiscountDefinition(name: string, type: DiscountCalculati
 
 
 export function calculateAppliedDiscount(subtotalCents: number, discount: AppliedDiscount | null) {
-  return calculateDiscount(subtotalCents, discount?.calculationType, discount?.value)
+  return calculateDiscount(
+    subtotalCents,
+    discount?.calculationType,
+    discount?.value,
+    discount?.roundingIncrementCents,
+  )
 }
 
 export function formatDiscountValue(calculationType: DiscountCalculationType, value: number) {
   return calculationType === 'percentage'
     ? `${new Intl.NumberFormat('es-ES', { maximumFractionDigits: 2 }).format(value)} %`
     : formatMoney(value)
+}
+
+export function formatDiscountRounding(incrementCents: DiscountRoundingIncrementCents | null) {
+  return discountRoundingOptions.find((option) => option.value === incrementCents)?.label ?? 'Sin redondeo'
 }
 
 export function getDiscountLabel(discount: AppliedDiscount) {

@@ -1,6 +1,6 @@
 import { Percent, Tags, X } from 'lucide-react'
 import { useState } from 'react'
-import { calculateDiscount, formatDiscountValue, getActiveVenueDiscounts } from '../../lib/discounts'
+import { calculateDiscount, formatDiscountRounding, formatDiscountValue, getActiveVenueDiscounts } from '../../lib/discounts'
 import { parseMoneyToCents } from '../../lib/format'
 import type { AppliedDiscount, Discount, DiscountCalculationType } from '../../types'
 import { Button } from '../ui'
@@ -45,6 +45,7 @@ export function DiscountModal({
         type: 'manual',
         calculationType: manualType,
         value,
+        roundingIncrementCents: null,
         color: null,
       })
     } catch (error) {
@@ -77,6 +78,7 @@ export function DiscountModal({
                 type: discount.type,
                 calculationType: discount.type,
                 value: discount.value,
+                roundingIncrementCents: discount.roundingIncrementCents,
                 color: discount.color,
               })}
               type="button"
@@ -85,7 +87,10 @@ export function DiscountModal({
                 <span className="h-3 w-3 rounded-full border border-black/10" style={{ backgroundColor: discount.color ?? 'var(--accent)' }} />
                 <strong>{discount.name}</strong>
               </span>
-              <span className="font-mono font-black">{formatDiscountValue(discount.type, discount.value)}</span>
+              <span className="flex flex-col items-end">
+                <strong className="font-mono">{formatDiscountValue(discount.type, discount.value)}</strong>
+                {discount.roundingIncrementCents ? <small className="text-xs text-[var(--muted)]">{formatDiscountRounding(discount.roundingIncrementCents)}</small> : null}
+              </span>
             </button>
           ))}
           {!availableDiscounts.length && !manualDiscountEnabled ? (

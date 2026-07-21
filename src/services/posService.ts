@@ -53,6 +53,7 @@ type DiscountRow = {
   name: string
   type: 'percentage' | 'fixed'
   value: number | string
+  rounding_increment_cents: 5 | 10 | 50 | 100 | null
   color: string | null
   is_active: boolean
   sort_order: number
@@ -586,7 +587,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
 
   let discountsQuery = supabase
     .from('discounts')
-    .select('id, tenant_id, venue_id, name, type, value, color, is_active, sort_order')
+    .select('id, tenant_id, venue_id, name, type, value, rounding_increment_cents, color, is_active, sort_order')
     .eq('tenant_id', context.tenantId)
     .eq('is_active', true)
     .order('sort_order', { ascending: true })
@@ -696,6 +697,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
       name: discount.name,
       type: discount.type,
       value: discount.type === 'fixed' ? Math.round(Number(discount.value) * 100) : Number(discount.value),
+      roundingIncrementCents: discount.rounding_increment_cents,
       color: discount.color,
       isActive: discount.is_active,
       sortOrder: discount.sort_order,
@@ -786,6 +788,7 @@ type SessionTicketQueryRow = {
   discount_type: 'percentage' | 'fixed' | 'manual' | null
   discount_value_type: 'percentage' | 'fixed' | null
   discount_value: number | string | null
+  discount_rounding_increment_cents: 5 | 10 | 50 | 100 | null
   discount_amount_cents: number | null
   total_cents: number
   local_created_at: string
@@ -845,6 +848,7 @@ export async function loadSessionTicketsFromSupabase(
         discount_type,
         discount_value_type,
         discount_value,
+        discount_rounding_increment_cents,
         discount_amount_cents,
         total_cents,
         local_created_at,
@@ -946,6 +950,7 @@ export async function loadSessionTicketsFromSupabase(
               value: ticket.discount_value_type === 'fixed'
                 ? Math.round(Number(ticket.discount_value) * 100)
                 : Number(ticket.discount_value),
+              roundingIncrementCents: ticket.discount_rounding_increment_cents,
               color: null,
             }
           : null,
