@@ -3,11 +3,11 @@ import { assertValidTicketPayment, calculateAppliedDiscount } from '../lib/disco
 import { defaultSaleFormats } from '../lib/catalog'
 import { PRODUCT_IMAGE_BUCKET } from '../lib/productImages'
 import { supabase } from '../lib/supabase'
+export { summarizeSales } from '../features/cash-registers/services/cashSummary.ts'
 import type {
   AppliedDiscount,
   CashClosedPayload,
   CashSession,
-  CashSummary,
   Catalog,
   Category,
   LoginInput,
@@ -191,32 +191,6 @@ function mapFiscalSnapshot(row: {
     taxAmountCents: row.tax_amount_cents,
     grossTotalCents: row.line_total_cents,
   }
-}
-
-export function summarizeSales(openingFloatCents: number, records: SaleRecord[]): CashSummary {
-  return records.reduce(
-    (totals, record) => {
-      if (record.paymentMethod === 'cash') {
-        totals.cashCents += record.totalCents
-      } else if (record.paymentMethod === 'card') {
-        totals.cardCents += record.totalCents
-      } else if (record.paymentMethod === 'invitation') {
-        totals.invitationCents += record.totalCents
-      } else {
-        totals.otherCents += record.totalCents
-      }
-
-      totals.totalSalesCents += record.totalCents
-      return totals
-    },
-    {
-      cashCents: openingFloatCents,
-      cardCents: 0,
-      invitationCents: 0,
-      otherCents: 0,
-      totalSalesCents: 0,
-    },
-  )
 }
 
 export async function loginTenant(input: LoginInput): Promise<TenantContext> {

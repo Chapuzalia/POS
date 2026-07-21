@@ -5,6 +5,7 @@ import {
   CashPaymentModal,
   CashClosingResultModal,
   CashClosingsHistoryModal,
+  CashMovementModal,
   CloseCashModal,
   ConfigModal,
   DiscountModal,
@@ -181,6 +182,7 @@ export function PosPage(props: Props) {
       <AppHeader
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true}
+        canManageCash={Boolean(props.context.canManageCash || ['manager', 'admin', 'owner'].includes(props.context.role))}
         canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'admin', 'owner'].includes(props.context.role))}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
@@ -189,6 +191,7 @@ export function PosPage(props: Props) {
         })()}
         onOpenConfig={() => setConfigOpen(true)}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
+        onOpenCashMovements={() => cash.setMovementModalOpen(true)}
         onOpenTicketHistory={() => void cash.ticketActions.openHistory()}
         onRefreshCatalog={() => void props.onRefreshCatalog()}
         onLogout={() => void props.onLogout()}
@@ -373,6 +376,12 @@ export function PosPage(props: Props) {
         onSelect={(discount) => { quickSale.setDiscount(discount); quickSale.closeDiscountModal() }}
         subtotalCents={subtotalCents}
         venueId={props.context.venueId}
+      /> : null}
+      {cash.movementModalOpen && cash.session ? <CashMovementModal
+        isOnline={props.isOnline}
+        isSaving={cash.movementSaving}
+        onCancel={() => cash.setMovementModalOpen(false)}
+        onConfirm={cash.registerMovement}
       /> : null}
       {cash.closeModalOpen && cash.session ? <CloseCashModal
         cashSession={cash.session}

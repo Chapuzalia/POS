@@ -1,4 +1,4 @@
-import { ChevronDown, Euro, LogOut, ReceiptText, RefreshCw, Settings, WalletCards, Wifi, WifiOff } from 'lucide-react'
+import { ArrowLeftRight, ChevronDown, Euro, LogOut, ReceiptText, RefreshCw, Settings, WalletCards, Wifi, WifiOff } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import type { CashSession } from '../../types'
 import { cx } from '../../utils/cx'
@@ -8,12 +8,14 @@ import { ManualCashDrawerButton, PrintAgentStatusBadge } from '../../features/lo
 type AppHeaderProps = {
   cashSession: CashSession | null
   canCloseCash: boolean
+  canManageCash: boolean
   canOpenCashDrawer: boolean
   isLoading: boolean
   isOnline: boolean
   onCloseCash: () => void
   onOpenConfig: () => void
   onOpenTicketHistory: () => void
+  onOpenCashMovements: () => void
   onOpenCashClosingHistory: () => void
   onRefreshCatalog: () => void
   onLogout: () => void
@@ -24,12 +26,14 @@ type AppHeaderProps = {
 export function AppHeader({
   cashSession,
   canCloseCash,
+  canManageCash,
   canOpenCashDrawer,
   isLoading,
   isOnline,
   onCloseCash,
   onOpenConfig,
   onOpenTicketHistory,
+  onOpenCashMovements,
   onOpenCashClosingHistory,
   onRefreshCatalog,
   onLogout,
@@ -116,6 +120,16 @@ export function AppHeader({
                   >
                     <ReceiptText className="h-4 w-4" />
                     <span>Historico de tickets</span>
+                  </button> : null}
+                  {canManageCash ? <button
+                    className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45"
+                    disabled={isLoading || !isOnline}
+                    onClick={() => runMenuAction(onOpenCashMovements)}
+                    role="menuitem"
+                    type="button"
+                  >
+                    <ArrowLeftRight className="h-4 w-4" />
+                    <span>Entradas / salidas</span>
                   </button> : null}
                   <button
                     className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"

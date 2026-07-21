@@ -63,6 +63,11 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
           <Metric label="Efectivo esperado" value={formatMoney(summary.cashCents)} />
           <Metric label="Tarjeta TPV" value={formatMoney(summary.cardCents)} />
         </div>
+        <div className="mt-3 grid gap-3 sm:grid-cols-3">
+          <Metric label="Entradas de efectivo" value={formatMoney(summary.cashEntriesCents)} />
+          <Metric label="Salidas de efectivo" value={formatMoney(summary.cashExitsCents)} />
+          <Metric label="Efectivo por tarjeta" value={formatMoney(summary.cardCashbackCents)} />
+        </div>
 
         <label className="mt-5 block">
           <span className="text-sm font-semibold text-[var(--muted)]">Fondo que se deja para el siguiente turno</span>

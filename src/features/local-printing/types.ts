@@ -124,7 +124,11 @@ export type CashClosingPrintDocument = {
   copyLabel?: string
   summary: { totalSalesCents: number; salesCount: number; averageSaleCents: number }
   payments: Array<{ code: string; label: string; amountCents: number }>
-  cashMovements: { entriesCents: number; exitsCents: number }
+  cashMovements: {
+    cashEntriesCents: number
+    cashExitsCents: number
+    cardCashbackCents: number
+  }
   cashFund: { openingCashFundCents: number; finalCashFundCents: number }
   differences: { cashDifferenceCents: number; cardDifferenceCents: number }
   expectedAndCounted?: {

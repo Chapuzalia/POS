@@ -46,6 +46,18 @@ export const printRequestSchema = z.object({
 
 const signedCents = z.number().int()
 
+const cashMovementsSchema = z.object({
+  cashEntriesCents: cents.optional(),
+  cashExitsCents: cents.optional(),
+  cardCashbackCents: cents.optional(),
+  entriesCents: cents.optional(),
+  exitsCents: cents.optional(),
+}).transform((value) => ({
+  cashEntriesCents: value.cashEntriesCents ?? value.entriesCents ?? 0,
+  cashExitsCents: value.cashExitsCents ?? value.exitsCents ?? 0,
+  cardCashbackCents: value.cardCashbackCents ?? 0,
+}))
+
 export const cashClosingPrintDocumentSchema = z.object({
   reportTitle: z.string().trim().min(1).max(100),
   companyName: z.string().trim().min(1).max(200),
@@ -66,7 +78,7 @@ export const cashClosingPrintDocumentSchema = z.object({
     label: z.string().trim().min(1).max(120),
     amountCents: signedCents,
   })),
-  cashMovements: z.object({ entriesCents: cents, exitsCents: cents }),
+  cashMovements: cashMovementsSchema,
   cashFund: z.object({ openingCashFundCents: cents, finalCashFundCents: cents }),
   differences: z.object({ cashDifferenceCents: signedCents, cardDifferenceCents: signedCents }),
   expectedAndCounted: z.object({

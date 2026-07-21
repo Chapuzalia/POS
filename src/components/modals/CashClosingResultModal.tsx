@@ -25,6 +25,11 @@ export function CashClosingResultModal({ closing, isPrinting, onClose, onPrint }
         <Metric label="Ventas" value={String(closing.printSnapshot.summary.salesCount)} />
         <Metric label="Diferencia efectivo" value={formatMoney(closing.printSnapshot.differences.cashDifferenceCents)} />
       </div>
+      <div className="mt-3 grid gap-3 sm:grid-cols-3">
+        <Metric label="Entradas de efectivo" value={formatMoney(closing.printSnapshot.cashMovements.cashEntriesCents)} />
+        <Metric label="Salidas de efectivo" value={formatMoney(closing.printSnapshot.cashMovements.cashExitsCents)} />
+        <Metric label="Efectivo por tarjeta" value={formatMoney(closing.printSnapshot.cashMovements.cardCashbackCents)} />
+      </div>
       {unknown ? <p className="mt-4 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-bold text-amber-700">No se puede confirmar si el cierre se imprimio. Comprueba la impresora antes de volver a imprimir.</p> : null}
       {closing.printStatus === 'failed' ? <p className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold text-red-700">El cierre se ha guardado, pero no se ha podido imprimir. Puedes reintentar con el mismo identificador.</p> : null}
       <div className="mt-5 flex flex-wrap justify-end gap-2">

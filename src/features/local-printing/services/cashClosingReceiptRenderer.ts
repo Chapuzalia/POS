@@ -30,8 +30,9 @@ export function renderCashClosingReceipt(document: CashClosingPrintDocument, mon
       ...(document.includeTotalPayments ? [row('Total pagos', money(document.payments.reduce((total, payment) => total + payment.amountCents, 0)))] : []),
     ]),
     ...section('Entradas/Salidas', [
-      row('Entradas', money(document.cashMovements.entriesCents)),
-      row('Salidas', money(document.cashMovements.exitsCents)),
+      row('Entradas de efectivo', money(document.cashMovements.cashEntriesCents)),
+      row('Salidas de efectivo', money(document.cashMovements.cashExitsCents)),
+      row('Efectivo por tarjeta', money(document.cashMovements.cardCashbackCents)),
     ]),
     ...section('Fondo de caja', [
       row('Fondo de efectivo', money(document.cashFund.openingCashFundCents)),

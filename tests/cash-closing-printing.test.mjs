@@ -17,7 +17,7 @@ const snapshot = {
     { code: 'bizum', label: 'Bizum', amountCents: 5000 },
     { code: 'invitation', label: 'Invitacion', amountCents: 0 },
   ],
-  cashMovements: { entriesCents: 500, exitsCents: 200 },
+  cashMovements: { cashEntriesCents: 500, cashExitsCents: 200, cardCashbackCents: 300 },
   cashFund: { openingCashFundCents: 5000, finalCashFundCents: 5000 },
   expectedAndCounted: { expectedCashCents: 80300, countedCashCents: 80200, expectedCardCents: 20000, countedCardCents: 20000 },
   differences: { cashDifferenceCents: -100, cardDifferenceCents: 0 },
@@ -58,7 +58,9 @@ test('renderiza pagos dinamicos, movimientos, fondos y diferencias en 80 mm', ()
   const receipt = renderCashClosingReceipt(request.cashClosing)
   assert.match(receipt, /Efectivo/)
   assert.match(receipt, /Bizum/)
-  assert.match(receipt, /Entradas/)
+  assert.match(receipt, /Entradas de efectivo/)
+  assert.match(receipt, /Salidas de efectivo/)
+  assert.match(receipt, /Efectivo por tarjeta/)
   assert.match(receipt, /Fondo de caja final/)
   assert.match(receipt, /Diferencia efectivo/)
   for (const line of receipt.split('\n')) assert.ok(line.length <= 42, `linea demasiado larga: ${line}`)

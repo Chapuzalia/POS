@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef, useState, type SetStateAction } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { sileo } from 'sileo'
 import {
   clearSaleLedger,
@@ -16,6 +16,8 @@ import {
 import type {
   CashClosedPayload,
   CashClosingRecord,
+  CashMovement,
+  CashMovementType,
   CashSession,
   SaleRecord,
   SessionTicketRecord,
@@ -39,7 +41,14 @@ import { useActiveCashSession } from './useActiveCashSession'
 import { useCashRegisterOptions } from './useCashRegisterOptions'
 import { useCashTicketActions } from './useCashTicketActions'
 import { getClosedCashState } from '../services/cashState'
-import { loadCashClosing, loadCashClosingHistory, recordCashClosingPrintResult } from '../service'
+import {
+  createCashMovement as createCashMovementRequest,
+  loadCashClosing,
+  loadCashClosingHistory,
+  loadCashMovements,
+  recordCashClosingPrintResult,
+  subscribeToCashMovements,
+} from '../service'
 
 type Options = {
   context: TenantContext | null
@@ -54,15 +63,49 @@ type Options = {
 export function useCashSession(options: Options) {
   const [session, setSession] = useState<CashSession | null>(null)
   const [ledger, setLedger] = useState<SaleRecord[]>([])
+  const [movements, setMovements] = useState<CashMovement[]>([])
   const [tickets, setTicketsState] = useState<SessionTicketRecord[]>([])
   const ticketsRef = useRef<SessionTicketRecord[]>([])
   const [closeModalOpen, setCloseModalOpen] = useState(false)
+  const [movementModalOpen, setMovementModalOpen] = useState(false)
+  const [movementSaving, setMovementSaving] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   const [closingHistoryOpen, setClosingHistoryOpen] = useState(false)
   const [cashClosings, setCashClosings] = useState<CashClosingRecord[]>([])
   const [completedClosing, setCompletedClosing] = useState<CashClosingRecord | null>(null)
   const [printingClosingId, setPrintingClosingId] = useState<string | null>(null)
-  usePrintAgentScope(options.context)
+  const cashContext = options.context
+  const isOnline = options.isOnline
+  const reportError = options.onError
+  usePrintAgentScope(cashContext)
+
+  useEffect(() => {
+    if (!cashContext || !session) {
+      setMovements([])
+      setMovementModalOpen(false)
+      return undefined
+    }
+    setMovements((current) => current.some((movement) => movement.cashSessionId !== session.id) ? [] : current)
+    if (!isOnline) return undefined
+    let active = true
+    let refreshVersion = 0
+    const refresh = async () => {
+      const requestVersion = ++refreshVersion
+      try {
+        const next = await loadCashMovements(cashContext, session.id)
+        if (!active || requestVersion !== refreshVersion) return
+        setMovements(next)
+      } catch (error) {
+        if (active && requestVersion === refreshVersion) reportError(getReadableError(error))
+      }
+    }
+    void refresh()
+    const unsubscribe = subscribeToCashMovements(session.id, () => void refresh())
+    return () => {
+      active = false
+      unsubscribe()
+    }
+  }, [cashContext, isOnline, reportError, session])
 
   const setTickets = useCallback((value: SetStateAction<SessionTicketRecord[]>) => {
     const next = typeof value === 'function' ? value(ticketsRef.current) : value
@@ -215,6 +258,38 @@ export function useCashSession(options: Options) {
     setError: options.onError,
     setHistoryOpen,
   })
+
+  const registerMovement = useCallback(async (input: {
+    type: CashMovementType
+    amountCents: number
+    notes: string
+    requestId: string
+  }) => {
+    const context = options.context
+    const activeSession = session
+    if (!context || !activeSession || !options.isOnline) {
+      throw new Error('Los movimientos de caja requieren una caja abierta y conexion.')
+    }
+    if (!context.canManageCash && !['manager', 'admin', 'owner'].includes(context.role)) {
+      throw new Error('No tienes permiso para gestionar movimientos de caja.')
+    }
+    setMovementSaving(true)
+    try {
+      const movement = await createCashMovementRequest(context, {
+        cashSessionId: activeSession.id,
+        type: input.type,
+        amountCents: input.amountCents,
+        notes: input.notes.trim(),
+        requestId: input.requestId,
+      })
+      setMovements((current) => current.some((item) => item.id === movement.id)
+        ? current.map((item) => item.id === movement.id ? movement : item)
+        : [...current, movement].sort((left, right) => left.createdAt.localeCompare(right.createdAt)))
+      return movement
+    } finally {
+      setMovementSaving(false)
+    }
+  }, [options.context, options.isOnline, session])
 
   const open = useCallback(async (registerId: string, openingFloatCents: number) => {
     if (!options.context?.canOpenCashSession || !options.isOnline) return
@@ -403,6 +478,9 @@ export function useCashSession(options: Options) {
     join,
     ledger,
     mergeRemotePrintStates,
+    movementModalOpen,
+    movementSaving,
+    movements,
     open,
     openCloseModal: () => setCloseModalOpen(true),
     openClosingHistory,
@@ -414,6 +492,7 @@ export function useCashSession(options: Options) {
     printClosing,
     printingClosingId,
     refreshConfirmedSale,
+    registerMovement,
     reset,
     session,
     setCloseModalOpen,
@@ -421,9 +500,10 @@ export function useCashSession(options: Options) {
     setCompletedClosing,
     setHistoryOpen,
     setLedger,
+    setMovementModalOpen,
     setSession,
     setTickets,
-    summary: useMemo(() => summarizeSales(session?.openingFloatCents ?? 0, ledger), [ledger, session?.openingFloatCents]),
+    summary: useMemo(() => summarizeSales(session?.openingFloatCents ?? 0, ledger, movements), [ledger, movements, session?.openingFloatCents]),
     ticketActions,
     tickets,
   }

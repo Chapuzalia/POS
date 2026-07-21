@@ -265,6 +265,22 @@ export type CashSession = {
 
 export type CashRegister = { id: string; tenantId: string; venueId: string; name: string; isActive: boolean; sortOrder: number }
 
+export type CashMovementType = 'cash_in' | 'cash_out' | 'card_cashback'
+
+export type CashMovement = {
+  id: string
+  tenantId: string
+  venueId: string
+  cashSessionId: string
+  createdBy: string
+  type: CashMovementType
+  direction: 'entry' | 'exit'
+  amountCents: number
+  notes: string
+  requestId: string
+  createdAt: string
+}
+
 export type SaleRecord = {
   id: string
   cashSessionId: string
@@ -301,6 +317,9 @@ export type CashSummary = {
   invitationCents: number
   otherCents: number
   totalSalesCents: number
+  cashEntriesCents: number
+  cashExitsCents: number
+  cardCashbackCents: number
 }
 
 export type SaleLinePayload = {
@@ -390,7 +409,11 @@ export type CashClosingPrintSnapshot = {
   closedBy?: string
   summary: { totalSalesCents: number; salesCount: number; averageSaleCents: number }
   payments: Array<{ code: string; label: string; amountCents: number }>
-  cashMovements: { entriesCents: number; exitsCents: number }
+  cashMovements: {
+    cashEntriesCents: number
+    cashExitsCents: number
+    cardCashbackCents: number
+  }
   cashFund: { openingCashFundCents: number; finalCashFundCents: number }
   expectedAndCounted: {
     expectedCashCents: number
