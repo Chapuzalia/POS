@@ -11,8 +11,6 @@ export function ManualCashDrawerButton({ canOpenDrawer }: { canOpenDrawer: boole
   if (!canOpenDrawer) return null
 
   async function handleOpenCashDrawer() {
-    if (!window.confirm('¿Quieres abrir el cajon manualmente?')) return
-
     try {
       await agent.openCashDrawer()
       sileo.success({ title: 'Cajon abierto' })
