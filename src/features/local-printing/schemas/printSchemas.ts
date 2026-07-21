@@ -19,6 +19,8 @@ export const printRequestSchema = z.object({
   ticket: z.object({
     establishmentName: z.string().trim().min(1).max(200),
     address: z.string().trim().max(300).optional(),
+    legalName: z.string().trim().max(80).optional(),
+    taxId: z.string().trim().max(80).optional(),
     ticketNumber: z.string().trim().min(1).max(100),
     date: z.string().datetime({ offset: true }),
     items: z.array(printTicketItemSchema).min(1),

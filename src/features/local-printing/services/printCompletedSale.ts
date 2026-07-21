@@ -5,7 +5,7 @@ import { mapSaleToPrintRequest } from './ticketPrintMapper'
 
 export async function printCompletedSale(input: {
   sale: SaleCreatedPayload
-  establishment: { name: string; address?: string }
+  establishment: { name: string; address?: string; legalName?: string; taxId?: string }
   isReprint?: boolean
   copyNumber?: number
 }) {

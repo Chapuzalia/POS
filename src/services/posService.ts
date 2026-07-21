@@ -334,7 +334,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name')
+      .select('id, name, address, legal_name, tax_id')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
@@ -367,6 +367,9 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     tenantSlug: tenant.slug,
     venueId: venue.id,
     venueName: venue.name,
+    venueAddress: venue.address ?? undefined,
+    venueLegalName: venue.legal_name ?? undefined,
+    venueTaxId: venue.tax_id ?? undefined,
     deviceId: device.id,
     deviceName: device.name,
     deviceMode: device.device_mode,
@@ -503,7 +506,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name')
+      .select('id, name, address, legal_name, tax_id')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
@@ -532,6 +535,9 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     tenantSlug: tenant.slug,
     venueId: venue.id,
     venueName: venue.name,
+    venueAddress: venue.address ?? undefined,
+    venueLegalName: venue.legal_name ?? undefined,
+    venueTaxId: venue.tax_id ?? undefined,
     deviceId: device.id,
     deviceName: device.name,
     deviceMode: device.device_mode,

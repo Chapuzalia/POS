@@ -77,6 +77,8 @@ export type PrintTicketItem = {
 export type PrintTicket = {
   establishmentName: string
   address?: string
+  legalName?: string
+  taxId?: string
   ticketNumber: string
   date: string
   items: PrintTicketItem[]

@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { canAccessCrm, canAccessCrmSection } from '../src/features/crm/routing/crmPermissions.ts'
+import { readFileSync } from 'node:fs'
 import { resolveSelectedVenueId } from '../src/features/crm/venues/services/venueSelection.ts'
 import { buildProductVariantInputs, getProductFormGuardError } from '../src/features/crm/catalog/forms/productFormModel.ts'
 import { buildSalesReportAggregates, compareSalesReportValues } from '../src/features/crm/sales/services/salesReportModel.ts'
@@ -54,4 +55,17 @@ test('sales aggregates ignore cancelled tickets, allocate net totals and sort co
   }])
   assert.ok(compareSalesReportValues('B', 'a', 'asc') > 0)
   assert.equal(compareSalesReportValues(5, 2, 'desc'), -3)
+})
+
+test('venue settings persist the three fiscal ticket fields per venue', () => {
+  const settings = readFileSync(new URL('../src/features/crm/venues/pages/VenueSettingsPage.tsx', import.meta.url), 'utf8')
+  const service = readFileSync(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8')
+  const migration = readFileSync(new URL('../supabase/26.venue-ticket-fiscal-details-migration.sql', import.meta.url), 'utf8')
+  assert.match(settings, /name="legalName"/)
+  assert.match(settings, /name="taxId"/)
+  assert.match(settings, /name="address"/)
+  assert.match(service, /legal_name: legalName \|\| null/)
+  assert.match(service, /tax_id: taxId \|\| null/)
+  assert.match(service, /address: address \|\| null/)
+  assert.match(migration, /alter table public\.venues/)
 })

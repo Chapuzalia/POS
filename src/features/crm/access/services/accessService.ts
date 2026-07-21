@@ -14,7 +14,7 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
     await Promise.all([
       client
         .from('venues')
-        .select('id, name, sort_order, is_active, tables_enabled, default_tax_rate')
+        .select('id, name, address, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate')
         .eq('tenant_id', context.tenantId)
         .order('sort_order'),
       client
@@ -40,6 +40,9 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
     venues: (venueRows ?? []).map((venue) => ({
       id: venue.id as string,
       name: venue.name as string,
+      address: (venue.address as string | null) ?? '',
+      legalName: (venue.legal_name as string | null) ?? '',
+      taxId: (venue.tax_id as string | null) ?? '',
       sortOrder: venue.sort_order as number,
       isActive: venue.is_active as boolean,
       tablesEnabled: venue.tables_enabled as boolean,
@@ -61,7 +64,7 @@ export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]>
   const client = requireSupabase()
   const { data, error } = await client
     .from('venues')
-    .select('id, name, sort_order, is_active, tables_enabled, default_tax_rate')
+    .select('id, name, address, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate')
     .eq('tenant_id', context.tenantId)
     .order('sort_order')
 
@@ -72,6 +75,9 @@ export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]>
   return (data ?? []).map((venue) => ({
     id: venue.id as string,
     name: venue.name as string,
+    address: (venue.address as string | null) ?? '',
+    legalName: (venue.legal_name as string | null) ?? '',
+    taxId: (venue.tax_id as string | null) ?? '',
     sortOrder: venue.sort_order as number,
     isActive: venue.is_active as boolean,
     tablesEnabled: venue.tables_enabled as boolean,
@@ -111,6 +117,53 @@ export async function updateCrmVenueDefaultTaxRate(
   if (error) {
     throw error
   }
+}
+
+export type CrmVenueSettingsInput = {
+  address: string
+  defaultTaxRate: number
+  legalName: string
+  taxId: string
+}
+
+export async function updateCrmVenueSettings(
+  context: TenantContext,
+  venueId: string,
+  input: CrmVenueSettingsInput,
+) {
+  if (!isValidTaxRate(input.defaultTaxRate)) {
+    throw new Error('El tipo de IVA debe estar entre 0 y 100.')
+  }
+
+  const address = input.address.trim()
+  const legalName = input.legalName.trim()
+  const taxId = input.taxId.trim()
+
+  if (address.length > 300) {
+    throw new Error('La direcci\u00f3n no puede superar los 300 caracteres.')
+  }
+  if (legalName.length > 80) {
+    throw new Error('La raz\u00f3n social no puede superar los 80 caracteres.')
+  }
+  if (taxId.length > 80) {
+    throw new Error('El NIF/CIF no puede superar los 80 caracteres.')
+  }
+
+  const { error } = await requireSupabase()
+    .from('venues')
+    .update({
+      address: address || null,
+      default_tax_rate: input.defaultTaxRate,
+      legal_name: legalName || null,
+      tax_id: taxId || null,
+    })
+    .eq('tenant_id', context.tenantId)
+    .eq('id', venueId)
+
+  if (error) {
+    throw error
+  }
+
 }
 
 export async function createCrmDevice(context: TenantContext, venueId: string, name: string, deviceMode: DeviceMode) {

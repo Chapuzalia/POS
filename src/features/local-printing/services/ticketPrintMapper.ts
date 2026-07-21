@@ -4,7 +4,7 @@ import { shouldOpenCashDrawer } from './cashDrawerRules.ts'
 
 type MapperOptions = {
   sale: SaleCreatedPayload
-  establishment: { name: string; address?: string }
+  establishment: { name: string; address?: string; legalName?: string; taxId?: string }
   printerId: string
   footer?: string
   isReprint?: boolean
@@ -49,6 +49,8 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     ticket: {
       establishmentName: options.establishment.name,
       ...(options.establishment.address ? { address: options.establishment.address } : {}),
+      ...(options.establishment.legalName ? { legalName: options.establishment.legalName } : {}),
+      ...(options.establishment.taxId ? { taxId: options.establishment.taxId } : {}),
       ticketNumber: sale.ticket.id,
       date: sale.sale.createdAt,
       items: sale.lines.map(mapSaleLineToPrintItem),
@@ -82,6 +84,9 @@ export function mapRestaurantSaleToPrintRequest(input: {
   paymentMethod: string | null
   receivedCents: number | null
   establishmentName: string
+  address?: string
+  legalName?: string
+  taxId?: string
   printerId: string
   footer?: string
   autoOpenCashDrawer?: boolean
@@ -102,7 +107,11 @@ export function mapRestaurantSaleToPrintRequest(input: {
   return {
     requestId: `print:${input.saleId}:original`, printerId: input.printerId,
     ticket: {
-      establishmentName: input.establishmentName, ticketNumber: input.ticketId, date: input.createdAt,
+      establishmentName: input.establishmentName,
+      ...(input.address ? { address: input.address } : {}),
+      ...(input.legalName ? { legalName: input.legalName } : {}),
+      ...(input.taxId ? { taxId: input.taxId } : {}),
+      ticketNumber: input.ticketId, date: input.createdAt,
       items, subtotalCents, discountCents: Math.max(0, subtotalCents - input.totalCents), totalCents: input.totalCents,
       ...(input.paymentMethod ? { paymentMethod: input.paymentMethod, payments } : {}),
       ...(input.receivedCents === null ? {} : { amountReceivedCents: input.receivedCents, changeCents: Math.max(0, input.receivedCents - input.totalCents) }),

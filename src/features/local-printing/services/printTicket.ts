@@ -56,7 +56,11 @@ export async function printTicket({ context, payload, tickets, updateTicketPrint
   })
   try {
     const job = await printCompletedSale({
-      sale: payload, establishment: { name: context.venueName },
+      sale: payload,
+      establishment: {
+        name: context.venueName, address: context.venueAddress,
+        legalName: context.venueLegalName, taxId: context.venueTaxId,
+      },
       isReprint: options.isReprint, copyNumber: options.copyNumber,
     })
     updateTicketPrintState(payload.sale.id, {

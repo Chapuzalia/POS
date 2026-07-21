@@ -26,6 +26,9 @@ export type DeviceAssignmentRow = {
 export type VenueRow = {
   id: string
   name: string
+  address: string | null
+  legal_name: string | null
+  tax_id: string | null
   default_tax_rate: number
 }
 

@@ -84,6 +84,9 @@ export type TenantContext = {
   tenantSlug: string
   venueId: string
   venueName: string
+  venueAddress?: string
+  venueLegalName?: string
+  venueTaxId?: string
   deviceId: string
   deviceName: string
   deviceMode?: DeviceMode
@@ -106,6 +109,9 @@ export type LoginInput = {
 export type CrmVenue = {
   id: string
   name: string
+  address: string
+  legalName: string
+  taxId: string
   sortOrder: number
   isActive: boolean
   tablesEnabled: boolean

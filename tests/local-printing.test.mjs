@@ -93,8 +93,14 @@ test('permite cancelar una consulta mediante AbortSignal', async () => {
 })
 
 test('mapea cubatas, extras, efectivo e importes enteros con idempotencia estable', () => {
-  const payload = mapSaleToPrintRequest({ sale, establishment: { name: 'MESS', address: 'Igualada' }, printerId: 'main-bar', footer: 'Gracias', autoOpenCashDrawer: true })
+  const payload = mapSaleToPrintRequest({
+    sale, establishment: { name: 'MESS', address: 'Carrer Exemple 1, Igualada', legalName: 'MESS EVENTS SL', taxId: 'B12345678' },
+    printerId: 'main-bar', footer: 'Gracias', autoOpenCashDrawer: true,
+  })
   assert.equal(payload.requestId, 'print:sale_123:original')
+  assert.equal(payload.ticket.address, 'Carrer Exemple 1, Igualada')
+  assert.equal(payload.ticket.legalName, 'MESS EVENTS SL')
+  assert.equal(payload.ticket.taxId, 'B12345678')
   assert.deepEqual(payload.ticket.items[0].additions, ['Coca-Cola', 'Limon'])
   assert.equal(payload.ticket.items[0].totalCents, 1800)
   assert.equal(payload.ticket.discountCents, 200)
