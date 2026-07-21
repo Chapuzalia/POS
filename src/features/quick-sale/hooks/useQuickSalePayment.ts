@@ -1,10 +1,8 @@
 import { useCallback } from 'react'
-import { sileo } from 'sileo'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
-import { buildSalePayload, loadSessionTicketsFromSupabase } from '../../../services/posService'
+import { buildSalePayload } from '../../../services/posService'
 import type { AppliedDiscount, CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
-import { getReadableError } from '../../../utils/errors'
 
 type Options = {
   context: TenantContext | null
@@ -37,20 +35,8 @@ export function useQuickSalePayment(options: Options) {
     options.persistLines([])
     options.refreshPendingCount()
     options.resetUi(paymentMethod)
-    if (!options.isOnline) {
-      sileo.warning({ title: 'Venta guardada sin imprimir', description: 'Revisa los tickets pendientes cuando vuelva la conexion; no se imprimiran automaticamente.' })
-      return
-    }
-    await options.syncPendingEvents()
-    try {
-      const confirmed = (await loadSessionTicketsFromSupabase(context, cashSession.id)).some((ticket) => ticket.id === payload.sale.id)
-      if (!confirmed) {
-        sileo.warning({ title: 'Venta pendiente de confirmar', description: 'El ticket no se imprimira hasta que la venta conste en la base de datos.' })
-        return
-      }
-      await options.printSale(payload)
-    } catch (error) {
-      sileo.warning({ title: 'Venta guardada sin imprimir', description: `No se ha podido confirmar la venta: ${getReadableError(error)}` })
-    }
+    const printTask = options.printSale(payload)
+    if (options.isOnline) void options.syncPendingEvents()
+    await printTask
   }, [options])
 }

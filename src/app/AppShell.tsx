@@ -130,6 +130,7 @@ export function AppShell() {
     onAddFeedback: addFeedback.triggerAddFeedback,
     onError: setRestaurantError,
     onPaidFeedback: setRestaurantPaidFeedback,
+    printSale: cash.printSale,
     refreshCashSales: cash.refreshConfirmedSale,
     refreshProductSalesStats: quickSale.refreshProductStats,
     setAppliedDiscount: quickSale.setDiscount,

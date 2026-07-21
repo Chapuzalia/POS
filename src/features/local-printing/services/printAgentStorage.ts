@@ -5,6 +5,7 @@ const prefix = 'clubpos:v1:print-agent-config'
 
 export const defaultPrintAgentPreferences = {
   autoOpenCashDrawer: true,
+  alwaysPrintTicket: true,
   cut: true,
   copies: 1,
   footer: 'Gracias por tu visita',

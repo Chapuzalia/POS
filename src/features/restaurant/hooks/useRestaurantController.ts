@@ -7,10 +7,17 @@ import type {
   Product,
   ProductLineSelection,
   ProductVariant,
+  SaleCreatedPayload,
   TenantContext,
 } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
+import {
+  buildRestaurantPrintPayload,
+  getEqualSplitPrintLines,
+  getMovedRestaurantPrintLines,
+  getRestaurantPrintSubtotal,
+} from '../services/restaurantPrintPayload'
 import { applySessionLayout, saveSessionTableLayout } from '../../tables/layout-service'
 import {
   cancelEmptyRestaurantOrder,
@@ -58,7 +65,8 @@ type Options = {
   onAddFeedback: (input: { feedbackType: 'added' | 'updated'; productName: string; sourceElement?: HTMLElement | null }) => void
   onError: (message: string | null) => void
   onPaidFeedback: (method: PaymentMethod | null) => void
-  refreshCashSales: (saleId: string, missingTicketTitle: string) => Promise<void>
+  printSale: (payload: SaleCreatedPayload) => Promise<void>
+  refreshCashSales: (saleId: string, missingTicketTitle: string, shouldPrint?: boolean) => Promise<void>
   refreshProductSalesStats: () => Promise<void>
   setAppliedDiscount: (discount: AppliedDiscount | null) => void
   setBusy: (busy: boolean) => void
@@ -262,9 +270,9 @@ export function useRestaurantController(options: Options) {
     }
   }, [draft, options])
 
-  const refreshSales = useCallback(async (saleId: string, missingTicketTitle: string) => {
+  const refreshSales = useCallback(async (saleId: string, missingTicketTitle: string, shouldPrint = true) => {
     await Promise.all([
-      options.refreshCashSales(saleId, missingTicketTitle),
+      options.refreshCashSales(saleId, missingTicketTitle, shouldPrint),
       options.refreshProductSalesStats(),
     ])
   }, [options])
@@ -276,14 +284,30 @@ export function useRestaurantController(options: Options) {
     discount: AppliedDiscount | null,
     useDefaultDiscount: boolean,
   ): Promise<PayRestaurantEqualPartResult> => {
-    if (!options.context || !options.cashSession || !equalSplit) throw new Error('No hay una división activa.')
+    const current = draft.getCurrentOrder()
+    if (!options.context || !options.cashSession || !equalSplit || !current) throw new Error('No hay una división activa.')
     options.setBusy(true)
     options.onError(null)
     try {
       const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending, discount, useDefaultDiscount)
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
-        await refreshSales(result.saleId, 'Pago completado sin imprimir')
+        const printLines = getEqualSplitPrintLines(current.lines, equalSplit)
+        void options.printSale(buildRestaurantPrintPayload({
+          cashSession: options.cashSession,
+          context: options.context,
+          createdAt: nowIso(),
+          discount: useDefaultDiscount ? equalSplit.nextDefaultDiscount : discount,
+          lines: printLines,
+          paymentId: result.paymentId,
+          paymentMethod: method,
+          receivedCents,
+          saleId: result.saleId,
+          subtotalCents: getRestaurantPrintSubtotal(printLines),
+          ticketId: result.ticketId,
+          totalCents: result.paidAmountCents,
+        }))
+        await refreshSales(result.saleId, 'Pago completado sin imprimir', false)
         const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
         realtime.setMap(nextMap)
         if (result.completed) {
@@ -321,7 +345,22 @@ export function useRestaurantController(options: Options) {
       if (!saved) throw new Error('No se pudo guardar la comanda antes del cobro.')
       const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, receivedCents, allowPending, discount)
       if (!result.requiresConfirmation) {
-        await refreshSales(result.saleId, 'Cobro completado sin imprimir')
+        const printLines = getMovedRestaurantPrintLines(saved.lines, moves)
+        void options.printSale(buildRestaurantPrintPayload({
+          cashSession: options.cashSession,
+          context: options.context,
+          createdAt: nowIso(),
+          discount,
+          lines: printLines,
+          paymentId: result.paymentId,
+          paymentMethod: method,
+          receivedCents,
+          saleId: result.saleId,
+          subtotalCents: result.subtotalCents,
+          ticketId: result.ticketId,
+          totalCents: result.totalCents,
+        }))
+        await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
         const [nextOrder, nextMap] = await Promise.all([
           loadRestaurantOrder(options.context, saved.order.id),
           realtime.loadCurrentMap(options.context, options.cashSession.id),
@@ -434,7 +473,21 @@ export function useRestaurantController(options: Options) {
         setPendingPayment({ method, receivedCents, pendingUnits: result.pendingUnits })
         return
       }
-      await refreshSales(result.saleId, 'Cobro completado sin imprimir')
+      void options.printSale(buildRestaurantPrintPayload({
+        cashSession: options.cashSession,
+        context: options.context,
+        createdAt: nowIso(),
+        discount: options.appliedDiscount,
+        lines: saved.lines,
+        paymentId: result.paymentId,
+        paymentMethod: method,
+        receivedCents,
+        saleId: result.saleId,
+        subtotalCents: getRestaurantPrintSubtotal(saved.lines),
+        ticketId: result.ticketId,
+        totalCents: result.totalCents,
+      }))
+      await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
       const nextOrder = result.nextOrderId ? await loadRestaurantOrder(options.context, result.nextOrderId) : null
       const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
       realtime.setMap(nextMap)

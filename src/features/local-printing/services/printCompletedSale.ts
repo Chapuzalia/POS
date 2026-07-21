@@ -10,10 +10,11 @@ export async function printCompletedSale(input: {
   copyNumber?: number
 }) {
   const state = usePrintAgentStore.getState()
-  if (!state.selectedPrinter?.id) throw new Error('No hay ninguna impresora seleccionada.')
+  const printerId = state.selectedPrinterId || state.selectedPrinter?.id
+  if (!printerId) throw new Error('No hay ninguna impresora seleccionada.')
   const payload = mapSaleToPrintRequest({
     ...input,
-    printerId: state.selectedPrinter.id,
+    printerId,
     footer: state.preferences.footer,
     autoOpenCashDrawer: state.preferences.autoOpenCashDrawer,
     cut: state.preferences.cut,

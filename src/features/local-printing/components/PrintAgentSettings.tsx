@@ -43,6 +43,17 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
       <div className="mt-3 flex flex-wrap gap-2"><Button onClick={() => setCertificateHelpOpen(true)} size="sm"><ExternalLink className="h-4 w-4" />Ayuda certificado</Button><Button onClick={() => void copyDiagnostics()} size="sm"><Clipboard className="h-4 w-4" />Copiar diagnostico</Button></div>
     </section>
 
+    <section className={'rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4'}>
+      <h3 className={'font-black'}>Ticket automatico</h3>
+      <label className={'mt-3 flex min-h-12 items-center gap-3 rounded-[var(--radius)] border border-[var(--separator)] px-3'}>
+        <input checked={agent.preferences.alwaysPrintTicket} disabled={!canConfigure} onChange={(event) => agent.updatePreferences({ alwaysPrintTicket: event.target.checked })} type={'checkbox'} />
+        <span>
+          <strong className={'block'}>Imprimir ticket siempre</strong>
+          <small className={'text-[var(--muted)]'}>Si se desactiva, los cobros en efectivo solo abriran el cajon.</small>
+        </span>
+      </label>
+    </section>
+
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><Printer className="h-5 w-5" /><div><h3 className="font-black">Impresoras</h3><p className="text-sm text-[var(--muted)]">Descubrimiento gestionado por el agente local.</p></div></div><div className="flex gap-2"><Button disabled={busy} onClick={() => void run(agent.loadPrinters, 'Lista de impresoras actualizada.')} size="sm"><RefreshCw className={`h-4 w-4 ${agent.isLoadingPrinters ? 'animate-spin' : ''}`} />Actualizar</Button><Button disabled={busy || !canConfigure} onClick={() => void run(agent.discoverPrinters, 'Descubrimiento completado.')} size="sm" variant="primary"><Network className={`h-4 w-4 ${agent.isDiscovering ? 'animate-pulse' : ''}`} />Descubrir</Button></div></div>
       {agent.discoveryProgress ? <p className="my-3 font-mono text-xs text-[var(--muted)]">Progreso: {agent.discoveryProgress.scanned ?? '-'} / {agent.discoveryProgress.total ?? '-'} · {agent.discoveryProgress.found ?? agent.printers.length} encontradas</p> : null}
       <div className="mt-4"><PrinterList disabled={busy || !canConfigure} onSelect={(id) => void run(() => agent.selectPrinter(id), 'Impresora seleccionada.')} onTest={(id) => void run(() => agent.testPrinter(id), 'Ticket de prueba enviado.')} printers={agent.printers} selectedPrinterId={agent.selectedPrinterId} /></div>

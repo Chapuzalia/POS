@@ -10,6 +10,7 @@ export type PrintAgentScope = {
 
 export type PrintAgentPreferences = {
   autoOpenCashDrawer: boolean
+  alwaysPrintTicket: boolean
   cut: boolean
   copies: number
   footer: string

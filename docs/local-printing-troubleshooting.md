@@ -52,7 +52,7 @@ No uses `*` con credenciales ni desactives CORS globalmente.
 
 ## Venta completada sin ticket
 
-La venta permanece valida. Abre el historial, revisa `printStatus` y usa Reimprimir cuando el agente vuelva a estar disponible. Una venta offline no se imprime automaticamente al recuperar red.
+La venta permanece valida. Abre el historial, revisa `printStatus` y usa Reimprimir cuando el agente vuelva a estar disponible. La falta de Internet no impide imprimir si el agente local es accesible; si tambien fallo la red local, el ticket no se imprime automaticamente al recuperar conexion para evitar duplicados.
 
 ## Informe tecnico
 

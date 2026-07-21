@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { sileo } from 'sileo'
 import {
   clearSaleLedger,
@@ -49,10 +49,17 @@ type Options = {
 export function useCashSession(options: Options) {
   const [session, setSession] = useState<CashSession | null>(null)
   const [ledger, setLedger] = useState<SaleRecord[]>([])
-  const [tickets, setTickets] = useState<SessionTicketRecord[]>([])
+  const [tickets, setTicketsState] = useState<SessionTicketRecord[]>([])
+  const ticketsRef = useRef<SessionTicketRecord[]>([])
   const [closeModalOpen, setCloseModalOpen] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
   usePrintAgentScope(options.context)
+
+  const setTickets = useCallback((value: SetStateAction<SessionTicketRecord[]>) => {
+    const next = typeof value === 'function' ? value(ticketsRef.current) : value
+    ticketsRef.current = next
+    setTicketsState(next)
+  }, [])
 
   const persistSession = useCallback((nextSession: CashSession | null) => {
     setSession(nextSession)
@@ -67,23 +74,21 @@ export function useCashSession(options: Options) {
   const persistTickets = useCallback((nextTickets: SessionTicketRecord[]) => {
     setTickets(nextTickets)
     if (options.context && session) saveSessionTickets(options.context, session.id, nextTickets)
-  }, [options.context, session])
+  }, [options.context, session, setTickets])
 
   const updateTicketPrintState = useCallback((
     saleId: string,
     patch: Partial<Pick<SessionTicketRecord,
       'printStatus' | 'printJobId' | 'printRequestId' | 'printedAt' | 'printErrorCode' | 'printAttempts'>>,
   ) => {
-    setTickets((current) => {
-      const next = current.map((ticket) => ticket.id === saleId ? { ...ticket, ...patch } : ticket)
-      if (options.context && session) saveSessionTickets(options.context, session.id, next)
-      return next
-    })
-  }, [options.context, session])
+    const next = ticketsRef.current.map((ticket) => ticket.id === saleId ? { ...ticket, ...patch } : ticket)
+    setTickets(next)
+    if (options.context && session) saveSessionTickets(options.context, session.id, next)
+  }, [options.context, session, setTickets])
 
   const mergeRemotePrintStates = useCallback(
-    (remoteTickets: SessionTicketRecord[]) => mergeRemoteTicketPrintStates(tickets, remoteTickets),
-    [tickets],
+    (remoteTickets: SessionTicketRecord[]) => mergeRemoteTicketPrintStates(ticketsRef.current, remoteTickets),
+    [],
   )
 
   const printSale = useCallback(async (
@@ -91,14 +96,27 @@ export function useCashSession(options: Options) {
     printOptions: { isReprint?: boolean; copyNumber?: number } = {},
   ) => {
     if (!options.context) return
+    if (!printOptions.isReprint && !ticketsRef.current.some((ticket) => ticket.id === payload.sale.id)) {
+      persistTickets([{
+        id: payload.sale.id,
+        cashSessionId: payload.sale.cashSessionId,
+        paymentMethod: payload.sale.paymentMethod,
+        totalCents: payload.sale.totalCents,
+        createdAt: payload.sale.createdAt,
+        status: 'active',
+        payload,
+        printStatus: 'not_requested',
+        printAttempts: 0,
+      }, ...ticketsRef.current])
+    }
     await printTicket({
       context: options.context,
       payload,
-      tickets,
+      tickets: ticketsRef.current,
       updateTicketPrintState,
       options: printOptions,
     })
-  }, [options.context, tickets, updateTicketPrintState])
+  }, [options.context, persistTickets, updateTicketPrintState])
 
   const handleClosedRemotely = useCallback(() => {
     if (options.context) {
@@ -113,7 +131,7 @@ export function useCashSession(options: Options) {
     setCloseModalOpen(false)
     setHistoryOpen(false)
     options.onError('La caja con la que estabas trabajando se ha cerrado.')
-  }, [options, session])
+  }, [options, session, setTickets])
 
   const handleAutomaticSession = useCallback((nextSession: CashSession) => {
     if (options.context) saveCachedCashSession(options.context, nextSession)
@@ -150,7 +168,7 @@ export function useCashSession(options: Options) {
     saveSaleLedger(options.context, remoteLedger)
     setTickets(getSessionTickets(options.context, nextSession.id))
     options.onError(null)
-  }, [options])
+  }, [options, setTickets])
 
   useActiveCashSession({
     context: options.context,
@@ -159,7 +177,7 @@ export function useCashSession(options: Options) {
     onError: (message) => options.onError(message),
   })
 
-  const refreshConfirmedSale = useCallback(async (saleId: string, missingTicketTitle: string) => {
+  const refreshConfirmedSale = useCallback(async (saleId: string, missingTicketTitle: string, shouldPrint = true) => {
     if (!options.context || !session) return
     const [nextLedger, remoteTickets] = await Promise.all([
       loadSalesLedgerFromSupabase(options.context, session.id),
@@ -168,8 +186,8 @@ export function useCashSession(options: Options) {
     persistLedger(nextLedger)
     persistTickets(mergeRemotePrintStates(remoteTickets))
     const confirmedTicket = remoteTickets.find((ticket) => ticket.id === saleId)
-    if (confirmedTicket) void printSale(confirmedTicket.payload)
-    else sileo.warning({ title: missingTicketTitle, description: 'No se ha podido recuperar el ticket confirmado.' })
+    if (confirmedTicket && shouldPrint) void printSale(confirmedTicket.payload)
+    else if (!confirmedTicket) sileo.warning({ title: missingTicketTitle, description: 'No se ha podido recuperar el ticket confirmado.' })
   }, [mergeRemotePrintStates, options.context, persistLedger, persistTickets, printSale, session])
   const ticketActions = useCashTicketActions({
     context: options.context,
@@ -205,7 +223,7 @@ export function useCashSession(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [cashOptions, options, persistLedger, persistSession])
+  }, [cashOptions, options, persistLedger, persistSession, setTickets])
 
   const join = useCallback(async (nextSession: CashSession) => {
     if (!options.context || !options.isOnline) return
@@ -222,7 +240,7 @@ export function useCashSession(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [options, persistLedger, persistSession])
+  }, [options, persistLedger, persistSession, setTickets])
 
   const openDefault = useCallback((openingFloatCents: number) => {
     const registerId = options.context?.defaultCashRegisterId
@@ -250,7 +268,7 @@ export function useCashSession(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [cashOptions, options, persistSession])
+  }, [cashOptions, options, persistSession, setTickets])
 
   const reset = useCallback(() => {
     const closed = getClosedCashState()
@@ -259,7 +277,7 @@ export function useCashSession(options: Options) {
     setTickets([...closed.tickets])
     setCloseModalOpen(false)
     setHistoryOpen(false)
-  }, [])
+  }, [setTickets])
 
   const hydrate = useCallback((
     nextSession: CashSession | null,
@@ -269,7 +287,7 @@ export function useCashSession(options: Options) {
     setSession(nextSession)
     setLedger(nextLedger)
     setTickets(nextTickets)
-  }, [])
+  }, [setTickets])
 
   const clearRejectedSession = useCallback((closedSessionId: string) => {
     if (!options.context) return
@@ -281,7 +299,7 @@ export function useCashSession(options: Options) {
     setTickets([])
     setCloseModalOpen(false)
     setHistoryOpen(false)
-  }, [options.context])
+  }, [options.context, setTickets])
 
   return {
     clearRejectedSession,

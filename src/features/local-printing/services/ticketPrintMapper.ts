@@ -41,6 +41,7 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
   const isReprint = options.isReprint === true
   const copyNumber = options.copyNumber || 0
   const payments = sale.payment ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }] : []
+  const hasTaxSnapshot = sale.lines.some((line) => Boolean(line.fiscalSnapshot))
   const taxCents = sale.lines.reduce((total, line) => total + (line.fiscalSnapshot?.taxAmountCents || 0), 0)
   return {
     requestId: isReprint ? `print:${sale.sale.id}:copy:${copyNumber}` : `print:${sale.sale.id}:original`,
@@ -53,7 +54,7 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
       items: sale.lines.map(mapSaleLineToPrintItem),
       subtotalCents: sale.ticket.subtotalCents,
       discountCents: sale.ticket.discountAmountCents,
-      taxCents,
+      ...(hasTaxSnapshot ? { taxCents } : {}),
       totalCents: sale.sale.totalCents,
       ...(sale.payment ? {
         paymentMethod: sale.payment.method,

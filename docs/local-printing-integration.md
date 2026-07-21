@@ -31,9 +31,9 @@ MESS, LOFT y terminales distintas conservan configuraciones independientes. Para
 
 ## Flujo de impresion
 
-1. El TPV valida y registra el cobro.
-2. En venta rapida sincroniza la venta y confirma que el ticket existe en Supabase.
-3. En mesas espera el resultado exitoso del RPC de cierre.
+1. El TPV valida el cobro y guarda el evento local.
+2. En venta rapida envia inmediatamente la impresion y sincroniza con Supabase en segundo plano, sin usar la conectividad a Internet como condicion de impresion local.
+3. En mesas espera el resultado exitoso de la RPC porque esta genera los IDs definitivos, construye el ticket con el estado local de la comanda y lo imprime antes de refrescar caja y estadisticas.
 4. El mapper crea un contrato minimo, con importes enteros en centimos y sin objetos internos completos.
 5. Zod valida el payload.
 6. Se envia `POST /api/v1/print` con un `requestId` estable.
@@ -55,6 +55,8 @@ Las reimpresiones muestran `COPIA`, no abren el cajon y requieren una decision e
 
 `shouldOpenCashDrawer` abre automaticamente solo con preferencia activa y algun pago efectivo positivo. No abre con tarjeta, en copias ni reimpresiones. La apertura manual requiere la capacidad existente de gestion de caja, confirmacion y bloqueo mientras la peticion esta activa.
 
+La preferencia `alwaysPrintTicket` esta activa por defecto para conservar el comportamiento anterior. Al desactivarla, una venta con pago en efectivo solo envia la apertura del cajon si la apertura automatica tambien esta habilitada; una venta sin efectivo no envia ninguna orden al agente. Las reimpresiones manuales siguen imprimiendo siempre.
+
 ## Red, CORS y TLS
 
 El agente debe servir un certificado valido para el hostname o IP usados y permitir el origen exacto del despliegue Vercel. Debe aceptar `Authorization` y `Content-Type` en el preflight CORS. Nunca se desactiva TLS, se pone el token en la URL ni se envian HTML o comandos ESC/POS.
@@ -63,7 +65,7 @@ Las lecturas (`health`, impresoras, configuracion y trabajos) admiten reintento 
 
 ## Offline
 
-La cola offline existente sigue siendo la autoridad de ventas. Una venta offline se marca como no impresa y el usuario recibe un aviso. Al recuperar conectividad no se imprimen tickets antiguos automaticamente ni se abre el cajon; deben revisarse desde el historial.
+La cola offline existente sigue siendo la autoridad de ventas. Una venta rapida nueva intenta imprimir y abrir el cajon en el momento del cobro aunque Supabase no sea accesible, siempre que el agente siga disponible en la red local. Al recuperar conectividad se sincroniza la venta, pero no se vuelven a imprimir tickets antiguos automaticamente ni se abre otra vez el cajon. Si el agente local tampoco estaba disponible, la reimpresion se decide manualmente desde el historial.
 
 ## Permisos y auditoria
 

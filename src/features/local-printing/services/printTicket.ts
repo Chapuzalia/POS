@@ -4,6 +4,7 @@ import { getPrintAgentErrorMessage } from '../api/PrintAgentError'
 import { nextPrintCopyNumber } from './printAgentStorage'
 import { printCompletedSale } from './printCompletedSale'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
+import { getAutomaticSaleHardwareAction } from './cashDrawerRules'
 import { getPrintFailurePatch } from './printFailure'
 
 type PrintTicketOptions = {
@@ -18,6 +19,32 @@ type PrintTicketOptions = {
 export async function printTicket({ context, payload, tickets, updateTicketPrintState, options = {} }: PrintTicketOptions) {
   const printState = usePrintAgentStore.getState()
   const requestId = options.isReprint ? `print:${payload.sale.id}:copy:${options.copyNumber || 1}` : `print:${payload.sale.id}:original`
+  const payments = payload.payment ? [{ method: payload.payment.method, amountCents: payload.payment.amountCents }] : []
+  const hardwareAction = getAutomaticSaleHardwareAction({
+    payments,
+    isReprint: options.isReprint,
+    settings: printState.preferences,
+  })
+  if (hardwareAction !== 'print') {
+    updateTicketPrintState(payload.sale.id, {
+      printStatus: 'not_requested', printRequestId: null, printErrorCode: null,
+    })
+    if (hardwareAction === 'none') return
+    if (!printState.token || !printState.selectedPrinterId) {
+      sileo.warning({ title: 'Venta completada, pero no se ha podido abrir el cajon', description: 'Configura el servidor y la impresora desde Ajustes > Hardware > Impresion.' })
+      return
+    }
+    try {
+      await printState.openCashDrawer({
+        requestId: `drawer:${payload.sale.id}:payment`,
+        printerId: printState.selectedPrinterId,
+      })
+      sileo.success({ title: 'Cajon abierto' })
+    } catch (error) {
+      sileo.warning({ title: 'La venta se ha completado, pero el cajon no se ha podido abrir', description: getPrintAgentErrorMessage(error) })
+    }
+    return
+  }
   if (!printState.token || !printState.selectedPrinterId) {
     updateTicketPrintState(payload.sale.id, { printStatus: 'not_requested', printRequestId: requestId })
     sileo.warning({ title: 'Venta completada sin imprimir', description: 'Configura el servidor y la impresora desde Ajustes > Hardware > Impresion.' })
