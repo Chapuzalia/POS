@@ -23,9 +23,9 @@ test('un fallo al crear el usuario revierte el dispositivo nuevo', async () => {
 })
 
 test('el crm ya no contiene el formulario manual de usuarios', async () => {
-  const crmPage = await readFile(new URL('../src/components/crm/CrmPage.tsx', import.meta.url), 'utf8')
+  const accessPage = await readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8')
 
-  assert.doesNotMatch(crmPage, /Nuevo usuario TPV/)
-  assert.doesNotMatch(crmPage, /createCrmPosUser/)
-  assert.match(crmPage, /Credenciales del nuevo dispositivo/)
+  assert.doesNotMatch(accessPage, /Nuevo usuario TPV/)
+  assert.doesNotMatch(accessPage, /createCrmPosUser/)
+  assert.match(accessPage, /Credenciales del nuevo dispositivo/)
 })

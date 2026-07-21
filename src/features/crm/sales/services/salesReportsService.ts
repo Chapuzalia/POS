@@ -1,0 +1,257 @@
+import { normalizeText } from '../../../../lib/format'
+import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { type CrmSalesReportAggregate, type CrmSalesReports, type HistoricalPaymentMethod, type TenantContext } from '../../../../types'
+
+export type SalesReportLineRow = {
+  id: string
+  line_total_cents: number
+  tax_amount_cents: number | null
+  tax_rate: number | null
+  taxable_base_cents: number | null
+  modifiers: Array<{
+    name?: string
+    priceCents?: number
+    price_cents?: number
+  }> | null
+  product_id: string | null
+  product_name: string
+  quantity: number
+  allocated_quantity: number | null
+  unit_price_cents: number
+  variant_name: string
+}
+
+export type SalesReportTicketRow = {
+  id: string
+  local_created_at: string
+  sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
+  status: 'paid' | 'void'
+  subtotal_cents: number
+  discount_id: string | null
+  discount_name: string | null
+  discount_type: 'percentage' | 'fixed' | 'manual' | null
+  discount_value_type: 'percentage' | 'fixed' | null
+  discount_value: number | string | null
+  discount_rounding_increment_cents: 5 | 10 | 50 | 100 | null
+  discount_amount_cents: number | null
+  ticket_lines: SalesReportLineRow[] | null
+  total_cents: number
+}
+
+export type SalesReportProductRow = {
+  category_id: string
+  id: string
+}
+
+export type SalesReportCategoryRow = {
+  id: string
+  name: string
+}
+
+export type MutableSalesReportAggregate = CrmSalesReportAggregate & {
+  ticketIds: Set<string>
+}
+
+export type NameRow = {
+  id: string
+  name: string
+}
+
+export function addSalesReportLine(
+  report: Map<string, MutableSalesReportAggregate>,
+  id: string,
+  label: string,
+  ticketId: string,
+  line: SalesReportLineRow,
+) {
+  const current = report.get(id) ?? {
+    id,
+    label,
+    quantity: 0,
+    ticketCount: 0,
+    ticketIds: new Set<string>(),
+    totalCents: 0,
+  }
+
+  current.quantity += Number(line.allocated_quantity ?? line.quantity)
+  current.totalCents += line.line_total_cents
+  current.ticketIds.add(ticketId)
+  current.ticketCount = current.ticketIds.size
+  report.set(id, current)
+}
+
+export function finalizeSalesReport(report: Map<string, MutableSalesReportAggregate>): CrmSalesReportAggregate[] {
+  return [...report.values()]
+    .map((item) => ({
+      id: item.id,
+      label: item.label,
+      quantity: item.quantity,
+      ticketCount: item.ticketCount,
+      totalCents: item.totalCents,
+    }))
+    .sort((a, b) => b.totalCents - a.totalCents || b.quantity - a.quantity || a.label.localeCompare(b.label, 'es'))
+}
+
+export async function loadCrmSalesReports(context: TenantContext, venueId?: string): Promise<CrmSalesReports> {
+  const client = requireSupabase()
+  let productsQuery = client
+    .from('products')
+    .select('id, category_id')
+    .eq('tenant_id', context.tenantId)
+
+  if (venueId) {
+    productsQuery = productsQuery.eq('venue_id', venueId)
+  }
+
+  const ticketRowsPromise = (async () => {
+    const rows: SalesReportTicketRow[] = []
+    const batchSize = 1000
+    let offset = 0
+
+    while (true) {
+      let ticketBatchQuery = client
+        .from('tickets')
+        .select(`
+          id,
+          status,
+          subtotal_cents,
+          discount_id,
+          discount_name,
+          discount_type,
+          discount_value_type,
+          discount_value,
+          discount_rounding_increment_cents,
+          discount_amount_cents,
+          total_cents,
+          local_created_at,
+          ticket_lines (
+            id,
+            product_id,
+            product_name,
+            variant_name,
+            quantity,
+            allocated_quantity,
+            unit_price_cents,
+            modifiers,
+            line_total_cents,
+            tax_rate,
+            taxable_base_cents,
+            tax_amount_cents
+          ),
+          sales (
+            payment_method
+          )
+        `)
+        .eq('tenant_id', context.tenantId)
+        .order('local_created_at', { ascending: false })
+        .range(offset, offset + batchSize - 1)
+
+      if (venueId) {
+        ticketBatchQuery = ticketBatchQuery.eq('venue_id', venueId)
+      }
+
+      const { data, error } = await ticketBatchQuery
+      if (error) throw error
+
+      const batch = (data ?? []) as SalesReportTicketRow[]
+      rows.push(...batch)
+
+      if (batch.length < batchSize) break
+      offset += batchSize
+    }
+
+    return rows
+  })()
+
+  const [
+    ticketRows,
+    { data: productRows, error: productsError },
+    { data: categoryRows, error: categoriesError },
+  ] = await Promise.all([
+    ticketRowsPromise,
+    productsQuery,
+    client.from('categories').select('id, name').eq('tenant_id', context.tenantId),
+  ])
+
+  if (productsError) throw productsError
+  if (categoriesError) throw categoriesError
+
+  const tickets = ticketRows
+  const categoryIdByProductId = new Map(
+    ((productRows ?? []) as SalesReportProductRow[]).map((product) => [product.id, product.category_id]),
+  )
+  const categoryNameById = new Map(
+    ((categoryRows ?? []) as SalesReportCategoryRow[]).map((category) => [category.id, category.name]),
+  )
+  const byProduct = new Map<string, MutableSalesReportAggregate>()
+  const byCategory = new Map<string, MutableSalesReportAggregate>()
+  const byFormat = new Map<string, MutableSalesReportAggregate>()
+
+  tickets.forEach((ticket) => {
+    if (ticket.status !== 'paid') return
+
+    ;(ticket.ticket_lines ?? []).forEach((line) => {
+      const productId = line.product_id ?? `deleted:${normalizeText(line.product_name)}`
+      const categoryId = line.product_id ? categoryIdByProductId.get(line.product_id) : undefined
+      const categoryName = categoryId ? categoryNameById.get(categoryId) : undefined
+      const formatName = line.variant_name.trim() || 'Sin formato'
+
+      addSalesReportLine(byProduct, productId, line.product_name, ticket.id, line)
+      addSalesReportLine(byCategory, categoryId ?? 'uncategorized', categoryName ?? 'Sin categoría', ticket.id, line)
+      addSalesReportLine(byFormat, normalizeText(formatName) || 'sin-formato', formatName, ticket.id, line)
+    })
+  })
+
+  return {
+    byCategory: finalizeSalesReport(byCategory),
+    byFormat: finalizeSalesReport(byFormat),
+    byProduct: finalizeSalesReport(byProduct),
+    tickets: tickets.map((ticket) => ({
+      id: ticket.id,
+      createdAt: ticket.local_created_at,
+      lineCount: ticket.ticket_lines?.length ?? 0,
+      lines: (ticket.ticket_lines ?? []).map((line) => {
+        const categoryId = line.product_id ? categoryIdByProductId.get(line.product_id) ?? null : null
+
+        return {
+          categoryId,
+          categoryName: categoryId ? categoryNameById.get(categoryId) ?? 'Sin categoría' : 'Sin categoría',
+          id: line.id,
+          lineTotalCents: line.line_total_cents,
+          modifiers: (line.modifiers ?? []).map((modifier) => ({
+            name: modifier.name?.trim() || 'Modificador',
+            priceCents: modifier.priceCents ?? modifier.price_cents ?? 0,
+          })),
+          productId: line.product_id,
+          productName: line.product_name,
+          quantity: Number(line.allocated_quantity ?? line.quantity),
+          unitPriceCents: line.unit_price_cents,
+          variantName: line.variant_name,
+          fiscalSnapshot: line.tax_rate === null
+            || line.taxable_base_cents === null
+            || line.tax_amount_cents === null
+            ? null
+            : {
+                taxRate: Number(line.tax_rate),
+                taxableBaseCents: line.taxable_base_cents,
+                taxAmountCents: line.tax_amount_cents,
+                grossTotalCents: line.line_total_cents,
+              },
+        }
+      }),
+      discountAmountCents: ticket.discount_amount_cents ?? 0,
+      discountId: ticket.discount_id,
+      discountName: ticket.discount_name,
+      discountType: ticket.discount_type,
+      discountValue: ticket.discount_value === null ? null : ticket.discount_value_type === 'fixed'
+        ? Math.round(Number(ticket.discount_value) * 100) : Number(ticket.discount_value),
+      discountValueType: ticket.discount_value_type,
+      discountRoundingIncrementCents: ticket.discount_rounding_increment_cents,
+      paymentMethod: ticket.sales?.[0]?.payment_method ?? null,
+      quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + Number(line.allocated_quantity ?? line.quantity), 0),
+      status: ticket.status,
+      subtotalCents: ticket.subtotal_cents,
+      totalCents: ticket.total_cents,
+    })),
+  }
+}

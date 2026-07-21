@@ -52,7 +52,7 @@ test('mapa, detalle y realtime trabajan por grupo de ocupacion', () => {
 
 test('por items selecciona cantidades y cobra directamente sin crear subcomandas', () => {
   assert.match(modal, /setLineQuantity/)
-  assert.match(modal, /Seleccionar todo/)
+  assert.match(modal, /Seleccionar visibles/)
   assert.match(modal, /Buscar productos de la comanda/)
   assert.match(modal, /Marca las unidades que quieras cobrar/)
   assert.match(modal, /Cobrar ítems seleccionados/)
