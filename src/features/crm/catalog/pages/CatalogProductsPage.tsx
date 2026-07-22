@@ -5,6 +5,7 @@ import { formatMoney } from '../../../../lib/format.ts'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination.tsx'
 import { CrmSelect } from '../../shared/components/CrmSelect.tsx'
 import { EmptyList } from '../../shared/components/EmptyList.tsx'
+import { CatalogCheckbox, CatalogPanel, CatalogPanelHeader, CatalogStatus } from '../components/CatalogUi.tsx'
 import {
   filterCatalogProducts,
   getCatalogProductSummaries,
@@ -82,18 +83,17 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
   }
 
   return (
-    <div className="crm-entity-layout crm-entity-layout-full !grid !grid-cols-1 !items-start !gap-4">
-      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-list-toolbar !grid !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]">
-          <div className="!flex !flex-col !justify-between !gap-3 md:!flex-row md:!items-center">
-            <div className="crm-list-title">
-              <h2>Productos</h2>
-              <p>{filtered.length} de {catalog.products.length} productos · una única carga para todo el local</p>
-            </div>
-            <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-2" disabled={disabled} onClick={() => setEditorProductId('create')} type="button">
+    <div className="crm-catalog-page-grid">
+      <CatalogPanel>
+        <CatalogPanelHeader
+          actions={
+            <button className="crm-primary-button" disabled={disabled} onClick={() => setEditorProductId('create')} type="button">
               <Plus className="!size-4" /> Añadir producto
             </button>
-          </div>
+          }
+          description={`${filtered.length} de ${catalog.products.length} productos · una única carga para todo el local`}
+          title="Productos"
+        >
           <div className="!grid !gap-2 sm:!grid-cols-2 lg:!grid-cols-[minmax(220px,1fr)_repeat(5,minmax(130px,auto))]">
             <label className="crm-search !flex !h-11 !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3">
               <Search className="!size-4 !text-[var(--crm-text-muted)]" />
@@ -105,23 +105,22 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
             <CrmSelect ariaLabel="Filtrar por pestaña" onChange={(tabId) => updateFilters({ tabId })} options={[{ label: 'Todas las pestañas', value: '' }, ...catalog.tabs.map((tab) => ({ label: tab.label, value: tab.id }))]} value={filters.tabId} />
             <CrmSelect ariaLabel="Ordenar productos" onChange={(value) => setSort(value as typeof sort)} options={[{ label: 'Orden del TPV', value: 'order' }, { label: 'Nombre', value: 'name' }, { label: 'Precio', value: 'price' }]} value={sort} />
           </div>
-          <label className="!flex !w-fit !items-center !gap-2 !text-sm !font-medium !text-[var(--crm-text-secondary)]">
-            <input checked={filters.showInternal} onChange={(event) => updateFilters({ showInternal: event.target.checked })} type="checkbox" />
+          <CatalogCheckbox checked={filters.showInternal} onChange={(showInternal) => updateFilters({ showInternal })}>
             Mostrar productos internos sin apariciones activas
-          </label>
-        </div>
+          </CatalogCheckbox>
+        </CatalogPanelHeader>
 
-        <div className="crm-data-table !grid !overflow-auto">
-          <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[1120px] !grid-cols-[2fr_.8fr_.8fr_.75fr_.8fr_1.4fr_1fr] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[.045em] !text-[var(--crm-text-muted)]">
+        <div className="crm-data-table crm-catalog-products-table !grid !overflow-auto">
+          <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[.045em] !text-[var(--crm-text-muted)]">
             <span>Producto</span><span>Tipo / estado</span><span>IVA</span><span>Variantes</span><span>Precio</span><span>Ubicaciones</span><span>Acciones</span>
           </div>
           {visibleProducts.map((summary) => (
-            <div className="crm-data-row !grid !min-h-[78px] !min-w-[1120px] !grid-cols-[2fr_.8fr_.8fr_.75fr_.8fr_1.4fr_1fr] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !text-[13px]" key={summary.product.id}>
+            <div className="crm-data-row !grid !min-h-[78px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !text-[13px]" key={summary.product.id}>
               <div className="crm-product-cell">
                 {summary.product.image?.publicUrl ? <img alt="" className="crm-product-thumb" src={summary.product.image.publicUrl} /> : <div className="crm-product-thumb crm-product-thumb-empty"><Boxes className="!size-4" /></div>}
                 <div className="crm-cell-main"><strong>{summary.product.name}</strong><span>{summary.product.description || 'Sin descripción'}{summary.internal ? ' · Interno' : ''}</span></div>
               </div>
-              <span>{summary.product.type === 'menu' ? 'Menú' : 'Estándar'}<br /><small>{summary.product.active ? 'Activo' : 'Inactivo'}</small></span>
+              <div className="!grid !gap-1.5"><span>{summary.product.type === 'menu' ? 'Menú' : 'Estándar'}</span><CatalogStatus active={summary.product.active} /></div>
               <span>{summary.product.vatRate === null ? 'Heredado' : `${summary.product.vatRate} %`}</span>
               <strong>{summary.variants.length}</strong>
               <strong>{priceLabel(summary)}</strong>
@@ -138,7 +137,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
           {!filtered.length ? <EmptyList message="No hay productos que coincidan con los filtros." /> : null}
         </div>
         <CrmPagination currentPage={visiblePage} onPageChange={setPage} totalResults={filtered.length} />
-      </section>
+      </CatalogPanel>
 
       {editorProductId ? (
         <CatalogProductEditor

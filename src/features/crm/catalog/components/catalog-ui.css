@@ -1,0 +1,169 @@
+.crm-shell .crm-panel {
+  border: 0;
+  border-radius: var(--crm-radius-lg);
+  background: var(--crm-surface);
+  color: var(--crm-text);
+  box-shadow: var(--crm-shadow-card);
+}
+
+.crm-shell .crm-primary-button,
+.crm-shell .crm-secondary-button,
+.crm-shell .crm-danger-button {
+  width: auto;
+  min-height: 40px;
+  height: auto;
+  border: 0;
+  border-radius: var(--crm-radius-sm);
+  padding: 0 14px;
+  font-size: 13px;
+  font-weight: 650;
+  line-height: 1;
+  transition: background-color 150ms ease, color 150ms ease, box-shadow 150ms ease, transform 150ms ease;
+}
+
+.crm-shell .crm-primary-button { background: var(--crm-blue); color: #fff; }
+.crm-shell .crm-secondary-button { background: var(--crm-input-bg); color: var(--crm-text-secondary); }
+.crm-shell .crm-danger-button { background: var(--crm-red-soft); color: var(--crm-red); }
+
+.crm-shell .crm-action-button {
+  width: 36px;
+  min-width: 36px;
+  height: 36px;
+  min-height: 36px;
+  border: 0;
+  border-radius: 9px;
+  background: var(--crm-surface-soft);
+  padding: 0;
+  color: var(--crm-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+  transition: background-color 150ms ease, color 150ms ease, transform 150ms ease;
+}
+
+.crm-shell .crm-action-button.crm-danger-button { background: var(--crm-red-soft); color: var(--crm-red); }
+
+.crm-shell .crm-input {
+  width: 100%;
+  min-height: 44px;
+  height: 44px;
+  border: 1px solid transparent;
+  border-radius: var(--crm-radius-sm);
+  background: var(--crm-input-bg);
+  padding: 0 14px;
+  color: var(--crm-text);
+  box-shadow: none;
+  font-size: 13px;
+  font-weight: 500;
+  line-height: 1.4;
+  transition: border-color 150ms ease, box-shadow 150ms ease, background-color 150ms ease;
+}
+
+.crm-shell textarea.crm-input { height: auto; min-height: 88px; padding-block: 11px; resize: vertical; }
+.crm-shell .crm-input::placeholder { color: var(--crm-text-muted); opacity: 1; }
+
+.crm-catalog-panel { min-width: 0; overflow: hidden; }
+.crm-catalog-panel-header {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 16px;
+  border-bottom: 1px solid var(--crm-border-subtle);
+  padding: 20px 22px;
+}
+
+.crm-catalog-panel-heading { min-width: 0; }
+.crm-catalog-panel-heading h2,
+.crm-catalog-panel-heading p,
+.crm-catalog-section-header h3,
+.crm-catalog-section-header p { margin: 0; }
+.crm-catalog-panel-heading h2 { color: var(--crm-text); font-size: 17px; font-weight: 700; letter-spacing: -0.02em; }
+.crm-catalog-panel-heading p,
+.crm-catalog-section-header p { margin-top: 4px; color: var(--crm-text-muted); font-size: 12px; font-weight: 500; line-height: 1.45; }
+
+.crm-catalog-header-actions {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.crm-catalog-header-content { display: grid; grid-column: 1 / -1; gap: 10px; min-width: 0; }
+.crm-catalog-section-header { display: flex; min-width: 0; align-items: flex-start; justify-content: space-between; gap: 16px; }
+.crm-catalog-section-header h3 { color: var(--crm-text); font-size: 15px; font-weight: 700; letter-spacing: -0.012em; }
+
+.crm-catalog-checkbox { display: inline-flex; width: fit-content; min-height: 36px; align-items: center; gap: 9px; color: var(--crm-text-secondary); font-size: 13px; font-weight: 550; cursor: pointer; }
+.crm-catalog-checkbox input { width: 16px; height: 16px; margin: 0; accent-color: var(--crm-blue); }
+
+.crm-status-pill { display: inline-flex; width: fit-content; min-height: 24px; align-items: center; border-radius: var(--crm-radius-pill); padding: 0 9px; font-size: 11px; font-weight: 650; white-space: nowrap; }
+.crm-status-pill-active { background: var(--crm-green-soft); color: var(--crm-green); }
+.crm-status-pill-inactive { background: var(--crm-input-bg); color: var(--crm-text-muted); }
+
+.crm-catalog-page-grid { display: grid; min-width: 0; align-items: start; gap: 16px; }
+.crm-catalog-page-grid-split { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.crm-catalog-master-detail { display: grid; min-width: 0; align-items: start; gap: 16px; grid-template-columns: minmax(280px, .72fr) minmax(0, 1.28fr); }
+.crm-catalog-list { display: grid; }
+.crm-catalog-panel-body { display: grid; gap: 20px; padding: 20px 22px; }
+.crm-catalog-form-card { display: grid; gap: 12px; border-radius: var(--crm-radius-md); background: var(--crm-surface-soft); padding: 16px; }
+.crm-catalog-form-grid { display: grid; min-width: 0; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+
+.crm-catalog-list-row {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 14px;
+  border-bottom: 1px solid var(--crm-border-subtle);
+  padding: 14px 18px;
+  color: var(--crm-text-secondary);
+  font-size: 13px;
+  transition: background-color 150ms ease;
+}
+
+.crm-catalog-list-row:last-child { border-bottom: 0; }
+.crm-catalog-list-row:hover { background: var(--crm-surface-hover); }
+.crm-catalog-list-row-active,
+.crm-catalog-list-row-active:hover { background: var(--crm-blue-soft); }
+.crm-catalog-list-row-main { display: grid; min-width: 0; gap: 4px; }
+.crm-catalog-list-row-main strong { overflow: hidden; color: var(--crm-text); font-size: 13px; font-weight: 650; text-overflow: ellipsis; white-space: nowrap; }
+.crm-catalog-list-row-main small { overflow: hidden; color: var(--crm-text-muted); font-size: 11px; font-weight: 500; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+
+.crm-catalog-item-card {
+  display: grid;
+  min-width: 0;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-radius: var(--crm-radius-md);
+  background: var(--crm-surface-soft);
+  padding: 13px 14px;
+  color: var(--crm-text-secondary);
+  font-size: 13px;
+}
+
+.crm-catalog-item-card strong { color: var(--crm-text); font-weight: 650; }
+
+.crm-catalog-products-table .crm-data-head,
+.crm-catalog-products-table .crm-data-row {
+  min-width: 900px !important;
+  grid-template-columns: minmax(180px, 1.45fr) 105px 64px 68px 88px minmax(120px, .9fr) 208px !important;
+}
+
+@media (max-width: 1100px) {
+  .crm-catalog-page-grid-split,
+  .crm-catalog-master-detail { grid-template-columns: minmax(0, 1fr); }
+}
+
+@media (max-width: 640px) {
+  .crm-catalog-panel-header { grid-template-columns: minmax(0, 1fr); padding: 18px; }
+  .crm-catalog-header-actions { justify-content: flex-start; }
+  .crm-catalog-header-actions > button,
+  .crm-catalog-header-actions > label { flex: 1 1 auto; }
+  .crm-catalog-panel-body { padding: 18px; }
+  .crm-catalog-form-grid,
+  .crm-catalog-item-card,
+  .crm-catalog-list-row { grid-template-columns: minmax(0, 1fr); }
+  .crm-catalog-item-card .crm-action-group,
+  .crm-catalog-list-row .crm-action-group { justify-content: flex-start; }
+}
