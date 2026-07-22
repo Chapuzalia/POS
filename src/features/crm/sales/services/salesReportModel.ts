@@ -1,5 +1,6 @@
 import { allocateNetTotalToLines } from '../../../../lib/discounts.ts'
 import { normalizeText } from '../../../../lib/format.ts'
+import { calculateTaxFromGross } from '../../../../lib/tax.ts'
 import type { CrmSalesReportAggregate, CrmSalesReports, HistoricalPaymentMethod } from '../../../../types'
 
 export const crmReportDateTimeFormatter = new Intl.DateTimeFormat('es-ES', {
@@ -38,6 +39,48 @@ export function salesReportLineMatches(line: SalesReportLine, productQuery: stri
 export function allocateTicketNetLines(ticket: CrmSalesReports['tickets'][number]) {
   const netLineTotals = allocateNetTotalToLines(ticket.lines.map((line) => line.lineTotalCents), ticket.totalCents)
   return ticket.lines.map((line, index) => ({ line, netCents: netLineTotals[index] }))
+}
+
+export function buildSalesReportTotals(
+  tickets: CrmSalesReports['tickets'],
+  productQuery: string,
+  categoryQuery: string,
+) {
+  return tickets.reduce((totals, ticket) => {
+    if (ticket.status !== 'paid') return totals
+    const ticketTotals = buildSalesReportTicketTotals(ticket, productQuery, categoryQuery)
+    totals.subtotalCents += ticketTotals.subtotalCents
+    totals.taxAmountCents += ticketTotals.taxAmountCents
+    totals.totalCents += ticketTotals.totalCents
+    return totals
+  }, { subtotalCents: 0, taxAmountCents: 0, totalCents: 0 })
+}
+
+export function buildSalesReportTicketTotals(
+  ticket: CrmSalesReports['tickets'][number],
+  productQuery = '',
+  categoryQuery = '',
+) {
+  const totals = { subtotalCents: 0, taxAmountCents: 0, totalCents: 0 }
+
+  for (const { line, netCents } of allocateTicketNetLines(ticket)) {
+    if (!salesReportLineMatches(line, productQuery, categoryQuery)) continue
+    const fiscal = line.fiscalSnapshot
+    if (!fiscal) {
+      totals.subtotalCents += netCents
+      totals.totalCents += netCents
+      continue
+    }
+
+    const breakdown = netCents === line.lineTotalCents
+      ? fiscal
+      : calculateTaxFromGross(netCents, fiscal.taxRate)
+    totals.subtotalCents += breakdown.taxableBaseCents
+    totals.taxAmountCents += breakdown.taxAmountCents
+    totals.totalCents += netCents
+  }
+
+  return totals
 }
 
 export function buildSalesReportAggregates(

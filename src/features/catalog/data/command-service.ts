@@ -5,6 +5,7 @@ import type {
   CatalogPlacementInput,
   CatalogProductInput,
   CatalogReorderInput,
+  CatalogSaleFormatInput,
   CatalogSelectionGroupInput,
   CatalogVariantInput,
 } from './commands.ts'
@@ -37,10 +38,12 @@ export class CatalogCommandService {
   }
 
   createVariant(venueId: string, productId: string, input: CatalogVariantInput) {
+    if (input.formatId) return this.repository.executeVariantFormatCommand(venueId, 'create_variant', payload({ ...input, productId }))
     return this.repository.executeCommand(venueId, 'create_variant', payload({ ...input, productId }))
   }
 
   updateVariant(venueId: string, input: CatalogVariantInput & { id: string; productId: string }) {
+    if (input.formatId) return this.repository.executeVariantFormatCommand(venueId, 'update_variant', payload(input))
     return this.repository.executeCommand(venueId, 'update_variant', payload(input))
   }
 
@@ -131,6 +134,22 @@ export class CatalogCommandService {
 
   executeBatch(venueId: string, commands: readonly CatalogBatchCommand[]) {
     return this.repository.executeBatch(venueId, commands)
+  }
+
+  executeBatchWithVariantFormats(venueId: string, commands: readonly CatalogBatchCommand[], variantFormats: readonly { variantId: string; formatId: string }[], newFormats: readonly { id: string; name: string; active: boolean; sortOrder: number }[] = []) {
+    return this.repository.executeBatchWithVariantFormats(venueId, commands, variantFormats, newFormats)
+  }
+
+  saveSaleFormat(venueId: string, input: CatalogSaleFormatInput) {
+    return this.repository.executeSaleFormatCommand(venueId, 'save', payload(input))
+  }
+
+  deleteSaleFormat(venueId: string, formatId: string) {
+    return this.repository.executeSaleFormatCommand(venueId, 'delete', { id: formatId })
+  }
+
+  reorderSaleFormats(venueId: string, items: readonly { id: string; sortOrder: number }[]) {
+    return this.repository.executeSaleFormatCommand(venueId, 'reorder', { items })
   }
 
   saveTabCategory(venueId: string, input: {

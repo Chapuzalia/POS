@@ -3,6 +3,7 @@ import { formatMoney } from '../../lib/format'
 import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from '../../types'
 import { Button } from '../ui'
 import { usePrintAgent } from '../../features/local-printing'
+import { closeOnModalBackdrop } from './modalBackdrop'
 
 const paymentLabels: Record<HistoricalPaymentMethod, string> = {
   card: 'Tarjeta',
@@ -37,7 +38,7 @@ export function SessionTicketsModal({
   const totalCents = activeTickets.reduce((total, ticket) => total + ticket.totalCents, 0)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onClose, isBusy)}>
       <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
           <div>

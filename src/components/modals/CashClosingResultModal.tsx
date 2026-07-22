@@ -2,6 +2,7 @@ import { CheckCircle2, LoaderCircle, Printer, X } from 'lucide-react'
 import type { CashClosingRecord } from '../../types'
 import { formatMoney } from '../../lib/format'
 import { Button, Metric } from '../ui'
+import { closeOnModalBackdrop } from './modalBackdrop'
 
 export function CashClosingResultModal({ closing, isPrinting, onClose, onPrint }: {
   closing: CashClosingRecord
@@ -11,7 +12,7 @@ export function CashClosingResultModal({ closing, isPrinting, onClose, onPrint }
 }) {
   const printed = closing.printStatus === 'printed'
   const unknown = closing.printStatus === 'unknown'
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onClose, isPrinting)}>
     <section className="w-full max-w-2xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">

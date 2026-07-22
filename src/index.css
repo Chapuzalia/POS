@@ -49,6 +49,20 @@ body {
   background: var(--background);
 }
 
+html.pos-viewport-locked,
+body.pos-viewport-locked {
+  overscroll-behavior: none;
+  touch-action: pan-x pan-y;
+}
+
+body.pos-viewport-locked {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  -webkit-overflow-scrolling: auto;
+}
+
 button,
 input,
 select,

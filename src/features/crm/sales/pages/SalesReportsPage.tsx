@@ -5,10 +5,9 @@ import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { KpiCard } from '../../dashboard/pages/DashboardPage'
-import { formatDiscountRounding } from '../../../../lib/discounts'
 import { formatMoney, normalizeText } from '../../../../lib/format'
 import { loadCrmSalesReports } from '../services/salesReportsService'
-import { allocateTicketNetLines, buildSalesReportAggregates, compareSalesReportValues, crmReportDateTimeFormatter, paymentLabels, salesReportLineMatches, salesReportTabs, type SalesReportAggregateView, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
+import { buildSalesReportAggregates, buildSalesReportTicketTotals, buildSalesReportTotals, compareSalesReportValues, crmReportDateTimeFormatter, paymentLabels, salesReportLineMatches, salesReportTabs, type SalesReportAggregateView, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
 import { type RunAction } from '../../shared/types'
@@ -120,10 +119,10 @@ export function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantCo
     return compareSalesReportValues(leftValue, rightValue, sortDirection)
   }), [activeAggregates, sortDirection, sortKey])
   const matchingPaidTickets = filteredTickets.filter((ticket) => ticket.status === 'paid')
-  const salesCents = matchingPaidTickets.reduce((total, ticket) => total + allocateTicketNetLines(ticket)
-    .filter(({ line }) => salesReportLineMatches(line, normalizedProductQuery, normalizedCategoryQuery))
-    .reduce((ticketTotal, { netCents }) => ticketTotal + netCents, 0),
-  0)
+  const reportTotals = useMemo(
+    () => buildSalesReportTotals(filteredTickets, normalizedProductQuery, normalizedCategoryQuery),
+    [filteredTickets, normalizedCategoryQuery, normalizedProductQuery],
+  )
   const totalResults = activeView === 'tickets' ? sortedTickets.length : sortedAggregates.length
   const totalPages = Math.max(1, Math.ceil(totalResults / CRM_PAGE_SIZE))
   const visiblePage = Math.min(currentPage, totalPages)
@@ -184,10 +183,10 @@ export function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantCo
           </button>
         </div>
         <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
-          <KpiCard color="green" label="Ventas filtradas" value={formatMoney(salesCents)} />
-          <KpiCard color="blue" label="Tickets cobrados" value={matchingPaidTickets.length} />
-          <KpiCard color="neutral" label="Ticket medio" value={formatMoney(matchingPaidTickets.length ? Math.round(salesCents / matchingPaidTickets.length) : 0)} />
-          <KpiCard color="neutral" label="Tickets anulados" value={filteredTickets.filter((ticket) => ticket.status === 'void').length} />
+          <KpiCard color="neutral" label="Subtotal" value={formatMoney(reportTotals.subtotalCents)} />
+          <KpiCard color="blue" label="Impuestos" value={formatMoney(reportTotals.taxAmountCents)} />
+          <KpiCard color="green" label="Total" value={formatMoney(reportTotals.totalCents)} />
+          <KpiCard color="neutral" label="Tickets cobrados" value={matchingPaidTickets.length} />
         </div>
       </section>
 
@@ -356,10 +355,7 @@ export function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantCo
 
 function getReportDiscountLabel(ticket: CrmSalesReports['tickets'][number]) {
   if (ticket.discountName) {
-    const rounding = ticket.discountRoundingIncrementCents
-      ? ` · ${formatDiscountRounding(ticket.discountRoundingIncrementCents)}`
-      : ''
-    return `${ticket.discountName} · −${formatMoney(ticket.discountAmountCents)}${rounding}`
+    return `−${formatMoney(ticket.discountAmountCents)}`
   }
   return ticket.paymentMethod === 'invitation' ? 'Invitación (histórico)' : '—'
 }
@@ -462,6 +458,8 @@ export function SalesReportTicketModal({
   onClose: () => void
   ticket: CrmSalesReports['tickets'][number]
 }) {
+  const fiscalTotals = buildSalesReportTicketTotals(ticket)
+
   return (
     <CrmModal label={`Detalle del ticket ${ticket.id.slice(0, 8)}`} onClose={onClose} size="large">
       <div className="crm-editor-header !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
@@ -480,7 +478,7 @@ export function SalesReportTicketModal({
       </div>
 
       <div className="!min-h-0 !overflow-y-auto !px-[18px] !py-5 md:!px-[22px]">
-        <div className="!mb-5 !grid !grid-cols-1 !gap-2.5 sm:!grid-cols-2 lg:!grid-cols-6">
+        <div className="!mb-5 !grid !grid-cols-1 !gap-2.5 sm:!grid-cols-2 lg:!grid-cols-4 xl:!grid-cols-7">
           <TicketDetailSummary label="Estado">
             <span className={ticket.status === 'paid'
               ? '!inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
@@ -495,7 +493,10 @@ export function SalesReportTicketModal({
             <strong>{ticket.lineCount} líneas · {ticket.quantity} uds.</strong>
           </TicketDetailSummary>
           <TicketDetailSummary label="Subtotal">
-            <strong className="!font-mono">{formatMoney(ticket.subtotalCents)}</strong>
+            <strong className="!font-mono">{formatMoney(fiscalTotals.subtotalCents)}</strong>
+          </TicketDetailSummary>
+          <TicketDetailSummary label="Impuestos">
+            <strong className="!font-mono">{formatMoney(fiscalTotals.taxAmountCents)}</strong>
           </TicketDetailSummary>
           <TicketDetailSummary label="Descuento">
             <strong>{getReportDiscountLabel(ticket)}</strong>
@@ -539,9 +540,10 @@ export function SalesReportTicketModal({
         </div>
       </div>
 
-      <div className="!flex !items-center !justify-between !gap-4 !border-t !border-[var(--crm-border-subtle)] !px-[18px] !py-4 md:!px-[22px]">
-        <span className="!text-sm !font-semibold !text-[var(--crm-text-secondary)]">Total del ticket</span>
-        <strong className="!font-mono !text-xl !text-[var(--crm-text)]">{formatMoney(ticket.totalCents)}</strong>
+      <div className="!flex !flex-wrap !items-center !justify-end !gap-x-8 !gap-y-3 !border-t !border-[var(--crm-border-subtle)] !px-[18px] !py-4 md:!px-[22px]">
+        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Subtotal</small><strong className="!font-mono !text-sm !text-[var(--crm-text)]">{formatMoney(fiscalTotals.subtotalCents)}</strong></span>
+        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Impuestos</small><strong className="!font-mono !text-sm !text-[var(--crm-text)]">{formatMoney(fiscalTotals.taxAmountCents)}</strong></span>
+        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Total del ticket</small><strong className="!font-mono !text-xl !text-[var(--crm-text)]">{formatMoney(ticket.totalCents)}</strong></span>
       </div>
     </CrmModal>
   )

@@ -4,7 +4,7 @@ import { canAccessCrm, canAccessCrmSection } from '../src/features/crm/routing/c
 import { readFileSync } from 'node:fs'
 import { resolveSelectedVenueId } from '../src/features/crm/venues/services/venueSelection.ts'
 import { buildProductCreationBatch, validateVariantDrafts } from '../src/features/crm/catalog/services/catalogAdminModel.ts'
-import { buildSalesReportAggregates, compareSalesReportValues } from '../src/features/crm/sales/services/salesReportModel.ts'
+import { buildSalesReportAggregates, buildSalesReportTicketTotals, buildSalesReportTotals, compareSalesReportValues } from '../src/features/crm/sales/services/salesReportModel.ts'
 
 test('CRM permissions preserve owner/admin access and reject POS roles', () => {
   assert.equal(canAccessCrm('owner'), true)
@@ -56,6 +56,45 @@ test('sales aggregates ignore cancelled tickets, allocate net totals and sort co
   }])
   assert.ok(compareSalesReportValues('B', 'a', 'asc') > 0)
   assert.equal(compareSalesReportValues(5, 2, 'desc'), -3)
+})
+
+test('ticket report totals expose subtotal, fiscal snapshots and discounted total with the same filters', () => {
+  const vodka = {
+    productName: 'Vodka', categoryName: 'Licores', quantity: 1, lineTotalCents: 1210,
+    fiscalSnapshot: { taxRate: 21, taxableBaseCents: 1000, taxAmountCents: 210, grossTotalCents: 1210 },
+  }
+  const mixer = {
+    productName: 'Tónica', categoryName: 'Refrescos', quantity: 1, lineTotalCents: 200,
+    fiscalSnapshot: { taxRate: 10, taxableBaseCents: 182, taxAmountCents: 18, grossTotalCents: 200 },
+  }
+  const paid = { id: 'paid', status: 'paid', totalCents: 1310, lines: [vodka, mixer] }
+  const voidTicket = { id: 'void', status: 'void', totalCents: 1210, lines: [vodka] }
+
+  assert.deepEqual(buildSalesReportTotals([paid, voidTicket], '', ''), {
+    subtotalCents: 1098,
+    taxAmountCents: 212,
+    totalCents: 1310,
+  })
+  assert.deepEqual(buildSalesReportTotals([paid], 'vodka', ''), {
+    subtotalCents: 929,
+    taxAmountCents: 195,
+    totalCents: 1124,
+  })
+  assert.deepEqual(buildSalesReportTicketTotals({ ...paid, totalCents: 1410 }), {
+    subtotalCents: 1182,
+    taxAmountCents: 228,
+    totalCents: 1410,
+  })
+  assert.deepEqual(buildSalesReportTicketTotals({
+    id: 'beer-ticket', status: 'paid', totalCents: 1750, lines: [{
+      productName: 'Estrella Damm', categoryName: 'Cervezas', quantity: 5, lineTotalCents: 1750,
+      fiscalSnapshot: { taxRate: 10, taxableBaseCents: 1591, taxAmountCents: 159, grossTotalCents: 1750 },
+    }],
+  }), {
+    subtotalCents: 1591,
+    taxAmountCents: 159,
+    totalCents: 1750,
+  })
 })
 
 test('venue settings persist the three fiscal ticket fields per venue', () => {

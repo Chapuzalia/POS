@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ImagePlus, Plus, Save, Trash2, X } from 'lucide-react'
+import { Eye, EyeOff, ImagePlus, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
 import { useEffect, useMemo, useState, type FormEvent } from 'react'
 import type { CatalogData, CatalogProduct } from '../../../catalog/domain/types.ts'
 import { formatMoney, parseMoneyToCents } from '../../../../lib/format.ts'
@@ -8,8 +8,6 @@ import { Field } from '../../shared/components/Field.tsx'
 import { catalogAdminService } from '../services/catalogAdminService.ts'
 import {
   buildProductCreationBatch,
-  moveCatalogItem,
-  toReorderItems,
   validateSelectionCapacity,
   validateVariantDrafts,
 } from '../services/catalogAdminModel.ts'
@@ -25,7 +23,7 @@ type Props = {
 
 type VariantDraft = {
   id: string
-  name: string
+  formatId: string
   price: string
   active: boolean
   isDefault: boolean
@@ -40,6 +38,8 @@ function cents(value: string) {
 }
 
 export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate, onClose, product }: Props) {
+  const activeFormats = useMemo(() => catalog.saleFormats.filter((format) => format.active), [catalog.saleFormats])
+  const formatById = useMemo(() => new Map(catalog.saleFormats.map((format) => [format.id, format])), [catalog.saleFormats])
   const productVariants = useMemo(() => catalog.variants.filter((variant) => variant.productId === product?.id), [catalog.variants, product?.id])
   const productPlacements = useMemo(() => catalog.placements.filter((placement) => placement.productId === product?.id), [catalog.placements, product?.id])
   const productAssignments = useMemo(() => [
@@ -49,23 +49,28 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
   const [name, setName] = useState(product?.name ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
   const [type, setType] = useState<'standard' | 'menu'>(product?.type ?? 'standard')
+  const [vatMode, setVatMode] = useState<'default' | 'custom'>(product?.vatRate === null || product?.vatRate === undefined ? 'default' : 'custom')
   const [vatRate, setVatRate] = useState(String(product?.vatRate ?? defaultTaxRate))
-  const [active, setActive] = useState(product?.active ?? true)
   const [advanced, setAdvanced] = useState(product?.type === 'menu')
   const [variantDrafts, setVariantDrafts] = useState<VariantDraft[]>(() => productVariants.length
-    ? productVariants.map((variant) => ({ id: variant.id, name: variant.name, price: (variant.priceCents / 100).toFixed(2).replace('.', ','), active: variant.active, isDefault: variant.isDefault }))
-    : [{ id: catalogAdminService.uuid(), name: 'Normal', price: '0,00', active: true, isDefault: true }])
+    ? productVariants.map((variant) => ({ id: variant.id, formatId: variant.formatId ?? '', price: (variant.priceCents / 100).toFixed(2).replace('.', ','), active: variant.active, isDefault: variant.isDefault }))
+    : [{ id: catalogAdminService.uuid(), formatId: activeFormats[0]?.id ?? '', price: '0,00', active: true, isDefault: true }])
   const [tabId, setTabId] = useState(catalog.tabs.find((tab) => tab.active)?.id ?? '')
   const [categoryId, setCategoryId] = useState(catalog.categories.find((category) => category.active)?.id ?? '')
   const [internal, setInternal] = useState(false)
+  const [initialPlacementFeatured, setInitialPlacementFeatured] = useState(false)
   const [imageFile, setImageFile] = useState<File | null>(null)
   const [dirty, setDirty] = useState(false)
   const [formError, setFormError] = useState<string | null>(null)
-  const [newVariantName, setNewVariantName] = useState('')
+  const [newVariantFormatId, setNewVariantFormatId] = useState('')
   const [newVariantPrice, setNewVariantPrice] = useState('0,00')
+  const [editingVariantId, setEditingVariantId] = useState('')
+  const [editingVariantFormatId, setEditingVariantFormatId] = useState('')
+  const [editingVariantPrice, setEditingVariantPrice] = useState('0,00')
   const [placementTabId, setPlacementTabId] = useState(catalog.tabs.find((tab) => tab.active)?.id ?? '')
   const [placementCategoryId, setPlacementCategoryId] = useState(catalog.categories.find((category) => category.active)?.id ?? '')
   const [placementVariantId, setPlacementVariantId] = useState('')
+  const [placementFeatured, setPlacementFeatured] = useState(false)
   const [placementEditId, setPlacementEditId] = useState('')
   const [assignmentDomain, setAssignmentDomain] = useState<'selection' | 'modifier'>('selection')
   const [assignmentGroupId, setAssignmentGroupId] = useState('')
@@ -98,8 +103,8 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
   async function submitGeneral(event: FormEvent) {
     event.preventDefault()
     if (!name.trim()) return setFormError('El nombre es obligatorio.')
-    const parsedVat = Number(vatRate.replace(',', '.'))
-    if (!Number.isFinite(parsedVat) || parsedVat < 0 || parsedVat > 100) return setFormError('El IVA debe estar entre 0 y 100.')
+    const parsedVat = vatMode === 'default' ? null : Number(vatRate.replace(',', '.'))
+    if (parsedVat !== null && (!Number.isFinite(parsedVat) || parsedVat < 0 || parsedVat > 100)) return setFormError('El IVA debe estar entre 0 y 100.')
 
     if (product) {
       const saved = await mutate(() => catalogAdminService.updateProduct(catalog.venueId, {
@@ -108,7 +113,7 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
         name: name.trim(),
         description: description.trim() || null,
         vatRate: parsedVat,
-        active,
+        active: product.active,
         sortOrder: product.sortOrder,
       }))
       if (saved && imageFile) await mutate(() => catalogAdminService.uploadProductImage({ tenantId: catalog.tenantId, venueId: catalog.venueId, productId: product.id, file: imageFile }))
@@ -118,13 +123,14 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
 
     const variants = (advanced ? variantDrafts : variantDrafts.slice(0, 1)).map((variant, index) => ({
       id: variant.id,
-      name: variant.name.trim(),
+      formatId: variant.formatId,
+      name: formatById.get(variant.formatId)?.name ?? '',
       priceCents: cents(variant.price),
       active: variant.active,
       isDefault: variant.isDefault,
       sortOrder: index * 10,
     }))
-    const variantError = validateVariantDrafts(variants, active)
+    const variantError = validateVariantDrafts(variants, true)
     if (variantError) return setFormError(variantError)
     if (!internal && (!tabId || !categoryId)) return setFormError('Elige una pestaña y categoría, o marca el producto como interno.')
     const productId = catalogAdminService.uuid()
@@ -135,7 +141,7 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
       name,
       description: description.trim() || null,
       vatRate: parsedVat,
-      active,
+      active: true,
       sortOrder: catalog.products.length * 10,
       variants,
       placement: internal ? undefined : {
@@ -143,27 +149,54 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
         tabId,
         categoryId,
         pinnedVariantId: null,
+        featured: initialPlacementFeatured,
         sortOrder: catalog.placements.filter((placement) => placement.tabId === tabId && placement.categoryId === categoryId).length * 10,
       },
     })
-    const saved = await mutate(() => catalogAdminService.batch(catalog.venueId, batch))
+    const saved = await mutate(() => catalogAdminService.batchWithVariantFormats(
+      catalog.venueId,
+      batch,
+      variants.map((variant) => ({ variantId: variant.id, formatId: variant.formatId })),
+    ))
     if (saved && imageFile) await mutate(() => catalogAdminService.uploadProductImage({ tenantId: catalog.tenantId, venueId: catalog.venueId, productId, file: imageFile }))
     if (saved) onClose()
   }
 
   async function addVariant() {
-    if (!product || !newVariantName.trim() || cents(newVariantPrice) < 0) return
+    const format = formatById.get(newVariantFormatId)
+    if (!product || !format || cents(newVariantPrice) < 0) return
     await mutate(() => catalogAdminService.createVariant(catalog.venueId, product.id, {
-      name: newVariantName.trim(), priceCents: cents(newVariantPrice), active: true,
+      formatId: format.id, name: format.name, priceCents: cents(newVariantPrice), active: true,
       isDefault: productVariants.length === 0, sortOrder: productVariants.length * 10,
     }))
-    setNewVariantName('')
+    setNewVariantFormatId('')
     setNewVariantPrice('0,00')
   }
 
-  async function moveVariant(id: string, direction: -1 | 1) {
-    const items = moveCatalogItem(productVariants, id, direction)
-    await mutate(() => catalogAdminService.reorder(catalog.venueId, { entity: 'variants', items: toReorderItems(items) }))
+  function beginVariantEdit(variantId: string) {
+    const variant = productVariants.find((item) => item.id === variantId)
+    if (!variant) return
+    setEditingVariantId(variant.id)
+    setEditingVariantFormatId(variant.formatId ?? '')
+    setEditingVariantPrice((variant.priceCents / 100).toFixed(2).replace('.', ','))
+  }
+
+  async function saveVariantEdit() {
+    if (!product) return
+    const variant = productVariants.find((item) => item.id === editingVariantId)
+    const format = formatById.get(editingVariantFormatId)
+    if (!variant || !format || cents(editingVariantPrice) < 0) return
+    const saved = await mutate(() => catalogAdminService.updateVariant(catalog.venueId, {
+      id: variant.id,
+      productId: product.id,
+      formatId: format.id,
+      name: format.name,
+      priceCents: cents(editingVariantPrice),
+      active: variant.active,
+      isDefault: variant.isDefault,
+      sortOrder: variant.sortOrder,
+    }))
+    if (saved) setEditingVariantId('')
   }
 
   async function savePlacement() {
@@ -175,13 +208,17 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
           tabId: placementTabId,
           categoryId: placementCategoryId,
           pinnedVariantId: placementVariantId || null,
+          featured: placementFeatured,
         }))
       : await mutate(() => catalogAdminService.createPlacement(catalog.venueId, {
           productId: product.id, tabId: placementTabId, categoryId: placementCategoryId,
-          pinnedVariantId: placementVariantId || null, featured: false, active: true,
+          pinnedVariantId: placementVariantId || null, featured: placementFeatured, active: true,
           sortOrder: productPlacements.length * 10,
         }))
-    if (saved) setPlacementEditId('')
+    if (saved) {
+      setPlacementEditId('')
+      setPlacementFeatured(false)
+    }
   }
 
   function editPlacement(id: string) {
@@ -191,13 +228,7 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
     setPlacementTabId(placement.tabId)
     setPlacementCategoryId(placement.categoryId ?? '')
     setPlacementVariantId(placement.pinnedVariantId ?? '')
-  }
-
-  async function movePlacement(id: string, direction: -1 | 1) {
-    await mutate(() => catalogAdminService.reorder(catalog.venueId, {
-      entity: 'placements',
-      items: toReorderItems(moveCatalogItem(productPlacements, id, direction)),
-    }))
+    setPlacementFeatured(placement.featured)
   }
 
   async function addAssignment() {
@@ -234,8 +265,20 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
           <div className="!grid !gap-3 sm:!grid-cols-2">
             <Field label="Nombre"><input className="crm-input" onChange={(event) => { setName(event.target.value); markDirty() }} value={name} /></Field>
             <Field label="Tipo"><CrmSelect onChange={(value) => { setType(value as typeof type); if (value === 'menu') setAdvanced(true); markDirty() }} options={[{ label: 'Producto estándar', value: 'standard' }, { label: 'Menú', value: 'menu' }]} value={type} /></Field>
-            <Field label="IVA (%)"><input className="crm-input" inputMode="decimal" onChange={(event) => { setVatRate(event.target.value); markDirty() }} value={vatRate} /></Field>
-            <label className="!flex !items-end !gap-2 !pb-3 !text-sm !font-semibold"><input checked={active} onChange={(event) => { setActive(event.target.checked); markDirty() }} type="checkbox" /> Producto activo</label>
+            <Field className="sm:!col-span-2" label="IVA">
+              <div className="!grid !gap-2 sm:!grid-cols-2">
+                <CrmSelect
+                  ariaLabel="Tipo de IVA"
+                  onChange={(value) => { setVatMode(value as typeof vatMode); markDirty() }}
+                  options={[
+                    { label: `IVA predeterminado del local (${defaultTaxRate} %)`, value: 'default' },
+                    { label: 'IVA personalizado', value: 'custom' },
+                  ]}
+                  value={vatMode}
+                />
+                {vatMode === 'custom' ? <input aria-label="IVA personalizado (%)" className="crm-input" inputMode="decimal" onChange={(event) => { setVatRate(event.target.value); markDirty() }} value={vatRate} /> : null}
+              </div>
+            </Field>
           </div>
           <Field label="Descripción"><textarea className="crm-input !min-h-20" onChange={(event) => { setDescription(event.target.value); markDirty() }} value={description} /></Field>
           <div className="!grid !gap-3 sm:!grid-cols-[110px_1fr] sm:!items-center">
@@ -250,50 +293,56 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
           {!product ? (
             <>
               <label className="!flex !items-center !gap-2 !text-sm !font-semibold"><input checked={advanced} onChange={(event) => { setAdvanced(event.target.checked); markDirty() }} type="checkbox" /> Configuración avanzada de variantes</label>
+              {!activeFormats.length ? <p className="!rounded-xl !bg-[var(--crm-yellow-soft)] !p-3 !text-sm !font-semibold !text-[var(--crm-yellow)]">Crea al menos un formato en Productos → Formatos antes de crear el producto.</p> : null}
               <div className="!grid !gap-2">
                 {(advanced ? variantDrafts : variantDrafts.slice(0, 1)).map((variant) => (
                   <div className="!grid !gap-2 sm:!grid-cols-[1fr_140px_auto_auto] sm:!items-center" key={variant.id}>
-                    <input aria-label="Nombre de variante" className="crm-input" onChange={(event) => updateDraft(variant.id, { name: event.target.value })} value={variant.name} />
+                    <CrmSelect ariaLabel="Formato de venta" onChange={(formatId) => updateDraft(variant.id, { formatId })} options={activeFormats.map((format) => ({ label: format.name, value: format.id, disabled: variantDrafts.some((draft) => draft.id !== variant.id && draft.formatId === format.id) }))} placeholder="Selecciona un formato" value={variant.formatId} />
                     <input aria-label="Precio de variante" className="crm-input" inputMode="decimal" onChange={(event) => updateDraft(variant.id, { price: event.target.value })} value={variant.price} />
                     <label className="!text-xs"><input checked={variant.active} onChange={(event) => updateDraft(variant.id, { active: event.target.checked })} type="checkbox" /> Activa</label>
                     <label className="!text-xs"><input checked={variant.isDefault} onChange={() => updateDraft(variant.id, { isDefault: true })} type="radio" /> Predeterminada</label>
                   </div>
                 ))}
-                {advanced ? <button className="crm-secondary-button !w-fit" onClick={() => { setVariantDrafts((current) => [...current, { id: catalogAdminService.uuid(), name: '', price: '0,00', active: true, isDefault: false }]); markDirty() }} type="button"><Plus className="!size-4" /> Añadir variante</button> : null}
+                {advanced ? <button className="crm-secondary-button !w-fit" disabled={variantDrafts.length >= activeFormats.length} onClick={() => { const used = new Set(variantDrafts.map((variant) => variant.formatId)); const formatId = activeFormats.find((format) => !used.has(format.id))?.id ?? ''; setVariantDrafts((current) => [...current, { id: catalogAdminService.uuid(), formatId, price: '0,00', active: true, isDefault: false }]); markDirty() }} type="button"><Plus className="!size-4" /> Añadir variante</button> : null}
               </div>
               <label className="!flex !items-center !gap-2 !text-sm !font-semibold"><input checked={internal} onChange={(event) => { setInternal(event.target.checked); markDirty() }} type="checkbox" /> Producto interno, sin aparición inicial en TPV</label>
-              {!internal ? <div className="!grid !gap-3 sm:!grid-cols-2"><Field label="Pestaña inicial"><CrmSelect onChange={(value) => { setTabId(value); markDirty() }} options={catalog.tabs.filter((tab) => tab.active).map((tab) => ({ label: tab.label, value: tab.id }))} value={tabId} /></Field><Field label="Categoría inicial"><CrmSelect onChange={(value) => { setCategoryId(value); markDirty() }} options={catalog.categories.filter((category) => category.active).map((category) => ({ label: category.name, value: category.id }))} value={categoryId} /></Field></div> : null}
+              {!internal ? <div className="!grid !gap-3 sm:!grid-cols-[1fr_1fr_auto] sm:!items-end"><Field label="Pestaña inicial"><CrmSelect onChange={(value) => { setTabId(value); markDirty() }} options={catalog.tabs.filter((tab) => tab.active).map((tab) => ({ label: tab.label, value: tab.id }))} value={tabId} /></Field><Field label="Categoría inicial"><CrmSelect onChange={(value) => { setCategoryId(value); markDirty() }} options={catalog.categories.filter((category) => category.active).map((category) => ({ label: category.name, value: category.id }))} value={categoryId} /></Field><label className="!flex !min-h-11 !items-center !gap-2 !text-xs !font-semibold"><input checked={initialPlacementFeatured} onChange={(event) => { setInitialPlacementFeatured(event.target.checked); markDirty() }} type="checkbox" /> Destacado</label></div> : null}
             </>
           ) : null}
           {formError ? <p className="!rounded-lg !bg-red-500/10 !p-3 !text-sm !font-semibold !text-red-500" role="alert">{formError}</p> : null}
-          <button className="crm-primary-button !inline-flex !w-fit !items-center !gap-2" disabled={disabled} type="submit"><Save className="!size-4" /> {product ? 'Guardar información' : 'Crear producto'}</button>
+          <button className="crm-primary-button !inline-flex !w-fit !items-center !gap-2" disabled={disabled || (!product && !activeFormats.length)} type="submit"><Save className="!size-4" /> {product ? 'Guardar información' : 'Crear producto'}</button>
         </form>
 
         {product ? (
           <>
             <section className="!grid !gap-3 !border-t !border-[var(--crm-border-subtle)] !pt-5">
-              <div><h3 className="!font-bold">Variantes</h3><p className="!text-sm !text-[var(--crm-text-muted)]">Una sola variante mantiene una experiencia sencilla; añade más cuando el producto lo necesite.</p></div>
-              {productVariants.map((variant, index) => (
+              <div><h3 className="!font-bold">Variantes</h3><p className="!text-sm !text-[var(--crm-text-muted)]">Cada variante utiliza uno de los formatos configurados para el local.</p></div>
+              {productVariants.map((variant) => (
                 <div className="!grid !gap-2 !rounded-xl !bg-[var(--crm-surface-soft)] !p-3 sm:!grid-cols-[1fr_auto] sm:!items-center" key={variant.id}>
-                  <div><strong>{variant.name}</strong> · {formatMoney(variant.priceCents)} · {variant.active ? 'Activa' : 'Inactiva'}{variant.isDefault ? ' · Predeterminada' : ''}</div>
+                  {editingVariantId === variant.id ? (
+                    <div className="!grid !gap-2 sm:!grid-cols-[minmax(180px,1fr)_140px_auto]">
+                      <CrmSelect ariaLabel="Formato de la variante" onChange={setEditingVariantFormatId} options={catalog.saleFormats.map((format) => ({ label: format.name, value: format.id, disabled: !format.active || productVariants.some((item) => item.id !== variant.id && item.formatId === format.id) }))} value={editingVariantFormatId} />
+                      <input aria-label="Precio de variante" className="crm-input" inputMode="decimal" onChange={(event) => setEditingVariantPrice(event.target.value)} value={editingVariantPrice} />
+                      <button aria-label="Guardar variante" className="crm-action-button !bg-[var(--crm-blue)] !text-white" disabled={disabled || !editingVariantFormatId} onClick={() => void saveVariantEdit()} title="Guardar variante" type="button"><Save className="!size-4" /></button>
+                    </div>
+                  ) : <div><strong>{formatById.get(variant.formatId ?? '')?.name ?? variant.name}</strong> · {formatMoney(variant.priceCents)} · {variant.active ? 'Activa' : 'Inactiva'}{variant.isDefault ? ' · Predeterminada' : ''}</div>}
                   <div className="crm-action-group">
-                    <button aria-label="Subir" className="crm-action-button" disabled={disabled || index === 0} onClick={() => void moveVariant(variant.id, -1)} type="button"><ArrowUp className="!size-4" /></button>
-                    <button aria-label="Bajar" className="crm-action-button" disabled={disabled || index === productVariants.length - 1} onClick={() => void moveVariant(variant.id, 1)} type="button"><ArrowDown className="!size-4" /></button>
-                    <button aria-label="Editar variante" className="crm-secondary-button" disabled={disabled} onClick={() => { const nextName = window.prompt('Nombre de la variante', variant.name)?.trim(); const nextPrice = window.prompt('Precio', (variant.priceCents / 100).toFixed(2).replace('.', ',')); if (!nextName || nextPrice === null || cents(nextPrice) < 0) return; void mutate(() => catalogAdminService.updateVariant(catalog.venueId, { id: variant.id, productId: product.id, name: nextName, priceCents: cents(nextPrice), active: variant.active, isDefault: variant.isDefault, sortOrder: variant.sortOrder })) }} type="button">Editar</button>
-                    <button className="crm-secondary-button" disabled={disabled || variant.isDefault} onClick={() => void mutate(() => catalogAdminService.updateVariant(catalog.venueId, { id: variant.id, productId: product.id, name: variant.name, priceCents: variant.priceCents, active: !variant.active, isDefault: variant.isDefault, sortOrder: variant.sortOrder }))} type="button">{variant.active ? 'Desactivar' : 'Activar'}</button>
+                    <button aria-label={editingVariantId === variant.id ? 'Cancelar edición de variante' : 'Editar variante'} className="crm-action-button" disabled={disabled} onClick={() => editingVariantId === variant.id ? setEditingVariantId('') : beginVariantEdit(variant.id)} title={editingVariantId === variant.id ? 'Cancelar' : 'Editar'} type="button">{editingVariantId === variant.id ? <X className="!size-4" /> : <Pencil className="!size-4" />}</button>
+                    <button aria-label={variant.active ? 'Desactivar variante' : 'Activar variante'} className="crm-action-button" disabled={disabled || variant.isDefault || !variant.formatId} onClick={() => void mutate(() => catalogAdminService.updateVariant(catalog.venueId, { id: variant.id, productId: product.id, formatId: variant.formatId, name: variant.name, priceCents: variant.priceCents, active: !variant.active, isDefault: variant.isDefault, sortOrder: variant.sortOrder }))} title={variant.active ? 'Desactivar' : 'Activar'} type="button">{variant.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</button>
                     {!variant.isDefault ? <button className="crm-secondary-button" disabled={disabled || !variant.active} onClick={() => void mutate(() => catalogAdminService.setDefaultVariant(catalog.venueId, product.id, variant.id))} type="button">Predeterminada</button> : null}
                     <button aria-label="Eliminar variante" className="crm-action-button crm-danger-button" disabled={disabled || variant.isDefault} onClick={() => void mutate(() => catalogAdminService.deleteVariant(catalog.venueId, product.id, variant.id))} type="button"><Trash2 className="!size-4" /></button>
                   </div>
                 </div>
               ))}
-              <div className="!grid !gap-2 sm:!grid-cols-[1fr_140px_auto]"><input className="crm-input" onChange={(event) => setNewVariantName(event.target.value)} placeholder="Nueva variante" value={newVariantName} /><input className="crm-input" inputMode="decimal" onChange={(event) => setNewVariantPrice(event.target.value)} value={newVariantPrice} /><button className="crm-secondary-button" disabled={disabled || !newVariantName.trim()} onClick={() => void addVariant()} type="button"><Plus className="!size-4" /> Añadir</button></div>
+              {!activeFormats.length ? <p className="!rounded-xl !bg-[var(--crm-yellow-soft)] !p-3 !text-sm !font-semibold !text-[var(--crm-yellow)]">No hay formatos activos. Créalo en Productos → Formatos.</p> : null}
+              <div className="!grid !gap-2 sm:!grid-cols-[1fr_140px_auto]"><CrmSelect ariaLabel="Nuevo formato de venta" onChange={setNewVariantFormatId} options={activeFormats.map((format) => ({ label: format.name, value: format.id, disabled: productVariants.some((variant) => variant.formatId === format.id) }))} placeholder="Selecciona un formato" value={newVariantFormatId} /><input aria-label="Precio de la nueva variante" className="crm-input" inputMode="decimal" onChange={(event) => setNewVariantPrice(event.target.value)} value={newVariantPrice} /><button className="crm-secondary-button" disabled={disabled || !newVariantFormatId} onClick={() => void addVariant()} type="button"><Plus className="!size-4" /> Añadir</button></div>
             </section>
 
             <section className="!grid !gap-3 !border-t !border-[var(--crm-border-subtle)] !pt-5">
               <div><h3 className="!font-bold">Apariciones en TPV</h3><p className="!text-sm !text-[var(--crm-text-muted)]">El producto puede mostrarse varias veces y fijar una variante distinta en cada ubicación.</p></div>
-              <div className="!grid !gap-2 sm:!grid-cols-4"><CrmSelect onChange={setPlacementTabId} options={catalog.tabs.filter((tab) => tab.active).map((tab) => ({ label: tab.label, value: tab.id }))} value={placementTabId} /><CrmSelect onChange={setPlacementCategoryId} options={catalog.categories.filter((category) => category.active).map((category) => ({ label: category.name, value: category.id }))} value={placementCategoryId} /><CrmSelect onChange={setPlacementVariantId} options={[{ label: 'Variante predeterminada', value: '' }, ...productVariants.filter((variant) => variant.active).map((variant) => ({ label: variant.name, value: variant.id }))]} value={placementVariantId} /><button className="crm-secondary-button" disabled={disabled || !placementTabId || !placementCategoryId} onClick={() => void savePlacement()} type="button"><Plus className="!size-4" /> {placementEditId ? 'Guardar cambios' : 'Añadir'}</button></div>
+              <div className="!grid !gap-2 sm:!grid-cols-[1fr_1fr_1fr_auto_auto] sm:!items-center"><CrmSelect onChange={setPlacementTabId} options={catalog.tabs.filter((tab) => tab.active).map((tab) => ({ label: tab.label, value: tab.id }))} value={placementTabId} /><CrmSelect onChange={setPlacementCategoryId} options={catalog.categories.filter((category) => category.active).map((category) => ({ label: category.name, value: category.id }))} value={placementCategoryId} /><CrmSelect onChange={setPlacementVariantId} options={[{ label: 'Variante predeterminada', value: '' }, ...productVariants.filter((variant) => variant.active).map((variant) => ({ label: variant.name, value: variant.id }))]} value={placementVariantId} /><label className="!flex !min-h-11 !items-center !gap-2 !text-xs !font-semibold"><input checked={placementFeatured} disabled={disabled} onChange={(event) => setPlacementFeatured(event.target.checked)} type="checkbox" /> Destacado</label><button aria-label={placementEditId ? 'Guardar aparición' : 'Añadir aparición'} className="crm-action-button !bg-[var(--crm-blue)] !text-white" disabled={disabled || !placementTabId || !placementCategoryId} onClick={() => void savePlacement()} title={placementEditId ? 'Guardar aparición' : 'Añadir aparición'} type="button">{placementEditId ? <Save className="!size-4" /> : <Plus className="!size-4" />}</button></div>
               {productPlacements.map((placement) => (
-                <div className="!flex !items-center !justify-between !gap-3 !rounded-xl !bg-[var(--crm-surface-soft)] !p-3" key={placement.id}><span>{catalog.tabs.find((tab) => tab.id === placement.tabId)?.label} / {catalog.categories.find((category) => category.id === placement.categoryId)?.name ?? 'Sin categoría'}{placement.pinnedVariantId ? ` · ${productVariants.find((variant) => variant.id === placement.pinnedVariantId)?.name}` : ''} · {placement.active ? 'Visible' : 'Oculta'}</span><div className="crm-action-group"><button className="crm-secondary-button" disabled={disabled} onClick={() => editPlacement(placement.id)} type="button">Editar</button><button aria-label="Subir aparición" className="crm-action-button" disabled={disabled || productPlacements[0]?.id === placement.id} onClick={() => void movePlacement(placement.id, -1)} type="button"><ArrowUp className="!size-4" /></button><button aria-label="Bajar aparición" className="crm-action-button" disabled={disabled || productPlacements.at(-1)?.id === placement.id} onClick={() => void movePlacement(placement.id, 1)} type="button"><ArrowDown className="!size-4" /></button><button className="crm-secondary-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.updatePlacement(catalog.venueId, { ...placement, active: !placement.active }))} type="button">{placement.active ? 'Ocultar' : 'Mostrar'}</button><button aria-label="Eliminar aparición" className="crm-action-button crm-danger-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.deletePlacement(catalog.venueId, placement.id))} type="button"><Trash2 className="!size-4" /></button></div></div>
+                <div className="!grid !gap-3 !rounded-xl !bg-[var(--crm-surface-soft)] !p-3 sm:!grid-cols-[minmax(0,1fr)_auto_auto] sm:!items-center" key={placement.id}><span>{catalog.tabs.find((tab) => tab.id === placement.tabId)?.label} / {catalog.categories.find((category) => category.id === placement.categoryId)?.name ?? 'Sin categoría'}{placement.pinnedVariantId ? ` · ${productVariants.find((variant) => variant.id === placement.pinnedVariantId)?.name}` : ''} · {placement.active ? 'Visible' : 'Oculta'}</span><label className="!flex !items-center !gap-2 !text-xs !font-semibold"><input checked={placement.featured} disabled={disabled} onChange={(event) => void mutate(() => catalogAdminService.updatePlacement(catalog.venueId, { ...placement, featured: event.target.checked }))} type="checkbox" /> Destacado</label><div className="crm-action-group"><button aria-label="Editar aparición" className="crm-action-button" disabled={disabled} onClick={() => editPlacement(placement.id)} title="Editar" type="button"><Pencil className="!size-4" /></button><button aria-label={placement.active ? 'Ocultar aparición' : 'Mostrar aparición'} className="crm-action-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.updatePlacement(catalog.venueId, { ...placement, active: !placement.active }))} title={placement.active ? 'Ocultar' : 'Mostrar'} type="button">{placement.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</button><button aria-label="Eliminar aparición" className="crm-action-button crm-danger-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.deletePlacement(catalog.venueId, placement.id))} title="Eliminar" type="button"><Trash2 className="!size-4" /></button></div></div>
               ))}
             </section>
 

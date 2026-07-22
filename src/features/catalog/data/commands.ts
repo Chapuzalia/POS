@@ -30,6 +30,7 @@ export type CatalogCommandName =
 
 export type CatalogVariantInput = {
   id?: string
+  formatId?: string | null
   name: string
   priceCents: number
   sku?: string | null
@@ -85,6 +86,13 @@ export type CatalogSelectionGroupInput = {
 export type CatalogReorderInput = {
   entity: 'products' | 'variants' | 'placements' | 'tabs' | 'categories' | 'tab_categories' | 'selection_groups' | 'selection_options' | 'selection_assignments' | 'modifier_groups' | 'modifiers' | 'modifier_assignments'
   items: Array<{ id: string; sortOrder: number }>
+}
+
+export type CatalogSaleFormatInput = {
+  id?: string
+  name: string
+  active?: boolean
+  sortOrder: number
 }
 export type CatalogBatchCommand = {
   command: CatalogCommandName | 'save_tab_category'

@@ -8,6 +8,7 @@ import type { CashMovement, CashMovementType } from '../../types'
 import { cx } from '../../utils/cx'
 import { getReadableError } from '../../utils/errors'
 import { Button } from '../ui'
+import { closeOnModalBackdrop } from './modalBackdrop'
 
 type Props = {
   isOnline: boolean
@@ -63,7 +64,7 @@ export function CashMovementModal({ isOnline, isSaving, onCancel, onConfirm }: P
     }
   }
 
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4">
+  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, busy)}>
     <section aria-labelledby="cash-movement-title" aria-modal="true" className="flex max-h-[92svh] w-full flex-col overflow-hidden rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-2xl sm:rounded-[var(--radius)]" role="dialog">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
         <div><h2 className="text-2xl font-bold" id="cash-movement-title">Movimientos de caja</h2><p className="mt-1 text-sm text-[var(--muted)]">Registra una entrada o salida de efectivo sin generar una venta.</p></div>

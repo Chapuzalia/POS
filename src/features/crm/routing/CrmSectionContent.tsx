@@ -1,6 +1,7 @@
 import { AccessManagementCrm } from '../access/pages/AccessPage'
 import { StatsCrm } from '../analytics/pages/StatsPage'
 import { CatalogGroupsCrm } from '../catalog/pages/CatalogGroupsPage.tsx'
+import { CatalogFormatsCrm } from '../catalog/pages/CatalogFormatsPage.tsx'
 import { CatalogProductsCrm } from '../catalog/pages/CatalogProductsPage.tsx'
 import { CatalogStructureCrm } from '../catalog/pages/CatalogStructurePage.tsx'
 import { CatalogTransferCrm } from '../catalog/pages/CatalogTransferPage.tsx'
@@ -8,6 +9,7 @@ import { DashboardCrm } from '../dashboard/pages/DashboardPage'
 import { DiscountsCrm } from '../discounts/pages/DiscountsPage'
 import { PlanCrm } from '../plan/pages/PlanPage'
 import { SalesReportsCrm } from '../sales/pages/SalesReportsPage'
+import { CashClosingReportsCrm } from '../sales/pages/CashClosingReportsPage'
 import type { RunAction } from '../shared/types'
 import { VenueSettingsCrm } from '../venues/pages/VenueSettingsPage'
 import { TableManagementPage } from '../../table-management/TableManagementPage'
@@ -32,7 +34,7 @@ type Props = {
   venues: CrmVenue[]
 }
 
-const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'categories', 'selection-groups', 'modifiers', 'import'])
+const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import'])
 
 export function CrmSectionContent({
   activeSection,
@@ -59,6 +61,8 @@ export function CrmSectionContent({
       return catalog ? <DashboardCrm activeCategories={catalog.categories.filter((category) => category.active).length} activeProducts={catalog.products.filter((product) => product.active).length} categories={catalog.categories} disabled={disabled} onRefresh={onStatsRefresh} placements={catalog.placements} products={catalog.products} stats={stats} /> : null
     case 'products':
       return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} mutate={mutateCatalog} /> : null
+    case 'formats':
+      return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'categories':
       return catalog ? <CatalogStructureCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'selection-groups':
@@ -75,6 +79,8 @@ export function CrmSectionContent({
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
     case 'reports':
       return <SalesReportsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'x-reports':
+      return <CashClosingReportsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'stats':
       return <StatsCrm disabled={disabled} onRefresh={onStatsRefresh} stats={stats} />
     case 'settings':

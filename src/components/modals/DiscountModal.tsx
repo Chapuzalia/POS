@@ -4,6 +4,7 @@ import { calculateDiscount, formatDiscountRounding, formatDiscountValue, getActi
 import { parseMoneyToCents } from '../../lib/format'
 import type { AppliedDiscount, Discount, DiscountCalculationType } from '../../types'
 import { Button } from '../ui'
+import { closeOnModalBackdrop } from './modalBackdrop'
 
 type DiscountModalProps = {
   description?: string
@@ -54,7 +55,7 @@ export function DiscountModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4">
+    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy)}>
       <section aria-labelledby="discount-title" aria-modal="true" className="max-h-[85svh] w-full overflow-y-auto rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-xl sm:rounded-[var(--radius)]" role="dialog">
         <div className="flex items-start justify-between gap-4">
           <div>

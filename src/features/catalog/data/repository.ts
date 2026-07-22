@@ -138,6 +138,61 @@ export class CatalogRepository {
     }
   }
 
+  async executeBatchWithVariantFormats(
+    venueId: string,
+    batchCommands: readonly CatalogBatchCommand[],
+    variantFormats: readonly { variantId: string; formatId: string }[],
+    newFormats: readonly { id: string; name: string; active: boolean; sortOrder: number }[] = [],
+  ) {
+    try {
+      const { data, error } = await this.client.rpc('catalog_command_batch_with_formats', {
+        p_venue_id: venueId,
+        p_commands: batchCommands,
+        p_variant_formats: variantFormats,
+        p_new_formats: newFormats,
+      })
+      if (error) throw error
+      this.invalidate(venueId)
+      return data
+    } catch (error) {
+      throw toCatalogDomainError(error)
+    }
+  }
+
+  async executeVariantFormatCommand(
+    venueId: string,
+    command: 'create_variant' | 'update_variant',
+    payload: Readonly<Record<string, unknown>>,
+  ) {
+    try {
+      const { data, error } = await this.client.rpc('catalog_variant_format_command', {
+        p_venue_id: venueId,
+        p_command: command,
+        p_payload: payload,
+      })
+      if (error) throw error
+      this.invalidate(venueId)
+      return data
+    } catch (error) {
+      throw toCatalogDomainError(error)
+    }
+  }
+
+  async executeSaleFormatCommand(venueId: string, action: 'save' | 'delete' | 'reorder', payload: Readonly<Record<string, unknown>>) {
+    try {
+      const { data, error } = await this.client.rpc('catalog_sale_format_command', {
+        p_venue_id: venueId,
+        p_action: action,
+        p_payload: payload,
+      })
+      if (error) throw error
+      this.invalidate(venueId)
+      return data
+    } catch (error) {
+      throw toCatalogDomainError(error)
+    }
+  }
+
   async saveTabCategory(venueId: string, payload: Readonly<Record<string, unknown>>) {
     return this.executeAdminRelation(venueId, 'catalog_tab_category_command', 'save', payload)
   }
