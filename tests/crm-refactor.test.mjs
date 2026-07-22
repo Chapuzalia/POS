@@ -3,7 +3,7 @@ import test from 'node:test'
 import { canAccessCrm, canAccessCrmSection } from '../src/features/crm/routing/crmPermissions.ts'
 import { readFileSync } from 'node:fs'
 import { resolveSelectedVenueId } from '../src/features/crm/venues/services/venueSelection.ts'
-import { buildProductVariantInputs, getProductFormGuardError } from '../src/features/crm/catalog/forms/productFormModel.ts'
+import { buildProductCreationBatch, validateVariantDrafts } from '../src/features/crm/catalog/services/catalogAdminModel.ts'
 import { buildSalesReportAggregates, compareSalesReportValues } from '../src/features/crm/sales/services/salesReportModel.ts'
 
 test('CRM permissions preserve owner/admin access and reject POS roles', () => {
@@ -26,23 +26,24 @@ test('venue selection keeps an active venue and falls back deterministically', (
   assert.equal(resolveSelectedVenueId([], 'main'), '')
 })
 
-test('product form guards and conversion preserve prices and labels', () => {
-  assert.equal(getProductFormGuardError({
-    categoryId: '', name: 'Copa', priceInputs: { glass: '12,34' }, selectedSaleFormats: ['glass'], venueId: 'v1',
-  }), 'missing-product-data')
-  assert.equal(getProductFormGuardError({
-    categoryId: 'c1', name: 'Copa', priceInputs: {}, selectedSaleFormats: ['glass'], venueId: 'v1',
-  }), 'missing-sale-format-prices')
-  assert.equal(getProductFormGuardError({
-    categoryId: 'c1', name: ' Copa ', priceInputs: { glass: '12,34' }, selectedSaleFormats: ['glass'], venueId: 'v1',
-  }), null)
-  assert.deepEqual(buildProductVariantInputs(
-    ['glass'],
-    { glass: '12,34' },
-    [{ key: 'glass', label: 'Copa premium', sortOrder: 1, isActive: true }],
-  ), [{ format: 'glass', name: 'Copa premium', priceCents: 1234 }])
+test('product form guards preserve definitive variant and atomic quick-create rules', () => {
+  assert.match(validateVariantDrafts([], true), /variante/)
+  assert.match(validateVariantDrafts([
+    { name: 'Copa', priceCents: 1234, active: true, isDefault: true },
+    { name: 'Botella', priceCents: 2500, active: true, isDefault: true },
+  ], true), /única/)
+  assert.equal(validateVariantDrafts([
+    { name: 'Copa', priceCents: 1234, active: true, isDefault: true },
+  ], true), null)
+  const batch = buildProductCreationBatch({
+    productId: 'p1', venueId: 'v1', type: 'standard', name: 'Copa', description: null,
+    vatRate: 21, active: true, sortOrder: 0,
+    variants: [{ id: 'pv1', name: 'Normal', priceCents: 1234, active: true, isDefault: true, sortOrder: 0 }],
+    placement: { id: 'pl1', tabId: 't1', categoryId: 'c1', pinnedVariantId: null, sortOrder: 0 },
+  })
+  assert.deepEqual(batch.map((item) => item.command), ['create_product', 'create_placement'])
+  assert.equal(batch[0].payload.variants[0].priceCents, 1234)
 })
-
 test('sales aggregates ignore cancelled tickets, allocate net totals and sort consistently', () => {
   const line = {
     productId: 'p1', productName: 'Vodka', categoryId: 'c1', categoryName: 'Licores',

@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 const shell = await readFile(new URL('../src/features/crm/layout/CrmShell.tsx', import.meta.url), 'utf8')
-const productForm = await readFile(new URL('../src/features/crm/catalog/forms/ProductForm.tsx', import.meta.url), 'utf8')
+const productForm = await readFile(new URL('../src/features/crm/catalog/forms/CatalogProductEditor.tsx', import.meta.url), 'utf8')
 const styles = await readFile(new URL('../src/components/crm/crm.css', import.meta.url), 'utf8')
 
 test('the CRM theme is scoped and persists independently from the POS theme', () => {
@@ -19,8 +19,9 @@ test('the theme control is rendered beside logout', () => {
   assert.match(shell, /<span className="!truncate">Salir<\/span>/)
 })
 
-test('forms and modal headers continue using CRM theme tokens', () => {
-  assert.match(productForm, /crm-editor-header[^\n]+!bg-transparent[^\n]+!text-\[var\(--crm-text\)\]/)
-  assert.match(productForm, /crm-color-field/)
+test('catalog forms and modal headers continue using CRM theme tokens', () => {
+  assert.match(productForm, /CrmModal/)
+  assert.match(productForm, /var\(--crm-border-subtle\)/)
+  assert.match(productForm, /var\(--crm-text-muted\)/)
   assert.match(styles, /\.crm-shell \.crm-input \{[\s\S]*color: var\(--crm-text\)/)
 })

@@ -10,7 +10,7 @@ import {
 } from '../domain/resolver.ts'
 import type { CatalogData, CatalogReadMode } from '../domain/types.ts'
 import { catalogCache, type CatalogCache } from './cache.ts'
-import type { CatalogCommandName } from './commands.ts'
+import type { CatalogBatchCommand, CatalogCommandName } from './commands.ts'
 import { mapCatalogPayload } from './mapper.ts'
 
 type CommandResult = { orphanedImagePaths?: string[]; [key: string]: unknown }
@@ -123,4 +123,60 @@ export class CatalogRepository {
       throw toCatalogDomainError(error)
     }
   }
-}
+
+  async executeBatch(venueId: string, commands: readonly CatalogBatchCommand[]) {
+    try {
+      const { data, error } = await this.client.rpc('catalog_command_batch', {
+        p_venue_id: venueId,
+        p_commands: commands,
+      })
+      if (error) throw error
+      this.invalidate(venueId)
+      return data
+    } catch (error) {
+      throw toCatalogDomainError(error)
+    }
+  }
+
+  async saveTabCategory(venueId: string, payload: Readonly<Record<string, unknown>>) {
+    return this.executeAdminRelation(venueId, 'catalog_tab_category_command', 'save', payload)
+  }
+
+  async deleteTabCategory(venueId: string, id: string) {
+    return this.executeAdminRelation(venueId, 'catalog_tab_category_command', 'delete', { id })
+  }
+
+  async saveProductImage(venueId: string, payload: Readonly<Record<string, unknown>>) {
+    return this.executeAdminRelation(venueId, 'catalog_image_command', 'save', payload, true)
+  }
+
+  async deleteProductImage(venueId: string, productId: string) {
+    return this.executeAdminRelation(venueId, 'catalog_image_command', 'delete', { productId }, true)
+  }
+
+  private async executeAdminRelation(
+    venueId: string,
+    rpc: 'catalog_tab_category_command' | 'catalog_image_command',
+    action: 'save' | 'delete',
+    payload: Readonly<Record<string, unknown>>,
+    cleanStorage = false,
+  ) {
+    try {
+      const { data, error } = await this.client.rpc(rpc, {
+        p_venue_id: venueId,
+        p_action: action,
+        p_payload: payload,
+      })
+      if (error) throw error
+      this.invalidate(venueId)
+      const result = (data && typeof data === 'object' ? data : {}) as CommandResult
+      const orphaned = result.orphanedImagePaths?.filter((path): path is string => typeof path === 'string') ?? []
+      if (cleanStorage && orphaned.length) {
+        const { error: storageError } = await this.client.storage.from(PRODUCT_IMAGE_BUCKET).remove(orphaned)
+        if (storageError) throw storageError
+      }
+      return result
+    } catch (error) {
+      throw toCatalogDomainError(error)
+    }
+  }}

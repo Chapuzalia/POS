@@ -5,15 +5,17 @@ import { formatMoney } from '../../../../lib/format'
 import { paymentLabels } from '../../sales/services/salesReportModel'
 import { formatCrmDateTime } from '../../shared/formatCrmDateTime'
 import { type CSSProperties } from 'react'
-import { type Category, type CrmStats, type Product } from '../../../../types'
+import type { CrmStats } from '../../../../types'
+import type { CatalogCategory, CatalogPlacement, CatalogProduct } from '../../../catalog/domain/types.ts'
 
 export type DashboardCrmProps = {
   activeCategories: number
   activeProducts: number
-  categories: Category[]
+  categories: CatalogCategory[]
   disabled: boolean
   onRefresh: () => Promise<void>
-  products: Product[]
+  placements: CatalogPlacement[]
+  products: CatalogProduct[]
   stats: CrmStats | null
 }
 
@@ -23,12 +25,13 @@ export function DashboardCrm({
   categories,
   disabled,
   onRefresh,
+  placements,
   products,
   stats,
 }: DashboardCrmProps) {
   const categoryBars = categories.map((category) => ({
     ...category,
-    count: products.filter((product) => product.categoryId === category.id).length,
+    count: new Set(placements.filter((placement) => placement.categoryId === category.id).map((placement) => placement.productId)).size,
   }))
   const maxCategoryCount = Math.max(1, ...categoryBars.map((category) => category.count))
   const activeRatio = products.length ? Math.round((activeProducts / products.length) * 100) : 0

@@ -1,6 +1,7 @@
 import { CatalogDomainError } from '../domain/errors.ts'
 import type {
   CatalogAssignmentInput,
+  CatalogBatchCommand,
   CatalogPlacementInput,
   CatalogProductInput,
   CatalogReorderInput,
@@ -64,7 +65,7 @@ export class CatalogCommandService {
   }
 
   saveTab(venueId: string, input: { id?: string; key: string; label: string; icon?: string | null; active?: boolean; sortOrder: number }) {
-    return this.repository.executeCommand(venueId, 'save_tab', payload(input))
+    return this.repository.executeCommand(venueId, 'save_tab', payload({ ...input, icon: input.icon || 'receipt' }))
   }
 
   deleteTab(venueId: string, tabId: string) {
@@ -127,4 +128,27 @@ export class CatalogCommandService {
   reorder(venueId: string, input: CatalogReorderInput) {
     return this.repository.executeCommand(venueId, 'reorder', payload(input))
   }
-}
+
+  executeBatch(venueId: string, commands: readonly CatalogBatchCommand[]) {
+    return this.repository.executeBatch(venueId, commands)
+  }
+
+  saveTabCategory(venueId: string, input: {
+    id?: string; tabId: string; categoryId: string; active?: boolean; sortOrder: number
+  }) {
+    return this.repository.saveTabCategory(venueId, payload(input))
+  }
+
+  deleteTabCategory(venueId: string, id: string) {
+    return this.repository.deleteTabCategory(venueId, id)
+  }
+
+  saveProductImage(venueId: string, input: {
+    id?: string; productId: string; storagePath: string; mimeType: string; sizeBytes: number; sha256: string
+  }) {
+    return this.repository.saveProductImage(venueId, payload(input))
+  }
+
+  deleteProductImage(venueId: string, productId: string) {
+    return this.repository.deleteProductImage(venueId, productId)
+  }}

@@ -1,11 +1,9 @@
 import { AccessManagementCrm } from '../access/pages/AccessPage'
 import { StatsCrm } from '../analytics/pages/StatsPage'
-import { CatalogImportCrm } from '../catalog/pages/CatalogImportPage'
-import { CategoriesCrm } from '../catalog/pages/CategoriesPage'
-import { ProductsCrm } from '../catalog/pages/ProductsPage'
-import { SaleFormatsCrm } from '../catalog/pages/SaleFormatsPage'
-import { CatalogOrganizationCrm } from '../catalog/pages/CatalogOrganizationPage'
-import { ComplementsCrm } from '../catalog/pages/ComplementsPage'
+import { CatalogGroupsCrm } from '../catalog/pages/CatalogGroupsPage.tsx'
+import { CatalogProductsCrm } from '../catalog/pages/CatalogProductsPage.tsx'
+import { CatalogStructureCrm } from '../catalog/pages/CatalogStructurePage.tsx'
+import { CatalogTransferCrm } from '../catalog/pages/CatalogTransferPage.tsx'
 import { DashboardCrm } from '../dashboard/pages/DashboardPage'
 import { DiscountsCrm } from '../discounts/pages/DiscountsPage'
 import { PlanCrm } from '../plan/pages/PlanPage'
@@ -13,15 +11,17 @@ import { SalesReportsCrm } from '../sales/pages/SalesReportsPage'
 import type { RunAction } from '../shared/types'
 import { VenueSettingsCrm } from '../venues/pages/VenueSettingsPage'
 import { TableManagementPage } from '../../table-management/TableManagementPage'
-import { getAvailableSaleFormats } from '../../../lib/catalog'
-import type { Catalog, CrmStats, CrmVenue, TenantContext } from '../../../types'
+import type { CatalogData } from '../../catalog/domain/types.ts'
+import type { CrmStats, CrmVenue, TenantContext } from '../../../types'
 import type { CrmSection } from './crmNavigation'
 
 type Props = {
   activeSection: CrmSection
-  catalog: Catalog | null
+  catalog: CatalogData | null
   context: TenantContext
   disabled: boolean
+  isCatalogLoading: boolean
+  mutateCatalog: (action: () => Promise<unknown>) => Promise<boolean>
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
   onStatsRefresh: (options?: { silent?: boolean }) => Promise<void>
@@ -32,11 +32,15 @@ type Props = {
   venues: CrmVenue[]
 }
 
+const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'categories', 'selection-groups', 'modifiers', 'import'])
+
 export function CrmSectionContent({
   activeSection,
   catalog,
   context,
   disabled,
+  isCatalogLoading,
+  mutateCatalog,
   onCatalogChanged,
   onError,
   onStatsRefresh,
@@ -46,92 +50,27 @@ export function CrmSectionContent({
   stats,
   venues,
 }: Props) {
-  const categories = catalog?.categories ?? []
-  const products = catalog?.products ?? []
-  const saleFormats = getAvailableSaleFormats(catalog?.saleFormats)
-  const venueProducts = products.filter((product) => product.venueId === selectedVenueId)
-  const venueCategoryIds = new Set(venueProducts.map((product) => product.categoryId))
-  const venueCategories = categories.filter((category) => venueCategoryIds.has(category.id))
+  if (catalogSections.has(activeSection) && !catalog) {
+    return <section className="crm-panel !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
+  }
 
   switch (activeSection) {
     case 'dashboard':
-      return (
-        <DashboardCrm
-          activeCategories={venueCategories.filter((category) => category.isActive).length}
-          activeProducts={venueProducts.filter((product) => product.isActive).length}
-          categories={venueCategories}
-          disabled={disabled}
-          onRefresh={onStatsRefresh}
-          products={venueProducts}
-          stats={stats}
-        />
-      )
+      return catalog ? <DashboardCrm activeCategories={catalog.categories.filter((category) => category.active).length} activeProducts={catalog.products.filter((product) => product.active).length} categories={catalog.categories} disabled={disabled} onRefresh={onStatsRefresh} placements={catalog.placements} products={catalog.products} stats={stats} /> : null
     case 'products':
-      return (
-        <ProductsCrm
-          categories={categories}
-          defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21}
-          disabled={disabled}
-          onCatalogChanged={onCatalogChanged}
-          products={venueProducts}
-          runAction={runAction}
-          saleFormats={saleFormats}
-          selectedVenueId={selectedVenueId}
-          tenantContext={context}
-        />
-      )
+      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} mutate={mutateCatalog} /> : null
+    case 'categories':
+      return catalog ? <CatalogStructureCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
+    case 'selection-groups':
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" mutate={mutateCatalog} /> : null
+    case 'modifiers':
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" mutate={mutateCatalog} /> : null
     case 'access':
       return <AccessManagementCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} />
-    case 'categories':
-      return (
-        <CategoriesCrm
-          categories={categories}
-          disabled={disabled}
-          onCatalogChanged={onCatalogChanged}
-          products={products}
-          runAction={runAction}
-          tenantContext={context}
-        />
-      )
-    case 'sale-formats':
-      return (
-        <SaleFormatsCrm
-          disabled={disabled}
-          onCatalogChanged={onCatalogChanged}
-          products={products}
-          runAction={runAction}
-          saleFormats={saleFormats}
-          tenantContext={context}
-        />
-      )
-    case 'organization':
-      return <CatalogOrganizationCrm context={context} venueId={selectedVenueId} tabs={(catalog?.tabs ?? []).filter((tab) => tab.venueId === selectedVenueId)} placements={(catalog?.placements ?? []).filter((placement) => placement.venueId === selectedVenueId)} categories={categories} products={venueProducts} disabled={disabled} runAction={runAction} onCatalogChanged={onCatalogChanged} />
-    case 'complements':
-      return <ComplementsCrm context={context} venueId={selectedVenueId} groups={(catalog?.selectionGroups ?? []).filter((group) => group.venueId === selectedVenueId)} products={venueProducts} disabled={disabled} runAction={runAction} onCatalogChanged={onCatalogChanged} />
     case 'discounts':
-      return (
-        <DiscountsCrm
-          disabled={disabled}
-          onCatalogChanged={onCatalogChanged}
-          runAction={runAction}
-          selectedVenueId={selectedVenueId}
-          tenantContext={context}
-        />
-      )
+      return <DiscountsCrm disabled={disabled} onCatalogChanged={onCatalogChanged} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'import':
-      return (
-        <CatalogImportCrm
-          categories={categories}
-          disabled={disabled}
-          onCatalogChanged={onCatalogChanged}
-          products={venueProducts}
-          runAction={runAction}
-          saleFormats={saleFormats}
-          selectedVenueId={selectedVenueId}
-          tenantContext={context}
-          venueName={venues.find((venue) => venue.id === selectedVenueId)?.name ?? ''}
-        />
-      )
+      return catalog ? <CatalogTransferCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} venueName={venues.find((venue) => venue.id === selectedVenueId)?.name ?? 'local'} /> : null
     case 'tables':
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
     case 'reports':

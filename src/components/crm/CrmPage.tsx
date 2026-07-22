@@ -6,12 +6,12 @@ import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
 import { loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
-import type { Catalog, CrmStats, CrmVenue, TenantContext } from '../../types'
+import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
+import type { CrmStats, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 import './crm.css'
 
 export type CrmPageProps = {
-  catalog: Catalog | null
   context: TenantContext
   error: string | null
   isOnline: boolean
@@ -20,12 +20,14 @@ export type CrmPageProps = {
   onLogout: () => void
 }
 
-export function CrmPage({ catalog, context, error, isOnline, onCatalogChanged, onError, onLogout }: CrmPageProps) {
+export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, onLogout }: CrmPageProps) {
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)
   const [venues, setVenues] = useState<CrmVenue[]>([])
   const [selectedVenueId, setSelectedVenueId] = useState('')
+  const handleCatalogLoadError = useCallback((loadError: unknown) => onError(getReadableError(loadError)), [onError])
+  const { catalog, isLoading: isCatalogLoading, refresh: refreshAdminCatalog } = useCatalogAdmin(selectedVenueId, isOnline, handleCatalogLoadError)
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
     setIsBusy(true)
@@ -38,6 +40,21 @@ export function CrmPage({ catalog, context, error, isOnline, onCatalogChanged, o
       setIsBusy(false)
     }
   }, [onError])
+
+  const mutateCatalog = useCallback(async (action: () => Promise<unknown>) => {
+    setIsBusy(true)
+    onError(null)
+    try {
+      await action()
+      await Promise.all([refreshAdminCatalog(true), onCatalogChanged()])
+      return true
+    } catch (actionError) {
+      onError(getReadableError(actionError))
+      return false
+    } finally {
+      setIsBusy(false)
+    }
+  }, [onCatalogChanged, onError, refreshAdminCatalog])
 
   const refreshVenues = useCallback(async () => {
     const nextVenues = await loadCrmVenues(context)
@@ -58,13 +75,8 @@ export function CrmPage({ catalog, context, error, isOnline, onCatalogChanged, o
       }
       setStats(await loadCrmStats(context, selectedVenueId))
     }
-
     if (options.silent) {
-      try {
-        await loadStats()
-      } catch (statsError) {
-        onError(getReadableError(statsError))
-      }
+      try { await loadStats() } catch (statsError) { onError(getReadableError(statsError)) }
       return
     }
     await runAction(loadStats)
@@ -76,13 +88,11 @@ export function CrmPage({ catalog, context, error, isOnline, onCatalogChanged, o
 
   useEffect(() => {
     if (!isOnline || (activeSection !== 'dashboard' && activeSection !== 'stats')) return undefined
-
     let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
     const unsubscribe = subscribeToCrmStatsChanges(context, () => {
       if (refreshTimer) window.clearTimeout(refreshTimer)
       refreshTimer = window.setTimeout(() => void refreshStats({ silent: true }), 250)
     })
-
     return () => {
       if (refreshTimer) window.clearTimeout(refreshTimer)
       unsubscribe()
@@ -90,40 +100,14 @@ export function CrmPage({ catalog, context, error, isOnline, onCatalogChanged, o
   }, [activeSection, context, isOnline, refreshStats])
 
   if (!canAccessCrm(context.role)) return null
+  const disabled = !isOnline || isBusy || isCatalogLoading
 
-  const disabled = !isOnline || isBusy
-  return (
-    <CrmShell
-      activeSection={activeSection}
-      context={context}
-      disabled={disabled}
-      error={error}
-      isOnline={isOnline}
-      onLogout={onLogout}
-      onSectionChange={(section) => {
-        if (canAccessCrmSection(context.role, section)) setActiveSection(section)
-      }}
-      onVenueChange={(venueId) => {
-        setStats(null)
-        setSelectedVenueId(venueId)
-      }}
-      selectedVenueId={selectedVenueId}
-      venues={venues}
-    >
-      <CrmSectionContent
-        activeSection={activeSection}
-        catalog={catalog}
-        context={context}
-        disabled={disabled}
-        onCatalogChanged={onCatalogChanged}
-        onError={onError}
-        onStatsRefresh={refreshStats}
-        onVenuesChanged={refreshVenues}
-        runAction={runAction}
-        selectedVenueId={selectedVenueId}
-        stats={stats}
-        venues={venues}
-      />
-    </CrmShell>
-  )
+  return <CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
+    if (canAccessCrmSection(context.role, section)) setActiveSection(section)
+  }} onVenueChange={(venueId) => {
+    setStats(null)
+    setSelectedVenueId(venueId)
+  }} selectedVenueId={selectedVenueId} venues={venues}>
+    <CrmSectionContent activeSection={activeSection} catalog={catalog} context={context} disabled={disabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={onCatalogChanged} onError={onError} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+  </CrmShell>
 }

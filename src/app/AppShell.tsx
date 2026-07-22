@@ -285,7 +285,6 @@ export function AppShell() {
   return <AppRouter context={context}>{() => {
     if (isSuperadmin(context)) return <SuperAdminPage context={context} error={error} isOnline={isOnline} onError={setGeneralError} onLogout={session.logout} />
     if (isCrmAdministrator(context)) return <CrmPage
-      catalog={catalog}
       context={context}
       error={error}
       isOnline={isOnline}
@@ -315,8 +314,8 @@ export function AppShell() {
     />
     return <PosPage
       addFeedback={addFeedback}
-      cash={cash}
       catalog={catalog}
+      cash={cash}
       catalogStartTab={catalogStartTab}
       context={context}
       error={error}
