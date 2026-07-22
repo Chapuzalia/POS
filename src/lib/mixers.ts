@@ -33,6 +33,19 @@ export function splitLegacyMixerModifiers(
 
   return {
     modifiers: safeModifiers.filter((modifier) => !isLegacyMixerModifier(modifier)),
+    components: resolvedProductId && (mixer || legacyMixer) ? [{
+      id: `legacy-component:${resolvedProductId}`,
+      type: 'mixer',
+      selectionGroupId: null,
+      selectionGroupName: 'Mixer',
+      productId: resolvedProductId,
+      variantId: mixer?.variantId ?? null,
+      productName: mixer?.name ?? legacyMixer?.name ?? 'Mixer',
+      variantName: '',
+      quantity: 1,
+      priceDeltaCents: mixer?.priceCents ?? legacyMixer?.priceCents ?? 0,
+      sortOrder: 0,
+    }] : [],
     mixerProductId: resolvedProductId,
     mixer: mixer ?? (resolvedProductId && legacyMixer ? {
       productId: resolvedProductId,

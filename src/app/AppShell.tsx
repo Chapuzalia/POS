@@ -105,6 +105,7 @@ export function AppShell() {
     syncPendingEvents: offline.syncPendingEvents,
   })
   const quickSale = useQuickSale({
+    catalog,
     cashSession: cash.session,
     context,
     isOnline,
@@ -327,11 +328,12 @@ export function AppShell() {
       offline={{ lastSyncError: offline.lastSyncError, pendingCount: offline.pendingCount, retry: offline.syncPendingEvents }}
       onLogout={session.logout}
       onRefreshCatalog={refreshCatalog}
-      onSelectProduct={(product, format, allowFormat, source) => quickSale.selectProduct(
+      onSelectProduct={(product, format, allowFormat, source, catalogSnapshot) => quickSale.selectProduct(
         product,
         format,
         allowFormat,
         source,
+        catalogSnapshot,
         restaurant.posView.type === 'table_order'
           ? (nextProduct, variant, selection, sourceElement) => restaurant.addLine(nextProduct, variant, selection, undefined, sourceElement)
           : quickSale.addLine,

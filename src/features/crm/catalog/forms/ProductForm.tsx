@@ -3,7 +3,7 @@ import { COMMON_TAX_RATES, calculateGrossFromNet, calculateTaxFromGross, resolve
 import { CrmModal } from '../../shared/components/CrmModal'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
-import { canSellProductStandalone, canUseProductAsMixer, findProductVariantForSaleFormat, getDefaultSaleFormatsForKind, getProductSaleFormats, productKindOptions } from '../../../../lib/catalog'
+import { canSellProductStandalone, canUseProductAsMixer, findProductVariantForSaleFormat, getProductSaleFormats, productKindOptions } from '../../../../lib/catalog'
 import { centsToInput, formatMoney, parseMoneyToCents } from '../../../../lib/format'
 import { createProductWithVariant, createVariant, deleteProductImage, deleteVariant, updateProduct, updateVariant, uploadProductImage } from '../services/catalogService'
 import { getDefaultProductImageFillColor } from '../../../../lib/productImages'
@@ -71,9 +71,9 @@ export function ProductFormPanel({
   const firstCategory = categories[0]
   const isEditing = mode === 'edit'
   const primaryVariant = product?.variants.find((variant) => variant.isDefault) ?? product?.variants[0]
-  const initialKind = product?.kind ?? firstCategory?.kind ?? 'other'
+  const initialKind = product?.kind ?? 'other'
   const initialMixerSupplementCents = product?.mixerSupplementCents ?? 0
-  const initialSaleFormats = product ? getProductSaleFormats(product) : getDefaultSaleFormatsForKind(initialKind)
+  const initialSaleFormats = product ? getProductSaleFormats(product) : saleFormats.filter((format) => format.isActive).slice(0, 1).map((format) => format.key)
   const initialVariantByFormat = product
     ? assignProductVariantsToSaleFormats(product, initialSaleFormats)
     : new Map<SaleFormat, ProductVariant>()
@@ -89,6 +89,7 @@ export function ProductFormPanel({
   const [categoryId, setCategoryId] = useState(product?.categoryId ?? firstCategory?.id ?? '')
   const [description, setDescription] = useState(product?.description ?? '')
   const [kind, setKind] = useState<CatalogKind>(initialKind)
+  const [productType, setProductType] = useState<Product['productType']>(product?.productType ?? 'standard')
   const [selectedSaleFormats, setSelectedSaleFormats] = useState<SaleFormat[]>(initialSaleFormats)
   const [taxRateInput, setTaxRateInput] = useState(initialProductTaxRate === null ? 'inherit' : String(initialProductTaxRate))
   const [priceInputMode, setPriceInputMode] = useState<PriceInputMode>('gross')
@@ -129,16 +130,7 @@ export function ProductFormPanel({
   }, [imageObjectUrl])
 
   function handleCategoryChange(nextCategoryId: string) {
-    const nextCategory = categories.find((category) => category.id === nextCategoryId)
     setCategoryId(nextCategoryId)
-
-    if (!isEditing && nextCategory) {
-      setKind(nextCategory.kind)
-      setSelectedSaleFormats(getDefaultSaleFormatsForKind(nextCategory.kind))
-      setCanSellStandalone(true)
-      setCanUseAsMixer(nextCategory.kind === 'mixer')
-      setHasMixerSupplement(false)
-    }
   }
 
   function toggleSaleFormat(format: SaleFormat) {
@@ -275,6 +267,7 @@ export function ProductFormPanel({
             imagePath: nextImagePath,
             isFeatured,
             kind,
+            productType,
             mixerSupplementCents,
             name: name.trim(),
             saleFormats: selectedSaleFormats,
@@ -291,12 +284,15 @@ export function ProductFormPanel({
                 isDefault: index === 0,
                 name: formatVariant.name,
                 priceCents: formatVariant.priceCents,
+                saleFormatId: formatVariant.saleFormatId,
+                isActive: true,
               })
             } else {
               await createVariant(tenantContext, product.id, {
                 isDefault: index === 0,
                 name: formatVariant.name,
                 priceCents: formatVariant.priceCents,
+                saleFormatId: formatVariant.saleFormatId,
               })
             }
           }
@@ -307,6 +303,7 @@ export function ProductFormPanel({
         } else {
           await createProductWithVariant(tenantContext, {
             venueId: selectedVenueId,
+            productType,
             canSellStandalone,
             canUseAsMixer,
             categoryId: selectedCategory.id,
@@ -318,9 +315,10 @@ export function ProductFormPanel({
             name: name.trim(),
             saleFormats: selectedSaleFormats,
             taxRate: selectedTaxRate,
-            variants: formatVariants.map(({ name: variantLabel, priceCents }) => ({
+            variants: formatVariants.map(({ name: variantLabel, priceCents, saleFormatId }) => ({
               name: variantLabel,
               priceCents,
+              saleFormatId,
             })),
           })
         }
@@ -391,11 +389,23 @@ export function ProductFormPanel({
         </Field>
         <Field label="Tipo de producto">
           <CrmSelect
-            onChange={(nextKind) => setKind(nextKind as CatalogKind)}
-            options={productKindOptions.map((option) => ({ label: option.label, value: option.value }))}
-            value={kind}
+            onChange={(value) => setProductType(value as Product['productType'])}
+            options={[{ label: 'Producto estandar', value: 'standard' }, { label: 'Menu', value: 'menu' }]}
+            value={productType}
           />
         </Field>
+        <details className="rounded-[10px] bg-[var(--crm-surface-soft)] p-3 text-sm text-[var(--crm-text-secondary)]">
+          <summary className="cursor-pointer font-semibold">Compatibilidad del bar clasico</summary>
+          <div className="mt-3">
+            <Field label="Clasificacion legacy (temporal)">
+              <CrmSelect
+                onChange={(nextKind) => setKind(nextKind as CatalogKind)}
+                options={productKindOptions.map((option) => ({ label: option.label, value: option.value }))}
+                value={kind}
+              />
+            </Field>
+          </div>
+        </details>
         <Field label="Descripcion">
           <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setDescription(event.target.value)} value={description} />
         </Field>

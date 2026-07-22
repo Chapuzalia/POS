@@ -1,10 +1,8 @@
 import { CrmModal } from '../../shared/components/CrmModal'
 import { Field } from '../../shared/components/Field'
-import { CrmSelect } from '../../shared/components/CrmSelect'
 import { Save, X } from 'lucide-react'
-import { categoryKindOptions } from '../../../../lib/catalog'
 import { createCategory, updateCategory } from '../services/catalogService'
-import { type CatalogKind, type Category, type TenantContext } from '../../../../types'
+import { type Category, type TenantContext } from '../../../../types'
 import { type RunAction } from '../../shared/types'
 import { useMemo, useState } from 'react'
 
@@ -31,7 +29,7 @@ export function CategoryFormPanel({
 }: CategoryFormPanelProps) {
   const isEditing = mode === 'edit'
   const [name, setName] = useState(category?.name ?? '')
-  const [kind, setKind] = useState<CatalogKind>(category?.kind ?? 'alcohol')
+  const kind = category?.kind ?? 'other'
   const nextSortOrder = useMemo(() => categories.length + 1, [categories.length])
 
   async function saveCategory() {
@@ -93,13 +91,7 @@ export function CategoryFormPanel({
       <Field label="Nombre">
         <input autoFocus={!isEditing} className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" onChange={(event) => setName(event.target.value)} value={name} />
       </Field>
-      <Field label="Tipo">
-        <CrmSelect
-          onChange={(nextKind) => setKind(nextKind as CatalogKind)}
-          options={categoryKindOptions.map((option) => ({ label: option.label, value: option.value }))}
-          value={kind}
-        />
-      </Field>
+      <p className="text-sm text-[var(--crm-text-muted)]">La categoria solo organiza visualmente el catalogo; el comportamiento se configura en pestañas, opciones de venta y complementos.</p>
       <div className="crm-editor-actions">
         <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} type="submit">
           <Save className="h-4 w-4" />

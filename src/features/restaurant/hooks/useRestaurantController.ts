@@ -1,5 +1,6 @@
 import { useCallback, useState } from 'react'
 import { createId, getLineSignature } from '../../../lib/format'
+import { calculateSaleLineTotals, validateProductLineSelection } from '../../catalog/services/saleLineBuilder'
 import type {
   AppliedDiscount,
   CashSession,
@@ -533,8 +534,9 @@ export function useRestaurantController(options: Options) {
     }
     const current = draft.getCurrentOrder()
     if (!current || !options.context) return false
-    const { modifiers, mixerProductId, mixer } = selection
-    const additionsTotal = modifiers.reduce((total, modifier) => total + modifier.priceCents, 0) + (mixer?.priceCents ?? 0)
+    validateProductLineSelection(product, variant, selection)
+    const { modifiers, components, catalogSnapshot, mixerProductId, mixer } = selection
+    const totals = calculateSaleLineTotals(variant, components, modifiers)
     if (lineId) {
       const timestamp = nowIso()
       draft.updateDraft((detail) => ({
@@ -545,8 +547,10 @@ export function useRestaurantController(options: Options) {
           variantId: variant.id,
           productName: product.name,
           variantName: variant.name,
-          unitPriceCents: variant.priceCents + additionsTotal,
+          unitPriceCents: totals.grossBeforeDiscountCents,
           modifiers,
+          components,
+          catalogSnapshot: catalogSnapshot ?? line.catalogSnapshot,
           mixerProductId,
           mixer,
           updatedAt: timestamp,
@@ -555,13 +559,14 @@ export function useRestaurantController(options: Options) {
       options.onAddFeedback({ feedbackType: 'updated', productName: product.name, sourceElement })
       return true
     }
-    const signature = getLineSignature({ productId: product.id, variantId: variant.id, modifiers, mixerProductId })
+    const signature = getLineSignature({ productId: product.id, variantId: variant.id, modifiers, components, mixerProductId })
     const existing = current.lines.find((line) => line.productId !== null
       && line.note === null
       && getLineSignature({
         productId: line.productId,
         variantId: line.variantId ?? '',
         modifiers: line.modifiers,
+        components: line.components,
         mixerProductId: line.mixerProductId,
       }) === signature)
     const timestamp = nowIso()
@@ -578,11 +583,13 @@ export function useRestaurantController(options: Options) {
             variantId: variant.id,
             productName: product.name,
             variantName: variant.name,
-            unitPriceCents: variant.priceCents + additionsTotal,
+            unitPriceCents: totals.grossBeforeDiscountCents,
             quantity: 1,
             servedQuantity: 0,
             fullyServedAt: null,
             modifiers,
+            components,
+            catalogSnapshot: catalogSnapshot ?? { saleFormatId: variant.saleFormatId, saleFormatName: variant.name, categoryId: product.categoryId, categoryName: '', catalogTabId: null, catalogTabName: '' },
             mixerProductId,
             mixer,
             note: null,

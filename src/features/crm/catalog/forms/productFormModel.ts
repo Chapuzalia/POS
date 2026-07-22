@@ -24,9 +24,13 @@ export function buildProductVariantInputs(
   priceInputs: Partial<Record<SaleFormat, string>>,
   saleFormats: SaleFormatDefinition[],
 ) {
-  return selectedSaleFormats.map((format) => ({
-    format,
-    name: saleFormats.find((definition) => definition.key === format)?.label ?? format,
-    priceCents: parseMoneyToCents(priceInputs[format] ?? ''),
-  }))
+  return selectedSaleFormats.map((format) => {
+    const definition = saleFormats.find((candidate) => candidate.key === format)
+    return {
+      format,
+      ...(definition?.id ? { saleFormatId: definition.id } : {}),
+      name: definition?.label ?? format,
+      priceCents: parseMoneyToCents(priceInputs[format] ?? ''),
+    }
+  })
 }

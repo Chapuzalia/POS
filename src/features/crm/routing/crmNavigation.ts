@@ -1,12 +1,14 @@
-import { Armchair, BarChart3, Boxes, Gauge, LayoutDashboard, type LucideIcon, ReceiptText, Settings, SlidersHorizontal, Tags, Upload, Users } from 'lucide-react'
+import { Armchair, BarChart3, Boxes, Gauge, LayoutDashboard, LayoutGrid, Puzzle, type LucideIcon, ReceiptText, Settings, SlidersHorizontal, Tags, Upload, Users } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'sale-formats' | 'discounts' | 'tables' | 'reports' | 'import' | 'stats' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'categories' | 'organization' | 'complements' | 'sale-formats' | 'discounts' | 'tables' | 'reports' | 'import' | 'stats' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
 export const productNavItems: CrmNavItem[] = [
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'categories', label: 'Categorias', icon: Tags },
+  { id: 'organization', label: 'Organizacion del TPV', icon: LayoutGrid },
+  { id: 'complements', label: 'Complementos', icon: Puzzle },
   { id: 'discounts', label: 'Descuentos', icon: Tags },
   { id: 'sale-formats', label: 'Formatos', icon: SlidersHorizontal },
 ]
@@ -39,6 +41,8 @@ export function getSectionTitle(section: CrmSection) {
   if (section === 'sale-formats') {
     return 'Formatos de venta'
   }
+  if (section === 'organization') return 'Organizacion del TPV'
+  if (section === 'complements') return 'Mixers y modificadores'
   if (section === 'import') {
     return 'Importar y exportar catalogo'
   }

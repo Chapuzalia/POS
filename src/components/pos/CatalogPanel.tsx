@@ -15,14 +15,11 @@ import {
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   canSellProductStandalone,
-  getActiveSaleFormats,
-  getSaleFormatLabel,
   getProductSaleFormats,
-  getProductVariantForSaleFormat,
-  productSupportsSaleFormat,
 } from '../../lib/catalog'
+import { getCatalogPlacements, getCatalogTabs } from '../../features/catalog/services/catalogAccess'
 import { formatMoney, normalizeText } from '../../lib/format'
-import type { Catalog, CatalogFilter, CatalogKind, CatalogStartTab, Category, Product, ProductSalesStat, SaleFormat } from '../../types'
+import type { Catalog, CatalogFilter, CatalogPlacement, CatalogStartTab, Product, ProductSalesStat, ProductVariant, SaleFormat, SaleLineCatalogSnapshot } from '../../types'
 import { Button } from '../ui'
 
 const saleFormatIcons: Record<string, LucideIcon> = {
@@ -49,7 +46,7 @@ function compareProductNames(a: Product, b: Product) {
   return a.name.localeCompare(b.name, 'es', { sensitivity: 'base' }) || a.sortOrder - b.sortOrder
 }
 
-function getCatalogKindIcon(kind: CatalogKind, activeFilter: CatalogFilter) {
+function getCatalogIcon(icon: string, activeFilter: CatalogFilter) {
   if (activeFilter === 'top') {
     return BarChart3
   }
@@ -58,60 +55,18 @@ function getCatalogKindIcon(kind: CatalogKind, activeFilter: CatalogFilter) {
     return getSaleFormatIcon(activeFilter)
   }
 
-  if (kind === 'alcohol' || kind === 'mixed' || kind === 'shot') {
-    return Wine
-  }
-  if (kind === 'beer' || kind === 'beer_bottle') {
-    return Beer
-  }
-  if (kind === 'cocktail') {
-    return Martini
-  }
-
-  return GlassWater
+  return saleFormatIcons[icon] ?? GlassWater
 }
 
-function getCategoryKindsForFilter(filter: CatalogFilter): CatalogKind[] | null {
-  if (filter === 'all' || filter === 'top') {
-    return null
-  }
-  if (filter === 'cubata' || filter === 'copa' || filter === 'shot') {
-    return ['alcohol', 'mixed', 'shot']
-  }
-  if (filter === 'beer_bottle') {
-    return ['beer_bottle', 'beer']
-  }
-  if (filter === 'soft_bottle') {
-    return ['soft_bottle', 'mixer']
-  }
-  if (filter === 'cocktail') {
-    return ['cocktail']
-  }
-
-  return null
-}
-
-function isSoftBottleCatalogProduct(product: Product, category: Category | undefined) {
-  if (category?.kind === 'other') {
-    return false
-  }
-
-  return product.kind === 'soft_bottle' || product.kind === 'mixer' || category?.kind === 'soft_bottle' || category?.kind === 'mixer'
-}
-
-function getProductSaleFormat(product: Product, activeFilter: CatalogFilter): SaleFormat {
-  if (activeFilter !== 'all' && activeFilter !== 'top') {
-    return activeFilter
-  }
-
-  return getProductSaleFormats(product)[0] ?? 'soft_bottle'
+function getProductSaleFormat(product: Product, variant: ProductVariant | null): SaleFormat {
+  return variant?.saleFormatKey ?? getProductSaleFormats(product)[0] ?? 'other'
 }
 
 type CatalogPanelProps = {
   catalog: Catalog | null
   catalogStartTab: CatalogStartTab
   disabled: boolean
-  onSelectProduct: (product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean, sourceElement: HTMLElement) => void
+  onSelectProduct: (product: Product, saleFormat: SaleFormat, allowFormatSelection: boolean, sourceElement: HTMLElement, catalogSnapshot: SaleLineCatalogSnapshot) => void
   productSalesStats: ProductSalesStat[]
 }
 
@@ -124,7 +79,8 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
   const tabsScrollerRef = useRef<HTMLDivElement | null>(null)
   const categories = useMemo(() => catalog?.categories ?? [], [catalog])
   const products = useMemo(() => catalog?.products ?? [], [catalog])
-  const saleFormats = useMemo(() => getActiveSaleFormats(catalog?.saleFormats), [catalog?.saleFormats])
+  const catalogTabs = useMemo(() => catalog ? getCatalogTabs(catalog) : [], [catalog])
+  const allPlacements = useMemo(() => catalog ? getCatalogPlacements(catalog) : [], [catalog])
   const productSalesById = useMemo(
     () => new Map(productSalesStats.map((stat) => [stat.productId, stat])),
     [productSalesStats],
@@ -134,17 +90,17 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
       catalogStartTab === 'top'
         ? { id: 'top', label: 'Top items', icon: BarChart3 }
         : { id: 'all', label: 'Todo', icon: ReceiptText },
-      ...saleFormats.map((format) => ({
-        id: format.key,
-        label: getSaleFormatLabel(format.key, saleFormats),
-        icon: getSaleFormatIcon(format.key),
+      ...catalogTabs.map((tab) => ({
+        id: tab.id,
+        label: tab.label,
+        icon: getSaleFormatIcon(tab.icon || tab.key),
       })),
     ],
-    [catalogStartTab, saleFormats],
+    [catalogStartTab, catalogTabs],
   )
   const categoryById = useMemo(() => new Map(categories.map((category) => [category.id, category])), [categories])
   const normalizedSearch = normalizeText(search.trim())
-  const productFilter = normalizedSearch ? 'all' : activeFilter
+  const productFilter: CatalogFilter = normalizedSearch ? 'all' : activeFilter
   const isFormatFilter = activeFilter !== 'all' && activeFilter !== 'top'
 
   useEffect(() => {
@@ -153,11 +109,11 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
   }, [catalogStartTab])
 
   useEffect(() => {
-    if (activeFilter !== 'all' && activeFilter !== 'top' && !saleFormats.some((format) => format.key === activeFilter)) {
+    if (activeFilter !== 'all' && activeFilter !== 'top' && !catalogTabs.some((tab) => tab.id === activeFilter)) {
       setActiveFilter(catalogStartTab)
       setSelectedCategoryId(null)
     }
-  }, [activeFilter, catalogStartTab, saleFormats])
+  }, [activeFilter, catalogStartTab, catalogTabs])
 
   useEffect(() => {
     updateTabScrollState()
@@ -177,88 +133,65 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
     }
   }, [filterOptions.length])
 
-  const visibleCategories = useMemo(
-    () => {
-      const allowedKinds = getCategoryKindsForFilter(activeFilter)
-      return categories
-        .filter((category) => !allowedKinds || allowedKinds.includes(category.kind))
-        .sort((a, b) => a.sortOrder - b.sortOrder)
-    },
-    [activeFilter, categories],
-  )
+  const activePlacements = useMemo(() => {
+    const source = productFilter === 'all' || productFilter === 'top'
+      ? allPlacements
+      : allPlacements.filter((placement) => placement.tabId === productFilter)
+    const byProduct = new Map<string, CatalogPlacement>()
+    for (const placement of source) {
+      if (!byProduct.has(placement.productId)) byProduct.set(placement.productId, placement)
+    }
+    return [...byProduct.values()]
+  }, [allPlacements, productFilter])
 
-  const visibleProducts = useMemo(() => {
-    return products
-      .filter((product) => product.isActive)
-      .filter((product) => productFilter === 'all' || productFilter === 'top' || productSupportsSaleFormat(product, productFilter))
-      .filter((product) => productFilter !== 'top' || (productSalesById.get(product.id)?.quantity ?? 0) > 0)
-      .filter((product) => productFilter !== 'soft_bottle' || isSoftBottleCatalogProduct(product, categoryById.get(product.categoryId)))
-      .filter((product) => productFilter !== 'soft_bottle' || canSellProductStandalone(product))
-      .filter((product) => productFilter !== 'beer_bottle' || canSellProductStandalone(product))
-      .filter((product) => productFilter !== 'cocktail' || canSellProductStandalone(product))
-      .filter((product) => productFilter !== 'all' || canSellProductStandalone(product))
-      .filter((product) => !selectedCategoryId || product.categoryId === selectedCategoryId)
-      .filter((product) => {
-        if (normalizedSearch || productFilter === 'all' || productFilter === 'top') {
-          return true
-        }
+  const visibleCategories = useMemo(() => {
+    const categoryIds = new Set(activePlacements.map((placement) => placement.categoryId))
+    return categories.filter((category) => category.isActive && categoryIds.has(category.id))
+      .sort((a, b) => a.sortOrder - b.sortOrder)
+  }, [activePlacements, categories])
 
-        return selectedCategoryId ? !product.isFeatured : product.isFeatured
-      })
-      .filter((product) => {
-        if (!normalizedSearch) {
-          return true
-        }
+  const visibleEntries = useMemo(() => activePlacements
+    .flatMap((placement) => {
+      const product = products.find((candidate) => candidate.id === placement.productId)
+      if (!product?.isActive || ((productFilter === 'all' || productFilter === 'top') && !canSellProductStandalone(product))) return []
+      if (productFilter === 'top' && (productSalesById.get(product.id)?.quantity ?? 0) <= 0) return []
+      if (selectedCategoryId && placement.categoryId !== selectedCategoryId) return []
+      if (!normalizedSearch && productFilter !== 'all' && productFilter !== 'top') {
+        if (selectedCategoryId ? placement.isFeatured : !placement.isFeatured) return []
+      }
+      if (normalizedSearch) {
+        const categoryName = categoryById.get(placement.categoryId)?.name ?? ''
+        const searchable = normalizeText([product.name, product.description ?? '', categoryName, ...product.variants.map((variant) => variant.name)].join(' '))
+        if (!searchable.includes(normalizedSearch)) return []
+      }
+      const variant = product.variants.find((candidate) => candidate.id === placement.defaultVariantId && candidate.isActive !== false)
+        ?? product.variants.find((candidate) => candidate.isDefault && candidate.isActive !== false)
+        ?? product.variants.find((candidate) => candidate.isActive !== false)
+        ?? null
+      return [{ product, placement, variant }]
+    })
+    .sort((a, b) => {
+      if (productFilter !== 'top') return compareProductNames(a.product, b.product)
+      const firstStat = productSalesById.get(a.product.id)
+      const secondStat = productSalesById.get(b.product.id)
+      return (secondStat?.quantity ?? 0) - (firstStat?.quantity ?? 0)
+        || (secondStat?.totalCents ?? 0) - (firstStat?.totalCents ?? 0)
+        || compareProductNames(a.product, b.product)
+    }), [activePlacements, categoryById, normalizedSearch, productFilter, productSalesById, products, selectedCategoryId])
 
-        const categoryName = categoryById.get(product.categoryId)?.name ?? ''
-        const searchable = normalizeText(
-          [
-            product.name,
-            product.description ?? '',
-            categoryName,
-            ...product.variants.map((variant) => variant.name),
-          ].join(' '),
-        )
-
-        return searchable.includes(normalizedSearch)
-      })
-      .sort((a, b) => {
-        if (productFilter !== 'top') {
-          return compareProductNames(a, b)
-        }
-
-        const firstStat = productSalesById.get(a.id)
-        const secondStat = productSalesById.get(b.id)
-        return (
-          (secondStat?.quantity ?? 0) - (firstStat?.quantity ?? 0) ||
-          (secondStat?.totalCents ?? 0) - (firstStat?.totalCents ?? 0) ||
-          compareProductNames(a, b)
-        )
-      })
-  }, [categoryById, normalizedSearch, productFilter, productSalesById, products, selectedCategoryId])
-
-  const categoryProductCounts = useMemo(() => {
-    return new Map(
-      visibleCategories.map((category) => [
-        category.id,
-        products.filter(
-          (product) =>
-            product.categoryId === category.id &&
-            product.isActive &&
-            (activeFilter === 'all' || activeFilter === 'top' || productSupportsSaleFormat(product, activeFilter)) &&
-            (activeFilter === 'all' || activeFilter === 'top' || !product.isFeatured) &&
-            (activeFilter === 'all' || activeFilter === 'top' || activeFilter === 'cubata' || canSellProductStandalone(product)),
-        ).length,
-      ]),
-    )
-  }, [activeFilter, products, visibleCategories])
+  const categoryProductCounts = useMemo(() => new Map(visibleCategories.map((category) => [
+    category.id,
+    activePlacements.filter((placement) => placement.categoryId === category.id && (
+      activeFilter === 'all' || activeFilter === 'top' || !placement.isFeatured
+    )).length,
+  ])), [activeFilter, activePlacements, visibleCategories])
   const visibleCategoriesWithProducts = visibleCategories.filter((category) => (categoryProductCounts.get(category.id) ?? 0) > 0)
   const showCategories =
     activeFilter !== 'top' &&
     !normalizedSearch &&
     !selectedCategoryId &&
     (isFormatFilter ? visibleCategoriesWithProducts.length > 0 : visibleCategoriesWithProducts.length > 1)
-  const showProductGrid = !showCategories || (isFormatFilter && visibleProducts.length > 0)
+  const showProductGrid = !showCategories || (isFormatFilter && visibleEntries.length > 0)
   const selectedCategory = selectedCategoryId
     ? categories.find((category) => category.id === selectedCategoryId) ?? null
     : null
@@ -385,20 +318,32 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
           ) : null}
 
           {showProductGrid ? (
-            visibleProducts.length ? (
+            visibleEntries.length ? (
               <div className="grid grid-cols-3 gap-3 md:grid-cols-4 2xl:grid-cols-5">
-                {visibleProducts.map((product) => {
-                  const saleFormat = getProductSaleFormat(product, productFilter)
-                  const primaryVariant = getProductVariantForSaleFormat(product, saleFormat)
+                {visibleEntries.map(({ product, placement, variant: primaryVariant }) => {
+                  const saleFormat = getProductSaleFormat(product, primaryVariant)
                   const allowFormatSelection = productFilter === 'all' || productFilter === 'top'
-                  const ProductIcon = getCatalogKindIcon(product.kind, productFilter)
+                  const tabIcon = catalogTabs.find((tab) => tab.id === placement.tabId)?.icon
+                  const ProductIcon = getCatalogIcon(tabIcon ?? categoryById.get(placement.categoryId)?.icon ?? '', productFilter)
 
                   return (
                     <button
                       className="flex min-h-8 flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
                       disabled={disabled || !primaryVariant}
                       key={product.id}
-                      onClick={(event) => onSelectProduct(product, saleFormat, allowFormatSelection, event.currentTarget)}
+                      onClick={(event) => {
+                        const tab = catalogTabs.find((candidate) => candidate.id === placement.tabId)
+                        const category = categoryById.get(placement.categoryId)
+                        const saleFormatDefinition = catalog?.saleFormats.find((format) => format.id === primaryVariant?.saleFormatId || format.key === primaryVariant?.saleFormatKey)
+                        onSelectProduct(product, saleFormat, allowFormatSelection, event.currentTarget, {
+                          saleFormatId: saleFormatDefinition?.id ?? primaryVariant?.saleFormatId ?? null,
+                          saleFormatName: saleFormatDefinition?.label ?? primaryVariant?.name ?? '',
+                          categoryId: category?.id ?? placement.categoryId,
+                          categoryName: category?.name ?? '',
+                          catalogTabId: tab?.id ?? placement.tabId,
+                          catalogTabName: tab?.label ?? '',
+                        })
+                      }}
                       type="button"
                     >
                       <span className="grid aspect-square w-full place-items-center overflow-hidden bg-[var(--surface-secondary)] text-[var(--accent)]">
@@ -431,9 +376,9 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
           ) : null}
 
           {showCategories ? (
-            <div className={`${showProductGrid && visibleProducts.length ? 'mt-3 ' : ''}grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5`}>
+            <div className={`${showProductGrid && visibleEntries.length ? 'mt-3 ' : ''}grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5`}>
               {visibleCategoriesWithProducts.map((category) => {
-                const Icon = getCatalogKindIcon(category.kind, activeFilter)
+                const Icon = getCatalogIcon(category.icon, activeFilter)
                 const count = categoryProductCounts.get(category.id) ?? 0
 
                 return (

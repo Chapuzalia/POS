@@ -337,7 +337,7 @@ export function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantCo
         ) : (
           <SalesReportAggregateTable
             items={visibleAggregates}
-            labelHeading={activeView === 'products' ? 'Producto' : activeView === 'categories' ? 'Categoría' : 'Formato'}
+            labelHeading={activeView === 'products' ? 'Producto' : activeView === 'variants' ? 'Variante' : activeView === 'categories' ? 'Categoría' : activeView === 'tabs' ? 'Pestaña' : activeView === 'mixers' ? 'Mixer' : activeView === 'menu-components' ? 'Componente' : activeView === 'modifiers' ? 'Modificador' : 'Formato'}
             loading={!reports}
             onSort={handleSort}
             sortDirection={sortDirection}

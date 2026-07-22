@@ -31,7 +31,7 @@ export type CatalogTransferModifierGroup = Omit<ModifierGroup, 'productId'>
 
 export type CatalogTransferProduct = Omit<
   Product,
-  'tenantId' | 'venueId' | 'imagePath' | 'imageUrl' | 'variants' | 'modifierGroups'
+  'tenantId' | 'venueId' | 'imagePath' | 'imageUrl' | 'variants' | 'modifierGroups' | 'variantSelectionGroups'
 > & {
   imageFile: string | null
   modifierGroups: CatalogTransferModifierGroup[]
@@ -140,6 +140,7 @@ function toTransferProduct(product: Product, imageFile: string | null): CatalogT
     id: product.id,
     categoryId: product.categoryId,
     name: product.name,
+    productType: product.productType,
     description: product.description,
     imageFile,
     kind: product.kind,
@@ -275,7 +276,10 @@ function parseVariant(value: unknown, productIndex: number, variantIndex: number
     name: readString(value.name, `${prefix}.name`),
     priceCents: readInteger(value.priceCents, `${prefix}.priceCents`),
     sku: value.sku === null ? null : readString(value.sku, `${prefix}.sku`, true),
+    saleFormatId: value.saleFormatId === null || value.saleFormatId === undefined ? null : readId(value.saleFormatId, `${prefix}.saleFormatId`),
+    saleFormatKey: value.saleFormatKey === null || value.saleFormatKey === undefined ? null : readString(value.saleFormatKey, `${prefix}.saleFormatKey`),
     isDefault: readBoolean(value.isDefault, `${prefix}.isDefault`),
+    isActive: value.isActive === undefined ? true : readBoolean(value.isActive, `${prefix}.isActive`),
     sortOrder: readInteger(value.sortOrder, `${prefix}.sortOrder`),
   }
 }
@@ -290,6 +294,7 @@ function parseModifierGroup(value: unknown, productIndex: number, groupIndex: nu
     name: readString(value.name, `${prefix}.name`),
     minSelect: readInteger(value.minSelect, `${prefix}.minSelect`),
     maxSelect: readInteger(value.maxSelect, `${prefix}.maxSelect`, 1),
+    isActive: value.isActive === undefined ? true : readBoolean(value.isActive, `${prefix}.isActive`),
     sortOrder: readInteger(value.sortOrder, `${prefix}.sortOrder`),
     modifiers: readArray(value.modifiers, `${prefix}.modifiers`).map((modifier, modifierIndex) => {
       if (!isRecord(modifier)) {
@@ -300,6 +305,8 @@ function parseModifierGroup(value: unknown, productIndex: number, groupIndex: nu
         groupId: readId(modifier.groupId, `${prefix}.modifiers[${modifierIndex}].groupId`),
         name: readString(modifier.name, `${prefix}.modifiers[${modifierIndex}].name`),
         priceCents: readInteger(modifier.priceCents, `${prefix}.modifiers[${modifierIndex}].priceCents`),
+        isDefault: modifier.isDefault === undefined ? false : readBoolean(modifier.isDefault, `${prefix}.modifiers[${modifierIndex}].isDefault`),
+        isActive: modifier.isActive === undefined ? true : readBoolean(modifier.isActive, `${prefix}.modifiers[${modifierIndex}].isActive`),
         sortOrder: readInteger(modifier.sortOrder, `${prefix}.modifiers[${modifierIndex}].sortOrder`),
       }
     }),
@@ -336,6 +343,9 @@ function parseManifest(value: unknown): CatalogTransferManifest {
       throw new Error(`La clave del formato ${index + 1} no es valida.`)
     }
     return {
+      id: saleFormat.id === undefined ? `legacy-format:${key}` : readId(saleFormat.id, `saleFormats[${index}].id`),
+      tenantId: typeof saleFormat.tenantId === 'string' ? saleFormat.tenantId : undefined,
+      venueId: typeof saleFormat.venueId === 'string' ? saleFormat.venueId : null,
       key,
       label: readString(saleFormat.label, `saleFormats[${index}].label`),
       isActive: readBoolean(saleFormat.isActive, `saleFormats[${index}].isActive`),
@@ -355,6 +365,7 @@ function parseManifest(value: unknown): CatalogTransferManifest {
       id: readId(product.id, `${prefix}.id`),
       categoryId: readId(product.categoryId, `${prefix}.categoryId`),
       name: readString(product.name, `${prefix}.name`),
+      productType: product.productType === 'menu' ? 'menu' as const : 'standard' as const,
       description: product.description === null ? null : readString(product.description, `${prefix}.description`, true),
       imageFile,
       kind: readKind(product.kind, `${prefix}.kind`),

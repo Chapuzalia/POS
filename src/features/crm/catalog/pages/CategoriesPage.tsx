@@ -3,7 +3,6 @@ import { CategoryFormPanel } from '../forms/CategoryForm'
 import { EmptyList } from '../../shared/components/EmptyList'
 import { Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { deleteCategory } from '../services/catalogService'
-import { getKindLabel } from '../../../../lib/catalog'
 import { type Category, type Product, type TenantContext } from '../../../../types'
 import { type RunAction } from '../../shared/types'
 import { useMemo, useState } from 'react'
@@ -44,9 +43,7 @@ export function CategoriesCrm({ categories, disabled, onCatalogChanged, products
       return categories
     }
 
-    return categories.filter((category) =>
-      [category.name, category.kind, getKindLabel(category.kind)].join(' ').toLowerCase().includes(normalizedQuery),
-    )
+    return categories.filter((category) => category.name.toLowerCase().includes(normalizedQuery))
   }, [categories, query])
   const totalPages = Math.max(1, Math.ceil(filteredCategories.length / CRM_PAGE_SIZE))
   const visiblePage = Math.min(currentPage, totalPages)
@@ -103,7 +100,7 @@ export function CategoriesCrm({ categories, disabled, onCatalogChanged, products
         <div className="crm-data-table !grid !overflow-auto crm-categories-table">
           <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[920px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
             <span>Categoria</span>
-            <span>Tipo</span>
+            <span>Funcion</span>
             <span>Productos</span>
             <span>Estado</span>
             <span>Acciones</span>
@@ -162,7 +159,7 @@ export function CategoryListRow({ category, disabled, onDelete, onEdit, productC
         <strong>{category.name}</strong>
         <span>Orden {category.sortOrder}</span>
       </div>
-      <span>{getKindLabel(category.kind)}</span>
+      <span>Organizacion visual</span>
       <strong>{productCount}</strong>
       <span className={category.isActive ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-active !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]' : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold crm-status-pill-muted !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-secondary)]'}>
         {category.isActive ? 'Activa' : 'Oculta'}

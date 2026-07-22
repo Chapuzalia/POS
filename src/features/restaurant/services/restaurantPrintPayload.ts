@@ -4,11 +4,28 @@ import type {
   PaymentMethod,
   SaleCreatedPayload,
   TenantContext,
-  TicketLineModifier,
 } from '../../../types/index.ts'
 import type { RestaurantEqualSplit, RestaurantOrderLine, RestaurantOrderLineMove } from '../../tables/types.ts'
 
 export type RestaurantPrintLine = RestaurantOrderLine & { lineTotalCents?: number }
+
+function printComponents(line: RestaurantOrderLine) {
+  if (line.components?.length) return line.components
+  if (!line.mixer) return []
+  return [{
+    id: `legacy-component:${line.mixerProductId || line.mixer.productId}`,
+    type: 'mixer' as const,
+    selectionGroupId: null,
+    selectionGroupName: 'Mixer',
+    productId: line.mixerProductId || line.mixer.productId,
+    variantId: line.mixer.variantId ?? null,
+    productName: line.mixer.name,
+    variantName: '',
+    quantity: 1,
+    priceDeltaCents: line.mixer.priceCents,
+    sortOrder: 0,
+  }]
+}
 
 type BuildRestaurantPrintPayloadInput = {
   cashSession: CashSession
@@ -23,16 +40,6 @@ type BuildRestaurantPrintPayloadInput = {
   subtotalCents: number
   ticketId: string
   totalCents: number
-}
-
-function printModifiers(line: RestaurantOrderLine): TicketLineModifier[] {
-  if (!line.mixer) return line.modifiers
-  return [...line.modifiers, {
-    id: `mixer:${line.mixerProductId || line.mixer.productId}`,
-    groupId: 'mixer',
-    name: line.mixer.name,
-    priceCents: line.mixer.priceCents,
-  }]
 }
 
 export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadInput): SaleCreatedPayload {
@@ -52,7 +59,12 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       totalCents: input.totalCents,
       createdAt: input.createdAt,
     },
-    lines: input.lines.map((line) => ({
+    lines: input.lines.map((line) => {
+      const components = printComponents(line)
+      const modifierDeltaCents = line.modifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
+        + components.reduce((total, component) => total + (component.modifiers ?? []).reduce((sum, modifier) => sum + modifier.priceCents, 0), 0)
+      const componentDeltaCents = components.reduce((total, component) => total + component.priceDeltaCents, 0)
+      return {
       id: `${input.ticketId}:${line.id}`,
       ticketId: input.ticketId,
       tenantId: input.context.tenantId,
@@ -60,12 +72,18 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       variantId: line.variantId || '',
       productName: line.productName,
       variantName: line.variantName,
+      basePriceCents: line.unitPriceCents - modifierDeltaCents - componentDeltaCents,
+      componentDeltaCents,
+      modifierDeltaCents,
+      grossBeforeDiscountCents: line.unitPriceCents,
       quantity: line.quantity,
       unitPriceCents: line.unitPriceCents,
       lineTotalCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity,
-      modifiers: printModifiers(line),
+      modifiers: line.modifiers,
+      components,
+      catalogSnapshot: { saleFormatId: null, saleFormatName: '', categoryId: null, categoryName: '', catalogTabId: null, catalogTabName: '' },
       fiscalSnapshot: null,
-    })),
+    }}),
     sale: {
       id: input.saleId,
       tenantId: input.context.tenantId,

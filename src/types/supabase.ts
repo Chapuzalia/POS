@@ -1,4 +1,4 @@
-import type { CatalogKind, DeviceMode, PaymentMethod, SaleFormat, TenantRole } from './domain'
+import type { CatalogKind, CatalogProfile, DeviceMode, PaymentMethod, ProductType, SaleFormat, SelectionGroupKind, TenantRole } from './domain'
 
 export type TenantRow = {
   id: string
@@ -30,6 +30,7 @@ export type VenueRow = {
   legal_name: string | null
   tax_id: string | null
   default_tax_rate: number
+  catalog_profile: CatalogProfile
 }
 
 export type DeviceRow = {
@@ -55,6 +56,9 @@ export type CategoryRow = {
 }
 
 export type SaleFormatRow = {
+  id: string
+  tenant_id: string
+  venue_id?: string | null
   key: string
   label: string
   is_active: boolean
@@ -67,7 +71,10 @@ export type VariantRow = {
   name: string
   price_cents: number
   sku: string | null
+  sale_format_id: string | null
+  sale_formats?: { key: string }[] | { key: string } | null
   is_default: boolean
+  is_active: boolean
   sort_order: number
 }
 
@@ -76,6 +83,8 @@ export type ModifierRow = {
   group_id: string
   name: string
   price_cents: number
+  is_default?: boolean | null
+  is_active?: boolean | null
   sort_order: number
 }
 
@@ -85,6 +94,7 @@ export type ModifierGroupRow = {
   name: string
   min_select: number
   max_select: number
+  is_active?: boolean | null
   sort_order: number
   modifiers: ModifierRow[] | null
 }
@@ -95,6 +105,7 @@ export type ProductRow = {
   venue_id: string
   category_id: string
   name: string
+  product_type: ProductType
   description: string | null
   image_path?: string | null
   kind: CatalogKind
@@ -108,6 +119,70 @@ export type ProductRow = {
   sort_order: number
   product_variants: VariantRow[] | null
   modifier_groups: ModifierGroupRow[] | null
+  variant_selection_groups?: VariantSelectionGroupRow[] | null
+}
+
+export type CatalogTabRow = {
+  id: string
+  tenant_id: string
+  venue_id: string
+  key: string
+  label: string
+  icon: string | null
+  is_active: boolean
+  sort_order: number
+}
+
+export type CatalogPlacementRow = {
+  id: string
+  tenant_id: string
+  venue_id: string
+  tab_id: string
+  category_id: string
+  product_id: string
+  default_variant_id: string | null
+  is_featured: boolean
+  is_active: boolean
+  sort_order: number
+}
+
+export type SelectionGroupItemRow = {
+  id: string
+  group_id: string
+  product_id: string
+  variant_id: string | null
+  price_delta_cents: number
+  is_default: boolean
+  is_active: boolean
+  sort_order: number
+}
+
+export type SelectionGroupRow = {
+  id: string
+  tenant_id: string
+  venue_id: string
+  kind: SelectionGroupKind
+  name: string
+  min_select: number
+  max_select: number
+  is_active: boolean
+  sort_order: number
+  selection_group_items: SelectionGroupItemRow[] | null
+}
+
+export type VariantSelectionGroupRow = {
+  variant_id: string
+  selection_group_id: string
+  sort_order: number
+  selection_groups: SelectionGroupRow | null
+}
+
+export type ProductModifierGroupAssignmentRow = {
+  product_id: string
+  variant_id: string | null
+  modifier_group_id: string
+  sort_order: number
+  modifier_groups: ModifierGroupRow | ModifierGroupRow[] | null
 }
 
 export type SaleRow = {

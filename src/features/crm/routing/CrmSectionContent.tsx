@@ -4,6 +4,8 @@ import { CatalogImportCrm } from '../catalog/pages/CatalogImportPage'
 import { CategoriesCrm } from '../catalog/pages/CategoriesPage'
 import { ProductsCrm } from '../catalog/pages/ProductsPage'
 import { SaleFormatsCrm } from '../catalog/pages/SaleFormatsPage'
+import { CatalogOrganizationCrm } from '../catalog/pages/CatalogOrganizationPage'
+import { ComplementsCrm } from '../catalog/pages/ComplementsPage'
 import { DashboardCrm } from '../dashboard/pages/DashboardPage'
 import { DiscountsCrm } from '../discounts/pages/DiscountsPage'
 import { PlanCrm } from '../plan/pages/PlanPage'
@@ -102,6 +104,10 @@ export function CrmSectionContent({
           tenantContext={context}
         />
       )
+    case 'organization':
+      return <CatalogOrganizationCrm context={context} venueId={selectedVenueId} tabs={(catalog?.tabs ?? []).filter((tab) => tab.venueId === selectedVenueId)} placements={(catalog?.placements ?? []).filter((placement) => placement.venueId === selectedVenueId)} categories={categories} products={venueProducts} disabled={disabled} runAction={runAction} onCatalogChanged={onCatalogChanged} />
+    case 'complements':
+      return <ComplementsCrm context={context} venueId={selectedVenueId} groups={(catalog?.selectionGroups ?? []).filter((group) => group.venueId === selectedVenueId)} products={venueProducts} disabled={disabled} runAction={runAction} onCatalogChanged={onCatalogChanged} />
     case 'discounts':
       return (
         <DiscountsCrm

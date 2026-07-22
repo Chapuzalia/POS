@@ -18,6 +18,7 @@ import type {
   Product,
   ProductSalesStat,
   ProductVariant,
+  SelectionGroup,
   SaleCreatedPayload,
   SaleLinePayload,
   SaleRecord,
@@ -29,12 +30,16 @@ import type {
 } from '../types'
 import type {
   CategoryRow,
+  CatalogPlacementRow,
+  CatalogTabRow,
   DeviceAssignmentRow,
   DeviceRow,
   MembershipRow,
   ModifierGroupRow,
   ProductRow,
+  ProductModifierGroupAssignmentRow,
   SaleFormatRow,
+  SelectionGroupRow,
   SaleRow,
   TicketLineProductSalesRow,
   TenantRow,
@@ -82,6 +87,9 @@ function mapCategory(row: CategoryRow): Category {
 
 function mapSaleFormat(row: SaleFormatRow) {
   return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    venueId: row.venue_id ?? null,
     key: row.key,
     label: row.label,
     isActive: row.is_active,
@@ -96,7 +104,10 @@ function mapVariant(row: VariantRow): ProductVariant {
     name: row.name,
     priceCents: row.price_cents,
     sku: row.sku,
+    saleFormatId: row.sale_format_id,
+    saleFormatKey: (Array.isArray(row.sale_formats) ? row.sale_formats[0]?.key : row.sale_formats?.key) ?? null,
     isDefault: row.is_default,
+    isActive: row.is_active,
     sortOrder: row.sort_order,
   }
 }
@@ -109,6 +120,7 @@ function mapModifierGroups(rows: ModifierGroupRow[] | null): ModifierGroup[] {
       name: group.name,
       minSelect: group.min_select,
       maxSelect: group.max_select,
+      isActive: group.is_active ?? true,
       sortOrder: group.sort_order,
       modifiers: (group.modifiers ?? [])
         .map((modifier) => ({
@@ -116,6 +128,8 @@ function mapModifierGroups(rows: ModifierGroupRow[] | null): ModifierGroup[] {
           groupId: modifier.group_id,
           name: modifier.name,
           priceCents: modifier.price_cents,
+          isDefault: modifier.is_default ?? false,
+          isActive: modifier.is_active ?? true,
           sortOrder: modifier.sort_order,
         }))
         .sort((a, b) => a.sortOrder - b.sortOrder),
@@ -158,6 +172,7 @@ function mapProduct(row: ProductRow): Product {
     venueId: row.venue_id,
     categoryId: row.category_id,
     name: row.name,
+    productType: row.product_type ?? 'standard',
     description: row.description,
     imagePath: row.image_path ?? null,
     imageUrl: getProductImageUrl(row.image_path),
@@ -172,6 +187,39 @@ function mapProduct(row: ProductRow): Product {
     sortOrder: row.sort_order,
     variants: (row.product_variants ?? []).map(mapVariant).sort((a, b) => a.sortOrder - b.sortOrder),
     modifierGroups: mapModifierGroups(row.modifier_groups),
+    variantSelectionGroups: [],
+  }
+}
+
+type SelectionGroupWithAssignmentsRow = SelectionGroupRow & {
+  variant_selection_groups: Array<{
+    variant_id: string
+    selection_group_id: string
+    sort_order: number
+  }> | null
+}
+
+function mapSelectionGroup(row: SelectionGroupRow): SelectionGroup {
+  return {
+    id: row.id,
+    tenantId: row.tenant_id,
+    venueId: row.venue_id,
+    kind: row.kind,
+    name: row.name,
+    minSelect: row.min_select,
+    maxSelect: row.max_select,
+    isActive: row.is_active,
+    sortOrder: row.sort_order,
+    items: (row.selection_group_items ?? []).map((item) => ({
+      id: item.id,
+      groupId: item.group_id,
+      productId: item.product_id,
+      variantId: item.variant_id,
+      priceDeltaCents: item.price_delta_cents,
+      isDefault: item.is_default,
+      isActive: item.is_active,
+      sortOrder: item.sort_order,
+    })).sort((a, b) => a.sortOrder - b.sortOrder),
   }
 }
 
@@ -573,11 +621,42 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
     .order('sort_order', { ascending: true })
   if (context.venueId) discountsQuery = discountsQuery.eq('venue_id', context.venueId)
 
+  let tabsQuery = supabase
+    .from('catalog_tabs')
+    .select('id, tenant_id, venue_id, key, label, icon, is_active, sort_order')
+    .eq('tenant_id', context.tenantId)
+    .order('sort_order', { ascending: true })
+  if (context.venueId) tabsQuery = tabsQuery.eq('venue_id', context.venueId)
+
+  let placementsQuery = supabase
+    .from('catalog_placements')
+    .select('id, tenant_id, venue_id, tab_id, category_id, product_id, default_variant_id, is_featured, is_active, sort_order')
+    .eq('tenant_id', context.tenantId)
+    .order('sort_order', { ascending: true })
+  if (context.venueId) placementsQuery = placementsQuery.eq('venue_id', context.venueId)
+
+  let selectionGroupsQuery = supabase
+    .from('selection_groups')
+    .select(`
+      id, tenant_id, venue_id, kind, name, min_select, max_select, is_active, sort_order,
+      selection_group_items (
+        id, group_id, product_id, variant_id, price_delta_cents, is_default, is_active, sort_order
+      ),
+      variant_selection_groups (variant_id, selection_group_id, sort_order)
+    `)
+    .eq('tenant_id', context.tenantId)
+    .order('sort_order', { ascending: true })
+  if (context.venueId) selectionGroupsQuery = selectionGroupsQuery.eq('venue_id', context.venueId)
+
   const [
     { data: categoryRows, error: categoriesError },
     { data: discountRows, error: discountsError },
     { data: saleFormatRows, error: saleFormatsError },
     { data: productRows, error: productsError },
+    { data: tabRows, error: tabsError },
+    { data: placementRows, error: placementsError },
+    { data: selectionGroupRows, error: selectionGroupsError },
+    { data: modifierAssignmentRows, error: modifierAssignmentsError },
     { data: venueSettings, error: venueSettingsError },
   ] =
     await Promise.all([
@@ -589,7 +668,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
       discountsQuery,
       supabase
         .from('sale_formats')
-        .select('key, label, is_active, sort_order')
+        .select('id, tenant_id, key, label, is_active, sort_order')
         .eq('tenant_id', context.tenantId)
         .order('sort_order', { ascending: true }),
       supabase
@@ -601,6 +680,7 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
           venue_id,
           category_id,
           name,
+          product_type,
           description,
           image_path,
           kind,
@@ -618,7 +698,10 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
             name,
             price_cents,
             sku,
+            sale_format_id,
+            sale_formats (key),
             is_default,
+            is_active,
             sort_order
           ),
           modifier_groups (
@@ -627,12 +710,15 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
             name,
             min_select,
             max_select,
+            is_active,
             sort_order,
             modifiers (
               id,
               group_id,
               name,
               price_cents,
+              is_default,
+              is_active,
               sort_order
             )
           )
@@ -640,8 +726,22 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
         )
         .eq('tenant_id', context.tenantId)
         .order('sort_order', { ascending: true }),
+      tabsQuery,
+      placementsQuery,
+      selectionGroupsQuery,
+      supabase
+        .from('product_modifier_groups')
+        .select(`
+          product_id, variant_id, modifier_group_id, sort_order,
+          modifier_groups (
+            id, product_id, name, min_select, max_select, is_active, sort_order,
+            modifiers (id, group_id, name, price_cents, is_default, is_active, sort_order)
+          )
+        `)
+        .eq('tenant_id', context.tenantId)
+        .order('sort_order', { ascending: true }),
       context.venueId
-        ? supabase.from('venues').select('manual_discount_enabled').eq('tenant_id', context.tenantId).eq('id', context.venueId).maybeSingle()
+        ? supabase.from('venues').select('manual_discount_enabled, catalog_profile').eq('tenant_id', context.tenantId).eq('id', context.venueId).maybeSingle()
         : Promise.resolve({ data: null, error: null }),
     ])
 
@@ -658,15 +758,73 @@ export async function loadCatalogFromSupabase(context: TenantContext): Promise<C
   if (productsError) {
     throw productsError
   }
+  if (tabsError) throw tabsError
+  if (placementsError) throw placementsError
+  if (selectionGroupsError) throw selectionGroupsError
+  if (modifierAssignmentsError) throw modifierAssignmentsError
 
   const saleFormats = ((saleFormatRows ?? []) as SaleFormatRow[]).map(mapSaleFormat)
   const allProducts = ((productRows ?? []) as ProductRow[]).map(mapProduct)
   const products = context.venueId
     ? allProducts.filter((product) => product.venueId === context.venueId)
     : allProducts
+  const selectionGroups = ((selectionGroupRows ?? []) as SelectionGroupWithAssignmentsRow[]).map(mapSelectionGroup)
+  const selectionGroupsById = new Map(selectionGroups.map((group) => [group.id, group]))
+  for (const groupRow of (selectionGroupRows ?? []) as SelectionGroupWithAssignmentsRow[]) {
+    const group = selectionGroupsById.get(groupRow.id)
+    if (!group) continue
+    for (const assignment of groupRow.variant_selection_groups ?? []) {
+      const product = products.find((candidate) => candidate.variants.some((variant) => variant.id === assignment.variant_id))
+      if (!product) continue
+      product.variantSelectionGroups.push({
+        variantId: assignment.variant_id,
+        selectionGroupId: assignment.selection_group_id,
+        sortOrder: assignment.sort_order,
+        group,
+      })
+    }
+  }
+  for (const assignment of (modifierAssignmentRows ?? []) as unknown as ProductModifierGroupAssignmentRow[]) {
+    const product = products.find((candidate) => candidate.id === assignment.product_id)
+    const groupRow = Array.isArray(assignment.modifier_groups) ? assignment.modifier_groups[0] : assignment.modifier_groups
+    const group = groupRow ? mapModifierGroups([groupRow])[0] : null
+    if (!product || !group) continue
+    product.modifierGroupAssignments = [...(product.modifierGroupAssignments ?? []), {
+      productId: product.id,
+      variantId: assignment.variant_id,
+      modifierGroupId: assignment.modifier_group_id,
+      sortOrder: assignment.sort_order,
+      group,
+    }]
+  }
   const visibleCategoryIds = new Set(products.map((product) => product.categoryId))
 
   return {
+    catalogProfile: (venueSettings as { catalog_profile?: Catalog['catalogProfile'] } | null)?.catalog_profile ?? 'bar_classic',
+    tabs: ((tabRows ?? []) as CatalogTabRow[]).map((row) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      venueId: row.venue_id,
+      key: row.key,
+      label: row.label,
+      icon: row.icon ?? row.key,
+      isActive: row.is_active,
+      sortOrder: row.sort_order,
+    })),
+    placements: ((placementRows ?? []) as CatalogPlacementRow[]).map((row) => ({
+      id: row.id,
+      tenantId: row.tenant_id,
+      venueId: row.venue_id,
+      tabId: row.tab_id,
+      categoryId: row.category_id,
+      productId: row.product_id,
+      defaultVariantId: row.default_variant_id,
+      isFeatured: row.is_featured,
+      isActive: row.is_active,
+      sortOrder: row.sort_order,
+    })),
+    selectionGroups,
+    usesLegacyFallback: !(tabRows?.length && placementRows?.length),
     categories: ((categoryRows ?? []) as CategoryRow[])
       .map(mapCategory)
       .filter((category) => !context.venueId || visibleCategoryIds.has(category.id)),
@@ -786,6 +944,22 @@ type SessionTicketQueryRow = {
     taxable_base_cents: number | null
     tax_amount_cents: number | null
     modifiers: TicketLineModifier[]
+    sale_format_id: string | null
+    sale_format_name_snapshot: string | null
+    category_id_snapshot: string | null
+    category_name_snapshot: string | null
+    catalog_tab_id_snapshot: string | null
+    catalog_tab_name_snapshot: string | null
+    base_price_cents: number | null
+    component_delta_cents: number | null
+    modifier_delta_cents: number | null
+    gross_before_discount_cents: number | null
+    ticket_line_components: Array<{
+      id: string; component_type: 'mixer' | 'menu_component'; selection_group_id: string | null; selection_group_name_snapshot: string
+      product_id: string | null; variant_id: string | null; product_name_snapshot: string; variant_name_snapshot: string
+      quantity: number; price_delta_cents: number; sort_order: number
+      metadata: { modifiers?: Array<{ id: string; groupId: string; name: string; priceCents: number }> } | null
+    }> | null
   }> | null
   sales: Array<{
     id: string
@@ -846,6 +1020,21 @@ export async function loadSessionTicketsFromSupabase(
           taxable_base_cents,
           tax_amount_cents,
           modifiers
+          ,sale_format_id,
+          sale_format_name_snapshot,
+          category_id_snapshot,
+          category_name_snapshot,
+          catalog_tab_id_snapshot,
+          catalog_tab_name_snapshot,
+          base_price_cents,
+          component_delta_cents,
+          modifier_delta_cents,
+          gross_before_discount_cents,
+          ticket_line_components (
+            id, component_type, selection_group_id, selection_group_name_snapshot,
+            product_id, variant_id, product_name_snapshot, variant_name_snapshot,
+            quantity, price_delta_cents, sort_order, metadata
+          )
         ),
         sales (
           id,
@@ -904,11 +1093,24 @@ export async function loadSessionTicketsFromSupabase(
         variantId: line.variant_id ?? loggedLine?.variantId ?? '',
         productName: line.product_name,
         variantName: line.variant_name,
+        basePriceCents: loggedLine?.basePriceCents ?? line.base_price_cents ?? line.unit_price_cents - (line.modifiers ?? []).reduce((total, modifier) => total + modifier.priceCents, 0),
+        componentDeltaCents: loggedLine?.componentDeltaCents ?? line.component_delta_cents ?? 0,
+        modifierDeltaCents: loggedLine?.modifierDeltaCents ?? line.modifier_delta_cents ?? (line.modifiers ?? []).reduce((total, modifier) => total + modifier.priceCents, 0),
+        grossBeforeDiscountCents: loggedLine?.grossBeforeDiscountCents ?? line.gross_before_discount_cents ?? line.unit_price_cents,
         quantity: Number(line.allocated_quantity ?? line.quantity),
         unitPriceCents: line.unit_price_cents,
         lineTotalCents: line.line_total_cents,
         fiscalSnapshot: mapFiscalSnapshot(line),
         modifiers: line.modifiers ?? [],
+        components: loggedLine?.components ?? (line.ticket_line_components ?? []).map((component) => ({
+          id: component.id, type: component.component_type, selectionGroupId: component.selection_group_id,
+          selectionGroupName: component.selection_group_name_snapshot, productId: component.product_id ?? '',
+          variantId: component.variant_id, productName: component.product_name_snapshot,
+          variantName: component.variant_name_snapshot, quantity: component.quantity,
+          priceDeltaCents: component.price_delta_cents, sortOrder: component.sort_order,
+          modifiers: component.metadata?.modifiers ?? [],
+        })),
+        catalogSnapshot: loggedLine?.catalogSnapshot ?? { saleFormatId: line.sale_format_id, saleFormatName: line.sale_format_name_snapshot ?? line.variant_name, categoryId: line.category_id_snapshot, categoryName: line.category_name_snapshot ?? '', catalogTabId: line.catalog_tab_id_snapshot, catalogTabName: line.catalog_tab_name_snapshot ?? '' },
       }
     })
     const payload: SaleCreatedPayload = {
@@ -1048,10 +1250,16 @@ export function buildSalePayload(
     variantId: line.variantId,
     productName: line.productName,
     variantName: line.variantName,
+    basePriceCents: line.basePriceCents,
+    componentDeltaCents: line.componentDeltaCents,
+    modifierDeltaCents: line.modifierDeltaCents,
+    grossBeforeDiscountCents: line.unitPriceCents,
     quantity: line.quantity,
     unitPriceCents: line.unitPriceCents,
     lineTotalCents: getLineTotal(line),
     modifiers: line.modifiers,
+    components: line.components,
+    catalogSnapshot: line.catalogSnapshot,
     fiscalSnapshot: null,
   }))
 

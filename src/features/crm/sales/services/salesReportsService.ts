@@ -14,7 +14,28 @@ export type SalesReportLineRow = {
     price_cents?: number
   }> | null
   product_id: string | null
+  variant_id: string | null
   product_name: string
+  sale_format_id: string | null
+  sale_format_name_snapshot: string | null
+  category_id_snapshot: string | null
+  category_name_snapshot: string | null
+  catalog_tab_id_snapshot: string | null
+  catalog_tab_name_snapshot: string | null
+  ticket_line_components: Array<{
+    id: string
+    component_type: 'mixer' | 'menu_component'
+    selection_group_id: string | null
+    selection_group_name_snapshot: string
+    product_id: string | null
+    variant_id: string | null
+    product_name_snapshot: string
+    variant_name_snapshot: string
+    quantity: number
+    price_delta_cents: number
+    sort_order: number
+    metadata: { modifiers?: Array<{ id: string; groupId: string; name: string; priceCents: number }> } | null
+  }> | null
   quantity: number
   allocated_quantity: number | null
   unit_price_cents: number
@@ -92,6 +113,15 @@ export function finalizeSalesReport(report: Map<string, MutableSalesReportAggreg
     .sort((a, b) => b.totalCents - a.totalCents || b.quantity - a.quantity || a.label.localeCompare(b.label, 'es'))
 }
 
+function addNamedAggregate(report: Map<string, MutableSalesReportAggregate>, id: string, label: string, ticketId: string, quantity: number, totalCents: number) {
+  const current = report.get(id) ?? { id, label, quantity: 0, ticketCount: 0, ticketIds: new Set<string>(), totalCents: 0 }
+  current.quantity += quantity
+  current.totalCents += totalCents
+  current.ticketIds.add(ticketId)
+  current.ticketCount = current.ticketIds.size
+  report.set(id, current)
+}
+
 export async function loadCrmSalesReports(context: TenantContext, venueId?: string): Promise<CrmSalesReports> {
   const client = requireSupabase()
   let productsQuery = client
@@ -127,8 +157,15 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
           ticket_lines (
             id,
             product_id,
+            variant_id,
             product_name,
             variant_name,
+            sale_format_id,
+            sale_format_name_snapshot,
+            category_id_snapshot,
+            category_name_snapshot,
+            catalog_tab_id_snapshot,
+            catalog_tab_name_snapshot,
             quantity,
             allocated_quantity,
             unit_price_cents,
@@ -136,7 +173,12 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
             line_total_cents,
             tax_rate,
             taxable_base_cents,
-            tax_amount_cents
+            tax_amount_cents,
+            ticket_line_components (
+              id, component_type, selection_group_id, selection_group_name_snapshot,
+              product_id, variant_id, product_name_snapshot, variant_name_snapshot,
+              quantity, price_delta_cents, sort_order, metadata
+            )
           ),
           sales (
             payment_method
@@ -186,19 +228,38 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
   const byProduct = new Map<string, MutableSalesReportAggregate>()
   const byCategory = new Map<string, MutableSalesReportAggregate>()
   const byFormat = new Map<string, MutableSalesReportAggregate>()
+  const byVariant = new Map<string, MutableSalesReportAggregate>()
+  const byCatalogTab = new Map<string, MutableSalesReportAggregate>()
+  const byMixer = new Map<string, MutableSalesReportAggregate>()
+  const byMenuComponent = new Map<string, MutableSalesReportAggregate>()
+  const byModifier = new Map<string, MutableSalesReportAggregate>()
 
   tickets.forEach((ticket) => {
     if (ticket.status !== 'paid') return
 
     ;(ticket.ticket_lines ?? []).forEach((line) => {
       const productId = line.product_id ?? `deleted:${normalizeText(line.product_name)}`
-      const categoryId = line.product_id ? categoryIdByProductId.get(line.product_id) : undefined
-      const categoryName = categoryId ? categoryNameById.get(categoryId) : undefined
-      const formatName = line.variant_name.trim() || 'Sin formato'
+      const categoryId = line.category_id_snapshot ?? (line.product_id ? categoryIdByProductId.get(line.product_id) : undefined)
+      const categoryName = line.category_name_snapshot ?? (categoryId ? categoryNameById.get(categoryId) : undefined)
+      const formatName = line.sale_format_name_snapshot?.trim() || line.variant_name.trim() || 'Sin formato'
 
       addSalesReportLine(byProduct, productId, line.product_name, ticket.id, line)
       addSalesReportLine(byCategory, categoryId ?? 'uncategorized', categoryName ?? 'Sin categoría', ticket.id, line)
-      addSalesReportLine(byFormat, normalizeText(formatName) || 'sin-formato', formatName, ticket.id, line)
+      addSalesReportLine(byFormat, line.sale_format_id ?? (normalizeText(formatName) || 'sin-formato'), formatName, ticket.id, line)
+      addSalesReportLine(byVariant, line.variant_id ?? `deleted:${normalizeText(line.variant_name)}`, line.variant_name || 'Sin variante', ticket.id, line)
+      addSalesReportLine(byCatalogTab, line.catalog_tab_id_snapshot ?? 'sin-pestana', line.catalog_tab_name_snapshot ?? 'Sin pestana historica', ticket.id, line)
+      for (const component of line.ticket_line_components ?? []) {
+        const target = component.component_type === 'mixer' ? byMixer : byMenuComponent
+        addNamedAggregate(target, component.product_id ?? component.id, component.product_name_snapshot, ticket.id, component.quantity * Number(line.allocated_quantity ?? line.quantity), component.price_delta_cents * component.quantity)
+        for (const modifier of component.metadata?.modifiers ?? []) {
+          const name = modifier.name?.trim() || 'Modificador'
+          addNamedAggregate(byModifier, normalizeText(name), name, ticket.id, component.quantity * Number(line.allocated_quantity ?? line.quantity), modifier.priceCents * component.quantity * Number(line.allocated_quantity ?? line.quantity))
+        }
+      }
+      for (const modifier of line.modifiers ?? []) {
+        const name = modifier.name?.trim() || 'Modificador'
+        addNamedAggregate(byModifier, normalizeText(name), name, ticket.id, Number(line.allocated_quantity ?? line.quantity), (modifier.priceCents ?? modifier.price_cents ?? 0) * Number(line.allocated_quantity ?? line.quantity))
+      }
     })
   })
 
@@ -206,16 +267,25 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
     byCategory: finalizeSalesReport(byCategory),
     byFormat: finalizeSalesReport(byFormat),
     byProduct: finalizeSalesReport(byProduct),
+    byVariant: finalizeSalesReport(byVariant),
+    byCatalogTab: finalizeSalesReport(byCatalogTab),
+    byMixer: finalizeSalesReport(byMixer),
+    byMenuComponent: finalizeSalesReport(byMenuComponent),
+    byModifier: finalizeSalesReport(byModifier),
     tickets: tickets.map((ticket) => ({
       id: ticket.id,
       createdAt: ticket.local_created_at,
       lineCount: ticket.ticket_lines?.length ?? 0,
       lines: (ticket.ticket_lines ?? []).map((line) => {
-        const categoryId = line.product_id ? categoryIdByProductId.get(line.product_id) ?? null : null
+        const categoryId = line.category_id_snapshot ?? (line.product_id ? categoryIdByProductId.get(line.product_id) ?? null : null)
 
         return {
           categoryId,
-          categoryName: categoryId ? categoryNameById.get(categoryId) ?? 'Sin categoría' : 'Sin categoría',
+          categoryName: line.category_name_snapshot ?? (categoryId ? categoryNameById.get(categoryId) ?? 'Sin categoría' : 'Sin categoría'),
+          saleFormatId: line.sale_format_id,
+          saleFormatName: line.sale_format_name_snapshot ?? line.variant_name,
+          catalogTabId: line.catalog_tab_id_snapshot,
+          catalogTabName: line.catalog_tab_name_snapshot ?? '',
           id: line.id,
           lineTotalCents: line.line_total_cents,
           modifiers: (line.modifiers ?? []).map((modifier) => ({
@@ -224,9 +294,24 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
           })),
           productId: line.product_id,
           productName: line.product_name,
+          variantId: line.variant_id,
           quantity: Number(line.allocated_quantity ?? line.quantity),
           unitPriceCents: line.unit_price_cents,
           variantName: line.variant_name,
+          components: (line.ticket_line_components ?? []).map((component) => ({
+            id: component.id,
+            type: component.component_type,
+            selectionGroupId: component.selection_group_id,
+            selectionGroupName: component.selection_group_name_snapshot,
+            productId: component.product_id ?? '',
+            variantId: component.variant_id,
+            productName: component.product_name_snapshot,
+            variantName: component.variant_name_snapshot,
+            quantity: component.quantity,
+            priceDeltaCents: component.price_delta_cents,
+            sortOrder: component.sort_order,
+            modifiers: component.metadata?.modifiers ?? [],
+          })),
           fiscalSnapshot: line.tax_rate === null
             || line.taxable_base_cents === null
             || line.tax_amount_cents === null

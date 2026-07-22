@@ -1,4 +1,4 @@
-import type { AppliedDiscount, PaymentMethod, TicketLineMixer, TicketLineModifier } from '../../types/domain'
+import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
 
 export type RestaurantTableShape = 'square' | 'rectangle' | 'round'
 export type RestaurantMapElementKind = 'wall' | 'column' | 'text'
@@ -9,7 +9,7 @@ export type DiningArea = { id: string; tenantId: string; venueId: string; name: 
 export type RestaurantTable = { id: string; tenantId: string; venueId: string; areaId: string; name: string; capacity: number; shape: RestaurantTableShape; positionX: number; positionY: number; width: number; height: number; isActive: boolean; sortOrder: number; reservedUntil: string | null; reservationNote: string | null; createdAt: string; updatedAt: string }
 export type RestaurantOrder = { id: string; tenantId: string; venueId: string; cashSessionId: string; cashRegisterId: string; openedByUserId: string; openedByDeviceId: string; guestCount: number; status: 'open' | 'paid' | 'cancelled'; revision: number; orderGroupId: string; splitSequence: number; openedAt: string; updatedAt: string; closedAt: string | null }
 export type OrderTable = { orderId: string; orderGroupId: string; tableId: string; joinedAt: string; releasedAt: string | null }
-export type RestaurantOrderLine = { id: string; tenantId: string; venueId: string; orderId: string; productId: string | null; variantId: string | null; productName: string; variantName: string; unitPriceCents: number; quantity: number; servedQuantity: number; fullyServedAt: string | null; modifiers: TicketLineModifier[]; mixerProductId: string | null; mixer: TicketLineMixer | null; note: string | null; createdAt: string; updatedAt: string }
+export type RestaurantOrderLine = { id: string; tenantId: string; venueId: string; orderId: string; productId: string | null; variantId: string | null; productName: string; variantName: string; unitPriceCents: number; quantity: number; servedQuantity: number; fullyServedAt: string | null; modifiers: TicketLineModifier[]; components: TicketLineComponent[]; catalogSnapshot: SaleLineCatalogSnapshot; mixerProductId: string | null; mixer: TicketLineMixer | null; note: string | null; createdAt: string; updatedAt: string }
 export type TableLayoutEntry = { positionX: number; positionY: number; groupId: string | null }
 export type SessionTableLayout = { cashSessionId: string; revision: number; updatedAt: string; tables: Record<string, TableLayoutEntry> }
 export type RestaurantTableMapItem = RestaurantTable & { status: RestaurantTableStatus; orderId: string | null; orderOpenedAt: string | null; guestCount: number | null; totalCents: number; pendingUnits: number; groupTableIds: string[]; layoutGroupId?: string | null; layoutGroupTableIds?: string[] }

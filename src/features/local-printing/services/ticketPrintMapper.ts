@@ -14,7 +14,13 @@ type MapperOptions = {
 }
 
 function lineAdditions(line: SaleCreatedPayload['lines'][number]) {
-  return line.modifiers.map((modifier) => modifier.name).filter(Boolean)
+  return [
+    ...(line.components ?? []).flatMap((component) => [
+      component.productName,
+      ...(component.modifiers ?? []).map((modifier) => `${component.productName} · ${modifier.name}`),
+    ]),
+    ...line.modifiers.map((modifier) => modifier.name),
+  ].filter(Boolean)
 }
 
 function lineName(line: SaleCreatedPayload['lines'][number]) {
@@ -79,7 +85,7 @@ export function mapRestaurantSaleToPrintRequest(input: {
   saleId: string
   ticketId: string
   createdAt: string
-  lines: Array<{ productName: string; variantName?: string; quantity: number; unitPriceCents: number; modifiers?: Array<{ name: string }>; mixer?: { name: string } | null; note?: string | null }>
+  lines: Array<{ productName: string; variantName?: string; quantity: number; unitPriceCents: number; modifiers?: Array<{ name: string }>; components?: Array<{ productName: string; modifiers?: Array<{ name: string }> }>; mixer?: { name: string } | null; note?: string | null }>
   totalCents: number
   paymentMethod: string | null
   receivedCents: number | null
@@ -92,7 +98,11 @@ export function mapRestaurantSaleToPrintRequest(input: {
   autoOpenCashDrawer?: boolean
 }) : PrintRequest {
   const items = input.lines.map((line) => {
-    const additions = [...(line.modifiers || []).map((modifier) => modifier.name), ...(line.mixer ? [line.mixer.name] : [])]
+    const additions = [
+      ...(line.components || []).flatMap((component) => [component.productName, ...(component.modifiers ?? []).map((modifier) => `${component.productName} · ${modifier.name}`)]),
+      ...(line.modifiers || []).map((modifier) => modifier.name),
+      ...(!line.components?.length && line.mixer ? [line.mixer.name] : []),
+    ]
     return {
       name: line.variantName && line.variantName !== line.productName ? `${line.productName} ${line.variantName}` : line.productName,
       quantity: line.quantity,

@@ -8,10 +8,15 @@ export function getRejectedSaleRecovery(event: RejectedSale, hasCurrentTicket: b
     modifiers: line.modifiers,
     productId: line.productId,
     productName: line.productName,
+    basePriceCents: line.basePriceCents,
+    componentDeltaCents: line.componentDeltaCents,
+    modifierDeltaCents: line.modifierDeltaCents,
     quantity: line.quantity,
     unitPriceCents: line.unitPriceCents,
     variantId: line.variantId,
     variantName: line.variantName,
+    components: line.components,
+    catalogSnapshot: line.catalogSnapshot,
   }))
   return {
     closedSessionId: event.payload.ticket.cashSessionId,

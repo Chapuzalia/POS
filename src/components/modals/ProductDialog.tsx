@@ -1,13 +1,12 @@
 import { GlassWater, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import {
-  canUseProductAsMixer,
   getProductSaleFormats,
   getProductVariantForSaleFormat,
 } from '../../lib/catalog'
+import { getProductModifierGroups, getVariantSelectionGroups } from '../../features/catalog/services/catalogAccess'
 import { formatMoney } from '../../lib/format'
-import { mixerFromProduct } from '../../lib/mixers'
-import type { Catalog, ModifierGroup, Product, ProductLineSelection, ProductVariant, SaleFormat, TicketLineModifier } from '../../types'
+import type { Catalog, ModifierGroup, Product, ProductLineSelection, ProductVariant, SaleFormat, SaleLineCatalogSnapshot, TicketLineComponent, TicketLineModifier, VariantSelectionGroup } from '../../types'
 import { cx } from '../../utils/cx'
 import { Button } from '../ui'
 
@@ -21,6 +20,7 @@ type ProductDialogProps = {
   onCancel: () => void
   product: Product
   saleFormat: SaleFormat
+  catalogSnapshot?: SaleLineCatalogSnapshot
 }
 
 function compareProductNames(a: Product, b: Product) {
@@ -29,13 +29,54 @@ function compareProductNames(a: Product, b: Product) {
 
 function getProductLineSelection(
   explicitModifierList: TicketLineModifier[],
-  saleFormat: SaleFormat,
-  mixer: Product | null,
+  assignments: VariantSelectionGroup[],
+  selectedComponentIds: Record<string, string[]>,
+  selectedComponentModifiers: Record<string, Record<string, string[]>>,
+  products: Product[],
+  catalogSnapshot?: SaleLineCatalogSnapshot,
 ): ProductLineSelection {
-  if (saleFormat !== 'cubata' || !mixer) {
-    return { modifiers: explicitModifierList, mixerProductId: null, mixer: null }
+  const components: TicketLineComponent[] = assignments.flatMap((assignment) => (
+    assignment.group.items
+      .filter((item) => selectedComponentIds[assignment.group.id]?.includes(item.id))
+      .map((item) => {
+        const selectedProduct = products.find((candidate) => candidate.id === item.productId)
+        const selectedVariant = selectedProduct?.variants.find((candidate) => candidate.id === item.variantId)
+          ?? selectedProduct?.variants.find((candidate) => candidate.isDefault)
+          ?? null
+        const modifiers = selectedProduct && selectedVariant
+          ? getProductModifierGroups(selectedProduct, selectedVariant.id).flatMap((group) => group.modifiers
+            .filter((modifier) => selectedComponentModifiers[item.id]?.[group.id]?.includes(modifier.id))
+            .map((modifier) => ({ id: modifier.id, groupId: group.id, name: modifier.name, priceCents: modifier.priceCents })))
+          : []
+        return {
+          id: item.id,
+          type: assignment.group.kind,
+          selectionGroupId: assignment.group.id,
+          selectionGroupName: assignment.group.name,
+          productId: item.productId,
+          variantId: selectedVariant?.id ?? null,
+          productName: selectedProduct?.name ?? 'Producto',
+          variantName: selectedVariant?.name ?? '',
+          quantity: 1,
+          priceDeltaCents: item.priceDeltaCents,
+          sortOrder: item.sortOrder,
+          modifiers,
+        }
+      })
+  ))
+  const mixer = components.find((component) => component.type === 'mixer') ?? null
+  return {
+    modifiers: explicitModifierList,
+    components,
+    catalogSnapshot,
+    mixerProductId: mixer?.productId ?? null,
+    mixer: mixer ? {
+      productId: mixer.productId,
+      variantId: mixer.variantId,
+      name: mixer.productName,
+      priceCents: mixer.priceDeltaCents,
+    } : null,
   }
-  return { modifiers: explicitModifierList, mixerProductId: mixer.id, mixer: mixerFromProduct(mixer) }
 }
 
 function getSaleFormatForVariant(product: Product, variant: ProductVariant, fallbackSaleFormat: SaleFormat) {
@@ -56,16 +97,59 @@ export function ProductDialog({
   onCancel,
   product,
   saleFormat,
+  catalogSnapshot,
 }: ProductDialogProps) {
   const defaultVariant = getProductVariantForSaleFormat(product, saleFormat)
   const startsWithFormatSelection = !initialSelection && allowFormatSelection && product.variants.length > 1
   const [selectedSaleFormat, setSelectedSaleFormat] = useState(saleFormat)
   const [selectedVariantId, setSelectedVariantId] = useState(startsWithFormatSelection ? '' : initialVariantId ?? defaultVariant?.id ?? '')
-  const [selectedMixerId, setSelectedMixerId] = useState(initialSelection?.mixerProductId ?? '')
+  const [selectedComponentIds, setSelectedComponentIds] = useState<Record<string, string[]>>(() => {
+    const selected: Record<string, string[]> = {}
+    for (const component of initialSelection?.components ?? []) {
+      if (!component.selectionGroupId) continue
+      selected[component.selectionGroupId] = [...(selected[component.selectionGroupId] ?? []), component.id]
+    }
+    if (!initialSelection) {
+      const startingVariantId = initialVariantId ?? defaultVariant?.id
+      for (const assignment of startingVariantId ? getVariantSelectionGroups(product, startingVariantId) : []) {
+        selected[assignment.group.id] = assignment.group.items.filter((item) => item.isActive && item.isDefault).map((item) => item.id)
+      }
+    }
+    return selected
+  })
+  const [selectedComponentModifiers, setSelectedComponentModifiers] = useState<Record<string, Record<string, string[]>>>(() => {
+    const selected: Record<string, Record<string, string[]>> = Object.fromEntries((initialSelection?.components ?? []).map((component) => [
+      component.id,
+      Object.fromEntries([...new Set((component.modifiers ?? []).map((modifier) => modifier.groupId))].map((groupId) => [
+        groupId,
+        (component.modifiers ?? []).filter((modifier) => modifier.groupId === groupId).map((modifier) => modifier.id),
+      ])),
+    ]))
+    if (!initialSelection) {
+      const startingVariantId = initialVariantId ?? defaultVariant?.id
+      for (const assignment of startingVariantId ? getVariantSelectionGroups(product, startingVariantId) : []) {
+        for (const item of assignment.group.items.filter((candidate) => candidate.isActive && candidate.isDefault)) {
+          const componentProduct = catalog?.products.find((candidate) => candidate.id === item.productId)
+          const componentVariant = componentProduct?.variants.find((candidate) => candidate.id === item.variantId)
+            ?? componentProduct?.variants.find((candidate) => candidate.isDefault)
+          if (!componentProduct || !componentVariant) continue
+          selected[item.id] = Object.fromEntries(getProductModifierGroups(componentProduct, componentVariant.id).map((group) => [
+            group.id,
+            group.modifiers.filter((modifier) => modifier.isActive && modifier.isDefault).map((modifier) => modifier.id),
+          ]))
+        }
+      }
+    }
+    return selected
+  })
   const [selectedModifiers, setSelectedModifiers] = useState<Record<string, string[]>>(() =>
-    Object.fromEntries(product.modifierGroups.map((group) => [
+    Object.fromEntries([...new Map([
+      ...product.modifierGroups,
+      ...(product.modifierGroupAssignments ?? []).map((assignment) => assignment.group),
+    ].map((group) => [group.id, group])).values()].map((group) => [
       group.id,
-      initialSelection?.modifiers.filter((modifier) => modifier.groupId === group.id).map((modifier) => modifier.id) ?? [],
+      initialSelection?.modifiers.filter((modifier) => modifier.groupId === group.id).map((modifier) => modifier.id)
+        ?? group.modifiers.filter((modifier) => modifier.isActive && modifier.isDefault).map((modifier) => modifier.id),
     ])),
   )
   const [hasChosenFormat, setHasChosenFormat] = useState(!startsWithFormatSelection)
@@ -74,23 +158,31 @@ export function ProductDialog({
   const submittedRef = useRef(false)
   const dialogRef = useRef<HTMLElement>(null)
   const isChoosingFormat = startsWithFormatSelection && !hasChosenFormat
-  const isChoosingMixer = !isChoosingFormat && selectedSaleFormat === 'cubata'
   const selectedVariant =
     product.variants.find((variant) => variant.id === selectedVariantId) ??
     getProductVariantForSaleFormat(product, selectedSaleFormat) ??
     defaultVariant
-  const mixerProducts = useMemo(
-    () =>
-      (catalog?.products ?? [])
-        .filter((candidate) => candidate.isActive && canUseProductAsMixer(candidate))
-        .sort(compareProductNames),
-    [catalog],
+  const selectionAssignments = useMemo(
+    () => selectedVariant ? getVariantSelectionGroups(product, selectedVariant.id) : [],
+    [product, selectedVariant],
   )
-  const selectedMixer = mixerProducts.find((candidate) => candidate.id === selectedMixerId) ?? null
+  const mixerAssignment = selectionAssignments.find((assignment) => assignment.group.kind === 'mixer') ?? null
+  const menuAssignments = selectionAssignments.filter((assignment) => assignment.group.kind === 'menu_component')
+  const modifierGroups = useMemo(
+    () => selectedVariant ? getProductModifierGroups(product, selectedVariant.id) : [],
+    [product, selectedVariant],
+  )
+  const isChoosingMixer = !isChoosingFormat && Boolean(mixerAssignment)
+  const mixerOptions = useMemo(() => (mixerAssignment?.group.items ?? [])
+    .filter((item) => item.isActive)
+    .map((item) => ({ item, product: (catalog?.products ?? []).find((candidate) => candidate.id === item.productId) }))
+    .filter((option): option is typeof option & { product: Product } => Boolean(option.product?.isActive))
+    .sort((a, b) => compareProductNames(a.product, b.product)), [catalog, mixerAssignment])
+  const selectedMixerItemId = mixerAssignment ? selectedComponentIds[mixerAssignment.group.id]?.[0] ?? '' : ''
 
   const explicitModifierList = useMemo(
     () =>
-      product.modifierGroups.flatMap((group) =>
+      modifierGroups.flatMap((group) =>
         group.modifiers
           .filter((modifier) => selectedModifiers[group.id]?.includes(modifier.id))
           .map((modifier) => ({
@@ -100,13 +192,28 @@ export function ProductDialog({
             priceCents: modifier.priceCents,
           })),
       ),
-    [product.modifierGroups, selectedModifiers],
+    [modifierGroups, selectedModifiers],
   )
 
-  const isModifierValid = product.modifierGroups.every((group) => {
+  const isModifierValid = modifierGroups.every((group) => {
     const selectedCount = selectedModifiers[group.id]?.length ?? 0
     return selectedCount >= group.minSelect && selectedCount <= group.maxSelect
   })
+  const isComponentSelectionValid = selectionAssignments.every((assignment) => {
+    const count = selectedComponentIds[assignment.group.id]?.length ?? 0
+    return count >= assignment.group.minSelect && count <= assignment.group.maxSelect
+  })
+  const isComponentModifierValid = menuAssignments.every((assignment) => assignment.group.items
+    .filter((item) => selectedComponentIds[assignment.group.id]?.includes(item.id))
+    .every((item) => {
+      const componentProduct = catalog?.products.find((candidate) => candidate.id === item.productId)
+      const componentVariant = componentProduct?.variants.find((candidate) => candidate.id === item.variantId)
+        ?? componentProduct?.variants.find((candidate) => candidate.isDefault)
+      return !componentProduct || !componentVariant || getProductModifierGroups(componentProduct, componentVariant.id).every((group) => {
+        const count = selectedComponentModifiers[item.id]?.[group.id]?.length ?? 0
+        return count >= group.minSelect && count <= group.maxSelect
+      })
+    }))
 
   useEffect(() => {
     if (!isClosing) return
@@ -122,19 +229,17 @@ export function ProductDialog({
 
   function submitSelection(
     variant = selectedVariant,
-    submitSaleFormat = selectedSaleFormat,
-    mixer = selectedMixer,
     sourceElement?: HTMLElement | null,
   ) {
-    if (!variant || !isModifierValid || submittedRef.current || isBusy) {
+    if (!variant || !isModifierValid || !isComponentSelectionValid || !isComponentModifierValid || submittedRef.current || isBusy) {
       return
     }
-
-    if (submitSaleFormat === 'cubata' && !mixer && !initialSelection) {
-      return
-    }
-
-    const wasAdded = onAdd(product, variant, getProductLineSelection(explicitModifierList, submitSaleFormat, mixer), sourceElement ?? dialogRef.current)
+    const wasAdded = onAdd(
+      product,
+      variant,
+      getProductLineSelection(explicitModifierList, selectionAssignments, selectedComponentIds, selectedComponentModifiers, catalog?.products ?? [], catalogSnapshot ?? initialSelection?.catalogSnapshot),
+      sourceElement ?? dialogRef.current,
+    )
     if (!wasAdded) return
 
     submittedRef.current = true
@@ -142,14 +247,29 @@ export function ProductDialog({
     setIsClosing(true)
   }
 
-  function handleMixerSelect(mixer: Product, sourceElement: HTMLElement) {
-    setSelectedMixerId(mixer.id)
-    if (!product.modifierGroups.length && !initialSelection) submitSelection(selectedVariant, selectedSaleFormat, mixer, sourceElement)
+  function handleMixerSelect(itemId: string, sourceElement: HTMLElement) {
+    if (!mixerAssignment) return
+    setSelectedComponentIds((current) => ({ ...current, [mixerAssignment.group.id]: [itemId] }))
+    if (!modifierGroups.length && !menuAssignments.length && !initialSelection) {
+      const nextSelection = { ...selectedComponentIds, [mixerAssignment.group.id]: [itemId] }
+      const wasAdded = selectedVariant && onAdd(
+        product,
+        selectedVariant,
+        getProductLineSelection(explicitModifierList, selectionAssignments, nextSelection, selectedComponentModifiers, catalog?.products ?? [], catalogSnapshot),
+        sourceElement,
+      )
+      if (wasAdded) {
+        submittedRef.current = true
+        setHasSubmitted(true)
+        setIsClosing(true)
+      }
+    }
   }
 
   function handleNoMixer(sourceElement: HTMLElement) {
-    setSelectedMixerId('')
-    if (!product.modifierGroups.length) submitSelection(selectedVariant, selectedSaleFormat, null, sourceElement)
+    if (!mixerAssignment) return
+    setSelectedComponentIds((current) => ({ ...current, [mixerAssignment.group.id]: [] }))
+    if (!modifierGroups.length) submitSelection(selectedVariant, sourceElement)
   }
 
   function toggleModifier(group: ModifierGroup, modifierId: string) {
@@ -169,16 +289,51 @@ export function ProductDialog({
     })
   }
 
+  function toggleMenuComponent(assignment: VariantSelectionGroup, itemId: string) {
+    const currentValues = selectedComponentIds[assignment.group.id] ?? []
+    const isSelected = currentValues.includes(itemId)
+    const nextValues = isSelected
+      ? currentValues.filter((id) => id !== itemId)
+      : assignment.group.maxSelect === 1 ? [itemId] : [...currentValues, itemId].slice(0, assignment.group.maxSelect)
+    setSelectedComponentIds((current) => ({ ...current, [assignment.group.id]: nextValues }))
+    if (isSelected) return
+
+    const item = assignment.group.items.find((candidate) => candidate.id === itemId)
+    const componentProduct = catalog?.products.find((candidate) => candidate.id === item?.productId)
+    const componentVariant = componentProduct?.variants.find((candidate) => candidate.id === item?.variantId)
+      ?? componentProduct?.variants.find((candidate) => candidate.isDefault)
+    if (!componentProduct || !componentVariant) return
+    setSelectedComponentModifiers((current) => ({
+      ...current,
+      [itemId]: Object.fromEntries(getProductModifierGroups(componentProduct, componentVariant.id).map((group) => [
+        group.id,
+        group.modifiers.filter((modifier) => modifier.isActive && modifier.isDefault).map((modifier) => modifier.id),
+      ])),
+    }))
+  }
+
+  function toggleComponentModifier(itemId: string, group: ModifierGroup, modifierId: string) {
+    setSelectedComponentModifiers((current) => {
+      const selected = current[itemId]?.[group.id] ?? []
+      const exists = selected.includes(modifierId)
+      const next = exists
+        ? selected.filter((id) => id !== modifierId)
+        : group.maxSelect === 1 ? [modifierId] : [...selected, modifierId].slice(0, group.maxSelect)
+      return { ...current, [itemId]: { ...current[itemId], [group.id]: next } }
+    })
+  }
+
   function handleVariantSelect(variant: ProductVariant, sourceElement: HTMLElement) {
     const nextSaleFormat = getSaleFormatForVariant(product, variant, selectedSaleFormat)
 
     setSelectedVariantId(variant.id)
     setSelectedSaleFormat(nextSaleFormat)
-    setSelectedMixerId('')
+    setSelectedComponentIds({})
+    setSelectedComponentModifiers({})
     setHasChosenFormat(true)
 
-    if (nextSaleFormat !== 'cubata' && product.modifierGroups.length === 0) {
-      submitSelection(variant, nextSaleFormat, null, sourceElement)
+    if (!getVariantSelectionGroups(product, variant.id).length && getProductModifierGroups(product, variant.id).length === 0) {
+      submitSelection(variant, sourceElement)
     }
   }
 
@@ -229,10 +384,10 @@ export function ProductDialog({
 
         {isChoosingMixer ? (
           <div className="mt-5">
-            {mixerProducts.length ? (
+            {mixerOptions.length ? (
               <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
                 {initialSelection ? <Button
-                  active={!selectedMixerId}
+                  active={!selectedMixerItemId}
                   disabled={isBusy || hasSubmitted}
                   fullWidth
                   onClick={(event) => handleNoMixer(event.currentTarget)}
@@ -240,13 +395,13 @@ export function ProductDialog({
                   variant="tertiary"
                   className="h-28"
                 >Sin mixer</Button> : null}
-                {mixerProducts.map((mixer) => (
+                {mixerOptions.map(({ item, product: mixer }) => (
                   <Button
-                    active={mixer.id === selectedMixerId}
+                    active={item.id === selectedMixerItemId}
                     disabled={isBusy || hasSubmitted}
                     fullWidth
-                    key={mixer.id}
-                    onClick={(event) => handleMixerSelect(mixer, event.currentTarget)}
+                    key={item.id}
+                    onClick={(event) => handleMixerSelect(item.id, event.currentTarget)}
                     type="button"
                     variant="tertiary"
                     className="h-28 overflow-hidden !justify-start !p-0"
@@ -263,7 +418,10 @@ export function ProductDialog({
                           <GlassWater className="h-8 w-8" />
                         )}
                       </span>
-                      <span className="min-w-0 truncate px-4 text-left text-lg">{mixer.name}</span>
+                      <span className="min-w-0 px-4 text-left text-lg">
+                        <span className="block truncate">{mixer.name}</span>
+                        {item.priceDeltaCents ? <span className="block text-sm text-[var(--muted)]">+{formatMoney(item.priceDeltaCents)}</span> : null}
+                      </span>
                     </span>
                   </Button>
                 ))}
@@ -276,9 +434,67 @@ export function ProductDialog({
           </div>
         ) : null}
 
-        {!isChoosingFormat && product.modifierGroups.length ? (
+        {!isChoosingFormat && menuAssignments.length ? (
           <div className="mt-5 space-y-4">
-            {product.modifierGroups.map((group) => (
+            {menuAssignments.map((assignment) => (
+              <div key={assignment.selectionGroupId}>
+                <p className="mb-2 text-sm font-semibold text-[var(--muted)]">
+                  {assignment.group.name} - selecciona entre {assignment.group.minSelect} y {assignment.group.maxSelect}
+                </p>
+                <div className="grid gap-2 sm:grid-cols-2">
+                  {assignment.group.items.filter((item) => item.isActive).map((item) => {
+                    const optionProduct = catalog?.products.find((candidate) => candidate.id === item.productId)
+                    const optionVariant = optionProduct?.variants.find((candidate) => candidate.id === item.variantId)
+                      ?? optionProduct?.variants.find((candidate) => candidate.isDefault)
+                    const componentModifierGroups = optionProduct && optionVariant ? getProductModifierGroups(optionProduct, optionVariant.id) : []
+                    const selected = selectedComponentIds[assignment.group.id]?.includes(item.id) ?? false
+                    return <div className="grid gap-2" key={item.id}>
+                      <Button
+                        active={selected}
+                        disabled={hasSubmitted || !optionProduct}
+                        fullWidth
+                        onClick={() => toggleMenuComponent(assignment, item.id)}
+                        type="button"
+                        variant="tertiary"
+                      >
+                        <span className="flex w-full items-center justify-between gap-3">
+                          <span>{optionProduct?.name ?? 'Producto no disponible'}</span>
+                          <span>{item.priceDeltaCents ? `+${formatMoney(item.priceDeltaCents)}` : 'Incluido'}</span>
+                        </span>
+                      </Button>
+                      {selected && componentModifierGroups.length ? <div className="rounded-[var(--radius)] border border-[var(--separator)] p-3">
+                        {componentModifierGroups.map((group) => <div className="mb-3 last:mb-0" key={group.id}>
+                          <p className="mb-2 text-xs font-semibold text-[var(--muted)]">{group.name} · {group.minSelect}-{group.maxSelect}</p>
+                          <div className="grid gap-2">
+                            {group.modifiers.filter((modifier) => modifier.isActive).map((modifier) => <Button
+                              active={selectedComponentModifiers[item.id]?.[group.id]?.includes(modifier.id) ?? false}
+                              disabled={hasSubmitted}
+                              fullWidth
+                              key={modifier.id}
+                              onClick={() => toggleComponentModifier(item.id, group, modifier.id)}
+                              size="sm"
+                              type="button"
+                              variant="tertiary"
+                            >
+                              <span className="flex w-full items-center justify-between gap-3">
+                                <span>{modifier.name}</span>
+                                <span>{modifier.priceCents ? `+${formatMoney(modifier.priceCents)}` : 'Incluido'}</span>
+                              </span>
+                            </Button>)}
+                          </div>
+                        </div>)}
+                      </div> : null}
+                    </div>
+                  })}
+                </div>
+              </div>
+            ))}
+          </div>
+        ) : null}
+
+        {!isChoosingFormat && modifierGroups.length ? (
+          <div className="mt-5 space-y-4">
+            {modifierGroups.map((group) => (
               <div key={group.id}>
                 <p className="mb-2 text-sm font-semibold text-[var(--muted)]">
                   {group.name}
@@ -309,12 +525,12 @@ export function ProductDialog({
           </div>
         ) : null}
 
-        {!isChoosingFormat && (product.modifierGroups.length > 0 || initialSelection) ? (
+        {!isChoosingFormat && (modifierGroups.length > 0 || selectionAssignments.length > 0 || initialSelection) ? (
           <div className="mt-5">
             <Button
-              disabled={isBusy || hasSubmitted || !selectedVariant || !isModifierValid || (selectedSaleFormat === 'cubata' && !selectedMixer && !initialSelection)}
+              disabled={isBusy || hasSubmitted || !selectedVariant || !isModifierValid || !isComponentSelectionValid || !isComponentModifierValid}
               fullWidth
-              onClick={(event) => submitSelection(selectedVariant, selectedSaleFormat, selectedMixer, event.currentTarget)}
+              onClick={(event) => submitSelection(selectedVariant, event.currentTarget)}
               size="lg"
               type="button"
               variant="primary"

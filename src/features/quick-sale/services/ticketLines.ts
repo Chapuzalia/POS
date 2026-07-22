@@ -1,15 +1,9 @@
 import { createId, getLineSignature } from '../../../lib/format'
-import { toQuickSaleModifiers } from '../../../lib/mixers'
+import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
 import type { Product, ProductLineSelection, ProductVariant, TicketLine } from '../../../types'
 
 export function addQuickSaleTicketLine(lines: TicketLine[], product: Product, variant: ProductVariant, selection: ProductLineSelection) {
-  const modifiers = toQuickSaleModifiers(selection.modifiers, selection.mixer)
-  const candidate: TicketLine = {
-    id: createId(), productId: product.id, productName: product.name,
-    variantId: variant.id, variantName: variant.name,
-    unitPriceCents: variant.priceCents + modifiers.reduce((total, modifier) => total + modifier.priceCents, 0),
-    quantity: 1, modifiers,
-  }
+  const candidate = buildSaleLine(createId(), product, variant, selection)
   const signature = getLineSignature(candidate)
   const existing = lines.find((line) => getLineSignature(line) === signature)
   return existing

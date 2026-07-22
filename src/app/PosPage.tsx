@@ -92,9 +92,14 @@ export function PosPage(props: Props) {
         productName: line.productName,
         variantId: line.variantId ?? '',
         variantName: line.variantName,
+        basePriceCents: line.unitPriceCents - line.modifiers.reduce((total, modifier) => total + modifier.priceCents, 0) - line.components.reduce((total, component) => total + component.priceDeltaCents, 0),
+        componentDeltaCents: line.components.reduce((total, component) => total + component.priceDeltaCents, 0),
+        modifierDeltaCents: line.modifiers.reduce((total, modifier) => total + modifier.priceCents, 0),
         unitPriceCents: line.unitPriceCents,
         quantity: line.quantity,
         modifiers: line.modifiers,
+        components: line.components,
+        catalogSnapshot: line.catalogSnapshot,
         mixerProductId: line.mixerProductId,
         mixer: line.mixer,
       }))
@@ -140,6 +145,8 @@ export function PosPage(props: Props) {
             allowFormatSelection: false,
             initialSelection: {
               modifiers: line.modifiers,
+              components: line.components,
+              catalogSnapshot: line.catalogSnapshot,
               mixerProductId: line.mixerProductId,
               mixer: line.mixer,
             },
@@ -356,6 +363,7 @@ export function PosPage(props: Props) {
       /> : null}
       {quickSale.productDialog ? <ProductDialog
         allowFormatSelection={quickSale.productDialog.allowFormatSelection}
+        catalogSnapshot={quickSale.productDialog.catalogSnapshot}
         isBusy={props.isBusy}
         catalog={props.catalog}
         initialSelection={quickSale.productDialog.initialSelection}

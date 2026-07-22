@@ -1,11 +1,18 @@
 export type SaleFormat = string
 
 export type SaleFormatDefinition = {
+  id: string
+  tenantId?: string
+  venueId?: string | null
   key: SaleFormat
   label: string
   isActive: boolean
   sortOrder: number
 }
+
+export type CatalogProfile = 'bar_classic' | 'restaurant' | 'custom'
+export type ProductType = 'standard' | 'menu'
+export type SelectionGroupKind = 'mixer' | 'menu_component'
 
 export type CatalogKind =
   | 'beer'
@@ -150,13 +157,40 @@ export type Category = {
   sortOrder: number
 }
 
+export type CatalogTab = {
+  id: string
+  tenantId: string
+  venueId: string
+  key: string
+  label: string
+  icon: string
+  isActive: boolean
+  sortOrder: number
+}
+
+export type CatalogPlacement = {
+  id: string
+  tenantId: string
+  venueId: string
+  tabId: string
+  categoryId: string
+  productId: string
+  defaultVariantId: string | null
+  isFeatured: boolean
+  isActive: boolean
+  sortOrder: number
+}
+
 export type ProductVariant = {
   id: string
   productId: string
   name: string
   priceCents: number
   sku: string | null
+  saleFormatId: string | null
+  saleFormatKey?: SaleFormat | null
   isDefault: boolean
+  isActive: boolean
   sortOrder: number
 }
 
@@ -165,6 +199,8 @@ export type Modifier = {
   groupId: string
   name: string
   priceCents: number
+  isDefault: boolean
+  isActive: boolean
   sortOrder: number
 }
 
@@ -174,8 +210,49 @@ export type ModifierGroup = {
   name: string
   minSelect: number
   maxSelect: number
+  isActive: boolean
   sortOrder: number
   modifiers: Modifier[]
+}
+
+export type SelectionGroupItem = {
+  id: string
+  groupId: string
+  productId: string
+  variantId: string | null
+  priceDeltaCents: number
+  isDefault: boolean
+  isActive: boolean
+  sortOrder: number
+  product?: Product
+}
+
+export type SelectionGroup = {
+  id: string
+  tenantId: string
+  venueId: string
+  kind: SelectionGroupKind
+  name: string
+  minSelect: number
+  maxSelect: number
+  isActive: boolean
+  sortOrder: number
+  items: SelectionGroupItem[]
+}
+
+export type VariantSelectionGroup = {
+  variantId: string
+  selectionGroupId: string
+  sortOrder: number
+  group: SelectionGroup
+}
+
+export type ProductModifierGroupAssignment = {
+  productId: string
+  variantId: string | null
+  modifierGroupId: string
+  sortOrder: number
+  group: ModifierGroup
 }
 
 export type Product = {
@@ -184,6 +261,7 @@ export type Product = {
   venueId: string
   categoryId: string
   name: string
+  productType: ProductType
   description: string | null
   imagePath: string | null
   imageUrl: string | null
@@ -198,9 +276,16 @@ export type Product = {
   sortOrder: number
   variants: ProductVariant[]
   modifierGroups: ModifierGroup[]
+  modifierGroupAssignments?: ProductModifierGroupAssignment[]
+  variantSelectionGroups: VariantSelectionGroup[]
 }
 
 export type Catalog = {
+  catalogProfile: CatalogProfile
+  tabs: CatalogTab[]
+  placements: CatalogPlacement[]
+  selectionGroups: SelectionGroup[]
+  usesLegacyFallback: boolean
   categories: Category[]
   discounts: Discount[]
   manualDiscountEnabled: boolean
@@ -219,12 +304,39 @@ export type TicketLineModifier = {
 
 export type TicketLineMixer = {
   productId: string
+  variantId?: string | null
   name: string
   priceCents: number
 }
 
+export type TicketLineComponent = {
+  id: string
+  type: SelectionGroupKind
+  selectionGroupId: string | null
+  selectionGroupName: string
+  productId: string
+  variantId: string | null
+  productName: string
+  variantName: string
+  quantity: number
+  priceDeltaCents: number
+  sortOrder: number
+  modifiers?: TicketLineModifier[]
+}
+
+export type SaleLineCatalogSnapshot = {
+  saleFormatId: string | null
+  saleFormatName: string
+  categoryId: string | null
+  categoryName: string
+  catalogTabId: string | null
+  catalogTabName: string
+}
+
 export type ProductLineSelection = {
   modifiers: TicketLineModifier[]
+  components: TicketLineComponent[]
+  catalogSnapshot?: SaleLineCatalogSnapshot
   mixerProductId: string | null
   mixer: TicketLineMixer | null
 }
@@ -235,9 +347,14 @@ export type TicketLine = {
   productName: string
   variantId: string
   variantName: string
+  basePriceCents: number
+  componentDeltaCents: number
+  modifierDeltaCents: number
   unitPriceCents: number
   quantity: number
   modifiers: TicketLineModifier[]
+  components: TicketLineComponent[]
+  catalogSnapshot: SaleLineCatalogSnapshot
   mixerProductId?: string | null
   mixer?: TicketLineMixer | null
   fiscalSnapshot?: TicketLineFiscalSnapshot | null
@@ -330,10 +447,16 @@ export type SaleLinePayload = {
   variantId: string
   productName: string
   variantName: string
+  basePriceCents: number
+  componentDeltaCents: number
+  modifierDeltaCents: number
+  grossBeforeDiscountCents: number
   quantity: number
   unitPriceCents: number
   lineTotalCents: number
   modifiers: TicketLineModifier[]
+  components: TicketLineComponent[]
+  catalogSnapshot: SaleLineCatalogSnapshot
   fiscalSnapshot: TicketLineFiscalSnapshot | null
 }
 
@@ -499,6 +622,7 @@ export type OfflineEvent =
 
 export type ProductCreateInput = {
   venueId: string
+  productType: ProductType
   canSellStandalone: boolean
   canUseAsMixer: boolean
   categoryId: string
@@ -513,6 +637,7 @@ export type ProductCreateInput = {
   variants: Array<{
     name: string
     priceCents: number
+    saleFormatId?: string | null
   }>
 }
 
@@ -568,6 +693,10 @@ export type CrmSalesReportTicket = {
   lines: Array<{
     categoryId: string | null
     categoryName: string
+    saleFormatId: string | null
+    saleFormatName: string
+    catalogTabId: string | null
+    catalogTabName: string
     id: string
     lineTotalCents: number
     modifiers: Array<{
@@ -576,9 +705,11 @@ export type CrmSalesReportTicket = {
     }>
     productId: string | null
     productName: string
+    variantId: string | null
     quantity: number
     unitPriceCents: number
     variantName: string
+    components: TicketLineComponent[]
     fiscalSnapshot: TicketLineFiscalSnapshot | null
   }>
   discountAmountCents: number
@@ -607,5 +738,10 @@ export type CrmSalesReports = {
   byCategory: CrmSalesReportAggregate[]
   byFormat: CrmSalesReportAggregate[]
   byProduct: CrmSalesReportAggregate[]
+  byVariant: CrmSalesReportAggregate[]
+  byCatalogTab: CrmSalesReportAggregate[]
+  byMixer: CrmSalesReportAggregate[]
+  byMenuComponent: CrmSalesReportAggregate[]
+  byModifier: CrmSalesReportAggregate[]
   tickets: CrmSalesReportTicket[]
 }

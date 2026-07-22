@@ -1,13 +1,12 @@
 import type { CatalogKind, Product, ProductVariant, SaleFormat, SaleFormatDefinition } from '../types'
-import { normalizeText } from './format'
 
 export const defaultSaleFormats: SaleFormatDefinition[] = [
-  { key: 'cubata', label: 'Cubata', isActive: true, sortOrder: 1 },
-  { key: 'copa', label: 'Copa', isActive: true, sortOrder: 2 },
-  { key: 'shot', label: 'Chupito', isActive: true, sortOrder: 3 },
-  { key: 'beer_bottle', label: 'Botellin cerveza', isActive: true, sortOrder: 4 },
-  { key: 'soft_bottle', label: 'Botellin refresco', isActive: true, sortOrder: 5 },
-  { key: 'cocktail', label: 'Coctel', isActive: true, sortOrder: 6 },
+  { id: 'legacy-format:cubata', key: 'cubata', label: 'Cubata', isActive: true, sortOrder: 1 },
+  { id: 'legacy-format:copa', key: 'copa', label: 'Copa', isActive: true, sortOrder: 2 },
+  { id: 'legacy-format:shot', key: 'shot', label: 'Chupito', isActive: true, sortOrder: 3 },
+  { id: 'legacy-format:beer_bottle', key: 'beer_bottle', label: 'Botellin cerveza', isActive: true, sortOrder: 4 },
+  { id: 'legacy-format:soft_bottle', key: 'soft_bottle', label: 'Botellin refresco', isActive: true, sortOrder: 5 },
+  { id: 'legacy-format:cocktail', key: 'cocktail', label: 'Coctel', isActive: true, sortOrder: 6 },
 ]
 
 export const saleFormatOptions = defaultSaleFormats.map((format) => ({
@@ -31,15 +30,6 @@ export const categoryKindOptions: Array<{ label: string; value: CatalogKind }> =
   { label: 'Cocteles', value: 'cocktail' },
   { label: 'Otros', value: 'other' },
 ]
-
-const saleFormatVariantAliases: Record<string, string[]> = {
-  cubata: ['cubata', 'copa larga', 'alcohol mixer', 'mixed'],
-  copa: ['copa', 'solo', 'alcohol solo'],
-  shot: ['chupito', 'shot'],
-  beer_bottle: ['botellin', 'botella', 'cerveza'],
-  soft_bottle: ['botellin', 'botella', 'refresco'],
-  cocktail: ['coctel', 'cocktail'],
-}
 
 export function getAvailableSaleFormats(saleFormats: SaleFormatDefinition[] | null | undefined) {
   const source = saleFormats?.length ? saleFormats : defaultSaleFormats
@@ -86,14 +76,17 @@ export function canUseProductAsMixer(product: Product) {
 }
 
 export function findProductVariantForSaleFormat(product: Product, saleFormat: SaleFormat): ProductVariant | null {
-  const aliases = (saleFormatVariantAliases[saleFormat] ?? [saleFormat]).flatMap((alias) => {
-    const normalizedAlias = normalizeText(alias)
-    return [normalizedAlias, normalizedAlias.replace(/[_-]+/g, ' ')]
-  })
-  return product.variants.find((variant) => {
-    const normalizedName = normalizeText(variant.name)
-    return aliases.some((alias) => normalizedName.includes(alias))
-  }) ?? null
+  const explicit = product.variants.find((variant) => variant.isActive && variant.saleFormatKey === saleFormat)
+  if (explicit) return explicit
+
+  // @deprecated Compatibility for cached catalogues created before sale_format_id.
+  // The old sale_formats array and variant order are structural data; names/aliases
+  // are deliberately never inspected here.
+  const legacyFormatIndex = product.saleFormats.indexOf(saleFormat)
+  if (legacyFormatIndex < 0) return null
+  return [...product.variants]
+    .filter((variant) => variant.isActive !== false)
+    .sort((a, b) => a.sortOrder - b.sortOrder)[legacyFormatIndex] ?? null
 }
 
 export function getProductVariantForSaleFormat(product: Product, saleFormat: SaleFormat): ProductVariant | null {

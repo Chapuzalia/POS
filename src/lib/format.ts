@@ -52,11 +52,16 @@ export function getTicketTotal(lines: TicketLine[]) {
   return lines.reduce((total, line) => total + getLineTotal(line), 0)
 }
 
-export function getLineSignature(line: Pick<TicketLine, 'productId' | 'variantId' | 'modifiers'> & Pick<Partial<TicketLine>, 'mixerProductId'>) {
+export function getLineSignature(line: Pick<TicketLine, 'productId' | 'variantId' | 'modifiers'> & Pick<Partial<TicketLine>, 'mixerProductId' | 'components'>) {
   const modifierIds = line.modifiers
     .map((modifier) => modifier.id)
     .sort()
     .join('|')
 
-  return `${line.productId}:${line.variantId}:${modifierIds}:${line.mixerProductId ?? ''}`
+  const componentIds = (line.components ?? [])
+    .map((component) => `${component.selectionGroupId ?? ''}:${component.productId}:${component.variantId ?? ''}:${component.quantity}`)
+    .sort()
+    .join('|')
+
+  return `${line.productId}:${line.variantId}:${modifierIds}:${componentIds}:${line.mixerProductId ?? ''}`
 }
