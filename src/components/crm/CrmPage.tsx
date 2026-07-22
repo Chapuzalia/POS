@@ -15,7 +15,7 @@ export type CrmPageProps = {
   context: TenantContext
   error: string | null
   isOnline: boolean
-  onCatalogChanged: () => Promise<void>
+  onCatalogChanged: (venueId: string) => Promise<void>
   onError: (error: string | null) => void
   onLogout: () => void
 }
@@ -41,12 +41,17 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     }
   }, [onError])
 
+  const refreshCurrentProjectedCatalog = useCallback(async () => {
+    if (!selectedVenueId) return
+    await onCatalogChanged(selectedVenueId)
+  }, [onCatalogChanged, selectedVenueId])
+
   const mutateCatalog = useCallback(async (action: () => Promise<unknown>) => {
     setIsBusy(true)
     onError(null)
     try {
       await action()
-      await Promise.all([refreshAdminCatalog(true), onCatalogChanged()])
+      await Promise.all([refreshAdminCatalog(true), refreshCurrentProjectedCatalog()])
       return true
     } catch (actionError) {
       onError(getReadableError(actionError))
@@ -54,7 +59,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     } finally {
       setIsBusy(false)
     }
-  }, [onCatalogChanged, onError, refreshAdminCatalog])
+  }, [onError, refreshAdminCatalog, refreshCurrentProjectedCatalog])
 
   const refreshVenues = useCallback(async () => {
     const nextVenues = await loadCrmVenues(context)
@@ -108,6 +113,6 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     setStats(null)
     setSelectedVenueId(venueId)
   }} selectedVenueId={selectedVenueId} venues={venues}>
-    <CrmSectionContent activeSection={activeSection} catalog={catalog} context={context} disabled={disabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={onCatalogChanged} onError={onError} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+    <CrmSectionContent activeSection={activeSection} catalog={catalog} context={context} disabled={disabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
   </CrmShell>
 }

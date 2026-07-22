@@ -288,7 +288,7 @@ export function AppShell() {
       context={context}
       error={error}
       isOnline={isOnline}
-      onCatalogChanged={() => refreshCatalog(context)}
+      onCatalogChanged={(venueId) => refreshCatalog({ ...context, venueId })}
       onError={setGeneralError}
       onLogout={session.logout}
     />

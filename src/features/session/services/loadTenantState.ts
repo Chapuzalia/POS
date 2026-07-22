@@ -15,7 +15,7 @@ export async function loadTenantState(context: TenantContext) {
   }
   if (isCrmAdministrator(context)) {
     return {
-      catalog: await loadCatalogFromSupabase(context),
+      catalog: null,
       cashSession: null,
       productSalesStats: [],
       salesLedger: [],
