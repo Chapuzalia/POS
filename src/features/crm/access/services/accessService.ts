@@ -1,5 +1,5 @@
 import { isValidTaxRate } from '../../../../lib/tax'
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
 import { type CrmDevice, type CrmPosUser, type CrmVenue, type DeviceMode, type TenantContext } from '../../../../types'
 
 export type CrmAccessData = {
@@ -182,9 +182,28 @@ export async function createCrmDevice(context: TenantContext, venueId: string, n
   })
 
   if (error || data?.error || !data?.credentials) {
-    throw new Error(data?.error ?? error?.message ?? 'No se pudieron crear el dispositivo y su usuario.')
+    throw new Error(await getFunctionInvokeErrorMessage(
+      data,
+      error,
+      'No se pudieron crear el dispositivo y su usuario. Revisa la conexión e inténtalo de nuevo.',
+    ))
   }
   return data.credentials
+}
+
+export async function retireCrmDevice(context: TenantContext, deviceId: string) {
+  const client = requireSupabase()
+  const { data, error } = await client.functions.invoke<{ error?: string }>('manage-pos-users', {
+    body: { action: 'retire-device', deviceId, tenantId: context.tenantId },
+  })
+
+  if (error || data?.error) {
+    throw new Error(await getFunctionInvokeErrorMessage(
+      data,
+      error,
+      'No se pudo retirar el dispositivo.',
+    ))
+  }
 }
 
 export async function setCrmPosUserActive(context: TenantContext, userId: string, isActive: boolean) {

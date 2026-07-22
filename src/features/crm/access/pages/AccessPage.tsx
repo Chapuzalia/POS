@@ -1,11 +1,11 @@
-import { Building2, Copy, LogOut, MonitorSmartphone, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
+import { ArchiveX, Building2, Copy, LogOut, MonitorSmartphone, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import { CrmModal } from '../../shared/components/CrmModal'
 import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { formatCrmDateTime } from '../../shared/formatCrmDateTime'
 import { sileo } from 'sileo'
-import { type CrmAccessData, createCrmDevice, createCrmVenue, deleteCrmPosUser, loadCrmAccessData, releaseCrmPosUserLogin, setCrmPosUserActive, updateCrmPosUser } from '../services/accessService'
+import { type CrmAccessData, createCrmDevice, createCrmVenue, deleteCrmPosUser, loadCrmAccessData, releaseCrmPosUserLogin, retireCrmDevice, setCrmPosUserActive, updateCrmPosUser } from '../services/accessService'
 import { type CrmPosUser, type DeviceMode, type TenantContext } from '../../../../types'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { type RunAction } from '../../shared/types'
@@ -146,9 +146,20 @@ export function AccessManagementCrm({
     })
   }
 
+  async function retireDevice(deviceId: string, deviceName: string) {
+    if (!window.confirm(`Retirar el dispositivo "${deviceName}"? Dejará de consumir una plaza del plan y se conservará su histórico.`)) return
+
+    await runAction(async () => {
+      await retireCrmDevice(tenantContext, deviceId)
+      await refresh()
+    })
+  }
+
   const venueById = new Map(data.venues.map((venue) => [venue.id, venue]))
   const deviceById = new Map(data.devices.map((device) => [device.id, device]))
+  const userByDeviceId = new Map(data.users.filter((user) => user.hasDeviceAssignment).map((user) => [user.deviceId, user]))
   const assignedDeviceIds = new Set(data.users.filter((user) => user.isActive).map((user) => user.deviceId))
+  const activeDeviceCount = data.devices.filter((device) => device.isActive).length
 
   return (
     <>
@@ -197,6 +208,7 @@ export function AccessManagementCrm({
             </button>
           </form>
         </section>
+
       </div>
 
       <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-access-users">
@@ -295,6 +307,27 @@ export function AccessManagementCrm({
           })}
           {!data.users.length ? <EmptyList message="No hay usuarios TPV creados." /> : null}
         </div>
+        </section>
+
+        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] xl:!col-span-2">
+          <div className="crm-list-toolbar !flex !items-center !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]">
+            <div className="crm-list-title"><h2>Dispositivos</h2><p>{activeDeviceCount} activos · {data.devices.length} registrados · límite calculado sobre los activos</p></div>
+            <MonitorSmartphone className="!size-5 !text-[var(--crm-text-muted)]" />
+          </div>
+          <div className="!divide-y !divide-[var(--crm-border-subtle)]">
+            {data.devices.map((device) => {
+              const assignedUser = userByDeviceId.get(device.id)
+              const venue = venueById.get(device.venueId)
+              const mode = device.deviceMode === 'satellite' ? 'Satélite' : device.deviceMode === 'hybrid' ? 'Híbrido' : 'Caja'
+              return <div className="!grid !min-h-[68px] !items-center !gap-3 !px-[18px] !py-3 md:!grid-cols-[minmax(160px,1fr)_minmax(150px,0.8fr)_110px_auto] md:!px-[22px]" key={device.id}>
+                <div className="crm-cell-main"><strong>{device.name}</strong><span>{venue?.name ?? 'Local no disponible'} · {mode}</span></div>
+                <div className="crm-cell-main"><strong>{assignedUser?.fullName || assignedUser?.email || 'Sin usuario asignado'}</strong><span>{assignedUser ? assignedUser.email : 'Disponible para retirar'}</span></div>
+                <span className={device.isActive ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]' : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !px-[9px] !text-[11px] !font-semibold !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-secondary)]'}>{device.isActive ? 'Activo' : 'Retirado'}</span>
+                <button aria-label={`Retirar dispositivo ${device.name}`} className="crm-danger-button !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-3 !text-[13px] !font-semibold !text-[var(--crm-red)]" disabled={disabled || !device.isActive || Boolean(assignedUser)} onClick={() => void retireDevice(device.id, device.name)} title={assignedUser ? 'Elimina o reasigna primero el usuario asociado' : device.isActive ? 'Retirar y liberar una plaza del plan' : 'Dispositivo retirado'} type="button"><ArchiveX className="!size-4" /> Retirar</button>
+              </div>
+            })}
+            {!data.devices.length ? <EmptyList message="No hay dispositivos registrados." /> : null}
+          </div>
         </section>
       </div>
 

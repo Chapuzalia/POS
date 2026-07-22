@@ -1,16 +1,12 @@
 import {
   ArrowLeft,
   BarChart3,
-  Beer,
   ChevronLeft,
   ChevronRight,
   GlassWater,
-  Martini,
   ReceiptText,
   Search,
-  Wine,
   X,
-  type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getActiveTabs, getCategoriesForTab, resolveSellableCatalog } from '../../features/catalog/domain/resolver'
@@ -19,22 +15,14 @@ import { formatMoney, normalizeText } from '../../lib/format'
 import type { CatalogStartTab, ProductSalesStat } from '../../types'
 import { Button } from '../ui'
 import { getAvailableFormatCounts, groupCatalogItemsByProduct } from './catalogPanelModel'
-
-const catalogIcons: Record<string, LucideIcon> = {
-  beer_bottle: Beer,
-  cocktail: Martini,
-  copa: Wine,
-  cubata: Martini,
-  shot: Wine,
-  soft_bottle: GlassWater,
-}
+import { getCatalogIconComponent } from '../../features/catalog/ui/catalogIcons'
 
 type CatalogFilter = CatalogStartTab | string
 
 function getCatalogIcon(icon: string, activeFilter: CatalogFilter) {
   if (activeFilter === 'top') return BarChart3
-  if (activeFilter === 'all') return catalogIcons[icon] ?? GlassWater
-  return catalogIcons[icon] ?? ReceiptText
+  if (activeFilter === 'all') return getCatalogIconComponent(icon, GlassWater)
+  return icon ? getCatalogIconComponent(icon) : ReceiptText
 }
 
 function compareItems(left: ResolvedCatalogItem, right: ResolvedCatalogItem) {
