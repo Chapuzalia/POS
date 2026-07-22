@@ -53,7 +53,7 @@ test('la carga CRM no envia un venue UUID vacio al cargar todos los locales', ()
   assert.match(source, /if \(context\.venueId\) tabsQuery = tabsQuery\.eq\('venue_id', context\.venueId\)/)
   assert.match(source, /if \(context\.venueId\) placementsQuery = placementsQuery\.eq\('venue_id', context\.venueId\)/)
   assert.match(source, /if \(context\.venueId\) selectionGroupsQuery = selectionGroupsQuery\.eq\('venue_id', context\.venueId\)/)
-  assert.match(source, /\n\s+tabsQuery,\n\s+placementsQuery,\n\s+selectionGroupsQuery,/)
+  assert.match(source, /\r?\n\s+tabsQuery,\r?\n\s+placementsQuery,\r?\n\s+selectionGroupsQuery,/)
 })
 
 test('el suplemento del mixer es contextual y no se convierte en modificador', () => {
