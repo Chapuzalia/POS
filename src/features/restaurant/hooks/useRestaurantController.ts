@@ -1,13 +1,12 @@
 import { useCallback, useState } from 'react'
 import { createId, getLineSignature } from '../../../lib/format'
-import { calculateSaleLineTotals, validateProductLineSelection } from '../../catalog/services/saleLineBuilder'
+import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
+import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
 import type {
   AppliedDiscount,
   CashSession,
   PaymentMethod,
-  Product,
   ProductLineSelection,
-  ProductVariant,
   SaleCreatedPayload,
   TenantContext,
 } from '../../../types'
@@ -58,6 +57,7 @@ type PendingPayment = { method: PaymentMethod | null; receivedCents: number | nu
 
 type Options = {
   appliedDiscount: AppliedDiscount | null
+  catalog: CatalogData | null
   cashSession: CashSession | null
   context: TenantContext | null
   enabled: boolean
@@ -522,44 +522,42 @@ export function useRestaurantController(options: Options) {
   }, [options, realtime.tablesEnabled])
 
   const addLine = useCallback((
-    product: Product,
-    variant: ProductVariant,
+    sellable: ResolvedSellableProduct,
     selection: ProductLineSelection,
+    item: ResolvedCatalogItem | null,
     lineId?: string,
     sourceElement?: HTMLElement | null,
   ) => {
     if (!options.isOnline) {
-      options.onError('La gestion de mesas requiere conexion.')
+      options.onError('La gestión de mesas requiere conexión.')
       return false
     }
     const current = draft.getCurrentOrder()
-    if (!current || !options.context) return false
-    validateProductLineSelection(product, variant, selection)
-    const { modifiers, components, catalogSnapshot, mixerProductId, mixer } = selection
-    const totals = calculateSaleLineTotals(variant, components, modifiers)
+    if (!current || !options.context || !options.catalog) return false
+    const candidate = buildSaleLine(createId(), options.catalog, sellable, selection, item)
     if (lineId) {
       const timestamp = nowIso()
       draft.updateDraft((detail) => ({
         ...detail,
         lines: detail.lines.map((line) => line.id === lineId ? {
           ...line,
-          productId: product.id,
-          variantId: variant.id,
-          productName: product.name,
-          variantName: variant.name,
-          unitPriceCents: totals.grossBeforeDiscountCents,
-          modifiers,
-          components,
-          catalogSnapshot: catalogSnapshot ?? line.catalogSnapshot,
-          mixerProductId,
-          mixer,
+          productId: candidate.productId,
+          variantId: candidate.variantId,
+          productName: candidate.productName,
+          variantName: candidate.variantName,
+          unitPriceCents: candidate.unitPriceCents,
+          modifiers: candidate.modifiers,
+          components: candidate.components,
+          catalogSnapshot: candidate.catalogSnapshot,
+          mixerProductId: candidate.mixerProductId ?? null,
+          mixer: candidate.mixer ?? null,
           updatedAt: timestamp,
         } : line),
       }))
-      options.onAddFeedback({ feedbackType: 'updated', productName: product.name, sourceElement })
+      options.onAddFeedback({ feedbackType: 'updated', productName: candidate.productName, sourceElement })
       return true
     }
-    const signature = getLineSignature({ productId: product.id, variantId: variant.id, modifiers, components, mixerProductId })
+    const signature = getLineSignature(candidate)
     const existing = current.lines.find((line) => line.productId !== null
       && line.note === null
       && getLineSignature({
@@ -575,29 +573,29 @@ export function useRestaurantController(options: Options) {
       lines: existing
         ? detail.lines.map((line) => line.id === existing.id ? { ...line, quantity: line.quantity + 1, updatedAt: timestamp } : line)
         : [...detail.lines, {
-            id: createId(),
+            id: candidate.id,
             tenantId: options.context!.tenantId,
             venueId: options.context!.venueId,
             orderId: detail.order.id,
-            productId: product.id,
-            variantId: variant.id,
-            productName: product.name,
-            variantName: variant.name,
-            unitPriceCents: totals.grossBeforeDiscountCents,
+            productId: candidate.productId,
+            variantId: candidate.variantId,
+            productName: candidate.productName,
+            variantName: candidate.variantName,
+            unitPriceCents: candidate.unitPriceCents,
             quantity: 1,
             servedQuantity: 0,
             fullyServedAt: null,
-            modifiers,
-            components,
-            catalogSnapshot: catalogSnapshot ?? { saleFormatId: variant.saleFormatId, saleFormatName: variant.name, categoryId: product.categoryId, categoryName: '', catalogTabId: null, catalogTabName: '' },
-            mixerProductId,
-            mixer,
+            modifiers: candidate.modifiers,
+            components: candidate.components,
+            catalogSnapshot: candidate.catalogSnapshot,
+            mixerProductId: candidate.mixerProductId ?? null,
+            mixer: candidate.mixer ?? null,
             note: null,
             createdAt: timestamp,
             updatedAt: timestamp,
           }],
     }))
-    options.onAddFeedback({ feedbackType: 'added', productName: product.name, sourceElement })
+    options.onAddFeedback({ feedbackType: 'added', productName: candidate.productName, sourceElement })
     return true
   }, [draft, options])
 

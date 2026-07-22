@@ -7,13 +7,13 @@ test('CRM login defers catalog loading until a venue has been selected', async (
   const hookSource = await readFile(new URL('../src/features/crm/catalog/hooks/useCatalogAdmin.ts', import.meta.url), 'utf8')
   const adminBranch = sessionSource.match(/if \(isCrmAdministrator\(context\)\) \{([\s\S]*?)\n  \}/)?.[1] ?? ''
 
-  assert.match(adminBranch, /catalog: null/)
-  assert.doesNotMatch(adminBranch, /loadCatalogFromSupabase/)
+  assert.match(adminBranch, /\.\.\.emptyCatalogState/)
+  assert.doesNotMatch(adminBranch, /loadPosCatalogFromSupabase/)
   assert.match(hookSource, /if \(!venueId \|\| !enabled\)/)
   assert.match(hookSource, /if \(enabled && venueId\) void refresh\(false\)/)
 })
 
-test('CRM catalog mutations refresh the projection for the selected venue', async () => {
+test('CRM catalog mutations refresh the definitive POS catalog for the selected venue', async () => {
   const appShellSource = await readFile(new URL('../src/app/AppShell.tsx', import.meta.url), 'utf8')
   const crmPageSource = await readFile(new URL('../src/components/crm/CrmPage.tsx', import.meta.url), 'utf8')
 

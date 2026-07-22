@@ -1,13 +1,13 @@
 import { createId, getLineTotal, getTicketTotal } from '../lib/format'
 import { assertValidTicketPayment, calculateAppliedDiscount } from '../lib/discounts'
-import { loadCurrentCatalog } from '../features/catalog/data/load-current-catalog.ts'
+import { loadPosCatalog } from '../features/catalog/data/load-pos-catalog.ts'
+import { normalizeCatalogSnapshot } from '../features/catalog/services/catalogSnapshots.ts'
 import { supabase } from '../lib/supabase'
 export { summarizeSales } from '../features/cash-registers/services/cashSummary.ts'
 import type {
   AppliedDiscount,
   CashClosedPayload,
   CashSession,
-  Catalog,
   HistoricalPaymentMethod,
   LoginInput,
   OfflineEvent,
@@ -429,8 +429,8 @@ export async function logoutTenant() {
   }
 }
 
-export async function loadCatalogFromSupabase(context: TenantContext): Promise<Catalog> {
-  return loadCurrentCatalog(context)
+export async function loadPosCatalogFromSupabase(context: TenantContext, force = false) {
+  return loadPosCatalog(context, force)
 }
 
 export async function loadOpenCashSession(context: TenantContext) {
@@ -695,7 +695,7 @@ export async function loadSessionTicketsFromSupabase(
           priceDeltaCents: component.price_delta_cents, sortOrder: component.sort_order,
           modifiers: component.metadata?.modifiers ?? [],
         })),
-        catalogSnapshot: loggedLine?.catalogSnapshot ?? { saleFormatId: line.sale_format_id, saleFormatName: line.sale_format_name_snapshot ?? line.variant_name, categoryId: line.category_id_snapshot, categoryName: line.category_name_snapshot ?? '', catalogTabId: line.catalog_tab_id_snapshot, catalogTabName: line.catalog_tab_name_snapshot ?? '' },
+        catalogSnapshot: normalizeCatalogSnapshot(loggedLine?.catalogSnapshot ?? { saleFormatId: line.sale_format_id, saleFormatName: line.sale_format_name_snapshot ?? line.variant_name, categoryId: line.category_id_snapshot, categoryName: line.category_name_snapshot ?? '', catalogTabId: line.catalog_tab_id_snapshot, catalogTabName: line.catalog_tab_name_snapshot ?? '' }, { productId: line.product_id ?? loggedLine?.productId ?? null, productName: line.product_name, variantId: line.variant_id ?? loggedLine?.variantId ?? null, variantName: line.variant_name, basePriceCents: loggedLine?.basePriceCents ?? line.base_price_cents ?? line.unit_price_cents }),
       }
     })
     const payload: SaleCreatedPayload = {

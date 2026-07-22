@@ -325,12 +325,21 @@ export type TicketLineComponent = {
 }
 
 export type SaleLineCatalogSnapshot = {
-  saleFormatId: string | null
-  saleFormatName: string
+  placementId: string | null
+  productType: ProductType | null
+  productId: string | null
+  productName: string
+  variantId: string | null
+  variantName: string
+  basePriceCents: number | null
+  vatRate: number | null
   categoryId: string | null
   categoryName: string
   catalogTabId: string | null
   catalogTabName: string
+  /** Historical database columns retained only for old ticket rendering. */
+  saleFormatId: string | null
+  saleFormatName: string
 }
 
 export type ProductLineSelection = {

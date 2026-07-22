@@ -4,7 +4,6 @@ import { readFileSync } from 'node:fs'
 
 const migration = readFileSync(new URL('../supabase/29.catalog-architecture-migration.sql', import.meta.url), 'utf8')
 const verification = readFileSync(new URL('../supabase/verification/catalog_architecture_verification.sql', import.meta.url), 'utf8')
-const catalogRuntime = readFileSync(new URL('../src/lib/catalog.ts', import.meta.url), 'utf8')
 const quickSale = readFileSync(new URL('../src/features/quick-sale/services/ticketLines.ts', import.meta.url), 'utf8')
 const catalogPanel = readFileSync(new URL('../src/components/pos/CatalogPanel.tsx', import.meta.url), 'utf8')
 
@@ -23,10 +22,10 @@ test('la migracion es aditiva y crea catalogo, componentes, snapshots, indices y
 
 test('los aliases quedan limitados al backfill y el flujo principal usa relaciones', () => {
   assert.match(migration, /Alias matching exists only in this one-time backfill/)
-  assert.doesNotMatch(catalogRuntime, /saleFormatVariantAliases|copa larga|alcohol mixer/)
+  assert.doesNotMatch(catalogPanel, /saleFormatVariantAliases|copa larga|alcohol mixer/)
   assert.match(quickSale, /buildSaleLine/)
   assert.doesNotMatch(quickSale, /toQuickSaleModifiers/)
-  assert.match(catalogPanel, /getCatalogPlacements/)
+  assert.match(catalogPanel, /resolveSellableCatalog/)
   assert.doesNotMatch(catalogPanel, /category\.kind|productSupportsSaleFormat/)
 })
 

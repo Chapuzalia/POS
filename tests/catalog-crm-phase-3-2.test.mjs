@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { projectCatalogForCurrentUi } from '../src/features/catalog/compatibility/project-current-ui.ts'
+import { resolveCatalogItem } from '../src/features/catalog/domain/resolver.ts'
 import {
   buildProductCreationBatch,
   filterCatalogProducts,
@@ -84,13 +84,12 @@ test('all CRM reorder operations emit one collision-free deterministic payload',
   assert.deepEqual(toReorderItems(moved), [{ id: 'a', sortOrder: 0 }, { id: 'c', sortOrder: 10 }, { id: 'b', sortOrder: 20 }])
 })
 
-test('the temporary POS adapter immediately reflects final CRM price, category, placement and group data', () => {
-  const projected = projectCatalogForCurrentUi({ catalog, discounts: [], manualDiscountEnabled: false })
-  const menu = projected.products.find((product) => product.id === 'p-menu')
-  assert.equal(menu.variants[0].priceCents, 1500)
-  assert.equal(menu.categoryId, 'category')
-  assert.equal(projected.placements.some((placement) => placement.productId === 'p-menu'), true)
-  assert.equal(menu.variantSelectionGroups[0].group.name, 'Primeros')
+test('the definitive POS resolver immediately reflects final CRM price, category, placement and group data', () => {
+  const item = resolveCatalogItem({ ...catalog, mode: 'pos' }, 'pl-menu')
+  assert.equal(item.variant.priceCents, 1500)
+  assert.equal(item.category.id, 'category')
+  assert.equal(item.placement.productId, 'p-menu')
+  assert.equal(item.selectionGroups[0].group.name, 'Primeros')
 })
 
 test('phase 3.2 CRM code uses final RPCs and contains no legacy catalog writes', async () => {

@@ -1,5 +1,5 @@
 import type { RefObject, ReactNode } from 'react'
-import { useState } from 'react'
+import { useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
 import {
   CashPaymentModal,
@@ -20,15 +20,16 @@ import { RestaurantOrderPanel } from '../features/tables/components/RestaurantOr
 import { SplitOrderModal } from '../features/tables/components/SplitOrderModal'
 import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
-import { getProductVariantForSaleFormat } from '../lib/catalog'
+import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
+import type { CatalogData } from '../features/catalog/domain/types'
 import { calculateAppliedDiscount } from '../lib/discounts'
 import { getTicketTotal } from '../lib/format'
 import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
 import type {
-  Catalog,
   CatalogStartTab,
+  Discount,
   PaymentMethod,
   ProductSalesStat,
   ThemeDefinition,
@@ -51,8 +52,10 @@ type AddFeedback = {
 type Props = {
   addFeedback: AddFeedback
   cash: CashController
-  catalog: Catalog | null
+  catalog: CatalogData | null
   catalogStartTab: CatalogStartTab
+  discounts: Discount[]
+  manualDiscountEnabled: boolean
   context: TenantContext
   error: string | null
   floatingTicketButtonRef: RefObject<HTMLButtonElement | null>
@@ -85,6 +88,7 @@ export function PosPage(props: Props) {
   const restaurant = props.restaurant
   const quickSale = props.quickSale
   const cash = props.cash
+  const resolvedCatalog = useMemo(() => props.catalog ? resolveSellableCatalog(props.catalog) : null, [props.catalog])
   const activeLines: TicketLine[] = restaurant.posView.type === 'table_order' && restaurant.order
     ? restaurant.order.lines.map((line) => ({
         id: line.id,
@@ -92,7 +96,7 @@ export function PosPage(props: Props) {
         productName: line.productName,
         variantId: line.variantId ?? '',
         variantName: line.variantName,
-        basePriceCents: line.unitPriceCents - line.modifiers.reduce((total, modifier) => total + modifier.priceCents, 0) - line.components.reduce((total, component) => total + component.priceDeltaCents, 0),
+        basePriceCents: line.catalogSnapshot.basePriceCents ?? line.unitPriceCents,
         componentDeltaCents: line.components.reduce((total, component) => total + component.priceDeltaCents, 0),
         modifierDeltaCents: line.modifiers.reduce((total, modifier) => total + modifier.priceCents, 0),
         unitPriceCents: line.unitPriceCents,
@@ -133,16 +137,16 @@ export function PosPage(props: Props) {
             props.onSetError('No se puede editar una linea con productos ya servidos.')
             return
           }
-          const product = props.catalog?.products.find((candidate) => candidate.id === line.productId)
-          if (!product) {
-            props.onSetError('El producto de esta linea ya no esta disponible.')
+          const item = resolvedCatalog?.items.find((candidate) => (
+            candidate.product.id === line.productId
+            && (line.variantId ? candidate.variant.id === line.variantId : true)
+          )) ?? null
+          if (!item) {
+            props.onSetError('El producto de esta línea ya no está disponible.')
             return
           }
-          const saleFormat = product.saleFormats.find(
-            (format) => getProductVariantForSaleFormat(product, format)?.id === line.variantId,
-          ) ?? product.saleFormats[0] ?? 'other'
           quickSale.openProductDialog({
-            allowFormatSelection: false,
+            allowVariantSelection: false,
             initialSelection: {
               modifiers: line.modifiers,
               components: line.components,
@@ -152,8 +156,7 @@ export function PosPage(props: Props) {
             },
             initialVariantId: line.variantId ?? undefined,
             lineId: line.id,
-            product,
-            saleFormat,
+            item,
           })
         }}
         onRemove={(lineId) => {
@@ -330,9 +333,9 @@ export function PosPage(props: Props) {
       /> : null}
       {restaurant.splitOrderGroup && restaurant.order ? <SplitOrderModal
         defaultDiscount={quickSale.discount}
-        discounts={props.catalog?.discounts ?? []}
+        discounts={props.discounts}
         isBusy={props.isBusy}
-        manualDiscountEnabled={props.catalog?.manualDiscountEnabled ?? false}
+        manualDiscountEnabled={props.manualDiscountEnabled}
         onClose={() => restaurant.setSplitOrderGroup(null)}
         onPay={restaurant.paySelectedOrderItems}
         order={restaurant.order}
@@ -340,9 +343,9 @@ export function PosPage(props: Props) {
       /> : null}
       {restaurant.equalSplitOpen && restaurant.order ? <EqualSplitOrderModal
         defaultDiscount={quickSale.discount}
-        discounts={props.catalog?.discounts ?? []}
+        discounts={props.discounts}
         isBusy={props.isBusy}
-        manualDiscountEnabled={props.catalog?.manualDiscountEnabled ?? false}
+        manualDiscountEnabled={props.manualDiscountEnabled}
         onClose={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onCompleted={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onConfigure={restaurant.configureEqualSplit}
@@ -361,25 +364,23 @@ export function PosPage(props: Props) {
         }}
         totalCents={totalCents}
       /> : null}
-      {quickSale.productDialog ? <ProductDialog
-        allowFormatSelection={quickSale.productDialog.allowFormatSelection}
-        catalogSnapshot={quickSale.productDialog.catalogSnapshot}
-        isBusy={props.isBusy}
+      {quickSale.productDialog && props.catalog ? <ProductDialog
+        allowVariantSelection={quickSale.productDialog.allowVariantSelection}
         catalog={props.catalog}
         initialSelection={quickSale.productDialog.initialSelection}
         initialVariantId={quickSale.productDialog.initialVariantId}
-        key={`${quickSale.productDialog.product.id}-${quickSale.productDialog.saleFormat}-${quickSale.productDialog.allowFormatSelection}-${quickSale.productDialog.lineId ?? 'new'}`}
-        onAdd={(product, variant, selection, sourceElement) => restaurant.posView.type === 'table_order'
-          ? restaurant.addLine(product, variant, selection, quickSale.productDialog?.lineId, sourceElement)
-          : quickSale.addLine(product, variant, selection, sourceElement)}
+        isBusy={props.isBusy}
+        item={quickSale.productDialog.item}
+        key={`${quickSale.productDialog.item.placement.id}-${quickSale.productDialog.initialVariantId ?? quickSale.productDialog.item.variant.id}-${quickSale.productDialog.lineId ?? 'new'}`}
+        onAdd={(sellable, selection, item, sourceElement) => restaurant.posView.type === 'table_order'
+          ? restaurant.addLine(sellable, selection, item, quickSale.productDialog?.lineId, sourceElement)
+          : quickSale.addLine(sellable, selection, item, sourceElement)}
         onCancel={quickSale.closeProductDialog}
-        product={quickSale.productDialog.product}
-        saleFormat={quickSale.productDialog.saleFormat}
       /> : null}
       {quickSale.discountModalOpen ? <DiscountModal
-        discounts={props.catalog?.discounts ?? []}
+        discounts={props.discounts}
         isBusy={props.isBusy}
-        manualDiscountEnabled={props.catalog?.manualDiscountEnabled ?? false}
+        manualDiscountEnabled={props.manualDiscountEnabled}
         onCancel={quickSale.closeDiscountModal}
         onSelect={(discount) => { quickSale.setDiscount(discount); quickSale.closeDiscountModal() }}
         subtotalCents={subtotalCents}

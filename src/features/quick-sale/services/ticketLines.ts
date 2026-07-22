@@ -1,9 +1,16 @@
 import { createId, getLineSignature } from '../../../lib/format'
 import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
-import type { Product, ProductLineSelection, ProductVariant, TicketLine } from '../../../types'
+import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
+import type { ProductLineSelection, TicketLine } from '../../../types'
 
-export function addQuickSaleTicketLine(lines: TicketLine[], product: Product, variant: ProductVariant, selection: ProductLineSelection) {
-  const candidate = buildSaleLine(createId(), product, variant, selection)
+export function addQuickSaleTicketLine(
+  lines: TicketLine[],
+  catalog: CatalogData,
+  sellable: ResolvedSellableProduct,
+  selection: ProductLineSelection,
+  item: ResolvedCatalogItem | null,
+) {
+  const candidate = buildSaleLine(createId(), catalog, sellable, selection, item)
   const signature = getLineSignature(candidate)
   const existing = lines.find((line) => getLineSignature(line) === signature)
   return existing

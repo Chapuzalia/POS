@@ -1,7 +1,7 @@
 import { getSaleLedger } from '../../../lib/offlineStore'
 import {
-  loadCatalogFromSupabase,
   loadOpenCashSession,
+  loadPosCatalogFromSupabase,
   loadProductSalesStatsFromSupabase,
   loadSalesLedgerFromSupabase,
   mergeLedgers,
@@ -9,27 +9,35 @@ import {
 import type { TenantContext } from '../../../types'
 import { isCrmAdministrator, isSuperadmin } from '../../../app/app-permissions'
 
+const emptyCatalogState = {
+  catalog: null,
+  discounts: [],
+  manualDiscountEnabled: false,
+}
+
 export async function loadTenantState(context: TenantContext) {
   if (isSuperadmin(context)) {
-    return { catalog: null, cashSession: null, productSalesStats: [], salesLedger: [] }
+    return { ...emptyCatalogState, cashSession: null, productSalesStats: [], salesLedger: [] }
   }
   if (isCrmAdministrator(context)) {
     return {
-      catalog: null,
+      ...emptyCatalogState,
       cashSession: null,
       productSalesStats: [],
       salesLedger: [],
     }
   }
-  const [catalog, cashSession, productSalesStats] = await Promise.all([
-    loadCatalogFromSupabase(context),
+  const [posCatalog, cashSession, productSalesStats] = await Promise.all([
+    loadPosCatalogFromSupabase(context),
     loadOpenCashSession(context),
     loadProductSalesStatsFromSupabase(context),
   ])
   const localLedger = cashSession ? getSaleLedger(context) : []
   const remoteLedger = cashSession ? await loadSalesLedgerFromSupabase(context, cashSession.id) : []
   return {
-    catalog,
+    catalog: posCatalog.catalog,
+    discounts: posCatalog.discounts,
+    manualDiscountEnabled: posCatalog.manualDiscountEnabled,
     cashSession,
     productSalesStats,
     salesLedger: mergeLedgers(localLedger, remoteLedger),

@@ -1,6 +1,5 @@
 import { useCallback, useMemo, useState } from 'react'
-import { getProductVariantForSaleFormat } from '../../../lib/catalog'
-import { getProductModifierGroups, getVariantSelectionGroups } from '../../catalog/services/catalogAccess'
+import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
 import { getDefaultProductLineSelection } from '../../catalog/services/saleLineBuilder'
 import { calculateAppliedDiscount } from '../../../lib/discounts'
 import { getTicketTotal } from '../../../lib/format'
@@ -9,14 +8,9 @@ import { loadProductSalesStatsFromSupabase } from '../../../services/posService'
 import type {
   AppliedDiscount,
   CashSession,
-  Catalog,
   PaymentMethod,
-  Product,
   ProductLineSelection,
   ProductSalesStat,
-  ProductVariant,
-  SaleFormat,
-  SaleLineCatalogSnapshot,
   SaleRecord,
   SessionTicketRecord,
   TenantContext,
@@ -26,18 +20,23 @@ import { addProductSalesStats } from '../services/productSalesStats'
 import { addQuickSaleTicketLine, changeQuickSaleTicketLineQuantity } from '../services/ticketLines'
 import { useQuickSalePayment } from './useQuickSalePayment'
 
+export type AddCatalogLine = (
+  sellable: ResolvedSellableProduct,
+  selection: ProductLineSelection,
+  item: ResolvedCatalogItem | null,
+  sourceElement?: HTMLElement | null,
+) => boolean
+
 export type ProductDialogState = {
-  allowFormatSelection: boolean
+  allowVariantSelection: boolean
   initialSelection?: ProductLineSelection
   initialVariantId?: string
   lineId?: string
-  product: Product
-  saleFormat: SaleFormat
-  catalogSnapshot?: SaleLineCatalogSnapshot
+  item: ResolvedCatalogItem
 }
 
 type Options = {
-  catalog: Catalog | null
+  catalog: CatalogData | null
   cashSession: CashSession | null
   context: TenantContext | null
   isOnline: boolean
@@ -95,42 +94,37 @@ export function useQuickSale(options: Options) {
     },
   })
 
-  const addLine = useCallback((
-    product: Product,
-    variant: ProductVariant,
-    selection: ProductLineSelection,
-    sourceElement?: HTMLElement | null,
-  ): boolean => {
-    persistLines(addQuickSaleTicketLine(lines, product, variant, selection))
-    options.onAddFeedback({ feedbackType: 'added', productName: product.name, sourceElement })
+  const addLine = useCallback<AddCatalogLine>((sellable, selection, item, sourceElement) => {
+    if (!options.catalog) return false
+    persistLines(addQuickSaleTicketLine(lines, options.catalog, sellable, selection, item))
+    options.onAddFeedback({ feedbackType: 'added', productName: sellable.product.name, sourceElement })
     return true
   }, [lines, options, persistLines])
 
   const selectProduct = useCallback((
-    product: Product,
-    saleFormat: SaleFormat,
-    allowFormatSelection: boolean,
+    item: ResolvedCatalogItem,
+    allowVariantSelection: boolean,
     sourceElement: HTMLElement,
-    catalogSnapshot?: SaleLineCatalogSnapshot,
-    onImmediateAdd: (product: Product, variant: ProductVariant, selection: ProductLineSelection, sourceElement?: HTMLElement | null) => boolean = addLine,
+    onImmediateAdd: AddCatalogLine = addLine,
   ) => {
-    const firstVariant = getProductVariantForSaleFormat(product, saleFormat)
-    if (!firstVariant) return
-    const hasConfiguredSelections = getVariantSelectionGroups(product, firstVariant.id).length > 0
-      || getProductModifierGroups(product, firstVariant.id).length > 0
-    const defaultSelection = !allowFormatSelection && hasConfiguredSelections
-      ? getDefaultProductLineSelection(product, firstVariant, options.catalog?.products ?? [])
+    if (!options.catalog) return
+    const hasConfiguredSelections = item.selectionGroups.length > 0 || item.modifierGroups.length > 0
+    const defaultSelection = !allowVariantSelection && hasConfiguredSelections
+      ? getDefaultProductLineSelection(options.catalog, item)
       : null
+    const variantCount = options.catalog.variants.filter((variant) => variant.productId === item.product.id && variant.active).length
     const needsDialog = (hasConfiguredSelections && !defaultSelection)
-      || (allowFormatSelection && product.variants.length > 1)
+      || (allowVariantSelection && variantCount > 1)
     if (!needsDialog) {
-      onImmediateAdd(product, firstVariant, {
-        ...(defaultSelection ?? { modifiers: [], components: [], mixerProductId: null, mixer: null }),
-        catalogSnapshot,
-      }, sourceElement)
+      onImmediateAdd(
+        item,
+        defaultSelection ?? { modifiers: [], components: [], mixerProductId: null, mixer: null },
+        item,
+        sourceElement,
+      )
       return
     }
-    setProductDialog({ allowFormatSelection, catalogSnapshot, product, saleFormat })
+    setProductDialog({ allowVariantSelection, item })
   }, [addLine, options.catalog])
 
   const refreshProductStats = useCallback(async () => {

@@ -6,6 +6,7 @@ import type {
   TenantContext,
 } from '../../../types/index.ts'
 import type { RestaurantEqualSplit, RestaurantOrderLine, RestaurantOrderLineMove } from '../../tables/types.ts'
+import { normalizeCatalogSnapshot } from '../../catalog/services/catalogSnapshots.ts'
 
 export type RestaurantPrintLine = RestaurantOrderLine & { lineTotalCents?: number }
 
@@ -81,7 +82,7 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       lineTotalCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity,
       modifiers: line.modifiers,
       components,
-      catalogSnapshot: { saleFormatId: null, saleFormatName: '', categoryId: null, categoryName: '', catalogTabId: null, catalogTabName: '' },
+      catalogSnapshot: normalizeCatalogSnapshot(line.catalogSnapshot, { productId: line.productId, productName: line.productName, variantId: line.variantId, variantName: line.variantName, basePriceCents: line.unitPriceCents }),
       fiscalSnapshot: null,
     }}),
     sale: {

@@ -8,6 +8,7 @@ import { CashSessionGate } from '../features/cash-registers/CashSessionGate'
 import { useCashSession } from '../features/cash-registers'
 import { useOfflineController, useRejectedSaleRecovery } from '../features/offline'
 import { useQuickSale } from '../features/quick-sale'
+import type { CatalogData } from '../features/catalog/domain/types'
 import { removeProductSalesStats } from '../features/quick-sale/services/productSalesStats'
 import { useRestaurantController } from '../features/restaurant'
 import { useLoginActivity, useTenantSession } from '../features/session'
@@ -37,13 +38,13 @@ import {
 import { supabaseConfig } from '../lib/supabase'
 import { releaseLocalLoginLock } from '../services/loginLeaseService'
 import {
-  loadCatalogFromSupabase,
+  loadPosCatalogFromSupabase,
   loadProductSalesStatsFromSupabase,
   logoutTenant,
 } from '../services/posService'
 import type {
-  Catalog,
   CatalogStartTab,
+  Discount,
   PaymentMethod,
   ProductSalesStat,
   TenantContext,
@@ -63,7 +64,9 @@ export function AppShell() {
   const isOnline = useOnlineStatus()
   const offline = useOfflineController(isOnline)
   const [context, setContext] = useState<TenantContext | null>(null)
-  const [catalog, setCatalog] = useState<Catalog | null>(null)
+  const [catalog, setCatalog] = useState<CatalogData | null>(null)
+  const [discounts, setDiscounts] = useState<Discount[]>([])
+  const [manualDiscountEnabled, setManualDiscountEnabled] = useState(false)
   const [catalogStartTab, setCatalogStartTab] = useState<CatalogStartTab>(() => getCatalogStartTab())
   const [productSalesStats, setProductSalesStats] = useState<ProductSalesStat[]>([])
   const [isBootstrapping, setIsBootstrapping] = useState(true)
@@ -123,6 +126,7 @@ export function AppShell() {
   })
   const restaurant = useRestaurantController({
     appliedDiscount: quickSale.discount,
+    catalog,
     cashSession: cash.session,
     context,
     enabled: Boolean(context && !isAdministrativeUser(context)),
@@ -162,6 +166,8 @@ export function AppShell() {
   const clearActiveState = () => {
     setContext(null)
     setCatalog(null)
+    setDiscounts([])
+    setManualDiscountEnabled(false)
     setProductSalesStats([])
     setPendingLoginContext(null)
     setMobileTicketOpen(false)
@@ -199,11 +205,17 @@ export function AppShell() {
     setLoginLeaseBlocked(false)
     saveCachedContext(nextContext)
     setCatalog(state.catalog)
+    setDiscounts(state.discounts)
+    setManualDiscountEnabled(state.manualDiscountEnabled)
     setProductSalesStats(state.productSalesStats)
     quickSale.hydrate(isAdministrativeUser(nextContext) ? [] : getCachedTicket(nextContext))
     const nextTickets = state.cashSession ? getSessionTickets(nextContext, state.cashSession.id) : []
     cash.hydrate(state.cashSession, state.salesLedger, nextTickets)
-    if (state.catalog) saveCachedCatalog(nextContext.tenantId, state.catalog)
+    if (state.catalog) saveCachedCatalog(nextContext, {
+      catalog: state.catalog,
+      discounts: state.discounts,
+      manualDiscountEnabled: state.manualDiscountEnabled,
+    })
     saveCachedProductSalesStats(nextContext.tenantId, state.productSalesStats)
     const previousSession = getCachedCashSession(nextContext)
     saveCachedCashSession(nextContext, state.cashSession)
@@ -215,8 +227,11 @@ export function AppShell() {
     }
   }
   const applyOfflineState = async (cachedContext: TenantContext) => {
+    const cachedCatalog = getCachedCatalog(cachedContext)
     setContext(cachedContext)
-    setCatalog(getCachedCatalog(cachedContext.tenantId))
+    setCatalog(cachedCatalog?.catalog ?? null)
+    setDiscounts(cachedCatalog?.discounts ?? [])
+    setManualDiscountEnabled(cachedCatalog?.manualDiscountEnabled ?? false)
     setProductSalesStats(getCachedProductSalesStats(cachedContext.tenantId))
     const cachedSession = getCachedCashSession(cachedContext)
     cash.hydrate(
@@ -249,12 +264,14 @@ export function AppShell() {
     setGeneralError(null)
     try {
       const [nextCatalog, nextStats] = await Promise.all([
-        loadCatalogFromSupabase(activeContext),
+        loadPosCatalogFromSupabase(activeContext, true),
         loadProductSalesStatsFromSupabase(activeContext),
       ])
-      setCatalog(nextCatalog)
+      setCatalog(nextCatalog.catalog)
+      setDiscounts(nextCatalog.discounts)
+      setManualDiscountEnabled(nextCatalog.manualDiscountEnabled)
       persistProductSalesStats(nextStats)
-      saveCachedCatalog(activeContext.tenantId, nextCatalog)
+      saveCachedCatalog(activeContext, nextCatalog)
     } catch (refreshError) {
       setGeneralError(getReadableError(refreshError))
     } finally {
@@ -315,6 +332,8 @@ export function AppShell() {
     return <PosPage
       addFeedback={addFeedback}
       catalog={catalog}
+      discounts={discounts}
+      manualDiscountEnabled={manualDiscountEnabled}
       cash={cash}
       catalogStartTab={catalogStartTab}
       context={context}
@@ -327,14 +346,12 @@ export function AppShell() {
       offline={{ lastSyncError: offline.lastSyncError, pendingCount: offline.pendingCount, retry: offline.syncPendingEvents }}
       onLogout={session.logout}
       onRefreshCatalog={refreshCatalog}
-      onSelectProduct={(product, format, allowFormat, source, catalogSnapshot) => quickSale.selectProduct(
-        product,
-        format,
-        allowFormat,
+      onSelectProduct={(item, allowVariantSelection, source) => quickSale.selectProduct(
+        item,
+        allowVariantSelection,
         source,
-        catalogSnapshot,
         restaurant.posView.type === 'table_order'
-          ? (nextProduct, variant, selection, sourceElement) => restaurant.addLine(nextProduct, variant, selection, undefined, sourceElement)
+          ? (sellable, selection, selectedItem, sourceElement) => restaurant.addLine(sellable, selection, selectedItem, undefined, sourceElement)
           : quickSale.addLine,
       )}
       onSetError={setGeneralError}

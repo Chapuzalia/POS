@@ -1,6 +1,7 @@
+import type { PosCatalogState } from '../features/catalog/data/load-pos-catalog.ts'
+
 import type {
   CashSession,
-  Catalog,
   CatalogStartTab,
   OfflineEvent,
   ProductSalesStat,
@@ -57,8 +58,8 @@ function catalogStartTabKey() {
   return `${prefix}:catalog-start-tab`
 }
 
-function catalogKey(tenantId: string) {
-  return `${prefix}:catalog:${tenantId}`
+function catalogKey(context: Pick<TenantContext, 'tenantId' | 'venueId'>) {
+  return `${prefix}:catalog-domain:${context.tenantId}:${context.venueId}`
 }
 
 function productSalesStatsKey(tenantId: string) {
@@ -113,12 +114,12 @@ export function saveCachedContext(context: TenantContext | null) {
   }
 }
 
-export function getCachedCatalog(tenantId: string) {
-  return readJson<Catalog | null>(catalogKey(tenantId), null)
+export function getCachedCatalog(context: Pick<TenantContext, 'tenantId' | 'venueId'>) {
+  return readJson<PosCatalogState | null>(catalogKey(context), null)
 }
 
-export function saveCachedCatalog(tenantId: string, catalog: Catalog) {
-  writeJson(catalogKey(tenantId), catalog)
+export function saveCachedCatalog(context: Pick<TenantContext, 'tenantId' | 'venueId'>, state: PosCatalogState) {
+  writeJson(catalogKey(context), state)
 }
 
 export function getCachedProductSalesStats(tenantId: string) {

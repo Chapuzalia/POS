@@ -1,4 +1,3 @@
-import { calculateSaleLineTotals } from '../services/saleLineBuilder.ts'
 import { calculateTaxFromGross } from '../../../lib/tax.ts'
 import { CatalogDomainError } from './errors.ts'
 import type { CatalogPriceBreakdown, CatalogPriceModifier, CatalogPriceSelection } from './types.ts'
@@ -36,29 +35,6 @@ export function calculateCatalogPrice(input: {
     assertQuantity(modifier.quantity ?? 1, 'La cantidad de modificador')
   }
 
-  let totals: ReturnType<typeof calculateSaleLineTotals>
-  try {
-    totals = calculateSaleLineTotals(
-      { priceCents: input.baseVariantPriceCents },
-      selections.map((selection) => ({ priceDeltaCents: selection.supplementCents, quantity: selection.quantity, modifiers: [] })),
-      modifiers.flatMap((modifier) => Array.from({ length: modifier.quantity ?? 1 }, () => ({ priceCents: modifier.supplementCents }))),
-    )
-  } catch (cause) {
-    throw new CatalogDomainError(
-      'CATALOG_NEGATIVE_FINAL_PRICE',
-      'El precio unitario final no puede ser negativo.',
-      undefined,
-      { cause },
-    )
-  }
-  const netUnitPriceCents = totals.grossBeforeDiscountCents - discountCents
-  if (netUnitPriceCents < 0) {
-    throw new CatalogDomainError('CATALOG_NEGATIVE_FINAL_PRICE', 'El precio unitario final no puede ser negativo.', {
-      grossUnitPriceCents: totals.grossBeforeDiscountCents,
-      discountCents,
-    })
-  }
-  const tax = calculateTaxFromGross(netUnitPriceCents, input.vatRate)
   const menuSupplementsCents = selections.filter((selection) => selection.type === 'menu_component')
     .reduce((total, selection) => total + selection.supplementCents * selection.quantity, 0)
   const selectionSupplementsCents = selections.filter((selection) => selection.type !== 'menu_component')
@@ -67,12 +43,29 @@ export function calculateCatalogPrice(input: {
     (total, modifier) => total + modifier.supplementCents * (modifier.quantity ?? 1),
     0,
   )
+  const grossUnitPriceCents = input.baseVariantPriceCents
+    + selectionSupplementsCents
+    + menuSupplementsCents
+    + modifierSupplementsCents
+  if (grossUnitPriceCents < 0) {
+    throw new CatalogDomainError('CATALOG_NEGATIVE_FINAL_PRICE', 'El precio unitario final no puede ser negativo.', {
+      grossUnitPriceCents,
+    })
+  }
+  const netUnitPriceCents = grossUnitPriceCents - discountCents
+  if (netUnitPriceCents < 0) {
+    throw new CatalogDomainError('CATALOG_NEGATIVE_FINAL_PRICE', 'El precio unitario final no puede ser negativo.', {
+      grossUnitPriceCents,
+      discountCents,
+    })
+  }
+  const tax = calculateTaxFromGross(netUnitPriceCents, input.vatRate)
   return {
-    baseVariantPriceCents: totals.basePriceCents,
+    baseVariantPriceCents: input.baseVariantPriceCents,
     selectionSupplementsCents,
     modifierSupplementsCents,
     menuSupplementsCents,
-    grossUnitPriceCents: totals.grossBeforeDiscountCents,
+    grossUnitPriceCents,
     discountCents,
     netUnitPriceCents,
     vatRate: input.vatRate,
