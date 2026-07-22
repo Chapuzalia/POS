@@ -77,7 +77,7 @@ export function AppHeader({
   }
 
   return (
-    <header className="shrink-0 border-b border-[var(--separator)] bg-[var(--surface)]">
+    <header className="shrink-0 pt-6 border-b border-[var(--separator)] bg-[var(--surface)]">
       <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2">
         <div className="relative min-w-0" ref={menuRef}>
           <button
