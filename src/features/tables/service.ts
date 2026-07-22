@@ -302,7 +302,7 @@ export async function payRestaurantOrderItems(orderId: string, expectedRevision:
   return { ...result, requiresConfirmation: Boolean(result.requiresConfirmation), pendingUnits: Number(result.pendingUnits) } as PayRestaurantOrderItemsResult
 }
 export async function saveRestaurantOrderLines(detail: RestaurantOrderDetail): Promise<SaveRestaurantOrderLinesResult> {
-  const { data, error } = await requireSupabase().rpc('save_restaurant_order_lines_v3', {
+  const { data, error } = await requireSupabase().rpc('save_catalog_order_lines', {
     p_order_id: detail.order.id,
     p_expected_revision: detail.order.revision,
     p_lines: buildRestaurantOrderLinesPayload(detail),

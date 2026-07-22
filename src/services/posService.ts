@@ -1,7 +1,6 @@
 import { createId, getLineTotal, getTicketTotal } from '../lib/format'
 import { assertValidTicketPayment, calculateAppliedDiscount } from '../lib/discounts'
-import { defaultSaleFormats } from '../lib/catalog'
-import { PRODUCT_IMAGE_BUCKET } from '../lib/productImages'
+import { loadCurrentCatalog } from '../features/catalog/data/load-current-catalog.ts'
 import { supabase } from '../lib/supabase'
 export { summarizeSales } from '../features/cash-registers/services/cashSummary.ts'
 import type {
@@ -9,16 +8,11 @@ import type {
   CashClosedPayload,
   CashSession,
   Catalog,
-  Category,
-  LoginInput,
-  ModifierGroup,
-  OfflineEvent,
   HistoricalPaymentMethod,
+  LoginInput,
+  OfflineEvent,
   PaymentMethod,
-  Product,
   ProductSalesStat,
-  ProductVariant,
-  SelectionGroup,
   SaleCreatedPayload,
   SaleLinePayload,
   SaleRecord,
@@ -29,41 +23,18 @@ import type {
   TicketLineModifier,
 } from '../types'
 import type {
-  CategoryRow,
-  CatalogPlacementRow,
-  CatalogTabRow,
   DeviceAssignmentRow,
   DeviceRow,
   MembershipRow,
-  ModifierGroupRow,
-  ProductRow,
-  ProductModifierGroupAssignmentRow,
-  SaleFormatRow,
-  SelectionGroupRow,
   SaleRow,
-  TicketLineProductSalesRow,
   TenantRow,
+  TicketLineProductSalesRow,
   UserMembershipRow,
-  VariantRow,
   VenueRow,
 } from '../types/supabase'
 import { nowIso } from '../utils/dates'
 import { getReadableError } from '../utils/errors'
 import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
-
-type DiscountRow = {
-  id: string
-  tenant_id: string
-  venue_id: string
-  name: string
-  type: 'percentage' | 'fixed'
-  value: number | string
-  rounding_increment_cents: 5 | 10 | 50 | 100 | null
-  color: string | null
-  is_active: boolean
-  sort_order: number
-}
-
 async function requireExclusiveLogin(context: TenantContext) {
   if (await claimLoginLease()) {
     return context
@@ -71,156 +42,6 @@ async function requireExclusiveLogin(context: TenantContext) {
 
   releaseLocalLoginLock()
   throw new LoginLeaseConflictError('Esta cuenta ya esta abierta en otro dispositivo o pestana.', context)
-}
-
-function mapCategory(row: CategoryRow): Category {
-  return {
-    id: row.id,
-    tenantId: row.tenant_id,
-    name: row.name,
-    kind: row.kind,
-    icon: row.icon ?? row.kind,
-    isActive: row.is_active,
-    sortOrder: row.sort_order,
-  }
-}
-
-function mapSaleFormat(row: SaleFormatRow) {
-  return {
-    id: row.id,
-    tenantId: row.tenant_id,
-    venueId: row.venue_id ?? null,
-    key: row.key,
-    label: row.label,
-    isActive: row.is_active,
-    sortOrder: row.sort_order,
-  }
-}
-
-function mapVariant(row: VariantRow): ProductVariant {
-  return {
-    id: row.id,
-    productId: row.product_id,
-    name: row.name,
-    priceCents: row.price_cents,
-    sku: row.sku,
-    saleFormatId: row.sale_format_id,
-    saleFormatKey: (Array.isArray(row.sale_formats) ? row.sale_formats[0]?.key : row.sale_formats?.key) ?? null,
-    isDefault: row.is_default,
-    isActive: row.is_active,
-    sortOrder: row.sort_order,
-  }
-}
-
-function mapModifierGroups(rows: ModifierGroupRow[] | null): ModifierGroup[] {
-  return (rows ?? [])
-    .map((group) => ({
-      id: group.id,
-      productId: group.product_id,
-      name: group.name,
-      minSelect: group.min_select,
-      maxSelect: group.max_select,
-      isActive: group.is_active ?? true,
-      sortOrder: group.sort_order,
-      modifiers: (group.modifiers ?? [])
-        .map((modifier) => ({
-          id: modifier.id,
-          groupId: modifier.group_id,
-          name: modifier.name,
-          priceCents: modifier.price_cents,
-          isDefault: modifier.is_default ?? false,
-          isActive: modifier.is_active ?? true,
-          sortOrder: modifier.sort_order,
-        }))
-        .sort((a, b) => a.sortOrder - b.sortOrder),
-    }))
-    .sort((a, b) => a.sortOrder - b.sortOrder)
-}
-
-function getProductImageUrl(imagePath: string | null | undefined) {
-  if (!imagePath || !supabase) {
-    return null
-  }
-
-  return supabase.storage.from(PRODUCT_IMAGE_BUCKET).getPublicUrl(imagePath).data.publicUrl
-}
-
-function inferSaleFormats(kind: ProductRow['kind']) {
-  if (kind === 'alcohol' || kind === 'mixed') {
-    return ['cubata'] as const
-  }
-  if (kind === 'shot') {
-    return ['shot'] as const
-  }
-  if (kind === 'beer' || kind === 'beer_bottle') {
-    return ['beer_bottle'] as const
-  }
-  if (kind === 'soft_bottle' || kind === 'mixer') {
-    return ['soft_bottle'] as const
-  }
-  if (kind === 'cocktail') {
-    return ['cocktail'] as const
-  }
-
-  return ['soft_bottle'] as const
-}
-
-function mapProduct(row: ProductRow): Product {
-  return {
-    id: row.id,
-    tenantId: row.tenant_id,
-    venueId: row.venue_id,
-    categoryId: row.category_id,
-    name: row.name,
-    productType: row.product_type ?? 'standard',
-    description: row.description,
-    imagePath: row.image_path ?? null,
-    imageUrl: getProductImageUrl(row.image_path),
-    kind: row.kind,
-    saleFormats: row.sale_formats?.length ? row.sale_formats : [...inferSaleFormats(row.kind)],
-    canSellStandalone: row.can_sell_standalone ?? row.kind !== 'mixer',
-    canUseAsMixer: row.can_use_as_mixer ?? row.kind === 'mixer',
-    isFeatured: row.is_featured ?? false,
-    mixerSupplementCents: row.mixer_supplement_cents ?? 0,
-    taxRate: row.tax_rate === null ? null : Number(row.tax_rate),
-    isActive: row.is_active,
-    sortOrder: row.sort_order,
-    variants: (row.product_variants ?? []).map(mapVariant).sort((a, b) => a.sortOrder - b.sortOrder),
-    modifierGroups: mapModifierGroups(row.modifier_groups),
-    variantSelectionGroups: [],
-  }
-}
-
-type SelectionGroupWithAssignmentsRow = SelectionGroupRow & {
-  variant_selection_groups: Array<{
-    variant_id: string
-    selection_group_id: string
-    sort_order: number
-  }> | null
-}
-
-function mapSelectionGroup(row: SelectionGroupRow): SelectionGroup {
-  return {
-    id: row.id,
-    tenantId: row.tenant_id,
-    venueId: row.venue_id,
-    kind: row.kind,
-    name: row.name,
-    minSelect: row.min_select,
-    maxSelect: row.max_select,
-    isActive: row.is_active,
-    sortOrder: row.sort_order,
-    items: (row.selection_group_items ?? []).map((item) => ({
-      id: item.id,
-      groupId: item.group_id,
-      productId: item.product_id,
-      variantId: item.variant_id,
-      priceDeltaCents: item.price_delta_cents,
-      isDefault: item.is_default,
-      isActive: item.is_active,
-      sortOrder: item.sort_order,
-    })).sort((a, b) => a.sortOrder - b.sortOrder),
-  }
 }
 
 function mapFiscalSnapshot(row: {
@@ -609,243 +430,7 @@ export async function logoutTenant() {
 }
 
 export async function loadCatalogFromSupabase(context: TenantContext): Promise<Catalog> {
-  if (!supabase) {
-    throw new Error('Supabase no esta configurado.')
-  }
-
-  let discountsQuery = supabase
-    .from('discounts')
-    .select('id, tenant_id, venue_id, name, type, value, rounding_increment_cents, color, is_active, sort_order')
-    .eq('tenant_id', context.tenantId)
-    .eq('is_active', true)
-    .order('sort_order', { ascending: true })
-  if (context.venueId) discountsQuery = discountsQuery.eq('venue_id', context.venueId)
-
-  let tabsQuery = supabase
-    .from('catalog_tabs')
-    .select('id, tenant_id, venue_id, key, label, icon, is_active, sort_order')
-    .eq('tenant_id', context.tenantId)
-    .order('sort_order', { ascending: true })
-  if (context.venueId) tabsQuery = tabsQuery.eq('venue_id', context.venueId)
-
-  let placementsQuery = supabase
-    .from('catalog_placements')
-    .select('id, tenant_id, venue_id, tab_id, category_id, product_id, default_variant_id, is_featured, is_active, sort_order')
-    .eq('tenant_id', context.tenantId)
-    .order('sort_order', { ascending: true })
-  if (context.venueId) placementsQuery = placementsQuery.eq('venue_id', context.venueId)
-
-  let selectionGroupsQuery = supabase
-    .from('selection_groups')
-    .select(`
-      id, tenant_id, venue_id, kind, name, min_select, max_select, is_active, sort_order,
-      selection_group_items (
-        id, group_id, product_id, variant_id, price_delta_cents, is_default, is_active, sort_order
-      ),
-      variant_selection_groups (variant_id, selection_group_id, sort_order)
-    `)
-    .eq('tenant_id', context.tenantId)
-    .order('sort_order', { ascending: true })
-  if (context.venueId) selectionGroupsQuery = selectionGroupsQuery.eq('venue_id', context.venueId)
-
-  const [
-    { data: categoryRows, error: categoriesError },
-    { data: discountRows, error: discountsError },
-    { data: saleFormatRows, error: saleFormatsError },
-    { data: productRows, error: productsError },
-    { data: tabRows, error: tabsError },
-    { data: placementRows, error: placementsError },
-    { data: selectionGroupRows, error: selectionGroupsError },
-    { data: modifierAssignmentRows, error: modifierAssignmentsError },
-    { data: venueSettings, error: venueSettingsError },
-  ] =
-    await Promise.all([
-      supabase
-        .from('categories')
-        .select('id, tenant_id, name, kind, icon, is_active, sort_order')
-        .eq('tenant_id', context.tenantId)
-        .order('sort_order', { ascending: true }),
-      discountsQuery,
-      supabase
-        .from('sale_formats')
-        .select('id, tenant_id, key, label, is_active, sort_order')
-        .eq('tenant_id', context.tenantId)
-        .order('sort_order', { ascending: true }),
-      supabase
-        .from('products')
-        .select(
-          `
-          id,
-          tenant_id,
-          venue_id,
-          category_id,
-          name,
-          product_type,
-          description,
-          image_path,
-          kind,
-          sale_formats,
-          can_sell_standalone,
-          can_use_as_mixer,
-          is_featured,
-          mixer_supplement_cents,
-          tax_rate,
-          is_active,
-          sort_order,
-          product_variants (
-            id,
-            product_id,
-            name,
-            price_cents,
-            sku,
-            sale_format_id,
-            sale_formats (key),
-            is_default,
-            is_active,
-            sort_order
-          ),
-          modifier_groups (
-            id,
-            product_id,
-            name,
-            min_select,
-            max_select,
-            is_active,
-            sort_order,
-            modifiers (
-              id,
-              group_id,
-              name,
-              price_cents,
-              is_default,
-              is_active,
-              sort_order
-            )
-          )
-        `,
-        )
-        .eq('tenant_id', context.tenantId)
-        .order('sort_order', { ascending: true }),
-      tabsQuery,
-      placementsQuery,
-      selectionGroupsQuery,
-      supabase
-        .from('product_modifier_groups')
-        .select(`
-          product_id, variant_id, modifier_group_id, sort_order,
-          modifier_groups (
-            id, product_id, name, min_select, max_select, is_active, sort_order,
-            modifiers (id, group_id, name, price_cents, is_default, is_active, sort_order)
-          )
-        `)
-        .eq('tenant_id', context.tenantId)
-        .order('sort_order', { ascending: true }),
-      context.venueId
-        ? supabase.from('venues').select('manual_discount_enabled, catalog_profile').eq('tenant_id', context.tenantId).eq('id', context.venueId).maybeSingle()
-        : Promise.resolve({ data: null, error: null }),
-    ])
-
-  if (categoriesError) {
-    throw categoriesError
-  }
-  if (discountsError) throw discountsError
-  if (venueSettingsError) throw venueSettingsError
-
-  if (saleFormatsError) {
-    throw saleFormatsError
-  }
-
-  if (productsError) {
-    throw productsError
-  }
-  if (tabsError) throw tabsError
-  if (placementsError) throw placementsError
-  if (selectionGroupsError) throw selectionGroupsError
-  if (modifierAssignmentsError) throw modifierAssignmentsError
-
-  const saleFormats = ((saleFormatRows ?? []) as SaleFormatRow[]).map(mapSaleFormat)
-  const allProducts = ((productRows ?? []) as ProductRow[]).map(mapProduct)
-  const products = context.venueId
-    ? allProducts.filter((product) => product.venueId === context.venueId)
-    : allProducts
-  const selectionGroups = ((selectionGroupRows ?? []) as SelectionGroupWithAssignmentsRow[]).map(mapSelectionGroup)
-  const selectionGroupsById = new Map(selectionGroups.map((group) => [group.id, group]))
-  for (const groupRow of (selectionGroupRows ?? []) as SelectionGroupWithAssignmentsRow[]) {
-    const group = selectionGroupsById.get(groupRow.id)
-    if (!group) continue
-    for (const assignment of groupRow.variant_selection_groups ?? []) {
-      const product = products.find((candidate) => candidate.variants.some((variant) => variant.id === assignment.variant_id))
-      if (!product) continue
-      product.variantSelectionGroups.push({
-        variantId: assignment.variant_id,
-        selectionGroupId: assignment.selection_group_id,
-        sortOrder: assignment.sort_order,
-        group,
-      })
-    }
-  }
-  for (const assignment of (modifierAssignmentRows ?? []) as unknown as ProductModifierGroupAssignmentRow[]) {
-    const product = products.find((candidate) => candidate.id === assignment.product_id)
-    const groupRow = Array.isArray(assignment.modifier_groups) ? assignment.modifier_groups[0] : assignment.modifier_groups
-    const group = groupRow ? mapModifierGroups([groupRow])[0] : null
-    if (!product || !group) continue
-    product.modifierGroupAssignments = [...(product.modifierGroupAssignments ?? []), {
-      productId: product.id,
-      variantId: assignment.variant_id,
-      modifierGroupId: assignment.modifier_group_id,
-      sortOrder: assignment.sort_order,
-      group,
-    }]
-  }
-  const visibleCategoryIds = new Set(products.map((product) => product.categoryId))
-
-  return {
-    catalogProfile: (venueSettings as { catalog_profile?: Catalog['catalogProfile'] } | null)?.catalog_profile ?? 'bar_classic',
-    tabs: ((tabRows ?? []) as CatalogTabRow[]).map((row) => ({
-      id: row.id,
-      tenantId: row.tenant_id,
-      venueId: row.venue_id,
-      key: row.key,
-      label: row.label,
-      icon: row.icon ?? row.key,
-      isActive: row.is_active,
-      sortOrder: row.sort_order,
-    })),
-    placements: ((placementRows ?? []) as CatalogPlacementRow[]).map((row) => ({
-      id: row.id,
-      tenantId: row.tenant_id,
-      venueId: row.venue_id,
-      tabId: row.tab_id,
-      categoryId: row.category_id,
-      productId: row.product_id,
-      defaultVariantId: row.default_variant_id,
-      isFeatured: row.is_featured,
-      isActive: row.is_active,
-      sortOrder: row.sort_order,
-    })),
-    selectionGroups,
-    usesLegacyFallback: !(tabRows?.length && placementRows?.length),
-    categories: ((categoryRows ?? []) as CategoryRow[])
-      .map(mapCategory)
-      .filter((category) => !context.venueId || visibleCategoryIds.has(category.id)),
-    discounts: ((discountRows ?? []) as DiscountRow[]).map((discount) => ({
-      id: discount.id,
-      tenantId: discount.tenant_id,
-      venueId: discount.venue_id,
-      name: discount.name,
-      type: discount.type,
-      value: discount.type === 'fixed' ? Math.round(Number(discount.value) * 100) : Number(discount.value),
-      roundingIncrementCents: discount.rounding_increment_cents,
-      color: discount.color,
-      isActive: discount.is_active,
-      sortOrder: discount.sort_order,
-    })),
-    manualDiscountEnabled: Boolean((venueSettings as { manual_discount_enabled?: boolean } | null)?.manual_discount_enabled),
-    products,
-    saleFormats: saleFormats.length ? saleFormats : defaultSaleFormats,
-    updatedAt: nowIso(),
-    source: 'supabase',
-  }
+  return loadCurrentCatalog(context)
 }
 
 export async function loadOpenCashSession(context: TenantContext) {

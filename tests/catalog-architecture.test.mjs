@@ -38,22 +38,22 @@ function legacyCatalog() {
   }
 }
 
-test('bar_classic conserva las seis pestanas, orden y variantes sin inferir nombres', () => {
+test('la capa de acceso no sintetiza tabs ni placements desde formatos legacy', () => {
   const catalog = legacyCatalog()
-  assert.deepEqual(getCatalogTabs(catalog).map(({ label }) => label), ['Cubata', 'Copa', 'Chupito', 'Botellin cerveza', 'Botellin refresco', 'Coctel'])
+  assert.deepEqual(getCatalogTabs(catalog), [])
+  assert.deepEqual(getCatalogPlacements(catalog), [])
   assert.equal(getProductVariantForSaleFormat(catalog.products[0], 'cubata').id, ids.cubata)
-  assert.equal(getProductVariantForSaleFormat(catalog.products[0], 'copa').id, ids.copa)
-  assert.equal(getProductVariantForSaleFormat(catalog.products[0], 'shot').id, ids.shot)
-  assert.equal(getCatalogPlacements(catalog, 'legacy-tab:cubata').length, 1)
   assert.equal(getProductSaleOptions(catalog.products[0]).length, 3)
 })
 
-test('la carga CRM no envia un venue UUID vacio al cargar todos los locales', () => {
-  const source = readFileSync(new URL('../src/services/posService.ts', import.meta.url), 'utf8')
-  assert.match(source, /if \(context\.venueId\) tabsQuery = tabsQuery\.eq\('venue_id', context\.venueId\)/)
-  assert.match(source, /if \(context\.venueId\) placementsQuery = placementsQuery\.eq\('venue_id', context\.venueId\)/)
-  assert.match(source, /if \(context\.venueId\) selectionGroupsQuery = selectionGroupsQuery\.eq\('venue_id', context\.venueId\)/)
-  assert.match(source, /\r?\n\s+tabsQuery,\r?\n\s+placementsQuery,\r?\n\s+selectionGroupsQuery,/)
+test('la carga de catalogo entra por el repositorio final y filtra por local explicitamente', () => {
+  const loader = readFileSync(new URL('../src/features/catalog/data/load-current-catalog.ts', import.meta.url), 'utf8')
+  const repository = readFileSync(new URL('../src/features/catalog/data/repository.ts', import.meta.url), 'utf8')
+  const posService = readFileSync(new URL('../src/services/posService.ts', import.meta.url), 'utf8')
+  assert.match(loader, /repository\.getCatalog\(context\.venueId, 'pos'\)/)
+  assert.match(repository, /rpc\('get_catalog', \{ p_venue_id: venueId, p_mode: mode \}\)/)
+  assert.match(posService, /return loadCurrentCatalog\(context\)/)
+  assert.doesNotMatch(posService, /from\('sale_formats'\)|selection_group_items|variant_selection_groups/)
 })
 
 test('el suplemento del mixer es contextual y no se convierte en modificador', () => {
