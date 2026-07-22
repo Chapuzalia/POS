@@ -20,9 +20,9 @@ const archiveFor = async (document = contract(), loadImage = async () => ({ byte
   return readCatalogArchive(built.bytes)
 }
 
-test('freezes schema v2, rejects incompatible versions and fixes phase-1 image refs', () => {
+test('freezes final schema v3, rejects incompatible versions and fixes phase-1 image refs', () => {
   const document = contract()
-  assert.equal(document.schemaVersion, 2)
+  assert.equal(document.schemaVersion, 3)
   assert.equal(validateCatalog(document).counts.ERROR, 0)
   assert.equal(new Set(document.catalog.products.map((item) => item.imageRef).filter(Boolean)).size, document.catalog.images.length)
   assert.throws(() => upgradeDraftExport({ ...draft(), schemaVersion: 99 }), /incompatible/)

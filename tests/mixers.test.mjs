@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { getLineAdditionNames, isLegacyMixerModifier, isUuid, splitLegacyMixerModifiers, toQuickSaleModifiers } from '../src/lib/mixers.ts'
+import { getLineAdditionNames, isUuid, splitLegacyMixerModifiers } from '../src/lib/mixers.ts'
 import { buildRestaurantOrderLinesPayload } from '../src/features/tables/order-line-payload.ts'
 import { getLineSignature } from '../src/lib/format.ts'
 
@@ -20,14 +20,6 @@ test('separa el mixer sintetico historico de los modificadores reales', () => {
   assert.deepEqual(result.modifiers.map((modifier) => modifier.id), [modifierId])
   assert.equal(result.mixerProductId, productId)
   assert.deepEqual(result.mixer, { productId, name: 'Coca-Cola', priceCents: 50 })
-})
-
-test('solo el adaptador de venta rapida reconstruye mixer:<uuid>', () => {
-  const modifiers = [{ id: modifierId, groupId: 'g', name: 'Hielo', priceCents: 0 }]
-  const result = toQuickSaleModifiers(modifiers, { productId, name: 'Coca-Cola', priceCents: 50 })
-  assert.equal(result[1].id, `mixer:${productId}`)
-  assert.ok(isLegacyMixerModifier(result[1]))
-  assert.equal(modifiers.length, 1)
 })
 
 test('el payload de comanda envia el mixer separado y solo UUID reales en modifierIds', () => {

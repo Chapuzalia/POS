@@ -1,33 +1,8 @@
-export type SaleFormat = string
-
-export type SaleFormatDefinition = {
-  id: string
-  tenantId?: string
-  venueId?: string | null
-  key: SaleFormat
-  label: string
-  isActive: boolean
-  sortOrder: number
-}
-
 export type CatalogProfile = 'bar_classic' | 'restaurant' | 'custom'
 export type ProductType = 'standard' | 'menu'
 export type SelectionGroupKind = 'mixer' | 'menu_component'
 
-export type CatalogKind =
-  | 'beer'
-  | 'mixed'
-  | 'shot'
-  | 'other'
-  | 'alcohol'
-  | 'mixer'
-  | 'beer_bottle'
-  | 'soft_bottle'
-  | 'cocktail'
-
 export type CatalogStartTab = 'all' | 'top'
-
-export type CatalogFilter = CatalogStartTab | SaleFormat
 
 export type PaymentMethod = 'cash' | 'card'
 export type HistoricalPaymentMethod = PaymentMethod | 'invitation' | 'other'
@@ -145,154 +120,6 @@ export type CrmPosUser = {
   loginHeartbeatAt: string | null
   venueId: string
   deviceId: string
-}
-
-export type Category = {
-  id: string
-  tenantId: string
-  name: string
-  kind: CatalogKind
-  icon: string
-  isActive: boolean
-  sortOrder: number
-}
-
-export type CatalogTab = {
-  id: string
-  tenantId: string
-  venueId: string
-  key: string
-  label: string
-  icon: string
-  isActive: boolean
-  sortOrder: number
-}
-
-export type CatalogPlacement = {
-  id: string
-  tenantId: string
-  venueId: string
-  tabId: string
-  categoryId: string
-  productId: string
-  defaultVariantId: string | null
-  isFeatured: boolean
-  isActive: boolean
-  sortOrder: number
-}
-
-export type ProductVariant = {
-  id: string
-  productId: string
-  name: string
-  priceCents: number
-  sku: string | null
-  saleFormatId: string | null
-  saleFormatKey?: SaleFormat | null
-  isDefault: boolean
-  isActive: boolean
-  sortOrder: number
-}
-
-export type Modifier = {
-  id: string
-  groupId: string
-  name: string
-  priceCents: number
-  isDefault: boolean
-  isActive: boolean
-  sortOrder: number
-}
-
-export type ModifierGroup = {
-  id: string
-  productId: string
-  name: string
-  minSelect: number
-  maxSelect: number
-  isActive: boolean
-  sortOrder: number
-  modifiers: Modifier[]
-}
-
-export type SelectionGroupItem = {
-  id: string
-  groupId: string
-  productId: string
-  variantId: string | null
-  priceDeltaCents: number
-  isDefault: boolean
-  isActive: boolean
-  sortOrder: number
-  product?: Product
-}
-
-export type SelectionGroup = {
-  id: string
-  tenantId: string
-  venueId: string
-  kind: SelectionGroupKind
-  name: string
-  minSelect: number
-  maxSelect: number
-  isActive: boolean
-  sortOrder: number
-  items: SelectionGroupItem[]
-}
-
-export type VariantSelectionGroup = {
-  variantId: string
-  selectionGroupId: string
-  sortOrder: number
-  group: SelectionGroup
-}
-
-export type ProductModifierGroupAssignment = {
-  productId: string
-  variantId: string | null
-  modifierGroupId: string
-  sortOrder: number
-  group: ModifierGroup
-}
-
-export type Product = {
-  id: string
-  tenantId: string
-  venueId: string
-  categoryId: string
-  name: string
-  productType: ProductType
-  description: string | null
-  imagePath: string | null
-  imageUrl: string | null
-  kind: CatalogKind
-  saleFormats: SaleFormat[]
-  canSellStandalone: boolean
-  canUseAsMixer: boolean
-  isFeatured: boolean
-  mixerSupplementCents: number
-  taxRate: number | null
-  isActive: boolean
-  sortOrder: number
-  variants: ProductVariant[]
-  modifierGroups: ModifierGroup[]
-  modifierGroupAssignments?: ProductModifierGroupAssignment[]
-  variantSelectionGroups: VariantSelectionGroup[]
-}
-
-export type Catalog = {
-  catalogProfile: CatalogProfile
-  tabs: CatalogTab[]
-  placements: CatalogPlacement[]
-  selectionGroups: SelectionGroup[]
-  usesLegacyFallback: boolean
-  categories: Category[]
-  discounts: Discount[]
-  manualDiscountEnabled: boolean
-  products: Product[]
-  saleFormats: SaleFormatDefinition[]
-  updatedAt: string
-  source: 'supabase' | 'cache'
 }
 
 export type TicketLineModifier = {
@@ -628,33 +455,6 @@ export type OfflineEvent =
       lastError?: string
       payload: CashClosedPayload
     }
-
-export type ProductCreateInput = {
-  venueId: string
-  productType: ProductType
-  canSellStandalone: boolean
-  canUseAsMixer: boolean
-  categoryId: string
-  description: string
-  imagePath?: string | null
-  isFeatured: boolean
-  kind: CatalogKind
-  mixerSupplementCents: number
-  name: string
-  saleFormats: SaleFormat[]
-  taxRate: number | null
-  variants: Array<{
-    name: string
-    priceCents: number
-    saleFormatId?: string | null
-  }>
-}
-
-export type CategoryCreateInput = {
-  kind: CatalogKind
-  name: string
-  sortOrder: number
-}
 
 export type CrmStats = {
   averageTicketCents: number

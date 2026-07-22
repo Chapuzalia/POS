@@ -9,6 +9,14 @@ function exactEntity(item, keys) { return Object.fromEntries(keys.map((key) => [
 export function upgradeDraftExport(input) {
   if (input?.format !== CATALOG_FORMAT) throw new Error(`Formato no compatible: ${input?.format ?? '<ausente>'}`)
   if (input.schemaVersion === CATALOG_SCHEMA_VERSION) return clone(input)
+  if (input.schemaVersion === 2) {
+    const versionTwo = clone(input)
+    delete versionTwo.catalog.saleFormats
+    versionTwo.schemaVersion = CATALOG_SCHEMA_VERSION
+    versionTwo.metadata = { ...versionTwo.metadata, source: { ...(versionTwo.metadata.source ?? {}), upgradedFromDraftSchemaVersion: 2 } }
+    versionTwo.metadata.counts = Object.fromEntries(COLLECTIONS.map((name) => [name, versionTwo.catalog[name].length]))
+    return versionTwo
+  }
   if (input.schemaVersion !== 1) throw new Error(`schemaVersion incompatible: ${input.schemaVersion}`)
   const draft = clone(input)
   const usedCategories = new Set([
@@ -22,7 +30,6 @@ export function upgradeDraftExport(input) {
     metadata: { ...draft.metadata, exporter: 'scripts/catalog-rebuild', source: { ...(draft.metadata.source ?? {}), upgradedFromDraftSchemaVersion: 1 } },
     catalog: {
       categories: draft.catalog.categories.map((item) => ({ ...exactEntity(item, ['ref', 'name', 'icon', 'sortOrder', 'isActive', 'trace', 'source']), unused: !usedCategories.has(item.ref) })),
-      saleFormats: draft.catalog.saleFormats.map((item) => exactEntity(item, ['ref', 'key', 'label', 'sortOrder', 'isActive', 'trace', 'source'])),
       tabs: draft.catalog.tabs.map((item) => exactEntity(item, ['ref', 'key', 'label', 'icon', 'sortOrder', 'isActive', 'trace'])),
       tabCategories: draft.catalog.tabCategories.map((item) => exactEntity(item, ['ref', 'tabRef', 'categoryRef', 'sortOrder', 'isActive', 'source'])),
       products: draft.catalog.products.map((item) => ({ ...exactEntity(item, ['ref', 'type', 'name', 'description', 'taxRate', 'sortOrder', 'isActive', 'trace', 'source']), imageRef: imagesByProduct.get(item.ref)?.ref ?? null })),
@@ -117,9 +124,9 @@ export function buildImportPlan(input, { venueId, uuid = randomUUID } = {}) {
   assertValidCatalog(input)
   const { document, changes } = normalizeForImport(input)
   const ids = {}
-  for (const name of COLLECTIONS.filter((name) => name !== 'saleFormats')) ids[name] = Object.fromEntries(document.catalog[name].map((item) => [item.ref, uuid()]))
+  for (const name of COLLECTIONS) ids[name] = Object.fromEntries(document.catalog[name].map((item) => [item.ref, uuid()]))
   const plan = { venueId, document, generatedIds: ids, changes }
-  plan.counts = Object.fromEntries(COLLECTIONS.filter((name) => name !== 'saleFormats').map((name) => [name, document.catalog[name].length]))
+  plan.counts = Object.fromEntries(COLLECTIONS.map((name) => [name, document.catalog[name].length]))
   return plan
 }
 

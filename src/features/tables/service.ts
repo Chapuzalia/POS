@@ -150,7 +150,6 @@ export async function updateRestaurantTable(context: TenantContext, tableId: str
 }
 
 export async function openRestaurantOrder(input: OpenRestaurantOrderInput) { const { data, error } = await requireSupabase().rpc('open_restaurant_order', { p_table_ids: input.tableIds, p_guest_count: input.guestCount, p_cash_session_id: input.cashSessionId, p_device_id: input.deviceId }); if (error) throw error; return String(data) }
-export async function addRestaurantOrderLine(orderId: string, productId: string, variantId: string, modifiers: TicketLineModifier[], mixerProductId: string | null = null) { const { data, error } = await requireSupabase().rpc('add_restaurant_order_line_with_mixer', { p_order_id: orderId, p_product_id: productId, p_variant_id: variantId, p_modifier_ids: modifiers.map((modifier) => modifier.id), p_quantity: 1, p_note: null, p_mixer_product_id: mixerProductId }); if (error) throw error; return String(data) }
 export async function setRestaurantOrderLineQuantity(lineId: string, quantity: number) { const { error } = await requireSupabase().rpc('set_restaurant_order_line_quantity', { p_line_id: lineId, p_quantity: quantity }); if (error) throw error }
 export async function removeRestaurantOrderLine(lineId: string) { const { error } = await requireSupabase().rpc('remove_restaurant_order_line', { p_line_id: lineId }); if (error) throw error }
 export async function removeRestaurantOrderLineConfirmed(lineId: string, expectedRevision: number) {

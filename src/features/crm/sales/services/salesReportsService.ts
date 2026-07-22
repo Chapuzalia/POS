@@ -59,16 +59,6 @@ export type SalesReportTicketRow = {
   total_cents: number
 }
 
-export type SalesReportProductRow = {
-  category_id: string
-  id: string
-}
-
-export type SalesReportCategoryRow = {
-  id: string
-  name: string
-}
-
 export type MutableSalesReportAggregate = CrmSalesReportAggregate & {
   ticketIds: Set<string>
 }
@@ -124,15 +114,6 @@ function addNamedAggregate(report: Map<string, MutableSalesReportAggregate>, id:
 
 export async function loadCrmSalesReports(context: TenantContext, venueId?: string): Promise<CrmSalesReports> {
   const client = requireSupabase()
-  let productsQuery = client
-    .from('products')
-    .select('id, category_id')
-    .eq('tenant_id', context.tenantId)
-
-  if (venueId) {
-    productsQuery = productsQuery.eq('venue_id', venueId)
-  }
-
   const ticketRowsPromise = (async () => {
     const rows: SalesReportTicketRow[] = []
     const batchSize = 1000
@@ -205,26 +186,7 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
     return rows
   })()
 
-  const [
-    ticketRows,
-    { data: productRows, error: productsError },
-    { data: categoryRows, error: categoriesError },
-  ] = await Promise.all([
-    ticketRowsPromise,
-    productsQuery,
-    client.from('categories').select('id, name').eq('tenant_id', context.tenantId),
-  ])
-
-  if (productsError) throw productsError
-  if (categoriesError) throw categoriesError
-
-  const tickets = ticketRows
-  const categoryIdByProductId = new Map(
-    ((productRows ?? []) as SalesReportProductRow[]).map((product) => [product.id, product.category_id]),
-  )
-  const categoryNameById = new Map(
-    ((categoryRows ?? []) as SalesReportCategoryRow[]).map((category) => [category.id, category.name]),
-  )
+  const tickets = await ticketRowsPromise
   const byProduct = new Map<string, MutableSalesReportAggregate>()
   const byCategory = new Map<string, MutableSalesReportAggregate>()
   const byFormat = new Map<string, MutableSalesReportAggregate>()
@@ -239,8 +201,8 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
 
     ;(ticket.ticket_lines ?? []).forEach((line) => {
       const productId = line.product_id ?? `deleted:${normalizeText(line.product_name)}`
-      const categoryId = line.category_id_snapshot ?? (line.product_id ? categoryIdByProductId.get(line.product_id) : undefined)
-      const categoryName = line.category_name_snapshot ?? (categoryId ? categoryNameById.get(categoryId) : undefined)
+      const categoryId = line.category_id_snapshot
+      const categoryName = line.category_name_snapshot
       const formatName = line.sale_format_name_snapshot?.trim() || line.variant_name.trim() || 'Sin formato'
 
       addSalesReportLine(byProduct, productId, line.product_name, ticket.id, line)
@@ -277,11 +239,11 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
       createdAt: ticket.local_created_at,
       lineCount: ticket.ticket_lines?.length ?? 0,
       lines: (ticket.ticket_lines ?? []).map((line) => {
-        const categoryId = line.category_id_snapshot ?? (line.product_id ? categoryIdByProductId.get(line.product_id) ?? null : null)
+        const categoryId = line.category_id_snapshot
 
         return {
           categoryId,
-          categoryName: line.category_name_snapshot ?? (categoryId ? categoryNameById.get(categoryId) ?? 'Sin categoría' : 'Sin categoría'),
+          categoryName: line.category_name_snapshot ?? 'Sin categoría',
           saleFormatId: line.sale_format_id,
           saleFormatName: line.sale_format_name_snapshot ?? line.variant_name,
           catalogTabId: line.catalog_tab_id_snapshot,

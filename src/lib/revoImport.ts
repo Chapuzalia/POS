@@ -1,24 +1,19 @@
 import { normalizeText } from './format'
-import type { CatalogKind, SaleFormat } from '../types'
+type RevoCategoryFamily = 'alcohol' | 'mixer' | 'beer' | 'beer_bottle' | 'soft_bottle' | 'cocktail' | 'other'
+type RevoSellingFormat = 'cubata' | 'copa' | 'shot' | 'beer_bottle' | 'soft_bottle' | 'cocktail'
 
 export type RevoImportVariant = {
   name: string
   priceCents: number
-  saleFormat: SaleFormat
+  saleFormat: RevoSellingFormat
   sortOrder: number
   sourceFormat: string
 }
 
 export type RevoImportProduct = {
   active: boolean
-  canSellStandalone: boolean
-  canUseAsMixer: boolean
-  categoryKind: CatalogKind
   categoryName: string
-  kind: CatalogKind
-  mixerSupplementCents: number
   name: string
-  saleFormats: SaleFormat[]
   sourceCategories: string[]
   sourceIds: string[]
   variants: RevoImportVariant[]
@@ -32,13 +27,13 @@ export type RevoImportParseResult = {
 }
 
 type RevoCategoryMapping = {
-  categoryKind: CatalogKind
+  categoryKind: RevoCategoryFamily
   categoryName: string
 }
 
-const saleFormatOrder: SaleFormat[] = ['cubata', 'copa', 'shot', 'beer_bottle', 'soft_bottle', 'cocktail']
+const saleFormatOrder: RevoSellingFormat[] = ['cubata', 'copa', 'shot', 'beer_bottle', 'soft_bottle', 'cocktail']
 
-const variantNames: Record<SaleFormat, string> = {
+const variantNames: Record<RevoSellingFormat, string> = {
   beer_bottle: 'Botellin',
   cocktail: 'Coctel',
   copa: 'Copa',
@@ -83,7 +78,7 @@ function parseActive(value: string) {
   return cleanText(value) !== '0'
 }
 
-function getVariantName(saleFormat: SaleFormat, sourceFormat: string) {
+function getVariantName(saleFormat: RevoSellingFormat, sourceFormat: string) {
   if (normalizeImportKey(sourceFormat).includes('ampolla')) {
     return 'Botella'
   }
@@ -165,24 +160,7 @@ function getCategoryMapping(categoryGroupName: string, categoryName: string): Re
   return { categoryKind: 'other', categoryName: titleCase(sourceName) || 'Otros' }
 }
 
-function getProductKind(categoryKind: CatalogKind): CatalogKind {
-  if (categoryKind === 'mixer') {
-    return 'mixer'
-  }
-  if (categoryKind === 'beer_bottle') {
-    return 'beer_bottle'
-  }
-  if (categoryKind === 'cocktail') {
-    return 'cocktail'
-  }
-  if (categoryKind === 'other') {
-    return 'other'
-  }
-
-  return 'alcohol'
-}
-
-function getDefaultSaleFormat(categoryKind: CatalogKind, categoryName: string): SaleFormat {
+function getDefaultRevoSellingFormat(categoryKind: RevoCategoryFamily, categoryName: string): RevoSellingFormat {
   if (categoryKind === 'mixer' || categoryKind === 'soft_bottle') {
     return 'soft_bottle'
   }
@@ -199,15 +177,15 @@ function getDefaultSaleFormat(categoryKind: CatalogKind, categoryName: string): 
   return categoryKind === 'alcohol' ? 'copa' : 'soft_bottle'
 }
 
-function getSaleFormat(
+function getRevoSellingFormat(
   sourceFormat: string,
-  categoryKind: CatalogKind,
+  categoryKind: RevoCategoryFamily,
   categoryName: string,
-): { saleFormat: SaleFormat | null; warning?: string } {
+): { saleFormat: RevoSellingFormat | null; warning?: string } {
   const formatKey = normalizeImportKey(sourceFormat)
 
   if (!formatKey) {
-    return { saleFormat: getDefaultSaleFormat(categoryKind, categoryName) }
+    return { saleFormat: getDefaultRevoSellingFormat(categoryKind, categoryName) }
   }
 
   if (formatKey.includes('cubata')) {
@@ -290,10 +268,6 @@ function parseCsvRows(csvText: string) {
   return rows
 }
 
-function sortSaleFormats(formats: SaleFormat[]) {
-  return [...formats].sort((a, b) => saleFormatOrder.indexOf(a) - saleFormatOrder.indexOf(b))
-}
-
 export function parseRevoItemsCsv(csvText: string): RevoImportParseResult {
   const rows = parseCsvRows(csvText.replace(/^\uFEFF/, ''))
   const headers = rows[0]?.map((header) => cleanText(header).replace(/^\uFEFF/, '')) ?? []
@@ -320,7 +294,7 @@ export function parseRevoItemsCsv(csvText: string): RevoImportParseResult {
     const categoryName = read(row, 'category.name')
     const categoryMapping = getCategoryMapping(categoryGroupName, categoryName)
     const sourceFormat = read(row, 'sellingFormat')
-    const formatResult = getSaleFormat(sourceFormat, categoryMapping.categoryKind, categoryMapping.categoryName)
+    const formatResult = getRevoSellingFormat(sourceFormat, categoryMapping.categoryKind, categoryMapping.categoryName)
 
     if (!formatResult.saleFormat) {
       skippedRows += 1
@@ -329,7 +303,6 @@ export function parseRevoItemsCsv(csvText: string): RevoImportParseResult {
     }
 
     const productKey = `${normalizeImportKey(categoryMapping.categoryName)}::${normalizeImportKey(productName)}`
-    const productKind = getProductKind(categoryMapping.categoryKind)
     const variantName = getVariantName(formatResult.saleFormat, sourceFormat)
     const variantKey = normalizeImportKey(variantName)
     const sourceCategory = cleanText([categoryGroupName, categoryName].filter(Boolean).join(' / '))
@@ -338,14 +311,8 @@ export function parseRevoItemsCsv(csvText: string): RevoImportParseResult {
       productsByKey.get(productKey) ??
       ({
         active: false,
-        canSellStandalone: true,
-        canUseAsMixer: categoryMapping.categoryKind === 'mixer',
-        categoryKind: categoryMapping.categoryKind,
         categoryName: categoryMapping.categoryName,
-        kind: productKind,
-        mixerSupplementCents: 0,
         name: productName,
-        saleFormats: [],
         sourceCategories: [],
         sourceIds: [],
         variants: [],
@@ -369,7 +336,6 @@ export function parseRevoItemsCsv(csvText: string): RevoImportParseResult {
     }
 
     current.active = current.active || parseActive(read(row, 'active'))
-    current.saleFormats = sortSaleFormats([...new Set(current.variants.map((item) => item.saleFormat))])
     current.sourceIds = [...new Set([...current.sourceIds, sourceId].filter(Boolean))]
     current.sourceCategories = [...new Set([...current.sourceCategories, sourceCategory].filter(Boolean))]
     current.warnings = [...current.warnings, ...rowWarning]

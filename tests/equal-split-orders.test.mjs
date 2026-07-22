@@ -11,10 +11,10 @@ const modal = await readFile(new URL('../src/features/tables/components/EqualSpl
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 
 test('la division a partes iguales persiste el progreso y cada cobro por separado', () => {
-  assert.match(migration, /create table if not exists public\.restaurant_order_equal_splits/)
+  assert.match(migration, /create table(?: if not exists)? public\.restaurant_order_equal_splits/i)
   assert.match(migration, /create table if not exists public\.restaurant_order_equal_split_payments/)
   assert.match(migration, /create or replace function public\.configure_restaurant_order_equal_split/)
-  assert.match(migration, /create or replace function public\.pay_restaurant_order_equal_part/)
+  assert.match(migration, /create(?: or replace)? function public\.pay_restaurant_order_equal_part/i)
   assert.match(migration, /insert into public\.tickets/)
   assert.match(migration, /insert into public\.sales/)
   assert.match(migration, /insert into public\.sale_payments/)
@@ -102,7 +102,8 @@ test('app, mapa y realtime recuperan la division desde cualquier dispositivo', (
 })
 
 test('la migracion esta incorporada en la base completa', () => {
-  assert.match(completeDatabase, /create table if not exists public\.restaurant_order_equal_splits/)
-  assert.match(completeDatabase, /create or replace function public\.pay_restaurant_order_equal_part/)
-  assert.match(completeDatabase, /Descuentos independientes por cada cobro a partes iguales/)
+  assert.match(completeDatabase, /create table(?: if not exists)? public\.restaurant_order_equal_splits/i)
+  assert.match(completeDatabase, /create(?: or replace)? function public\.pay_restaurant_order_equal_part/i)
+  assert.match(completeDatabase, /default_discount jsonb/)
+  assert.match(completeDatabase, /discount_amount_cents integer default 0 not null/i)
 })

@@ -1,4 +1,4 @@
-import type { Product, ProductLineSelection, TicketLineMixer, TicketLineModifier } from '../types'
+import type { ProductLineSelection, TicketLineMixer, TicketLineModifier } from '../types'
 
 const mixerModifierPrefix = 'mixer:'
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
@@ -9,14 +9,6 @@ export function isUuid(value: string) {
 
 export function isLegacyMixerModifier(modifier: TicketLineModifier) {
   return modifier.groupId === 'mixer' || modifier.id.startsWith(mixerModifierPrefix)
-}
-
-export function mixerFromProduct(product: Product): TicketLineMixer {
-  return {
-    productId: product.id,
-    name: product.name,
-    priceCents: product.canUseAsMixer ? (product.mixerSupplementCents ?? 0) : 0,
-  }
 }
 
 export function splitLegacyMixerModifiers(
@@ -53,19 +45,6 @@ export function splitLegacyMixerModifiers(
       priceCents: legacyMixer.priceCents,
     } : null),
   }
-}
-
-export function toQuickSaleModifiers(
-  modifiers: TicketLineModifier[],
-  mixer: TicketLineMixer | null | undefined,
-) {
-  if (!mixer) return modifiers
-  return [...modifiers, {
-    id: `${mixerModifierPrefix}${mixer.productId}`,
-    groupId: 'mixer',
-    name: mixer.name,
-    priceCents: mixer.priceCents,
-  }]
 }
 
 export function getLineAdditionNames(

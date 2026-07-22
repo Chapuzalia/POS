@@ -1,9 +1,9 @@
 import { z } from 'zod'
 
 export const CATALOG_FORMAT = 'club-pos-catalog-export'
-export const CATALOG_SCHEMA_VERSION = 2
+export const CATALOG_SCHEMA_VERSION = 3
 export const COLLECTIONS = [
-  'categories', 'saleFormats', 'tabs', 'tabCategories', 'products', 'variants', 'placements',
+  'categories', 'tabs', 'tabCategories', 'products', 'variants', 'placements',
   'selectionGroups', 'selectionGroupOptions', 'selectionAssignments', 'modifierGroups',
   'modifiers', 'modifierAssignments', 'images',
 ]
@@ -16,7 +16,6 @@ const nullableString = z.string().nullable()
 const common = { ref, sortOrder, isActive: z.boolean() }
 
 const category = z.object({ ...common, name: z.string().min(1), icon: nullableString, unused: z.boolean(), trace: openBlock, source: openBlock }).strict()
-const saleFormat = z.object({ ...common, key: z.string().min(1), label: z.string().min(1), trace: openBlock, source: openBlock }).strict()
 const tab = z.object({ ...common, key: z.string().min(1), label: z.string().min(1), icon: nullableString, trace: openBlock }).strict()
 const tabCategory = z.object({ ...common, tabRef: ref, categoryRef: ref, source: openBlock }).strict()
 const product = z.object({ ...common, type: z.enum(['standard', 'menu']), name: z.string().min(1), description: nullableString, imageRef: ref.nullable(), taxRate: z.number().min(0).max(100).multipleOf(0.01).nullable(), trace: openBlock, source: openBlock }).strict()
@@ -41,7 +40,7 @@ export const catalogExportSchema = z.object({
     counts: z.record(z.string(), z.number().int().nonnegative()),
   }).passthrough(),
   catalog: z.object({
-    categories: z.array(category), saleFormats: z.array(saleFormat), tabs: z.array(tab), tabCategories: z.array(tabCategory),
+    categories: z.array(category), tabs: z.array(tab), tabCategories: z.array(tabCategory),
     products: z.array(product), variants: z.array(variant), placements: z.array(placement), selectionGroups: z.array(selectionGroup),
     selectionGroupOptions: z.array(selectionOption), selectionAssignments: z.array(assignment), modifierGroups: z.array(modifierGroup),
     modifiers: z.array(modifier), modifierAssignments: z.array(assignment), images: z.array(image),
@@ -138,7 +137,6 @@ export function validateCatalog(document) {
   })
   catalog.products.filter((item) => !catalog.placements.some((placementItem) => placementItem.productRef === item.ref)).forEach((item) => add(issues, 'INFO', 'INTERNAL_PRODUCT', `$.catalog.products.${item.ref}`, 'Producto interno sin colocaciones.'))
   catalog.categories.filter((item) => item.unused).forEach((item) => add(issues, 'INFO', 'UNUSED_CATEGORY', `$.catalog.categories.${item.ref}`, 'Categoría conservada sin asociación automática.'))
-  if (catalog.saleFormats.length) add(issues, 'INFO', 'SALE_FORMATS_SOURCE_ONLY', '$.catalog.saleFormats', 'Los formatos de venta solo son trazabilidad.')
   return result(issues)
 }
 

@@ -77,5 +77,5 @@ test('el cobro parcial es atomico, descuenta solo la seleccion y mantiene abiert
   assert.match(partialPaymentMigration, /update public\.orders o set revision = o\.revision \+ 1/)
   assert.doesNotMatch(partialPaymentMigration, /update public\.orders o set status = 'paid'/)
   assert.doesNotMatch(partialPaymentMigration, /update public\.order_tables set released_at/)
-  assert.match(completeDatabase, /create or replace function public\.pay_restaurant_order_items/)
+  assert.match(completeDatabase, /create(?: or replace)? function public\.pay_restaurant_order_items/i)
 })

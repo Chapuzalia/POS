@@ -27,7 +27,6 @@ export class MemoryCatalogRepository {
       if (this.failAfterDelete) throw new Error('Fallo inyectado después del borrado')
       const target = {}
       for (const [name, rows] of Object.entries(plan.document.catalog)) {
-        if (name === 'saleFormats') continue
         target[name] = rows.map((row) => ({ ...structuredClone(row), id: plan.generatedIds[name][row.ref], venueId: plan.venueId }))
       }
       this.state.venues[plan.venueId] = target
