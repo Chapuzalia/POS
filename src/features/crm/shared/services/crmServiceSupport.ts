@@ -9,11 +9,6 @@ export function requireSupabase() {
   return supabase
 }
 
-export function getMonthStartIso() {
-  const now = new Date()
-  return new Date(now.getFullYear(), now.getMonth(), 1).toISOString()
-}
-
 export function getImportKey(value: string) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, ' ').trim()
 }

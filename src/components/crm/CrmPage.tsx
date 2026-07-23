@@ -78,14 +78,19 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
         setStats(null)
         return
       }
-      setStats(await loadCrmStats(context, selectedVenueId))
+      const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
+      if (!selectedVenue) {
+        setStats(null)
+        return
+      }
+      setStats(await loadCrmStats(context, selectedVenue))
     }
     if (options.silent) {
       try { await loadStats() } catch (statsError) { onError(getReadableError(statsError)) }
       return
     }
     await runAction(loadStats)
-  }, [context, onError, runAction, selectedVenueId])
+  }, [context, onError, runAction, selectedVenueId, venues])
 
   useEffect(() => {
     if ((activeSection === 'dashboard' || activeSection === 'stats') && isOnline && selectedVenueId) void refreshStats()

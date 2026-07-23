@@ -6086,6 +6086,7 @@ CREATE TABLE public.venues (
     default_tax_rate numeric(5,2) DEFAULT 21 NOT NULL,
     manual_discount_enabled boolean DEFAULT false NOT NULL,
     timezone text DEFAULT 'Europe/Madrid'::text NOT NULL,
+    day_change_time time without time zone,
     currency_code text DEFAULT 'EUR'::text NOT NULL,
     catalog_profile text DEFAULT 'bar_classic'::text NOT NULL,
     CONSTRAINT venues_address_check CHECK (((address IS NULL) OR (char_length(address) <= 300))),
@@ -7114,6 +7115,8 @@ CREATE INDEX sales_register_created_idx ON public.sales USING btree (tenant_id, 
 
 CREATE INDEX sales_tenant_idx ON public.sales USING btree (tenant_id, created_at DESC);
 
+CREATE INDEX sales_venue_local_created_idx ON public.sales USING btree (tenant_id, venue_id, local_created_at DESC);
+
 
 --
 -- Name: selection_group_options_identity_idx; Type: INDEX; Schema: public; Owner: -
@@ -7169,6 +7172,8 @@ CREATE INDEX tickets_register_created_idx ON public.tickets USING btree (tenant_
 --
 
 CREATE INDEX tickets_tenant_idx ON public.tickets USING btree (tenant_id, created_at DESC);
+
+CREATE INDEX tickets_venue_local_created_idx ON public.tickets USING btree (tenant_id, venue_id, local_created_at DESC);
 
 
 --

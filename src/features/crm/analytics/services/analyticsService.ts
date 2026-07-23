@@ -1,6 +1,7 @@
-import { getMonthStartIso, requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { getOperationalMonthStartIso } from '../../../../lib/operationalDay'
 import { supabase } from '../../../../lib/supabase'
-import { type CrmStats, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
+import { type CrmStats, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
 import { type NameRow } from '../../sales/services/salesReportsService'
 
 export type SaleStatsRow = {
@@ -39,20 +40,23 @@ export type OpenCashSessionSaleRow = {
   total_cents: number
 }
 
-export async function loadCrmStats(context: TenantContext, venueId?: string): Promise<CrmStats> {
+export async function loadCrmStats(context: TenantContext, venue: CrmVenue): Promise<CrmStats> {
   const client = requireSupabase()
-  const monthStart = getMonthStartIso()
+  const monthStart = getOperationalMonthStartIso({
+    dayChangeTime: venue.dayChangeTime,
+    timeZone: venue.timeZone,
+  })
   let salesQuery = client
     .from('sales')
     .select('id, payment_method, total_cents')
     .eq('tenant_id', context.tenantId)
-    .gte('created_at', monthStart)
+    .gte('local_created_at', monthStart)
   let ticketsQuery = client
     .from('tickets')
     .select('id, total_cents, discount_id, discount_name, discount_amount_cents, ticket_lines(product_name, quantity, allocated_quantity, line_total_cents)')
     .eq('tenant_id', context.tenantId)
     .eq('status', 'paid')
-    .gte('created_at', monthStart)
+    .gte('local_created_at', monthStart)
   let openSessionsQuery = client
     .from('cash_sessions')
     .select('id, venue_id, device_id, opened_at, opening_float_cents')
@@ -60,11 +64,9 @@ export async function loadCrmStats(context: TenantContext, venueId?: string): Pr
     .eq('status', 'open')
     .order('opened_at', { ascending: false })
 
-  if (venueId) {
-    salesQuery = salesQuery.eq('venue_id', venueId)
-    ticketsQuery = ticketsQuery.eq('venue_id', venueId)
-    openSessionsQuery = openSessionsQuery.eq('venue_id', venueId)
-  }
+  salesQuery = salesQuery.eq('venue_id', venue.id)
+  ticketsQuery = ticketsQuery.eq('venue_id', venue.id)
+  openSessionsQuery = openSessionsQuery.eq('venue_id', venue.id)
 
   const [
     { data: salesRows, error: salesError },

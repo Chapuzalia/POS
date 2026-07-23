@@ -1,4 +1,5 @@
 import { isValidTaxRate } from '../../../../lib/tax'
+import { normalizeDayChangeTime } from '../../../../lib/operationalDay'
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
 import { type CrmDevice, type CrmPosUser, type CrmVenue, type DeviceMode, type TenantContext } from '../../../../types'
 
@@ -14,7 +15,7 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
     await Promise.all([
       client
         .from('venues')
-        .select('id, name, address, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate')
+        .select('id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone')
         .eq('tenant_id', context.tenantId)
         .order('sort_order'),
       client
@@ -41,12 +42,14 @@ export async function loadCrmAccessData(context: TenantContext): Promise<CrmAcce
       id: venue.id as string,
       name: venue.name as string,
       address: (venue.address as string | null) ?? '',
+      dayChangeTime: normalizeDayChangeTime(venue.day_change_time as string | null),
       legalName: (venue.legal_name as string | null) ?? '',
       taxId: (venue.tax_id as string | null) ?? '',
       sortOrder: venue.sort_order as number,
       isActive: venue.is_active as boolean,
       tablesEnabled: venue.tables_enabled as boolean,
       defaultTaxRate: Number(venue.default_tax_rate),
+      timeZone: venue.timezone as string,
     })),
     devices: (deviceRows ?? []).map((device) => ({
       id: device.id as string,
@@ -64,7 +67,7 @@ export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]>
   const client = requireSupabase()
   const { data, error } = await client
     .from('venues')
-    .select('id, name, address, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate')
+    .select('id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone')
     .eq('tenant_id', context.tenantId)
     .order('sort_order')
 
@@ -76,12 +79,14 @@ export async function loadCrmVenues(context: TenantContext): Promise<CrmVenue[]>
     id: venue.id as string,
     name: venue.name as string,
     address: (venue.address as string | null) ?? '',
+    dayChangeTime: normalizeDayChangeTime(venue.day_change_time as string | null),
     legalName: (venue.legal_name as string | null) ?? '',
     taxId: (venue.tax_id as string | null) ?? '',
     sortOrder: venue.sort_order as number,
     isActive: venue.is_active as boolean,
     tablesEnabled: venue.tables_enabled as boolean,
     defaultTaxRate: Number(venue.default_tax_rate),
+    timeZone: venue.timezone as string,
   }))
 }
 
@@ -121,6 +126,7 @@ export async function updateCrmVenueDefaultTaxRate(
 
 export type CrmVenueSettingsInput = {
   address: string
+  dayChangeTime: string | null
   defaultTaxRate: number
   legalName: string
   taxId: string
@@ -136,6 +142,7 @@ export async function updateCrmVenueSettings(
   }
 
   const address = input.address.trim()
+  const dayChangeTime = normalizeDayChangeTime(input.dayChangeTime)
   const legalName = input.legalName.trim()
   const taxId = input.taxId.trim()
 
@@ -153,6 +160,7 @@ export async function updateCrmVenueSettings(
     .from('venues')
     .update({
       address: address || null,
+      day_change_time: dayChangeTime,
       default_tax_rate: input.defaultTaxRate,
       legal_name: legalName || null,
       tax_id: taxId || null,

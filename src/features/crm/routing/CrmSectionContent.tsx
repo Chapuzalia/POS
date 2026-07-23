@@ -74,7 +74,14 @@ export function CrmSectionContent({
     case 'tables':
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
     case 'reports':
-      return <SalesReportsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+      return <SalesReportsCrm
+        dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
+        disabled={disabled}
+        runAction={runAction}
+        selectedVenueId={selectedVenueId}
+        tenantContext={context}
+        timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
+      />
     case 'stats':
       return <StatsCrm disabled={disabled} onRefresh={onStatsRefresh} stats={stats} />
     case 'settings':

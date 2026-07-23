@@ -92,12 +92,14 @@ export type CrmVenue = {
   id: string
   name: string
   address: string
+  dayChangeTime: string | null
   legalName: string
   taxId: string
   sortOrder: number
   isActive: boolean
   tablesEnabled: boolean
   defaultTaxRate: number
+  timeZone: string
 }
 
 export type CrmDevice = {

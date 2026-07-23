@@ -7,6 +7,7 @@ import { CrmSelect } from '../../shared/components/CrmSelect'
 import { KpiCard } from '../../dashboard/pages/DashboardPage'
 import { formatDiscountRounding } from '../../../../lib/discounts'
 import { formatMoney, normalizeText } from '../../../../lib/format'
+import { getOperationalDateKey } from '../../../../lib/operationalDay'
 import { loadCrmSalesReports } from '../services/salesReportsService'
 import { allocateTicketNetLines, buildSalesReportAggregates, compareSalesReportValues, crmReportDateTimeFormatter, paymentLabels, salesReportLineMatches, salesReportTabs, type SalesReportAggregateView, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
@@ -14,13 +15,15 @@ import { type ReactNode, useCallback, useEffect, useMemo, useState } from 'react
 import { type RunAction } from '../../shared/types'
 
 export type SalesReportsCrmProps = {
+  dayChangeTime: string | null
   disabled: boolean
   runAction: RunAction
   selectedVenueId: string
   tenantContext: TenantContext
+  timeZone: string
 }
 
-export function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantContext }: SalesReportsCrmProps) {
+export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVenueId, tenantContext, timeZone }: SalesReportsCrmProps) {
   const [activeView, setActiveView] = useState<SalesReportView>('tickets')
   const [categoryQuery, setCategoryQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
@@ -46,15 +49,13 @@ export function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantCo
 
   const normalizedProductQuery = normalizeText(productQuery.trim())
   const normalizedCategoryQuery = normalizeText(categoryQuery.trim())
+  const operationalDayConfig = useMemo(() => ({ dayChangeTime, timeZone }), [dayChangeTime, timeZone])
   const ticketsInDateRange = useMemo(() => {
-    const startAt = dateFrom ? new Date(`${dateFrom}T00:00:00`).getTime() : Number.NEGATIVE_INFINITY
-    const endAt = dateTo ? new Date(`${dateTo}T23:59:59.999`).getTime() : Number.POSITIVE_INFINITY
-
     return (reports?.tickets ?? []).filter((ticket) => {
-      const createdAt = new Date(ticket.createdAt).getTime()
-      return createdAt >= startAt && createdAt <= endAt
+      const operationalDate = getOperationalDateKey(ticket.createdAt, operationalDayConfig)
+      return (!dateFrom || operationalDate >= dateFrom) && (!dateTo || operationalDate <= dateTo)
     })
-  }, [dateFrom, dateTo, reports])
+  }, [dateFrom, dateTo, operationalDayConfig, reports])
   const filteredTickets = useMemo(() => ticketsInDateRange.filter((ticket) => {
     const matchesDiscount = discountFilter === 'all'
       || (discountFilter === 'with' && (ticket.discountAmountCents > 0 || ticket.paymentMethod === 'invitation'))
@@ -240,7 +241,7 @@ export function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantCo
 
         {isFiltersOpen ? (
         <div className="!grid !grid-cols-1 !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[18px] !py-4 sm:!grid-cols-2 lg:!grid-cols-5 md:!px-[22px]" id="crm-sales-report-filters">
-          <Field label="Desde">
+          <Field label="Día operativo desde">
             <input
               className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
               max={dateTo || undefined}
@@ -252,7 +253,7 @@ export function SalesReportsCrm({ disabled, runAction, selectedVenueId, tenantCo
               value={dateFrom}
             />
           </Field>
-          <Field label="Hasta">
+          <Field label="Día operativo hasta">
             <input
               className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
               min={dateFrom || undefined}

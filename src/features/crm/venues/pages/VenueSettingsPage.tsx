@@ -24,6 +24,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
     const defaultTaxRate = Number(formData.get('defaultTaxRate'))
     const settings = {
       address: String(formData.get('address') ?? ''),
+      dayChangeTime: String(formData.get('dayChangeTime') ?? '') || null,
       defaultTaxRate,
       legalName: String(formData.get('legalName') ?? ''),
       taxId: String(formData.get('taxId') ?? ''),
@@ -70,6 +71,19 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
               />
             </Field>
             <p className="crm-form-help">Se aplicará a los productos que no tengan un IVA específico.</p>
+            <Field label="Hora de cambio de día">
+              <input
+                className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+                defaultValue={venue.dayChangeTime ?? ''}
+                disabled={disabled}
+                name="dayChangeTime"
+                step={60}
+                type="time"
+              />
+            </Field>
+            <p className="crm-form-help">
+              Vacío usa días naturales. Si indicas una hora, las ventas anteriores se contabilizan en el día operativo anterior.
+            </p>
             <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled} type="submit">
               <Save className="h-4 w-4" /> {'Guardar configuraci\u00f3n'}
             </button>
