@@ -190,7 +190,7 @@ export function PosPage(props: Props) {
   }
 
   return (
-    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
       <AppHeader
         cashSession={cash.session}
@@ -262,7 +262,7 @@ export function PosPage(props: Props) {
         selectedAreaId={restaurant.posView.areaId}
       /> : null}
 
-      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 max-lg:flex-col ${restaurant.tablesEnabled && restaurant.posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
+      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-lg:flex-col ${restaurant.tablesEnabled && restaurant.posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {activeTicketPanel}
           <PaymentPanel

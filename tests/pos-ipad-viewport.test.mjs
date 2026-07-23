@@ -3,10 +3,17 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 test('the POS viewport disables native browser scaling on iPad', async () => {
-  const html = await readFile(new URL('../index.html', import.meta.url), 'utf8')
+  const [html, page, header] = await Promise.all([
+    readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/layout/AppHeader.tsx', import.meta.url), 'utf8'),
+  ])
   assert.match(html, /maximum-scale=1/)
   assert.match(html, /user-scalable=no/)
   assert.match(html, /viewport-fit=cover/)
+  assert.match(page, /h-dvh/)
+  assert.match(page, /safe-area-inset-bottom/)
+  assert.match(header, /safe-area-inset-top/)
 })
 
 test('the POS locks Safari gestures while preserving the custom table-map viewport', async () => {
