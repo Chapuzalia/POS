@@ -77,5 +77,4 @@ No existe aun un servicio generico de auditoria en el TPV. Las acciones estan en
 
 El cliente implementa `/health`, servidor, descubrimiento normal y streaming, impresoras, seleccion, prueba, impresion, cajon, trabajos y configuracion. El streaming usa `fetch` para poder enviar Bearer; no usa `EventSource` ni query params con token. Si no esta disponible, usa el endpoint normal.
 
-La impresion del cierre de caja reutiliza este mismo endpoint con el documento estructurado `cash-closing`. Su snapshot, idempotencia y tabla de fuentes reales se documentan en [cash-closing-printing.md](./cash-closing-printing.md).
-
+La impresion del cierre de caja reutiliza este mismo endpoint y el mismo contrato `ticket` de una venta. Los datos del cierre se adaptan a lineas del ticket sin exigir soporte adicional al agente. Su snapshot, idempotencia y tabla de fuentes reales se documentan en [cash-closing-printing.md](./cash-closing-printing.md).

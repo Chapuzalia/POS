@@ -93,20 +93,6 @@ export const cashClosingPrintDocumentSchema = z.object({
   paperWidth: z.union([z.literal(32), z.literal(42), z.literal(48)]),
 })
 
-export const cashClosingPrintRequestSchema = z.object({
-  requestId: z.string().trim().min(1).max(200),
-  printerId: z.string().trim().min(1).max(200),
-  documentType: z.literal('cash-closing'),
-  cashClosing: cashClosingPrintDocumentSchema,
-  options: z.object({
-    cut: z.boolean(),
-    openCashDrawer: z.literal(false),
-    copies: z.number().int().min(1).max(5),
-  }),
-})
-
-export const printDocumentRequestSchema = z.union([printRequestSchema, cashClosingPrintRequestSchema])
-
 export const printerActionSchema = z.object({
   requestId: z.string().trim().min(1).max(200),
   printerId: z.string().trim().min(1).max(200),

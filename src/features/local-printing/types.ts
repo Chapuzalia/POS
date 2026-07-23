@@ -143,15 +143,4 @@ export type CashClosingPrintDocument = {
   paperWidth: 32 | 42 | 48
 }
 
-export type CashClosingPrintRequest = {
-  requestId: string
-  printerId: string
-  documentType: 'cash-closing'
-  cashClosing: CashClosingPrintDocument
-  options: { cut: boolean; openCashDrawer: false; copies: number }
-}
-
-export type PrintDocumentRequest = PrintRequest | CashClosingPrintRequest
-
 export type DiscoveryProgress = { scanned?: number; total?: number; found?: number; message?: string }
-
