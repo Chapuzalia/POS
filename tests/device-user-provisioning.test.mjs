@@ -52,7 +52,7 @@ test('accesos muestra todos los dispositivos y permite retirar los que no tienen
   assert.match(accessPage, /data\.devices\.map/)
   assert.match(accessPage, /Sin usuario asignado/)
   assert.match(accessPage, /retireCrmDevice/)
-  assert.match(accessService, /action: 'retire-device'/)
+  assert.match(accessService, /action:\s*["']retire-device["']/)
   assert.match(edgeFunction, /action === 'retire-device'/)
   assert.match(edgeFunction, /El dispositivo tiene un usuario asociado/)
   assert.match(migration, /where tenant_id = new\.tenant_id and is_active/)

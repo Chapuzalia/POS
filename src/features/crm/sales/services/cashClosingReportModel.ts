@@ -1,3 +1,4 @@
+import { getOperationalDateKey, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
 import type { CashClosingRecord } from '../../../../types'
 
 export type CashClosingDailyValue = {
@@ -6,27 +7,22 @@ export type CashClosingDailyValue = {
   totalCents: number
 }
 
-export function getCashClosingDay(closing: CashClosingRecord) {
-  const date = new Date(closing.closedAt)
+export function getCashClosingDay(closing: CashClosingRecord, config: OperationalDayConfig) {
   try {
-    const parts = new Intl.DateTimeFormat('en-GB', {
-      day: '2-digit',
-      month: '2-digit',
-      timeZone: closing.printSnapshot.timezone,
-      year: 'numeric',
-    }).formatToParts(date)
-    const values = new Map(parts.map((part) => [part.type, part.value]))
-    return `${values.get('year')}-${values.get('month')}-${values.get('day')}`
+    return getOperationalDateKey(closing.closedAt, {
+      dayChangeTime: config.dayChangeTime,
+      timeZone: closing.printSnapshot.timezone || config.timeZone,
+    })
   } catch {
-    return date.toISOString().slice(0, 10)
+    return new Date(closing.closedAt).toISOString().slice(0, 10)
   }
 }
 
-export function buildCashClosingDailyValues(closings: readonly CashClosingRecord[]) {
+export function buildCashClosingDailyValues(closings: readonly CashClosingRecord[], config: OperationalDayConfig) {
   const values = new Map<string, CashClosingDailyValue>()
 
   for (const closing of closings) {
-    const date = getCashClosingDay(closing)
+    const date = getCashClosingDay(closing, config)
     const current = values.get(date) ?? { closingCount: 0, date, totalCents: 0 }
     current.closingCount += 1
     current.totalCents += closing.printSnapshot.summary.totalSalesCents
@@ -40,9 +36,10 @@ export function filterCashClosingsByDate(
   closings: readonly CashClosingRecord[],
   dateFrom: string,
   dateTo: string,
+  config: OperationalDayConfig,
 ) {
   return closings.filter((closing) => {
-    const day = getCashClosingDay(closing)
+    const day = getCashClosingDay(closing, config)
     return (!dateFrom || day >= dateFrom) && (!dateTo || day <= dateTo)
   })
 }

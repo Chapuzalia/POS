@@ -2,15 +2,16 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 
-const [accessService, analyticsService, reportsPage, settingsPage] = await Promise.all([
+const [accessService, analyticsService, cashClosingModel, reportsPage, settingsPage] = await Promise.all([
   readFile(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
+  readFile(new URL('../src/features/crm/sales/services/cashClosingReportModel.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/crm/sales/pages/SalesReportsPage.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/crm/venues/pages/VenueSettingsPage.tsx', import.meta.url), 'utf8'),
 ])
 
 test('la configuración del local carga, edita y limpia la hora de cambio', () => {
-  assert.match(accessService, /select\('id, name, address, day_change_time,/)
+  assert.match(accessService, /select\(\s*["']id, name, address, day_change_time,/)
   assert.match(accessService, /dayChangeTime: normalizeDayChangeTime/)
   assert.match(accessService, /day_change_time: dayChangeTime/)
   assert.match(settingsPage, /name="dayChangeTime"/)
@@ -22,4 +23,5 @@ test('informes y estadísticas aplican el día operativo a la fecha real de vent
   assert.match(reportsPage, /Día operativo desde/)
   assert.match(analyticsService, /getOperationalMonthStartIso/)
   assert.match(analyticsService, /\.gte\('local_created_at', monthStart\)/)
+  assert.match(cashClosingModel, /getOperationalDateKey\(closing\.closedAt/)
 })

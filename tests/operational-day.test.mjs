@@ -43,7 +43,7 @@ test('normaliza el tipo time de Postgres y rechaza horas inválidas', () => {
 })
 
 test('la migración añade la configuración nullable y los índices de consulta', async () => {
-  const sql = await readFile(new URL('../supabase/43.operational-day-change-time-migration.sql', import.meta.url), 'utf8')
+  const sql = await readFile(new URL('../supabase/46.operational-day-change-time-migration.sql', import.meta.url), 'utf8')
   assert.match(sql, /day_change_time time without time zone/)
   assert.doesNotMatch(sql, /day_change_time time without time zone not null/)
   assert.match(sql, /sales_venue_local_created_idx/)

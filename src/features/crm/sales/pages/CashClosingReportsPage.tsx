@@ -10,12 +10,15 @@ import {
   filterCashClosingsByDate,
   type CashClosingDailyValue,
 } from "../services/cashClosingReportModel";
+import type { OperationalDayConfig } from "../../../../lib/operationalDay";
 
 type Props = {
+  dayChangeTime: string | null;
   disabled: boolean;
   runAction: RunAction;
   selectedVenueId: string;
   tenantContext: TenantContext;
+  timeZone: string;
 };
 
 const dateFormatter = new Intl.DateTimeFormat("es-ES", {
@@ -234,10 +237,12 @@ function ClosingValuesChart({ values }: { values: CashClosingDailyValue[] }) {
 }
 
 export function CashClosingReportsCrm({
+  dayChangeTime,
   disabled,
   runAction,
   selectedVenueId,
   tenantContext,
+  timeZone,
 }: Props) {
   const [closings, setClosings] = useState<CashClosingRecord[] | null>(null);
   const [dateFrom, setDateFrom] = useState("");
@@ -262,13 +267,17 @@ export function CashClosingReportsCrm({
     void runAction(refresh);
   }, [refresh, runAction]);
 
+  const operationalDayConfig = useMemo<OperationalDayConfig>(
+    () => ({ dayChangeTime, timeZone }),
+    [dayChangeTime, timeZone],
+  );
   const filteredClosings = useMemo(
-    () => filterCashClosingsByDate(closings ?? [], dateFrom, dateTo),
-    [closings, dateFrom, dateTo],
+    () => filterCashClosingsByDate(closings ?? [], dateFrom, dateTo, operationalDayConfig),
+    [closings, dateFrom, dateTo, operationalDayConfig],
   );
   const dailyValues = useMemo(
-    () => buildCashClosingDailyValues(filteredClosings),
-    [filteredClosings],
+    () => buildCashClosingDailyValues(filteredClosings, operationalDayConfig),
+    [filteredClosings, operationalDayConfig],
   );
   const totalSalesCents = filteredClosings.reduce(
     (total, closing) => total + closing.printSnapshot.summary.totalSalesCents,
@@ -292,11 +301,11 @@ export function CashClosingReportsCrm({
         <div className="crm-panel-header !flex !min-h-[60px] !flex-wrap !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 md:!px-[22px]">
           <div>
             <h2 className="!text-base !font-bold">Evolución de cierres</h2>
-            <p>Valor total de los cierres agrupado por día</p>
+            <p>Valor total de los cierres agrupado por día operativo</p>
           </div>
           <div className="!flex !flex-wrap !items-end !gap-2">
             <label className="!grid !gap-1 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
-              Desde
+              Día operativo desde
               <input
                 className="crm-field !min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-[13px] !text-[var(--crm-text)]"
                 max={dateTo || undefined}
@@ -306,7 +315,7 @@ export function CashClosingReportsCrm({
               />
             </label>
             <label className="!grid !gap-1 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
-              Hasta
+              Día operativo hasta
               <input
                 className="crm-field !min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-[13px] !text-[var(--crm-text)]"
                 min={dateFrom || undefined}

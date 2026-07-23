@@ -15,6 +15,11 @@ function closing(id, closedAt, totalSalesCents) {
   }
 }
 
+const madridAtFour = {
+  dayChangeTime: '04:00',
+  timeZone: 'Europe/Madrid',
+}
+
 test('sales reports navigation exposes Tickets and the cash-closing report as child pages', () => {
   assert.deepEqual(reportNavItems.map(({ id }) => id), ['reports', 'x-reports'])
   assert.equal(reportNavItems[0].label, 'Tickets')
@@ -23,24 +28,24 @@ test('sales reports navigation exposes Tickets and the cash-closing report as ch
   assert.equal(reportSections.has('x-reports'), true)
 })
 
-test('cash-closing reports aggregate values by the venue-local day', () => {
+test('cash-closing reports aggregate values by the venue operational day', () => {
   const closings = [
-    closing('one', '2026-07-22T23:30:00.000Z', 1250),
-    closing('two', '2026-07-23T12:00:00.000Z', 2750),
-    closing('three', '2026-07-24T10:00:00.000Z', 5000),
+    closing('one', '2026-07-22T21:30:00.000Z', 1250),
+    closing('two', '2026-07-22T23:30:00.000Z', 2750),
+    closing('three', '2026-07-23T02:00:00.000Z', 5000),
   ]
 
-  assert.deepEqual(buildCashClosingDailyValues(closings), [
-    { closingCount: 2, date: '2026-07-23', totalCents: 4000 },
-    { closingCount: 1, date: '2026-07-24', totalCents: 5000 },
+  assert.deepEqual(buildCashClosingDailyValues(closings, madridAtFour), [
+    { closingCount: 2, date: '2026-07-22', totalCents: 4000 },
+    { closingCount: 1, date: '2026-07-23', totalCents: 5000 },
   ])
-  assert.deepEqual(filterCashClosingsByDate(closings, '2026-07-24', '2026-07-24').map(({ id }) => id), ['three'])
+  assert.deepEqual(filterCashClosingsByDate(closings, '2026-07-22', '2026-07-22', madridAtFour).map(({ id }) => id), ['one', 'two'])
 })
 
 test('cash-closing reports render the chart and the detailed table', async () => {
   const source = await readFile(new URL('../src/features/crm/sales/pages/CashClosingReportsPage.tsx', import.meta.url), 'utf8')
   assert.match(source, /ClosingValuesChart/)
-  assert.match(source, /Valor total de los cierres agrupado por día/)
+  assert.match(source, /Valor total de los cierres agrupado por día operativo/)
   assert.match(source, /Cierres de caja/)
   assert.match(source, /expectedAndCounted/)
   assert.match(source, /crm-list-toolbar[^\n]+!bg-transparent[^\n]+!text-\[var\(--crm-text\)\]/)
