@@ -1,4 +1,5 @@
 export * from './cache.ts'
+export * from './catalog-realtime.ts'
 export type * from './commands.ts'
 export type * from './database.ts'
 export * from './mapper.ts'

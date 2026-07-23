@@ -90,12 +90,16 @@ export function filterCatalogProducts(
 }
 
 export function validateVariantDrafts(variants: readonly {
+  formatId?: string | null
   name: string
   priceCents: number
   active: boolean
   isDefault: boolean
 }[], productActive: boolean) {
   if (!variants.length) return 'Añade al menos una variante.'
+  const usesFormats = variants.some((variant) => Object.hasOwn(variant, 'formatId'))
+  if (usesFormats && variants.some((variant) => !variant.formatId)) return 'Selecciona un formato para todas las variantes.'
+  if (usesFormats && new Set(variants.map((variant) => variant.formatId)).size !== variants.length) return 'No puedes repetir un formato en el mismo producto.'
   if (variants.some((variant) => !variant.name.trim())) return 'Todas las variantes necesitan nombre.'
   if (variants.some((variant) => !Number.isSafeInteger(variant.priceCents) || variant.priceCents < 0)) {
     return 'Los precios deben ser céntimos enteros no negativos.'
@@ -145,6 +149,7 @@ export function buildProductCreationBatch(input: {
   sortOrder: number
   variants: Array<{
     id: string
+    formatId: string
     name: string
     priceCents: number
     active: boolean
@@ -156,6 +161,7 @@ export function buildProductCreationBatch(input: {
     tabId: string
     categoryId: string
     pinnedVariantId: string | null
+    featured?: boolean
     sortOrder: number
   }
 }): CatalogBatchCommand[] {
@@ -181,7 +187,7 @@ export function buildProductCreationBatch(input: {
         tabId: input.placement.tabId,
         categoryId: input.placement.categoryId,
         pinnedVariantId: input.placement.pinnedVariantId,
-        featured: false,
+        featured: input.placement.featured ?? false,
         active: true,
         sortOrder: input.placement.sortOrder,
       },

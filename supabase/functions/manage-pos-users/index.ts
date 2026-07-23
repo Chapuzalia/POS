@@ -105,7 +105,7 @@ Deno.serve(async (request) => {
           .from('tenant_memberships')
           .select('tenant_id, user_id, role, is_active'),
         adminClient.from('venues').select('id, tenant_id, name, is_active').order('sort_order'),
-        adminClient.from('devices').select('tenant_id'),
+        adminClient.from('devices').select('tenant_id, is_active'),
       ])
 
       if (tenantsResult.error || ownersResult.error || venuesResult.error || devicesResult.error) {
@@ -154,6 +154,7 @@ Deno.serve(async (request) => {
       }
       const deviceCountByTenant = new Map<string, number>()
       for (const device of devicesResult.data ?? []) {
+        if (!device.is_active) continue
         deviceCountByTenant.set(device.tenant_id, (deviceCountByTenant.get(device.tenant_id) ?? 0) + 1)
       }
 
@@ -314,7 +315,7 @@ Deno.serve(async (request) => {
 
       const [venueUsage, deviceUsage] = await Promise.all([
         adminClient.from('venues').select('id', { count: 'exact', head: true }).eq('tenant_id', targetTenantId),
-        adminClient.from('devices').select('id', { count: 'exact', head: true }).eq('tenant_id', targetTenantId),
+        adminClient.from('devices').select('id', { count: 'exact', head: true }).eq('tenant_id', targetTenantId).eq('is_active', true),
       ])
       const usageError = venueUsage.error ?? deviceUsage.error
       if (usageError) throw usageError
@@ -419,7 +420,7 @@ Deno.serve(async (request) => {
           .eq('id', tenantId)
           .maybeSingle(),
         adminClient.from('venues').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
-        adminClient.from('devices').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId),
+        adminClient.from('devices').select('id', { count: 'exact', head: true }).eq('tenant_id', tenantId).eq('is_active', true),
       ])
       const planError = tenantResult.error ?? venueUsage.error ?? deviceUsage.error
       if (planError) throw planError
@@ -567,7 +568,6 @@ Deno.serve(async (request) => {
       const emailDevice = normalizeEmailPart(deviceName) || 'dispositivo'
       const emailVenue = normalizeEmailPart(venue.name, '-') || 'local'
       const emailTenant = normalizeEmailPart(tenant.slug, '-') || 'negocio'
-      const email = `${emailDevice}@${emailVenue}.${emailTenant}`
       const password = generateLoginPassword()
 
       const { data: device, error: deviceError } = await adminClient
@@ -587,7 +587,17 @@ Deno.serve(async (request) => {
         })
         .select('id, venue_id')
         .single()
-      if (deviceError || !device) throw deviceError ?? new Error('No se pudo crear el dispositivo')
+      if (deviceError) {
+        const message = deviceError.code === '23505'
+          ? 'Ya existe un dispositivo con ese nombre en el local'
+          : deviceError.message || 'No se pudo crear el dispositivo'
+        return response({ error: message }, deviceError.code === '23505' || deviceError.code === 'P0001' ? 409 : 500)
+      }
+      if (!device) throw new Error('No se pudo crear el dispositivo')
+
+      // The stable suffix prevents normalized names such as "Caja 1" and
+      // "Caja-1" from attempting to provision the same Auth email.
+      const email = `${emailDevice}-${device.id.slice(0, 8)}@${emailVenue}.${emailTenant}`
 
       const { data: created, error: createError } = await adminClient.auth.admin.createUser({
         email,
@@ -631,6 +641,24 @@ Deno.serve(async (request) => {
       }
 
       return response({ credentials: { email, password }, deviceId: device.id, userId }, 201)
+    }
+
+    if (action === 'retire-device') {
+      const deviceId = String(body.deviceId ?? '')
+      if (!deviceId) return response({ error: 'Dispositivo no válido' }, 400)
+
+      const [{ data: device, error: deviceError }, { data: assignment, error: assignmentError }] = await Promise.all([
+        adminClient.from('devices').select('id, is_active').eq('tenant_id', tenantId).eq('id', deviceId).maybeSingle(),
+        adminClient.from('device_user_assignments').select('user_id').eq('tenant_id', tenantId).eq('device_id', deviceId).limit(1).maybeSingle(),
+      ])
+      if (deviceError || assignmentError) throw deviceError ?? assignmentError
+      if (!device) return response({ error: 'El dispositivo no existe' }, 404)
+      if (assignment) return response({ error: 'El dispositivo tiene un usuario asociado. Elimina o reasigna primero esa cuenta.' }, 409)
+      if (!device.is_active) return response({ ok: true })
+
+      const { error: retireError } = await adminClient.from('devices').update({ is_active: false }).eq('tenant_id', tenantId).eq('id', deviceId)
+      if (retireError) throw retireError
+      return response({ ok: true })
     }
 
     if (action === 'update') {

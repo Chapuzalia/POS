@@ -10,6 +10,7 @@ import {
   X,
 } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
+import { closeOnModalBackdrop } from '../../../components/modals/modalBackdrop'
 import { PaymentPanel } from '../../../components/pos'
 import { calculateAppliedDiscount } from '../../../lib/discounts'
 import { formatMoney, normalizeText } from '../../../lib/format'
@@ -145,7 +146,7 @@ export function SplitOrderModal({
   }
 
   return (
-    <div className="table-modal-backdrop">
+    <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, onClose, isBusy || paying)}>
       <section
         aria-labelledby="split-order-title"
         aria-modal="true"
@@ -434,7 +435,7 @@ export function SplitOrderModal({
       ) : null}
 
       {pendingPayment ? (
-        <div className="table-modal-backdrop">
+        <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, () => setPendingPayment(null), isBusy || paying)}>
           <section
             aria-labelledby="split-items-pending-title"
             aria-modal="true"

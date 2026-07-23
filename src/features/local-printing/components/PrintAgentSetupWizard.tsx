@@ -4,6 +4,7 @@ import { Button } from '../../../components/ui'
 import { getPrintAgentErrorMessage } from '../api/PrintAgentError'
 import { usePrintAgent } from '../hooks/usePrintAgent'
 import { PrinterList } from './PrinterList'
+import { closeOnModalBackdrop } from '../../../components/modals/modalBackdrop'
 
 export function PrintAgentSetupWizard({ canOpenDrawer, onClose }: { canOpenDrawer: boolean; onClose: () => void }) {
   const agent = usePrintAgent()
@@ -20,7 +21,7 @@ export function PrintAgentSetupWizard({ canOpenDrawer, onClose }: { canOpenDrawe
   }
 
   const busy = agent.isCheckingConnection || agent.isLoadingServerInfo || agent.isDiscovering || agent.isSelectingPrinter || agent.isTestingPrinter || agent.isOpeningCashDrawer
-  return <div className="fixed inset-0 z-[65] bg-[var(--background)] text-[var(--foreground)] sm:flex sm:items-center sm:justify-center sm:bg-black/60 sm:p-4">
+  return <div className="fixed inset-0 z-[65] bg-[var(--background)] text-[var(--foreground)] sm:flex sm:items-center sm:justify-center sm:bg-black/60 sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onClose, busy)}>
     <section aria-labelledby="print-wizard-title" aria-modal="true" className="flex h-[100svh] w-full flex-col bg-[var(--surface)] sm:h-auto sm:max-h-[92svh] sm:max-w-3xl sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]" role="dialog">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5"><div><p className="text-xs font-black uppercase text-[var(--accent)]">Paso {step} de 9</p><h2 className="text-2xl font-black" id="print-wizard-title">Configuracion del servidor de impresion</h2></div><Button disabled={busy} onClick={onClose} size="sm"><X className="h-4 w-4" /></Button></header>
       <div className="h-1 bg-[var(--surface-secondary)]"><div className="h-full bg-[var(--accent)] transition-all" style={{ width: `${step / 9 * 100}%` }} /></div>
@@ -40,4 +41,3 @@ export function PrintAgentSetupWizard({ canOpenDrawer, onClose }: { canOpenDrawe
     </section>
   </div>
 }
-

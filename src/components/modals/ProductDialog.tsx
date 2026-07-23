@@ -15,6 +15,7 @@ import { formatMoney } from '../../lib/format'
 import type { ProductLineSelection, TicketLineModifier } from '../../types'
 import { cx } from '../../utils/cx'
 import { Button } from '../ui'
+import { closeOnModalBackdrop } from './modalBackdrop'
 
 type ProductDialogProps = {
   allowVariantSelection: boolean
@@ -315,7 +316,7 @@ export function ProductDialog({
     }
   }
 
-  return <div className={cx('fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4', isClosing && 'product-dialog-backdrop-closing')}>
+  return <div className={cx('fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4', isClosing && 'product-dialog-backdrop-closing')} onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy || hasSubmitted)}>
     <section ref={dialogRef} className={cx('max-h-[calc(100svh-32px)] w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]', isChoosingMixer ? 'max-w-5xl' : 'max-w-xl', isClosing && 'product-dialog-closing')}>
       <div className="flex items-start justify-between gap-4"><h2 className="text-2xl font-bold">{isChoosingVariant ? 'Variante' : `${item.product.name} con`}</h2><Button disabled={isBusy || hasSubmitted} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button></div>
 

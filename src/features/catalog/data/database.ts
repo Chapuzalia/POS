@@ -29,6 +29,22 @@ export type CatalogVariantRow = {
   updated_at: string
 }
 
+export type CatalogSaleFormatRow = {
+  id: string
+  tenant_id: string
+  venue_id: string
+  name: string
+  is_active: boolean
+  sort_order: number
+  created_at: string
+  updated_at: string
+}
+
+export type CatalogVariantFormatRow = {
+  variant_id: string
+  format_id: string
+}
+
 export type CatalogPlacementRow = {
   id: string
   tenant_id: string
@@ -170,6 +186,8 @@ export type CatalogRpcPayload = {
   venue_id: string
   mode: 'admin' | 'pos'
   products: CatalogProductRow[]
+  sale_formats?: CatalogSaleFormatRow[]
+  variant_formats?: CatalogVariantFormatRow[]
   variants: CatalogVariantRow[]
   placements: CatalogPlacementRow[]
   tabs: CatalogTabRow[]

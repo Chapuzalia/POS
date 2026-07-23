@@ -1,16 +1,12 @@
 import {
   ArrowLeft,
   BarChart3,
-  Beer,
   ChevronLeft,
   ChevronRight,
   GlassWater,
-  Martini,
   ReceiptText,
   Search,
-  Wine,
   X,
-  type LucideIcon,
 } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { getActiveTabs, getCategoriesForTab, resolveSellableCatalog } from '../../features/catalog/domain/resolver'
@@ -18,22 +14,15 @@ import type { CatalogData, ResolvedCatalogItem } from '../../features/catalog/do
 import { formatMoney, normalizeText } from '../../lib/format'
 import type { CatalogStartTab, ProductSalesStat } from '../../types'
 import { Button } from '../ui'
-
-const catalogIcons: Record<string, LucideIcon> = {
-  beer_bottle: Beer,
-  cocktail: Martini,
-  copa: Wine,
-  cubata: Martini,
-  shot: Wine,
-  soft_bottle: GlassWater,
-}
+import { getAvailableFormatCounts, groupCatalogItemsByProduct } from './catalogPanelModel'
+import { getCatalogIconComponent } from '../../features/catalog/ui/catalogIcons'
 
 type CatalogFilter = CatalogStartTab | string
 
 function getCatalogIcon(icon: string, activeFilter: CatalogFilter) {
   if (activeFilter === 'top') return BarChart3
-  if (activeFilter === 'all') return catalogIcons[icon] ?? GlassWater
-  return catalogIcons[icon] ?? ReceiptText
+  if (activeFilter === 'all') return getCatalogIconComponent(icon, GlassWater)
+  return icon ? getCatalogIconComponent(icon) : ReceiptText
 }
 
 function compareItems(left: ResolvedCatalogItem, right: ResolvedCatalogItem) {
@@ -134,7 +123,9 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
     })
   }, [catalog, normalizedSearch, productFilter, productSalesById, resolved.items, selectedCategoryId])
 
-  const visibleEntries = useMemo(() => [...activeItems].sort((left, right) => {
+  const availableFormatCounts = useMemo(() => getAvailableFormatCounts(activeItems), [activeItems])
+
+  const visibleEntries = useMemo(() => groupCatalogItemsByProduct(activeItems).sort((left, right) => {
     if (productFilter !== 'top') return compareItems(left, right)
     const firstStat = productSalesById.get(left.product.id)
     const secondStat = productSalesById.get(right.product.id)
@@ -221,21 +212,21 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
           {showProductGrid ? visibleEntries.length ? (
             <div className="grid grid-cols-3 gap-3 md:grid-cols-4 2xl:grid-cols-5">
               {visibleEntries.map((item) => {
-                const variantCount = catalog?.variants.filter((variant) => variant.productId === item.product.id && variant.active).length ?? 1
+                const availableFormatCount = availableFormatCounts.get(item.product.id) ?? 1
                 const ProductIcon = getCatalogIcon(item.tab.icon ?? item.category?.icon ?? '', productFilter)
                 return <button
                   className="flex min-h-8 flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
                   disabled={disabled}
                   key={item.placement.id}
-                  onClick={(event) => onSelectProduct(item, productFilter === 'all' || productFilter === 'top', event.currentTarget)}
+                  onClick={(event) => onSelectProduct(item, availableFormatCount > 1, event.currentTarget)}
                   type="button"
                 >
                   <span className="grid aspect-square w-full place-items-center overflow-hidden bg-[var(--surface-secondary)] text-[var(--accent)]">
                     {item.image?.publicUrl ? <img alt="" className="h-full w-full object-cover" src={item.image.publicUrl} /> : <ProductIcon className="h-9 w-9" />}
                   </span>
                   <span className="flex min-h-0 flex-1 flex-col justify-between p-2">
-                    <span><span className="line-clamp-2 font-bold text-[var(--foreground)]">{item.product.name}</span><span className="mt-1 block text-sm text-[var(--muted)]">{variantCount <= 1 ? null : `${variantCount} variantes`}</span></span>
-                    <span className="mt-0 font-mono text-xl font-black tabular-nums text-[var(--foreground)]">{formatMoney(item.basePriceCents)}</span>
+                    <span><span className="line-clamp-2 font-bold text-[var(--foreground)]">{item.product.name}</span>{availableFormatCount > 1 ? <span className="mt-1 block text-sm text-[var(--muted)]">{availableFormatCount} formatos</span> : null}</span>
+                    {availableFormatCount === 1 ? <span className="mt-0 font-mono text-xl font-black tabular-nums text-[var(--foreground)]">{formatMoney(item.basePriceCents)}</span> : null}
                   </span>
                 </button>
               })}

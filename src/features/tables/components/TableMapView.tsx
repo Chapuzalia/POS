@@ -11,6 +11,7 @@ import type { RestaurantMap, RestaurantTableMapItem, SessionTableLayout, TableLa
 import { useMapViewport } from '../useMapViewport'
 import { getMapPlaneSize, positionFloatingPanel, screenToMap } from '../viewport'
 import { MapViewportControls } from './MapViewportControls'
+import { closeOnModalBackdrop } from '../../../components/modals/modalBackdrop'
 import '../tables.css'
 
 type Props = {
@@ -310,6 +311,6 @@ export function TableMapView(props: Props) {
       <MapViewportControls zoom={viewport.zoom} onFit={() => canvasRef.current && viewportApi.fit(canvasRef.current, [...tables, ...mapElements], planeSize)} onReset={() => viewportApi.setViewport({ zoom: 1, panX: 0, panY: 0 })} onZoomIn={() => canvasRef.current && viewportApi.zoomBy(1.2, canvasRef.current)} onZoomOut={() => canvasRef.current && viewportApi.zoomBy(1 / 1.2, canvasRef.current)} />
       {editMode && groupMenu ? <div className="table-group-menu" style={{ left: groupMenu.left, top: groupMenu.top }}><strong>{groupMenuTable?.name}</strong>{groupMenuLocked ? <p>La comanda esta abierta. Cobra o cancela la comanda antes de separar las mesas.</p> : null}<button disabled={groupMenuLocked} onClick={() => separate(groupMenu.tableId, false)} type="button"><Unlink size={16} /> Separar esta mesa</button><button disabled={groupMenuLocked} onClick={() => separate(groupMenu.tableId, true)} type="button"><Unlink size={16} /> Separar todas las mesas</button></div> : null}
     </section>
-    {pendingIds ? <div className="table-modal-backdrop"><section className="table-modal"><h2>{pendingIds.length > 1 ? `Abrir ${pendingIds.length} mesas juntas` : map.tables.find((table) => table.id === pendingIds[0])?.name}</h2><p>La comanda se guardara automaticamente y quedara disponible para los dispositivos del local.</p><label>Numero de comensales<input autoFocus min="1" onChange={(event) => setGuestCount(Math.max(1, Number(event.target.value)))} type="number" value={guestCount} /></label><div><button className="table-action secondary" onClick={() => setPendingIds(null)} type="button">Cancelar</button><button className="table-action primary" disabled={isBusy || !isOnline || !canOpen} onClick={() => void confirmOpen()} type="button">Abrir mesa</button></div></section></div> : null}
+    {pendingIds ? <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, () => setPendingIds(null), isBusy)}><section className="table-modal"><h2>{pendingIds.length > 1 ? `Abrir ${pendingIds.length} mesas juntas` : map.tables.find((table) => table.id === pendingIds[0])?.name}</h2><p>La comanda se guardara automaticamente y quedara disponible para los dispositivos del local.</p><label>Numero de comensales<input autoFocus min="1" onChange={(event) => setGuestCount(Math.max(1, Number(event.target.value)))} type="number" value={guestCount} /></label><div><button className="table-action secondary" onClick={() => setPendingIds(null)} type="button">Cancelar</button><button className="table-action primary" disabled={isBusy || !isOnline || !canOpen} onClick={() => void confirmOpen()} type="button">Abrir mesa</button></div></section></div> : null}
   </main>
 }

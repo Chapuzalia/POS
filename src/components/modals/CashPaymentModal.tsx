@@ -4,6 +4,7 @@ import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
 import { cx } from '../../utils/cx'
 import { Button } from '../ui'
 import { addCashDenomination, cashDenominationsCents } from './cash-payment'
+import { closeOnModalBackdrop } from './modalBackdrop'
 
 type CashPaymentModalProps = {
   isBusy: boolean
@@ -44,7 +45,7 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
   }, [deliveredCents, difference, isBusy, onCancel, onConfirm])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy)}>
       <section className="w-full max-w-xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>

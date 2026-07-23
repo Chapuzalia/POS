@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Check, Minus, Plus, UsersRound, X } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
+import { closeOnModalBackdrop } from '../../../components/modals/modalBackdrop'
 import { PaymentPanel } from '../../../components/pos'
 import { calculateAppliedDiscount } from '../../../lib/discounts'
 import { formatMoney } from '../../../lib/format'
@@ -88,7 +89,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, isBusy, manua
     }
   }
 
-  return <div className="table-modal-backdrop">
+  return <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, onClose, isBusy || paying)}>
     <section aria-labelledby="equal-split-title" aria-modal="true" className="table-modal !w-[min(560px,100%)]" role="dialog">
       <header className="flex items-start justify-between gap-4">
         <div>
@@ -135,7 +136,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, isBusy, manua
 
     {discountOpen && split ? <DiscountModal description="Se aplicará solo al siguiente pago." discounts={discounts} isBusy={paying || isBusy} manualDiscountEnabled={manualDiscountEnabled} onCancel={() => setDiscountOpen(false)} onSelect={(discount) => { setCurrentDiscount(discount); setUseDefaultDiscount(false); setDiscountOpen(false) }} subtotalCents={split.nextPartCents} venueId={venueId} /> : null}
 
-    {pendingPayment ? <div className="table-modal-backdrop">
+    {pendingPayment ? <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, () => setPendingPayment(null), isBusy || paying)}>
       <section aria-labelledby="equal-split-pending-title" aria-modal="true" className="table-modal max-w-md" role="dialog">
         <h2 id="equal-split-pending-title">Productos pendientes</h2>
         <p>Quedan {pendingPayment.pendingUnits} {pendingPayment.pendingUnits === 1 ? 'producto pendiente' : 'productos pendientes'} de servir.</p>

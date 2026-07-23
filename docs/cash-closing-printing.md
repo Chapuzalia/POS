@@ -28,32 +28,46 @@ El total sigue el criterio vigente del TPV: `sales.total_cents` es el total neto
 - `supabase/27.cash-closing-printing-migration.sql`: snapshot, movimientos, fondo final, estado, reclamacion idempotente y auditoria.
 - `src/features/cash-registers/service.ts`: lectura del cierre/historico y registro protegido del resultado.
 - `src/features/cash-registers/hooks/useCashSession.ts`: guarda primero, imprime despues y mantiene el cierre ante cualquier fallo del agente.
-- `src/features/local-printing/services/cashClosingPrintMapper.ts`: contrato minimo `cash-closing`; no envia objetos de Supabase ni del store.
-- `src/features/local-printing/schemas/printSchemas.ts`: validacion Zod del documento.
-- `src/features/local-printing/services/cashClosingReceiptRenderer.ts`: render de referencia por lineas para 58/80 mm y snapshots de pruebas. El agente local debe aplicar estos campos a su builder ESC/POS; la web no envia ESC/POS.
+- `src/features/local-printing/services/cashClosingPrintMapper.ts`: adapta el snapshot al mismo contrato `ticket` que usa una venta; no envia objetos de Supabase ni del store.
+- `src/features/local-printing/schemas/printSchemas.ts`: valida el cierre con el mismo `printRequestSchema` de las ventas.
+- `src/features/local-printing/services/cashClosingReceiptRenderer.ts`: convierte el detalle del cierre en lineas de texto para 58/80 mm. Esas lineas viajan como `additions` de un item normal del ticket; la web no envia ESC/POS.
 - `src/components/modals/CashClosingResultModal.tsx` y `CashClosingsHistoryModal.tsx`: impresion original, reintento e historial.
 
 ## Contrato del agente
 
-Se reutiliza `POST /api/v1/print`. Las ventas conservan el contrato anterior. El cierre envia:
+Se reutiliza `POST /api/v1/print` sin requerir ningun tipo de documento ni endpoint especifico en el agente. El cierre envia exactamente el mismo contrato que una venta:
 
 ```json
 {
   "requestId": "cash-closing:{closingId}:original",
   "printerId": "...",
-  "documentType": "cash-closing",
-  "cashClosing": {},
+  "ticket": {
+    "establishmentName": "...",
+    "ticketNumber": "Informe ...",
+    "date": "...",
+    "items": [{
+      "name": "Cierre · Caja principal",
+      "quantity": 1,
+      "unitPriceCents": 100000,
+      "totalCents": 100000,
+      "additions": ["CAJA ...", "RESUMEN", "Total ..."]
+    }],
+    "subtotalCents": 100000,
+    "totalCents": 100000,
+    "deferredLabel": "CIERRE DE CAJA",
+    "footer": "CIERRE COMPLETADO"
+  },
   "options": { "cut": true, "openCashDrawer": false, "copies": 1 }
 }
 ```
 
-El renderer ESC/POS del agente debe seleccionar `cashClosing` cuando `documentType` sea `cash-closing`, respetar `paperWidth`, centrar cabecera, aplicar negrita a secciones, añadir avance y corte. Nunca debe emitir el pulso de cajon para este tipo, incluso si recibe una opcion incorrecta. `cashClosingReceiptRenderer.ts` define la disposicion y es la prueba de contrato legible, pero la unica generacion de bytes ESC/POS debe permanecer en el agente.
+El agente procesa el cierre como cualquier ticket de venta. El item principal representa el total vendido y sus `additions` contienen las filas ya formateadas del resumen, pagos, movimientos, fondos, diferencias y campos opcionales. `openCashDrawer` siempre es `false`; el corte y el numero de copias usan las preferencias locales.
 
 Los intentos originales usan siempre `cash-closing:{id}:original`; los reintentos de un fallo confirmado conservan el ID. Las copias usan `cash-closing:{id}:copy:{n}`. El RPC rechaza una segunda reclamacion original pendiente, impresa o desconocida. Un estado desconocido se bloquea en la interfaz y requiere comprobar fisicamente la impresora.
 
 ## Despliegue
 
 1. Aplicar la migracion 27 antes de publicar el frontend.
-2. Publicar una version del agente que acepte `documentType: cash-closing` en el endpoint existente.
+2. Comprobar que el agente instalado imprime correctamente el contrato de tickets de venta.
 3. Configurar impresora y preferencias por local/terminal en Ajustes > Hardware > Impresion.
 4. Probar un cierre sin ventas y otro con efectivo/tarjeta antes de activar la impresion automatica en produccion.

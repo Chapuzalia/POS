@@ -1,4 +1,4 @@
-import { useCallback, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CrmPage } from '../components/crm/CrmPage'
 import { SuperAdminPage } from '../components/superadmin/SuperAdminPage'
 import { LoginScreen } from '../components/screens/LoginScreen'
@@ -9,6 +9,7 @@ import { useCashSession } from '../features/cash-registers'
 import { useOfflineController, useRejectedSaleRecovery } from '../features/offline'
 import { useQuickSale } from '../features/quick-sale'
 import type { CatalogData } from '../features/catalog/domain/types'
+import { subscribeToCatalogTabChanges } from '../features/catalog/data/catalog-realtime'
 import { removeProductSalesStats } from '../features/quick-sale/services/productSalesStats'
 import { useRestaurantController } from '../features/restaurant'
 import { useLoginActivity, useTenantSession } from '../features/session'
@@ -258,7 +259,7 @@ export function AppShell() {
     setPendingLoginContext,
   })
 
-  const refreshCatalog = async (activeContext = context) => {
+  const refreshCatalog = useCallback(async (activeContext = context) => {
     if (!activeContext || !isOnline) return
     setIsLoading(true)
     setGeneralError(null)
@@ -277,7 +278,26 @@ export function AppShell() {
     } finally {
       setIsLoading(false)
     }
-  }
+  }, [context, isOnline, persistProductSalesStats, setGeneralError])
+
+  useEffect(() => {
+    if (!context || !isOnline || isAdministrativeUser(context)) return undefined
+    let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
+    const scheduleRefresh = () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      refreshTimer = window.setTimeout(() => void refreshCatalog(context), 200)
+    }
+    const unsubscribe = subscribeToCatalogTabChanges(context, scheduleRefresh)
+    const refreshWhenVisible = () => {
+      if (document.visibilityState === 'visible') scheduleRefresh()
+    }
+    document.addEventListener('visibilitychange', refreshWhenVisible)
+    return () => {
+      if (refreshTimer) window.clearTimeout(refreshTimer)
+      document.removeEventListener('visibilitychange', refreshWhenVisible)
+      unsubscribe()
+    }
+  }, [context, isOnline, refreshCatalog])
   const updateCatalogStartTab = (next: CatalogStartTab) => {
     setCatalogStartTab(next)
     saveCatalogStartTab(next)

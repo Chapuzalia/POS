@@ -12,6 +12,7 @@ import {
   ProductDialog,
   SessionTicketsModal,
 } from '../components/modals'
+import { closeOnModalBackdrop } from '../components/modals/modalBackdrop'
 import { CatalogPanel, MobileTicketModal, PaymentPanel, TicketPanel } from '../components/pos'
 import { AddProductFlyAnimation } from '../components/feedback/AddProductFlyAnimation'
 import { EqualSplitOrderModal } from '../features/tables/components/EqualSplitOrderModal'
@@ -22,6 +23,7 @@ import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
+import { usePosViewportLock } from './usePosViewportLock'
 import { calculateAppliedDiscount } from '../lib/discounts'
 import { getTicketTotal } from '../lib/format'
 import type { useCashSession } from '../features/cash-registers'
@@ -84,6 +86,7 @@ type Props = {
 }
 
 export function PosPage(props: Props) {
+  usePosViewportLock()
   const [configOpen, setConfigOpen] = useState(false)
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -187,7 +190,7 @@ export function PosPage(props: Props) {
   }
 
   return (
-    <div className="flex h-screen min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
       <AppHeader
         cashSession={cash.session}
@@ -259,7 +262,7 @@ export function PosPage(props: Props) {
         selectedAreaId={restaurant.posView.areaId}
       /> : null}
 
-      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 max-lg:flex-col ${restaurant.tablesEnabled && restaurant.posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
+      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-lg:flex-col ${restaurant.tablesEnabled && restaurant.posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {activeTicketPanel}
           <PaymentPanel
@@ -311,7 +314,7 @@ export function PosPage(props: Props) {
         </div>
       </MobileTicketModal>}
 
-      {restaurant.pendingPayment ? <div className="table-modal-backdrop">
+      {restaurant.pendingPayment ? <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, () => restaurant.setPendingPayment(null), props.isBusy)}>
         <section className="table-modal" role="dialog" aria-modal="true" aria-labelledby="pending-service-title">
           <h2 id="pending-service-title">Productos pendientes</h2>
           <p>Quedan {restaurant.pendingPayment.pendingUnits} {restaurant.pendingPayment.pendingUnits === 1 ? 'producto pendiente' : 'productos pendientes'} de servir.</p>

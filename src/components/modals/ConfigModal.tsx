@@ -4,6 +4,7 @@ import type { CatalogStartTab, TenantContext, ThemeDefinition } from '../../type
 import { PrintAgentSettings } from '../../features/local-printing'
 import { Button, Metric } from '../ui'
 import { Select } from '../ui/Select'
+import { closeOnModalBackdrop } from './modalBackdrop'
 
 type ConfigModalProps = {
   catalogStartTab: CatalogStartTab
@@ -36,7 +37,7 @@ export function ConfigModal({
 
   if (section === 'printing') {
     return (
-      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 sm:items-center sm:p-4">
+      <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 sm:items-center sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onClose)}>
         <section className="flex max-h-[100svh] w-full flex-col bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[94svh] sm:max-w-5xl sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]">
           <div className="flex items-center justify-between gap-3 border-b border-[var(--separator)] p-4">
             <Button onClick={() => setSection('general')} size="sm" type="button" variant="tertiary"><ArrowLeft className="h-4 w-4" />Ajustes</Button>
@@ -49,7 +50,7 @@ export function ConfigModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onClose)}>
       <section className="w-full max-w-xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>

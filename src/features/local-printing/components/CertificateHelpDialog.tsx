@@ -1,8 +1,9 @@
 import { ExternalLink, X } from 'lucide-react'
 import { Button } from '../../../components/ui'
+import { closeOnModalBackdrop } from '../../../components/modals/modalBackdrop'
 
 export function CertificateHelpDialog({ baseUrl, onClose }: { baseUrl: string; onClose: () => void }) {
-  return <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 sm:items-center sm:p-4">
+  return <div className="fixed inset-0 z-[70] flex items-end justify-center bg-black/60 sm:items-center sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onClose)}>
     <section aria-modal="true" className="max-h-[100svh] w-full overflow-y-auto rounded-t-[var(--radius)] bg-[var(--surface)] p-5 text-[var(--foreground)] sm:max-w-xl sm:rounded-[var(--radius)]" role="dialog">
       <div className="flex justify-between gap-3"><div><h2 className="text-xl font-black">Certificado y red local</h2><p className="text-sm text-[var(--muted)]">Safari no permite ignorar errores TLS desde JavaScript.</p></div><Button onClick={onClose} size="sm" variant="tertiary"><X className="h-4 w-4" /></Button></div>
       <ol className="mt-5 grid list-decimal gap-3 pl-5 text-sm leading-6">
@@ -15,4 +16,3 @@ export function CertificateHelpDialog({ baseUrl, onClose }: { baseUrl: string; o
     </section>
   </div>
 }
-

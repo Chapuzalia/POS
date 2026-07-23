@@ -4,6 +4,7 @@ import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
 import type { CashClosedPayload, CashSession, CashSummary } from '../../types'
 import { nowIso } from '../../utils/dates'
 import { Button, Metric } from '../ui'
+import { closeOnModalBackdrop } from './modalBackdrop'
 
 type CloseCashModalProps = {
   cashSession: CashSession
@@ -47,7 +48,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy)}>
       <section className="max-h-[calc(100svh-32px)] w-full max-w-3xl overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>

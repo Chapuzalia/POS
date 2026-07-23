@@ -31,11 +31,23 @@ export type CatalogProduct = {
   updatedAt: string
 }
 
+export type CatalogSaleFormat = {
+  id: string
+  tenantId: string
+  venueId: string
+  name: string
+  active: boolean
+  sortOrder: number
+  createdAt: string
+  updatedAt: string
+}
+
 export type CatalogVariant = {
   id: string
   tenantId: string
   venueId: string
   productId: string
+  formatId: string | null
   name: string
   priceCents: number
   sku: string | null
@@ -174,6 +186,7 @@ export type CatalogData = {
   venueId: string
   mode: CatalogReadMode
   products: CatalogProduct[]
+  saleFormats: CatalogSaleFormat[]
   variants: CatalogVariant[]
   placements: CatalogPlacement[]
   tabs: CatalogTab[]

@@ -52,6 +52,7 @@ export function mapCatalogPayload(
     appliesToAllVariants: row.applies_to_all_variants, variantIds: [...row.variant_ids].sort(), active: row.is_active,
     sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
   })))
+  const variantFormats = new Map((payload.variant_formats ?? []).map((row) => [row.variant_id, row.format_id]))
   return {
     tenantId: payload.tenant_id,
     venueId,
@@ -61,9 +62,13 @@ export function mapCatalogPayload(
       description: row.description, image: images.get(row.id) ?? null, vatRate: numberValue(row.tax_rate), active: row.is_active,
       sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
     }))),
+    saleFormats: order((payload.sale_formats ?? []).map((row) => ({
+      id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, active: row.is_active,
+      sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
+    }))),
     variants: order(payload.variants.map((row) => ({
       id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, productId: row.product_id, name: row.name,
-      priceCents: row.price_cents, sku: row.sku, isDefault: row.is_default, active: row.is_active,
+      formatId: variantFormats.get(row.id) ?? null, priceCents: row.price_cents, sku: row.sku, isDefault: row.is_default, active: row.is_active,
       sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
     }))),
     placements: order(payload.placements.map((row) => ({

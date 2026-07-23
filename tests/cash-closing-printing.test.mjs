@@ -1,10 +1,11 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
+import { createPrintAgentClient } from '../src/features/local-printing/api/printAgentClient.ts'
 import { mapCashClosingToPrintRequest } from '../src/features/local-printing/services/cashClosingPrintMapper.ts'
 import { renderCashClosingReceipt } from '../src/features/local-printing/services/cashClosingReceiptRenderer.ts'
 import { createSeparator, formatMoneyForReceipt, formatReceiptDate, formatReceiptRow } from '../src/features/local-printing/services/receiptFormatters.ts'
-import { cashClosingPrintRequestSchema } from '../src/features/local-printing/schemas/printSchemas.ts'
+import { printRequestSchema } from '../src/features/local-printing/schemas/printSchemas.ts'
 
 const snapshot = {
   reportTitle: 'Informe ABCD1234', companyName: 'MESS', registerName: 'Barra principal', shiftLabel: 'ABCD1234',
@@ -36,26 +37,52 @@ const settings = {
   cashClosingCopies: 1, cashClosingPaperWidth: 42, moneySymbol: 'currency',
 }
 
-test('mapea un cierre estructurado con ID estable y nunca abre el cajon', () => {
+test('mapea el cierre al mismo contrato de ticket de una venta y nunca abre el cajon', () => {
   const request = mapCashClosingToPrintRequest({ closing, printerId: 'main', settings })
   assert.equal(request.requestId, 'cash-closing:closing_123:original')
-  assert.equal(request.documentType, 'cash-closing')
+  assert.equal(request.documentType, undefined)
+  assert.equal(request.cashClosing, undefined)
   assert.equal(request.options.openCashDrawer, false)
-  assert.deepEqual(request.cashClosing.payments.map((payment) => payment.code), ['cash', 'card', 'bizum'])
-  assert.equal(cashClosingPrintRequestSchema.parse(request).cashClosing.summary.salesCount, 100)
+  assert.equal(request.ticket.establishmentName, 'MESS')
+  assert.equal(request.ticket.ticketNumber, 'Informe ABCD1234')
+  assert.equal(request.ticket.deferredLabel, 'CIERRE DE CAJA')
+  assert.equal(request.ticket.totalCents, 100000)
+  assert.match(request.ticket.items[0].additions.join('\n'), /Efectivo/)
+  assert.match(request.ticket.items[0].additions.join('\n'), /Bizum/)
+  assert.doesNotMatch(request.ticket.items[0].additions.join('\n'), /Invitacion/)
+  assert.equal(printRequestSchema.parse(request).ticket.items[0].name, 'Cierre · Barra principal')
+})
+
+test('envia el cierre al endpoint de impresion de ventas sin campos especiales', async () => {
+  let sent
+  const client = createPrintAgentClient({
+    baseUrl: 'https://tpv-printer.local:8443',
+    token: 'secret',
+    fetchImpl: async (url, init) => {
+      sent = { url: String(url), method: init?.method, body: JSON.parse(String(init?.body)) }
+      return new Response(JSON.stringify({ ok: true, status: 'printed' }))
+    },
+  })
+  const request = mapCashClosingToPrintRequest({ closing, printerId: 'main', settings })
+  await client.printTicket(request)
+  assert.equal(new URL(sent.url).pathname, '/api/v1/print')
+  assert.equal(sent.method, 'POST')
+  assert.deepEqual(sent.body, request)
+  assert.equal('documentType' in sent.body, false)
+  assert.equal('cashClosing' in sent.body, false)
 })
 
 test('la reimpresion tiene ID propio, etiqueta COPIA y conserva el snapshot', () => {
   const request = mapCashClosingToPrintRequest({ closing, printerId: 'main', settings, isReprint: true, copyNumber: 2 })
   assert.equal(request.requestId, 'cash-closing:closing_123:copy:2')
-  assert.equal(request.cashClosing.copyLabel, 'COPIA')
-  assert.equal(request.cashClosing.summary.totalSalesCents, snapshot.summary.totalSalesCents)
+  assert.equal(request.ticket.copyLabel, 'COPIA')
+  assert.equal(request.ticket.totalCents, snapshot.summary.totalSalesCents)
   assert.equal(request.options.openCashDrawer, false)
 })
 
 test('renderiza pagos dinamicos, movimientos, fondos y diferencias en 80 mm', () => {
   const request = mapCashClosingToPrintRequest({ closing, printerId: 'main', settings })
-  const receipt = renderCashClosingReceipt(request.cashClosing)
+  const receipt = request.ticket.items[0].additions.join('\n')
   assert.match(receipt, /Efectivo/)
   assert.match(receipt, /Bizum/)
   assert.match(receipt, /Entradas de efectivo/)
@@ -69,9 +96,21 @@ test('renderiza pagos dinamicos, movimientos, fondos y diferencias en 80 mm', ()
 test('cierre sin ventas produce media cero y no NaN', () => {
   const empty = { ...closing, printSnapshot: { ...snapshot, summary: { totalSalesCents: 0, salesCount: 0, averageSaleCents: 0 }, payments: [] } }
   const request = mapCashClosingToPrintRequest({ closing: empty, printerId: 'main', settings })
-  const receipt = renderCashClosingReceipt(request.cashClosing)
+  const receipt = request.ticket.items[0].additions.join('\n')
   assert.doesNotMatch(receipt, /NaN|Infinity/)
   assert.match(receipt, /0,00/)
+  assert.equal(request.ticket.totalCents, 0)
+})
+
+test('el renderer de referencia conserva el formato completo del cierre', () => {
+  const receipt = renderCashClosingReceipt({
+    ...snapshot,
+    payments: snapshot.payments.slice(0, 3),
+    paperWidth: 42,
+  })
+  assert.match(receipt, /INFORME ABCD1234/)
+  assert.match(receipt, /CIERRE COMPLETADO/)
+  for (const line of receipt.split('\n')) assert.ok(line.length <= 42, `linea demasiado larga: ${line}`)
 })
 
 test('formatea centimos, negativos, importes grandes y fecha de Madrid', () => {

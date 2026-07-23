@@ -1,7 +1,7 @@
 import type { CashClosingPrintDocument } from '../types.ts'
 import { centerReceiptText, createSeparator, formatMoneyForReceipt, formatReceiptDate, formatReceiptRow } from './receiptFormatters.ts'
 
-export function renderCashClosingReceipt(document: CashClosingPrintDocument, moneySymbol: 'currency' | 'code' = 'currency') {
+function getCashClosingReceiptSections(document: CashClosingPrintDocument, moneySymbol: 'currency' | 'code') {
   const width = document.paperWidth
   const money = (amountCents: number) => formatMoneyForReceipt(amountCents, {
     currency: document.currency,
@@ -10,11 +10,13 @@ export function renderCashClosingReceipt(document: CashClosingPrintDocument, mon
   })
   const row = (label: string, value: string) => formatReceiptRow({ label, value, width })
   const section = (title: string, rows: string[]) => [title.toLocaleUpperCase(document.locale), createSeparator(width), ...rows, '']
-  const lines = [
+  const header = [
     centerReceiptText(document.reportTitle.toLocaleUpperCase(document.locale), width),
     centerReceiptText(document.companyName, width),
     ...(document.copyLabel ? [centerReceiptText(document.copyLabel, width)] : []),
     '',
+  ]
+  const details = [
     row('Caja', document.registerName),
     row('Turno', document.shiftLabel),
     row('Fecha', formatReceiptDate(document.closedAt, document.timezone)),
@@ -41,17 +43,26 @@ export function renderCashClosingReceipt(document: CashClosingPrintDocument, mon
     row('Diferencia efectivo', money(document.differences.cashDifferenceCents)),
     row('Diferencia tarjeta', money(document.differences.cardDifferenceCents)),
   ]
-  if (document.expectedAndCounted) lines.push('',
+  if (document.expectedAndCounted) details.push('',
     row('Efectivo esperado', money(document.expectedAndCounted.expectedCashCents)),
     row('Efectivo contado', money(document.expectedAndCounted.countedCashCents)),
     row('Tarjeta esperada', money(document.expectedAndCounted.expectedCardCents)),
     row('Tarjeta declarada', money(document.expectedAndCounted.countedCardCents)))
-  if (document.users) lines.push('',
+  if (document.users) details.push('',
     ...(document.users.openedBy ? [row('Abierto por', document.users.openedBy)] : []),
     ...(document.users.closedBy ? [row('Cerrado por', document.users.closedBy)] : []))
-  if (document.times) lines.push('',
+  if (document.times) details.push('',
     row('Inicio', formatReceiptDate(document.times.openedAt, document.timezone)),
     row('Cierre', formatReceiptDate(document.times.closedAt, document.timezone)))
-  lines.push('', centerReceiptText('CIERRE COMPLETADO', width), '', '', '')
-  return lines.join('\n')
+  const footer = ['', centerReceiptText('CIERRE COMPLETADO', width), '', '', '']
+  return { header, details, footer }
+}
+
+export function getCashClosingReceiptDetails(document: CashClosingPrintDocument, moneySymbol: 'currency' | 'code' = 'currency') {
+  return getCashClosingReceiptSections(document, moneySymbol).details.filter((line) => line.trim().length > 0)
+}
+
+export function renderCashClosingReceipt(document: CashClosingPrintDocument, moneySymbol: 'currency' | 'code' = 'currency') {
+  const { header, details, footer } = getCashClosingReceiptSections(document, moneySymbol)
+  return [...header, ...details, ...footer].join('\n')
 }

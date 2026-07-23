@@ -43,6 +43,10 @@ export const catalogAdminService = {
     return commands.executeBatch(venueId, batchCommands)
   },
 
+  batchWithVariantFormats(venueId: string, batchCommands: readonly CatalogBatchCommand[], variantFormats: readonly { variantId: string; formatId: string }[], newFormats: readonly { id: string; name: string; active: boolean; sortOrder: number }[] = []) {
+    return commands.executeBatchWithVariantFormats(venueId, batchCommands, variantFormats, newFormats)
+  },
+
   createProduct: commands.createProduct.bind(commands),
   updateProduct: commands.updateProduct.bind(commands),
   setProductActive: commands.setProductActive.bind(commands),
@@ -51,6 +55,9 @@ export const catalogAdminService = {
   updateVariant: commands.updateVariant.bind(commands),
   setDefaultVariant: commands.setDefaultVariant.bind(commands),
   deleteVariant: commands.deleteVariant.bind(commands),
+  saveSaleFormat: commands.saveSaleFormat.bind(commands),
+  deleteSaleFormat: commands.deleteSaleFormat.bind(commands),
+  reorderSaleFormats: commands.reorderSaleFormats.bind(commands),
   createPlacement: commands.createPlacement.bind(commands),
   updatePlacement: commands.updatePlacement.bind(commands),
   deletePlacement: commands.deletePlacement.bind(commands),

@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, Boxes, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Boxes, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
 import { formatMoney } from '../../../../lib/format.ts'
@@ -11,8 +11,6 @@ import {
   getCatalogProductSummaries,
   type CatalogProductFilters,
   type CatalogProductSummary,
-  moveCatalogItem,
-  toReorderItems,
 } from '../services/catalogAdminModel.ts'
 import { catalogAdminService } from '../services/catalogAdminService.ts'
 import { CatalogProductEditor } from '../forms/CatalogProductEditor.tsx'
@@ -33,6 +31,9 @@ const defaultFilters: CatalogProductFilters = {
   showInternal: false,
 }
 
+type CatalogProductSortKey = 'product' | 'type' | 'vat' | 'variants' | 'price' | 'locations'
+type CatalogProductSortDirection = 'asc' | 'desc'
+
 function priceLabel(summary: CatalogProductSummary) {
   if (summary.minPriceCents === null) return 'Sin precio vendible'
   if (summary.minPriceCents === summary.maxPriceCents) return formatMoney(summary.minPriceCents)
@@ -41,7 +42,8 @@ function priceLabel(summary: CatalogProductSummary) {
 
 export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }: Props) {
   const [filters, setFilters] = useState(defaultFilters)
-  const [sort, setSort] = useState<'order' | 'name' | 'price'>('order')
+  const [sortKey, setSortKey] = useState<CatalogProductSortKey>('product')
+  const [sortDirection, setSortDirection] = useState<CatalogProductSortDirection>('asc')
   const [page, setPage] = useState(1)
   const [editorProductId, setEditorProductId] = useState<string | 'create' | null>(null)
   const deferredQuery = useDeferredValue(filters.query)
@@ -49,11 +51,39 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
   const filtered = useMemo(() => {
     const result = filterCatalogProducts(summaries, { ...filters, query: deferredQuery })
     return [...result].sort((left, right) => {
-      if (sort === 'name') return left.product.name.localeCompare(right.product.name, 'es')
-      if (sort === 'price') return (left.minPriceCents ?? Number.MAX_SAFE_INTEGER) - (right.minPriceCents ?? Number.MAX_SAFE_INTEGER)
-      return left.product.sortOrder - right.product.sortOrder || left.product.id.localeCompare(right.product.id)
+      if (sortKey === 'price' && (left.minPriceCents === null || right.minPriceCents === null)) {
+        if (left.minPriceCents === right.minPriceCents) return left.product.name.localeCompare(right.product.name, 'es')
+        return left.minPriceCents === null ? 1 : -1
+      }
+      const leftValue = sortKey === 'product'
+        ? left.product.name
+        : sortKey === 'type'
+          ? `${left.product.type}:${left.product.active ? '0' : '1'}`
+          : sortKey === 'vat'
+            ? left.product.vatRate ?? defaultTaxRate
+            : sortKey === 'variants'
+              ? left.variants.length
+              : sortKey === 'price'
+                ? left.minPriceCents ?? 0
+                : `${left.tabs.map((tab) => tab.label).join(', ')} ${left.categories.map((category) => category.name).join(', ')}`
+      const rightValue = sortKey === 'product'
+        ? right.product.name
+        : sortKey === 'type'
+          ? `${right.product.type}:${right.product.active ? '0' : '1'}`
+          : sortKey === 'vat'
+            ? right.product.vatRate ?? defaultTaxRate
+            : sortKey === 'variants'
+              ? right.variants.length
+              : sortKey === 'price'
+                ? right.minPriceCents ?? 0
+                : `${right.tabs.map((tab) => tab.label).join(', ')} ${right.categories.map((category) => category.name).join(', ')}`
+      const comparison = typeof leftValue === 'number' && typeof rightValue === 'number'
+        ? leftValue - rightValue
+        : String(leftValue).localeCompare(String(rightValue), 'es')
+      return comparison * (sortDirection === 'asc' ? 1 : -1)
+        || left.product.name.localeCompare(right.product.name, 'es')
     })
-  }, [deferredQuery, filters, sort, summaries])
+  }, [defaultTaxRate, deferredQuery, filters, sortDirection, sortKey, summaries])
   const pages = Math.max(1, Math.ceil(filtered.length / CRM_PAGE_SIZE))
   const visiblePage = Math.min(page, pages)
   const visibleProducts = filtered.slice((visiblePage - 1) * CRM_PAGE_SIZE, visiblePage * CRM_PAGE_SIZE)
@@ -66,12 +96,14 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
     setPage(1)
   }
 
-  async function moveProduct(productId: string, direction: -1 | 1) {
-    const reordered = moveCatalogItem(catalog.products, productId, direction)
-    await mutate(() => catalogAdminService.reorder(catalog.venueId, {
-      entity: 'products',
-      items: toReorderItems(reordered),
-    }))
+  function handleSort(nextSortKey: CatalogProductSortKey) {
+    setPage(1)
+    if (sortKey === nextSortKey) {
+      setSortDirection((current) => current === 'asc' ? 'desc' : 'asc')
+      return
+    }
+    setSortKey(nextSortKey)
+    setSortDirection('asc')
   }
   async function removeProduct(summary: CatalogProductSummary) {
     const assignmentCount = catalog.selectionAssignments.filter((item) => item.productId === summary.product.id).length
@@ -94,7 +126,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
           description={`${filtered.length} de ${catalog.products.length} productos · una única carga para todo el local`}
           title="Productos"
         >
-          <div className="!grid !gap-2 sm:!grid-cols-2 lg:!grid-cols-[minmax(220px,1fr)_repeat(5,minmax(130px,auto))]">
+          <div className="!grid !gap-2 sm:!grid-cols-2 lg:!grid-cols-[minmax(220px,1fr)_repeat(4,minmax(130px,auto))]">
             <label className="crm-search !flex !h-11 !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3">
               <Search className="!size-4 !text-[var(--crm-text-muted)]" />
               <input onChange={(event) => updateFilters({ query: event.target.value })} placeholder="Buscar producto, variante o ubicación" value={filters.query} />
@@ -103,7 +135,6 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
             <CrmSelect ariaLabel="Filtrar por tipo" onChange={(value) => updateFilters({ type: value as CatalogProductFilters['type'] })} options={[{ label: 'Todos los tipos', value: 'all' }, { label: 'Estándar', value: 'standard' }, { label: 'Menú', value: 'menu' }]} value={filters.type} />
             <CrmSelect ariaLabel="Filtrar por categoría" onChange={(categoryId) => updateFilters({ categoryId })} options={[{ label: 'Todas las categorías', value: '' }, ...catalog.categories.map((category) => ({ label: category.name, value: category.id }))]} value={filters.categoryId} />
             <CrmSelect ariaLabel="Filtrar por pestaña" onChange={(tabId) => updateFilters({ tabId })} options={[{ label: 'Todas las pestañas', value: '' }, ...catalog.tabs.map((tab) => ({ label: tab.label, value: tab.id }))]} value={filters.tabId} />
-            <CrmSelect ariaLabel="Ordenar productos" onChange={(value) => setSort(value as typeof sort)} options={[{ label: 'Orden del TPV', value: 'order' }, { label: 'Nombre', value: 'name' }, { label: 'Precio', value: 'price' }]} value={sort} />
           </div>
           <CatalogCheckbox checked={filters.showInternal} onChange={(showInternal) => updateFilters({ showInternal })}>
             Mostrar productos internos sin apariciones activas
@@ -112,7 +143,13 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
 
         <div className="crm-data-table crm-catalog-products-table !grid !overflow-auto">
           <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[.045em] !text-[var(--crm-text-muted)]">
-            <span>Producto</span><span>Tipo / estado</span><span>IVA</span><span>Variantes</span><span>Precio</span><span>Ubicaciones</span><span>Acciones</span>
+            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Producto" onSort={handleSort} sortKey="product" />
+            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Tipo / estado" onSort={handleSort} sortKey="type" />
+            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="IVA" onSort={handleSort} sortKey="vat" />
+            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Variantes" onSort={handleSort} sortKey="variants" />
+            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Precio" onSort={handleSort} sortKey="price" />
+            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ubicaciones" onSort={handleSort} sortKey="locations" />
+            <span>Acciones</span>
           </div>
           {visibleProducts.map((summary) => (
             <div className="crm-data-row !grid !min-h-[78px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !text-[13px]" key={summary.product.id}>
@@ -126,8 +163,6 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
               <strong>{priceLabel(summary)}</strong>
               <span>{summary.tabs.map((tab) => tab.label).join(', ') || 'Sin apariciones'}<br /><small>{summary.categories.map((category) => category.name).join(', ')}</small></span>
               <div className="crm-action-group">
-                <button aria-label="Subir producto" className="crm-action-button" disabled={disabled || catalog.products[0]?.id === summary.product.id} onClick={() => void moveProduct(summary.product.id, -1)} type="button"><ArrowUp className="!size-4" /></button>
-                <button aria-label="Bajar producto" className="crm-action-button" disabled={disabled || catalog.products.at(-1)?.id === summary.product.id} onClick={() => void moveProduct(summary.product.id, 1)} type="button"><ArrowDown className="!size-4" /></button>
                 <button aria-label={`Editar ${summary.product.name}`} className="crm-action-button" disabled={disabled} onClick={() => setEditorProductId(summary.product.id)} type="button"><Pencil className="!size-4" /></button>
                 <button aria-label={summary.product.active ? 'Desactivar' : 'Activar'} className="crm-action-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.setProductActive(catalog.venueId, summary.product.id, !summary.product.active))} type="button">{summary.product.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</button>
                 <button aria-label={`Eliminar ${summary.product.name}`} className="crm-action-button crm-danger-button" disabled={disabled} onClick={() => void removeProduct(summary)} type="button"><Trash2 className="!size-4" /></button>
@@ -151,5 +186,36 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
         />
       ) : null}
     </div>
+  )
+}
+
+function CatalogProductSortHeader({
+  currentDirection,
+  currentKey,
+  label,
+  onSort,
+  sortKey,
+}: {
+  currentDirection: CatalogProductSortDirection
+  currentKey: CatalogProductSortKey
+  label: string
+  onSort: (sortKey: CatalogProductSortKey) => void
+  sortKey: CatalogProductSortKey
+}) {
+  const isActive = currentKey === sortKey
+  const SortIcon = isActive ? currentDirection === 'asc' ? ArrowUp : ArrowDown : ArrowUpDown
+
+  return (
+    <button
+      aria-label={`Ordenar por ${label}`}
+      className={isActive
+        ? '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-secondary)] !shadow-none'
+        : '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)] !shadow-none'}
+      onClick={() => onSort(sortKey)}
+      type="button"
+    >
+      <span>{label}</span>
+      <SortIcon className="!size-3.5" />
+    </button>
   )
 }

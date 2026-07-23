@@ -27,6 +27,7 @@ begin
     'cash_registers',
     'cash_session_table_layouts',
     'cash_sessions',
+    'catalog_tabs',
     'order_events',
     'order_lines',
     'order_tables',
