@@ -91,6 +91,7 @@ export type LoginInput = {
 export type CrmVenue = {
   id: string
   name: string
+  catalogProfile: CatalogProfile
   address: string
   dayChangeTime: string | null
   legalName: string

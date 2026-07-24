@@ -27,6 +27,19 @@ test('las operaciones de plataforma permanecen restringidas al superadmin', asyn
   assert.match(edgeFunction, /remainingMembership/)
 })
 
+test('el alta de negocio crea los formatos del catalogo actual para el local inicial', async () => {
+  const [edgeFunction, platformService] = await Promise.all([
+    readFile(new URL('../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/services/platformService.ts', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(edgeFunction, /\.from\('venues'\)[\s\S]*\.select\('id'\)[\s\S]*\.single\(\)/)
+  assert.match(edgeFunction, /adminClient\.from\('catalog_sale_formats'\)\.insert/)
+  assert.match(edgeFunction, /venue_id: createdVenue\.id/)
+  assert.doesNotMatch(edgeFunction, /adminClient\.from\('sale_formats'\)/)
+  assert.match(edgeFunction, /console\.error\('manage-pos-users failed', error\)/)
+  assert.match(platformService, /getFunctionInvokeErrorMessage/)
+})
 test('los limites del plan se aplican en base de datos a todos los recursos', async () => {
   const migration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 

@@ -1,4 +1,5 @@
 import { supabase } from '../lib/supabase'
+import { getFunctionInvokeErrorMessage } from '../features/crm/shared/services/crmServiceSupport'
 
 export type PlatformTenant = {
   id: string
@@ -66,7 +67,7 @@ export async function loadPlatformTenants(): Promise<PlatformTenant[]> {
   )
   const functionError = getFunctionError(data)
   if (error || functionError) {
-    throw new Error(functionError ?? error?.message ?? 'No se pudieron cargar los negocios.')
+    throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron cargar los negocios.'))
   }
   return data?.tenants ?? []
 }
@@ -83,7 +84,7 @@ export async function createPlatformTenant(input: CreatePlatformTenantInput) {
   )
   const functionError = getFunctionError(data)
   if (error || functionError) {
-    throw new Error(functionError ?? error?.message ?? 'No se pudo crear el negocio.')
+    throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudo crear el negocio.'))
   }
   if (!data?.tenant) {
     throw new Error('La funcion no devolvio el negocio creado.')
@@ -99,7 +100,7 @@ async function invokePlatformAction<T>(body: Record<string, unknown>, fallbackEr
   )
   const functionError = getFunctionError(data)
   if (error || functionError) {
-    throw new Error(functionError ?? error?.message ?? fallbackError)
+    throw new Error(await getFunctionInvokeErrorMessage(data, error, fallbackError))
   }
   return data
 }

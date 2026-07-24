@@ -245,6 +245,21 @@ Deno.serve(async (request) => {
         }
         createdTenantId = createdTenant.id
 
+        const { data: createdVenue, error: venueCreateError } = await adminClient
+          .from('venues')
+          .insert({
+            tenant_id: createdTenant.id,
+            name: venueName,
+            sort_order: 1,
+            is_active: true,
+          })
+          .select('id')
+          .single()
+
+        if (venueCreateError || !createdVenue) {
+          throw venueCreateError ?? new Error('No se pudo crear el local inicial')
+        }
+
         const setupResults = await Promise.all([
           adminClient.from('profiles').upsert({
             id: ownerId,
@@ -257,19 +272,13 @@ Deno.serve(async (request) => {
             role: 'owner',
             is_active: true,
           }),
-          adminClient.from('venues').insert({
-            tenant_id: createdTenant.id,
-            name: venueName,
-            sort_order: 1,
-            is_active: true,
-          }),
-          adminClient.from('sale_formats').insert([
-            { tenant_id: createdTenant.id, key: 'cubata', label: 'Cubata', sort_order: 1, is_active: true },
-            { tenant_id: createdTenant.id, key: 'copa', label: 'Copa', sort_order: 2, is_active: true },
-            { tenant_id: createdTenant.id, key: 'shot', label: 'Chupito', sort_order: 3, is_active: true },
-            { tenant_id: createdTenant.id, key: 'beer_bottle', label: 'Botellin cerveza', sort_order: 4, is_active: true },
-            { tenant_id: createdTenant.id, key: 'soft_bottle', label: 'Botellin refresco', sort_order: 5, is_active: true },
-            { tenant_id: createdTenant.id, key: 'cocktail', label: 'Coctel', sort_order: 6, is_active: true },
+          adminClient.from('catalog_sale_formats').insert([
+            { tenant_id: createdTenant.id, venue_id: createdVenue.id, name: 'Cubata', sort_order: 1, is_active: true },
+            { tenant_id: createdTenant.id, venue_id: createdVenue.id, name: 'Copa', sort_order: 2, is_active: true },
+            { tenant_id: createdTenant.id, venue_id: createdVenue.id, name: 'Chupito', sort_order: 3, is_active: true },
+            { tenant_id: createdTenant.id, venue_id: createdVenue.id, name: 'Botellin cerveza', sort_order: 4, is_active: true },
+            { tenant_id: createdTenant.id, venue_id: createdVenue.id, name: 'Botellin refresco', sort_order: 5, is_active: true },
+            { tenant_id: createdTenant.id, venue_id: createdVenue.id, name: 'Coctel', sort_order: 6, is_active: true },
           ]),
         ])
         const setupError = setupResults.find((result) => result.error)?.error
@@ -409,9 +418,137 @@ Deno.serve(async (request) => {
       .maybeSingle()
 
     if (membershipError || !membership?.is_active || !['owner', 'admin'].includes(membership.role)) {
-      return response({ error: 'Solo administracion puede gestionar usuarios' }, 403)
+      return response({ error: 'Solo administracion puede gestionar el negocio' }, 403)
     }
 
+    if (action === 'create-venue') {
+      const name = String(body.name ?? '').trim()
+      const catalogProfile = String(body.catalogProfile ?? '')
+      if (!name || name.length > 80 || !['bar_classic', 'restaurant', 'custom'].includes(catalogProfile)) {
+        return response({ error: 'Indica un nombre válido y una plantilla disponible' }, 400)
+      }
+
+      const { data: lastVenue, error: lastVenueError } = await adminClient
+        .from('venues')
+        .select('sort_order')
+        .eq('tenant_id', tenantId)
+        .order('sort_order', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (lastVenueError) throw lastVenueError
+
+      const { data: createdVenue, error: venueCreateError } = await adminClient
+        .from('venues')
+        .insert({
+          tenant_id: tenantId,
+          name,
+          sort_order: (lastVenue?.sort_order ?? -1) + 1,
+          is_active: true,
+          tables_enabled: catalogProfile === 'restaurant',
+          catalog_profile: catalogProfile,
+        })
+        .select('id, name, catalog_profile')
+        .single()
+
+      if (venueCreateError || !createdVenue) {
+        const isPlanLimit = venueCreateError?.code === 'P0001'
+        return response({
+          error: venueCreateError?.message ?? 'No se pudo crear el local',
+        }, isPlanLimit ? 409 : 500)
+      }
+
+      const formatNames = catalogProfile === 'bar_classic'
+        ? ['Cubata', 'Copa', 'Chupito', 'Botellin cerveza', 'Botellin refresco', 'Coctel']
+        : catalogProfile === 'restaurant'
+          ? ['Unidad', 'Media racion', 'Racion', 'Menu']
+          : []
+      const tab = catalogProfile === 'bar_classic'
+        ? { id: crypto.randomUUID(), key: 'barra', label: 'Barra', icon: 'cocktail' }
+        : catalogProfile === 'restaurant'
+          ? { id: crypto.randomUUID(), key: 'carta', label: 'Carta', icon: 'utensils' }
+          : null
+      const categoryTemplates = catalogProfile === 'bar_classic'
+        ? [
+          { name: 'Combinados', icon: 'cocktail' },
+          { name: 'Cervezas', icon: 'beer_bottle' },
+          { name: 'Refrescos', icon: 'soft_bottle' },
+        ]
+        : catalogProfile === 'restaurant'
+          ? [
+            { name: 'Entrantes', icon: 'salad' },
+            { name: 'Principales', icon: 'utensils' },
+            { name: 'Postres', icon: 'dessert' },
+            { name: 'Bebidas', icon: 'cup_soda' },
+          ]
+          : []
+
+      try {
+        if (formatNames.length) {
+          const { error: formatsError } = await adminClient.from('catalog_sale_formats').insert(
+            formatNames.map((formatName, index) => ({
+              tenant_id: tenantId,
+              venue_id: createdVenue.id,
+              name: formatName,
+              sort_order: index + 1,
+              is_active: true,
+            })),
+          )
+          if (formatsError) throw formatsError
+        }
+
+        if (tab) {
+          const categoryRows = categoryTemplates.map((category, index) => ({
+            id: crypto.randomUUID(),
+            tenant_id: tenantId,
+            venue_id: createdVenue.id,
+            name: category.name,
+            icon: category.icon,
+            sort_order: index + 1,
+            is_active: true,
+            unused: false,
+          }))
+          const [tabResult, categoriesResult] = await Promise.all([
+            adminClient.from('catalog_tabs').insert({
+              id: tab.id,
+              tenant_id: tenantId,
+              venue_id: createdVenue.id,
+              key: tab.key,
+              label: tab.label,
+              icon: tab.icon,
+              sort_order: 1,
+              is_active: true,
+            }),
+            adminClient.from('categories').insert(categoryRows),
+          ])
+          const structureError = tabResult.error ?? categoriesResult.error
+          if (structureError) throw structureError
+
+          const { error: relationsError } = await adminClient.from('catalog_tab_categories').insert(
+            categoryRows.map((category, index) => ({
+              tenant_id: tenantId,
+              venue_id: createdVenue.id,
+              tab_id: tab.id,
+              category_id: category.id,
+              sort_order: index + 1,
+              is_active: true,
+            })),
+          )
+          if (relationsError) throw relationsError
+        }
+
+        return response({
+          venue: {
+            id: createdVenue.id,
+            name: createdVenue.name,
+            catalogProfile: createdVenue.catalog_profile,
+          },
+        }, 201)
+      } catch (templateError) {
+        const { error: rollbackError } = await adminClient.from('venues').delete().eq('id', createdVenue.id)
+        if (rollbackError) console.error('create-venue rollback failed', rollbackError)
+        throw templateError
+      }
+    }
     if (action === 'tenant-plan') {
       const [tenantResult, venueUsage, deviceUsage] = await Promise.all([
         adminClient
@@ -973,6 +1110,7 @@ Deno.serve(async (request) => {
 
     return response({ error: 'Accion no valida' }, 400)
   } catch (error) {
+    console.error('manage-pos-users failed', error)
     const message = error instanceof Error ? error.message : 'Error interno'
     return response({ error: message }, 500)
   }

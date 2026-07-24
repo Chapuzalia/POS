@@ -1,30 +1,27 @@
-import { ArchiveX, Building2, Copy, LogOut, MonitorSmartphone, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
+import { ArchiveX, Copy, LogOut, MonitorSmartphone, Pencil, Plus, RefreshCw, Save, Trash2, X } from 'lucide-react'
 import { CrmModal } from '../../shared/components/CrmModal'
 import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { formatCrmDateTime } from '../../shared/formatCrmDateTime'
 import { sileo } from 'sileo'
-import { type CrmAccessData, createCrmDevice, createCrmVenue, deleteCrmPosUser, loadCrmAccessData, releaseCrmPosUserLogin, retireCrmDevice, setCrmPosUserActive, updateCrmPosUser } from '../services/accessService'
+import { type CrmAccessData, createCrmDevice, deleteCrmPosUser, loadCrmAccessData, releaseCrmPosUserLogin, retireCrmDevice, setCrmPosUserActive, updateCrmPosUser } from '../services/accessService'
 import { type CrmPosUser, type DeviceMode, type TenantContext } from '../../../../types'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { type RunAction } from '../../shared/types'
 
 export type AccessManagementCrmProps = {
   disabled: boolean
-  onVenuesChanged: () => Promise<void>
   runAction: RunAction
   tenantContext: TenantContext
 }
 
 export function AccessManagementCrm({
   disabled,
-  onVenuesChanged,
   runAction,
   tenantContext,
 }: AccessManagementCrmProps) {
   const [data, setData] = useState<CrmAccessData>({ devices: [], users: [], venues: [] })
-  const [venueName, setVenueName] = useState('')
   const [deviceName, setDeviceName] = useState('')
   const [deviceVenueId, setDeviceVenueId] = useState('')
   const [deviceMode, setDeviceMode] = useState<'satellite' | 'checkout' | 'hybrid'>('checkout')
@@ -49,15 +46,6 @@ export function AccessManagementCrm({
       setDeviceVenueId(data.venues[0].id)
     }
   }, [data.venues, deviceVenueId])
-
-  async function submitVenue(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    await runAction(async () => {
-      await createCrmVenue(tenantContext, venueName)
-      setVenueName('')
-      await Promise.all([refresh(), onVenuesChanged()])
-    })
-  }
 
   async function submitDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -165,18 +153,6 @@ export function AccessManagementCrm({
     <>
       <div className="crm-access-layout !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[340px_minmax(0,1fr)] xl:!gap-6">
       <div className="crm-access-forms">
-        <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-          <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Nuevo local</span><Building2 className="h-4 w-4" /></div>
-          <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]" onSubmit={(event) => void submitVenue(event)}>
-            <Field label="Nombre del local">
-              <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" disabled={disabled} onChange={(event) => setVenueName(event.target.value)} required value={venueName} />
-            </Field>
-            <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled || !venueName.trim()} type="submit">
-              <Plus className="h-4 w-4" /> Crear local
-            </button>
-          </form>
-        </section>
-
         <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
           <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]"><span>Nuevo dispositivo</span><MonitorSmartphone className="h-4 w-4" /></div>
           <form className="crm-form-stack !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]" onSubmit={(event) => void submitDevice(event)}>

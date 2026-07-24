@@ -5,6 +5,7 @@ import {
   requireSupabase,
 } from "../../shared/services/crmServiceSupport";
 import {
+  type CatalogProfile,
   type CrmDevice,
   type CrmPosUser,
   type CrmVenue,
@@ -30,7 +31,7 @@ export async function loadCrmAccessData(
     client
       .from("venues")
       .select(
-        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone",
+        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone, catalog_profile",
       )
       .eq("tenant_id", context.tenantId)
       .order("sort_order"),
@@ -59,6 +60,7 @@ export async function loadCrmAccessData(
     venues: (venueRows ?? []).map((venue) => ({
       id: venue.id as string,
       name: venue.name as string,
+      catalogProfile: venue.catalog_profile as CatalogProfile,
       address: (venue.address as string | null) ?? "",
       dayChangeTime: normalizeDayChangeTime(
         venue.day_change_time as string | null,
@@ -90,7 +92,7 @@ export async function loadCrmVenues(
   const { data, error } = await client
     .from("venues")
     .select(
-      "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone",
+      "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone, catalog_profile",
     )
     .eq("tenant_id", context.tenantId)
     .order("sort_order");
@@ -102,6 +104,7 @@ export async function loadCrmVenues(
   return (data ?? []).map((venue) => ({
     id: venue.id as string,
     name: venue.name as string,
+    catalogProfile: venue.catalog_profile as CatalogProfile,
     address: (venue.address as string | null) ?? "",
     dayChangeTime: normalizeDayChangeTime(
       venue.day_change_time as string | null,
@@ -116,18 +119,35 @@ export async function loadCrmVenues(
   }));
 }
 
-export async function createCrmVenue(context: TenantContext, name: string) {
+export async function createCrmVenue(
+  context: TenantContext,
+  name: string,
+  catalogProfile: CatalogProfile,
+) {
   const client = requireSupabase();
-  const { error } = await client.from("venues").insert({
-    tenant_id: context.tenantId,
-    name: name.trim(),
-    sort_order: 0,
-    is_active: true,
+  const { data, error } = await client.functions.invoke<{
+    venue?: { id: string; name: string; catalogProfile: CatalogProfile };
+    error?: string;
+  }>("manage-pos-users", {
+    body: {
+      action: "create-venue",
+      catalogProfile,
+      name: name.trim(),
+      tenantId: context.tenantId,
+    },
   });
 
-  if (error) {
-    throw error;
+  if (error || data?.error) {
+    throw new Error(await getFunctionInvokeErrorMessage(
+      data,
+      error,
+      "No se pudo crear el local.",
+    ));
   }
+  if (!data?.venue) {
+    throw new Error("La funcion no devolvio el local creado.");
+  }
+  return data.venue;
 }
 
 export async function updateCrmVenueDefaultTaxRate(
@@ -152,6 +172,7 @@ export async function updateCrmVenueDefaultTaxRate(
 
 export type CrmVenueSettingsInput = {
   address: string;
+  name: string;
   dayChangeTime: string | null;
   defaultTaxRate: number;
   legalName: string;
@@ -170,8 +191,12 @@ export async function updateCrmVenueSettings(
   const address = input.address.trim();
   const dayChangeTime = normalizeDayChangeTime(input.dayChangeTime);
   const legalName = input.legalName.trim();
+  const name = input.name.trim();
   const taxId = input.taxId.trim();
 
+  if (!name || name.length > 80) {
+    throw new Error("El nombre del local debe tener entre 1 y 80 caracteres.");
+  }
   if (address.length > 300) {
     throw new Error("La direcci\u00f3n no puede superar los 300 caracteres.");
   }
@@ -189,6 +214,7 @@ export async function updateCrmVenueSettings(
       day_change_time: dayChangeTime,
       default_tax_rate: input.defaultTaxRate,
       legal_name: legalName || null,
+      name,
       tax_id: taxId || null,
     })
     .eq("tenant_id", context.tenantId)

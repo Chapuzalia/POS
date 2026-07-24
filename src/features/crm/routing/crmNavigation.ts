@@ -34,7 +34,7 @@ export const reportSections = new Set<CrmSection>(reportNavItems.map((item) => i
 
 export function getSectionTitle(section: CrmSection) {
   const titles: Partial<Record<CrmSection, string>> = {
-    access: 'Locales, dispositivos y usuarios',
+    access: 'Dispositivos y usuarios',
     products: 'Productos del catálogo',
     formats: 'Formatos de venta',
     categories: 'Categorías y pestañas del TPV',
