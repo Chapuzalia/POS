@@ -4814,7 +4814,14 @@ begin
   end if;
   if new.tenant_id is distinct from old.tenant_id or new.venue_id is distinct from old.venue_id
     or new.cash_register_id is distinct from old.cash_register_id or new.opened_by is distinct from old.opened_by
-    or new.opened_by_device_id is distinct from old.opened_by_device_id or new.opened_at is distinct from old.opened_at then
+    or new.opened_at is distinct from old.opened_at then
+    raise exception 'No se puede cambiar la identidad de una sesion de caja';
+  end if;
+  if new.opened_by_device_id is distinct from old.opened_by_device_id
+    and not (
+      new.opened_by_device_id is null
+      and not exists (select 1 from public.devices d where d.id = old.opened_by_device_id)
+    ) then
     raise exception 'No se puede cambiar la identidad de una sesion de caja';
   end if;
   if old.status = 'closed' and new.status is distinct from old.status then raise exception 'Una caja cerrada no se puede reabrir'; end if;
@@ -4822,6 +4829,48 @@ begin
     raise exception 'El cierre requiere usuario, dispositivo y fecha';
   end if;
   return new;
+end;
+$$;
+
+
+--
+-- Name: prevent_device_delete_with_open_work(); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.prevent_device_delete_with_open_work() RETURNS trigger
+    LANGUAGE plpgsql
+    SET search_path TO ''
+    AS $$
+begin
+  if not exists (select 1 from public.tenants t where t.id = old.tenant_id) then
+    return old;
+  end if;
+
+  if exists (
+    select 1
+    from public.cash_sessions cs
+    where cs.tenant_id = old.tenant_id
+      and cs.status = 'open'
+      and (
+        cs.device_id = old.id
+        or cs.opened_by_device_id = old.id
+        or cs.cash_register_id = old.id
+      )
+  ) or exists (
+    select 1
+    from public.orders o
+    where o.tenant_id = old.tenant_id
+      and o.status = 'open'
+      and (
+        o.opened_by_device_id = old.id
+        or o.cash_register_id = old.id
+      )
+  ) then
+    raise exception 'Cierra la caja y las comandas abiertas de este dispositivo antes de eliminarlo'
+      using errcode = 'P0001';
+  end if;
+
+  return old;
 end;
 $$;
 
@@ -5177,7 +5226,14 @@ begin
   if tg_op = 'UPDATE' then
     if new.user_id is distinct from old.user_id or new.tenant_id is distinct from old.tenant_id
       or new.cash_session_id is distinct from old.cash_session_id or new.cash_register_id is distinct from old.cash_register_id
-      or new.venue_id is distinct from old.venue_id or new.device_id is distinct from old.device_id then
+      or new.venue_id is distinct from old.venue_id
+      or (
+        new.device_id is distinct from old.device_id
+        and not (
+          new.device_id is null
+          and not exists (select 1 from public.devices d where d.id = old.device_id)
+        )
+      ) then
       raise exception 'No se puede cambiar la identidad economica de una transaccion';
     end if;
     return new;
@@ -5276,7 +5332,7 @@ CREATE TABLE public.cash_sessions (
     id uuid DEFAULT gen_random_uuid() NOT NULL,
     tenant_id uuid NOT NULL,
     venue_id uuid NOT NULL,
-    device_id uuid NOT NULL,
+    device_id uuid,
     opened_by uuid NOT NULL,
     closed_by uuid,
     status text NOT NULL,
@@ -5297,7 +5353,7 @@ CREATE TABLE public.cash_sessions (
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     cash_register_id uuid NOT NULL,
-    opened_by_device_id uuid NOT NULL,
+    opened_by_device_id uuid,
     closed_by_device_id uuid,
     final_cash_fund_cents integer DEFAULT 0 NOT NULL,
     print_snapshot jsonb,
@@ -5732,7 +5788,7 @@ CREATE TABLE public.orders (
     venue_id uuid NOT NULL,
     cash_session_id uuid NOT NULL,
     opened_by_user_id uuid NOT NULL,
-    opened_by_device_id uuid NOT NULL,
+    opened_by_device_id uuid,
     guest_count integer DEFAULT 1 NOT NULL,
     status text DEFAULT 'open'::text NOT NULL,
     opened_at timestamp with time zone DEFAULT now() NOT NULL,
@@ -6017,7 +6073,7 @@ CREATE TABLE public.sales (
     ticket_id uuid NOT NULL,
     cash_session_id uuid NOT NULL,
     venue_id uuid NOT NULL,
-    device_id uuid NOT NULL,
+    device_id uuid,
     user_id uuid NOT NULL,
     total_cents integer NOT NULL,
     payment_method text,
@@ -6230,7 +6286,7 @@ CREATE TABLE public.tickets (
     tenant_id uuid NOT NULL,
     cash_session_id uuid NOT NULL,
     venue_id uuid NOT NULL,
-    device_id uuid NOT NULL,
+    device_id uuid,
     user_id uuid NOT NULL,
     status text NOT NULL,
     subtotal_cents integer NOT NULL,
@@ -7594,6 +7650,13 @@ CREATE TRIGGER create_device_cash_register AFTER INSERT ON public.devices FOR EA
 
 
 --
+-- Name: devices prevent_device_delete_with_open_work; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER prevent_device_delete_with_open_work BEFORE DELETE ON public.devices FOR EACH ROW EXECUTE FUNCTION public.prevent_device_delete_with_open_work();
+
+
+--
 -- Name: devices enforce_device_plan_limit; Type: TRIGGER; Schema: public; Owner: -
 --
 
@@ -8279,7 +8342,7 @@ ALTER TABLE ONLY public.cash_sessions
 --
 
 ALTER TABLE ONLY public.cash_sessions
-    ADD CONSTRAINT cash_sessions_closed_device_fk FOREIGN KEY (closed_by_device_id) REFERENCES public.devices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT cash_sessions_closed_device_fk FOREIGN KEY (closed_by_device_id) REFERENCES public.devices(id) ON DELETE SET NULL;
 
 
 --
@@ -8287,7 +8350,7 @@ ALTER TABLE ONLY public.cash_sessions
 --
 
 ALTER TABLE ONLY public.cash_sessions
-    ADD CONSTRAINT cash_sessions_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT cash_sessions_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE SET NULL;
 
 
 --
@@ -8303,7 +8366,7 @@ ALTER TABLE ONLY public.cash_sessions
 --
 
 ALTER TABLE ONLY public.cash_sessions
-    ADD CONSTRAINT cash_sessions_opened_device_fk FOREIGN KEY (opened_by_device_id) REFERENCES public.devices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT cash_sessions_opened_device_fk FOREIGN KEY (opened_by_device_id) REFERENCES public.devices(id) ON DELETE SET NULL;
 
 
 --
@@ -8743,7 +8806,7 @@ ALTER TABLE ONLY public.orders
 --
 
 ALTER TABLE ONLY public.orders
-    ADD CONSTRAINT orders_opened_by_device_id_fkey FOREIGN KEY (opened_by_device_id) REFERENCES public.devices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT orders_opened_by_device_id_fkey FOREIGN KEY (opened_by_device_id) REFERENCES public.devices(id) ON DELETE SET NULL;
 
 
 --
@@ -9119,7 +9182,7 @@ ALTER TABLE ONLY public.sales
 --
 
 ALTER TABLE ONLY public.sales
-    ADD CONSTRAINT sales_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT sales_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE SET NULL;
 
 
 --
@@ -9279,7 +9342,7 @@ ALTER TABLE ONLY public.tickets
 --
 
 ALTER TABLE ONLY public.tickets
-    ADD CONSTRAINT tickets_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE RESTRICT;
+    ADD CONSTRAINT tickets_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE SET NULL;
 
 
 --

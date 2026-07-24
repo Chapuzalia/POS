@@ -77,6 +77,29 @@
   transform: none;
 }
 
+/*
+ * Las PWA de iOS con una barra de estado translucida ocupan toda la pantalla.
+ * Conservamos el espaciado habitual y desplazamos los controles fuera del
+ * reloj/Dynamic Island solo cuando la app se ejecuta desde la pantalla de inicio.
+ * La clase se aplica tambien mediante navigator.standalone porque algunas
+ * versiones de iOS no resuelven de forma fiable la media query display-mode.
+ */
+.pwa-standalone .crm-dashboard-shell .crm-topbar {
+  padding-top: calc(0.625rem + env(safe-area-inset-top, 0px)) !important;
+}
+
+.pwa-standalone .crm-dashboard-shell .crm-sidebar {
+  padding-top: calc(1.5rem + env(safe-area-inset-top, 0px)) !important;
+}
+
+@media (min-width: 768px) {
+  .pwa-standalone .crm-dashboard-shell .crm-topbar {
+    min-height: calc(5rem + env(safe-area-inset-top, 0px)) !important;
+    flex-basis: calc(5rem + env(safe-area-inset-top, 0px)) !important;
+    padding-top: env(safe-area-inset-top, 0px) !important;
+  }
+}
+
 .crm-sidebar {
   scrollbar-width: none;
 }
