@@ -53,7 +53,7 @@ import type {
 } from '../types'
 import { getReadableError } from '../utils/errors'
 import { AppRouter } from './AppRouter'
-import { isAdministrativeUser, isCrmAdministrator, isSuperadmin } from './app-permissions'
+import { isBackofficeUser, isCrmOwner, isSuperadmin } from './app-permissions'
 import { PosPage } from './PosPage'
 import { useDomainErrors } from './useDomainErrors'
 
@@ -130,7 +130,7 @@ export function AppShell() {
     catalog,
     cashSession: cash.session,
     context,
-    enabled: Boolean(context && !isAdministrativeUser(context)),
+    enabled: Boolean(context && !isBackofficeUser(context)),
     isBusy,
     isOnline,
     onAddFeedback: addFeedback.triggerAddFeedback,
@@ -209,7 +209,7 @@ export function AppShell() {
     setDiscounts(state.discounts)
     setManualDiscountEnabled(state.manualDiscountEnabled)
     setProductSalesStats(state.productSalesStats)
-    quickSale.hydrate(isAdministrativeUser(nextContext) ? [] : getCachedTicket(nextContext))
+    quickSale.hydrate(isBackofficeUser(nextContext) ? [] : getCachedTicket(nextContext))
     const nextTickets = state.cashSession ? getSessionTickets(nextContext, state.cashSession.id) : []
     cash.hydrate(state.cashSession, state.salesLedger, nextTickets)
     if (state.catalog) saveCachedCatalog(nextContext, {
@@ -220,9 +220,9 @@ export function AppShell() {
     saveCachedProductSalesStats(nextContext.tenantId, state.productSalesStats)
     const previousSession = getCachedCashSession(nextContext)
     saveCachedCashSession(nextContext, state.cashSession)
-    if (!isAdministrativeUser(nextContext) && state.cashSession) {
+    if (!isBackofficeUser(nextContext) && state.cashSession) {
       saveSaleLedger(nextContext, state.salesLedger)
-    } else if (!isAdministrativeUser(nextContext)) {
+    } else if (!isBackofficeUser(nextContext)) {
       clearSaleLedger(nextContext)
       if (previousSession) clearSessionTickets(nextContext, previousSession.id)
     }
@@ -281,7 +281,7 @@ export function AppShell() {
   }, [context, isOnline, persistProductSalesStats, setGeneralError])
 
   useEffect(() => {
-    if (!context || !isOnline || isAdministrativeUser(context)) return undefined
+    if (!context || !isOnline || isBackofficeUser(context)) return undefined
     let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
     const scheduleRefresh = () => {
       if (refreshTimer) window.clearTimeout(refreshTimer)
@@ -321,7 +321,7 @@ export function AppShell() {
 
   return <AppRouter context={context}>{() => {
     if (isSuperadmin(context)) return <SuperAdminPage context={context} error={error} isOnline={isOnline} onError={setGeneralError} onLogout={session.logout} />
-    if (isCrmAdministrator(context)) return <CrmPage
+    if (isCrmOwner(context)) return <CrmPage
       context={context}
       error={error}
       isOnline={isOnline}

@@ -69,7 +69,7 @@ La cola offline existente sigue siendo la autoridad de ventas. Una venta rapida 
 
 ## Permisos y auditoria
 
-El proyecto actual expone roles y capacidades de dispositivo, no permisos granulares de hardware. La adaptacion usa `canManageCash` (o roles manager/admin/owner) para configurar hardware, reimprimir y abrir cajon. Cuando el backend incorpore permisos granulares, deben mapearse a `hardware.configure`, `hardware.open_cash_drawer`, `hardware.discover_printers` y `sales.reprint_ticket`.
+El proyecto actual expone roles y capacidades de dispositivo, no permisos granulares de hardware. La adaptacion usa `canManageCash` (o roles manager/owner) para configurar hardware, reimprimir y abrir cajon. Cuando el backend incorpore permisos granulares, deben mapearse a `hardware.configure`, `hardware.open_cash_drawer`, `hardware.discover_printers` y `sales.reprint_ticket`.
 
 No existe aun un servicio generico de auditoria en el TPV. Las acciones estan encapsuladas y listas para conectar dicho servicio sin incluir el token. No debe registrarse `Authorization`, el token, datos de cliente ni el contenido completo de tickets.
 

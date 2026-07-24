@@ -44,7 +44,7 @@ export type AppliedDiscount = {
   color: string | null
 }
 
-export type TenantRole = 'superadmin' | 'owner' | 'admin' | 'manager' | 'cashier'
+export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'cashier'
 export type DeviceMode = 'satellite' | 'checkout' | 'hybrid'
 
 export type ThemeMode = 'light' | 'dark'
@@ -128,7 +128,7 @@ export type CrmAccessUser = {
   email: string
   fullName: string
   isActive: boolean
-  role: 'owner' | 'admin' | 'manager'
+  role: 'owner' | 'manager'
 }
 
 export type TicketLineModifier = {

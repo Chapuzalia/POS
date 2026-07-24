@@ -61,7 +61,7 @@ create table if not exists public.tenant_memberships (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
   user_id uuid not null references auth.users(id) on delete cascade,
-  role text not null check (role in ('owner', 'admin', 'manager', 'cashier')),
+  role text not null check (role in ('owner', 'manager', 'cashier')),
   is_active boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
@@ -767,11 +767,11 @@ create policy "memberships_self_select"
 on public.tenant_memberships for select
 using (user_id = auth.uid());
 
-drop policy if exists "memberships_admin_all" on public.tenant_memberships;
-create policy "memberships_admin_all"
+drop policy if exists "memberships_owner_all" on public.tenant_memberships;
+create policy "memberships_owner_all"
 on public.tenant_memberships for all
-using (public.user_has_tenant_role(tenant_id, array['owner', 'admin']))
-with check (public.user_has_tenant_role(tenant_id, array['owner', 'admin']));
+using (public.user_has_tenant_role(tenant_id, array['owner']))
+with check (public.user_has_tenant_role(tenant_id, array['owner']));
 
 drop policy if exists "venues_tenant_access" on public.venues;
 create policy "venues_tenant_access"
@@ -1875,7 +1875,7 @@ as $$
     from public.tenant_memberships tm
     where tm.tenant_id = target_tenant
       and tm.user_id = auth.uid()
-      and tm.role in ('owner', 'admin')
+      and tm.role = 'owner'
       and tm.is_active = true
   );
 $$;
@@ -1994,11 +1994,11 @@ grant execute on function public.user_can_view_device(uuid, uuid, uuid) to authe
 grant execute on function public.user_has_venue_access(uuid, uuid) to authenticated;
 
 drop policy if exists "device_assignments_select" on public.device_user_assignments;
-drop policy if exists "device_assignments_admin_manage" on public.device_user_assignments;
+drop policy if exists "device_assignments_owner_manage" on public.device_user_assignments;
 create policy "device_assignments_select" on public.device_user_assignments
 for select to authenticated
 using (user_id = (select auth.uid()) or public.user_is_tenant_admin(tenant_id));
-create policy "device_assignments_admin_manage" on public.device_user_assignments
+create policy "device_assignments_owner_manage" on public.device_user_assignments
 for all to authenticated
 using (public.user_is_tenant_admin(tenant_id))
 with check (public.user_is_tenant_admin(tenant_id));
@@ -2006,7 +2006,7 @@ with check (public.user_is_tenant_admin(tenant_id));
 -- Los cajeros solo ven su local/dispositivo; administracion gestiona toda la estructura.
 drop policy if exists "venues_tenant_access" on public.venues;
 drop policy if exists "venues_select" on public.venues;
-drop policy if exists "venues_admin_manage" on public.venues;
+drop policy if exists "venues_owner_manage" on public.venues;
 create policy "venues_select" on public.venues
 for select to authenticated
 using (
@@ -2019,28 +2019,28 @@ using (
       and dua.is_active = true
   )
 );
-create policy "venues_admin_manage" on public.venues
+create policy "venues_owner_manage" on public.venues
 for all to authenticated
 using (public.user_is_tenant_admin(tenant_id))
 with check (public.user_is_tenant_admin(tenant_id));
 
 drop policy if exists "devices_tenant_access" on public.devices;
 drop policy if exists "devices_select" on public.devices;
-drop policy if exists "devices_admin_manage" on public.devices;
+drop policy if exists "devices_owner_manage" on public.devices;
 create policy "devices_select" on public.devices
 for select to authenticated
 using (public.user_can_view_device(tenant_id, venue_id, id));
-create policy "devices_admin_manage" on public.devices
+create policy "devices_owner_manage" on public.devices
 for all to authenticated
 using (public.user_is_tenant_admin(tenant_id))
 with check (public.user_is_tenant_admin(tenant_id));
 
 drop policy if exists "product_venue_settings_select" on public.product_venue_settings;
-drop policy if exists "product_venue_settings_admin_manage" on public.product_venue_settings;
+drop policy if exists "product_venue_settings_owner_manage" on public.product_venue_settings;
 create policy "product_venue_settings_select" on public.product_venue_settings
 for select to authenticated
 using (public.user_has_tenant_access(tenant_id));
-create policy "product_venue_settings_admin_manage" on public.product_venue_settings
+create policy "product_venue_settings_owner_manage" on public.product_venue_settings
 for all to authenticated
 using (public.user_is_tenant_admin(tenant_id))
 with check (public.user_is_tenant_admin(tenant_id));
@@ -2063,59 +2063,59 @@ begin
     old_policy := table_name || '_tenant_access';
     execute format('drop policy if exists %I on public.%I', old_policy, table_name);
     execute format('drop policy if exists %I on public.%I', table_name || '_select', table_name);
-    execute format('drop policy if exists %I on public.%I', table_name || '_admin_manage', table_name);
+    execute format('drop policy if exists %I on public.%I', table_name || '_owner_manage', table_name);
     execute format(
       'create policy %I on public.%I for select to authenticated using (public.user_has_tenant_access(tenant_id))',
       table_name || '_select', table_name
     );
     execute format(
       'create policy %I on public.%I for all to authenticated using (public.user_is_tenant_admin(tenant_id)) with check (public.user_is_tenant_admin(tenant_id))',
-      table_name || '_admin_manage', table_name
+      table_name || '_owner_manage', table_name
     );
   end loop;
 end $$;
 
 drop policy if exists "products_tenant_access" on public.products;
 drop policy if exists "products_select" on public.products;
-drop policy if exists "products_admin_manage" on public.products;
+drop policy if exists "products_owner_manage" on public.products;
 create policy "products_select" on public.products for select to authenticated
 using (
   public.user_is_tenant_admin(tenant_id)
   or public.user_has_venue_access(tenant_id, venue_id)
 );
-create policy "products_admin_manage" on public.products for all to authenticated
+create policy "products_owner_manage" on public.products for all to authenticated
 using (public.user_is_tenant_admin(tenant_id))
 with check (public.user_is_tenant_admin(tenant_id));
 
 drop policy if exists "product_variants_tenant_access" on public.product_variants;
 drop policy if exists "product_variants_select" on public.product_variants;
-drop policy if exists "product_variants_admin_manage" on public.product_variants;
+drop policy if exists "product_variants_owner_manage" on public.product_variants;
 create policy "product_variants_select" on public.product_variants for select to authenticated
 using (exists (
   select 1 from public.products p
   where p.id = product_variants.product_id
     and (public.user_is_tenant_admin(p.tenant_id) or public.user_has_venue_access(p.tenant_id, p.venue_id))
 ));
-create policy "product_variants_admin_manage" on public.product_variants for all to authenticated
+create policy "product_variants_owner_manage" on public.product_variants for all to authenticated
 using (public.user_is_tenant_admin(tenant_id))
 with check (public.user_is_tenant_admin(tenant_id));
 
 drop policy if exists "modifier_groups_tenant_access" on public.modifier_groups;
 drop policy if exists "modifier_groups_select" on public.modifier_groups;
-drop policy if exists "modifier_groups_admin_manage" on public.modifier_groups;
+drop policy if exists "modifier_groups_owner_manage" on public.modifier_groups;
 create policy "modifier_groups_select" on public.modifier_groups for select to authenticated
 using (exists (
   select 1 from public.products p
   where p.id = modifier_groups.product_id
     and (public.user_is_tenant_admin(p.tenant_id) or public.user_has_venue_access(p.tenant_id, p.venue_id))
 ));
-create policy "modifier_groups_admin_manage" on public.modifier_groups for all to authenticated
+create policy "modifier_groups_owner_manage" on public.modifier_groups for all to authenticated
 using (public.user_is_tenant_admin(tenant_id))
 with check (public.user_is_tenant_admin(tenant_id));
 
 drop policy if exists "modifiers_tenant_access" on public.modifiers;
 drop policy if exists "modifiers_select" on public.modifiers;
-drop policy if exists "modifiers_admin_manage" on public.modifiers;
+drop policy if exists "modifiers_owner_manage" on public.modifiers;
 create policy "modifiers_select" on public.modifiers for select to authenticated
 using (exists (
   select 1
@@ -2124,7 +2124,7 @@ using (exists (
   where mg.id = modifiers.group_id
     and (public.user_is_tenant_admin(p.tenant_id) or public.user_has_venue_access(p.tenant_id, p.venue_id))
 ));
-create policy "modifiers_admin_manage" on public.modifiers for all to authenticated
+create policy "modifiers_owner_manage" on public.modifiers for all to authenticated
 using (public.user_is_tenant_admin(tenant_id))
 with check (public.user_is_tenant_admin(tenant_id));
 
@@ -2227,7 +2227,7 @@ create or replace function public.user_can_access_offline_event(
   target_tenant uuid,
   event_kind_value text,
   event_payload jsonb,
-  allow_admin boolean default true
+  allow_owner boolean default true
 )
 returns boolean
 language plpgsql
@@ -2241,7 +2241,7 @@ declare
   related_sale public.sales%rowtype;
   related_session public.cash_sessions%rowtype;
 begin
-  if allow_admin and public.user_is_tenant_admin(target_tenant) then
+  if allow_owner and public.user_is_tenant_admin(target_tenant) then
     return true;
   end if;
 
@@ -2281,7 +2281,7 @@ using (public.user_can_access_offline_event(tenant_id, event_kind, payload, true
 create policy "offline_event_log_insert" on public.offline_event_log for insert to authenticated
 with check (public.user_can_access_offline_event(tenant_id, event_kind, payload, false));
 
--- Las imagenes del catalogo solo pueden modificarlas owner/admin.
+-- Las imagenes del catalogo solo pueden modificarlas owner.
 drop policy if exists "product_images_tenant_select" on storage.objects;
 drop policy if exists "product_images_tenant_insert" on storage.objects;
 drop policy if exists "product_images_tenant_update" on storage.objects;
@@ -2402,7 +2402,7 @@ using (
 -- declare
 --   v_tenant_name text := 'Mess Gold';
 --   v_tenant_slug text := 'mess_gold';
---   v_user_email text := 'admin@messigualada.com';
+--   v_user_email text := 'owner@messigualada.com';
 --   v_venue_name text := 'Sala principal';
 -- 
 --   v_tenant_id uuid;

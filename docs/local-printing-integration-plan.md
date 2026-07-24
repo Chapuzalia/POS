@@ -9,7 +9,7 @@
 - `src/components/modals/ConfigModal.tsx` es la pantalla actual de ajustes. Incluira una entrada `Hardware > Impresion` que abre una vista tactil independiente, manteniendo el aspecto de los modales existentes.
 - `src/components/layout/AppHeader.tsx` aloja los indicadores globales. Recibira un badge discreto del agente/impresora sin bloquear el TPV.
 - `src/components/modals/SessionTicketsModal.tsx` es el historial de la sesion. Incorporara la reimpresion con permiso, etiqueta `COPIA` y cajon desactivado.
-- Los permisos actuales son capacidades de dispositivo y roles (`cashier`, `manager`, `admin`, `owner`). Se adaptaran asi: cualquier dispositivo que cobra puede imprimir; `manager`, `admin` y `owner` pueden reimprimir y abrir cajon; `admin` y `owner` pueden configurar hardware. No se inventara una autorizacion remota que el backend actual no expone.
+- Los permisos actuales son capacidades de dispositivo y roles (`cashier`, `manager`, `owner`). Se adaptaran asi: cualquier dispositivo que cobra puede imprimir; `manager` y `owner` pueden reimprimir y abrir cajon; `owner` puede configurar hardware. No se inventara una autorizacion remota que el backend actual no expone.
 - El feedback global actual combina alertas en `App.tsx` y el `Toaster` de Sileo. La feature devolvera errores de dominio legibles; los flujos de venta usaran Sileo para confirmar impresion o advertir de fallos sin revertir la venta.
 - El modo offline conserva ventas en la cola existente. La impresion solo se intentara cuando la venta ya se haya registrado localmente/remotamente; no se creara una cola automatica de impresion diferida.
 

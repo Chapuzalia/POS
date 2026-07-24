@@ -404,8 +404,8 @@ Deno.serve(async (request) => {
       .eq('user_id', authData.user.id)
       .maybeSingle()
 
-    if (membershipError || !membership?.is_active || !['owner', 'admin'].includes(membership.role)) {
-      return response({ error: 'Solo administracion puede gestionar el negocio' }, 403)
+    if (membershipError || !membership?.is_active || membership.role !== 'owner') {
+      return response({ error: 'Solo el propietario puede gestionar el negocio' }, 403)
     }
 
     if (action === 'create-venue') {
@@ -618,7 +618,7 @@ Deno.serve(async (request) => {
 
       const deviceUserIds = new Set((assignments ?? []).map((item) => item.user_id))
       const managementMemberships = (memberships ?? []).filter((item) =>
-        ['owner', 'admin', 'manager'].includes(item.role)
+        ['owner', 'manager'].includes(item.role)
       )
       const requestedUserIds = new Set([
         ...deviceUserIds,
