@@ -22,6 +22,16 @@ function requireClient() {
   if (!supabase) throw new Error('Supabase no está configurado.')
   return supabase
 }
+export type CatalogImportProgress = {
+  label: string
+  value: number
+}
+
+type CatalogImportProgressHandler = (progress: CatalogImportProgress) => void
+
+function reportProgress(handler: CatalogImportProgressHandler | undefined, value: number, label: string) {
+  handler?.({ label, value: Math.min(100, Math.max(0, Math.round(value))) })
+}
 
 function downloadJson(value: unknown, venueName: string) {
   const blob = new Blob([JSON.stringify(value, null, 2)], { type: 'application/json' })
@@ -105,13 +115,17 @@ export type OwnCatalogImportResult = CatalogImportSummary
 export async function importOwnCatalog(
   targetCatalog: CatalogData,
   document: CatalogExportDocument,
+  onProgress?: CatalogImportProgressHandler,
 ): Promise<OwnCatalogImportResult> {
   const client = requireClient()
   const generatedIds = buildCatalogImportIds(document)
   const imagePaths: Record<string, string> = {}
   const uploadedPaths: string[] = []
 
+  reportProgress(onProgress, 5, 'Validando catálogo')
   try {
+    const importableImages = document.catalog.images.filter((image) => image.missing !== true)
+    let uploadedImageCount = 0
     for (const rawImage of document.catalog.images) {
       const image = rawImage as CatalogExportImage
       if (image.missing === true) continue
@@ -141,7 +155,14 @@ export async function importOwnCatalog(
       if (uploadError) throw uploadError
       imagePaths[image.ref] = storagePath
       uploadedPaths.push(storagePath)
+      uploadedImageCount += 1
+      reportProgress(
+        onProgress,
+        10 + (uploadedImageCount / Math.max(1, importableImages.length)) * 55,
+        `Subiendo imágenes (${uploadedImageCount}/${importableImages.length})`,
+      )
     }
+    if (!importableImages.length) reportProgress(onProgress, 65, 'Catálogo preparado')
 
     const databaseDocument = {
       ...document,
@@ -150,6 +171,7 @@ export async function importOwnCatalog(
         images: document.catalog.images.map(({ dataBase64: _dataBase64, ...image }) => image),
       },
     }
+    reportProgress(onProgress, 72, 'Reemplazando catálogo')
     const { data, error } = await client.rpc('import_catalog', {
       p_mode: 'replace',
       p_plan: {
@@ -165,16 +187,19 @@ export async function importOwnCatalog(
     const removedPaths = data && typeof data === 'object' && !Array.isArray(data)
       ? (data as Record<string, unknown>).removedImagePaths
       : null
+    reportProgress(onProgress, 92, 'Limpiando imágenes anteriores')
     if (Array.isArray(removedPaths)) {
       const stalePaths = removedPaths.filter((path): path is string => typeof path === 'string' && !uploadedPaths.includes(path))
       if (stalePaths.length) await client.storage.from(PRODUCT_IMAGE_BUCKET).remove(stalePaths)
     }
+    reportProgress(onProgress, 100, 'Importación completada')
     return getCatalogImportSummary(document)
   } catch (error) {
     if (uploadedPaths.length) await client.storage.from(PRODUCT_IMAGE_BUCKET).remove(uploadedPaths)
     throw error
   }
 }
+
 export type FinalCatalogImportResult = {
   categories: number
   formats: number
@@ -186,8 +211,10 @@ export type FinalCatalogImportResult = {
 export async function importRevoIntoFinalCatalog(
   catalog: CatalogData,
   products: readonly RevoImportProduct[],
+  onProgress?: CatalogImportProgressHandler,
 ): Promise<FinalCatalogImportResult> {
   if (!products.length) throw new Error('No hay productos para importar.')
+  reportProgress(onProgress, 5, 'Preparando archivo REVO')
   const batch: CatalogBatchCommand[] = []
   const categoriesByName = new Map(catalog.categories.map((category) => [key(category.name), category.id]))
   const formatsByName = new Map(catalog.saleFormats.map((format) => [key(format.name), format]))
@@ -218,7 +245,12 @@ export async function importRevoIntoFinalCatalog(
     return created.id
   }
 
-  for (const imported of products) {
+  for (const [productIndex, imported] of products.entries()) {
+    reportProgress(
+      onProgress,
+      10 + (productIndex / products.length) * 60,
+      `Preparando productos (${productIndex + 1}/${products.length})`,
+    )
     const categoryKey = key(imported.categoryName)
     let categoryId = categoriesByName.get(categoryKey)
     if (!categoryId) {
@@ -264,6 +296,8 @@ export async function importRevoIntoFinalCatalog(
       result.placements += 1
     }
   }
+  reportProgress(onProgress, 75, 'Guardando catálogo REVO')
   await catalogAdminService.batchWithVariantFormats(catalog.venueId, batch, variantFormats, formatSaves)
+  reportProgress(onProgress, 100, 'Importación REVO completada')
   return result
 }

@@ -11,6 +11,7 @@ import {
 const migration = readFileSync(new URL('../supabase/migrations/20260724171616_complete_catalog_import_export.sql', import.meta.url), 'utf8')
 const page = readFileSync(new URL('../src/features/crm/catalog/pages/CatalogTransferPage.tsx', import.meta.url), 'utf8')
 const service = readFileSync(new URL('../src/features/crm/catalog/services/catalogTransferService.ts', import.meta.url), 'utf8')
+const progressBar = readFileSync(new URL('../src/features/crm/shared/components/ProgressBar.tsx', import.meta.url), 'utf8')
 
 function documentFixture() {
   const catalog = Object.fromEntries(catalogExportCollections.map((collection) => [collection, []]))
@@ -65,6 +66,13 @@ test('la pestaña ofrece importación propia con confirmación de reemplazo', ()
   assert.match(service, /rpc\('import_catalog'/)
   assert.match(service, /dataBase64/)
   assert.match(service, /remove\(uploadedPaths\)/)
+  assert.match(service, /Subiendo imágenes/)
+  assert.match(service, /Guardando catálogo REVO/)
+  assert.match(page, /<ImportProgress progress=\{ownProgress\}/)
+  assert.match(page, /<ImportProgress progress=\{revoProgress\}/)
+  assert.match(progressBar, /role="progressbar"/)
+  assert.match(progressBar, /aria-valuenow/)
+  assert.match(progressBar, /labelPosition === 'right'/)
 })
 
 test('la migración exporta formatos e imágenes y restringe el RPC al owner o admin', () => {
