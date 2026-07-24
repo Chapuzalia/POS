@@ -3,6 +3,10 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 
 const migration = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+const exportCatalogPermissionMigration = readFileSync(
+  new URL('../supabase/migrations/20260724171103_grant_export_catalog_to_authenticated.sql', import.meta.url),
+  'utf8',
+)
 const verification = readFileSync(new URL('../supabase/verification/catalog_architecture_verification.sql', import.meta.url), 'utf8')
 const quickSale = readFileSync(new URL('../src/features/quick-sale/services/ticketLines.ts', import.meta.url), 'utf8')
 const catalogPanel = readFileSync(new URL('../src/components/pos/CatalogPanel.tsx', import.meta.url), 'utf8')
@@ -36,3 +40,13 @@ test('la verificacion cubre alcance, orfanos, duplicados, precios, mixers e hist
   assert.doesNotMatch(verification, /\b(update|insert|delete|truncate)\b/i)
 })
 
+test('el owner puede exportar el catalogo sin abrir acceso entre negocios', () => {
+  assert.match(
+    exportCatalogPermissionMigration,
+    /grant execute on function public\.export_catalog\(uuid\) to authenticated/i,
+  )
+  assert.match(
+    migration,
+    /not public\.user_is_tenant_admin\(v_venue\.tenant_id\).*CATALOG_EXPORT_FORBIDDEN/i,
+  )
+})

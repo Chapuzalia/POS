@@ -1,11 +1,26 @@
 import type { CatalogBatchCommand } from '../../../catalog/data/commands.ts'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
 import type { RevoImportProduct } from '../../../../lib/revoImport.ts'
+import { PRODUCT_IMAGE_BUCKET } from '../../../../lib/productImages.ts'
 import { supabase } from '../../../../lib/supabase.ts'
 import { catalogAdminService } from './catalogAdminService.ts'
+import {
+  CATALOG_EXPORT_FORMAT,
+  CATALOG_EXPORT_SCHEMA_VERSION,
+  buildCatalogImportIds,
+  getCatalogImportSummary,
+  type CatalogExportDocument,
+  type CatalogExportImage,
+  type CatalogImportSummary,
+} from './catalogTransferDocument.ts'
 
 function key(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').trim().toLowerCase()
+}
+
+function requireClient() {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  return supabase
 }
 
 function downloadJson(value: unknown, venueName: string) {
@@ -18,13 +33,148 @@ function downloadJson(value: unknown, venueName: string) {
   window.setTimeout(() => URL.revokeObjectURL(url), 0)
 }
 
-export async function exportFinalCatalog(venueId: string, venueName: string) {
-  if (!supabase) throw new Error('Supabase no está configurado.')
-  const { data, error } = await supabase.rpc('export_catalog', { p_venue_id: venueId })
-  if (error) throw error
-  downloadJson(data, venueName)
+function blobToDataUrl(blob: Blob) {
+  return new Promise<string>((resolve, reject) => {
+    const reader = new FileReader()
+    reader.onload = () => resolve(String(reader.result))
+    reader.onerror = () => reject(new Error('No se ha podido incluir una imagen en la exportación.'))
+    reader.readAsDataURL(blob)
+  })
 }
 
+function imageBlobFromDataUrl(dataUrl: string) {
+  const match = /^data:(image\/(?:webp|png|jpeg|avif));base64,([a-z0-9+/=]+)$/i.exec(dataUrl)
+  if (!match) throw new Error('El catálogo contiene una imagen no válida.')
+  const binary = window.atob(match[2])
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return new Blob([bytes], { type: match[1].toLowerCase() })
+}
+
+async function sha256(blob: Blob) {
+  const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer())
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
+}
+
+function imageExtension(mimeType: string) {
+  if (mimeType === 'image/jpeg') return 'jpg'
+  if (mimeType === 'image/png') return 'png'
+  if (mimeType === 'image/avif') return 'avif'
+  return 'webp'
+}
+
+function exportedImages(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('La exportación ha devuelto un documento no válido.')
+  const document = value as Record<string, unknown>
+  if (document.format !== CATALOG_EXPORT_FORMAT || document.schemaVersion !== CATALOG_EXPORT_SCHEMA_VERSION) {
+    throw new Error('La base de datos todavía no tiene instalada la migración de importación/exportación completa.')
+  }
+  const catalog = document.catalog
+  if (!catalog || typeof catalog !== 'object' || Array.isArray(catalog)) throw new Error('La exportación no contiene un catálogo válido.')
+  const images = (catalog as Record<string, unknown>).images
+  if (!Array.isArray(images)) throw new Error('La exportación no contiene la colección de imágenes.')
+  return { catalog: catalog as Record<string, unknown>, document, images: images as CatalogExportImage[] }
+}
+
+export async function exportFinalCatalog(venueId: string, venueName: string) {
+  const client = requireClient()
+  const { data, error } = await client.rpc('export_catalog', { p_venue_id: venueId })
+  if (error) throw error
+
+  const exported = exportedImages(data)
+  const images = await Promise.all(exported.images.map(async (image) => {
+    if (image.missing === true) return image
+    const source = image.source
+    const storagePath = source && typeof source === 'object' && !Array.isArray(source)
+      ? (source as Record<string, unknown>).storagePath
+      : null
+    if (typeof storagePath !== 'string' || !storagePath) throw new Error(`No se ha encontrado la ruta de la imagen ${image.ref}.`)
+    const { data: blob, error: downloadError } = await client.storage.from(PRODUCT_IMAGE_BUCKET).download(storagePath)
+    if (downloadError) throw downloadError
+    return { ...image, dataBase64: await blobToDataUrl(blob) }
+  }))
+
+  downloadJson({
+    ...exported.document,
+    catalog: { ...exported.catalog, images },
+  }, venueName)
+}
+
+export type OwnCatalogImportResult = CatalogImportSummary
+
+export async function importOwnCatalog(
+  targetCatalog: CatalogData,
+  document: CatalogExportDocument,
+): Promise<OwnCatalogImportResult> {
+  const client = requireClient()
+  const generatedIds = buildCatalogImportIds(document)
+  const imagePaths: Record<string, string> = {}
+  const uploadedPaths: string[] = []
+
+  try {
+    for (const rawImage of document.catalog.images) {
+      const image = rawImage as CatalogExportImage
+      if (image.missing === true) continue
+      if (typeof image.dataBase64 !== 'string') throw new Error(`Faltan los datos de la imagen ${image.ref}.`)
+      const blob = imageBlobFromDataUrl(image.dataBase64)
+      if (blob.size <= 0 || blob.size > 1024 * 1024) throw new Error(`La imagen ${image.ref} supera el máximo de 1 MB.`)
+      if (typeof image.mimeType !== 'string' || blob.type !== image.mimeType.toLowerCase()) {
+        throw new Error(`El tipo de la imagen ${image.ref} no coincide con su contenido.`)
+      }
+      if (typeof image.sizeBytes === 'number' && image.sizeBytes !== blob.size) {
+        throw new Error(`El tamaño de la imagen ${image.ref} no coincide con el documento.`)
+      }
+      if (typeof image.sha256 !== 'string' || await sha256(blob) !== image.sha256) {
+        throw new Error(`La integridad de la imagen ${image.ref} no es válida.`)
+      }
+
+      const productRef = String(image.productRef ?? '')
+      const productId = generatedIds.products[productRef]
+      const imageId = generatedIds.images[image.ref]
+      if (!productId || !imageId) throw new Error(`La imagen ${image.ref} apunta a un producto inexistente.`)
+      const storagePath = `${targetCatalog.tenantId}/${targetCatalog.venueId}/products/${productId}/${imageId}.${imageExtension(blob.type)}`
+      const { error: uploadError } = await client.storage.from(PRODUCT_IMAGE_BUCKET).upload(storagePath, blob, {
+        cacheControl: '31536000',
+        contentType: blob.type,
+        upsert: false,
+      })
+      if (uploadError) throw uploadError
+      imagePaths[image.ref] = storagePath
+      uploadedPaths.push(storagePath)
+    }
+
+    const databaseDocument = {
+      ...document,
+      catalog: {
+        ...document.catalog,
+        images: document.catalog.images.map(({ dataBase64: _dataBase64, ...image }) => image),
+      },
+    }
+    const { data, error } = await client.rpc('import_catalog', {
+      p_mode: 'replace',
+      p_plan: {
+        document: databaseDocument,
+        generatedIds,
+        imagePaths,
+        venueId: targetCatalog.venueId,
+      },
+      p_venue_id: targetCatalog.venueId,
+    })
+    if (error) throw error
+
+    const removedPaths = data && typeof data === 'object' && !Array.isArray(data)
+      ? (data as Record<string, unknown>).removedImagePaths
+      : null
+    if (Array.isArray(removedPaths)) {
+      const stalePaths = removedPaths.filter((path): path is string => typeof path === 'string' && !uploadedPaths.includes(path))
+      if (stalePaths.length) await client.storage.from(PRODUCT_IMAGE_BUCKET).remove(stalePaths)
+    }
+    return getCatalogImportSummary(document)
+  } catch (error) {
+    if (uploadedPaths.length) await client.storage.from(PRODUCT_IMAGE_BUCKET).remove(uploadedPaths)
+    throw error
+  }
+}
 export type FinalCatalogImportResult = {
   categories: number
   formats: number
