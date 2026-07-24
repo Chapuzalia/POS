@@ -25,7 +25,7 @@ El total sigue el criterio vigente del TPV: `sales.total_cents` es el total neto
 
 ## Archivos
 
-- `supabase/27.cash-closing-printing-migration.sql`: snapshot, movimientos, fondo final, estado, reclamacion idempotente y auditoria.
+- `supabase/0.Complete_Database_24-07-26.sql`: snapshot, movimientos, fondo final, estado, reclamacion idempotente y auditoria.
 - `src/features/cash-registers/service.ts`: lectura del cierre/historico y registro protegido del resultado.
 - `src/features/cash-registers/hooks/useCashSession.ts`: guarda primero, imprime despues y mantiene el cierre ante cualquier fallo del agente.
 - `src/features/local-printing/services/cashClosingPrintMapper.ts`: adapta el snapshot al mismo contrato `ticket` que usa una venta; no envia objetos de Supabase ni del store.

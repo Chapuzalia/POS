@@ -46,7 +46,7 @@ test('accesos muestra todos los dispositivos y permite retirar los que no tienen
     readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../supabase/45.active-device-plan-usage.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
   ])
 
   assert.match(accessPage, /data\.devices\.map/)
@@ -56,5 +56,5 @@ test('accesos muestra todos los dispositivos y permite retirar los que no tienen
   assert.match(edgeFunction, /action === 'retire-device'/)
   assert.match(edgeFunction, /El dispositivo tiene un usuario asociado/)
   assert.match(migration, /where tenant_id = new\.tenant_id and is_active/)
-  assert.match(migration, /where is_active/)
+  assert.match(migration, /devices_active_venue_name_key[\s\S]*where is_active/i)
 })

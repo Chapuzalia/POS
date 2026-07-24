@@ -1,4 +1,4 @@
--- Read-only verification for 29.catalog-architecture-migration.sql.
+-- Read-only verification for 0.Complete_Database_24-07-26.sql.
 -- Every result set should return zero rows/count zero unless its label says INFO.
 
 select 'ERROR venues_without_profile' as check_name, count(*) as affected

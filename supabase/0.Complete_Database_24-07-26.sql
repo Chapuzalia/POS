@@ -1,5 +1,5 @@
--- CLUB POS - CONSOLIDATED FINAL DATABASE
--- Direct post-Phase-4 schema. No transitional catalogue objects are created.
+-- CLUB POS - CONSOLIDATED FINAL DATABASE - 24/07/2026
+-- Final schema after applying migrations 1 through 46 in sequence.
 -- Execute once in Supabase SQL Editor with an administrative role.
 
 
@@ -1493,7 +1493,7 @@ begin
 
     select count(*) into current_usage
     from public.devices
-    where tenant_id = new.tenant_id;
+    where tenant_id = new.tenant_id and is_active;
     resource_label := 'dispositivos';
   elsif tg_table_name = 'tenant_memberships' then
     if new.role <> 'cashier' then
@@ -1626,7 +1626,7 @@ $$;
 -- Name: get_catalog(uuid, text); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.get_catalog(p_venue_id uuid, p_mode text DEFAULT 'admin'::text) RETURNS jsonb
+CREATE FUNCTION public.get_catalog_without_formats(p_venue_id uuid, p_mode text DEFAULT 'admin'::text) RETURNS jsonb
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO ''
     AS $$
@@ -1788,10 +1788,184 @@ $$;
 
 
 --
--- Name: FUNCTION get_catalog(p_venue_id uuid, p_mode text); Type: COMMENT; Schema: public; Owner: -
+-- Name: FUNCTION get_catalog_without_formats(p_venue_id uuid, p_mode text); Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON FUNCTION public.get_catalog(p_venue_id uuid, p_mode text) IS 'Definitive venue-scoped catalogue read boundary for admin and POS.';
+COMMENT ON FUNCTION public.get_catalog_without_formats(p_venue_id uuid, p_mode text) IS 'Definitive venue-scoped catalogue read boundary before reusable sale-format projection.';
+
+
+--
+-- Name: get_catalog(uuid, text); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.get_catalog(p_venue_id uuid, p_mode text DEFAULT 'admin'::text) RETURNS jsonb
+    LANGUAGE plpgsql STABLE SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_catalog jsonb;
+  v_active_only boolean;
+begin
+  v_catalog := public.get_catalog_without_formats(p_venue_id, p_mode);
+  v_active_only := p_mode = 'pos';
+  return v_catalog || jsonb_build_object(
+    'sale_formats', coalesce((
+      select jsonb_agg(to_jsonb(x) order by x.sort_order, x.name, x.id)
+      from (
+        select f.id, f.tenant_id, f.venue_id, f.name, f.is_active,
+          f.sort_order, f.created_at, f.updated_at
+        from public.catalog_sale_formats f
+        where f.venue_id = p_venue_id and (not v_active_only or f.is_active)
+      ) x
+    ), '[]'::jsonb),
+    'variant_formats', coalesce((
+      select jsonb_agg(jsonb_build_object('variant_id', v.id, 'format_id', f.id)
+        order by v.product_id, v.sort_order, v.id)
+      from public.product_variants v
+      join public.products p on p.id = v.product_id and p.venue_id = p_venue_id
+      join public.catalog_sale_formats f on f.id = v.catalog_sale_format_id and f.venue_id = p_venue_id
+      where v.venue_id = p_venue_id
+        and (not v_active_only or (p.is_active and v.is_active and f.is_active))
+    ), '[]'::jsonb)
+  );
+end;
+$$;
+
+
+--
+-- Name: catalog_sale_format_command(uuid, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.catalog_sale_format_command(p_venue_id uuid, p_action text, p_payload jsonb DEFAULT '{}'::jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_tenant_id uuid;
+  v_id uuid;
+  v_item jsonb;
+  v_name text;
+begin
+  select v.tenant_id into v_tenant_id from public.venues v where v.id = p_venue_id for update;
+  if v_tenant_id is null then raise exception 'CATALOG_VENUE_NOT_FOUND'; end if;
+  if auth.role() <> 'service_role' and not public.user_is_tenant_admin(v_tenant_id) then
+    raise exception 'CATALOG_COMMAND_FORBIDDEN';
+  end if;
+
+  if p_action = 'save' then
+    v_name := trim(p_payload ->> 'name');
+    if coalesce(v_name, '') = '' then raise exception 'CATALOG_SALE_FORMAT_NAME_REQUIRED'; end if;
+    v_id := nullif(p_payload ->> 'id', '')::uuid;
+    if v_id is null then
+      insert into public.catalog_sale_formats(tenant_id, venue_id, name, is_active, sort_order)
+      values(v_tenant_id, p_venue_id, v_name, coalesce((p_payload ->> 'active')::boolean, true),
+        coalesce((p_payload ->> 'sortOrder')::integer, 0))
+      returning id into v_id;
+    else
+      update public.catalog_sale_formats set
+        name = v_name,
+        is_active = coalesce((p_payload ->> 'active')::boolean, is_active),
+        sort_order = coalesce((p_payload ->> 'sortOrder')::integer, sort_order)
+      where id = v_id and venue_id = p_venue_id;
+      if not found then raise exception 'CATALOG_SALE_FORMAT_NOT_FOUND'; end if;
+    end if;
+    update public.product_variants set name = v_name
+    where catalog_sale_format_id = v_id and venue_id = p_venue_id;
+  elsif p_action = 'delete' then
+    v_id := (p_payload ->> 'id')::uuid;
+    if exists(select 1 from public.product_variants where catalog_sale_format_id = v_id and venue_id = p_venue_id) then
+      raise exception 'CATALOG_SALE_FORMAT_IN_USE';
+    end if;
+    delete from public.catalog_sale_formats where id = v_id and venue_id = p_venue_id;
+    if not found then raise exception 'CATALOG_SALE_FORMAT_NOT_FOUND'; end if;
+  elsif p_action = 'reorder' then
+    for v_item in select value from jsonb_array_elements(coalesce(p_payload -> 'items', '[]'::jsonb)) loop
+      update public.catalog_sale_formats set sort_order = (v_item ->> 'sortOrder')::integer
+      where id = (v_item ->> 'id')::uuid and venue_id = p_venue_id;
+      if not found then raise exception 'CATALOG_SALE_FORMAT_NOT_FOUND'; end if;
+    end loop;
+  else
+    raise exception 'CATALOG_SALE_FORMAT_ACTION_INVALID';
+  end if;
+  return jsonb_build_object('result', 'SUCCESS', 'id', v_id);
+end;
+$$;
+
+
+--
+-- Name: catalog_variant_format_command(uuid, text, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.catalog_variant_format_command(p_venue_id uuid, p_command text, p_payload jsonb) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_format_id uuid;
+  v_format_name text;
+  v_format_active boolean;
+  v_result jsonb;
+  v_variant_id uuid;
+begin
+  if p_command not in ('create_variant', 'update_variant') then
+    raise exception 'CATALOG_VARIANT_FORMAT_COMMAND_INVALID';
+  end if;
+  v_format_id := nullif(p_payload ->> 'formatId', '')::uuid;
+  if v_format_id is null then raise exception 'CATALOG_VARIANT_FORMAT_REQUIRED'; end if;
+  select name, is_active into v_format_name, v_format_active
+  from public.catalog_sale_formats where id = v_format_id and venue_id = p_venue_id;
+  if v_format_name is null then raise exception 'CATALOG_SALE_FORMAT_NOT_FOUND'; end if;
+  if p_command = 'create_variant' and not v_format_active then raise exception 'CATALOG_SALE_FORMAT_INACTIVE'; end if;
+
+  p_payload := jsonb_set(p_payload, '{name}', to_jsonb(v_format_name));
+  v_result := public.catalog_command(p_venue_id, p_command, p_payload);
+  v_variant_id := (v_result ->> 'id')::uuid;
+  update public.product_variants set catalog_sale_format_id = v_format_id, name = v_format_name
+  where id = v_variant_id and venue_id = p_venue_id;
+  if not found then raise exception 'CATALOG_VARIANT_NOT_FOUND'; end if;
+  return v_result;
+end;
+$$;
+
+
+--
+-- Name: catalog_command_batch_with_formats(uuid, jsonb, jsonb, jsonb); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.catalog_command_batch_with_formats(
+  p_venue_id uuid,
+  p_commands jsonb,
+  p_variant_formats jsonb,
+  p_new_formats jsonb DEFAULT '[]'::jsonb
+) RETURNS jsonb
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  v_result jsonb;
+  v_item jsonb;
+  v_format_name text;
+begin
+  if jsonb_typeof(p_variant_formats) <> 'array' or jsonb_array_length(p_variant_formats) = 0 then
+    raise exception 'CATALOG_VARIANT_FORMAT_REQUIRED';
+  end if;
+  for v_item in select value from jsonb_array_elements(coalesce(p_new_formats, '[]'::jsonb)) loop
+    perform public.catalog_sale_format_command(p_venue_id, 'save', v_item);
+  end loop;
+  v_result := public.catalog_command_batch(p_venue_id, p_commands);
+  for v_item in select value from jsonb_array_elements(p_variant_formats) loop
+    select name into v_format_name from public.catalog_sale_formats
+    where id = (v_item ->> 'formatId')::uuid and venue_id = p_venue_id and is_active;
+    if v_format_name is null then raise exception 'CATALOG_SALE_FORMAT_NOT_FOUND'; end if;
+    update public.product_variants set
+      catalog_sale_format_id = (v_item ->> 'formatId')::uuid,
+      name = v_format_name
+    where id = (v_item ->> 'variantId')::uuid and venue_id = p_venue_id;
+    if not found then raise exception 'CATALOG_VARIANT_NOT_FOUND'; end if;
+  end loop;
+  return v_result;
+end;
+$$;
 
 
 --
@@ -5204,6 +5378,30 @@ COMMENT ON TABLE public.catalog_placements IS 'Definitive visibility, featured s
 
 
 --
+-- Name: catalog_sale_formats; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.catalog_sale_formats (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    venue_id uuid NOT NULL,
+    name text NOT NULL,
+    is_active boolean DEFAULT true NOT NULL,
+    sort_order integer DEFAULT 0 NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    updated_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT catalog_sale_formats_name_check CHECK (((char_length(TRIM(BOTH FROM name)) >= 1) AND (char_length(TRIM(BOTH FROM name)) <= 80)))
+);
+
+
+--
+-- Name: TABLE catalog_sale_formats; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON TABLE public.catalog_sale_formats IS 'Reusable venue-scoped sale formats assigned to product variants.';
+
+
+--
 -- Name: catalog_tab_categories; Type: TABLE; Schema: public; Owner: -
 --
 
@@ -5665,8 +5863,16 @@ CREATE TABLE public.product_variants (
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
     is_active boolean DEFAULT true NOT NULL,
     venue_id uuid NOT NULL,
+    catalog_sale_format_id uuid,
     CONSTRAINT product_variants_price_cents_check CHECK ((price_cents >= 0))
 );
+
+
+--
+-- Name: COLUMN product_variants.catalog_sale_format_id; Type: COMMENT; Schema: public; Owner: -
+--
+
+COMMENT ON COLUMN public.product_variants.catalog_sale_format_id IS 'Explicit reusable sale format selected for this variant.';
 
 
 --
@@ -6207,6 +6413,22 @@ ALTER TABLE ONLY public.catalog_placements
 
 
 --
+-- Name: catalog_sale_formats catalog_sale_formats_id_tenant_id_venue_id_key; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_sale_formats
+    ADD CONSTRAINT catalog_sale_formats_id_tenant_id_venue_id_key UNIQUE (id, tenant_id, venue_id);
+
+
+--
+-- Name: catalog_sale_formats catalog_sale_formats_pkey; Type: CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_sale_formats
+    ADD CONSTRAINT catalog_sale_formats_pkey PRIMARY KEY (id);
+
+
+--
 -- Name: catalog_tab_categories catalog_tab_categories_pkey; Type: CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -6276,14 +6498,6 @@ ALTER TABLE ONLY public.device_user_assignments
 
 ALTER TABLE ONLY public.devices
     ADD CONSTRAINT devices_pkey PRIMARY KEY (id);
-
-
---
--- Name: devices devices_tenant_id_venue_id_name_key; Type: CONSTRAINT; Schema: public; Owner: -
---
-
-ALTER TABLE ONLY public.devices
-    ADD CONSTRAINT devices_tenant_id_venue_id_name_key UNIQUE (tenant_id, venue_id, name);
 
 
 --
@@ -6781,6 +6995,20 @@ CREATE INDEX catalog_placements_tab_idx ON public.catalog_placements USING btree
 
 
 --
+-- Name: catalog_sale_formats_venue_name_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX catalog_sale_formats_venue_name_idx ON public.catalog_sale_formats USING btree (tenant_id, venue_id, lower(TRIM(BOTH FROM name)));
+
+
+--
+-- Name: catalog_sale_formats_venue_order_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX catalog_sale_formats_venue_order_idx ON public.catalog_sale_formats USING btree (tenant_id, venue_id, is_active, sort_order, id);
+
+
+--
 -- Name: catalog_tab_categories_order_final_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -6827,6 +7055,13 @@ CREATE INDEX device_user_assignments_user_idx ON public.device_user_assignments 
 --
 
 CREATE INDEX devices_tenant_idx ON public.devices USING btree (tenant_id, venue_id);
+
+
+--
+-- Name: devices_active_venue_name_key; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE UNIQUE INDEX devices_active_venue_name_key ON public.devices USING btree (tenant_id, venue_id, lower(name)) WHERE is_active;
 
 
 --
@@ -7023,6 +7258,13 @@ CREATE INDEX product_selection_assignments_order_final_idx ON public.product_sel
 --
 
 CREATE UNIQUE INDEX product_variants_catalog_scope_idx ON public.product_variants USING btree (id, product_id, tenant_id, venue_id);
+
+
+--
+-- Name: product_variants_catalog_sale_format_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX product_variants_catalog_sale_format_idx ON public.product_variants USING btree (tenant_id, venue_id, catalog_sale_format_id, is_active, sort_order);
 
 
 --
@@ -7258,6 +7500,13 @@ CREATE TRIGGER catalog_placements_final_scope BEFORE INSERT OR UPDATE ON public.
 --
 
 CREATE TRIGGER catalog_placements_updated_at BEFORE UPDATE ON public.catalog_placements FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
+
+
+--
+-- Name: catalog_sale_formats catalog_sale_formats_updated_at; Type: TRIGGER; Schema: public; Owner: -
+--
+
+CREATE TRIGGER catalog_sale_formats_updated_at BEFORE UPDATE ON public.catalog_sale_formats FOR EACH ROW EXECUTE FUNCTION public.set_updated_at();
 
 
 --
@@ -8130,6 +8379,22 @@ ALTER TABLE ONLY public.catalog_placements
 
 
 --
+-- Name: catalog_sale_formats catalog_sale_formats_tenant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_sale_formats
+    ADD CONSTRAINT catalog_sale_formats_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: catalog_sale_formats catalog_sale_formats_venue_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.catalog_sale_formats
+    ADD CONSTRAINT catalog_sale_formats_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES public.venues(id) ON DELETE CASCADE;
+
+
+--
 -- Name: catalog_tab_categories catalog_tab_categories_category_id_tenant_id_venue_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -8666,6 +8931,14 @@ ALTER TABLE ONLY public.product_selection_group_assignments
 
 
 --
+-- Name: product_variants product_variants_catalog_sale_format_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.product_variants
+    ADD CONSTRAINT product_variants_catalog_sale_format_fkey FOREIGN KEY (catalog_sale_format_id) REFERENCES public.catalog_sale_formats(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: product_variants product_variants_product_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -9163,6 +9436,26 @@ CREATE POLICY catalog_placements_admin_manage ON public.catalog_placements TO au
 --
 
 CREATE POLICY catalog_placements_select ON public.catalog_placements FOR SELECT TO authenticated USING ((public.user_is_tenant_admin(tenant_id) OR public.user_has_venue_access(tenant_id, venue_id)));
+
+
+--
+-- Name: catalog_sale_formats; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.catalog_sale_formats ENABLE ROW LEVEL SECURITY;
+
+--
+-- Name: catalog_sale_formats catalog_sale_formats_admin_manage; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY catalog_sale_formats_admin_manage ON public.catalog_sale_formats TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+
+
+--
+-- Name: catalog_sale_formats catalog_sale_formats_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY catalog_sale_formats_select ON public.catalog_sale_formats FOR SELECT TO authenticated USING ((public.user_is_tenant_admin(tenant_id) OR public.user_has_venue_access(tenant_id, venue_id)));
 
 
 --
@@ -10070,12 +10363,32 @@ GRANT ALL ON FUNCTION public.get_cash_session_table_layout(p_cash_session_id uui
 
 
 --
+-- Name: FUNCTION get_catalog_without_formats(p_venue_id uuid, p_mode text); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.get_catalog_without_formats(p_venue_id uuid, p_mode text) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.get_catalog_without_formats(p_venue_id uuid, p_mode text) TO service_role;
+
+
+--
 -- Name: FUNCTION get_catalog(p_venue_id uuid, p_mode text); Type: ACL; Schema: public; Owner: -
 --
 
 REVOKE ALL ON FUNCTION public.get_catalog(p_venue_id uuid, p_mode text) FROM PUBLIC;
 GRANT ALL ON FUNCTION public.get_catalog(p_venue_id uuid, p_mode text) TO authenticated;
 GRANT ALL ON FUNCTION public.get_catalog(p_venue_id uuid, p_mode text) TO service_role;
+
+
+--
+-- Name: reusable sale format functions; Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.catalog_sale_format_command(p_venue_id uuid, p_action text, p_payload jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.catalog_variant_format_command(p_venue_id uuid, p_command text, p_payload jsonb) FROM PUBLIC;
+REVOKE ALL ON FUNCTION public.catalog_command_batch_with_formats(p_venue_id uuid, p_commands jsonb, p_variant_formats jsonb, p_new_formats jsonb) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.catalog_sale_format_command(p_venue_id uuid, p_action text, p_payload jsonb) TO authenticated, service_role;
+GRANT ALL ON FUNCTION public.catalog_variant_format_command(p_venue_id uuid, p_command text, p_payload jsonb) TO authenticated, service_role;
+GRANT ALL ON FUNCTION public.catalog_command_batch_with_formats(p_venue_id uuid, p_commands jsonb, p_variant_formats jsonb, p_new_formats jsonb) TO authenticated, service_role;
 
 
 --
@@ -10492,6 +10805,13 @@ GRANT SELECT,INSERT,DELETE,UPDATE ON TABLE public.catalog_placements TO authenti
 
 
 --
+-- Name: TABLE catalog_sale_formats; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.catalog_sale_formats TO authenticated;
+
+
+--
 -- Name: TABLE catalog_tab_categories; Type: ACL; Schema: public; Owner: -
 --
 
@@ -10702,6 +11022,67 @@ USING (
   bucket_id = 'product-images'
   AND public.user_is_tenant_admin(((storage.foldername(name))[1])::uuid)
 );
+
+--
+-- Supabase Realtime: final union of every table published by the migrations.
+--
+
+DO $$
+DECLARE
+  target_table text;
+  publishes_all_tables boolean;
+BEGIN
+  IF NOT EXISTS (
+    SELECT 1
+    FROM pg_catalog.pg_publication
+    WHERE pubname = 'supabase_realtime'
+  ) THEN
+    EXECUTE 'CREATE PUBLICATION supabase_realtime';
+  END IF;
+
+  SELECT publication.puballtables
+  INTO publishes_all_tables
+  FROM pg_catalog.pg_publication AS publication
+  WHERE publication.pubname = 'supabase_realtime';
+
+  IF publishes_all_tables THEN
+    RETURN;
+  END IF;
+
+  FOREACH target_table IN ARRAY ARRAY[
+    'cash_movements',
+    'cash_registers',
+    'cash_session_table_layouts',
+    'cash_sessions',
+    'catalog_tabs',
+    'order_events',
+    'order_groups',
+    'order_lines',
+    'order_tables',
+    'orders',
+    'restaurant_order_equal_split_payments',
+    'restaurant_order_equal_splits',
+    'sales',
+    'tickets'
+  ]
+  LOOP
+    IF to_regclass(format('public.%I', target_table)) IS NOT NULL
+      AND NOT EXISTS (
+        SELECT 1
+        FROM pg_catalog.pg_publication_tables AS published
+        WHERE published.pubname = 'supabase_realtime'
+          AND published.schemaname = 'public'
+          AND published.tablename = target_table
+      )
+    THEN
+      EXECUTE format(
+        'ALTER PUBLICATION supabase_realtime ADD TABLE public.%I',
+        target_table
+      );
+    END IF;
+  END LOOP;
+END
+$$;
 
 --
 -- PostgreSQL database dump complete

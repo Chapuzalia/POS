@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const migration = await readFile(new URL('../supabase/19.cancel-empty-restaurant-order-migration.sql', import.meta.url), 'utf8')
+const migration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 const orderBar = await readFile(new URL('../src/features/tables/components/TableOrderBar.tsx', import.meta.url), 'utf8')
 

@@ -4,7 +4,7 @@ import test from 'node:test'
 import { validateVariantDrafts } from '../src/features/crm/catalog/services/catalogAdminModel.ts'
 
 const [migration, navigation, routing, formatsPage, productEditor, mapper] = await Promise.all([
-  readFile(new URL('../supabase/43.catalog-sale-formats.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/crm/routing/crmNavigation.ts', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/crm/routing/CrmSectionContent.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/crm/catalog/pages/CatalogFormatsPage.tsx', import.meta.url), 'utf8'),
@@ -33,10 +33,10 @@ test('las variantes del editor seleccionan formatos reutilizables y rechazan dup
   ], true), /repetir un formato/)
 })
 
-test('la migración conserva variantes existentes y expone la relación en el catálogo agregado', () => {
-  assert.match(migration, /create table public\.catalog_sale_formats/)
-  assert.match(migration, /add column catalog_sale_format_id/)
-  assert.match(migration, /update public\.product_variants v[\s\S]*set catalog_sale_format_id = f\.id/)
+test('el esquema final expone formatos y su relación en el catálogo agregado', () => {
+  assert.match(migration, /create table public\.catalog_sale_formats/i)
+  assert.match(migration, /catalog_sale_format_id uuid/)
+  assert.match(migration, /product_variants_catalog_sale_format_fkey/)
   assert.match(migration, /catalog_command_batch_with_formats/)
   assert.match(migration, /'variant_formats'/)
   assert.match(mapper, /variantFormats\.get\(row\.id\) \?\? null/)

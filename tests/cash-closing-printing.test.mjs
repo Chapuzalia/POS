@@ -128,10 +128,10 @@ test('las filas de 58 y 80 mm no parten el importe ni superan el ancho', () => {
   }
 })
 
-test('la migracion persiste snapshot, estados, auditoria y movimientos', () => {
-  const sql = readFileSync(new URL('../supabase/27.cash-closing-printing-migration.sql', import.meta.url), 'utf8')
+test('el esquema consolidado persiste snapshot, estados, auditoria y movimientos', () => {
+  const sql = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
   assert.match(sql, /print_snapshot jsonb/i)
-  assert.match(sql, /create table if not exists public\.cash_movements/i)
+  assert.match(sql, /create table public\.cash_movements/i)
   assert.match(sql, /cash_closing\.reprinted/i)
   assert.doesNotMatch(sql, /cash.drawer|open_cash_drawer/i)
 })

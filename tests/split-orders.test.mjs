@@ -2,22 +2,24 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const migration = await readFile(new URL('../supabase/21.split-restaurant-orders-migration.sql', import.meta.url), 'utf8')
-const partialPaymentMigration = await readFile(new URL('../supabase/24.partial-order-item-payments-migration.sql', import.meta.url), 'utf8')
-const completeDatabase = await readFile(new URL('../supabase/0.complete-database.sql', import.meta.url), 'utf8')
+const migration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+const partialPaymentMigration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+const completeDatabase = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 const app = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const modal = await readFile(new URL('../src/features/tables/components/SplitOrderModal.tsx', import.meta.url), 'utf8')
+const partialPaymentFunction = partialPaymentMigration.match(
+  /CREATE FUNCTION public\.pay_restaurant_order_items\([\s\S]*?\r?\n\$\$;/i,
+)?.[0] ?? ''
 
 test('cada ocupacion tiene un grupo y las comandas existentes se migran uno a uno', () => {
-  assert.match(migration, /create table if not exists public\.order_groups/)
-  assert.match(migration, /insert into public\.order_groups[\s\S]+select o\.id/)
-  assert.match(migration, /alter table public\.orders alter column order_group_id set not null/)
+  assert.match(migration, /create table public\.order_groups/i)
+  assert.match(migration, /create table public\.orders[\s\S]*order_group_id uuid not null/i)
   assert.match(migration, /orders_group_split_sequence_unique/)
 })
 
 test('la division mueve varias cantidades de forma atomica y protege revisiones concurrentes', () => {
-  assert.match(migration, /create or replace function public\.move_restaurant_order_lines/)
+  assert.match(migration, /create function public\.move_restaurant_order_lines/i)
   assert.match(migration, /jsonb_array_elements\(p_moves\)/)
   assert.match(migration, /order by o\.id for update/)
   assert.match(migration, /order by \(value ->> 'lineId'\)::uuid/)
@@ -47,7 +49,8 @@ test('mapa, detalle y realtime trabajan por grupo de ocupacion', () => {
   assert.match(service, /tableIdsByGroup/)
   assert.match(service, /loadRestaurantOrderGroup/)
   assert.match(service, /\['order_groups', 'orders', 'order_tables', 'order_lines'/)
-  assert.match(migration, /alter publication supabase_realtime add table public\.order_groups/)
+  assert.match(migration, /'order_groups'/)
+  assert.match(migration, /alter publication supabase_realtime add table public\.%I/i)
 })
 
 test('por items selecciona cantidades y cobra directamente sin crear subcomandas', () => {
@@ -66,16 +69,17 @@ test('por items selecciona cantidades y cobra directamente sin crear subcomandas
 })
 
 test('el cobro parcial es atomico, descuenta solo la seleccion y mantiene abierta la comanda', () => {
-  assert.match(partialPaymentMigration, /create or replace function public\.pay_restaurant_order_items/)
-  assert.match(partialPaymentMigration, /order by o\.id for update/)
-  assert.match(partialPaymentMigration, /p_expected_revision/)
-  assert.match(partialPaymentMigration, /using errcode = '40001'/)
-  assert.match(partialPaymentMigration, /insert into public\.tickets/)
-  assert.match(partialPaymentMigration, /insert into public\.ticket_lines/)
-  assert.match(partialPaymentMigration, /delete from public\.order_lines/)
-  assert.match(partialPaymentMigration, /quantity = ol\.quantity - selected\.quantity/)
-  assert.match(partialPaymentMigration, /update public\.orders o set revision = o\.revision \+ 1/)
-  assert.doesNotMatch(partialPaymentMigration, /update public\.orders o set status = 'paid'/)
-  assert.doesNotMatch(partialPaymentMigration, /update public\.order_tables set released_at/)
+  assert.notEqual(partialPaymentFunction, '')
+  assert.match(partialPaymentFunction, /create function public\.pay_restaurant_order_items/i)
+  assert.match(partialPaymentFunction, /order by o\.id for update/)
+  assert.match(partialPaymentFunction, /p_expected_revision/)
+  assert.match(partialPaymentFunction, /using errcode = '40001'/)
+  assert.match(partialPaymentFunction, /insert into public\.tickets/)
+  assert.match(partialPaymentFunction, /insert into public\.ticket_lines/)
+  assert.match(partialPaymentFunction, /delete from public\.order_lines/)
+  assert.match(partialPaymentFunction, /quantity = ol\.quantity - selected\.quantity/)
+  assert.match(partialPaymentFunction, /update public\.orders o set revision = o\.revision \+ 1/)
+  assert.doesNotMatch(partialPaymentFunction, /update public\.orders o set status = 'paid'/)
+  assert.doesNotMatch(partialPaymentFunction, /update public\.order_tables set released_at/)
   assert.match(completeDatabase, /create(?: or replace)? function public\.pay_restaurant_order_items/i)
 })

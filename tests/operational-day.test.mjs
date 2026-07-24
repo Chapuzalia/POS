@@ -42,8 +42,8 @@ test('normaliza el tipo time de Postgres y rechaza horas inválidas', () => {
   assert.throws(() => normalizeDayChangeTime('24:00'), /formato HH:mm/)
 })
 
-test('la migración añade la configuración nullable y los índices de consulta', async () => {
-  const sql = await readFile(new URL('../supabase/46.operational-day-change-time-migration.sql', import.meta.url), 'utf8')
+test('el esquema consolidado incluye la configuración nullable y los índices de consulta', async () => {
+  const sql = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
   assert.match(sql, /day_change_time time without time zone/)
   assert.doesNotMatch(sql, /day_change_time time without time zone not null/)
   assert.match(sql, /sales_venue_local_created_idx/)

@@ -42,13 +42,14 @@ test('combina ventas y movimientos sin convertir movimientos en facturacion', ()
   assert.equal(summary.totalSalesCents, 11500)
 })
 
-const migration = readFileSync(new URL('../supabase/28.cash-movement-actions.sql', import.meta.url), 'utf8')
+const migration = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 
 test('el RPC deriva identidad y direccion, y la escritura directa queda revocada', () => {
   assert.match(migration, /security definer/i)
   assert.match(migration, /created_by[\s\S]*auth\.uid\(\)/i)
   assert.match(migration, /movement_direction := case p_movement_type/i)
-  assert.match(migration, /revoke insert, update, delete on public\.cash_movements/i)
+  assert.match(migration, /grant select on table public\.cash_movements to authenticated/i)
+  assert.doesNotMatch(migration, /grant (?:insert|update|delete)[\s\S]*public\.cash_movements/i)
 })
 
 test('request_id hace la creacion idempotente y devuelve el movimiento existente', () => {

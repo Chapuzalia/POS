@@ -2,9 +2,9 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const migration = await readFile(new URL('../supabase/22.equal-order-splits-migration.sql', import.meta.url), 'utf8')
-const discountMigration = await readFile(new URL('../supabase/23.equal-split-discounts-migration.sql', import.meta.url), 'utf8')
-const completeDatabase = await readFile(new URL('../supabase/0.complete-database.sql', import.meta.url), 'utf8')
+const migration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+const discountMigration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+const completeDatabase = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const app = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const bar = await readFile(new URL('../src/features/tables/components/TableOrderBar.tsx', import.meta.url), 'utf8')
 const modal = await readFile(new URL('../src/features/tables/components/EqualSplitOrderModal.tsx', import.meta.url), 'utf8')
@@ -12,19 +12,19 @@ const service = await readFile(new URL('../src/features/tables/service.ts', impo
 
 test('la division a partes iguales persiste el progreso y cada cobro por separado', () => {
   assert.match(migration, /create table(?: if not exists)? public\.restaurant_order_equal_splits/i)
-  assert.match(migration, /create table if not exists public\.restaurant_order_equal_split_payments/)
-  assert.match(migration, /create or replace function public\.configure_restaurant_order_equal_split/)
+  assert.match(migration, /create table public\.restaurant_order_equal_split_payments/i)
+  assert.match(migration, /create function public\.configure_restaurant_order_equal_split/i)
   assert.match(migration, /create(?: or replace)? function public\.pay_restaurant_order_equal_part/i)
   assert.match(migration, /insert into public\.tickets/)
   assert.match(migration, /insert into public\.sales/)
   assert.match(migration, /insert into public\.sale_payments/)
-  assert.match(migration, /unique \(split_id, part_number\)/)
+  assert.match(migration, /unique \(split_id, part_number\)/i)
 })
 
 test('los centimos se reparten exactamente y la mesa solo se libera con la ultima parte', () => {
   assert.match(migration, /base_amount := split_row\.total_cents \/ split_row\.part_count/)
   assert.match(migration, /remainder := mod\(split_row\.total_cents, split_row\.part_count\)/)
-  assert.match(migration, /part_amount := base_amount \+ case when part_number <= remainder then 1 else 0 end/)
+  assert.match(migration, /part_subtotal := base_amount \+ case when part_number <= remainder then 1 else 0 end/)
   assert.match(migration, /status = case when s\.paid_parts \+ 1 = s\.part_count then 'completed'/)
   assert.match(migration, /if remaining_orders = 0 then[\s\S]+released_at = now\(\)/)
   assert.match(migration, /'nextOrderId'/)
@@ -51,10 +51,10 @@ test('el dropdown ofrece las dos estrategias y el modal comunica importe y progr
 })
 
 test('el descuento previo se hereda sin multiplicar importes fijos', () => {
-  assert.match(discountMigration, /add column if not exists default_discount jsonb/)
+  assert.match(discountMigration, /default_discount jsonb/)
   assert.match(discountMigration, /resolve_ticket_discount\([\s\S]+p_default_discount/)
   assert.match(discountMigration, /default_discount = excluded\.default_discount/)
-  assert.match(discountMigration, /default_discount ->> 'amountCents'\)::integer, 0\) \/ p_split\.part_count/)
+  assert.match(discountMigration, /default_discount ->> 'amountCents'\)::integer, 0\) \/ split_row\.part_count/)
   assert.match(discountMigration, /nextDefaultDiscount/)
   assert.match(app, /configureRestaurantEqualSplit\([\s\S]+current\.order\.id,[\s\S]+partCount,[\s\S]+current\.order\.revision,[\s\S]+options\.appliedDiscount/)
 
@@ -68,8 +68,8 @@ test('el descuento previo se hereda sin multiplicar importes fijos', () => {
 })
 
 test('cada parte puede conservar, cambiar o quitar su descuento', () => {
-  assert.match(discountMigration, /p_discount jsonb default null/)
-  assert.match(discountMigration, /p_use_default_discount boolean default true/)
+  assert.match(discountMigration, /p_discount jsonb default null/i)
+  assert.match(discountMigration, /p_use_default_discount boolean default true/i)
   assert.match(discountMigration, /if p_use_default_discount and split_row\.default_discount is not null/)
   assert.match(discountMigration, /resolve_ticket_discount\([\s\S]+part_subtotal, p_discount/)
   assert.match(discountMigration, /discount_name, discount_type/)
@@ -87,7 +87,7 @@ test('realtime no restaura el descuento mientras siga siendo la misma parte', ()
 test('un descuento completo permite finalizar una parte sin metodo de pago', () => {
   assert.match(discountMigration, /if part_total = 0 then[\s\S]+p_payment_method is not null/)
   assert.match(discountMigration, /if part_total > 0 then[\s\S]+insert into public\.sale_payments/)
-  assert.match(discountMigration, /payment_method is null or payment_method in \('cash', 'card'\)/)
+  assert.match(discountMigration, /restaurant_order_equal_split_payments_payment_method_check/)
   assert.match(modal, /else void completePart\(method, null\)/)
 })
 
@@ -98,7 +98,8 @@ test('app, mapa y realtime recuperan la division desde cualquier dispositivo', (
   assert.match(service, /restaurant_order_equal_splits/)
   assert.match(service, /restaurant_order_equal_split_payments/)
   assert.match(service, /Math\.max\(0, \(totals\.get\(groupId\)/)
-  assert.match(migration, /alter publication supabase_realtime add table public\.restaurant_order_equal_splits/)
+  assert.match(migration, /'restaurant_order_equal_splits'/)
+  assert.match(migration, /alter publication supabase_realtime add table public\.%I/i)
 })
 
 test('la migracion esta incorporada en la base completa', () => {

@@ -249,10 +249,10 @@ test('los snapshots históricos sobreviven sin consultar el producto vivo', () =
   assert.equal(historicalLine.catalogSnapshot.categoryName, 'Histórica')
 })
 
-test('la migración 39 contiene lectura agregada, comandos finales, locks, alcance y hard delete seguro', () => {
-  const sql = readFileSync(new URL('../supabase/39.catalog-domain-backend.sql', import.meta.url), 'utf8')
-  assert.match(sql, /create or replace function public\.get_catalog/)
-  assert.match(sql, /create or replace function public\.catalog_command/)
+test('el esquema consolidado contiene lectura agregada, comandos finales, locks, alcance y hard delete seguro', () => {
+  const sql = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+  assert.match(sql, /create function public\.get_catalog\(/i)
+  assert.match(sql, /create function public\.catalog_command\(/i)
   assert.match(sql, /where .*venue_id = p_venue_id/i)
   assert.match(sql, /for update/)
   assert.match(sql, /orphanedImagePaths/)

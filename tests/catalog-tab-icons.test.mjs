@@ -27,7 +27,7 @@ test('the CRM tab editor persists both its label and visible icon', async () => 
     readFile(new URL('../src/components/pos/CatalogPanel.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/app/AppShell.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/catalog/data/catalog-realtime.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../supabase/44.catalog-tabs-realtime.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
   ])
 
   assert.match(structure, /CrmModal label="Editar pestaña del TPV"/)
@@ -41,5 +41,6 @@ test('the CRM tab editor persists both its label and visible icon', async () => 
   assert.match(app, /subscribeToCatalogTabChanges\(context, scheduleRefresh\)/)
   assert.match(realtime, /table: 'catalog_tabs'/)
   assert.match(realtime, /filter: `venue_id=eq\.\$\{context\.venueId\}`/)
-  assert.match(migration, /alter publication supabase_realtime add table public\.catalog_tabs/)
+  assert.match(migration, /'catalog_tabs'/)
+  assert.match(migration, /alter publication supabase_realtime add table public\.%I/i)
 })

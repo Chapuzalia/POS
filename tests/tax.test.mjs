@@ -60,11 +60,11 @@ test('lineas gratuitas y tickets con varios tipos mantienen la identidad fiscal'
   )
 })
 
-test('la migracion conserva historico y calcula el snapshot en servidor', async () => {
-  const sql = await readFile(new URL('../supabase/12.add-vat-support-migration.sql', import.meta.url), 'utf8')
-  assert.match(sql, /add column if not exists tax_rate numeric\(5, 2\)/)
+test('el esquema consolidado conserva historico y calcula el snapshot en servidor', async () => {
+  const sql = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+  assert.match(sql, /tax_rate numeric\(5,2\)/)
   assert.match(sql, /coalesce\(p\.tax_rate, v\.default_tax_rate\)/)
-  assert.match(sql, /before insert or update on public\.ticket_lines/)
+  assert.match(sql, /before insert or update on public\.ticket_lines/i)
   assert.match(sql, /Se ignora cualquier valor fiscal aportado por el cliente/)
   assert.doesNotMatch(sql, /update\s+public\.ticket_lines\s+set\s+tax_rate/i)
 })

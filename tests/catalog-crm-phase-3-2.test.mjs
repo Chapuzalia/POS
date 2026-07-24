@@ -97,7 +97,7 @@ test('phase 3.2 CRM code uses final RPCs and contains no legacy catalog writes',
     readFile(new URL('../src/features/crm/catalog/services/catalogAdminService.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/catalog/services/catalogTransferService.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/routing/CrmSectionContent.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../supabase/41.catalog-crm-commands.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
   ])
   const crmCode = service + transfer + routing
   for (const legacy of ['sale_formats', 'selection_group_items', 'variant_selection_groups', 'product_modifier_groups']) {
