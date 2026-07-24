@@ -3,13 +3,14 @@ import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
 import { CrmModal } from '../../shared/components/CrmModal'
 import { CrmSelect } from '../../shared/components/CrmSelect'
-import { Building2, Plus, Save, X } from 'lucide-react'
+import { Building2, KeyRound, Plus, Save, X } from 'lucide-react'
 import { sileo } from 'sileo'
 import { type CatalogProfile, type CrmVenue, type TenantContext } from '../../../../types'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { type RunAction } from '../../shared/types'
 import { createCrmVenue, updateCrmVenueSettings } from '../../access/services/accessService'
 import { type CrmPlan, loadCrmPlan } from '../../plan/services/planService'
+import { CRM_PASSWORD_MIN_LENGTH, updateCurrentCrmPassword } from '../../settings/services/accountSettingsService'
 
 export type SettingsCrmProps = {
   disabled: boolean
@@ -48,6 +49,8 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [newVenueName, setNewVenueName] = useState('')
   const [newVenueProfile, setNewVenueProfile] = useState<CatalogProfile>('bar_classic')
+  const [newPassword, setNewPassword] = useState('')
+  const [passwordConfirmation, setPasswordConfirmation] = useState('')
 
   const refreshPlan = useCallback(async () => {
     setPlan(await loadCrmPlan(tenantContext))
@@ -95,6 +98,29 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
       sileo.success({
         description: `Se ha aplicado la plantilla ${templateLabels.get(newVenueProfile) ?? 'seleccionada'}.`,
         title: `${name} creado correctamente`,
+      })
+    })
+  }
+
+  async function submitPasswordChange(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+
+    if (newPassword.length < CRM_PASSWORD_MIN_LENGTH) {
+      sileo.error({ title: `La contraseña debe tener al menos ${CRM_PASSWORD_MIN_LENGTH} caracteres` })
+      return
+    }
+    if (newPassword !== passwordConfirmation) {
+      sileo.error({ title: 'Las contraseñas no coinciden' })
+      return
+    }
+
+    await runAction(async () => {
+      await updateCurrentCrmPassword(newPassword)
+      setNewPassword('')
+      setPasswordConfirmation('')
+      sileo.success({
+        description: 'Podrás usarla la próxima vez que inicies sesión.',
+        title: 'Contraseña actualizada',
       })
     })
   }
@@ -173,6 +199,54 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
           ))}
           {!venues.length ? <EmptyList message="No hay locales configurados." /> : null}
         </div>
+      </section>
+
+      <section className="crm-panel !mt-4 !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="crm-panel-header !flex !min-h-[72px] !items-start !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-[var(--crm-text)] md:!px-[22px]">
+          <div className="!grid !size-10 !shrink-0 !place-items-center !rounded-[10px] !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]">
+            <KeyRound className="!size-[18px]" />
+          </div>
+          <div>
+            <h2 className="!m-0 !text-base !font-bold">Seguridad de la cuenta</h2>
+            <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">
+              Cambia la contraseña del usuario CRM conectado: {tenantContext.userName}.
+            </p>
+          </div>
+        </div>
+        <form className="!grid !max-w-2xl !gap-4 !px-[18px] !pt-5 !pb-[22px] md:!grid-cols-2 md:!px-[22px]" onSubmit={(event) => void submitPasswordChange(event)}>
+          <Field label="Nueva contraseña">
+            <input
+              autoComplete="new-password"
+              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+              disabled={disabled}
+              minLength={CRM_PASSWORD_MIN_LENGTH}
+              onChange={(event) => setNewPassword(event.target.value)}
+              required
+              type="password"
+              value={newPassword}
+            />
+          </Field>
+          <Field label="Confirmar contraseña">
+            <input
+              autoComplete="new-password"
+              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+              disabled={disabled}
+              minLength={CRM_PASSWORD_MIN_LENGTH}
+              onChange={(event) => setPasswordConfirmation(event.target.value)}
+              required
+              type="password"
+              value={passwordConfirmation}
+            />
+          </Field>
+          <p className="crm-form-help md:!col-span-2">Usa al menos {CRM_PASSWORD_MIN_LENGTH} caracteres. Este cambio solo afecta al usuario CRM conectado.</p>
+          <button
+            className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white md:!w-fit"
+            disabled={disabled || newPassword.length < CRM_PASSWORD_MIN_LENGTH || newPassword !== passwordConfirmation}
+            type="submit"
+          >
+            <Save className="h-4 w-4" /> Actualizar contraseña
+          </button>
+        </form>
       </section>
 
       {isCreateOpen ? (

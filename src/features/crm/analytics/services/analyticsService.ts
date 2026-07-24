@@ -66,7 +66,6 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue): Pro
 
   salesQuery = salesQuery.eq('venue_id', venue.id)
   ticketsQuery = ticketsQuery.eq('venue_id', venue.id)
-  openSessionsQuery = openSessionsQuery.eq('venue_id', venue.id)
 
   const [
     { data: salesRows, error: salesError },
@@ -116,6 +115,7 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue): Pro
   const topProductMap = new Map<string, { productName: string; quantity: number; totalCents: number }>()
   const openCashSessions = openSessions.map((session) => ({
     id: session.id,
+    venueId: session.venue_id,
     venueName: venuesById.get(session.venue_id) ?? 'Local sin nombre',
     deviceName: devicesById.get(session.device_id) ?? 'Caja sin nombre',
     openedAt: session.opened_at,

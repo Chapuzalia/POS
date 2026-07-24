@@ -25,3 +25,11 @@ test('catalog forms and modal headers continue using CRM theme tokens', () => {
   assert.match(productForm, /var\(--crm-text-muted\)/)
   assert.match(styles, /\.crm-shell \.crm-input \{[\s\S]*color: var\(--crm-text\)/)
 })
+
+test('light theme separates the canvas, cards and form controls', () => {
+  assert.match(styles, /--crm-canvas: #f3f5f7/)
+  assert.match(styles, /--crm-surface: #ffffff/)
+  assert.match(styles, /--crm-input-border: #cfd6df/)
+  assert.match(styles, /\.crm-shell:not\(\[data-crm-theme='dark'\]\) \.crm-input,[\s\S]*border-color: var\(--crm-input-border\) !important/)
+  assert.match(styles, /--crm-shadow-card: 0 0 0 1px/)
+})

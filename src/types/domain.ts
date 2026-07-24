@@ -486,6 +486,7 @@ export type CrmStats = {
   monthTicketCount: number
   openCashSessions: Array<{
     id: string
+    venueId: string
     venueName: string
     deviceName: string
     openedAt: string
