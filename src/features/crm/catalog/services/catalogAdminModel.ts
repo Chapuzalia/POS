@@ -152,6 +152,7 @@ export function buildProductCreationBatch(input: {
     formatId: string
     name: string
     priceCents: number
+    sku?: string | null
     active: boolean
     isDefault: boolean
     sortOrder: number
@@ -194,4 +195,102 @@ export function buildProductCreationBatch(input: {
     })
   }
   return batch
+}
+
+export function buildProductDuplicationPlan(
+  catalog: CatalogData,
+  sourceProductId: string,
+  createId: () => string,
+) {
+  const source = catalog.products.find((product) => product.id === sourceProductId)
+  if (!source) throw new Error('El producto que quieres duplicar ya no existe.')
+
+  const productId = createId()
+  const variantIdBySourceId = new Map<string, string>()
+  const variants = catalog.variants
+    .filter((variant) => variant.productId === sourceProductId)
+    .map((variant) => {
+      const id = createId()
+      variantIdBySourceId.set(variant.id, id)
+      return {
+        id,
+        formatId: variant.formatId ?? '',
+        name: variant.name,
+        priceCents: variant.priceCents,
+        sku: variant.sku,
+        active: variant.active,
+        isDefault: variant.isDefault,
+        sortOrder: variant.sortOrder,
+      }
+    })
+
+  if (!variants.length) throw new Error('No se puede duplicar un producto sin variantes.')
+
+  const batch: CatalogBatchCommand[] = [{
+    command: 'create_product',
+    payload: {
+      id: productId,
+      type: source.type,
+      name: source.name,
+      description: source.description,
+      vatRate: source.vatRate,
+      active: source.active,
+      sortOrder: catalog.products.length * 10,
+      variants,
+    },
+  }]
+
+  for (const placement of catalog.placements.filter((item) => item.productId === sourceProductId)) {
+    batch.push({
+      command: 'create_placement',
+      payload: {
+        id: createId(),
+        productId,
+        tabId: placement.tabId,
+        categoryId: placement.categoryId,
+        pinnedVariantId: placement.pinnedVariantId
+          ? variantIdBySourceId.get(placement.pinnedVariantId) ?? null
+          : null,
+        featured: placement.featured,
+        active: placement.active,
+        sortOrder: placement.sortOrder,
+      },
+    })
+  }
+
+  const assignments = [
+    ...catalog.selectionAssignments
+      .filter((assignment) => assignment.productId === sourceProductId)
+      .map((assignment) => ({ assignment, domain: 'selection' as const })),
+    ...catalog.modifierAssignments
+      .filter((assignment) => assignment.productId === sourceProductId)
+      .map((assignment) => ({ assignment, domain: 'modifier' as const })),
+  ]
+  for (const { assignment, domain } of assignments) {
+    batch.push({
+      command: 'save_assignment',
+      payload: {
+        id: createId(),
+        domain,
+        productId,
+        groupId: assignment.groupId,
+        displayName: assignment.displayName,
+        minSelection: assignment.minSelection,
+        maxSelection: assignment.maxSelection,
+        appliesToAllVariants: assignment.appliesToAllVariants,
+        variantIds: assignment.variantIds.map((id) => variantIdBySourceId.get(id)).filter((id): id is string => Boolean(id)),
+        active: assignment.active,
+        sortOrder: assignment.sortOrder,
+      },
+    })
+  }
+
+  return {
+    productId,
+    batch,
+    variantFormats: variants.flatMap((variant) => variant.formatId
+      ? [{ variantId: variant.id, formatId: variant.formatId }]
+      : []),
+    image: source.image,
+  }
 }

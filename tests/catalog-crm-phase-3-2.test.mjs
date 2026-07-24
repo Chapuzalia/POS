@@ -4,6 +4,7 @@ import test from 'node:test'
 import { resolveCatalogItem } from '../src/features/catalog/domain/resolver.ts'
 import {
   buildProductCreationBatch,
+  buildProductDuplicationPlan,
   filterCatalogProducts,
   getCatalogProductSummaries,
   moveCatalogItem,
@@ -77,6 +78,62 @@ test('simple and advanced products are created as one atomic command batch using
   assert.deepEqual(batch.map((command) => command.command), ['create_product', 'create_placement'])
   assert.deepEqual(batch[0].payload.variants.map((variant) => variant.priceCents), [1500, 2200])
   assert.equal(JSON.stringify(batch).includes('sale_formats'), false)
+})
+
+test('product duplication preserves catalog values and remaps every product-owned relation', () => {
+  const source = {
+    ...catalog.products[1],
+    image: {
+      ...base('image-menu'),
+      productId: catalog.products[1].id,
+      storagePath: 'tenant/venue/products/p-menu/image.webp',
+      publicUrl: 'https://example.test/image.webp',
+      mimeType: 'image/webp',
+      sizeBytes: 123,
+      sha256: 'a'.repeat(64),
+    },
+  }
+  const sourceModifierAssignment = {
+    ...base('ma'),
+    productId: source.id,
+    groupId: 'mg',
+    displayName: 'Extras',
+    minSelection: 0,
+    maxSelection: 2,
+    appliesToAllVariants: false,
+    variantIds: ['v-menu'],
+    active: true,
+  }
+  const duplicationCatalog = {
+    ...catalog,
+    products: catalog.products.map((product) => product.id === source.id ? source : product),
+    modifierAssignments: [sourceModifierAssignment],
+  }
+  let nextId = 0
+  const plan = buildProductDuplicationPlan(duplicationCatalog, source.id, () => `copy-${++nextId}`)
+  const [createProduct, placement, selectionAssignment, modifierAssignment] = plan.batch
+
+  assert.equal(createProduct.command, 'create_product')
+  assert.deepEqual({
+    type: createProduct.payload.type,
+    name: createProduct.payload.name,
+    description: createProduct.payload.description,
+    vatRate: createProduct.payload.vatRate,
+    active: createProduct.payload.active,
+  }, {
+    type: source.type,
+    name: source.name,
+    description: source.description,
+    vatRate: source.vatRate,
+    active: source.active,
+  })
+  assert.equal(createProduct.payload.variants[0].priceCents, 1500)
+  assert.equal(placement.payload.productId, plan.productId)
+  assert.equal(placement.payload.pinnedVariantId, createProduct.payload.variants[0].id)
+  assert.equal(selectionAssignment.payload.domain, 'selection')
+  assert.equal(modifierAssignment.payload.domain, 'modifier')
+  assert.deepEqual(modifierAssignment.payload.variantIds, [createProduct.payload.variants[0].id])
+  assert.equal(plan.image.storagePath, source.image.storagePath)
 })
 
 test('all CRM reorder operations emit one collision-free deterministic payload', () => {

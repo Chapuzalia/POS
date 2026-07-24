@@ -146,8 +146,8 @@
 
 .crm-catalog-products-table .crm-data-head,
 .crm-catalog-products-table .crm-data-row {
-  min-width: 900px !important;
-  grid-template-columns: minmax(160px, 1.2fr) 105px 64px 68px 104px minmax(120px, .9fr) 128px !important;
+  min-width: 940px !important;
+  grid-template-columns: minmax(160px, 1.2fr) 105px 64px 68px 104px minmax(120px, .9fr) 168px !important;
 }
 
 .crm-catalog-products-table .crm-data-row {

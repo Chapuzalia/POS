@@ -26,8 +26,10 @@ test('catalog controls use CRM tokens instead of the legacy POS palette', () => 
 
 test('the products table reserves a stable column for all row actions', () => {
   assert.match(productsPage, /crm-catalog-products-table/)
-  assert.match(catalogStyles, /grid-template-columns:[^;]+128px/)
-  assert.match(catalogStyles, /min-width: 900px !important/)
+  assert.match(catalogStyles, /grid-template-columns:[^;]+168px/)
+  assert.match(catalogStyles, /min-width: 940px !important/)
+  assert.match(productsPage, /Duplicar \$\{summary\.product\.name\}/)
+  assert.match(productsPage, /catalogAdminService\.duplicateProduct/)
 })
 
 test('product sorting lives in clickable column headers without manual reorder controls', () => {

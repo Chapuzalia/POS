@@ -1,4 +1,4 @@
-import { ArrowDown, ArrowUp, ArrowUpDown, Boxes, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Boxes, Copy, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
 import { formatMoney } from '../../../../lib/format.ts'
@@ -164,6 +164,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
               <span>{summary.tabs.map((tab) => tab.label).join(', ') || 'Sin apariciones'}<br /><small>{summary.categories.map((category) => category.name).join(', ')}</small></span>
               <div className="crm-action-group">
                 <button aria-label={`Editar ${summary.product.name}`} className="crm-action-button" disabled={disabled} onClick={() => setEditorProductId(summary.product.id)} type="button"><Pencil className="!size-4" /></button>
+                <button aria-label={`Duplicar ${summary.product.name}`} className="crm-action-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.duplicateProduct(catalog, summary.product.id))} title="Duplicar producto" type="button"><Copy className="!size-4" /></button>
                 <button aria-label={summary.product.active ? 'Desactivar' : 'Activar'} className="crm-action-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.setProductActive(catalog.venueId, summary.product.id, !summary.product.active))} type="button">{summary.product.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</button>
                 <button aria-label={`Eliminar ${summary.product.name}`} className="crm-action-button crm-danger-button" disabled={disabled} onClick={() => void removeProduct(summary)} type="button"><Trash2 className="!size-4" /></button>
               </div>

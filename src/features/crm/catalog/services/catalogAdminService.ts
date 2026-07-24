@@ -7,6 +7,7 @@ import {
   resizeProductImageToWebp,
 } from '../../../../lib/productImages.ts'
 import { supabase } from '../../../../lib/supabase.ts'
+import { buildProductDuplicationPlan } from './catalogAdminModel.ts'
 
 export const CRM_CATALOG_IMAGE_MAX_SOURCE_BYTES = 10 * 1024 * 1024
 export const CRM_CATALOG_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'] as const
@@ -45,6 +46,32 @@ export const catalogAdminService = {
 
   batchWithVariantFormats(venueId: string, batchCommands: readonly CatalogBatchCommand[], variantFormats: readonly { variantId: string; formatId: string }[], newFormats: readonly { id: string; name: string; active: boolean; sortOrder: number }[] = []) {
     return commands.executeBatchWithVariantFormats(venueId, batchCommands, variantFormats, newFormats)
+  },
+
+  async duplicateProduct(catalog: CatalogData, sourceProductId: string) {
+    const plan = buildProductDuplicationPlan(catalog, sourceProductId, uuid)
+    await commands.executeBatchWithVariantFormats(catalog.venueId, plan.batch, plan.variantFormats)
+    if (!plan.image) return plan.productId
+
+    try {
+      await commands.saveProductImage(catalog.venueId, {
+        id: uuid(),
+        productId: plan.productId,
+        storagePath: plan.image.storagePath,
+        mimeType: plan.image.mimeType,
+        sizeBytes: plan.image.sizeBytes,
+        sha256: plan.image.sha256,
+      })
+    } catch (error) {
+      try {
+        await commands.deleteProduct(catalog.venueId, plan.productId)
+      } catch {
+        // Preserve the image error: it describes the incomplete duplication while
+        // the next forced catalog refresh will still expose any failed rollback.
+      }
+      throw error
+    }
+    return plan.productId
   },
 
   createProduct: commands.createProduct.bind(commands),
