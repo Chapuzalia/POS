@@ -110,19 +110,25 @@ export type CrmDevice = {
   isActive: boolean
   deviceMode: DeviceMode
   defaultCashRegisterId: string | null
+  account: CrmDeviceAccount | null
 }
 
-export type CrmPosUser = {
-  id: string
+export type CrmDeviceAccount = {
+  userId: string
   email: string
   fullName: string
   hasActiveLogin: boolean
   isActive: boolean
-  hasDeviceAssignment: boolean
   loginExpiresAt: string | null
   loginHeartbeatAt: string | null
-  venueId: string
-  deviceId: string
+}
+
+export type CrmAccessUser = {
+  id: string
+  email: string
+  fullName: string
+  isActive: boolean
+  role: 'owner' | 'admin' | 'manager'
 }
 
 export type TicketLineModifier = {
@@ -480,6 +486,7 @@ export type CrmStats = {
   monthTicketCount: number
   openCashSessions: Array<{
     id: string
+    venueId: string
     venueName: string
     deviceName: string
     openedAt: string

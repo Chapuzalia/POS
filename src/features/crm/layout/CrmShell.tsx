@@ -67,7 +67,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
           </div>
           <div>
             <p className="crm-brand-title !m-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-sm !leading-tight !font-semibold !text-[var(--crm-text)]">{context.tenantName}</p>
-            <p className="crm-brand-subtitle !mt-0.5 !mb-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-[11px] !font-medium !text-[var(--crm-text-muted)]">CRM · CLUB POS</p>
+            <p className="crm-brand-subtitle !mt-0.5 !mb-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-[11px] !font-medium !text-[var(--crm-text-muted)]">TICKIT</p>
           </div>
         </div>
 

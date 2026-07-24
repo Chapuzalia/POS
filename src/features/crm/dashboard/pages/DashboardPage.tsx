@@ -4,7 +4,7 @@ import { TopProductsList } from '../../analytics/pages/StatsPage'
 import { formatMoney } from '../../../../lib/format'
 import { paymentLabels } from '../../sales/services/salesReportModel'
 import { formatCrmDateTime } from '../../shared/formatCrmDateTime'
-import { type CSSProperties } from 'react'
+import { type CSSProperties, useState } from 'react'
 import type { CrmStats } from '../../../../types'
 import type { CatalogCategory, CatalogPlacement, CatalogProduct } from '../../../catalog/domain/types.ts'
 
@@ -16,6 +16,7 @@ export type DashboardCrmProps = {
   onRefresh: () => Promise<void>
   placements: CatalogPlacement[]
   products: CatalogProduct[]
+  selectedVenueId: string
   stats: CrmStats | null
 }
 
@@ -27,8 +28,10 @@ export function DashboardCrm({
   onRefresh,
   placements,
   products,
+  selectedVenueId,
   stats,
 }: DashboardCrmProps) {
+  const [showAllOpenCashSessions, setShowAllOpenCashSessions] = useState(true)
   const categoryBars = categories.map((category) => ({
     ...category,
     count: new Set(placements.filter((placement) => placement.categoryId === category.id).map((placement) => placement.productId)).size,
@@ -38,6 +41,27 @@ export function DashboardCrm({
 
   return (
     <div className="crm-dashboard-grid !grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] xl:!gap-6">
+      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
+        <div className="crm-panel-header !flex !min-h-[60px] !flex-col !items-stretch !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] sm:!flex-row sm:!items-center md:!px-[22px]">
+          <span>Cajas abiertas</span>
+          <div className="!flex !items-center !justify-between !gap-2 sm:!justify-end">
+            <label className="!inline-flex !min-h-10 !cursor-pointer !items-center !gap-2.5 !rounded-[10px] !bg-[var(--crm-surface-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-text-secondary)]">
+              <input
+                checked={showAllOpenCashSessions}
+                className="!size-4 !accent-[var(--crm-blue)]"
+                onChange={(event) => setShowAllOpenCashSessions(event.target.checked)}
+                type="checkbox"
+              />
+              Todas las cajas del negocio
+            </label>
+            <button aria-label="Actualizar cajas abiertas" className="crm-icon-button !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => void onRefresh()} type="button">
+              <RefreshCw className="h-4 w-4" />
+            </button>
+          </div>
+        </div>
+        <OpenCashSessionsList selectedVenueId={selectedVenueId} showAll={showAllOpenCashSessions} stats={stats} />
+      </section>
+
       <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
         <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Resumen del catalogo</span>
@@ -51,16 +75,6 @@ export function DashboardCrm({
           <KpiCard color="neutral" label="Categorias" value={categories.length} />
           <KpiCard color="green" label="Activas" value={activeCategories} />
         </div>
-      </section>
-
-      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] crm-panel-span !col-span-full">
-        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
-          <span>Cajas abiertas</span>
-          <button aria-label="Actualizar cajas abiertas" className="crm-icon-button !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150" disabled={disabled} onClick={() => void onRefresh()} type="button">
-            <RefreshCw className="h-4 w-4" />
-          </button>
-        </div>
-        <OpenCashSessionsList stats={stats} />
       </section>
 
       <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
@@ -126,8 +140,8 @@ export function DashboardCrm({
   )
 }
 
-function OpenCashSessionsList({ stats }: { stats: CrmStats | null }) {
-  const sessions = stats?.openCashSessions ?? []
+function OpenCashSessionsList({ selectedVenueId, showAll, stats }: { selectedVenueId: string; showAll: boolean; stats: CrmStats | null }) {
+  const sessions = (stats?.openCashSessions ?? []).filter((session) => showAll || session.venueId === selectedVenueId)
   const totalOpenSalesCents = sessions.reduce((total, session) => total + session.salesCents, 0)
 
   if (!stats) {
@@ -135,13 +149,13 @@ function OpenCashSessionsList({ stats }: { stats: CrmStats | null }) {
   }
 
   if (!sessions.length) {
-    return <EmptyList message="No hay cajas abiertas." />
+    return <EmptyList message={showAll ? 'No hay cajas abiertas.' : 'No hay cajas abiertas en el local seleccionado.'} />
   }
 
   return (
     <div className="crm-open-cash">
       <div className="crm-open-cash-summary !flex !min-h-[62px] !flex-col !items-start !justify-between !gap-3 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-green-soft)] !px-4 !py-3 md:!flex-row md:!items-center">
-        <span>{sessions.length} cajas abiertas</span>
+        <span>{sessions.length === 1 ? '1 caja abierta' : `${sessions.length} cajas abiertas`}</span>
         <strong>{formatMoney(totalOpenSalesCents)}</strong>
       </div>
       <div className="crm-open-cash-list">

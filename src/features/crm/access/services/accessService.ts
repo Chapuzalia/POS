@@ -6,8 +6,9 @@ import {
 } from "../../shared/services/crmServiceSupport";
 import {
   type CatalogProfile,
+  type CrmAccessUser,
   type CrmDevice,
-  type CrmPosUser,
+  type CrmDeviceAccount,
   type CrmVenue,
   type DeviceMode,
   type TenantContext,
@@ -16,7 +17,12 @@ import {
 export type CrmAccessData = {
   venues: CrmVenue[];
   devices: CrmDevice[];
-  users: CrmPosUser[];
+  users: CrmAccessUser[];
+};
+
+type CrmDeviceAccountRow = CrmDeviceAccount & {
+  deviceId: string;
+  venueId: string;
 };
 
 export async function loadCrmAccessData(
@@ -26,7 +32,7 @@ export async function loadCrmAccessData(
   const [
     { data: venueRows, error: venuesError },
     { data: deviceRows, error: devicesError },
-    usersResult,
+    accessResult,
   ] = await Promise.all([
     client
       .from("venues")
@@ -42,19 +48,37 @@ export async function loadCrmAccessData(
       )
       .eq("tenant_id", context.tenantId)
       .order("name"),
-    client.functions.invoke<{ users: CrmPosUser[] }>("manage-pos-users", {
+    client.functions.invoke<{
+      deviceAccounts: CrmDeviceAccountRow[];
+      users: CrmAccessUser[];
+    }>("manage-pos-users", {
       body: { action: "list", tenantId: context.tenantId },
     }),
   ]);
 
-  if (venuesError || devicesError || usersResult.error) {
-    throw venuesError ?? devicesError ?? usersResult.error;
+  if (venuesError || devicesError || accessResult.error) {
+    throw venuesError ?? devicesError ?? accessResult.error;
   }
 
-  const functionError = (usersResult.data as { error?: string } | null)?.error;
+  const functionError = (accessResult.data as { error?: string } | null)?.error;
   if (functionError) {
     throw new Error(functionError);
   }
+
+  const accountByDeviceId = new Map(
+    (accessResult.data?.deviceAccounts ?? []).map((account) => [
+      account.deviceId,
+      {
+        email: account.email,
+        fullName: account.fullName,
+        hasActiveLogin: account.hasActiveLogin,
+        isActive: account.isActive,
+        loginExpiresAt: account.loginExpiresAt,
+        loginHeartbeatAt: account.loginHeartbeatAt,
+        userId: account.userId,
+      },
+    ]),
+  );
 
   return {
     venues: (venueRows ?? []).map((venue) => ({
@@ -80,8 +104,9 @@ export async function loadCrmAccessData(
       isActive: device.is_active as boolean,
       deviceMode: device.device_mode as DeviceMode,
       defaultCashRegisterId: device.default_cash_register_id as string | null,
+      account: accountByDeviceId.get(device.id as string) ?? null,
     })),
-    users: usersResult.data?.users ?? [],
+    users: accessResult.data?.users ?? [],
   };
 }
 
@@ -257,15 +282,30 @@ export async function createCrmDevice(
   return data.credentials;
 }
 
-export async function retireCrmDevice(
+export async function updateCrmDevice(
   context: TenantContext,
   deviceId: string,
+  input: {
+    deviceMode: DeviceMode;
+    name: string;
+    password?: string;
+  },
 ) {
   const client = requireSupabase();
-  const { data, error } = await client.functions.invoke<{ error?: string }>(
+  const { data, error } = await client.functions.invoke<{
+    credentials?: { email: string };
+    error?: string;
+  }>(
     "manage-pos-users",
     {
-      body: { action: "retire-device", deviceId, tenantId: context.tenantId },
+      body: {
+        action: "update-device",
+        deviceId,
+        deviceMode: input.deviceMode,
+        deviceName: input.name.trim(),
+        password: input.password ?? "",
+        tenantId: context.tenantId,
+      },
     },
   );
 
@@ -274,40 +314,37 @@ export async function retireCrmDevice(
       await getFunctionInvokeErrorMessage(
         data,
         error,
-        "No se pudo retirar el dispositivo.",
+        "No se pudo actualizar el dispositivo.",
       ),
     );
   }
+  return data?.credentials;
 }
 
-export async function setCrmPosUserActive(
+export async function deleteCrmDevice(
   context: TenantContext,
-  userId: string,
-  isActive: boolean,
+  deviceId: string,
 ) {
   const client = requireSupabase();
   const { data, error } = await client.functions.invoke<{ error?: string }>(
     "manage-pos-users",
     {
-      body: {
-        action: "set-active",
-        tenantId: context.tenantId,
-        userId,
-        isActive,
-      },
+      body: { action: "delete-device", deviceId, tenantId: context.tenantId },
     },
   );
 
-  if (error) {
-    throw error;
-  }
-
-  if (data?.error) {
-    throw new Error(data.error);
+  if (error || data?.error) {
+    throw new Error(
+      await getFunctionInvokeErrorMessage(
+        data,
+        error,
+        "No se pudo eliminar el dispositivo.",
+      ),
+    );
   }
 }
 
-export async function releaseCrmPosUserLogin(
+export async function releaseCrmDeviceLogin(
   context: TenantContext,
   userId: string,
 ) {
@@ -316,52 +353,6 @@ export async function releaseCrmPosUserLogin(
     "manage-pos-users",
     {
       body: { action: "release-login", tenantId: context.tenantId, userId },
-    },
-  );
-
-  if (error) {
-    throw error;
-  }
-
-  if (data?.error) {
-    throw new Error(data.error);
-  }
-}
-
-export async function updateCrmPosUser(
-  context: TenantContext,
-  userId: string,
-  input: {
-    deviceId: string;
-    deviceMode: DeviceMode;
-    email: string;
-    fullName: string;
-    password?: string;
-  },
-) {
-  const client = requireSupabase();
-  const { data, error } = await client.functions.invoke<{ error?: string }>(
-    "manage-pos-users",
-    {
-      body: { action: "update", tenantId: context.tenantId, userId, ...input },
-    },
-  );
-
-  if (error) {
-    throw error;
-  }
-
-  if (data?.error) {
-    throw new Error(data.error);
-  }
-}
-
-export async function deleteCrmPosUser(context: TenantContext, userId: string) {
-  const client = requireSupabase();
-  const { data, error } = await client.functions.invoke<{ error?: string }>(
-    "manage-pos-users",
-    {
-      body: { action: "delete", tenantId: context.tenantId, userId },
     },
   );
 

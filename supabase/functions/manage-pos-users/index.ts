@@ -18,24 +18,11 @@ function randomIndex(max: number) {
 }
 
 function generateLoginPassword() {
-  const uppercase = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-  const lowercase = 'abcdefghijklmnopqrstuvwxyz'
-  const digits = '0123456789'
-  const allCharacters = `${uppercase}${lowercase}${digits}`
-  const password = [
-    uppercase[randomIndex(uppercase.length)],
-    lowercase[randomIndex(lowercase.length)],
-    digits[randomIndex(digits.length)],
-    ...Array.from({ length: 9 }, () => allCharacters[randomIndex(allCharacters.length)]),
-  ]
-
-  for (let index = password.length - 1; index > 0; index -= 1) {
-    const swapIndex = randomIndex(index + 1)
-    const current = password[index]
-    password[index] = password[swapIndex]
-    password[swapIndex] = current
-  }
-  return password.join('')
+  const characters = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+  return Array.from(
+    { length: 6 },
+    () => characters[randomIndex(characters.length)],
+  ).join('')
 }
 
 function normalizeEmailPart(value: string, separator: '' | '-' = '') {
@@ -617,9 +604,8 @@ Deno.serve(async (request) => {
         await Promise.all([
           adminClient
             .from('tenant_memberships')
-            .select('user_id, is_active')
-            .eq('tenant_id', tenantId)
-            .eq('role', 'cashier'),
+            .select('user_id, role, is_active')
+            .eq('tenant_id', tenantId),
           adminClient
             .from('device_user_assignments')
             .select('user_id, venue_id, device_id, is_active')
@@ -630,19 +616,26 @@ Deno.serve(async (request) => {
         throw membershipsError ?? assignmentsError
       }
 
-      const cashierIds = new Set((memberships ?? []).map((item) => item.user_id))
-      const { data: leases, error: leasesError } = cashierIds.size
+      const deviceUserIds = new Set((assignments ?? []).map((item) => item.user_id))
+      const managementMemberships = (memberships ?? []).filter((item) =>
+        ['owner', 'admin', 'manager'].includes(item.role)
+      )
+      const requestedUserIds = new Set([
+        ...deviceUserIds,
+        ...managementMemberships.map((item) => item.user_id),
+      ])
+      const { data: leases, error: leasesError } = deviceUserIds.size
         ? await adminClient
           .from('user_login_leases')
           .select('user_id, heartbeat_at, expires_at')
-          .in('user_id', [...cashierIds])
+          .in('user_id', [...deviceUserIds])
         : { data: [], error: null }
 
       if (leasesError) {
         throw leasesError
       }
 
-      const users = []
+      const authUsers = []
       let page = 1
 
       while (true) {
@@ -652,7 +645,7 @@ Deno.serve(async (request) => {
           throw error
         }
 
-        users.push(...data.users.filter((user) => cashierIds.has(user.id)))
+        authUsers.push(...data.users.filter((user) => requestedUserIds.has(user.id)))
         if (data.users.length < 1000) {
           break
         }
@@ -660,28 +653,37 @@ Deno.serve(async (request) => {
       }
 
       const membershipByUser = new Map((memberships ?? []).map((item) => [item.user_id, item]))
-      const assignmentByUser = new Map((assignments ?? []).map((item) => [item.user_id, item]))
       const leaseByUser = new Map((leases ?? []).map((item) => [item.user_id, item]))
+      const authUserById = new Map(authUsers.map((user) => [user.id, user]))
       const now = Date.now()
 
       return response({
-        users: users.map((user) => {
-          const userMembership = membershipByUser.get(user.id)
-          const assignment = assignmentByUser.get(user.id)
-          const lease = leaseByUser.get(user.id)
+        users: managementMemberships.map((userMembership) => {
+          const user = authUserById.get(userMembership.user_id)
+          return {
+            id: userMembership.user_id,
+            email: user?.email ?? '',
+            fullName: String(user?.user_metadata?.full_name ?? ''),
+            isActive: Boolean(userMembership.is_active),
+            role: userMembership.role,
+          }
+        }),
+        deviceAccounts: (assignments ?? []).map((assignment) => {
+          const user = authUserById.get(assignment.user_id)
+          const userMembership = membershipByUser.get(assignment.user_id)
+          const lease = leaseByUser.get(assignment.user_id)
           const hasActiveLogin = Boolean(lease && new Date(lease.expires_at).getTime() > now)
 
           return {
-            id: user.id,
-            email: user.email ?? '',
-            fullName: String(user.user_metadata?.full_name ?? ''),
+            userId: assignment.user_id,
+            email: user?.email ?? '',
+            fullName: String(user?.user_metadata?.full_name ?? ''),
             hasActiveLogin,
             isActive: Boolean(userMembership?.is_active && assignment?.is_active),
-            hasDeviceAssignment: Boolean(assignment),
             loginExpiresAt: hasActiveLogin ? lease?.expires_at ?? null : null,
             loginHeartbeatAt: hasActiveLogin ? lease?.heartbeat_at ?? null : null,
-            venueId: assignment?.venue_id ?? '',
-            deviceId: assignment?.device_id ?? '',
+            venueId: assignment.venue_id,
+            deviceId: assignment.device_id,
           }
         }),
       })
@@ -732,9 +734,7 @@ Deno.serve(async (request) => {
       }
       if (!device) throw new Error('No se pudo crear el dispositivo')
 
-      // The stable suffix prevents normalized names such as "Caja 1" and
-      // "Caja-1" from attempting to provision the same Auth email.
-      const email = `${emailDevice}-${device.id.slice(0, 8)}@${emailVenue}.${emailTenant}`
+      const email = `${emailDevice}@${emailVenue}.${emailTenant}`
 
       const { data: created, error: createError } = await adminClient.auth.admin.createUser({
         email,
@@ -778,6 +778,210 @@ Deno.serve(async (request) => {
       }
 
       return response({ credentials: { email, password }, deviceId: device.id, userId }, 201)
+    }
+
+    if (action === 'update-device') {
+      const deviceId = String(body.deviceId ?? '')
+      const deviceName = String(body.deviceName ?? '').trim()
+      const deviceMode = String(body.deviceMode ?? '')
+      const password = String(body.password ?? '')
+      if (
+        !deviceId
+        || !deviceName
+        || deviceName.length > 80
+        || !['checkout', 'satellite', 'hybrid'].includes(deviceMode)
+        || (password && password.length !== 6)
+      ) {
+        return response({ error: 'Nombre y modo son obligatorios; la nueva contrasena debe tener exactamente 6 caracteres' }, 400)
+      }
+
+      const [{ data: device, error: deviceError }, { data: assignment, error: assignmentError }, { data: tenant, error: tenantError }] = await Promise.all([
+        adminClient
+          .from('devices')
+          .select('id, venue_id, name, device_mode, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
+          .eq('tenant_id', tenantId)
+          .eq('id', deviceId)
+          .maybeSingle(),
+        adminClient
+          .from('device_user_assignments')
+          .select('user_id')
+          .eq('tenant_id', tenantId)
+          .eq('device_id', deviceId)
+          .limit(1)
+          .maybeSingle(),
+        adminClient.from('tenants').select('slug').eq('id', tenantId).eq('is_active', true).maybeSingle(),
+      ])
+      if (deviceError || assignmentError || tenantError) throw deviceError ?? assignmentError ?? tenantError
+      if (!device) return response({ error: 'El dispositivo no existe' }, 404)
+      if (!assignment) return response({ error: 'El dispositivo no tiene credenciales asociadas' }, 409)
+      if (!tenant) return response({ error: 'El negocio no existe o esta desactivado' }, 400)
+
+      const { data: venue, error: venueError } = await adminClient
+        .from('venues')
+        .select('name')
+        .eq('tenant_id', tenantId)
+        .eq('id', device.venue_id)
+        .maybeSingle()
+      if (venueError) throw venueError
+      if (!venue) return response({ error: 'El local del dispositivo no existe' }, 400)
+
+      if (device.device_mode !== deviceMode && deviceMode === 'satellite') {
+        const [{ data: openSession, error: openSessionError }, { data: openOrder, error: openOrderError }] = await Promise.all([
+          adminClient
+            .from('cash_sessions')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('opened_by_device_id', deviceId)
+            .eq('status', 'open')
+            .limit(1)
+            .maybeSingle(),
+          adminClient
+            .from('orders')
+            .select('id')
+            .eq('tenant_id', tenantId)
+            .eq('opened_by_device_id', deviceId)
+            .eq('status', 'open')
+            .limit(1)
+            .maybeSingle(),
+        ])
+        if (openSessionError || openOrderError) throw openSessionError ?? openOrderError
+        if (openSession || openOrder) {
+          return response({ error: 'Cierra la caja y las comandas abiertas antes de cambiar el dispositivo a modo satelite' }, 409)
+        }
+      }
+
+      const emailDevice = normalizeEmailPart(deviceName) || 'dispositivo'
+      const emailVenue = normalizeEmailPart(venue.name, '-') || 'local'
+      const emailTenant = normalizeEmailPart(tenant.slug, '-') || 'negocio'
+      const email = `${emailDevice}@${emailVenue}.${emailTenant}`
+      const nextDeviceValues = {
+        name: deviceName,
+        device_mode: deviceMode,
+        can_take_orders: true,
+        can_take_payments: deviceMode !== 'satellite',
+        can_open_cash_session: deviceMode !== 'satellite',
+        can_close_cash_session: deviceMode !== 'satellite',
+        can_manage_cash: deviceMode !== 'satellite',
+      }
+
+      const { error: deviceUpdateError } = await adminClient
+        .from('devices')
+        .update(nextDeviceValues)
+        .eq('tenant_id', tenantId)
+        .eq('id', deviceId)
+      if (deviceUpdateError) {
+        const message = deviceUpdateError.code === '23505'
+          ? 'Ya existe un dispositivo con ese nombre en el local'
+          : deviceUpdateError.message
+        return response({ error: message }, deviceUpdateError.code === '23505' ? 409 : 500)
+      }
+
+      const authAttributes: { email: string; password?: string; user_metadata: { full_name: string } } = {
+        email,
+        user_metadata: { full_name: deviceName },
+      }
+      if (password) authAttributes.password = password
+      const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(assignment.user_id, authAttributes)
+      if (authUpdateError) {
+        await adminClient.from('devices').update({
+          name: device.name,
+          device_mode: device.device_mode,
+          can_take_orders: device.can_take_orders,
+          can_take_payments: device.can_take_payments,
+          can_open_cash_session: device.can_open_cash_session,
+          can_close_cash_session: device.can_close_cash_session,
+          can_manage_cash: device.can_manage_cash,
+        }).eq('tenant_id', tenantId).eq('id', deviceId)
+        return response({ error: authUpdateError.message }, 409)
+      }
+
+      const { error: profileError } = await adminClient.from('profiles').upsert({
+        id: assignment.user_id,
+        full_name: deviceName,
+      })
+      if (profileError) throw profileError
+
+      if (password) {
+        const { error: releaseError } = await adminClient
+          .from('user_login_leases')
+          .delete()
+          .eq('user_id', assignment.user_id)
+        if (releaseError) throw releaseError
+      }
+
+      return response({ credentials: { email } })
+    }
+
+    if (action === 'delete-device') {
+      const deviceId = String(body.deviceId ?? '')
+      if (!deviceId) return response({ error: 'Dispositivo no valido' }, 400)
+
+      const [{ data: device, error: deviceError }, { data: assignment, error: assignmentError }] = await Promise.all([
+        adminClient.from('devices').select('id, name').eq('tenant_id', tenantId).eq('id', deviceId).maybeSingle(),
+        adminClient.from('device_user_assignments').select('user_id').eq('tenant_id', tenantId).eq('device_id', deviceId).limit(1).maybeSingle(),
+      ])
+      if (deviceError || assignmentError) throw deviceError ?? assignmentError
+      if (!device) return response({ error: 'El dispositivo no existe' }, 404)
+
+      const [{ data: openSession, error: openSessionError }, { data: openOrder, error: openOrderError }] = await Promise.all([
+        adminClient
+          .from('cash_sessions')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'open')
+          .or(`device_id.eq.${deviceId},opened_by_device_id.eq.${deviceId},cash_register_id.eq.${deviceId}`)
+          .limit(1)
+          .maybeSingle(),
+        adminClient
+          .from('orders')
+          .select('id')
+          .eq('tenant_id', tenantId)
+          .eq('status', 'open')
+          .or(`opened_by_device_id.eq.${deviceId},cash_register_id.eq.${deviceId}`)
+          .limit(1)
+          .maybeSingle(),
+      ])
+      if (openSessionError || openOrderError) throw openSessionError ?? openOrderError
+      if (openSession || openOrder) {
+        return response({ error: 'Cierra la caja y las comandas abiertas de este dispositivo antes de eliminarlo' }, 409)
+      }
+
+      if (assignment) {
+        const { data: targetMemberships, error: membershipsError } = await adminClient
+          .from('tenant_memberships')
+          .select('tenant_id, role')
+          .eq('user_id', assignment.user_id)
+        if (membershipsError) throw membershipsError
+        if (
+          targetMemberships?.length !== 1
+          || targetMemberships[0].tenant_id !== tenantId
+          || targetMemberships[0].role !== 'cashier'
+        ) {
+          return response({ error: 'Las credenciales del dispositivo estan vinculadas a otros accesos y no se pueden eliminar automaticamente' }, 409)
+        }
+      }
+
+      const { error: deleteDeviceError } = await adminClient
+        .from('devices')
+        .delete()
+        .eq('tenant_id', tenantId)
+        .eq('id', deviceId)
+      if (deleteDeviceError) throw deleteDeviceError
+
+      if (assignment) {
+        const cleanupResults = await Promise.all([
+          adminClient.from('tenant_memberships').delete().eq('tenant_id', tenantId).eq('user_id', assignment.user_id).eq('role', 'cashier'),
+          adminClient.from('user_login_leases').delete().eq('user_id', assignment.user_id),
+          adminClient.from('profiles').delete().eq('id', assignment.user_id),
+        ])
+        const cleanupError = cleanupResults.find((result) => result.error)?.error
+        if (cleanupError) throw cleanupError
+
+        const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(assignment.user_id, true)
+        if (deleteAuthError) throw deleteAuthError
+      }
+
+      return response({ ok: true })
     }
 
     if (action === 'retire-device') {

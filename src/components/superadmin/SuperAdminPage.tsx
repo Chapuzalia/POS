@@ -277,7 +277,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
             <Crown className="size-5 stroke-[1.8]" />
           </div>
           <div>
-            <p className="crm-brand-title !m-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-sm !leading-tight !font-semibold !text-[var(--crm-text)]">CLUB POS</p>
+            <p className="crm-brand-title !m-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-sm !leading-tight !font-semibold !text-[var(--crm-text)]">TICKIT</p>
             <p className="crm-brand-subtitle !mt-0.5 !mb-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Superadmin</p>
           </div>
         </div>

@@ -95,7 +95,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   if (profile?.is_superadmin) {
     return requireExclusiveLogin({
       tenantId: '',
-      tenantName: 'Plataforma CLUB POS',
+      tenantName: 'Plataforma TICKIT',
       tenantSlug: '',
       venueId: '',
       venueName: '',
@@ -280,7 +280,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   if (profile?.is_superadmin) {
     return requireExclusiveLogin({
       tenantId: '',
-      tenantName: 'Plataforma CLUB POS',
+      tenantName: 'Plataforma TICKIT',
       tenantSlug: '',
       venueId: '',
       venueName: '',
