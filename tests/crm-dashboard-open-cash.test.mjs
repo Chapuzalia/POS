@@ -22,3 +22,22 @@ test('el dashboard muestra primero las cajas y permite filtrar por el local sele
   assert.doesNotMatch(service, /openSessionsQuery = openSessionsQuery\.eq\('venue_id'/)
   assert.match(domain, /openCashSessions: Array<\{[\s\S]*venueId: string/)
 })
+
+test('las cajas abiertas actualizan el facturado por realtime con fallback periodico', async () => {
+  const [crmPage, service, migration] = await Promise.all([
+    readFile(new URL('../src/components/crm/CrmPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260725220000_enable_crm_dashboard_realtime.sql', import.meta.url), 'utf8'),
+  ])
+
+  for (const table of ['cash_sessions', 'sales', 'tickets']) {
+    assert.match(service, new RegExp(`table: '${table}'`))
+    assert.match(migration, new RegExp(`'${table}'`))
+  }
+  assert.match(service, /\.subscribe\(\(status, error\) => onStatus\?\.\(status, error\)\)/)
+  assert.match(crmPage, /status === 'SUBSCRIBED'/)
+  assert.match(crmPage, /status === 'CHANNEL_ERROR' \|\| status === 'TIMED_OUT' \|\| status === 'CLOSED'/)
+  assert.match(crmPage, /window\.setInterval\(scheduleRefresh, 3000\)/)
+  assert.match(crmPage, /window\.setTimeout\(\(\) => void refreshStats\(\{ silent: true \}\), 250\)/)
+  assert.match(migration, /alter publication supabase_realtime add table public\.%I/i)
+})

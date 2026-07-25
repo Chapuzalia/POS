@@ -227,7 +227,11 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue): Pro
   }
 }
 
-export function subscribeToCrmStatsChanges(context: TenantContext, onChange: () => void) {
+export function subscribeToCrmStatsChanges(
+  context: TenantContext,
+  onChange: () => void,
+  onStatus?: (status: string, error?: Error) => void,
+) {
   const client = supabase
 
   if (!client) {
@@ -251,7 +255,7 @@ export function subscribeToCrmStatsChanges(context: TenantContext, onChange: () 
       { event: '*', schema: 'public', table: 'tickets', filter: `tenant_id=eq.${context.tenantId}` },
       onChange,
     )
-    .subscribe()
+    .subscribe((status, error) => onStatus?.(status, error))
 
   return () => {
     void client.removeChannel(channel)

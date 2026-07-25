@@ -103,12 +103,26 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
   useEffect(() => {
     if (!isOnline || (activeSection !== 'dashboard' && activeSection !== 'stats')) return undefined
     let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
-    const unsubscribe = subscribeToCrmStatsChanges(context, () => {
+    let fallbackTimer: ReturnType<typeof window.setInterval> | null = null
+    const scheduleRefresh = () => {
       if (refreshTimer) window.clearTimeout(refreshTimer)
       refreshTimer = window.setTimeout(() => void refreshStats({ silent: true }), 250)
+    }
+    const unsubscribe = subscribeToCrmStatsChanges(context, scheduleRefresh, (status, channelError) => {
+      if (status === 'SUBSCRIBED') {
+        if (fallbackTimer) window.clearInterval(fallbackTimer)
+        fallbackTimer = null
+        scheduleRefresh()
+        return
+      }
+      if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && !fallbackTimer) {
+        console.warn('Realtime del dashboard CRM no disponible; se activa la actualización periódica.', channelError)
+        fallbackTimer = window.setInterval(scheduleRefresh, 3000)
+      }
     })
     return () => {
       if (refreshTimer) window.clearTimeout(refreshTimer)
+      if (fallbackTimer) window.clearInterval(fallbackTimer)
       unsubscribe()
     }
   }, [activeSection, context, isOnline, refreshStats])
