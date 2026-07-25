@@ -80,6 +80,13 @@ export const cashClosingPrintDocumentSchema = z.object({
   })),
   cashMovements: cashMovementsSchema,
   cashFund: z.object({ openingCashFundCents: cents, finalCashFundCents: cents }),
+  operationalSummary: z.object({
+    billedCardCents: signedCents,
+    billedCashCents: signedCents,
+    cardTerminalExpectedCents: signedCents,
+    cashOverOpeningFundCents: signedCents,
+    cashToWithdrawCents: signedCents,
+  }).optional(),
   differences: z.object({ cashDifferenceCents: signedCents, cardDifferenceCents: signedCents }),
   expectedAndCounted: z.object({
     expectedCashCents: signedCents,

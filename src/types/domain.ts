@@ -399,6 +399,7 @@ export type CashClosingRecord = {
   cashRegisterId: string
   closedAt: string
   closedBy: string
+  notes: string
   printSnapshot: CashClosingPrintSnapshot
   printStatus: 'not_requested' | 'pending' | 'printed' | 'failed' | 'unknown'
   printJobId: string | null
