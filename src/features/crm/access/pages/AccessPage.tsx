@@ -10,7 +10,9 @@ import { formatCrmDateTime } from '../../shared/formatCrmDateTime'
 import { type RunAction } from '../../shared/types'
 import {
   type CrmAccessData,
+  CRM_USER_PASSWORD_MIN_LENGTH,
   createCrmDevice,
+  createCrmUser,
   deleteCrmDevice,
   loadCrmAccessData,
   releaseCrmDeviceLogin,
@@ -30,10 +32,14 @@ const modeOptions = [
 ]
 
 const roleLabels = {
-
-  manager: 'Gestor',
+  manager: 'Manager',
   owner: 'Owner',
 }
+
+const roleOptions = [
+  { label: 'Manager', value: 'manager' },
+  { label: 'Owner', value: 'owner' },
+]
 
 export function AccessManagementCrm({ disabled, runAction, tenantContext }: AccessManagementCrmProps) {
   const [data, setData] = useState<CrmAccessData>({ devices: [], users: [], venues: [] })
@@ -45,6 +51,10 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
   const [editingDeviceName, setEditingDeviceName] = useState('')
   const [editingDeviceMode, setEditingDeviceMode] = useState<DeviceMode>('checkout')
   const [editingDevicePassword, setEditingDevicePassword] = useState('')
+  const [isUserModalOpen, setIsUserModalOpen] = useState(false)
+  const [userEmail, setUserEmail] = useState('')
+  const [userPassword, setUserPassword] = useState('')
+  const [userRole, setUserRole] = useState<'owner' | 'manager'>('manager')
 
   const refresh = useCallback(async () => {
     setData(await loadCrmAccessData(tenantContext))
@@ -65,6 +75,30 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
       setDeviceName('')
       await refresh()
       setGeneratedCredentials(credentials)
+    })
+  }
+
+  function openUserModal() {
+    setUserEmail('')
+    setUserPassword('')
+    setUserRole('manager')
+    setIsUserModalOpen(true)
+  }
+
+  async function submitUser(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    await runAction(async () => {
+      const user = await createCrmUser(tenantContext, {
+        email: userEmail,
+        password: userPassword,
+        role: userRole,
+      })
+      setData((current) => ({
+        ...current,
+        users: [...current.users, user].sort((first, second) => first.email.localeCompare(second.email)),
+      }))
+      setIsUserModalOpen(false)
+      sileo.success({ title: 'Usuario CRM creado' })
     })
   }
 
@@ -218,7 +252,9 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
         <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] xl:!col-span-2">
           <div className="crm-list-toolbar !flex !items-center !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
             <div className="crm-list-title"><h2>Usuarios con acceso al CRM</h2><p>{data.users.length} usuarios gestores · las cuentas técnicas de dispositivos no aparecen aquí</p></div>
-            <ShieldCheck className="!size-5 !text-[var(--crm-text-muted)]" />
+            <button className="crm-primary-button !inline-flex !min-h-10 !shrink-0 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || tenantContext.role !== 'owner'} onClick={openUserModal} type="button">
+              <Plus className="!size-4" /> <span className="!hidden sm:!inline">Añadir usuario</span><span className="sm:!hidden">Añadir</span>
+            </button>
           </div>
           <div className="!divide-y !divide-[var(--crm-border-subtle)]">
             {data.users.map((user) => (
@@ -232,6 +268,65 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
           </div>
         </section>
       </div>
+
+      {isUserModalOpen ? (
+        <CrmModal label="Añadir usuario CRM" onClose={() => setIsUserModalOpen(false)}>
+          <form onSubmit={(event) => void submitUser(event)}>
+            <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
+              <div>
+                <h2 className="!m-0 !text-lg !font-bold">Nuevo usuario CRM</h2>
+                <p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Crea sus credenciales y asigna el nivel de acceso al negocio.</p>
+              </div>
+              <button aria-label="Cerrar" className="crm-icon-button !inline-flex !size-9 !shrink-0 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" disabled={disabled} onClick={() => setIsUserModalOpen(false)} type="button"><X className="!size-4" /></button>
+            </div>
+            <div className="!grid !gap-4 !px-5 !py-5">
+              <Field label="Email">
+                <input
+                  autoComplete="email"
+                  autoFocus
+                  className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
+                  disabled={disabled}
+                  maxLength={254}
+                  onChange={(event) => setUserEmail(event.target.value)}
+                  placeholder="usuario@empresa.com"
+                  required
+                  type="email"
+                  value={userEmail}
+                />
+              </Field>
+              <Field label="Contraseña">
+                <input
+                  autoComplete="new-password"
+                  className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
+                  disabled={disabled}
+                  maxLength={72}
+                  minLength={CRM_USER_PASSWORD_MIN_LENGTH}
+                  onChange={(event) => setUserPassword(event.target.value)}
+                  required
+                  type="password"
+                  value={userPassword}
+                />
+              </Field>
+              <Field label="Rol">
+                <CrmSelect
+                  disabled={disabled}
+                  onChange={(value) => setUserRole(value as 'owner' | 'manager')}
+                  options={roleOptions}
+                  required
+                  value={userRole}
+                />
+              </Field>
+              <p className="crm-form-help">La contraseña debe tener al menos {CRM_USER_PASSWORD_MIN_LENGTH} caracteres.</p>
+              <div className="!flex !flex-col-reverse !gap-2 sm:!flex-row sm:!justify-end">
+                <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !px-4 !text-[13px] !font-semibold" disabled={disabled} onClick={() => setIsUserModalOpen(false)} type="button">Cancelar</button>
+                <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !userEmail.trim() || userPassword.length < CRM_USER_PASSWORD_MIN_LENGTH} type="submit">
+                  <ShieldCheck className="!size-4" /> Crear usuario
+                </button>
+              </div>
+            </div>
+          </form>
+        </CrmModal>
+      ) : null}
 
       {generatedCredentials ? (
         <CrmModal label="Credenciales del nuevo dispositivo" onClose={() => setGeneratedCredentials(null)}>

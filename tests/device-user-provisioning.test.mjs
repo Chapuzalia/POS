@@ -32,6 +32,28 @@ test('el crm ya no contiene el formulario manual de usuarios', async () => {
   assert.doesNotMatch(accessPage, /Usuarios de caja/)
 })
 
+test('el owner puede crear cuentas CRM con email, contrasena y rol desde Accesos', async () => {
+  const [accessPage, accessService, edgeFunction] = await Promise.all([
+    readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(accessPage, /Añadir usuario/)
+  assert.match(accessPage, /Nuevo usuario CRM/)
+  assert.match(accessPage, /type="email"/)
+  assert.match(accessPage, /type="password"/)
+  assert.match(accessPage, /roleOptions/)
+  assert.match(accessPage, /createCrmUser/)
+  assert.match(accessService, /action: "create-crm-user"/)
+  assert.match(accessService, /CRM_USER_PASSWORD_MIN_LENGTH = 8/)
+  assert.match(edgeFunction, /action === 'create-crm-user'/)
+  assert.match(edgeFunction, /\['owner', 'manager'\]\.includes\(role\)/)
+  assert.match(edgeFunction, /auth\.admin\.createUser/)
+  assert.match(edgeFunction, /from\('tenant_memberships'\)\.insert/)
+  assert.match(edgeFunction, /auth\.admin\.deleteUser\(userId, true\)/)
+})
+
 test('el crm muestra el detalle devuelto por la edge function en vez del error non-2xx genérico', async () => {
   const service = await readFile(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8')
   const support = await readFile(new URL('../src/features/crm/shared/services/crmServiceSupport.ts', import.meta.url), 'utf8')
