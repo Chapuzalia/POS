@@ -1,7 +1,7 @@
 import type { TenantRole } from '../../../types'
 import type { CrmSection } from './crmNavigation'
 
-const CRM_ROLES = new Set<TenantRole>(['owner', 'admin'])
+const CRM_ROLES = new Set<TenantRole>(['owner'])
 
 export function canAccessCrm(role: TenantRole) {
   return CRM_ROLES.has(role)

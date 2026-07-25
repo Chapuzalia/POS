@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react'
-import { isAdministrativeUser } from '../../../app/app-permissions'
+import { isBackofficeUser } from '../../../app/app-permissions'
 import { getCachedCashSession } from '../../../lib/offlineStore'
 import { loadOpenCashSession, subscribeToCashSessionChanges } from '../../../services/posService'
 import type { CashSession, TenantContext } from '../../../types'
@@ -18,7 +18,7 @@ export function useActiveCashSession(options: Options) {
   const { context, isOnline } = options
 
   useEffect(() => {
-    if (!context || !isOnline || isAdministrativeUser(context)) return undefined
+    if (!context || !isOnline || isBackofficeUser(context)) return undefined
     let active = true
     let refreshVersion = 0
     const refresh = async () => {

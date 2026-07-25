@@ -1409,14 +1409,14 @@ begin
     or device_row.venue_id <> session_row.venue_id then
     raise exception 'El dispositivo o el local no estan disponibles para este usuario' using errcode = '42501';
   end if;
-  if coalesce(member_role, '') not in ('manager', 'admin', 'owner')
+  if coalesce(member_role, '') not in ('manager', 'owner')
     and (not public.user_has_device_access(session_row.tenant_id, session_row.venue_id, device_row.id)
       or not public.user_has_venue_access(session_row.tenant_id, session_row.venue_id)) then
     raise exception 'El usuario no tiene acceso al dispositivo o al local' using errcode = '42501';
   end if;
 
   if not coalesce(device_row.can_manage_cash, false)
-    and coalesce(member_role, '') not in ('manager', 'admin', 'owner') then
+    and coalesce(member_role, '') not in ('manager', 'owner') then
     raise exception 'No tienes permiso para gestionar movimientos de caja' using errcode = '42501';
   end if;
 
@@ -3222,7 +3222,7 @@ begin
     where tm.tenant_id = closing.tenant_id and tm.user_id = auth.uid() and tm.is_active limit 1;
     select coalesce(d.can_manage_cash, false) into terminal_can_manage_cash from public.devices d
     where d.id = p_terminal_id and d.tenant_id = closing.tenant_id and d.venue_id = closing.venue_id;
-    if coalesce(member_role, '') not in ('owner', 'admin', 'manager') and not terminal_can_manage_cash then
+    if coalesce(member_role, '') not in ('owner', 'manager') and not terminal_can_manage_cash then
       raise exception 'No tienes permiso para reimprimir cierres' using errcode = '42501';
     end if;
   elsif closing.closed_by <> auth.uid() and not public.user_is_tenant_admin(closing.tenant_id) then
@@ -4576,7 +4576,7 @@ $$;
 -- Name: user_can_access_offline_event(uuid, text, jsonb, boolean); Type: FUNCTION; Schema: public; Owner: -
 --
 
-CREATE FUNCTION public.user_can_access_offline_event(target_tenant uuid, event_kind_value text, event_payload jsonb, allow_admin boolean DEFAULT true) RETURNS boolean
+CREATE FUNCTION public.user_can_access_offline_event(target_tenant uuid, event_kind_value text, event_payload jsonb, allow_owner boolean DEFAULT true) RETURNS boolean
     LANGUAGE plpgsql STABLE SECURITY DEFINER
     SET search_path TO ''
     AS $$
@@ -4586,7 +4586,7 @@ declare
   related_sale public.sales%rowtype;
   related_session public.cash_sessions%rowtype;
 begin
-  if allow_admin and public.user_is_tenant_admin(target_tenant) then
+  if allow_owner and public.user_is_tenant_admin(target_tenant) then
     return true;
   end if;
 
@@ -4748,7 +4748,7 @@ CREATE FUNCTION public.user_is_tenant_admin(target_tenant uuid) RETURNS boolean
     from public.tenant_memberships tm
     where tm.tenant_id = target_tenant
       and tm.user_id = auth.uid()
-      and tm.role in ('owner', 'admin')
+      and tm.role = 'owner'
       and tm.is_active = true
   );
 $$;
@@ -6141,7 +6141,7 @@ CREATE TABLE public.tenant_memberships (
     is_active boolean DEFAULT true NOT NULL,
     created_at timestamp with time zone DEFAULT now() NOT NULL,
     updated_at timestamp with time zone DEFAULT now() NOT NULL,
-    CONSTRAINT tenant_memberships_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'admin'::text, 'manager'::text, 'cashier'::text])))
+    CONSTRAINT tenant_memberships_role_check CHECK ((role = ANY (ARRAY['owner'::text, 'manager'::text, 'cashier'::text])))
 );
 
 
@@ -9488,10 +9488,10 @@ CREATE POLICY catalog_audit_log_select ON public.catalog_audit_log FOR SELECT TO
 ALTER TABLE public.catalog_placements ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: catalog_placements catalog_placements_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: catalog_placements catalog_placements_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY catalog_placements_admin_manage ON public.catalog_placements TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY catalog_placements_owner_manage ON public.catalog_placements TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9508,10 +9508,10 @@ CREATE POLICY catalog_placements_select ON public.catalog_placements FOR SELECT 
 ALTER TABLE public.catalog_sale_formats ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: catalog_sale_formats catalog_sale_formats_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: catalog_sale_formats catalog_sale_formats_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY catalog_sale_formats_admin_manage ON public.catalog_sale_formats TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY catalog_sale_formats_owner_manage ON public.catalog_sale_formats TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9548,10 +9548,10 @@ CREATE POLICY catalog_tab_categories_select ON public.catalog_tab_categories FOR
 ALTER TABLE public.catalog_tabs ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: catalog_tabs catalog_tabs_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: catalog_tabs catalog_tabs_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY catalog_tabs_admin_manage ON public.catalog_tabs TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY catalog_tabs_owner_manage ON public.catalog_tabs TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9568,10 +9568,10 @@ CREATE POLICY catalog_tabs_select ON public.catalog_tabs FOR SELECT TO authentic
 ALTER TABLE public.categories ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: categories categories_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: categories categories_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY categories_admin_manage ON public.categories TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY categories_owner_manage ON public.categories TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9582,10 +9582,10 @@ CREATE POLICY categories_select ON public.categories FOR SELECT TO authenticated
 
 
 --
--- Name: device_user_assignments device_assignments_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: device_user_assignments device_assignments_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY device_assignments_admin_manage ON public.device_user_assignments TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY device_assignments_owner_manage ON public.device_user_assignments TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9608,10 +9608,10 @@ ALTER TABLE public.device_user_assignments ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.devices ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: devices devices_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: devices devices_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY devices_admin_manage ON public.devices TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY devices_owner_manage ON public.devices TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9628,10 +9628,10 @@ CREATE POLICY devices_select ON public.devices FOR SELECT TO authenticated USING
 ALTER TABLE public.dining_areas ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: dining_areas dining_areas_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: dining_areas dining_areas_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY dining_areas_admin_manage ON public.dining_areas TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY dining_areas_owner_manage ON public.dining_areas TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9648,10 +9648,10 @@ CREATE POLICY dining_areas_select ON public.dining_areas FOR SELECT TO authentic
 ALTER TABLE public.discounts ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: discounts discounts_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: discounts discounts_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY discounts_admin_manage ON public.discounts TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY discounts_owner_manage ON public.discounts TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9662,10 +9662,10 @@ CREATE POLICY discounts_select ON public.discounts FOR SELECT TO authenticated U
 
 
 --
--- Name: tenant_memberships memberships_admin_all; Type: POLICY; Schema: public; Owner: -
+-- Name: tenant_memberships memberships_owner_all; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY memberships_admin_all ON public.tenant_memberships USING (public.user_has_tenant_role(tenant_id, ARRAY['owner'::text, 'admin'::text])) WITH CHECK (public.user_has_tenant_role(tenant_id, ARRAY['owner'::text, 'admin'::text]));
+CREATE POLICY memberships_owner_all ON public.tenant_memberships USING (public.user_has_tenant_role(tenant_id, ARRAY['owner'::text])) WITH CHECK (public.user_has_tenant_role(tenant_id, ARRAY['owner'::text]));
 
 
 --
@@ -9682,10 +9682,10 @@ CREATE POLICY memberships_self_select ON public.tenant_memberships FOR SELECT US
 ALTER TABLE public.modifier_groups ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: modifier_groups modifier_groups_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: modifier_groups modifier_groups_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY modifier_groups_admin_manage ON public.modifier_groups TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY modifier_groups_owner_manage ON public.modifier_groups TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9702,10 +9702,10 @@ CREATE POLICY modifier_groups_select ON public.modifier_groups FOR SELECT TO aut
 ALTER TABLE public.modifiers ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: modifiers modifiers_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: modifiers modifiers_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY modifiers_admin_manage ON public.modifiers TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY modifiers_owner_manage ON public.modifiers TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9920,10 +9920,10 @@ CREATE POLICY product_selection_group_assignments_select ON public.product_selec
 ALTER TABLE public.product_variants ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: product_variants product_variants_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: product_variants product_variants_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY product_variants_admin_manage ON public.product_variants TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY product_variants_owner_manage ON public.product_variants TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -9942,10 +9942,10 @@ CREATE POLICY product_variants_select ON public.product_variants FOR SELECT TO a
 ALTER TABLE public.products ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: products products_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: products products_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY products_admin_manage ON public.products TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY products_owner_manage ON public.products TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -10001,10 +10001,10 @@ CREATE POLICY restaurant_order_equal_splits_select ON public.restaurant_order_eq
 ALTER TABLE public.restaurant_tables ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: restaurant_tables restaurant_tables_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: restaurant_tables restaurant_tables_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY restaurant_tables_admin_manage ON public.restaurant_tables TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY restaurant_tables_owner_manage ON public.restaurant_tables TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -10101,10 +10101,10 @@ CREATE POLICY selection_group_options_select ON public.selection_group_options F
 ALTER TABLE public.selection_groups ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: selection_groups selection_groups_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: selection_groups selection_groups_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY selection_groups_admin_manage ON public.selection_groups TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY selection_groups_owner_manage ON public.selection_groups TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -10222,10 +10222,10 @@ ALTER TABLE public.user_login_leases ENABLE ROW LEVEL SECURITY;
 ALTER TABLE public.venues ENABLE ROW LEVEL SECURITY;
 
 --
--- Name: venues venues_admin_manage; Type: POLICY; Schema: public; Owner: -
+-- Name: venues venues_owner_manage; Type: POLICY; Schema: public; Owner: -
 --
 
-CREATE POLICY venues_admin_manage ON public.venues TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
+CREATE POLICY venues_owner_manage ON public.venues TO authenticated USING (public.user_is_tenant_admin(tenant_id)) WITH CHECK (public.user_is_tenant_admin(tenant_id));
 
 
 --
@@ -10736,11 +10736,11 @@ GRANT ALL ON FUNCTION public.sync_sale_created_v2(p_event_id uuid, p_payload jso
 
 
 --
--- Name: FUNCTION user_can_access_offline_event(target_tenant uuid, event_kind_value text, event_payload jsonb, allow_admin boolean); Type: ACL; Schema: public; Owner: -
+-- Name: FUNCTION user_can_access_offline_event(target_tenant uuid, event_kind_value text, event_payload jsonb, allow_owner boolean); Type: ACL; Schema: public; Owner: -
 --
 
-REVOKE ALL ON FUNCTION public.user_can_access_offline_event(target_tenant uuid, event_kind_value text, event_payload jsonb, allow_admin boolean) FROM PUBLIC;
-GRANT ALL ON FUNCTION public.user_can_access_offline_event(target_tenant uuid, event_kind_value text, event_payload jsonb, allow_admin boolean) TO authenticated;
+REVOKE ALL ON FUNCTION public.user_can_access_offline_event(target_tenant uuid, event_kind_value text, event_payload jsonb, allow_owner boolean) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.user_can_access_offline_event(target_tenant uuid, event_kind_value text, event_payload jsonb, allow_owner boolean) TO authenticated;
 
 
 --
@@ -11043,7 +11043,7 @@ GRANT SELECT ON TABLE public.ticket_line_components TO authenticated;
 
 
 --
--- Supabase Storage: final product image bucket and tenant-admin policies.
+-- Supabase Storage: final product image bucket and tenant-owner policies.
 -- These objects live outside public and are therefore not emitted by the
 -- public-only schema dump above.
 --

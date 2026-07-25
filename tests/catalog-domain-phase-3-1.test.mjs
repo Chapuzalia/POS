@@ -111,7 +111,7 @@ test('rechaza default inactiva, ausencia de default y producto sin variante vend
   assert.throws(() => resolveSellableProduct({ ...catalog, variants: [noDefault] }, 'product-1'), /predeterminada activa/)
 })
 
-test('excluye placements con producto o categoría inactivos sin ocultar categorías admin sin uso', () => {
+test('excluye placements con producto o categoría inactivos sin ocultar categorías del CRM sin uso', () => {
   const catalog = catalogFixture()
   const unused = row('category-unused', { name: 'Sin uso', icon: null, unused: true, sortOrder: 2 })
   const inactiveProduct = { ...catalog.products[0], active: false }

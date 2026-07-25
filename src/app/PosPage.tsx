@@ -195,8 +195,8 @@ export function PosPage(props: Props) {
       <AppHeader
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true}
-        canManageCash={Boolean(props.context.canManageCash || ['manager', 'admin', 'owner'].includes(props.context.role))}
-        canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'admin', 'owner'].includes(props.context.role))}
+        canManageCash={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
+        canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
         onCloseCash={() => void (async () => {
@@ -409,7 +409,7 @@ export function PosPage(props: Props) {
         userId={props.context.userId}
       /> : null}
       {cash.historyOpen ? <SessionTicketsModal
-        canReprint={Boolean(props.context.canManageCash || props.context.canCloseCashSession || ['manager', 'admin', 'owner'].includes(props.context.role))}
+        canReprint={Boolean(props.context.canManageCash || props.context.canCloseCashSession || ['manager', 'owner'].includes(props.context.role))}
         isBusy={props.isBusy}
         onChangePayment={cash.ticketActions.changePayment}
         onClose={() => cash.setHistoryOpen(false)}
@@ -424,7 +424,7 @@ export function PosPage(props: Props) {
         onPrint={() => void cash.printClosing(cash.completedClosing!)}
       /> : null}
       {cash.closingHistoryOpen ? <CashClosingsHistoryModal
-        canReprint={Boolean(props.context.canManageCash || ['manager', 'admin', 'owner'].includes(props.context.role))}
+        canReprint={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         closings={cash.cashClosings}
         onClose={() => cash.setClosingHistoryOpen(false)}
         onReprint={(closing) => void cash.printClosing(closing, { isReprint: true, copyNumber: closing.printCopies + 1 })}

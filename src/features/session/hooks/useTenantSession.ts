@@ -12,7 +12,7 @@ import {
 import { forceClaimLoginLease, releaseLocalLoginLock } from '../../../services/loginLeaseService'
 import type { LoginInput, TenantContext } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
-import { isAdministrativeUser } from '../../../app/app-permissions'
+import { isBackofficeUser } from '../../../app/app-permissions'
 
 type UseTenantSessionOptions<TenantState> = {
   isOnline: boolean
@@ -41,7 +41,7 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
   } = options
 
   const activateAuthenticatedContext = useCallback(async (context: TenantContext) => {
-    if (!isAdministrativeUser(context)) await syncPendingEvents()
+    if (!isBackofficeUser(context)) await syncPendingEvents()
     applyTenantState(context, await loadTenantState(context))
   }, [applyTenantState, loadTenantState, syncPendingEvents])
 
@@ -74,7 +74,7 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
       current.setError(null)
       try {
         const context = await restoreTenantContext(cachedContext)
-        if (!isAdministrativeUser(context)) await current.syncPendingEvents()
+        if (!isBackofficeUser(context)) await current.syncPendingEvents()
         const state = await current.loadTenantState(context)
         if (!cancelled) current.applyTenantState(context, state)
       } catch (error) {
@@ -138,7 +138,7 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
     if (!context) return
     setIsBusy(true); setError(null)
     try {
-      if (isAdministrativeUser(context)) throw new TenantSessionError('El CRM de administracion requiere conexion.')
+      if (isBackofficeUser(context)) throw new TenantSessionError('El CRM requiere conexion.')
       if (!(await hasValidOfflineSession(context))) throw new TenantSessionError('La sesion ha caducado. Conecta el TPV e inicia sesion de nuevo.')
       await applyOfflineState(context)
     } catch (error) { setError(getReadableError(error)) } finally { setIsBusy(false) }

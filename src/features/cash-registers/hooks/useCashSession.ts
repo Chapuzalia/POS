@@ -270,7 +270,7 @@ export function useCashSession(options: Options) {
     if (!context || !activeSession || !options.isOnline) {
       throw new Error('Los movimientos de caja requieren una caja abierta y conexion.')
     }
-    if (!context.canManageCash && !['manager', 'admin', 'owner'].includes(context.role)) {
+    if (!context.canManageCash && !['manager', 'owner'].includes(context.role)) {
       throw new Error('No tienes permiso para gestionar movimientos de caja.')
     }
     setMovementSaving(true)

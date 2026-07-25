@@ -139,7 +139,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw new Error(`No se pudo cargar el negocio asignado: ${getReadableError(tenantError)}`)
   }
 
-  if (membership.role === 'owner' || membership.role === 'admin') {
+  if (membership.role === 'owner') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
       tenantName: tenant.name,
@@ -149,13 +149,13 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
       deviceId: '',
       deviceName: '',
       userId: user.id,
-      userName: user.user_metadata.full_name ?? user.email ?? 'Administrador',
+      userName: user.user_metadata.full_name ?? user.email ?? 'Propietario',
       role: membership.role,
     })
   }
 
   if (membership.role !== 'cashier') {
-    throw new Error('Este usuario no tiene permisos de administracion ni una cuenta de caja compatible.')
+    throw new Error('Este usuario no es propietario del negocio ni tiene una cuenta de caja compatible.')
   }
 
   const { data: assignment, error: assignmentError } = await supabase
@@ -171,7 +171,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   }
 
   if (!assignment) {
-    throw new Error('Este usuario no tiene ningun dispositivo activo asignado. Contacta con administracion.')
+    throw new Error('Este usuario no tiene ningun dispositivo activo asignado. Contacta con el propietario.')
   }
 
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
@@ -315,7 +315,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new TenantSessionError('El usuario ya no tiene acceso activo a este negocio.')
   }
 
-  if (membership.role === 'owner' || membership.role === 'admin') {
+  if (membership.role === 'owner') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
       tenantName: tenant.name,
@@ -325,7 +325,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
       deviceId: '',
       deviceName: '',
       userId: user.id,
-      userName: user.user_metadata.full_name ?? user.email ?? 'Administrador',
+      userName: user.user_metadata.full_name ?? user.email ?? 'Propietario',
       role: membership.role,
     })
   }

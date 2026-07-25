@@ -7,7 +7,7 @@ import {
   mergeLedgers,
 } from '../../../services/posService'
 import type { TenantContext } from '../../../types'
-import { isCrmAdministrator, isSuperadmin } from '../../../app/app-permissions'
+import { isCrmOwner, isSuperadmin } from '../../../app/app-permissions'
 
 const emptyCatalogState = {
   catalog: null,
@@ -19,7 +19,7 @@ export async function loadTenantState(context: TenantContext) {
   if (isSuperadmin(context)) {
     return { ...emptyCatalogState, cashSession: null, productSalesStats: [], salesLedger: [] }
   }
-  if (isCrmAdministrator(context)) {
+  if (isCrmOwner(context)) {
     return {
       ...emptyCatalogState,
       cashSession: null,

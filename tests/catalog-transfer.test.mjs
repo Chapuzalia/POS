@@ -75,7 +75,7 @@ test('la pestaña ofrece importación propia con confirmación de reemplazo', ()
   assert.match(progressBar, /labelPosition === 'right'/)
 })
 
-test('la migración exporta formatos e imágenes y restringe el RPC al owner o admin', () => {
+test('la migración exporta formatos e imágenes y restringe el RPC al owner', () => {
   assert.match(migration, /'schemaVersion',4/)
   assert.match(migration, /'saleFormats'/)
   assert.match(migration, /'saleFormatRef'/)

@@ -30,7 +30,7 @@ const modeOptions = [
 ]
 
 const roleLabels = {
-  admin: 'Administrador',
+
   manager: 'Gestor',
   owner: 'Owner',
 }

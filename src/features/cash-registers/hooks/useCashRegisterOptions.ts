@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { isAdministrativeUser } from '../../../app/app-permissions'
+import { isBackofficeUser } from '../../../app/app-permissions'
 import type { CashRegister, CashSession, TenantContext } from '../../../types'
 import { loadCashRegisterOptions, subscribeToVenueCashSessions } from '../service'
 
@@ -19,7 +19,7 @@ export function useCashRegisterOptions(options: Options) {
   const { context, isOnline } = options
 
   const refresh = useCallback(async (activeContext = context) => {
-    if (!activeContext || !isOnline || isAdministrativeUser(activeContext)) return
+    if (!activeContext || !isOnline || isBackofficeUser(activeContext)) return
     const state = await loadCashRegisterOptions(activeContext)
     setRegisters(state.registers)
     setSessions(state.sessions)
@@ -37,7 +37,7 @@ export function useCashRegisterOptions(options: Options) {
   }, [context, isOnline])
 
   useEffect(() => {
-    if (!context || !isOnline || isAdministrativeUser(context)) {
+    if (!context || !isOnline || isBackofficeUser(context)) {
       setRegisters([])
       setSessions([])
       return undefined

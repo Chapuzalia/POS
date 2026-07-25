@@ -1,4 +1,4 @@
--- Complete, portable catalog import/export for CRM owners and admins.
+-- Complete, portable catalog import/export for CRM owners.
 -- Both RPCs are SECURITY DEFINER and validate tenant administration internally.
 
 CREATE OR REPLACE FUNCTION public.export_catalog(p_venue_id uuid) RETURNS jsonb
@@ -107,7 +107,7 @@ begin
 end; $$;
 
 COMMENT ON FUNCTION public.import_catalog(uuid, text, jsonb)
-  IS 'Transactional catalog replacement restricted to active tenant owners/admins and service_role.';
+  IS 'Transactional catalog replacement restricted to active tenant owners and service_role.';
 
 REVOKE ALL ON FUNCTION public.export_catalog(uuid) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION public.export_catalog(uuid) TO authenticated;
