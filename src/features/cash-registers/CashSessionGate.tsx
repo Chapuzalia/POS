@@ -39,7 +39,7 @@ export function CashSessionGate({ cashClosings, closingHistoryOpen, completedClo
       </section>
       {completedClosing ? <CashClosingResultModal closing={completedClosing} isPrinting={printingClosingId === completedClosing.id} onClose={onCloseCompletedClosing} onPrint={() => onPrintClosing(completedClosing, false)} /> : null}
       {closingHistoryOpen ? <CashClosingsHistoryModal
-        canReprint={Boolean(context.canManageCash || ['manager', 'admin', 'owner'].includes(context.role))}
+        canReprint={Boolean(context.canManageCash || ['manager', 'owner'].includes(context.role))}
         closings={cashClosings}
         onClose={onCloseClosingHistory}
         onReprint={(closing) => onPrintClosing(closing, true)}

@@ -6,13 +6,13 @@ import { resolveSelectedVenueId } from '../src/features/crm/venues/services/venu
 import { buildProductCreationBatch, validateVariantDrafts } from '../src/features/crm/catalog/services/catalogAdminModel.ts'
 import { buildSalesReportAggregates, buildSalesReportTicketTotals, buildSalesReportTotals, compareSalesReportValues } from '../src/features/crm/sales/services/salesReportModel.ts'
 
-test('CRM permissions preserve owner/admin access and reject POS roles', () => {
+test('CRM permissions preserve owner access and reject non-owner roles', () => {
   assert.equal(canAccessCrm('owner'), true)
-  assert.equal(canAccessCrm('admin'), true)
+
   assert.equal(canAccessCrm('manager'), false)
   assert.equal(canAccessCrm('cashier'), false)
   assert.equal(canAccessCrmSection('owner', 'settings'), true)
-  assert.equal(canAccessCrmSection('admin', 'reports'), true)
+
 })
 
 test('venue selection keeps an active venue and falls back deterministically', () => {

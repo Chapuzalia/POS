@@ -33,7 +33,7 @@ export function ConfigModal({
 }: ConfigModalProps) {
   const [section, setSection] = useState<'general' | 'printing'>('general')
   const theme = themes.find((item) => item.id === themeId)
-  const canManageHardware = context.canManageCash === true || ['manager', 'admin', 'owner', 'superadmin'].includes(context.role)
+  const canManageHardware = context.canManageCash === true || ['manager', 'owner', 'superadmin'].includes(context.role)
 
   if (section === 'printing') {
     return (

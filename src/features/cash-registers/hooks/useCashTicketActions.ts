@@ -41,7 +41,7 @@ export function useCashTicketActions(options: Options) {
 
   const reprint = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
-    if (!context || !(context.canManageCash || context.canCloseCashSession || ['manager', 'admin', 'owner'].includes(context.role))) {
+    if (!context || !(context.canManageCash || context.canCloseCashSession || ['manager', 'owner'].includes(context.role))) {
       options.setError('Tu usuario no tiene permiso para reimprimir tickets.'); return
     }
     const currentJob = usePrintAgentStore.getState().currentJob

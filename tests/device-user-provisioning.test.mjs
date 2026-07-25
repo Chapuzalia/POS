@@ -57,7 +57,7 @@ test('accesos integra las credenciales y la edición dentro de cada dispositivo'
   assert.match(edgeFunction, /action === 'update-device'/)
   assert.match(edgeFunction, /password\.length !== 6/)
   assert.match(edgeFunction, /managementMemberships/)
-  assert.match(edgeFunction, /\['owner', 'admin', 'manager'\]/)
+  assert.match(edgeFunction, /\['owner', 'manager'\]/)
 })
 
 test('los headers de dispositivos y usuarios usan los tokens del tema CRM', async () => {

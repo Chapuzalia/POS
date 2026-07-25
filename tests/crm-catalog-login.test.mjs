@@ -5,10 +5,10 @@ import test from 'node:test'
 test('CRM login defers catalog loading until a venue has been selected', async () => {
   const sessionSource = await readFile(new URL('../src/features/session/services/loadTenantState.ts', import.meta.url), 'utf8')
   const hookSource = await readFile(new URL('../src/features/crm/catalog/hooks/useCatalogAdmin.ts', import.meta.url), 'utf8')
-  const adminBranch = sessionSource.match(/if \(isCrmAdministrator\(context\)\) \{([\s\S]*?)\n  \}/)?.[1] ?? ''
+  const ownerBranch = sessionSource.match(/if \(isCrmOwner\(context\)\) \{([\s\S]*?)\n  \}/)?.[1] ?? ''
 
-  assert.match(adminBranch, /\.\.\.emptyCatalogState/)
-  assert.doesNotMatch(adminBranch, /loadPosCatalogFromSupabase/)
+  assert.match(ownerBranch, /\.\.\.emptyCatalogState/)
+  assert.doesNotMatch(ownerBranch, /loadPosCatalogFromSupabase/)
   assert.match(hookSource, /if \(!venueId \|\| !enabled\)/)
   assert.match(hookSource, /if \(enabled && venueId\) void refresh\(false\)/)
 })
