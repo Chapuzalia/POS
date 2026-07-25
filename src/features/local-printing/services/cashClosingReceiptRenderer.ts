@@ -27,15 +27,24 @@ function getCashClosingReceiptSections(document: CashClosingPrintDocument, money
       '',
       row('Media por venta', money(document.summary.averageSaleCents)),
     ]),
-    ...section('Pagos', [
+    ...section('Ventas facturadas', [
       ...document.payments.map((payment) => row(payment.label, money(payment.amountCents))),
-      ...(document.includeTotalPayments ? [row('Total pagos', money(document.payments.reduce((total, payment) => total + payment.amountCents, 0)))] : []),
+      ...(document.includeTotalPayments ? [row('Total facturado', money(document.payments.reduce((total, payment) => total + payment.amountCents, 0)))] : []),
     ]),
-    ...section('Entradas/Salidas', [
+    ...section('Movimientos no facturados', [
       row('Entradas de efectivo', money(document.cashMovements.cashEntriesCents)),
       row('Salidas de efectivo', money(document.cashMovements.cashExitsCents)),
-      row('Efectivo por tarjeta', money(document.cashMovements.cardCashbackCents)),
+      row('Tarjeta por efectivo', money(document.cashMovements.cardCashbackCents)),
     ]),
+    ...(document.operationalSummary
+      ? section('Arqueo operativo', [
+          row('Efectivo sobre fondo inicial', money(document.operationalSummary.cashOverOpeningFundCents)),
+          row('Datafono esperado', money(document.operationalSummary.cardTerminalExpectedCents)),
+          document.operationalSummary.cashToWithdrawCents >= 0
+            ? row('RETIRAR DE CAJA', money(document.operationalSummary.cashToWithdrawCents))
+            : row('ANADIR A CAJA', money(-document.operationalSummary.cashToWithdrawCents)),
+        ])
+      : []),
     ...section('Fondo de caja', [
       row('Fondo de efectivo', money(document.cashFund.openingCashFundCents)),
       row('Fondo de caja final', money(document.cashFund.finalCashFundCents)),

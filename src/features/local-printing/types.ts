@@ -130,6 +130,13 @@ export type CashClosingPrintDocument = {
     cardCashbackCents: number
   }
   cashFund: { openingCashFundCents: number; finalCashFundCents: number }
+  operationalSummary?: {
+    billedCardCents: number
+    billedCashCents: number
+    cardTerminalExpectedCents: number
+    cashOverOpeningFundCents: number
+    cashToWithdrawCents: number
+  }
   differences: { cashDifferenceCents: number; cardDifferenceCents: number }
   expectedAndCounted?: {
     expectedCashCents: number

@@ -22,6 +22,8 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
   const [notes, setNotes] = useState('')
   const countedCashCents = parseMoneyToCents(countedCash)
   const countedCardCents = parseMoneyToCents(countedCard)
+  const finalCashFundCents = parseMoneyToCents(finalCashFund)
+  const cashToWithdrawCents = countedCashCents - finalCashFundCents
   const expectedTotal = summary.cashCents + summary.cardCents
   const countedTotal = countedCashCents + countedCardCents
   const discrepancy = countedTotal - expectedTotal
@@ -42,7 +44,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
       countedInvitationCents: summary.invitationCents,
       countedOtherCents: summary.otherCents,
       discrepancyCents: discrepancy,
-      finalCashFundCents: parseMoneyToCents(finalCashFund),
+      finalCashFundCents,
       notes: notes.trim(),
     })
   }
@@ -103,12 +105,16 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
           ))}
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <div className="mt-5 grid gap-3 sm:grid-cols-3">
           <Metric label="Total esperado" value={formatMoney(expectedTotal)} />
           <Metric
             label="Descuadre"
             tone={discrepancy === 0 ? 'success' : 'danger'}
             value={formatMoney(discrepancy)}
+          />
+          <Metric
+            label={cashToWithdrawCents >= 0 ? 'Retirar de caja' : 'Añadir a caja'}
+            value={formatMoney(Math.abs(cashToWithdrawCents))}
           />
         </div>
 

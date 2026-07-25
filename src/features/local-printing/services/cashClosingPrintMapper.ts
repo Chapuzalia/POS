@@ -1,4 +1,5 @@
 import type { CashClosingRecord } from '../../../types/index.ts'
+import { getCashClosingAmounts } from '../../cash-registers/services/cashClosingAmounts.ts'
 import type { CashClosingPrintDocument, PrintAgentPreferences, PrintRequest } from '../types.ts'
 import { printRequestSchema } from '../schemas/printSchemas.ts'
 import { getCashClosingReceiptDetails } from './cashClosingReceiptRenderer.ts'
@@ -36,6 +37,7 @@ export function mapCashClosingToPrintRequest({ closing, printerId, settings, isR
     payments,
     cashMovements: snapshot.cashMovements,
     cashFund: snapshot.cashFund,
+    operationalSummary: getCashClosingAmounts(snapshot),
     differences: snapshot.differences,
     ...(settings.includeExpectedAndCountedAmounts ? { expectedAndCounted: snapshot.expectedAndCounted } : {}),
     ...(settings.includeUserNames ? { users: { openedBy: snapshot.openedBy, closedBy: snapshot.closedBy } } : {}),

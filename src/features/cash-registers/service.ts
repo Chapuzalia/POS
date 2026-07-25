@@ -119,6 +119,7 @@ type ClosingRow = {
   cash_register_id: string
   closed_at: string
   closed_by: string
+  notes: string | null
   print_snapshot: CashClosingPrintSnapshot
   print_status: CashClosingRecord['printStatus']
   print_job_id: string | null
@@ -129,7 +130,7 @@ type ClosingRow = {
   print_copies: number
 }
 
-const closingColumns = 'id, tenant_id, venue_id, cash_register_id, closed_at, closed_by, print_snapshot, print_status, print_job_id, print_request_id, printed_at, print_error_code, print_attempts, print_copies'
+const closingColumns = 'id, tenant_id, venue_id, cash_register_id, closed_at, closed_by, notes, print_snapshot, print_status, print_job_id, print_request_id, printed_at, print_error_code, print_attempts, print_copies'
 
 function mapClosing(row: ClosingRow): CashClosingRecord {
   const snapshot = cashClosingPrintDocumentSchema
@@ -144,6 +145,7 @@ function mapClosing(row: ClosingRow): CashClosingRecord {
   return {
     id: row.id, tenantId: row.tenant_id, venueId: row.venue_id,
     cashRegisterId: row.cash_register_id, closedAt: row.closed_at, closedBy: row.closed_by,
+    notes: row.notes?.trim() ?? '',
     printSnapshot: snapshot, printStatus: row.print_status || 'not_requested',
     printJobId: row.print_job_id, printRequestId: row.print_request_id, printedAt: row.printed_at,
     printErrorCode: row.print_error_code, printAttempts: row.print_attempts || 0, printCopies: row.print_copies || 0,

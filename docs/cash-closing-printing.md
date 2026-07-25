@@ -13,8 +13,10 @@ El informe se guarda como JSON estructurado en `cash_sessions.print_snapshot` de
 | Total | Suma de `sales.total_cents` cuyos tickets siguen en estado `paid` y pertenecen al cierre |
 | Ventas | Numero de esas filas de `sales`; movimientos manuales y tickets anulados no cuentan |
 | Media | Total / ventas, redondeado a centimos enteros; cero si no hay ventas |
-| Pagos | `sale_payments.amount_cents`, agrupado dinamicamente por `method` y limitado a tickets `paid` |
+| Ventas facturadas por método | `sale_payments.amount_cents`, agrupado dinamicamente por `method` y limitado a tickets `paid` |
 | Entradas / salidas | `cash_movements.amount_cents`, agrupado por `direction` durante el turno |
+| Tarjeta por efectivo | Movimiento no facturado `card_cashback`: aumenta el datáfono esperado y reduce el efectivo esperado |
+| Retirar de caja | `counted_cash_cents - final_cash_fund_cents`; es la cantidad operativa que debe retirarse para dejar el fondo final indicado |
 | Fondo inicial | `cash_sessions.opening_float_cents` |
 | Fondo final | `cash_sessions.final_cash_fund_cents`, introducido expresamente en el arqueo |
 | Diferencia efectivo | `counted_cash_cents - expected_cash_cents`, persistida en el snapshot |

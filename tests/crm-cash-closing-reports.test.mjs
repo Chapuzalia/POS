@@ -2,7 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { reportNavItems, reportSections } from '../src/features/crm/routing/crmNavigation.ts'
-import { buildCashClosingDailyValues, filterCashClosingsByDate } from '../src/features/crm/sales/services/cashClosingReportModel.ts'
+import { getCashClosingAmounts } from '../src/features/cash-registers/services/cashClosingAmounts.ts'
+import {
+  buildCashClosingDailyValues,
+  filterCashClosingsByDate,
+} from '../src/features/crm/sales/services/cashClosingReportModel.ts'
 
 function closing(id, closedAt, totalSalesCents) {
   return {
@@ -42,12 +46,48 @@ test('cash-closing reports aggregate values by the venue operational day', () =>
   assert.deepEqual(filterCashClosingsByDate(closings, '2026-07-22', '2026-07-22', madridAtFour).map(({ id }) => id), ['one', 'two'])
 })
 
+test('cash-closing reports separate invoicing, card cashback and the cash to withdraw', () => {
+  const amounts = getCashClosingAmounts({
+    payments: [
+      { code: 'cash', label: 'Efectivo', amountCents: 3550 },
+      { code: 'card', label: 'Tarjeta', amountCents: 13000 },
+    ],
+    cashFund: { openingCashFundCents: 5000, finalCashFundCents: 5000 },
+    expectedAndCounted: {
+      expectedCashCents: 7550,
+      countedCashCents: 7550,
+      expectedCardCents: 14000,
+      countedCardCents: 14000,
+    },
+  })
+
+  assert.deepEqual(amounts, {
+    billedCardCents: 13000,
+    billedCashCents: 3550,
+    cardTerminalExpectedCents: 14000,
+    cashOverOpeningFundCents: 2550,
+    cashToWithdrawCents: 2550,
+  })
+})
+
 test('cash-closing reports render the chart and the detailed table', async () => {
   const source = await readFile(new URL('../src/features/crm/sales/pages/CashClosingReportsPage.tsx', import.meta.url), 'utf8')
+  const cashRegisterService = await readFile(new URL('../src/features/cash-registers/service.ts', import.meta.url), 'utf8')
   assert.match(source, /ClosingValuesChart/)
   assert.match(source, /Valor total de los cierres agrupado por día operativo/)
   assert.match(source, /Cierres de caja/)
-  assert.match(source, /expectedAndCounted/)
+  assert.match(source, /getCashClosingAmounts/)
+  assert.match(source, /Facturado/)
+  assert.match(source, /CashClosingDetailModal/)
+  assert.match(source, /Cambio tarjeta → efectivo/)
+  assert.match(source, /Retirar de caja/)
+  assert.match(source, /Motivo del descuadre/)
+  assert.match(source, /Total final facturado/)
+  assert.match(source, /onClick=\{\(\) => setSelectedClosing\(closing\)\}/)
+  assert.doesNotMatch(source, /<th[^>]*>Cambio T\./)
+  assert.doesNotMatch(source, /<th[^>]*>Retirar de caja/)
+  assert.match(cashRegisterService, /closed_by, notes, print_snapshot/)
+  assert.match(cashRegisterService, /notes: row\.notes\?\.trim\(\) \?\? ''/)
   assert.match(source, /crm-list-toolbar[^\n]+!bg-transparent[^\n]+!text-\[var\(--crm-text\)\]/)
   assert.match(source, /onMouseEnter=\{\(\) => setHoveredPointIndex\(index\)\}/)
   assert.match(source, /cash-closing-tooltip-shadow/)

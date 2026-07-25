@@ -1,6 +1,7 @@
-import { RefreshCw } from "lucide-react";
+import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { loadCashClosingHistory } from "../../../cash-registers/service";
+import { getCashClosingAmounts } from "../../../cash-registers/services/cashClosingAmounts";
 import { formatMoney } from "../../../../lib/format";
 import type { CashClosingRecord, TenantContext } from "../../../../types";
 import { KpiCard } from "../../dashboard/pages/DashboardPage";
@@ -236,6 +237,259 @@ function ClosingValuesChart({ values }: { values: CashClosingDailyValue[] }) {
   );
 }
 
+function DetailValue({
+  label,
+  tone = "default",
+  value,
+}: {
+  label: string;
+  tone?: "default" | "danger" | "success";
+  value: string;
+}) {
+  const toneClass =
+    tone === "danger"
+      ? "!text-[var(--crm-red)]"
+      : tone === "success"
+        ? "!text-[var(--crm-green)]"
+        : "!text-[var(--crm-text)]";
+
+  return (
+    <div className="!rounded-xl !bg-[var(--crm-surface-soft)] !p-3">
+      <span className="!block !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
+        {label}
+      </span>
+      <strong className={`!mt-1 !block !font-mono !text-sm ${toneClass}`}>
+        {value}
+      </strong>
+    </div>
+  );
+}
+
+function CashClosingDetailModal({
+  closing,
+  onClose,
+}: {
+  closing: CashClosingRecord;
+  onClose: () => void;
+}) {
+  const snapshot = closing.printSnapshot;
+  const amounts = getCashClosingAmounts(snapshot);
+  const totalDifferenceCents =
+    snapshot.differences.cashDifferenceCents +
+    snapshot.differences.cardDifferenceCents;
+  const otherPayments = snapshot.payments.filter(
+    (payment) => payment.code !== "cash" && payment.code !== "card",
+  );
+
+  useEffect(() => {
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [onClose]);
+
+  return (
+    <div
+      className="!fixed !inset-0 !z-50 !grid !place-items-center !bg-black/55 !p-4"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        aria-labelledby="cash-closing-detail-title"
+        aria-modal="true"
+        className="!max-h-[calc(100svh-32px)] !w-full !max-w-4xl !overflow-y-auto !rounded-2xl !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-2xl sm:!p-6"
+        role="dialog"
+      >
+        <header className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !pb-4">
+          <div>
+            <h2
+              className="!text-xl !font-black"
+              id="cash-closing-detail-title"
+            >
+              Detalle del cierre
+            </h2>
+            <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">
+              {snapshot.registerName} · {snapshot.shiftLabel} ·{" "}
+              {dateFormatter.format(new Date(closing.closedAt))}
+            </p>
+          </div>
+          <button
+            aria-label="Cerrar detalle del cierre"
+            autoFocus
+            className="crm-icon-button !grid !size-10 !shrink-0 !place-items-center !rounded-xl !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
+            onClick={onClose}
+            type="button"
+          >
+            <X className="!size-4" />
+          </button>
+        </header>
+
+        <div className="!mt-5 !grid !gap-5">
+          <section>
+            <h3 className="!mb-3 !text-sm !font-black !uppercase !tracking-wide">
+              Facturación
+            </h3>
+            <div className="!grid !gap-3 sm:!grid-cols-2 lg:!grid-cols-4">
+              <DetailValue
+                label="Total final facturado"
+                value={formatMoney(snapshot.summary.totalSalesCents)}
+              />
+              <DetailValue
+                label="Efectivo facturado"
+                value={formatMoney(amounts.billedCashCents)}
+              />
+              <DetailValue
+                label="Tarjeta facturada"
+                value={formatMoney(amounts.billedCardCents)}
+              />
+              <DetailValue
+                label="Tickets / media"
+                value={`${snapshot.summary.salesCount} · ${formatMoney(snapshot.summary.averageSaleCents)}`}
+              />
+              {otherPayments.map((payment) => (
+                <DetailValue
+                  key={payment.code}
+                  label={`${payment.label} facturado`}
+                  value={formatMoney(payment.amountCents)}
+                />
+              ))}
+            </div>
+          </section>
+
+          <section>
+            <h3 className="!mb-3 !text-sm !font-black !uppercase !tracking-wide">
+              Arqueo de caja
+            </h3>
+            <div className="!grid !gap-3 sm:!grid-cols-2 lg:!grid-cols-4">
+              <DetailValue
+                label="Fondo inicial"
+                value={formatMoney(snapshot.cashFund.openingCashFundCents)}
+              />
+              <DetailValue
+                label="Efectivo esperado"
+                value={formatMoney(
+                  snapshot.expectedAndCounted.expectedCashCents,
+                )}
+              />
+              <DetailValue
+                label="Conteo final efectivo"
+                value={formatMoney(
+                  snapshot.expectedAndCounted.countedCashCents,
+                )}
+              />
+              <DetailValue
+                label={
+                  amounts.cashToWithdrawCents >= 0
+                    ? "Retirar de caja"
+                    : "Añadir a caja"
+                }
+                value={formatMoney(Math.abs(amounts.cashToWithdrawCents))}
+              />
+              <DetailValue
+                label="Fondo para el siguiente turno"
+                value={formatMoney(snapshot.cashFund.finalCashFundCents)}
+              />
+              <DetailValue
+                label="Cambio tarjeta → efectivo"
+                value={formatMoney(snapshot.cashMovements.cardCashbackCents)}
+              />
+              <DetailValue
+                label="Entradas de efectivo"
+                value={formatMoney(snapshot.cashMovements.cashEntriesCents)}
+              />
+              <DetailValue
+                label="Salidas de efectivo"
+                value={formatMoney(snapshot.cashMovements.cashExitsCents)}
+              />
+            </div>
+          </section>
+
+          <section>
+            <h3 className="!mb-3 !text-sm !font-black !uppercase !tracking-wide">
+              Tarjeta
+            </h3>
+            <div className="!grid !gap-3 sm:!grid-cols-3">
+              <DetailValue
+                label="Datáfono esperado"
+                value={formatMoney(amounts.cardTerminalExpectedCents)}
+              />
+              <DetailValue
+                label="Tarjeta declarada"
+                value={formatMoney(
+                  snapshot.expectedAndCounted.countedCardCents,
+                )}
+              />
+              <DetailValue
+                label="Diferencia tarjeta"
+                tone={
+                  snapshot.differences.cardDifferenceCents === 0
+                    ? "success"
+                    : "danger"
+                }
+                value={formatMoney(snapshot.differences.cardDifferenceCents)}
+              />
+            </div>
+          </section>
+
+          <section>
+            <h3 className="!mb-3 !text-sm !font-black !uppercase !tracking-wide">
+              Descuadre
+            </h3>
+            <div className="!grid !gap-3 sm:!grid-cols-3">
+              <DetailValue
+                label="Diferencia efectivo"
+                tone={
+                  snapshot.differences.cashDifferenceCents === 0
+                    ? "success"
+                    : "danger"
+                }
+                value={formatMoney(snapshot.differences.cashDifferenceCents)}
+              />
+              <DetailValue
+                label="Diferencia tarjeta"
+                tone={
+                  snapshot.differences.cardDifferenceCents === 0
+                    ? "success"
+                    : "danger"
+                }
+                value={formatMoney(snapshot.differences.cardDifferenceCents)}
+              />
+              <DetailValue
+                label="Descuadre total"
+                tone={totalDifferenceCents === 0 ? "success" : "danger"}
+                value={formatMoney(totalDifferenceCents)}
+              />
+            </div>
+            <div className="!mt-3 !rounded-xl !border !border-[var(--crm-border-subtle)] !p-4">
+              <span className="!block !text-xs !font-bold !text-[var(--crm-text-muted)]">
+                Motivo del descuadre
+              </span>
+              <p className="!mt-1 !whitespace-pre-wrap !text-sm">
+                {closing.notes || "Sin observaciones registradas."}
+              </p>
+            </div>
+          </section>
+
+          <section className="!grid !gap-3 !border-t !border-[var(--crm-border-subtle)] !pt-4 !text-xs !text-[var(--crm-text-muted)] sm:!grid-cols-2">
+            <p>
+              <strong className="!text-[var(--crm-text)]">Apertura:</strong>{" "}
+              {dateFormatter.format(new Date(snapshot.openedAt))}
+              {snapshot.openedBy ? ` · ${snapshot.openedBy}` : ""}
+            </p>
+            <p>
+              <strong className="!text-[var(--crm-text)]">Cierre:</strong>{" "}
+              {dateFormatter.format(new Date(snapshot.closedAt))}
+              {snapshot.closedBy ? ` · ${snapshot.closedBy}` : ""}
+            </p>
+          </section>
+        </div>
+      </section>
+    </div>
+  );
+}
+
 export function CashClosingReportsCrm({
   dayChangeTime,
   disabled,
@@ -245,6 +499,8 @@ export function CashClosingReportsCrm({
   timeZone,
 }: Props) {
   const [closings, setClosings] = useState<CashClosingRecord[] | null>(null);
+  const [selectedClosing, setSelectedClosing] =
+    useState<CashClosingRecord | null>(null);
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const refresh = useCallback(async () => {
@@ -262,6 +518,7 @@ export function CashClosingReportsCrm({
 
   useEffect(() => {
     setClosings(null);
+    setSelectedClosing(null);
     setDateFrom("");
     setDateTo("");
     void runAction(refresh);
@@ -383,19 +640,30 @@ export function CashClosingReportsCrm({
                 <th className="!px-3 !py-3">Efectivo</th>
                 <th className="!px-3 !py-3">Tarjeta</th>
                 <th className="!px-3 !py-3">Descuadre</th>
-                <th className="!px-[22px] !py-3">Fondo inicial</th>
+                <th className="!px-[22px] !py-3">Fondos</th>
               </tr>
             </thead>
             <tbody>
               {filteredClosings.map((closing) => {
                 const snapshot = closing.printSnapshot;
+                const amounts = getCashClosingAmounts(snapshot);
                 const difference =
                   snapshot.differences.cashDifferenceCents +
                   snapshot.differences.cardDifferenceCents;
                 return (
                   <tr
-                    className="!border-b !border-[var(--crm-border-subtle)] last:!border-0"
+                    aria-label={`Ver detalle del cierre de ${snapshot.registerName}`}
+                    className="!cursor-pointer !border-b !border-[var(--crm-border-subtle)] !outline-none hover:!bg-[var(--crm-surface-soft)] focus-visible:!bg-[var(--crm-surface-soft)] last:!border-0"
                     key={closing.id}
+                    onClick={() => setSelectedClosing(closing)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        event.preventDefault();
+                        setSelectedClosing(closing);
+                      }
+                    }}
+                    role="button"
+                    tabIndex={0}
                   >
                     <td className="!whitespace-nowrap !px-[22px] !py-4 !text-[13px] !font-semibold">
                       {dateFormatter.format(new Date(closing.closedAt))}
@@ -416,32 +684,28 @@ export function CashClosingReportsCrm({
                         {snapshot.summary.salesCount} tickets
                       </span>
                     </td>
-                    <td className="!px-3 !py-4 !text-[13px]">
-                      <span className="!block">
-                        Esperado{" "}
-                        {formatMoney(
-                          snapshot.expectedAndCounted.expectedCashCents,
-                        )}
-                      </span>
+                    <td className="!px-3 !py-4">
+                      <strong className="!block !font-mono !text-[13px]">
+                        {formatMoney(amounts.billedCashCents)}
+                      </strong>
                       <span className="!text-xs !text-[var(--crm-text-muted)]">
-                        Contado{" "}
-                        {formatMoney(
-                          snapshot.expectedAndCounted.countedCashCents,
-                        )}
+                        Facturado
+                      </span>
+                      <span className="!block !text-xs !text-[var(--crm-text-muted)]">
+                        Neto sobre fondo{" "}
+                        {formatMoney(amounts.cashOverOpeningFundCents)}
                       </span>
                     </td>
-                    <td className="!px-3 !py-4 !text-[13px]">
-                      <span className="!block">
-                        Esperado{" "}
-                        {formatMoney(
-                          snapshot.expectedAndCounted.expectedCardCents,
-                        )}
-                      </span>
+                    <td className="!px-3 !py-4">
+                      <strong className="!block !font-mono !text-[13px]">
+                        {formatMoney(amounts.billedCardCents)}
+                      </strong>
                       <span className="!text-xs !text-[var(--crm-text-muted)]">
-                        Contado{" "}
-                        {formatMoney(
-                          snapshot.expectedAndCounted.countedCardCents,
-                        )}
+                        Facturado
+                      </span>
+                      <span className="!block !text-xs !text-[var(--crm-text-muted)]">
+                        Datáfono esperado{" "}
+                        {formatMoney(amounts.cardTerminalExpectedCents)}
                       </span>
                     </td>
                     <td
@@ -449,8 +713,17 @@ export function CashClosingReportsCrm({
                     >
                       {formatMoney(difference)}
                     </td>
-                    <td className="!px-[22px] !py-4 !font-mono !text-[13px] !font-semibold">
-                      {formatMoney(snapshot.cashFund.finalCashFundCents)}
+                    <td className="!px-[22px] !py-4 !text-[13px]">
+                      <span className="!block">
+                        Inicial{" "}
+                        {formatMoney(snapshot.cashFund.openingCashFundCents)}
+                      </span>
+                      <span className="!text-xs !text-[var(--crm-text-muted)]">
+                        Contado{" "}
+                        {formatMoney(
+                          snapshot.expectedAndCounted.countedCashCents,
+                        )}
+                      </span>
                     </td>
                   </tr>
                 );
@@ -464,6 +737,12 @@ export function CashClosingReportsCrm({
           ) : null}
         </div>
       </section>
+      {selectedClosing ? (
+        <CashClosingDetailModal
+          closing={selectedClosing}
+          onClose={() => setSelectedClosing(null)}
+        />
+      ) : null}
     </div>
   );
 }
