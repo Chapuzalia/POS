@@ -94,6 +94,18 @@
   padding-top: calc(1.5rem + env(safe-area-inset-top, 0px)) !important;
 }
 
+/*
+ * El layout antiguo colapsaba el sidebar a 74 px y ocultaba sus etiquetas
+ * por debajo de 760 px. El CRM actual usa un cajón ancho en móvil, por lo que
+ * Safari/iOS no debe heredar aquel display:none en los textos de submenú.
+ */
+@media (max-width: 760px) {
+  .crm-dashboard-shell .crm-sidebar .crm-nav-item > span,
+  .crm-dashboard-shell .crm-sidebar .crm-sidebar-footer span {
+    display: inline !important;
+  }
+}
+
 @media (min-width: 768px) {
   .pwa-standalone .crm-dashboard-shell .crm-topbar {
     min-height: calc(5rem + env(safe-area-inset-top, 0px)) !important;

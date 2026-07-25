@@ -16,7 +16,7 @@ test('the admin tenant role is removed from application and schema authorization
   assert.doesNotMatch(permissions, /context\.role === 'admin'/)
   assert.match(edgeFunction, /membership\.role !== 'owner'/)
   assert.match(schema, /ARRAY\['owner'::text, 'manager'::text, 'cashier'::text\]/)
-  assert.match(schema, /and tm\.role = 'owner'/)
+  assert.match(schema, /and tm\.role = any \(array\['owner'::text, 'manager'::text\]\)/)
 })
 
 test('the destructive migration deletes admin memberships without guards', async () => {

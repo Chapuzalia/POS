@@ -139,7 +139,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw new Error(`No se pudo cargar el negocio asignado: ${getReadableError(tenantError)}`)
   }
 
-  if (membership.role === 'owner') {
+  if (membership.role === 'owner' || membership.role === 'manager') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
       tenantName: tenant.name,
@@ -149,13 +149,13 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
       deviceId: '',
       deviceName: '',
       userId: user.id,
-      userName: user.user_metadata.full_name ?? user.email ?? 'Propietario',
+      userName: user.user_metadata.full_name ?? user.email ?? 'Usuario CRM',
       role: membership.role,
     })
   }
 
   if (membership.role !== 'cashier') {
-    throw new Error('Este usuario no es propietario del negocio ni tiene una cuenta de caja compatible.')
+    throw new Error('Este usuario no tiene acceso al CRM ni una cuenta de caja compatible.')
   }
 
   const { data: assignment, error: assignmentError } = await supabase
@@ -315,7 +315,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new TenantSessionError('El usuario ya no tiene acceso activo a este negocio.')
   }
 
-  if (membership.role === 'owner') {
+  if (membership.role === 'owner' || membership.role === 'manager') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
       tenantName: tenant.name,
@@ -325,7 +325,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
       deviceId: '',
       deviceName: '',
       userId: user.id,
-      userName: user.user_metadata.full_name ?? user.email ?? 'Propietario',
+      userName: user.user_metadata.full_name ?? user.email ?? 'Usuario CRM',
       role: membership.role,
     })
   }

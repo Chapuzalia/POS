@@ -689,6 +689,68 @@ Deno.serve(async (request) => {
       })
     }
 
+    if (action === 'create-crm-user') {
+      const email = String(body.email ?? '').trim().toLowerCase()
+      const password = String(body.password ?? '')
+      const role = String(body.role ?? '')
+
+      if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return response({ error: 'Introduce un email válido' }, 400)
+      }
+      if (password.length < 8 || password.length > 72) {
+        return response({ error: 'La contraseña debe tener entre 8 y 72 caracteres' }, 400)
+      }
+      if (!['owner', 'manager'].includes(role)) {
+        return response({ error: 'El rol debe ser owner o manager' }, 400)
+      }
+
+      const { data: created, error: createError } = await adminClient.auth.admin.createUser({
+        email,
+        password,
+        email_confirm: true,
+      })
+
+      if (createError || !created.user) {
+        const createMessage = createError?.message ?? ''
+        const duplicateEmail = /already|registered|exists/i.test(createMessage)
+        return response({
+          error: duplicateEmail ? 'Ya existe una cuenta con ese email' : createMessage || 'No se pudo crear el usuario CRM',
+        }, duplicateEmail ? 409 : 400)
+      }
+
+      const userId = created.user.id
+      try {
+        const setupResults = await Promise.all([
+          adminClient.from('profiles').upsert({
+            id: userId,
+            full_name: null,
+            is_superadmin: false,
+          }),
+          adminClient.from('tenant_memberships').insert({
+            tenant_id: tenantId,
+            user_id: userId,
+            role,
+            is_active: true,
+          }),
+        ])
+        const setupError = setupResults.find((result) => result.error)?.error
+        if (setupError) throw setupError
+      } catch (setupError) {
+        await adminClient.auth.admin.deleteUser(userId, true)
+        throw setupError
+      }
+
+      return response({
+        user: {
+          id: userId,
+          email: created.user.email ?? email,
+          fullName: '',
+          isActive: true,
+          role,
+        },
+      }, 201)
+    }
+
     if (action === 'create-device-with-user') {
       const venueId = String(body.venueId ?? '')
       const deviceName = String(body.deviceName ?? '').trim()

@@ -3,6 +3,7 @@ import { useEffect, useState, type ReactNode } from 'react'
 import type { CrmVenue, TenantContext } from '../../../types'
 import { CrmVenueSelector } from '../../../components/crm/CrmVenueSelector'
 import { allNavItems, getSectionTitle, navItems, productNavItems, productSections, reportNavItems, reportSections, type CrmSection } from '../routing/crmNavigation'
+import { canAccessCrmSection } from '../routing/crmPermissions'
 import { CRM_THEME_STORAGE_KEY, getInitialCrmTheme, type CrmTheme } from './crmTheme'
 
 type Props = {
@@ -73,7 +74,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
 
         <nav aria-label="Navegacion del CRM" className="crm-nav !mt-[30px] !flex !flex-col !gap-[5px]">
           <p className="crm-nav-label !mx-0 !mt-0 !mb-[7px] !ml-[3px] !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Menu principal</p>
-          {navItems.slice(0, 2).map((item) => {
+          {navItems.slice(0, 2).filter((item) => canAccessCrmSection(context.role, item.id)).map((item) => {
             const Icon = item.icon
             return (
               <button
@@ -109,7 +110,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
             </button>
             {isProductsMenuOpen ? (
               <div className="!grid !gap-1 !pl-3" id="crm-products-submenu">
-                {productNavItems.map((item) => {
+                {productNavItems.filter((item) => canAccessCrmSection(context.role, item.id)).map((item) => {
                   const Icon = item.icon
                   return (
                     <button
@@ -132,7 +133,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
               </div>
             ) : null}
           </div>
-          {navItems.slice(2, 3).map((item) => {
+          {navItems.slice(2, 3).filter((item) => canAccessCrmSection(context.role, item.id)).map((item) => {
             const Icon = item.icon
             return (
               <button
@@ -168,7 +169,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
             </button>
             {isReportsMenuOpen ? (
               <div className="!grid !gap-1 !pl-3" id="crm-reports-submenu">
-                {reportNavItems.map((item) => {
+                {reportNavItems.filter((item) => canAccessCrmSection(context.role, item.id)).map((item) => {
                   const Icon = item.icon
                   return (
                     <button
@@ -191,7 +192,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
               </div>
             ) : null}
           </div>
-          {navItems.slice(3).map((item) => {
+          {navItems.slice(3).filter((item) => canAccessCrmSection(context.role, item.id)).map((item) => {
             const Icon = item.icon
             return (
               <button

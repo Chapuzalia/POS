@@ -71,6 +71,10 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     if (isOnline) void runAction(refreshVenues)
   }, [isOnline, refreshVenues, runAction])
 
+  useEffect(() => {
+    if (!canAccessCrmSection(context.role, activeSection)) setActiveSection('dashboard')
+  }, [activeSection, context.role])
+
   const refreshStats = useCallback(async (options: { silent?: boolean } = {}) => {
     const loadStats = async () => {
       onError(null)

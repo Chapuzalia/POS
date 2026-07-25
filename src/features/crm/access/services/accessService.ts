@@ -20,6 +20,8 @@ export type CrmAccessData = {
   users: CrmAccessUser[];
 };
 
+export const CRM_USER_PASSWORD_MIN_LENGTH = 8;
+
 type CrmDeviceAccountRow = CrmDeviceAccount & {
   deviceId: string;
   venueId: string;
@@ -280,6 +282,56 @@ export async function createCrmDevice(
     );
   }
   return data.credentials;
+}
+
+export async function createCrmUser(
+  context: TenantContext,
+  input: {
+    email: string;
+    password: string;
+    role: CrmAccessUser["role"];
+  },
+) {
+  const email = input.email.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new Error("Introduce un email válido.");
+  }
+  if (
+    input.password.length < CRM_USER_PASSWORD_MIN_LENGTH ||
+    input.password.length > 72
+  ) {
+    throw new Error(
+      `La contraseña debe tener entre ${CRM_USER_PASSWORD_MIN_LENGTH} y 72 caracteres.`,
+    );
+  }
+  if (!["owner", "manager"].includes(input.role)) {
+    throw new Error("Selecciona un rol válido.");
+  }
+
+  const client = requireSupabase();
+  const { data, error } = await client.functions.invoke<{
+    error?: string;
+    user?: CrmAccessUser;
+  }>("manage-pos-users", {
+    body: {
+      action: "create-crm-user",
+      email,
+      password: input.password,
+      role: input.role,
+      tenantId: context.tenantId,
+    },
+  });
+
+  if (error || data?.error || !data?.user) {
+    throw new Error(
+      await getFunctionInvokeErrorMessage(
+        data,
+        error,
+        "No se pudo crear el usuario CRM.",
+      ),
+    );
+  }
+  return data.user;
 }
 
 export async function updateCrmDevice(
