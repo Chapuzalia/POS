@@ -6,13 +6,16 @@ import { resolveSelectedVenueId } from '../src/features/crm/venues/services/venu
 import { buildProductCreationBatch, validateVariantDrafts } from '../src/features/crm/catalog/services/catalogAdminModel.ts'
 import { buildSalesReportAggregates, buildSalesReportTicketTotals, buildSalesReportTotals, compareSalesReportValues } from '../src/features/crm/sales/services/salesReportModel.ts'
 
-test('CRM permissions preserve owner access and reject non-owner roles', () => {
+test('CRM permissions allow managers without exposing owner-only sections', () => {
   assert.equal(canAccessCrm('owner'), true)
-
-  assert.equal(canAccessCrm('manager'), false)
+  assert.equal(canAccessCrm('manager'), true)
   assert.equal(canAccessCrm('cashier'), false)
   assert.equal(canAccessCrmSection('owner', 'settings'), true)
-
+  assert.equal(canAccessCrmSection('manager', 'dashboard'), true)
+  assert.equal(canAccessCrmSection('manager', 'products'), true)
+  assert.equal(canAccessCrmSection('manager', 'settings'), true)
+  assert.equal(canAccessCrmSection('manager', 'access'), false)
+  assert.equal(canAccessCrmSection('manager', 'plan'), false)
 })
 
 test('venue selection keeps an active venue and falls back deterministically', () => {

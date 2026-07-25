@@ -5,14 +5,18 @@ export function isCrmOwner(context: TenantContext) {
   return context.role === 'owner'
 }
 
+export function isCrmUser(context: TenantContext) {
+  return context.role === 'owner' || context.role === 'manager'
+}
+
 export function isSuperadmin(context: TenantContext) {
   return context.role === 'superadmin'
 }
 
 export function isBackofficeUser(context: TenantContext) {
-  return isSuperadmin(context) || isCrmOwner(context)
+  return isSuperadmin(context) || isCrmUser(context)
 }
 
 export function getRequiredAppRoute(context: TenantContext): AppRoute {
-  return isSuperadmin(context) ? 'superadmin' : isCrmOwner(context) ? 'crm' : 'pos'
+  return isSuperadmin(context) ? 'superadmin' : isCrmUser(context) ? 'crm' : 'pos'
 }

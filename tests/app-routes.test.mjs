@@ -14,5 +14,6 @@ test('route resolution keeps POS as the fallback', () => {
 test('role chooses the required app route', () => {
   assert.equal(getRequiredAppRoute({ role: 'cashier' }), 'pos')
   assert.equal(getRequiredAppRoute({ role: 'owner' }), 'crm')
+  assert.equal(getRequiredAppRoute({ role: 'manager' }), 'crm')
   assert.equal(getRequiredAppRoute({ role: 'superadmin' }), 'superadmin')
 })

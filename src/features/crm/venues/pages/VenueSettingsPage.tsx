@@ -51,14 +51,19 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
   const [newVenueProfile, setNewVenueProfile] = useState<CatalogProfile>('bar_classic')
   const [newPassword, setNewPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const isOwner = tenantContext.role === 'owner'
 
   const refreshPlan = useCallback(async () => {
+    if (!isOwner) {
+      setPlan(null)
+      return
+    }
     setPlan(await loadCrmPlan(tenantContext))
-  }, [tenantContext])
+  }, [isOwner, tenantContext])
 
   useEffect(() => {
-    void runAction(refreshPlan)
-  }, [refreshPlan, runAction])
+    if (isOwner) void runAction(refreshPlan)
+  }, [isOwner, refreshPlan, runAction])
 
   async function submitVenueSettings(event: FormEvent<HTMLFormElement>, venue: CrmVenue) {
     event.preventDefault()
@@ -87,6 +92,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
   async function submitNewVenue(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const name = newVenueName.trim()
+    if (!isOwner) return
     if (!name || !plan || plan.usage.venues >= plan.limits.venues) return
 
     await runAction(async () => {
@@ -138,7 +144,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
             <h2 className="!m-0 !text-base !font-bold">Configuración de locales</h2>
             <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Edita sus datos fiscales, cambia el nombre o crea un local desde una plantilla.</p>
           </div>
-          <div className="!flex !items-center !justify-between !gap-3 sm:!justify-end">
+          {isOwner ? <div className="!flex !items-center !justify-between !gap-3 sm:!justify-end">
             <span className="!text-xs !font-semibold !text-[var(--crm-text-muted)]">
               {venueLimit === null ? 'Consultando plan…' : `${venueUsage} / ${venueLimit} locales`}
             </span>
@@ -151,7 +157,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
             >
               <Plus className="h-4 w-4" /> Nuevo local
             </button>
-          </div>
+          </div> : null}
         </div>
         <div className="!grid !grid-cols-1 !gap-4 !px-[18px] !pt-5 !pb-[22px] md:!grid-cols-2 md:!px-[22px] xl:!grid-cols-3">
           {venues.map((venue) => (
@@ -249,7 +255,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
         </form>
       </section>
 
-      {isCreateOpen ? (
+      {isOwner && isCreateOpen ? (
         <CrmModal label="Crear nuevo local" onClose={() => setIsCreateOpen(false)}>
           <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
             <div>

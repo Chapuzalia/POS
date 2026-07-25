@@ -53,7 +53,7 @@ import type {
 } from '../types'
 import { getReadableError } from '../utils/errors'
 import { AppRouter } from './AppRouter'
-import { isBackofficeUser, isCrmOwner, isSuperadmin } from './app-permissions'
+import { isBackofficeUser, isCrmUser, isSuperadmin } from './app-permissions'
 import { PosPage } from './PosPage'
 import { useDomainErrors } from './useDomainErrors'
 
@@ -321,7 +321,7 @@ export function AppShell() {
 
   return <AppRouter context={context}>{() => {
     if (isSuperadmin(context)) return <SuperAdminPage context={context} error={error} isOnline={isOnline} onError={setGeneralError} onLogout={session.logout} />
-    if (isCrmOwner(context)) return <CrmPage
+    if (isCrmUser(context)) return <CrmPage
       context={context}
       error={error}
       isOnline={isOnline}
