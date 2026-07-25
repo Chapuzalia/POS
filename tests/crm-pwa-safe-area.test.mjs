@@ -22,3 +22,7 @@ test('standalone mode is detected through both the standard and iOS APIs', () =>
 test('the installed CRM sidebar also clears the iOS status area', () => {
   assert.match(styles, /\.pwa-standalone \.crm-dashboard-shell \.crm-sidebar \{[\s\S]*padding-top: calc\(1\.5rem \+ env\(safe-area-inset-top, 0px\)\) !important/)
 })
+
+test('the iPhone CRM drawer keeps active submenu labels visible', () => {
+  assert.match(styles, /@media \(max-width: 760px\) \{[\s\S]*\.crm-dashboard-shell \.crm-sidebar \.crm-nav-item > span,[\s\S]*display: inline !important/)
+})
