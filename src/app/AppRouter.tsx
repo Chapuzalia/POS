@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { TenantContext } from '../types'
 import { getRequiredAppRoute } from './app-permissions'
 import { getAppRoute, getAppRoutePath, type AppRoute } from './app-routes'
+import { moveSupabaseSessionToRoute } from '../lib/supabase'
 
 type AppRouterProps = {
   context: TenantContext | null
@@ -21,8 +22,8 @@ export function AppRouter({ context, children }: AppRouterProps) {
     if (!context) return
     const requiredRoute = getRequiredAppRoute(context)
     if (route !== requiredRoute) {
-      window.history.replaceState(null, '', getAppRoutePath(requiredRoute))
-      setRoute(requiredRoute)
+      moveSupabaseSessionToRoute(requiredRoute)
+      window.location.replace(getAppRoutePath(requiredRoute))
     }
   }, [context, route])
 

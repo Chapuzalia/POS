@@ -1,10 +1,10 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { CrmShell } from '../../features/crm/layout/CrmShell'
 import { canAccessCrm, canAccessCrmSection } from '../../features/crm/routing/crmPermissions'
 import type { CrmSection } from '../../features/crm/routing/crmNavigation'
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
-import { loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
+import { applyCrmOpenCashSalesTotals, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import type { CrmStats, CrmVenue, TenantContext } from '../../types'
@@ -95,37 +95,68 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     }
     await runAction(loadStats)
   }, [context, onError, runAction, selectedVenueId, venues])
+  const refreshStatsRef = useRef(refreshStats)
+  refreshStatsRef.current = refreshStats
+  const statsRef = useRef(stats)
+  statsRef.current = stats
 
   useEffect(() => {
     if ((activeSection === 'dashboard' || activeSection === 'stats') && isOnline && selectedVenueId) void refreshStats()
   }, [activeSection, isOnline, refreshStats, selectedVenueId])
 
   useEffect(() => {
-    if (!isOnline || (activeSection !== 'dashboard' && activeSection !== 'stats')) return undefined
-    let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
+    if (!isOnline || activeSection !== 'dashboard' || !venues.length) return undefined
+    let active = true
+    let cashSessionTimer: ReturnType<typeof window.setTimeout> | null = null
+    let salesTimer: ReturnType<typeof window.setTimeout> | null = null
     let fallbackTimer: ReturnType<typeof window.setInterval> | null = null
-    const scheduleRefresh = () => {
-      if (refreshTimer) window.clearTimeout(refreshTimer)
-      refreshTimer = window.setTimeout(() => void refreshStats({ silent: true }), 250)
+    const unavailableVenueIds = new Set<string>()
+    const refreshCashSessions = () => {
+      if (cashSessionTimer) window.clearTimeout(cashSessionTimer)
+      cashSessionTimer = window.setTimeout(() => void refreshStatsRef.current({ silent: true }), 250)
     }
-    const unsubscribe = subscribeToCrmStatsChanges(context, scheduleRefresh, (status, channelError) => {
-      if (status === 'SUBSCRIBED') {
-        if (fallbackTimer) window.clearInterval(fallbackTimer)
-        fallbackTimer = null
-        scheduleRefresh()
-        return
+    const refreshOpenCashSales = async () => {
+      const cashSessionIds = statsRef.current?.openCashSessions.map((session) => session.id) ?? []
+      if (!cashSessionIds.length) return
+      try {
+        const totals = await loadCrmOpenCashSalesTotals(context, cashSessionIds)
+        if (active) setStats((current) => applyCrmOpenCashSalesTotals(current, totals))
+      } catch (salesError) {
+        if (active) onError(getReadableError(salesError))
       }
-      if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && !fallbackTimer) {
-        console.warn('Realtime del dashboard CRM no disponible; se activa la actualización periódica.', channelError)
-        fallbackTimer = window.setInterval(scheduleRefresh, 3000)
-      }
-    })
+    }
+    const scheduleSalesRefresh = () => {
+      if (salesTimer) window.clearTimeout(salesTimer)
+      salesTimer = window.setTimeout(() => void refreshOpenCashSales(), 250)
+    }
+    const unsubscribers = venues.map((venue) => subscribeToCrmStatsChanges(
+      context,
+      venue.id,
+      refreshCashSessions,
+      scheduleSalesRefresh,
+      (status, channelError) => {
+        if (status === 'SUBSCRIBED') {
+          unavailableVenueIds.delete(venue.id)
+          if (!unavailableVenueIds.size && fallbackTimer) {
+            window.clearInterval(fallbackTimer)
+            fallbackTimer = null
+          }
+          scheduleSalesRefresh()
+        } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') {
+          unavailableVenueIds.add(venue.id)
+          console.warn(`Realtime del dashboard CRM no disponible para ${venue.name}.`, channelError)
+          if (!fallbackTimer) fallbackTimer = window.setInterval(scheduleSalesRefresh, 3000)
+        }
+      },
+    ))
     return () => {
-      if (refreshTimer) window.clearTimeout(refreshTimer)
+      active = false
+      if (cashSessionTimer) window.clearTimeout(cashSessionTimer)
+      if (salesTimer) window.clearTimeout(salesTimer)
       if (fallbackTimer) window.clearInterval(fallbackTimer)
-      unsubscribe()
+      unsubscribers.forEach((unsubscribe) => unsubscribe())
     }
-  }, [activeSection, context, isOnline, refreshStats])
+  }, [activeSection, context, isOnline, onError, venues])
 
   if (!canAccessCrm(context.role)) return null
   const disabled = !isOnline || isBusy || isCatalogLoading
