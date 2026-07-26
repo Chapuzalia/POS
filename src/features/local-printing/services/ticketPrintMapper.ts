@@ -49,6 +49,10 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
   const payments = sale.payment ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }] : []
   const hasTaxSnapshot = sale.lines.some((line) => Boolean(line.fiscalSnapshot))
   const taxCents = sale.lines.reduce((total, line) => total + (line.fiscalSnapshot?.taxAmountCents || 0), 0)
+  const taxableBaseCents = sale.lines.reduce(
+    (total, line) => total + (line.fiscalSnapshot?.taxableBaseCents ?? line.lineTotalCents),
+    0,
+  )
   return {
     requestId: isReprint ? `print:${sale.sale.id}:copy:${copyNumber}` : `print:${sale.sale.id}:original`,
     printerId: options.printerId,
@@ -60,7 +64,7 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
       ticketNumber: sale.ticket.id,
       date: sale.sale.createdAt,
       items: sale.lines.map(mapSaleLineToPrintItem),
-      subtotalCents: sale.ticket.subtotalCents,
+      subtotalCents: hasTaxSnapshot ? taxableBaseCents : sale.ticket.subtotalCents,
       discountCents: sale.ticket.discountAmountCents,
       ...(hasTaxSnapshot ? { taxCents } : {}),
       totalCents: sale.sale.totalCents,
