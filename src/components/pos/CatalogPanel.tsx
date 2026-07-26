@@ -176,7 +176,7 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
   }
 
   return (
-    <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-4">
+    <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <div className="relative min-w-0 max-w-full">
         <div className="catalog-tabs-scroll min-w-0 max-w-full overflow-x-auto pb-1" onScroll={updateTabScrollState} ref={tabsScrollerRef}>
           <div className="grid min-w-full grid-flow-col gap-2 lg:auto-cols-[calc((100%-3rem)/7)]">
@@ -199,13 +199,13 @@ export function CatalogPanel({ catalog, catalogStartTab, disabled, onSelectProdu
       </div>
 
       <div className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
-        <div className="border-b border-[var(--separator)] p-4">
+        <label className="border-b border-[var(--separator)] p-4">
           <div className="flex min-h-12 items-center gap-2 rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
             <Search className="h-5 w-5 shrink-0 text-[var(--muted)]" />
-            <input className="h-full min-w-0 flex-1 bg-transparent text-[var(--field-foreground)] outline-none" onChange={(event) => { setSearch(event.target.value); setSelectedCategoryId(null) }} placeholder="Buscar producto..." value={search} />
+            <input className="h-full min-h-full min-w-0 flex-1 bg-transparent text-[var(--field-foreground)] outline-none" onChange={(event) => { setSearch(event.target.value); setSelectedCategoryId(null) }} placeholder="Buscar producto..." value={search} />
             {search ? <Button onClick={() => setSearch('')} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button> : null}
           </div>
-        </div>
+        </label>
 
         <div className="min-h-0 flex-1 overflow-y-auto p-4">
           {selectedCategory ? <div className="mb-3 flex items-center gap-2"><Button onClick={() => setSelectedCategoryId(null)} size="sm" type="button" variant="tertiary"><ArrowLeft className="h-4 w-4" />{selectedCategory.name}</Button></div> : null}
