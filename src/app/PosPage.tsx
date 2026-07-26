@@ -28,6 +28,7 @@ import { getTicketTotal } from '../lib/format'
 import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
+import { ReservationsPage, type useReservationsController } from '../features/reservations'
 import type {
   CatalogStartTab,
   Discount,
@@ -41,6 +42,7 @@ import type {
 type CashController = ReturnType<typeof useCashSession>
 type QuickSaleController = ReturnType<typeof useQuickSale>
 type RestaurantController = ReturnType<typeof useRestaurantController>
+type ReservationsController = ReturnType<typeof useReservationsController>
 
 type AddFeedback = {
   announcement: string
@@ -78,6 +80,7 @@ type Props = {
   productSalesStats: ProductSalesStat[]
   quickSale: QuickSaleController
   restaurant: RestaurantController
+  reservations: ReservationsController
   restaurantPaidFeedback: PaymentMethod | null
   selectedThemeId: string
   setThemeId: (id: string) => void
@@ -195,12 +198,14 @@ export function PosPage(props: Props) {
         canCloseCash={props.context.canCloseCashSession === true}
         canManageCash={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
+        canOpenReservations={Boolean(restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
         onCloseCash={() => void (async () => {
           if (await restaurant.requestCloseCash()) cash.openCloseModal()
         })()}
         onOpenConfig={() => setConfigOpen(true)}
+        onOpenReservations={props.reservations.open}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
         onOpenCashMovements={() => cash.setMovementModalOpen(true)}
         onOpenTicketHistory={() => void cash.ticketActions.openHistory()}
@@ -215,8 +220,9 @@ export function PosPage(props: Props) {
         </div>
       </div> : null}
       <AddProductFlyAnimation feedback={props.addFeedback.flyFeedback} />
+      {props.reservations.isOpen ? <ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /> : null}
 
-      {restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
+      {!props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
         isBusy={props.isBusy}
         isOnline={props.isOnline}
         onBack={() => void restaurant.returnToMap()}
@@ -230,7 +236,7 @@ export function PosPage(props: Props) {
         canSell={canSell}
       /> : null}
 
-      {restaurant.tablesEnabled && restaurant.posView.type === 'table_map' && cash.session ? <TableMapView
+      {!props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map' && cash.session ? <TableMapView
         canOpen={Boolean(props.context.canTakeOrders)}
         cashSessionId={cash.session.id}
         canQuickSale={props.context.canTakePayments === true}
@@ -252,6 +258,7 @@ export function PosPage(props: Props) {
         onMove={restaurant.moveOrder}
         onOpen={restaurant.openTableOrder}
         onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)}
+        onOpenReservation={(reservationId) => void props.reservations.openReservation(reservationId)}
         onQuickSale={() => {
           if (!props.context.canTakePayments) return
           restaurant.reset()
@@ -260,7 +267,7 @@ export function PosPage(props: Props) {
         selectedAreaId={restaurant.posView.areaId}
       /> : null}
 
-      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-lg:flex-col ${restaurant.tablesEnabled && restaurant.posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
+      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-lg:flex-col ${props.reservations.isOpen || (restaurant.tablesEnabled && restaurant.posView.type === 'table_map') ? 'hidden' : 'flex'}`}>
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {activeTicketPanel}
           <PaymentPanel
@@ -284,7 +291,7 @@ export function PosPage(props: Props) {
         />
       </main>
 
-      {restaurant.tablesEnabled && restaurant.posView.type === 'table_map' ? null : <MobileTicketModal
+      {props.reservations.isOpen || (restaurant.tablesEnabled && restaurant.posView.type === 'table_map') ? null : <MobileTicketModal
         floatingButtonRef={props.floatingTicketButtonRef}
         isAddSuccess={props.addFeedback.isAddSuccess}
         isOpen={props.mobileTicketOpen}
