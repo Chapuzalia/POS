@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import { applyCrmOpenCashSalesTotals } from '../src/features/crm/analytics/services/analyticsModel.ts'
 
 test('el dashboard muestra primero las cajas y permite filtrar por el local seleccionado', async () => {
   const [dashboard, routing, service, domain] = await Promise.all([
@@ -21,4 +22,81 @@ test('el dashboard muestra primero las cajas y permite filtrar por el local sele
   assert.match(service, /venueId: session\.venue_id/)
   assert.doesNotMatch(service, /openSessionsQuery = openSessionsQuery\.eq\('venue_id'/)
   assert.match(domain, /openCashSessions: Array<\{[\s\S]*venueId: string/)
+})
+
+test('las cajas abiertas usan el mismo patrón realtime por local que el mapa de mesas', async () => {
+  const [crmPage, service, tableService, tableRealtime, publicationMigration] = await Promise.all([
+    readFile(new URL('../src/components/crm/CrmPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/restaurant/hooks/useRestaurantRealtime.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260725220000_enable_crm_dashboard_realtime.sql', import.meta.url), 'utf8'),
+  ])
+
+  for (const table of ['cash_sessions', 'sales']) {
+    assert.match(service, new RegExp(`table: '${table}'`))
+    assert.match(publicationMigration, new RegExp(`'${table}'`))
+  }
+  assert.match(service, /channel\(`crm-open-cash:\$\{context\.tenantId\}:\$\{venueId\}`\)/)
+  assert.match(service, /filter: `venue_id=eq\.\$\{venueId\}`/)
+  assert.match(tableService, /filter: `venue_id=eq\.\$\{context\.venueId\}`/)
+  assert.match(service, /\.subscribe\(\(status, error\) => onStatus\?\.\(status, error\)\)/)
+  assert.match(crmPage, /venues\.map\(\(venue\) => subscribeToCrmStatsChanges/)
+  assert.match(crmPage, /status === 'SUBSCRIBED'/)
+  assert.match(crmPage, /window\.setTimeout\(\(\) => void refreshOpenCashSales\(\), 250\)/)
+  assert.match(tableRealtime, /realtimeTimer = window\.setTimeout/)
+  assert.match(crmPage, /loadCrmOpenCashSalesTotals\(context, cashSessionIds\)/)
+  assert.match(crmPage, /setStats\(\(current\) => applyCrmOpenCashSalesTotals\(current, totals\)\)/)
+  assert.match(crmPage, /window\.setInterval\(scheduleSalesRefresh, 3000\)/)
+  assert.doesNotMatch(crmPage, /window\.setInterval\(refreshCashSessions/)
+  assert.match(publicationMigration, /alter publication supabase_realtime add table public\.%I/i)
+})
+
+test('la resincronización de ventas solo sustituye el facturado de cada caja abierta', () => {
+  const untouchedSession = {
+    id: 'session-2',
+    venueId: 'venue-2',
+    venueName: 'Local 2',
+    deviceName: 'Caja 2',
+    openedAt: '2026-07-26T08:00:00.000Z',
+    openingFloatCents: 5000,
+    salesCents: 2500,
+    ticketCount: 1,
+    cashCents: 2500,
+    cardCents: 0,
+    invitationCents: 0,
+    otherCents: 0,
+  }
+  const stats = {
+    averageTicketCents: 0,
+    byPayment: [],
+    discountApplications: [],
+    discountedTicketCount: 0,
+    discountsCents: 0,
+    monthSalesCents: 0,
+    monthTicketCount: 0,
+    openCashSessions: [{
+      ...untouchedSession,
+      id: 'session-1',
+      venueId: 'venue-1',
+      venueName: 'Local 1',
+      deviceName: 'Caja 1',
+      salesCents: 1000,
+      ticketCount: 1,
+      cashCents: 1000,
+    }, untouchedSession],
+    topProducts: [],
+  }
+
+  const next = applyCrmOpenCashSalesTotals(stats, new Map([
+    ['session-1', 2750],
+    ['session-2', 2500],
+  ]))
+
+  assert.equal(next.openCashSessions[0].salesCents, 2750)
+  assert.equal(next.openCashSessions[0].ticketCount, 1)
+  assert.equal(next.openCashSessions[0].cashCents, 1000)
+  assert.equal(next.openCashSessions[0].cardCents, 0)
+  assert.equal(next.openCashSessions[1], untouchedSession)
+  assert.equal(next.monthSalesCents, stats.monthSalesCents)
 })

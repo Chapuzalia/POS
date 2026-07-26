@@ -3,6 +3,7 @@ import { getOperationalMonthStartIso } from '../../../../lib/operationalDay'
 import { supabase } from '../../../../lib/supabase'
 import { type CrmStats, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
 import { type NameRow } from '../../sales/services/salesReportsService'
+export { applyCrmOpenCashSalesTotals } from './analyticsModel.ts'
 
 export type SaleStatsRow = {
   id: string
@@ -38,6 +39,31 @@ export type OpenCashSessionSaleRow = {
   cash_session_id: string
   payment_method: HistoricalPaymentMethod | null
   total_cents: number
+}
+
+export async function loadCrmOpenCashSalesTotals(
+  context: TenantContext,
+  cashSessionIds: string[],
+) {
+  const client = requireSupabase()
+  const totalsByCashSession = new Map<string, number>()
+  cashSessionIds.forEach((cashSessionId) => totalsByCashSession.set(cashSessionId, 0))
+  if (!cashSessionIds.length) return totalsByCashSession
+
+  const { data, error } = await client
+    .from('sales')
+    .select('cash_session_id, total_cents')
+    .eq('tenant_id', context.tenantId)
+    .in('cash_session_id', cashSessionIds)
+
+  if (error) throw error
+  ;((data ?? []) as Array<Pick<OpenCashSessionSaleRow, 'cash_session_id' | 'total_cents'>>).forEach((sale) => {
+    totalsByCashSession.set(
+      sale.cash_session_id,
+      (totalsByCashSession.get(sale.cash_session_id) ?? 0) + sale.total_cents,
+    )
+  })
+  return totalsByCashSession
 }
 
 export async function loadCrmStats(context: TenantContext, venue: CrmVenue): Promise<CrmStats> {
@@ -227,7 +253,13 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue): Pro
   }
 }
 
-export function subscribeToCrmStatsChanges(context: TenantContext, onChange: () => void) {
+export function subscribeToCrmStatsChanges(
+  context: TenantContext,
+  venueId: string,
+  onCashSessionChange: () => void,
+  onSaleChange: () => void,
+  onStatus?: (status: string, error?: Error) => void,
+) {
   const client = supabase
 
   if (!client) {
@@ -235,23 +267,24 @@ export function subscribeToCrmStatsChanges(context: TenantContext, onChange: () 
   }
 
   const channel = client
-    .channel(`crm-stats:${context.tenantId}`)
+    .channel(`crm-open-cash:${context.tenantId}:${venueId}`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'cash_sessions', filter: `tenant_id=eq.${context.tenantId}` },
-      onChange,
+      { event: '*', schema: 'public', table: 'cash_sessions', filter: `venue_id=eq.${venueId}` },
+      (payload) => {
+        const session = (Object.keys(payload.new).length ? payload.new : payload.old) as { tenant_id?: string }
+        if (session.tenant_id === context.tenantId) onCashSessionChange()
+      },
     )
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'sales', filter: `tenant_id=eq.${context.tenantId}` },
-      onChange,
+      { event: 'INSERT', schema: 'public', table: 'sales', filter: `venue_id=eq.${venueId}` },
+      (payload) => {
+        const sale = payload.new as { tenant_id?: string }
+        if (sale.tenant_id === context.tenantId) onSaleChange()
+      },
     )
-    .on(
-      'postgres_changes',
-      { event: '*', schema: 'public', table: 'tickets', filter: `tenant_id=eq.${context.tenantId}` },
-      onChange,
-    )
-    .subscribe()
+    .subscribe((status, error) => onStatus?.(status, error))
 
   return () => {
     void client.removeChannel(channel)

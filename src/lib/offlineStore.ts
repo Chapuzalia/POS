@@ -1,4 +1,5 @@
 import type { PosCatalogState } from '../features/catalog/data/load-pos-catalog.ts'
+import { getAppRoute, type AppRoute } from '../app/app-routes'
 
 import type {
   CashSession,
@@ -46,8 +47,14 @@ function removeKey(key: string) {
   window.localStorage.removeItem(key)
 }
 
-function contextKey() {
-  return `${prefix}:context`
+function contextKey(route: AppRoute = getAppRoute()) {
+  return `${prefix}:context:${route}`
+}
+
+function contextRoute(context: TenantContext): AppRoute {
+  if (context.role === 'superadmin') return 'superadmin'
+  if (context.role === 'owner' || context.role === 'manager') return 'crm'
+  return 'pos'
 }
 
 function themeKey() {
@@ -103,12 +110,22 @@ export function saveCatalogStartTab(startTab: CatalogStartTab) {
 }
 
 export function getCachedContext() {
-  return readJson<TenantContext | null>(contextKey(), null)
+  const scoped = readJson<TenantContext | null>(contextKey(), null)
+  if (scoped) return scoped
+
+  const legacyKey = `${prefix}:context`
+  const legacy = readJson<TenantContext | null>(legacyKey, null)
+  if (legacy && contextRoute(legacy) === getAppRoute()) {
+    writeJson(contextKey(), legacy)
+    removeKey(legacyKey)
+    return legacy
+  }
+  return null
 }
 
 export function saveCachedContext(context: TenantContext | null) {
   if (context) {
-    writeJson(contextKey(), context)
+    writeJson(contextKey(contextRoute(context)), context)
   } else {
     removeKey(contextKey())
   }
