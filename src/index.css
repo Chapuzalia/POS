@@ -37,8 +37,8 @@
 }
 
 html,
-body,
-#root {
+body {
+  width: 100%;
   height: 100%;
   min-height: 100%;
   overflow: hidden;
@@ -49,18 +49,11 @@ body {
   background: var(--background);
 }
 
-html.pos-viewport-locked,
-body.pos-viewport-locked {
-  overscroll-behavior: none;
-  touch-action: pan-x pan-y;
-}
-
-body.pos-viewport-locked {
-  position: fixed;
-  inset: 0;
+#root {
   width: 100%;
-  height: 100%;
-  -webkit-overflow-scrolling: auto;
+  height: var(--app-height, 100dvh);
+  min-height: 0;
+  overflow: hidden;
 }
 
 button,
@@ -68,6 +61,24 @@ input,
 select,
 textarea {
   font: inherit;
+}
+
+/* A 16px control font prevents iOS focus zoom without disabling user zoom. */
+@supports (-webkit-touch-callout: none) {
+  input,
+  select,
+  textarea,
+  [contenteditable]:not([contenteditable="false"]) {
+    font-size: max(16px, 1em);
+  }
+
+  /* CRM controls otherwise override the global rule with 13px selectors. */
+  .crm-shell input,
+  .crm-shell select,
+  .crm-shell textarea,
+  .crm-shell [contenteditable]:not([contenteditable="false"]) {
+    font-size: max(16px, 1em) !important;
+  }
 }
 
 button {
@@ -321,7 +332,7 @@ button {
 .crm-shell {
   display: flex;
   width: 100vw;
-  height: 100vh;
+  height: 100%;
   min-height: 0;
   overflow: hidden;
   background: #eef3f7;
@@ -968,7 +979,7 @@ button {
 
 .crm-list-panel,
 .crm-editor-panel {
-  min-height: calc(100vh - 86px);
+  min-height: calc(var(--app-height, 100dvh) - 86px);
 }
 
 .crm-list-toolbar {
@@ -1571,7 +1582,7 @@ button {
 }
 
 .crm-table-panel {
-  min-height: calc(100vh - 86px);
+  min-height: calc(var(--app-height, 100dvh) - 86px);
 }
 
 .crm-import-alert {
@@ -1608,7 +1619,7 @@ button {
 .crm-product-list,
 .crm-category-list {
   display: grid;
-  max-height: calc(100vh - 144px);
+  max-height: calc(var(--app-height, 100dvh) - 144px);
   gap: 10px;
   overflow: auto;
   padding: 12px;
@@ -1828,7 +1839,7 @@ button {
 
 @media (max-width: 760px) {
   .crm-shell {
-    height: 100vh;
+    height: 100%;
   }
 
   .crm-venue-selector {

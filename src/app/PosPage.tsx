@@ -23,7 +23,6 @@ import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
-import { usePosViewportLock } from './usePosViewportLock'
 import { calculateAppliedDiscount } from '../lib/discounts'
 import { getTicketTotal } from '../lib/format'
 import type { useCashSession } from '../features/cash-registers'
@@ -86,7 +85,6 @@ type Props = {
 }
 
 export function PosPage(props: Props) {
-  usePosViewportLock()
   const [configOpen, setConfigOpen] = useState(false)
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -190,7 +188,7 @@ export function PosPage(props: Props) {
   }
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
       <AppHeader
         cashSession={cash.session}

@@ -30,7 +30,7 @@ export function CashSessionGate({ cashClosings, closingHistoryOpen, completedClo
   const [openingFloat, setOpeningFloat] = useState('0.00')
   const canOpen = context.canOpenCashSession === true && context.deviceMode !== 'satellite'
   return (
-    <main className="min-h-screen bg-[var(--background)] p-4 text-[var(--foreground)]">
+    <main className="h-full overflow-y-auto bg-[var(--background)] p-4 text-[var(--foreground)]">
       <section className="mx-auto mt-[8vh] w-full max-w-2xl space-y-5 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
         <div><h1 className="text-2xl font-black">{sessions.length ? 'Cajas abiertas' : 'No hay ninguna caja abierta'}</h1><p className="mt-2 text-[var(--muted)]">{sessions.length ? 'Selecciona la caja con la que vas a trabajar.' : canOpen ? 'Abre un punto de caja para comenzar.' : 'Abre una caja desde un dispositivo autorizado para comenzar a trabajar.'}</p></div>
         {sessions.length ? <div className="grid gap-3">{sessions.map((session) => <button className="min-h-16 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface-secondary)] p-4 text-left hover:border-[var(--accent)]" disabled={isBusy || !isOnline} key={session.id} onClick={() => onJoin(session)} type="button"><strong className="block">{session.cashRegisterName}</strong><span className="text-sm text-[var(--muted)]">Abierta {new Date(session.openedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })} - Fondo {formatMoney(session.openingFloatCents)}</span></button>)}</div> : null}

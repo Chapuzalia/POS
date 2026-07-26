@@ -81,7 +81,7 @@ export function LoginScreen({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[var(--background)] p-4 text-[var(--foreground)]">
+    <main className="flex h-full overflow-y-auto items-center justify-center bg-[var(--background)] p-4 text-[var(--foreground)]">
       <section className="w-full max-w-md rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
