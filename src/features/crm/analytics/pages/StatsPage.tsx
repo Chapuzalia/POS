@@ -82,27 +82,6 @@ export function StatsCrm({ dayChangeTime, disabled, onRefresh, stats: loadedStat
         </div>
         <TopProductCombinationsList stats={stats} />
       </section>
-
-      <section className="crm-panel !col-span-full !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold md:!px-[22px]">
-          <div><span>Descuentos</span><p className="!mt-1 !text-xs !font-medium !text-[var(--crm-text-muted)]">{stats?.discountedTicketCount ?? 0} tickets con descuento</p></div>
-        </div>
-        <div className="!overflow-x-auto !px-[18px] !pb-[18px] md:!px-[22px] md:!pb-[22px]">
-          <div className="!grid !min-w-[760px] !grid-cols-[minmax(220px,1fr)_120px_150px_150px_110px] !gap-3 !border-b !border-[var(--crm-border-subtle)] !py-3 !text-[11px] !font-semibold !uppercase !text-[var(--crm-text-muted)]">
-            <span>Descuento</span><span>Aplicaciones</span><span>Total descontado</span><span>Ventas asociadas</span><span>% tickets</span>
-          </div>
-          {(stats?.discountApplications ?? []).map((discount) => (
-            <div className="!grid !min-h-14 !min-w-[760px] !grid-cols-[minmax(220px,1fr)_120px_150px_150px_110px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !text-[13px]" key={discount.id}>
-              <strong>{discount.name}</strong>
-              <span>{discount.applications}</span>
-              <span className="!font-mono">{formatMoney(discount.discountedCents)}</span>
-              <span className="!font-mono">{formatMoney(discount.netSalesCents)}</span>
-              <span>{discount.ticketPercentage} %</span>
-            </div>
-          ))}
-          {!stats?.discountApplications.length ? <EmptyList message="No hay descuentos en el periodo actual." /> : null}
-        </div>
-      </section>
     </div>
   )
 }
