@@ -184,7 +184,7 @@ export function buildCatalogSnapshot(
     categoryName: item?.category?.name ?? '',
     catalogTabId: item?.tab.id ?? null,
     catalogTabName: item?.tab.label ?? '',
-    saleFormatId: null,
+    saleFormatId: sellable.variant.formatId,
     saleFormatName: sellable.variant.name,
   }
 }

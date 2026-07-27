@@ -91,6 +91,8 @@ export type CatalogReorderInput = {
 export type CatalogSaleFormatInput = {
   id?: string
   name: string
+  inventoryConsumptionQuantity?: number | null
+  inventoryConsumptionUnitId?: string | null
   active?: boolean
   sortOrder: number
 }

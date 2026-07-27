@@ -36,6 +36,8 @@ export type CatalogSaleFormat = {
   tenantId: string
   venueId: string
   name: string
+  inventoryConsumptionQuantity: number | null
+  inventoryConsumptionUnitId: string | null
   active: boolean
   sortOrder: number
   createdAt: string

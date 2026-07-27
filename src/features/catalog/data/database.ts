@@ -34,6 +34,8 @@ export type CatalogSaleFormatRow = {
   tenant_id: string
   venue_id: string
   name: string
+  inventory_consumption_quantity?: number | string | null
+  inventory_consumption_unit_id?: string | null
   is_active: boolean
   sort_order: number
   created_at: string

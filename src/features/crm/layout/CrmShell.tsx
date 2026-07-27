@@ -1,8 +1,8 @@
-import { Boxes, ChevronDown, ChevronRight, LayoutDashboard, LogOut, Menu, Moon, ReceiptText, Store, Sun, UserRound } from 'lucide-react'
+import { Boxes, ChevronDown, ChevronRight, LayoutDashboard, LogOut, Menu, Moon, Package, ReceiptText, Store, Sun, UserRound } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { CrmVenue, TenantContext } from '../../../types'
 import { CrmVenueSelector } from '../../../components/crm/CrmVenueSelector'
-import { allNavItems, getSectionTitle, navItems, productNavItems, productSections, reportNavItems, reportSections, type CrmSection } from '../routing/crmNavigation'
+import { allNavItems, getSectionTitle, inventoryNavItems, inventorySections, navItems, productNavItems, productSections, reportNavItems, reportSections, type CrmSection } from '../routing/crmNavigation'
 import { canAccessCrmSection } from '../routing/crmPermissions'
 import { CRM_THEME_STORAGE_KEY, getInitialCrmTheme, type CrmTheme } from './crmTheme'
 
@@ -24,6 +24,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [isProductsMenuOpen, setIsProductsMenuOpen] = useState(false)
   const [isReportsMenuOpen, setIsReportsMenuOpen] = useState(false)
+  const [isInventoryMenuOpen, setIsInventoryMenuOpen] = useState(false)
   const [crmTheme, setCrmTheme] = useState<CrmTheme>(getInitialCrmTheme)
 
   function toggleCrmTheme() {
@@ -111,6 +112,45 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
             {isProductsMenuOpen ? (
               <div className="!grid !gap-1 !pl-3" id="crm-products-submenu">
                 {productNavItems.filter((item) => canAccessCrmSection(context.role, item.id)).map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <button
+                      aria-current={activeSection === item.id ? 'page' : undefined}
+                      className={activeSection === item.id
+                        ? 'crm-nav-item crm-nav-item-active !flex !min-h-10 !min-w-0 !items-center !justify-start !gap-3 !rounded-[10px] !border-0 !px-3.5 !text-left !text-[13px] !font-medium !shadow-none !transition-[background-color,color,transform] !duration-150'
+                        : 'hover:bg-white/5 !flex !min-h-10 !min-w-0 !items-center !justify-start !gap-3 !rounded-[10px] !border-0 !px-3.5 !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+                      key={item.id}
+                      onClick={() => {
+                        onSectionChange(item.id)
+                        setIsSidebarOpen(false)
+                      }}
+                      type="button"
+                    >
+                      <Icon className="!size-3.5" />
+                      <span>{item.label}</span>
+                    </button>
+                  )
+                })}
+              </div>
+            ) : null}
+          </div>
+          <div className="!grid !gap-[5px]">
+            <button
+              aria-controls="crm-inventory-submenu"
+              aria-expanded={isInventoryMenuOpen}
+              className={inventorySections.has(activeSection)
+                ? 'crm-nav-item crm-nav-item-active !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none !transition-[background-color,color,transform] !duration-150'
+                : 'hover:bg-white/5 !flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+              onClick={() => setIsInventoryMenuOpen((isOpen) => !isOpen)}
+              type="button"
+            >
+              <Package className="h-4 w-4" />
+              <span className="!inline">Inventario</span>
+              <ChevronDown className={`!ml-auto !size-4 !transition-transform !duration-200 ${isInventoryMenuOpen ? '!rotate-180' : ''}`} />
+            </button>
+            {isInventoryMenuOpen ? (
+              <div className="!grid !gap-1 !pl-3" id="crm-inventory-submenu">
+                {inventoryNavItems.filter((item) => canAccessCrmSection(context.role, item.id)).map((item) => {
                   const Icon = item.icon
                   return (
                     <button
