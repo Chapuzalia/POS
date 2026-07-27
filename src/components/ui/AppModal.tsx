@@ -15,7 +15,7 @@ type AppModalProps = {
 export function AppModal({
   backdropClassName = '',
   children,
-  containerClassName = '!max-w-xl !p-0 sm:!p-4',
+  containerClassName = '!max-w-[640px] !p-0 sm:!p-4',
   dialogClassName = '',
   dismissDisabled = false,
   label,
@@ -30,7 +30,7 @@ export function AppModal({
       }}
     >
       <Modal.Backdrop
-        className={`!z-[70] !bg-black/55 !backdrop-blur-[2px] ${backdropClassName}`}
+        className={`!z-[70] !bg-black/55 ${backdropClassName}`}
         isDismissable={!dismissDisabled}
         isKeyboardDismissDisabled={dismissDisabled}
       >
@@ -42,7 +42,7 @@ export function AppModal({
         >
           <Modal.Dialog
             aria-label={label}
-            className={`!max-h-[calc(100dvh-24px)] !overflow-hidden !rounded-[var(--radius)] !border !border-[var(--separator)] !bg-[var(--surface)] !p-0 !text-[var(--foreground)] !shadow-[var(--shadow)] ${dialogClassName}`}
+            className={`!w-full !max-h-[calc(100dvh-24px)] !overflow-hidden !rounded-[var(--radius)] !border !border-[var(--separator)] !bg-[var(--surface)] !p-0 !text-[var(--foreground)] !shadow-[var(--shadow)] [&>*]:!max-w-none ${dialogClassName}`}
           >
             {children}
           </Modal.Dialog>

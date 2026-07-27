@@ -9,9 +9,9 @@ type ChipProps = {
 
 export function Chip({ children, icon: Icon, tone = 'default' }: ChipProps) {
   return (
-    <HeroChip color={tone} size="sm" variant={tone === 'default' ? 'secondary' : 'soft'}>
+    <HeroChip color={tone} className="p-1" variant={tone === 'default' ? 'secondary' : 'soft'}>
       {Icon ? <Icon aria-hidden="true" className="size-4" /> : null}
-      <HeroChip.Label>{children ?? null}</HeroChip.Label>
+      {children ? <HeroChip.Label>{children ?? null}</HeroChip.Label> : null}
     </HeroChip>
   )
 }

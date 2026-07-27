@@ -16,20 +16,20 @@ export function CrmModal({ children, label, onClose, size = 'compact' }: CrmModa
       if (!isOpen) onClose()
     }}>
       <Modal.Backdrop
-        className="crm-shell !z-[80] !bg-black/55 !backdrop-blur-sm"
+        className="crm-shell !z-[80] !bg-black/55"
         data-crm-theme={crmTheme}
         data-theme={crmTheme}
         isDismissable
       >
         <Modal.Container
-          className={size === 'large' ? '!max-w-[820px] !p-3 sm:!p-6' : '!max-w-[520px] !p-3 sm:!p-6'}
+          className={size === 'large' ? '!max-w-[1200px] !p-3 sm:!p-6' : '!max-w-[560px] !p-3 sm:!p-6'}
           placement="center"
           scroll="inside"
-          size="lg"
+          size="full"
         >
           <Modal.Dialog
             aria-label={label}
-            className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !max-h-[calc(100dvh-24px)] !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !p-0 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] sm:!max-h-[calc(100dvh-48px)] sm:!rounded-[var(--crm-radius-lg)]"
+            className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !w-full !max-h-[calc(100dvh-24px)] !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !p-0 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] [&>*]:!max-w-none sm:!max-h-[calc(100dvh-48px)] sm:!rounded-[var(--crm-radius-lg)]"
           >
             {children}
           </Modal.Dialog>

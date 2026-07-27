@@ -45,7 +45,7 @@ export function CrmSelect({
   const isDisabled = disabled || options.every((option) => option.disabled)
 
   return (
-    <div className={`relative min-w-0 ${className}`}>
+    <div className={`relative min-w-0 w-full ${className}`}>
       {name ? <UiInput name={name} type="hidden" value={selectedValue} /> : null}
       <Select
         aria-label={ariaLabel ?? menuLabel ?? placeholder}

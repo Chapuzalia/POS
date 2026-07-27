@@ -99,7 +99,7 @@ export function LoginScreen({
           <label className="block">
             <span className="text-sm font-semibold text-[var(--muted)]">Email</span>
             <UiInput
-              className="mt-1 h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              className="mt-1 h-12 w-full rounded-(--radius) !border bg-(--field)! px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               autoComplete="username"
               onChange={(event) => setEmail(event.target.value)}
               placeholder="usuario@negocio.com"
@@ -111,7 +111,7 @@ export function LoginScreen({
           <label className="block">
             <span className="text-sm font-semibold text-[var(--muted)]">Contrasena</span>
             <UiInput
-              className="mt-1 h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
+              className="mt-1 h-12 w-full rounded-[var(--radius)] border-1 !bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               autoComplete="current-password"
               onChange={(event) => setPassword(event.target.value)}
               required

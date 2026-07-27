@@ -62,14 +62,16 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
           <p className="mt-1 font-mono text-4xl font-black tabular-nums">{formatMoney(totalCents)}</p>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
-          <Button onClick={selectExactAmount} type="button" variant="primary">Exacto</Button>
+        <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
+          <Button onClick={selectExactAmount} type="button" className="!text-xl" variant="primary">Exacto</Button>
           {cashDenominationsCents.map((amount) => (
             <Button
               key={amount}
+              className="bg-(--field) !text-xl"
               onClick={() => addDenomination(amount)}
               type="button"
               variant="tertiary"
+              size="lg"
             >
               {formatMoney(amount)}
             </Button>

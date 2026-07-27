@@ -128,10 +128,10 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
           description={`${filtered.length} de ${catalog.products.length} productos · una única carga para todo el local`}
           title="Productos"
         >
-          <div className="!grid !gap-2 sm:!grid-cols-2 lg:!grid-cols-[minmax(220px,1fr)_repeat(4,minmax(130px,auto))]">
+          <div className="!grid !gap-2 sm:!grid-cols-2 lg:!grid-cols-[minmax(220px,1fr)_repeat(4,minmax(180px,auto))]">
             <label className="!flex !h-11 !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3">
               <Search className="!size-4 !text-[var(--crm-text-muted)]" />
-              <UiInput onChange={(event) => updateFilters({ query: event.target.value })} placeholder="Buscar producto, variante o ubicación" value={filters.query} />
+              <UiInput className="bg-transparent" onChange={(event) => updateFilters({ query: event.target.value })} placeholder="Buscar producto, variante o ubicación" value={filters.query} />
             </label>
             <CrmSelect ariaLabel="Filtrar por estado" onChange={(value) => updateFilters({ status: value as CatalogProductFilters['status'] })} options={[{ label: 'Todos los estados', value: 'all' }, { label: 'Activos', value: 'active' }, { label: 'Inactivos', value: 'inactive' }]} value={filters.status} />
             <CrmSelect ariaLabel="Filtrar por tipo" onChange={(value) => updateFilters({ type: value as CatalogProductFilters['type'] })} options={[{ label: 'Todos los tipos', value: 'all' }, { label: 'Estándar', value: 'standard' }, { label: 'Menú', value: 'menu' }]} value={filters.type} />
