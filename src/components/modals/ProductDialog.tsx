@@ -316,13 +316,13 @@ export function ProductDialog({
     }
   }
 
-  return <AppModal containerClassName={isChoosingMixer ? '!w-[calc(100vw-32px)] !max-w-[calc(100vw-32px)] !p-0' : '!max-w-xl !p-4'} dialogClassName={cx(isChoosingMixer && '!w-full !max-w-none', isClosing && 'animate-[product-dialog-backdrop-close_170ms_ease-out_forwards] motion-reduce:animate-none')} dismissDisabled={isBusy || hasSubmitted} label="Configurar producto" onClose={onCancel}>
+  return <AppModal containerClassName={isChoosingMixer ? '!w-[calc(100vw-32px)] !max-w-5xl !p-0' : '!max-w-xl !p-4'} dialogClassName={cx(isChoosingMixer && '!w-full !max-w-none', isClosing && 'animate-[product-dialog-backdrop-close_170ms_ease-out_forwards] motion-reduce:animate-none')} dismissDisabled={isBusy || hasSubmitted} label="Configurar producto" onClose={onCancel}>
     <section ref={dialogRef} className={cx('max-h-[calc(100svh-32px)] w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]', isChoosingMixer ? 'max-w-none' : 'max-w-xl', isClosing && 'pointer-events-none animate-[product-dialog-close_170ms_ease-out_forwards] motion-reduce:animate-none')}>
       <div className="flex items-start justify-between gap-4"><h2 className="text-2xl font-bold">{isChoosingVariant ? 'Variante' : `${item.product.name} con`}</h2><Button disabled={isBusy || hasSubmitted} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button></div>
 
       {isChoosingVariant ? <div className="mt-5 grid gap-2">{variants.map((variant) => <Button active={variant.id === selectedVariantId} disabled={hasSubmitted} fullWidth key={variant.id} onClick={(event) => handleVariantSelect(variant.id, event.currentTarget)} size="lg" type="button" variant="tertiary"><span className="flex w-full items-center justify-between gap-3"><span>{variant.name}</span><span className="font-mono tabular-nums">{formatMoney(variant.priceCents)}</span></span></Button>)}</div> : null}
 
-      {isChoosingMixer ? <div className="mt-5">{mixerAssignment!.options.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
+      {isChoosingMixer ? <div className="mt-5">{mixerAssignment!.options.length ? <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
         {mixerAssignment!.assignment.minSelection === 0 || initialSelection ? (
           <PosMixerCard
             disabled={isBusy || hasSubmitted}

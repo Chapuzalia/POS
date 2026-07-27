@@ -10,5 +10,11 @@ export function Input({ className, type, ...props }: InputProps) {
 
   const heroProps = props as unknown as ComponentProps<typeof HeroInput>
 
-  return <HeroInput {...heroProps} className={className} type={type} />
+  return (
+    <HeroInput
+      {...heroProps}
+      className={`!border-0 !bg-transparent !p-0 !shadow-none !outline-none !ring-0 ${className ?? ''}`}
+      type={type}
+    />
+  )
 }

@@ -3,6 +3,7 @@ import { formatDiscountValue, getDiscountLabel } from '../../lib/discounts'
 import { formatMoney } from '../../lib/format'
 import type { AppliedDiscount, PaymentMethod } from '../../types'
 import { Button } from '../ui'
+import { PosCatalogTab } from './PosCatalogTab'
 
 const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: LucideIcon }> = [
   { id: 'cash', label: 'Efectivo', icon: Coins },
@@ -93,65 +94,29 @@ export function PaymentPanel({
             : payment.icon
 
         return (
-          <Button
-            className="flex flex-col items-center justify-center"
+          <PosCatalogTab
+            active={feedback === payment.id}
             disabled={disabled || totalCents === 0}
-            fullWidth
+            icon={Icon}
             key={payment.id}
-            onClick={() => onPayment(payment.id)}
+            label={payment.label}
+            onSelect={() => onPayment(payment.id)}
             size="lg"
-            type="button"
-            variant={
-              feedback === payment.id
-                ? 'primary'
-                : 'secondary'
-            }
-          >
-            <Icon className="h-6 w-6" />
-            <span>{payment.label}</span>
-          </Button>
+          />
         )
       })}
 
       {allowDiscount ? (
-        <Button
-          aria-label={
-            discount
-              ? 'Eliminar descuento'
-              : 'Añadir descuento'
-          }
-          className="flex flex-col items-center justify-center"
-          disabled={
-            discount
-              ? disabled
-              : disabled || totalCents === 0
-          }
-          fullWidth
-          onClick={
-            discount
-              ? onRemoveDiscount
-              : onOpenDiscount
-          }
+        <PosCatalogTab
+          active={Boolean(discount)}
+          ariaLabel={discount ? 'Eliminar descuento' : 'Añadir descuento'}
+          disabled={discount ? disabled : disabled || totalCents === 0}
+          icon={discount ? X : Percent}
+          label={discount ? getDiscountLabel(discount) : 'Descuento'}
+          onSelect={discount ? onRemoveDiscount : onOpenDiscount}
           size="lg"
-          type="button"
-          variant={
-            discount
-              ? "dangerSoft"
-              : "tertiary"
-          }
-        >
-          {discount ? (
-            <X className="h-6 w-6" />
-          ) : (
-            <Percent className="h-6 w-6" />
-          )}
-
-          <span>
-            {discount
-              ? getDiscountLabel(discount)
-              : 'Descuento'}
-          </span>
-        </Button>
+          tone={discount ? 'danger' : 'default'}
+        />
       ) : null}
     </div>
 

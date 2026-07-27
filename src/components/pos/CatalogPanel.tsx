@@ -27,6 +27,8 @@ import {
   getAvailableFormatCounts,
   groupCatalogItemsByProduct,
 } from "./catalogPanelModel";
+import { PosCategoryCard } from "./PosCategoryCard";
+import { PosCatalogTab } from "./PosCatalogTab";
 import { PosProductCard } from "./PosProductCard";
 import { getCatalogIconComponent } from "../../features/catalog/ui/catalogIcons";
 
@@ -299,19 +301,13 @@ export function CatalogPanel({
             {filterOptions.map((option) => {
               const Icon = option.icon;
               return (
-                <Button
+                <PosCatalogTab
                   active={activeFilter === option.id}
-                  fullWidth
+                  icon={Icon}
                   key={option.id}
-                  onClick={() => handleFilterChange(option.id)}
-                  type="button"
-                  variant="tertiary"
-                >
-                  <span className="flex min-w-0 flex-col items-center gap-1">
-                    <Icon className="h-5 w-5" />
-                    <span className="truncate text-xs">{option.label}</span>
-                  </span>
-                </Button>
+                  label={option.label}
+                  onSelect={() => handleFilterChange(option.id)}
+                />
               );
             })}
           </div>
@@ -421,27 +417,20 @@ export function CatalogPanel({
 
           {showCategories ? (
             <div
-              className={`${showProductGrid && visibleEntries.length ? "mt-3 " : ""}grid grid-cols-2 gap-3 md:grid-cols-3 2xl:grid-cols-5`}
+              className={`${showProductGrid && visibleEntries.length ? "mt-3 " : ""}grid grid-cols-3 gap-3 md:grid-cols-4 2xl:grid-cols-5`}
             >
               {visibleCategoriesWithProducts.map((category) => {
                 const Icon = getCatalogIcon(category.icon ?? "", activeFilter);
                 const count = categoryProductCounts.get(category.id) ?? 0;
                 return (
-                  <UiButton
-                    className="min-h-28 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 text-left transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] disabled:cursor-not-allowed disabled:opacity-45"
+                  <PosCategoryCard
+                    count={count}
                     disabled={disabled || count === 0}
+                    icon={Icon}
                     key={category.id}
-                    onClick={() => setSelectedCategoryId(category.id)}
-                    type="button"
-                  >
-                    <Icon className="mb-3 h-6 w-6 text-[var(--accent)]" />
-                    <p className="font-bold text-[var(--foreground)]">
-                      {category.name}
-                    </p>
-                    <p className="mt-1 text-sm text-[var(--muted)]">
-                      {count} productos
-                    </p>
-                  </UiButton>
+                    label={category.name}
+                    onSelect={() => setSelectedCategoryId(category.id)}
+                  />
                 );
               })}
             </div>
