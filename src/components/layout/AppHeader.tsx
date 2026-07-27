@@ -98,7 +98,7 @@ export function AppHeader({
   return (
     <header className="shrink-0 border-b border-[var(--separator)] bg-[var(--surface)] pt-[max(1.5rem,env(safe-area-inset-top))]">
       <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2">
-        <div className="relative min-w-0" ref={menuRef}>
+        <div className="relative flex flex-row gap-2 min-w-0" ref={menuRef}>
           <button
             aria-expanded={menuOpen}
             aria-haspopup="menu"
@@ -118,7 +118,18 @@ export function AppHeader({
               )}
             />
           </button>
-
+          {canOpenReservations ? (
+            <button
+              className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45"
+              disabled={isLoading || !isOnline}
+              onClick={() => runMenuAction(onOpenReservations)}
+              role="menuitem"
+              type="button"
+            >
+              <CalendarDays className="h-4 w-4" />
+              <span>Reservas</span>
+            </button>
+          ) : null}
           {menuOpen ? (
             <div
               className="absolute left-0 top-full z-50 mt-2 flex flex-col gap-2 w-64 max-w-[calc(100vw-2rem)] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-2 shadow-xl"
@@ -136,18 +147,7 @@ export function AppHeader({
                 />
                 <span>Recargar catalogo</span>
               </button>
-              {canOpenReservations ? (
-                <button
-                  className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45"
-                  disabled={isLoading || !isOnline}
-                  onClick={() => runMenuAction(onOpenReservations)}
-                  role="menuitem"
-                  type="button"
-                >
-                  <CalendarDays className="h-4 w-4" />
-                  <span>Reservas</span>
-                </button>
-              ) : null}
+
               {cashSession ? (
                 <>
                   {canCloseCash ? (
