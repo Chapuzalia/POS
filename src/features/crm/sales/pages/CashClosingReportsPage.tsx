@@ -595,28 +595,6 @@ export function CashClosingReportsCrm({
         <div className="!px-[18px] !pt-3 !pb-2 md:!px-[22px]">
           <ClosingValuesChart values={dailyValues} />
         </div>
-        <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-2 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
-          <KpiCard
-            color="blue"
-            label="Cierres"
-            value={filteredClosings.length}
-          />
-          <KpiCard
-            color="green"
-            label="Valor de cierres"
-            value={formatMoney(totalSalesCents)}
-          />
-          <KpiCard
-            color="neutral"
-            label="Tickets incluidos"
-            value={totalTickets}
-          />
-          <KpiCard
-            color="neutral"
-            label="Descuadre acumulado"
-            value={formatMoney(totalDifferenceCents)}
-          />
-        </div>
       </section>
 
       <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
@@ -634,7 +612,7 @@ export function CashClosingReportsCrm({
           <table className="!w-full !min-w-[1050px] !border-collapse">
             <thead>
               <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
-                <th className="!px-[22px] !py-3">Fecha</th>
+                <th className="!px-[22px] !py-3">Fecha Cierre</th>
                 <th className="!px-3 !py-3">Caja / turno</th>
                 <th className="!px-3 !py-3">Ventas</th>
                 <th className="!px-3 !py-3">Efectivo</th>

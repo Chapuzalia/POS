@@ -26,7 +26,7 @@ type Props = {
   mutateCatalog: (action: () => Promise<unknown>) => Promise<boolean>
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
-  onStatsRefresh: (options?: { silent?: boolean }) => Promise<void>
+  onStatsRefresh: (options?: { monthKey?: string; silent?: boolean }) => Promise<void>
   onVenuesChanged: () => Promise<void>
   runAction: RunAction
   selectedVenueId: string
@@ -96,7 +96,14 @@ export function CrmSectionContent({
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
     case 'stats':
-      return <StatsCrm disabled={disabled} onRefresh={onStatsRefresh} stats={stats} />
+      return <StatsCrm
+        dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
+        disabled={disabled}
+        key={selectedVenueId}
+        onRefresh={(monthKey) => onStatsRefresh({ monthKey })}
+        stats={stats}
+        timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
+      />
     case 'settings':
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':
