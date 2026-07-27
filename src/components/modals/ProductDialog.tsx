@@ -1,4 +1,4 @@
-import { GlassWater, Minus, Plus, X } from 'lucide-react'
+import { Minus, Plus, X } from 'lucide-react'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { resolveSellableProduct } from '../../features/catalog/domain/resolver'
 import type {
@@ -14,8 +14,8 @@ import type { AddCatalogLine } from '../../features/quick-sale/hooks/useQuickSal
 import { formatMoney } from '../../lib/format'
 import type { ProductLineSelection, TicketLineModifier } from '../../types'
 import { cx } from '../../utils/cx'
-import { Button } from '../ui'
-import { closeOnModalBackdrop } from './modalBackdrop'
+import { AppModal, Button } from '../ui'
+import { PosMixerCard } from '../pos/PosMixerCard'
 
 type ProductDialogProps = {
   allowVariantSelection: boolean
@@ -316,15 +316,32 @@ export function ProductDialog({
     }
   }
 
-  return <div className={cx('fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4', isClosing && 'product-dialog-backdrop-closing')} onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy || hasSubmitted)}>
-    <section ref={dialogRef} className={cx('max-h-[calc(100svh-32px)] w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]', isChoosingMixer ? 'max-w-5xl' : 'max-w-xl', isClosing && 'product-dialog-closing')}>
+  return <AppModal containerClassName={isChoosingMixer ? '!w-[calc(100vw-32px)] !max-w-[calc(100vw-32px)] !p-0' : '!max-w-xl !p-4'} dialogClassName={cx(isChoosingMixer && '!w-full !max-w-none', isClosing && 'animate-[product-dialog-backdrop-close_170ms_ease-out_forwards] motion-reduce:animate-none')} dismissDisabled={isBusy || hasSubmitted} label="Configurar producto" onClose={onCancel}>
+    <section ref={dialogRef} className={cx('max-h-[calc(100svh-32px)] w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]', isChoosingMixer ? 'max-w-none' : 'max-w-xl', isClosing && 'pointer-events-none animate-[product-dialog-close_170ms_ease-out_forwards] motion-reduce:animate-none')}>
       <div className="flex items-start justify-between gap-4"><h2 className="text-2xl font-bold">{isChoosingVariant ? 'Variante' : `${item.product.name} con`}</h2><Button disabled={isBusy || hasSubmitted} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button></div>
 
       {isChoosingVariant ? <div className="mt-5 grid gap-2">{variants.map((variant) => <Button active={variant.id === selectedVariantId} disabled={hasSubmitted} fullWidth key={variant.id} onClick={(event) => handleVariantSelect(variant.id, event.currentTarget)} size="lg" type="button" variant="tertiary"><span className="flex w-full items-center justify-between gap-3"><span>{variant.name}</span><span className="font-mono tabular-nums">{formatMoney(variant.priceCents)}</span></span></Button>)}</div> : null}
 
-      {isChoosingMixer ? <div className="mt-5">{mixerAssignment!.options.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {mixerAssignment!.assignment.minSelection === 0 || initialSelection ? <Button active={!selectedMixerItemId} disabled={isBusy || hasSubmitted} fullWidth onClick={(event) => handleNoMixer(event.currentTarget)} type="button" variant="tertiary" className="h-28">Sin mixer</Button> : null}
-        {mixerAssignment!.options.map((option) => <Button active={option.id === selectedMixerItemId} disabled={isBusy || hasSubmitted} fullWidth key={option.id} onClick={(event) => handleMixerSelect(option, event.currentTarget)} type="button" variant="tertiary" className="h-28 overflow-hidden !justify-start !p-0"><span className="grid h-full w-full grid-cols-[6rem_minmax(0,1fr)] items-center"><span className="grid h-full w-24 place-items-center overflow-hidden bg-[var(--surface-secondary)] text-[var(--accent)]">{option.product.image?.publicUrl ? <img alt="" className="h-full w-full object-cover" src={option.product.image.publicUrl} /> : <GlassWater className="h-8 w-8" />}</span><span className="min-w-0 px-4 text-left text-lg"><span className="block truncate">{option.product.name}</span>{option.supplementCents ? <span className="block text-sm text-[var(--muted)]">+{formatMoney(option.supplementCents)}</span> : null}</span></span></Button>)}
+      {isChoosingMixer ? <div className="mt-5">{mixerAssignment!.options.length ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-8">
+        {mixerAssignment!.assignment.minSelection === 0 || initialSelection ? (
+          <PosMixerCard
+            disabled={isBusy || hasSubmitted}
+            label="Sin mixer"
+            onSelect={handleNoMixer}
+            selected={!selectedMixerItemId}
+          />
+        ) : null}
+        {mixerAssignment!.options.map((option) => (
+          <PosMixerCard
+            disabled={isBusy || hasSubmitted}
+            imageUrl={option.product.image?.publicUrl}
+            key={option.id}
+            label={option.product.name}
+            onSelect={(sourceElement) => handleMixerSelect(option, sourceElement)}
+            selected={option.id === selectedMixerItemId}
+            supplementCents={option.supplementCents}
+          />
+        ))}
       </div> : <div className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-4 text-sm font-semibold text-[var(--muted)]">No hay mixers configurados en el CRM.</div>}
         {selectedMixerOption && selectedMixerSellable?.modifierGroups.length ? <div className="mt-4 space-y-3 rounded-[var(--radius)] border border-[var(--separator)] p-3">{selectedMixerSellable.modifierGroups.map((group) => <div key={group.group.id}><p className="mb-2 text-sm font-semibold text-[var(--muted)]">{group.assignment.displayName ?? group.group.name} · {group.assignment.minSelection}-{group.assignment.maxSelection}</p><div className="grid gap-2 sm:grid-cols-2">{group.modifiers.map((modifier) => <Button active={selectedComponentModifiers[selectedMixerOption.id]?.[group.group.id]?.includes(modifier.id) ?? false} disabled={hasSubmitted} fullWidth key={modifier.id} onClick={() => toggleModifier(group, modifier.id, selectedMixerOption.id)} size="sm" type="button" variant="tertiary"><span className="flex w-full items-center justify-between gap-3"><span>{modifier.name}</span><span>{modifier.supplementCents ? `+${formatMoney(modifier.supplementCents)}` : 'Incluido'}</span></span></Button>)}</div></div>)}</div> : null}
       </div> : null}
@@ -344,5 +361,5 @@ export function ProductDialog({
 
       {!isChoosingVariant && (selectedSellable.modifierGroups.length > 0 || selectedSellable.selectionGroups.length > 0 || initialSelection) ? <div className="mt-5"><Button disabled={isBusy || hasSubmitted || !isSelectionValid} fullWidth onClick={(event) => submitSelection(event.currentTarget)} size="lg" type="button" variant="primary">{initialSelection ? 'Guardar cambios' : 'Añadir producto'}</Button></div> : null}
     </section>
-  </div>
+  </AppModal>
 }

@@ -43,7 +43,7 @@ const consolidatedDatabase = readFileSync(
   new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url),
   'utf8',
 )
-const shell = readFileSync(new URL('../src/features/crm/layout/CrmShell.tsx', import.meta.url), 'utf8')
+const shell = readFileSync(new URL('../src/features/crm/layout/CrmSidebar.tsx', import.meta.url), 'utf8')
 const routes = readFileSync(new URL('../src/features/crm/routing/CrmSectionContent.tsx', import.meta.url), 'utf8')
 const stockPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryStockPage.tsx', import.meta.url), 'utf8')
 const warehousesPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryWarehousesPage.tsx', import.meta.url), 'utf8')
@@ -61,8 +61,8 @@ test('expone Inventario como submenu con sus tres paginas', () => {
   )
   assert.deepEqual([...inventorySections], inventoryNavItems.map((item) => item.id))
   assert.equal(getSectionTitle('inventory-stock'), 'Stock del local')
-  assert.match(shell, /crm-inventory-submenu/)
-  assert.match(shell, />Inventario</)
+  assert.match(shell, /label="Inventario"/)
+  assert.match(shell, /inventoryNavItems/)
   assert.match(routes, /case 'inventory-stock':/)
   assert.match(routes, /case 'inventory-warehouses':/)
   assert.match(routes, /case 'inventory-settings':/)

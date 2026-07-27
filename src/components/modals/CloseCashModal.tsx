@@ -1,10 +1,11 @@
+import { TextArea as UiTextArea } from '../ui/TextArea'
+import { Input as UiInput } from '../ui/Input'
 import { X } from 'lucide-react'
 import { useState } from 'react'
 import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
 import type { CashClosedPayload, CashSession, CashSummary } from '../../types'
 import { nowIso } from '../../utils/dates'
-import { Button, Metric } from '../ui'
-import { closeOnModalBackdrop } from './modalBackdrop'
+import { AppModal, Button, Metric } from '../ui'
 
 type CloseCashModalProps = {
   cashSession: CashSession
@@ -50,7 +51,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy)}>
+    <AppModal dismissDisabled={isBusy} label="Cierre de caja" onClose={onCancel}>
       <section className="max-h-[calc(100svh-32px)] w-full max-w-3xl overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -76,7 +77,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
           <span className="text-sm font-semibold text-[var(--muted)]">Fondo que se deja para el siguiente turno</span>
           <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]">
             <span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">EUR</span>
-            <input
+            <UiInput
               className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none"
               inputMode="decimal"
               onChange={(event) => setFinalCashFund(event.target.value)}
@@ -94,7 +95,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
               <span className="text-sm font-semibold text-[var(--muted)]">{label as string}</span>
               <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]">
                 <span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">EUR</span>
-                <input
+                <UiInput
                   className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none"
                   inputMode="decimal"
                   onChange={(event) => (setter as (next: string) => void)(event.target.value)}
@@ -120,7 +121,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
 
         <label className="mt-5 block">
           <span className="text-sm font-semibold text-[var(--muted)]">Notas</span>
-          <textarea
+          <UiTextArea
             className="mt-1 min-h-24 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] p-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
             onChange={(event) => setNotes(event.target.value)}
             value={notes}
@@ -139,6 +140,6 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
           Cerrar caja
         </Button>
       </section>
-    </div>
+    </AppModal>
   )
 }

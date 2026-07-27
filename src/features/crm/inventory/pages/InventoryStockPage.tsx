@@ -1,3 +1,6 @@
+import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
+import { Input as UiInput } from '../../../../components/ui/Input'
+import { Button as UiButton } from '../../../../components/ui/Button'
 import { Save } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import type { TenantContext } from '../../../../types'
@@ -123,9 +126,9 @@ export function InventoryStockCrm({ catalog, disabled, runAction, selectedVenueI
   })
 
   return (
-    <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-      <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!flex-row md:!items-center md:!px-[22px]">
-        <div className="crm-list-title">
+    <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+      <div className="flex items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] p-3 max-[760px]:flex-col max-[760px]:items-stretch !flex !flex-col !items-stretch !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!flex-row md:!items-center md:!px-[22px]">
+        <div className="min-w-0 [&_h2]:m-0 [&_h2]:text-[17px] [&_h2]:font-bold [&_h2]:tracking-[-0.02em] [&_h2]:text-[var(--crm-text)] [&_p]:mt-1 [&_p]:mb-0 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)]">
           <h2>Stock por producto y almacén</h2>
           <p>{products.length} productos activos · las cantidades admiten hasta 6 decimales según su unidad</p>
         </div>
@@ -135,7 +138,7 @@ export function InventoryStockCrm({ catalog, disabled, runAction, selectedVenueI
       {!snapshot.warehouses.length ? <div className="!mx-[18px] !mt-[18px] !rounded-xl !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !font-semibold !text-[var(--crm-yellow)] md:!mx-[22px]">Crea un almacén para poder indicar dónde se encuentran las existencias.</div> : null}
 
       <div className="!overflow-x-auto !pt-[18px]">
-        <table className="!w-full !min-w-max !border-collapse !text-left">
+        <UiDataTable className="!w-full !min-w-max !border-collapse !text-left">
           <thead>
             <tr className="!bg-[var(--crm-surface-soft)] !text-[11px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
               <th className="!min-w-[240px] !px-[22px] !py-3">Producto</th>
@@ -164,7 +167,7 @@ export function InventoryStockCrm({ catalog, disabled, runAction, selectedVenueI
               return (
                 <tr className="!border-b !border-[var(--crm-border-subtle)] !align-top" key={product.id}>
                   <td className="!px-[22px] !py-3.5">
-                    <div className="crm-cell-main"><strong>{product.name}</strong><span>{product.type === 'menu' ? 'Menú' : 'Producto estándar'}</span></div>
+                    <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{product.name}</strong><span>{product.type === 'menu' ? 'Menú' : 'Producto estándar'}</span></div>
                     {validationErrors[product.id] ? <small className="!mt-1 !block !max-w-[230px] !font-semibold !text-[var(--crm-red)]">{validationErrors[product.id]}</small> : null}
                   </td>
                   <td className="!px-3 !py-3">
@@ -180,7 +183,7 @@ export function InventoryStockCrm({ catalog, disabled, runAction, selectedVenueI
                   {snapshot.warehouses.map((warehouse) => (
                     <td className="!px-3 !py-3" key={warehouse.id}>
                       <div className="!flex !min-h-10 !items-center !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3">
-                        <input
+                        <UiInput
                           aria-label={`Stock de ${product.name} en ${warehouse.name}`}
                           className="!min-w-20 !flex-1 !border-0 !bg-transparent !font-mono !text-[13px] !outline-none"
                           disabled={disabled || !unit}
@@ -207,15 +210,15 @@ export function InventoryStockCrm({ catalog, disabled, runAction, selectedVenueI
                     )}
                   </td>
                   <td className="!px-[22px] !py-3">
-                    <button aria-label={`Guardar stock de ${product.name}`} className="crm-action-button !inline-flex !min-h-10 !items-center !gap-1.5 !rounded-[9px] !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-blue)]" disabled={disabled || !draft.unitId} onClick={() => void saveProduct(product.id)} type="button">
+                    <UiButton aria-label={`Guardar stock de ${product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !gap-1.5 !rounded-[9px] !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-blue)]" disabled={disabled || !draft.unitId} onClick={() => void saveProduct(product.id)} type="button">
                       <Save className="!size-3.5" /> Guardar
-                    </button>
+                    </UiButton>
                   </td>
                 </tr>
               )
             })}
           </tbody>
-        </table>
+        </UiDataTable>
       </div>
       {!products.length ? <div className="!p-[18px] md:!p-[22px]"><EmptyList message="No hay productos activos en el local seleccionado." /></div> : null}
     </section>

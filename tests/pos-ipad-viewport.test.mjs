@@ -23,10 +23,10 @@ test('the app uses a visual-viewport height without disabling accessible scaling
 })
 
 test('the global hook repairs only installed iOS/iPadOS PWA viewports', async () => {
-  const [hook, styles, mapStyles, viewport] = await Promise.all([
+  const [hook, styles, mapView, viewport] = await Promise.all([
     readFile(new URL('../src/hooks/useIOSPWAViewportFix.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/index.css', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/tables/components/map-viewport.css', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/tables/useMapViewport.ts', import.meta.url), 'utf8'),
   ])
 
@@ -50,7 +50,9 @@ test('the global hook repairs only installed iOS/iPadOS PWA viewports', async ()
   assert.match(hook, /visibilitychange/)
   assert.doesNotMatch(styles, /body\.pos-viewport-locked/)
   assert.doesNotMatch(styles, /body[^{]*\{[^}]*position:\s*fixed/)
-  assert.match(mapStyles, /\.table-map-canvas\{cursor:grab;touch-action:none\}/)
+  assert.match(mapView, /touch-none/)
+  assert.match(mapView, /cursor-grab/)
+  assert.doesNotMatch(styles, /\.table-map-canvas\b/)
   assert.match(viewport, /pinchRef/)
   assert.match(viewport, /zoomAtPoint/)
 })

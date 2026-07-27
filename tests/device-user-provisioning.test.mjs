@@ -82,12 +82,12 @@ test('accesos integra las credenciales y la edición dentro de cada dispositivo'
   assert.match(edgeFunction, /\['owner', 'manager'\]/)
 })
 
-test('los headers de dispositivos y usuarios usan los tokens del tema CRM', async () => {
+test('los headers de dispositivos y usuarios usan Tailwind con tokens del tema CRM', async () => {
   const accessPage = await readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8')
-  const themedHeaders = accessPage.match(/crm-list-toolbar[^"]*!bg-transparent[^"]*!text-\[var\(--crm-text\)\]/g) ?? []
 
-  assert.equal(themedHeaders.length, 2)
-  assert.match(accessPage, /!border-\[var\(--crm-border-subtle\)\]/)
+  assert.match(accessPage, /border-\[var\(--crm-border-subtle\)\][^"]*bg-transparent[^"]*text-\[var\(--crm-text\)\][\s\S]{0,500}<h2>Dispositivos/)
+  assert.match(accessPage, /border-\[var\(--crm-border-subtle\)\][^"]*bg-transparent[^"]*text-\[var\(--crm-text\)\][\s\S]{0,500}<h2>Usuarios con acceso al CRM/)
+  assert.doesNotMatch(accessPage, /crm-list-toolbar/)
 })
 
 test('los dispositivos se eliminan y sus referencias historicas quedan a null', async () => {

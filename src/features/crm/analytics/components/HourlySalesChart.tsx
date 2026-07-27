@@ -1,3 +1,4 @@
+import { Button as UiButton } from '../../../../components/ui/Button'
 import { useState } from 'react'
 import { formatMoney } from '../../../../lib/format'
 import type { CrmStats } from '../../../../types'
@@ -88,22 +89,22 @@ export function HourlySalesChart({ points }: { points: HourlySalesPoint[] }) {
       </div>
 
       <div className="!mb-3 !flex !w-fit !rounded-[10px] !bg-[var(--crm-surface-soft)] !p-1" role="group" aria-label="Métrica del gráfico">
-        <button
+        <UiButton
           aria-pressed={metric === 'tickets'}
           className={metric === 'tickets' ? '!min-h-9 !rounded-lg !border-0 !bg-[var(--crm-surface)] !px-4 !text-xs !font-bold !text-[var(--crm-blue)] !shadow-sm' : '!min-h-9 !rounded-lg !border-0 !bg-transparent !px-4 !text-xs !font-semibold !text-[var(--crm-text-muted)]'}
           onClick={() => setMetric('tickets')}
           type="button"
         >
           Tickets
-        </button>
-        <button
+        </UiButton>
+        <UiButton
           aria-pressed={metric === 'revenue'}
           className={metric === 'revenue' ? '!min-h-9 !rounded-lg !border-0 !bg-[var(--crm-surface)] !px-4 !text-xs !font-bold !text-[var(--crm-green)] !shadow-sm' : '!min-h-9 !rounded-lg !border-0 !bg-transparent !px-4 !text-xs !font-semibold !text-[var(--crm-text-muted)]'}
           onClick={() => setMetric('revenue')}
           type="button"
         >
           Facturación
-        </button>
+        </UiButton>
       </div>
 
       <div className="!overflow-x-auto">

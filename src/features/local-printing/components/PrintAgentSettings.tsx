@@ -1,3 +1,6 @@
+import { NativeSelect as UiNativeSelect } from '../../../components/ui/NativeSelect'
+import { Input as UiInput } from '../../../components/ui/Input'
+import { Checkbox as UiCheckbox } from '../../../components/ui/Checkbox'
 import { Clipboard, ExternalLink, LoaderCircle, Network, Printer, RefreshCw, RotateCcw, Server, Settings2, TestTube2, WalletCards } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button, Metric } from '../../../components/ui'
@@ -45,13 +48,9 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
 
     <section className={'rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4'}>
       <h3 className={'font-black'}>Ticket automatico</h3>
-      <label className={'mt-3 flex min-h-12 items-center gap-3 rounded-[var(--radius)] border border-[var(--separator)] px-3'}>
-        <input checked={agent.preferences.alwaysPrintTicket} disabled={!canConfigure} onChange={(event) => agent.updatePreferences({ alwaysPrintTicket: event.target.checked })} type={'checkbox'} />
-        <span>
-          <strong className={'block'}>Imprimir ticket siempre</strong>
-          <small className={'text-[var(--muted)]'}>Si se desactiva, los cobros en efectivo solo abriran el cajon.</small>
-        </span>
-      </label>
+      <UiCheckbox checked={agent.preferences.alwaysPrintTicket} className="mt-3 min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} onChange={(checked) => agent.updatePreferences({ alwaysPrintTicket: checked })}>
+        <span><strong className="block">Imprimir ticket siempre</strong><small className="text-[var(--muted)]">Si se desactiva, los cobros en efectivo solo abriran el cajon.</small></span>
+      </UiCheckbox>
     </section>
 
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4">
@@ -64,27 +63,21 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
           ['includeOpeningAndClosingTimes', 'Incluir horas de apertura y cierre'],
           ['includeZeroPaymentMethods', 'Incluir metodos de pago a cero'],
           ['includeTotalPayments', 'Incluir total de pagos'],
-        ].map(([key, label]) => <label className="flex min-h-12 items-center gap-3 rounded-[var(--radius)] border border-[var(--separator)] px-3" key={key}>
-          <input
-            checked={Boolean(agent.preferences[key as keyof typeof agent.preferences])}
-            disabled={!canConfigure}
-            onChange={(event) => agent.updatePreferences({ [key]: event.target.checked })}
-            type="checkbox"
-          />
+        ].map(([key, label]) => <UiCheckbox checked={Boolean(agent.preferences[key as keyof typeof agent.preferences])} className="min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} key={key} onChange={(checked) => agent.updatePreferences({ [key]: checked })}>
           <span className="font-semibold">{label}</span>
-        </label>)}
-        <label><span className="mb-2 block text-sm font-bold">Ancho de papel</span><select
+        </UiCheckbox>)}
+        <label><span className="mb-2 block text-sm font-bold">Ancho de papel</span><UiNativeSelect
           className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3"
           disabled={!canConfigure}
           onChange={(event) => agent.updatePreferences({ cashClosingPaperWidth: Number(event.target.value) as 32 | 42 | 48 })}
           value={agent.preferences.cashClosingPaperWidth}
-        ><option value={32}>58 mm · 32 caracteres</option><option value={42}>80 mm · 42 caracteres</option><option value={48}>80 mm · 48 caracteres</option></select></label>
-        <label><span className="mb-2 block text-sm font-bold">Copias por trabajo</span><select
+        ><option value={32}>58 mm · 32 caracteres</option><option value={42}>80 mm · 42 caracteres</option><option value={48}>80 mm · 48 caracteres</option></UiNativeSelect></label>
+        <label><span className="mb-2 block text-sm font-bold">Copias por trabajo</span><UiNativeSelect
           className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3"
           disabled={!canConfigure}
           onChange={(event) => agent.updatePreferences({ cashClosingCopies: Number(event.target.value) })}
           value={agent.preferences.cashClosingCopies}
-        >{[1, 2, 3].map((copies) => <option key={copies} value={copies}>{copies}</option>)}</select></label>
+        >{[1, 2, 3].map((copies) => <option key={copies} value={copies}>{copies}</option>)}</UiNativeSelect></label>
       </div>
     </section>
 
@@ -94,7 +87,7 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
       <div className="mt-4 flex flex-wrap gap-2"><Button disabled={busy || !agent.selectedPrinterId} onClick={() => void run(agent.testPrinter, 'Ticket de prueba enviado.')}><TestTube2 className={`h-4 w-4 ${agent.isTestingPrinter ? 'animate-spin' : ''}`} />Imprimir prueba</Button><Button disabled={busy || !canOpenDrawer || !agent.selectedPrinterId} onClick={() => { if (window.confirm('¿Quieres abrir el cajon manualmente?')) void run(() => agent.openCashDrawer(), 'Cajon abierto.') }}><WalletCards className={`h-4 w-4 ${agent.isOpeningCashDrawer ? 'animate-pulse' : ''}`} />Abrir cajon</Button></div>
     </section>
 
-    <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><h3 className="font-black">Preferencias</h3><div className="mt-3 grid gap-3 sm:grid-cols-2"><label className="flex min-h-12 items-center gap-3 rounded-[var(--radius)] border border-[var(--separator)] px-3"><input checked={agent.preferences.autoOpenCashDrawer} disabled={!canConfigure} onChange={(event) => agent.updatePreferences({ autoOpenCashDrawer: event.target.checked })} type="checkbox" /><span className="font-semibold">Abrir cajon automaticamente con efectivo</span></label><label className="flex min-h-12 items-center gap-3 rounded-[var(--radius)] border border-[var(--separator)] px-3"><input checked={agent.preferences.cut} disabled={!canConfigure} onChange={(event) => agent.updatePreferences({ cut: event.target.checked })} type="checkbox" /><span className="font-semibold">Cortar papel</span></label><label className="sm:col-span-2"><span className="mb-2 block text-sm font-bold">Pie del ticket</span><input className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3" disabled={!canConfigure} maxLength={500} onChange={(event) => agent.updatePreferences({ footer: event.target.value })} value={agent.preferences.footer} /></label></div></section>
+    <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><h3 className="font-black">Preferencias</h3><div className="mt-3 grid gap-3 sm:grid-cols-2"><UiCheckbox checked={agent.preferences.autoOpenCashDrawer} className="min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} onChange={(checked) => agent.updatePreferences({ autoOpenCashDrawer: checked })}>Abrir cajon automaticamente con efectivo</UiCheckbox><UiCheckbox checked={agent.preferences.cut} className="min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} onChange={(checked) => agent.updatePreferences({ cut: checked })}>Cortar papel</UiCheckbox><label className="sm:col-span-2"><span className="mb-2 block text-sm font-bold">Pie del ticket</span><UiInput className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3" disabled={!canConfigure} maxLength={500} onChange={(event) => agent.updatePreferences({ footer: event.target.value })} value={agent.preferences.footer} /></label></div></section>
 
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><div className="flex items-center justify-between gap-3"><h3 className="font-black">Trabajos recientes</h3><Button disabled={agent.isLoadingJobs} onClick={() => void run(agent.loadJobs, 'Trabajos actualizados.')} size="sm">{agent.isLoadingJobs ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Ver trabajos</Button></div><div className="mt-3"><PrintJobsTable jobs={agent.jobs} /></div></section>
 

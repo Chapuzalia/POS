@@ -1,7 +1,6 @@
 import { Trash2, X } from 'lucide-react'
-import { Button } from '../../../components/ui'
+import { AppModal, Button } from '../../../components/ui'
 import type { RestaurantOrderLine } from '../types'
-import { closeOnModalBackdrop } from '../../../components/modals/modalBackdrop'
 
 type Props = {
   isBusy: boolean
@@ -14,8 +13,8 @@ export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm }: Prop
   const served = line.servedQuantity > 0
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy)}>
-      <section aria-labelledby="remove-order-line-title" aria-modal="true" className="w-full rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-md sm:rounded-[var(--radius)]" role="dialog">
+    <AppModal containerClassName="!max-w-md !p-0 sm:!p-4" dismissDisabled={isBusy} label="Eliminar producto" onClose={onCancel} placement="bottom">
+      <section aria-labelledby="remove-order-line-title" className="w-full rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-md sm:rounded-[var(--radius)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-bold" id="remove-order-line-title">Eliminar producto</h2>
@@ -31,6 +30,6 @@ export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm }: Prop
           <Button disabled={isBusy} onClick={onConfirm} type="button" variant="danger"><Trash2 className="h-4 w-4" /> Eliminar</Button>
         </div>
       </section>
-    </div>
+    </AppModal>
   )
 }

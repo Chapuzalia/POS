@@ -1,3 +1,5 @@
+import { Input as UiInput } from '../../../../components/ui/Input'
+import { Button as UiButton } from '../../../../components/ui/Button'
 import { ArrowDown, ArrowUp, ArrowUpDown, Boxes, Copy, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
@@ -115,21 +117,21 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
   }
 
   return (
-    <div className="crm-catalog-page-grid">
+    <div className="grid min-w-0 items-start gap-4">
       <CatalogPanel>
         <CatalogPanelHeader
           actions={
-            <button className="crm-primary-button" disabled={disabled} onClick={() => setEditorProductId('create')} type="button">
+            <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)]" disabled={disabled} onClick={() => setEditorProductId('create')} type="button">
               <Plus className="!size-4" /> Añadir producto
-            </button>
+            </UiButton>
           }
           description={`${filtered.length} de ${catalog.products.length} productos · una única carga para todo el local`}
           title="Productos"
         >
           <div className="!grid !gap-2 sm:!grid-cols-2 lg:!grid-cols-[minmax(220px,1fr)_repeat(4,minmax(130px,auto))]">
-            <label className="crm-search !flex !h-11 !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3">
+            <label className="!flex !h-11 !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3">
               <Search className="!size-4 !text-[var(--crm-text-muted)]" />
-              <input onChange={(event) => updateFilters({ query: event.target.value })} placeholder="Buscar producto, variante o ubicación" value={filters.query} />
+              <UiInput onChange={(event) => updateFilters({ query: event.target.value })} placeholder="Buscar producto, variante o ubicación" value={filters.query} />
             </label>
             <CrmSelect ariaLabel="Filtrar por estado" onChange={(value) => updateFilters({ status: value as CatalogProductFilters['status'] })} options={[{ label: 'Todos los estados', value: 'all' }, { label: 'Activos', value: 'active' }, { label: 'Inactivos', value: 'inactive' }]} value={filters.status} />
             <CrmSelect ariaLabel="Filtrar por tipo" onChange={(value) => updateFilters({ type: value as CatalogProductFilters['type'] })} options={[{ label: 'Todos los tipos', value: 'all' }, { label: 'Estándar', value: 'standard' }, { label: 'Menú', value: 'menu' }]} value={filters.type} />
@@ -141,8 +143,8 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
           </CatalogCheckbox>
         </CatalogPanelHeader>
 
-        <div className="crm-data-table crm-catalog-products-table !grid !overflow-auto">
-          <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[.045em] !text-[var(--crm-text-muted)]">
+        <div className="grid overflow-auto !grid !overflow-auto">
+          <div className="sticky top-0 z-[1] grid min-w-[940px] grid-cols-[minmax(160px,1.2fr)_105px_64px_68px_104px_minmax(120px,.9fr)_168px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface-soft)] px-3 py-2.5 text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !sticky !top-0 !z-[1] !grid !min-h-[50px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[.045em] !text-[var(--crm-text-muted)]">
             <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Producto" onSort={handleSort} sortKey="product" />
             <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Tipo / estado" onSort={handleSort} sortKey="type" />
             <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="IVA" onSort={handleSort} sortKey="vat" />
@@ -152,21 +154,21 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
             <span>Acciones</span>
           </div>
           {visibleProducts.map((summary) => (
-            <div className="crm-data-row !grid !min-h-[78px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !text-[13px]" key={summary.product.id}>
-              <div className="crm-product-cell">
-                {summary.product.image?.publicUrl ? <img alt="" className="crm-product-thumb" src={summary.product.image.publicUrl} /> : <div className="crm-product-thumb crm-product-thumb-empty"><Boxes className="!size-4" /></div>}
-                <div className="crm-cell-main"><strong>{summary.product.name}</strong><span>{summary.product.description || 'Sin descripción'}{summary.internal ? ' · Interno' : ''}</span></div>
+            <div className="grid min-h-16 min-w-[940px] grid-cols-[minmax(160px,1.2fr)_105px_64px_68px_104px_minmax(120px,.9fr)_168px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] px-3 py-2.5 text-[13px] font-medium text-[var(--crm-text-secondary)] transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] !grid !min-h-[78px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !text-[13px]" key={summary.product.id}>
+              <div className="flex min-w-0 items-center gap-[11px]">
+                {summary.product.image?.publicUrl ? <img alt="" className="grid size-[42px] shrink-0 place-items-center overflow-hidden rounded-xl border-0 bg-[var(--crm-surface-soft)] object-cover text-[var(--crm-text-muted)]" src={summary.product.image.publicUrl} /> : <div className="grid size-[42px] shrink-0 place-items-center overflow-hidden rounded-xl border-0 bg-[var(--crm-surface-soft)] object-cover text-[var(--crm-text-muted)]"><Boxes className="!size-4" /></div>}
+                <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{summary.product.name}</strong><span>{summary.product.description || 'Sin descripción'}{summary.internal ? ' · Interno' : ''}</span></div>
               </div>
               <div className="!grid !gap-1.5"><span>{summary.product.type === 'menu' ? 'Menú' : 'Estándar'}</span><CatalogStatus active={summary.product.active} /></div>
               <span>{summary.product.vatRate === null ? 'Heredado' : `${summary.product.vatRate} %`}</span>
               <strong>{summary.variants.length}</strong>
               <strong>{priceLabel(summary)}</strong>
               <span>{summary.tabs.map((tab) => tab.label).join(', ') || 'Sin apariciones'}<br /><small>{summary.categories.map((category) => category.name).join(', ')}</small></span>
-              <div className="crm-action-group">
-                <button aria-label={`Editar ${summary.product.name}`} className="crm-action-button" disabled={disabled} onClick={() => setEditorProductId(summary.product.id)} type="button"><Pencil className="!size-4" /></button>
-                <button aria-label={`Duplicar ${summary.product.name}`} className="crm-action-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.duplicateProduct(catalog, summary.product.id))} title="Duplicar producto" type="button"><Copy className="!size-4" /></button>
-                <button aria-label={summary.product.active ? 'Desactivar' : 'Activar'} className="crm-action-button" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.setProductActive(catalog.venueId, summary.product.id, !summary.product.active))} type="button">{summary.product.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</button>
-                <button aria-label={`Eliminar ${summary.product.name}`} className="crm-action-button crm-danger-button" disabled={disabled} onClick={() => void removeProduct(summary)} type="button"><Trash2 className="!size-4" /></button>
+              <div className="flex min-w-0 items-center justify-end gap-[7px]">
+                <UiButton aria-label={`Editar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => setEditorProductId(summary.product.id)} type="button"><Pencil className="!size-4" /></UiButton>
+                <UiButton aria-label={`Duplicar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.duplicateProduct(catalog, summary.product.id))} title="Duplicar producto" type="button"><Copy className="!size-4" /></UiButton>
+                <UiButton aria-label={summary.product.active ? 'Desactivar' : 'Activar'} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.setProductActive(catalog.venueId, summary.product.id, !summary.product.active))} type="button">{summary.product.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</UiButton>
+                <UiButton aria-label={`Eliminar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95" disabled={disabled} onClick={() => void removeProduct(summary)} type="button"><Trash2 className="!size-4" /></UiButton>
               </div>
             </div>
           ))}
@@ -207,7 +209,7 @@ function CatalogProductSortHeader({
   const SortIcon = isActive ? currentDirection === 'asc' ? ArrowUp : ArrowDown : ArrowUpDown
 
   return (
-    <button
+    <UiButton
       aria-label={`Ordenar por ${label}`}
       className={isActive
         ? '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-secondary)] !shadow-none'
@@ -217,6 +219,6 @@ function CatalogProductSortHeader({
     >
       <span>{label}</span>
       <SortIcon className="!size-3.5" />
-    </button>
+    </UiButton>
   )
 }

@@ -23,7 +23,7 @@ export function ReservationTableBadge({ count = 1, onClick, reservation }: Props
   return (
     <span
       aria-label={`Abrir reserva de ${reservation.customerName}`}
-      className={`reservation-table-badge${minutes <= 60 ? ' soon' : ''}${minutes <= 15 || reservation.status === 'arrived' || isReservationLate(reservation) ? ' urgent' : ''}`}
+      className={`pointer-events-auto relative z-[2] flex min-h-6 max-w-full items-center gap-[3px] rounded-md border border-[color-mix(in_srgb,var(--warning)_45%,var(--separator))] bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] px-[5px] py-0.5 text-[9px] font-extrabold text-[var(--foreground)] [&>span]:truncate [&>b]:rounded-sm [&>b]:bg-[var(--surface)] [&>b]:px-[3px] [&>b]:py-px ${minutes <= 60 ? 'border-[var(--warning)]' : ''} ${minutes <= 15 || reservation.status === 'arrived' || isReservationLate(reservation) ? 'bg-[color-mix(in_srgb,var(--warning)_20%,var(--surface))]' : ''}`}
       onClick={(event) => {
         event.stopPropagation()
         onClick(event)

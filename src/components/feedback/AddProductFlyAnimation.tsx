@@ -21,7 +21,7 @@ export function AddProductFlyAnimation({ feedback }: AddProductFlyAnimationProps
   } as CSSProperties
 
   return createPortal(
-    <span aria-hidden="true" className="pos-add-product-fly" style={style} />,
+    <span aria-hidden="true" className="pointer-events-none fixed z-[60] -m-3 size-6 rounded-full bg-[var(--accent)] shadow-[0_6px_16px_color-mix(in_srgb,var(--accent)_40%,transparent)] animate-[pos-add-product-fly_320ms_cubic-bezier(.2,.8,.2,1)_forwards] motion-reduce:animate-none" style={style} />,
     document.body,
   )
 }

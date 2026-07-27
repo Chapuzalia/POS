@@ -1,3 +1,5 @@
+import { Button as UiButton } from '../components/ui/Button'
+import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
 import { useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
@@ -12,7 +14,6 @@ import {
   ProductDialog,
   SessionTicketsModal,
 } from '../components/modals'
-import { closeOnModalBackdrop } from '../components/modals/modalBackdrop'
 import { CatalogPanel, MobileTicketModal, PaymentPanel, TicketPanel } from '../components/pos'
 import { AddProductFlyAnimation } from '../components/feedback/AddProductFlyAnimation'
 import { EqualSplitOrderModal } from '../features/tables/components/EqualSplitOrderModal'
@@ -319,20 +320,20 @@ export function PosPage(props: Props) {
         </div>
       </MobileTicketModal>}
 
-      {restaurant.pendingPayment ? <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, () => restaurant.setPendingPayment(null), props.isBusy)}>
-        <section className="table-modal" role="dialog" aria-modal="true" aria-labelledby="pending-service-title">
+      {restaurant.pendingPayment ? <AppModal containerClassName="!max-w-md !p-4" dismissDisabled={props.isBusy} label="Productos pendientes" onClose={() => restaurant.setPendingPayment(null)}>
+        <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">
           <h2 id="pending-service-title">Productos pendientes</h2>
           <p>Quedan {restaurant.pendingPayment.pendingUnits} {restaurant.pendingPayment.pendingUnits === 1 ? 'producto pendiente' : 'productos pendientes'} de servir.</p>
           <div>
-            <button className="table-action secondary" onClick={() => restaurant.setPendingPayment(null)} type="button">Volver a la comanda</button>
-            <button className="table-action primary" onClick={() => {
+            <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45" onClick={() => restaurant.setPendingPayment(null)} type="button">Volver a la comanda</UiButton>
+            <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45" onClick={() => {
               const payment = restaurant.pendingPayment
               restaurant.setPendingPayment(null)
               if (payment) void restaurant.completePayment(payment.method, payment.receivedCents, true)
-            }} type="button">Cobrar igualmente</button>
+            }} type="button">Cobrar igualmente</UiButton>
           </div>
         </section>
-      </div> : null}
+      </AppModal> : null}
       {restaurant.pendingLineRemoval ? <RemoveOrderLineModal
         isBusy={props.isBusy}
         line={restaurant.pendingLineRemoval}

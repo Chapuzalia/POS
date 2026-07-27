@@ -1,10 +1,11 @@
+import { Input as UiInput } from '../ui/Input'
+import { Button as UiButton } from '../ui/Button'
 import { Percent, Tags, X } from 'lucide-react'
 import { useState } from 'react'
 import { calculateDiscount, formatDiscountRounding, formatDiscountValue, getActiveVenueDiscounts } from '../../lib/discounts'
 import { parseMoneyToCents } from '../../lib/format'
 import type { AppliedDiscount, Discount, DiscountCalculationType } from '../../types'
-import { Button } from '../ui'
-import { closeOnModalBackdrop } from './modalBackdrop'
+import { AppModal, Button } from '../ui'
 
 type DiscountModalProps = {
   description?: string
@@ -55,8 +56,8 @@ export function DiscountModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy)}>
-      <section aria-labelledby="discount-title" aria-modal="true" className="max-h-[85svh] w-full overflow-y-auto rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-xl sm:rounded-[var(--radius)]" role="dialog">
+    <AppModal dismissDisabled={isBusy} label="Aplicar descuento" onClose={onCancel} placement="bottom">
+      <section aria-labelledby="discount-title" className="max-h-[85svh] w-full overflow-y-auto rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-xl sm:rounded-[var(--radius)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold" id="discount-title">Aplicar descuento</h2>
@@ -69,7 +70,7 @@ export function DiscountModal({
 
         <div className="mt-5 grid gap-2">
           {availableDiscounts.map((discount) => (
-            <button
+            <UiButton
               className="flex min-h-14 items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 py-3 text-left hover:border-[var(--accent)]"
               disabled={isBusy}
               key={discount.id}
@@ -92,7 +93,7 @@ export function DiscountModal({
                 <strong className="font-mono">{formatDiscountValue(discount.type, discount.value)}</strong>
                 {discount.roundingIncrementCents ? <small className="text-xs text-[var(--muted)]">{formatDiscountRounding(discount.roundingIncrementCents)}</small> : null}
               </span>
-            </button>
+            </UiButton>
           ))}
           {!availableDiscounts.length && !manualDiscountEnabled ? (
             <p className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-5 text-center text-sm font-semibold text-[var(--muted)]">No hay descuentos disponibles para este local.</p>
@@ -116,7 +117,7 @@ export function DiscountModal({
                   <span className="text-sm font-semibold text-[var(--muted)]">{manualType === 'percentage' ? 'Porcentaje' : 'Importe'}</span>
                   <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
                     <Percent className="h-4 w-4 text-[var(--muted)]" />
-                    <input autoFocus className="min-w-0 flex-1 bg-transparent px-3 outline-none" inputMode="decimal" onChange={(event) => { setManualValue(event.target.value); setValidationError(null) }} value={manualValue} />
+                    <UiInput autoFocus className="min-w-0 flex-1 bg-transparent px-3 outline-none" inputMode="decimal" onChange={(event) => { setManualValue(event.target.value); setValidationError(null) }} value={manualValue} />
                     <span className="text-sm font-bold text-[var(--muted)]">{manualType === 'percentage' ? '%' : 'EUR'}</span>
                   </div>
                 </label>
@@ -127,6 +128,6 @@ export function DiscountModal({
           </div>
         ) : null}
       </section>
-    </div>
+    </AppModal>
   )
 }

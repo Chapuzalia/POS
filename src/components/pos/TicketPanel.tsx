@@ -137,7 +137,7 @@ function TicketLineRow({ isBusy, line, onDecrement, onIncrement, onRemove }: Tic
   }
 
   return (
-    <div className="ticket-line-swipe relative overflow-hidden rounded-[var(--radius)] bg-[var(--background)]">
+    <div className="touch-pan-y relative overflow-hidden rounded-[var(--radius)] bg-[var(--background)]">
       <div className="absolute inset-y-px right-px flex w-24 items-center justify-center rounded-r-[calc(var(--radius)-1px)] bg-[var(--danger)] text-white">
         <Trash2 className="h-5 w-5" />
       </div>

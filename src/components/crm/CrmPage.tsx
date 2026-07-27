@@ -9,7 +9,6 @@ import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import type { CrmStats, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
-import './crm.css'
 
 export type CrmPageProps = {
   context: TenantContext

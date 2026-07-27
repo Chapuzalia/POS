@@ -30,24 +30,22 @@ test('all CRM dropdowns use the shared CRM select instead of native selects', as
   assert.deepEqual(nativeSelects, [])
 })
 
-test('CRM select exposes listbox semantics and complete keyboard navigation', () => {
+test('CRM select delegates accessible listbox and keyboard behavior to HeroUI', () => {
+  assert.match(select, /from '@heroui\/react'/)
   assert.match(select, /aria-haspopup="listbox"/)
-  assert.match(select, /role="listbox"/)
-  assert.match(select, /role="option"/)
-  assert.match(select, /event\.key === 'ArrowDown'/)
-  assert.match(select, /event\.key === 'ArrowUp'/)
-  assert.match(select, /event\.key === 'Home'/)
-  assert.match(select, /event\.key === 'End'/)
-  assert.match(select, /event\.key === 'Escape'/)
-  assert.match(select, /event\.stopPropagation\(\)/)
+  assert.match(select, /<ListBox/)
+  assert.match(select, /<ListBoxItem/)
+  assert.match(select, /onSelectionChange=/)
+  assert.match(select, /selectedKey=\{selectedValue \|\| null\}/)
+  assert.doesNotMatch(select, /document\.addEventListener/)
 })
 
-test('CRM select portals its menu, retains form values and uses CRM theme tokens', () => {
-  assert.match(select, /createPortal/)
-  assert.ok(select.includes('const naturalHeight = menuRef.current?.scrollHeight'))
-  assert.ok(select.includes("menuPosition?.scrollable ? '!overflow-y-auto' : '!overflow-y-visible'"))
+test('CRM select retains form values and uses CRM theme tokens', () => {
+  assert.match(select, /<Select\.Popover/)
   assert.match(select, /type="hidden" value=\{selectedValue\}/)
-  assert.match(select, /!bg-\[var\(--crm-surface\)\]/)
-  assert.match(select, /!bg-\[var\(--crm-blue-soft\)\]/)
+  assert.match(select, /!bg-\[var\(--crm-input-bg\)\]/)
+  assert.match(select, /!border-\[var\(--crm-input-border\)\]/)
+  assert.match(select, /!bg-\[var\(--crm-popover-bg\)\]/)
   assert.match(select, /!shadow-\[var\(--crm-shadow-floating\)\]/)
+  assert.doesNotMatch(select, /crm-select(?:__|\s)/)
 })

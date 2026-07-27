@@ -1,3 +1,6 @@
+import { TextArea as UiTextArea } from '../ui/TextArea'
+import { Input as UiInput } from '../ui/Input'
+import { Button as UiButton } from '../ui/Button'
 import { ArrowDownToLine, ArrowUpFromLine, CreditCard, LoaderCircle, X } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { sileo } from 'sileo'
@@ -7,8 +10,7 @@ import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
 import type { CashMovement, CashMovementType } from '../../types'
 import { cx } from '../../utils/cx'
 import { getReadableError } from '../../utils/errors'
-import { Button } from '../ui'
-import { closeOnModalBackdrop } from './modalBackdrop'
+import { AppModal, Button } from '../ui'
 
 type Props = {
   isOnline: boolean
@@ -64,8 +66,8 @@ export function CashMovementModal({ isOnline, isSaving, onCancel, onConfirm }: P
     }
   }
 
-  return <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, busy)}>
-    <section aria-labelledby="cash-movement-title" aria-modal="true" className="flex max-h-[92svh] w-full flex-col overflow-hidden rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-2xl sm:rounded-[var(--radius)]" role="dialog">
+  return <AppModal containerClassName="!max-w-2xl !p-0 sm:!p-4" dismissDisabled={busy} label="Movimiento de efectivo" onClose={onCancel} placement="bottom">
+    <section aria-labelledby="cash-movement-title" className="flex max-h-[92svh] w-full flex-col overflow-hidden rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-2xl sm:rounded-[var(--radius)]">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
         <div><h2 className="text-2xl font-bold" id="cash-movement-title">Movimientos de caja</h2><p className="mt-1 text-sm text-[var(--muted)]">Registra una entrada o salida de efectivo sin generar una venta.</p></div>
         <Button aria-label="Cerrar" disabled={busy} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
@@ -76,16 +78,16 @@ export function CashMovementModal({ isOnline, isSaving, onCancel, onConfirm }: P
           <div className="mt-2 grid gap-2 sm:grid-cols-3">
             {options.map((option) => {
               const active = option.type === type
-              return <button aria-pressed={active} className={cx('flex min-h-28 flex-col items-start gap-2 rounded-[var(--radius)] border p-4 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45', active ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--separator)] bg-[var(--background)] hover:border-[var(--accent)]')} key={option.type} onClick={() => { setType(option.type); setNotes(option.defaultReason); setError(null) }} type="button">
+              return <UiButton aria-pressed={active} className={cx('flex min-h-28 flex-col items-start gap-2 rounded-[var(--radius)] border p-4 text-left transition focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45', active ? 'border-[var(--accent)] bg-[var(--accent-soft)]' : 'border-[var(--separator)] bg-[var(--background)] hover:border-[var(--accent)]')} key={option.type} onClick={() => { setType(option.type); setNotes(option.defaultReason); setError(null) }} type="button">
                 <option.Icon className="h-5 w-5 text-[var(--accent)]" />
                 <span><strong className="block text-sm">{option.title}</strong><span className="mt-1 block text-xs leading-5 text-[var(--muted)]">{option.description}</span></span>
-              </button>
+              </UiButton>
             })}
           </div>
         </fieldset>
         {selected ? <div className="mt-5 grid gap-4">
-          <label><span className="text-sm font-semibold text-[var(--muted)]">Importe</span><div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]"><span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">EUR</span><input autoFocus className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none" disabled={busy} inputMode="decimal" onBlur={() => { if (amountCents > 0) setAmount(centsToInput(amountCents)) }} onChange={(event) => { setAmount(event.target.value); setError(null) }} placeholder="0,00" value={amount} /></div></label>
-          <label><span className="text-sm font-semibold text-[var(--muted)]">Motivo</span><textarea className="mt-1 min-h-24 w-full resize-y rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] p-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]" disabled={busy} onChange={(event) => { setNotes(event.target.value); setError(null) }} value={notes} /><span className="mt-1 block text-xs text-[var(--muted)]">Puedes editar el motivo antes de registrar el movimiento.</span></label>
+          <label><span className="text-sm font-semibold text-[var(--muted)]">Importe</span><div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]"><span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">EUR</span><UiInput autoFocus className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none" disabled={busy} inputMode="decimal" onBlur={() => { if (amountCents > 0) setAmount(centsToInput(amountCents)) }} onChange={(event) => { setAmount(event.target.value); setError(null) }} placeholder="0,00" value={amount} /></div></label>
+          <label><span className="text-sm font-semibold text-[var(--muted)]">Motivo</span><UiTextArea className="mt-1 min-h-24 w-full resize-y rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] p-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]" disabled={busy} onChange={(event) => { setNotes(event.target.value); setError(null) }} value={notes} /><span className="mt-1 block text-xs text-[var(--muted)]">Puedes editar el motivo antes de registrar el movimiento.</span></label>
           <div className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><p className="text-sm font-semibold text-[var(--muted)]">Efecto en el arqueo</p><div className="mt-2 grid gap-2 text-sm sm:grid-cols-2"><p className="flex justify-between gap-3"><span>Efectivo en caja</span><strong className="font-mono">{selected.type === 'cash_in' ? '+' : '-'}{formatMoney(amountCents)}</strong></p><p className="flex justify-between gap-3"><span>Tarjeta</span><strong className="font-mono">{selected.type === 'card_cashback' ? `+${formatMoney(amountCents)}` : 'Sin cambios'}</strong></p></div></div>
           {!isOnline ? <p className="rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-semibold text-amber-700">Los movimientos de caja requieren conexión.</p> : null}
           {error ? <p className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]" role="alert">{error}</p> : null}
@@ -93,5 +95,5 @@ export function CashMovementModal({ isOnline, isSaving, onCancel, onConfirm }: P
         </div> : null}
       </div>
     </section>
-  </div>
+  </AppModal>
 }

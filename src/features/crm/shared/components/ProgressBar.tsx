@@ -1,4 +1,4 @@
-import type { CSSProperties } from 'react'
+import { ProgressBar as HeroProgressBar } from '@heroui/react'
 
 export type ProgressBarProps = {
   'aria-label'?: string
@@ -24,20 +24,13 @@ export function ProgressBarBase({
   progressClassName = '',
   value,
 }: Omit<ProgressBarProps, 'labelPosition' | 'valueFormatter'>) {
-  const percentage = getPercentage(value, min, max)
-  return <div
-    aria-label={ariaLabel}
-    aria-valuemax={max}
-    aria-valuemin={min}
-    aria-valuenow={Math.min(max, Math.max(min, value))}
-    className={`!h-2 !w-full !overflow-hidden !rounded-full !bg-[var(--crm-surface-soft)] ${className}`}
-    role="progressbar"
-  >
-    <div
-      className={`!h-full !rounded-full !bg-[var(--crm-green)] !transition-[width] !duration-300 !ease-out motion-reduce:!transition-none ${progressClassName}`}
-      style={{ width: `${percentage}%` } as CSSProperties}
-    />
-  </div>
+  return (
+    <HeroProgressBar aria-label={ariaLabel} className={className} color="success" maxValue={max} minValue={min} value={Math.min(max, Math.max(min, value))}>
+      <HeroProgressBar.Track className="!h-2 !w-full !rounded-full !bg-[var(--crm-surface-soft)]">
+        <HeroProgressBar.Fill className={`!rounded-full !bg-[var(--crm-green)] ${progressClassName}`} />
+      </HeroProgressBar.Track>
+    </HeroProgressBar>
+  )
 }
 
 export function ProgressBar({

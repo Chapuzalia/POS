@@ -8,5 +8,5 @@ export function getInitialCrmTheme(): CrmTheme {
   } catch {
     // El almacenamiento puede no estar disponible en navegacion privada.
   }
-  return document.documentElement.dataset.theme === 'club-night' ? 'dark' : 'light'
+  return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
 }
