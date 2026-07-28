@@ -37,7 +37,7 @@ export function ConfigModal({
 
   if (section === 'printing') {
     return (
-      <AppModal containerClassName="!max-w-5xl !p-0 sm:!p-4" label="Configuración de impresión" onClose={onClose} placement="bottom">
+      <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={1024} label="Configuración de impresión" onClose={onClose} placement="bottom">
         <section className="flex max-h-[100svh] w-full flex-col bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[94svh] sm:max-w-5xl sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]">
           <div className="flex items-center justify-between gap-3 border-b border-[var(--separator)] p-4">
             <Button onClick={() => setSection('general')} size="sm" type="button" variant="tertiary"><ArrowLeft className="h-4 w-4" />Ajustes</Button>

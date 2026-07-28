@@ -23,7 +23,7 @@ export function PrintAgentSetupWizard({ canOpenDrawer, onClose }: { canOpenDrawe
   }
 
   const busy = agent.isCheckingConnection || agent.isLoadingServerInfo || agent.isDiscovering || agent.isSelectingPrinter || agent.isTestingPrinter || agent.isOpeningCashDrawer
-  return <AppModal containerClassName="!max-w-3xl !p-0 sm:!p-4" dismissDisabled={busy} label="Configurar impresión local" onClose={onClose}>
+  return <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={768} dismissDisabled={busy} label="Configurar impresión local" onClose={onClose}>
     <section aria-labelledby="print-wizard-title" className="flex h-[100svh] w-full flex-col bg-[var(--surface)] sm:h-auto sm:max-h-[92svh] sm:max-w-3xl sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5"><div><p className="text-xs font-black uppercase text-[var(--accent)]">Paso {step} de 9</p><h2 className="text-2xl font-black" id="print-wizard-title">Configuracion del servidor de impresion</h2></div><Button disabled={busy} onClick={onClose} size="sm"><X className="h-4 w-4" /></Button></header>
       <ProgressBar aria-label={`Paso ${step} de 9`} maxValue={9} size="sm" value={step}><ProgressBar.Track className="h-1 bg-[var(--surface-secondary)]"><ProgressBar.Fill className="bg-[var(--accent)]" /></ProgressBar.Track></ProgressBar>

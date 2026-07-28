@@ -90,11 +90,18 @@ export function NativeSelect({
         <HeroSelect.Popover>
           <ListBox items={options}>
             {(option) => (
-              <ListBoxItem id={option.value} isDisabled={option.disabled} textValue={option.textValue}>
+              <ListBoxItem
+                className="transition-colors hover:bg-foreground/5 data-[hovered]:bg-foreground/5"
+                id={option.value}
+                isDisabled={option.disabled}
+                textValue={option.textValue}
+              >
                 {option.label}
-                <ListBoxItem.Indicator>
-                  <Check aria-hidden="true" className="size-4" />
-                </ListBoxItem.Indicator>
+                {option.value === selectedValue ? (
+                  <ListBoxItem.Indicator>
+                    <Check aria-hidden="true" className="size-4" />
+                  </ListBoxItem.Indicator>
+                ) : null}
               </ListBoxItem>
             )}
           </ListBox>

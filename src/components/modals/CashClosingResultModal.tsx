@@ -13,7 +13,7 @@ export function CashClosingResultModal({ closing, isPrinting, onClose, onPrint }
   const printed = closing.printStatus === 'printed'
   const unknown = closing.printStatus === 'unknown'
   const amounts = getCashClosingAmounts(closing.printSnapshot)
-  return <AppModal containerClassName="!max-w-2xl !p-4" dismissDisabled={isPrinting} label="Cierre completado" onClose={onClose}>
+  return <AppModal containerClassName="!p-4" maxWidth={672} dismissDisabled={isPrinting} label="Cierre completado" onClose={onClose}>
     <section className="w-full max-w-2xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">

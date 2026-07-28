@@ -141,7 +141,7 @@ export function LoginScreen({
       </section>
 
       {conflictAccountName ? (
-        <AppModal containerClassName="!max-w-lg !p-4" dismissDisabled label="Esta cuenta ya está conectada" onClose={onCancelLoginConflict}>
+        <AppModal containerClassName="!p-4" maxWidth={512} dismissDisabled label="Esta cuenta ya está conectada" onClose={onCancelLoginConflict}>
           <section
             aria-describedby="login-conflict-description"
             aria-labelledby="login-conflict-title"

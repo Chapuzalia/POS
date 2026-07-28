@@ -52,7 +52,8 @@ type SuperAdminModalProps = {
 function SuperAdminModal({ children, label, onClose, size = 'compact' }: SuperAdminModalProps) {
   return (
     <AppModal
-      containerClassName={size === 'large' ? '!max-w-[820px] !p-3 sm:!p-6' : '!max-w-[560px] !p-3 sm:!p-6'}
+      containerClassName="!p-3 sm:!p-6"
+      maxWidth={size === 'large' ? 820 : 560}
       dialogClassName="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !flex !max-h-[calc(100dvh-24px)] !flex-col !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] sm:!max-h-[calc(100dvh-48px)] sm:!rounded-[var(--crm-radius-lg)]"
       label={label}
       onClose={onClose}

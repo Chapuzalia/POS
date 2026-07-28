@@ -148,7 +148,7 @@ export function SplitOrderModal({
   }
 
   return (
-    <AppModal containerClassName={step === 'select' ? '!max-w-[760px] !p-0 sm:!p-4' : '!max-w-[560px] !p-0 sm:!p-4'} dismissDisabled={isBusy || paying} label={step === 'select' ? 'Seleccionar productos' : 'Cobrar selección'} onClose={onClose}>
+    <AppModal containerClassName="!p-0 sm:!p-4" dismissDisabled={isBusy || paying} maxWidth={step === 'select' ? 760 : 560} label={step === 'select' ? 'Seleccionar productos' : 'Cobrar selección'} onClose={onClose}>
       <section
         aria-labelledby="split-order-title"
         className={`w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 max-h-[calc(100svh-2.5rem)] overflow-y-auto ${
@@ -435,7 +435,7 @@ export function SplitOrderModal({
       ) : null}
 
       {pendingPayment ? (
-        <AppModal containerClassName="!max-w-md !p-4" dismissDisabled={isBusy || paying} label="Productos pendientes" onClose={() => setPendingPayment(null)}>
+        <AppModal containerClassName="!p-4" maxWidth={448} dismissDisabled={isBusy || paying} label="Productos pendientes" onClose={() => setPendingPayment(null)}>
           <section
             aria-labelledby="split-items-pending-title"
             className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 max-w-md"

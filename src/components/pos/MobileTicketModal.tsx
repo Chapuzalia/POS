@@ -98,7 +98,7 @@ export function MobileTicketModal({
       </UiButton>
 
       {isOpen ? (
-        <AppModal backdropClassName="lg:!hidden" containerClassName="!max-w-full !p-0 lg:!hidden" dialogClassName="!min-h-[65dvh] !rounded-t-2xl !rounded-b-none !border-b-0 !bg-[var(--background)]" label={title} onClose={onClose} placement="bottom">
+        <AppModal backdropClassName="lg:!hidden" containerClassName="!p-0 lg:!hidden" maxWidth="100%" dialogClassName="!min-h-[65dvh] !rounded-t-2xl !rounded-b-none !border-b-0 !bg-[var(--background)]" label={title} onClose={onClose} placement="bottom">
 
           <section
             aria-labelledby="mobile-ticket-title"
