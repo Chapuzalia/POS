@@ -1,9 +1,6 @@
-import type { LucideIcon } from "lucide-react";
-
 type PosCategoryCardProps = {
   count: number;
   disabled: boolean;
-  icon: LucideIcon;
   label: string;
   onSelect: () => void;
 };
@@ -11,7 +8,6 @@ type PosCategoryCardProps = {
 export function PosCategoryCard({
   count,
   disabled,
-  icon: CategoryIcon,
   label,
   onSelect,
 }: PosCategoryCardProps) {

@@ -420,13 +420,11 @@ export function CatalogPanel({
               className={`${showProductGrid && visibleEntries.length ? "mt-3 " : ""}grid grid-cols-3 gap-3 md:grid-cols-4 2xl:grid-cols-5`}
             >
               {visibleCategoriesWithProducts.map((category) => {
-                const Icon = getCatalogIcon(category.icon ?? "", activeFilter);
                 const count = categoryProductCounts.get(category.id) ?? 0;
                 return (
                   <PosCategoryCard
                     count={count}
                     disabled={disabled || count === 0}
-                    icon={Icon}
                     key={category.id}
                     label={category.name}
                     onSelect={() => setSelectedCategoryId(category.id)}
