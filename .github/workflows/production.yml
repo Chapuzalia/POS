@@ -84,6 +84,19 @@ jobs:
                 -i "$HOME/.ssh/pos-production" \
                 "${SSH_USER}@${SSH_HOST}"
 
+      - name: Configure Node and pnpm
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Enable pnpm
+        shell: bash
+        run: |
+          npm install --global corepack@latest
+          corepack enable
+          corepack prepare pnpm@10 --activate
+          pnpm --version
+
       - name: Install Vercel CLI
         run: npm install --global vercel@latest
 
