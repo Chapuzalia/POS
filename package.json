@@ -13,6 +13,7 @@
   "dependencies": {
     "@heroui/react": "3.2.2",
     "@heroui/styles": "3.2.2",
+    "@sentry/react": "^10.68.0",
     "@supabase/supabase-js": "^2.110.0",
     "fflate": "^0.8.3",
     "lucide-react": "^1.23.0",
@@ -23,6 +24,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@sentry/vite-plugin": "^5.4.0",
     "@tailwindcss/vite": "^4.3.2",
     "@types/node": "^24.13.2",
     "@types/react": "^19.2.17",

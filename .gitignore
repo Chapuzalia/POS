@@ -27,3 +27,6 @@ dist-ssr
 *.prod
 
 backups/
+
+# Sentry Config File
+.env.sentry-build-plugin

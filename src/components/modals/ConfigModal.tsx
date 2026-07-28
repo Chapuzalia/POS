@@ -70,6 +70,14 @@ export function ConfigModal({
           <Metric label="Pendiente sync" value={String(pendingCount)} tone={pendingCount ? 'danger' : 'success'} />
         </div>
 
+        <button
+          onClick={() => {
+            throw new Error('This is your first error!');
+          }}
+        >
+          Break the world
+        </button>
+
         <UiButton className="mt-5 flex min-h-14 w-full items-center justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-left transition hover:border-[var(--accent)]" onClick={() => setSection('printing')} type="button">
           <span className="flex items-center gap-3"><Printer className="h-5 w-5 text-[var(--accent)]" /><span><strong className="block">Hardware · Impresion</strong><small className="text-[var(--muted)]">Agente local, impresoras, cajon y diagnostico</small></span></span>
           <span aria-hidden="true">›</span>
