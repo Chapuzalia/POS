@@ -483,6 +483,12 @@ export type CrmStats = {
   }>
   discountedTicketCount: number
   discountsCents: number
+  hourlySales: Array<{
+    hour: number
+    ticketCount: number
+    totalCents: number
+  }>
+  monthKey: string
   monthSalesCents: number
   monthTicketCount: number
   openCashSessions: Array<{
@@ -498,6 +504,13 @@ export type CrmStats = {
     cardCents: number
     invitationCents: number
     otherCents: number
+  }>
+  topProductCombinations: Array<{
+    productName: string
+    mixers: string[]
+    modifiers: string[]
+    quantity: number
+    totalCents: number
   }>
   topProducts: Array<{
     productName: string

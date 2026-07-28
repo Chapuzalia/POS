@@ -1,7 +1,9 @@
+import { Input as UiInput } from '../ui/Input'
+import { Checkbox as UiCheckbox } from '../ui/Checkbox'
 import { LogIn, TriangleAlert, WifiOff, Wifi } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import type { LoginInput, TenantContext } from '../../types'
-import { Button, Chip } from '../ui'
+import { AppModal, Button, Chip } from '../ui'
 
 const rememberedEmailKey = 'club-pos:remembered-email'
 
@@ -81,7 +83,7 @@ export function LoginScreen({
   }
 
   return (
-    <main className="flex min-h-screen items-center justify-center bg-[var(--background)] p-4 text-[var(--foreground)]">
+    <main className="flex h-full overflow-y-auto items-center justify-center bg-[var(--background)] p-4 text-[var(--foreground)]">
       <section className="w-full max-w-md rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
@@ -96,8 +98,8 @@ export function LoginScreen({
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label className="block">
             <span className="text-sm font-semibold text-[var(--muted)]">Email</span>
-            <input
-              className="mt-1 h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            <UiInput
+              className="mt-1 h-12 w-full rounded-(--radius) !border bg-(--field)! px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               autoComplete="username"
               onChange={(event) => setEmail(event.target.value)}
               placeholder="usuario@negocio.com"
@@ -108,8 +110,8 @@ export function LoginScreen({
           </label>
           <label className="block">
             <span className="text-sm font-semibold text-[var(--muted)]">Contrasena</span>
-            <input
-              className="mt-1 h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
+            <UiInput
+              className="mt-1 h-12 w-full rounded-[var(--radius)] border-1 !bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               autoComplete="current-password"
               onChange={(event) => setPassword(event.target.value)}
               required
@@ -117,15 +119,7 @@ export function LoginScreen({
               value={password}
             />
           </label>
-          <label className="flex min-h-11 cursor-pointer items-center gap-3 text-sm font-semibold text-[var(--foreground)]">
-            <input
-              checked={rememberAccount}
-              className="h-5 w-5 rounded border-[var(--field-border)] accent-[var(--accent)]"
-              onChange={(event) => setRememberAccount(event.target.checked)}
-              type="checkbox"
-            />
-            Recordar cuenta
-          </label>
+          <UiCheckbox checked={rememberAccount} className="min-h-11 text-sm font-semibold text-[var(--foreground)]" onChange={setRememberAccount}>Recordar cuenta</UiCheckbox>
           {error ? (
             <div className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
               {error}
@@ -147,13 +141,11 @@ export function LoginScreen({
       </section>
 
       {conflictAccountName ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+        <AppModal containerClassName="!max-w-lg !p-4" dismissDisabled label="Esta cuenta ya está conectada" onClose={onCancelLoginConflict}>
           <section
             aria-describedby="login-conflict-description"
             aria-labelledby="login-conflict-title"
-            aria-modal="true"
             className="w-full max-w-lg rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)]"
-            role="dialog"
           >
             <div className="flex items-start gap-4">
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[var(--danger-soft)] text-[var(--danger)]">
@@ -182,7 +174,7 @@ export function LoginScreen({
               </Button>
             </div>
           </section>
-        </div>
+        </AppModal>
       ) : null}
     </main>
   )

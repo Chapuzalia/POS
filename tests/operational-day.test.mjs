@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import {
   getOperationalDateKey,
+  getOperationalMonthRangeIso,
   getOperationalMonthStartIso,
   normalizeDayChangeTime,
 } from '../src/lib/operationalDay.ts'
@@ -34,6 +35,14 @@ test('calcula el inicio mensual en la zona horaria y hora del local', () => {
     getOperationalMonthStartIso(madridAtFour, new Date('2026-07-01T04:00:00Z')),
     '2026-07-01T02:00:00.000Z',
   )
+})
+
+test('calcula el intervalo completo de un mes aunque cambie el horario de verano', () => {
+  assert.deepEqual(getOperationalMonthRangeIso(madridAtFour, '2026-10'), {
+    startIso: '2026-10-01T02:00:00.000Z',
+    endIso: '2026-11-01T03:00:00.000Z',
+  })
+  assert.throws(() => getOperationalMonthRangeIso(madridAtFour, '10-2026'), /YYYY-MM/)
 })
 
 test('normaliza el tipo time de Postgres y rechaza horas inválidas', () => {

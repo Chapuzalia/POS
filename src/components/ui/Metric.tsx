@@ -1,4 +1,4 @@
-import { cx } from '../../utils/cx'
+import { Card } from '@heroui/react'
 
 type MetricProps = {
   label: string
@@ -8,15 +8,20 @@ type MetricProps = {
 
 export function Metric({ label, tone = 'default', value }: MetricProps) {
   return (
-    <div
-      className={cx(
-        'rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3',
-        tone === 'success' && 'border-[var(--success)] bg-[var(--success-soft)]',
-        tone === 'danger' && 'border-[var(--danger)] bg-[var(--danger-soft)]',
-      )}
+    <Card
+      className={
+        tone === 'success'
+          ? 'border-success/35 bg-success-soft'
+          : tone === 'danger'
+            ? 'border-danger/35 bg-danger-soft'
+            : undefined
+      }
+      variant="secondary"
     >
-      <p className="text-xs font-semibold uppercase tracking-normal text-[var(--muted)]">{label}</p>
-      <p className="mt-1 font-mono text-xl font-bold tabular-nums text-[var(--foreground)]">{value}</p>
-    </div>
+      <Card.Content className="gap-1 p-3">
+        <p className="text-xs font-semibold uppercase text-muted">{label}</p>
+        <p className="font-mono text-xl font-bold tabular-nums text-foreground">{value}</p>
+      </Card.Content>
+    </Card>
   )
 }

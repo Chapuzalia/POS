@@ -23,7 +23,7 @@ function assertPayload(value: unknown, venueId: string, mode: CatalogReadMode): 
   }
 }
 
-const numberValue = (value: number | string | null) => value === null ? null : Number(value)
+const numberValue = (value: number | string | null | undefined) => value == null ? null : Number(value)
 const order = <T extends { id: string; sortOrder: number }>(rows: T[]) => rows.sort((left, right) => left.sortOrder - right.sortOrder || left.id.localeCompare(right.id))
 
 export function mapCatalogPayload(
@@ -64,6 +64,8 @@ export function mapCatalogPayload(
     }))),
     saleFormats: order((payload.sale_formats ?? []).map((row) => ({
       id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, active: row.is_active,
+      inventoryConsumptionQuantity: numberValue(row.inventory_consumption_quantity),
+      inventoryConsumptionUnitId: row.inventory_consumption_unit_id ?? null,
       sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
     }))),
     variants: order(payload.variants.map((row) => ({

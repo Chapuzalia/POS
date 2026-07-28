@@ -1,7 +1,10 @@
+import { Input as UiInput } from '../../../components/ui/Input'
+import { Button as UiButton } from '../../../components/ui/Button'
+import { AppModal } from '../../../components/ui/AppModal'
+import { ProgressBar } from '@heroui/react'
 import { useEffect, useRef, useState } from 'react'
 import { Check, Minus, Plus, UsersRound, X } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
-import { closeOnModalBackdrop } from '../../../components/modals/modalBackdrop'
 import { PaymentPanel } from '../../../components/pos'
 import { calculateAppliedDiscount } from '../../../lib/discounts'
 import { formatMoney } from '../../../lib/format'
@@ -89,24 +92,24 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, isBusy, manua
     }
   }
 
-  return <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, onClose, isBusy || paying)}>
-    <section aria-labelledby="equal-split-title" aria-modal="true" className="table-modal !w-[min(560px,100%)]" role="dialog">
+  return <AppModal containerClassName="!max-w-[560px] !p-0 sm:!p-4" dismissDisabled={isBusy || paying} label="Dividir comanda a partes iguales" onClose={onClose}>
+    <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 !w-full">
       <header className="flex items-start justify-between gap-4">
         <div>
           <div className="mb-2 inline-flex items-center gap-2 rounded-full bg-[var(--accent-soft)] px-3 py-1 text-xs font-black uppercase tracking-wide text-[var(--accent)]"><UsersRound size={15} /> A partes iguales</div>
           <h2 id="equal-split-title">Dividir comanda</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">{order.tables.map((table) => table.name).join(' + ')}</p>
         </div>
-        <button aria-label="Cerrar" className="table-icon-button" disabled={isBusy || paying} onClick={onClose} type="button"><X size={19} /></button>
+        <UiButton aria-label="Cerrar" className="grid size-11 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] disabled:opacity-45" disabled={isBusy || paying} onClick={onClose} type="button"><X size={19} /></UiButton>
       </header>
 
       {!split ? <div className="!mt-6 !block space-y-5">
         <div className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-center">
           <label className="text-sm font-bold text-[var(--muted)]" htmlFor="equal-split-count">Número de comensales</label>
           <div className="mx-auto mt-3 flex max-w-xs items-center justify-center gap-3">
-            <button aria-label="Quitar comensal" className="table-icon-button min-h-12 min-w-12" disabled={partCount <= 2} onClick={() => setPartCount((count) => Math.max(2, count - 1))} type="button"><Minus /></button>
-            <input className="h-14 w-24 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-center text-2xl font-black" id="equal-split-count" max={99} min={2} onChange={(event) => setPartCount(Math.max(2, Math.min(99, Number(event.target.value) || 2)))} type="number" value={partCount} />
-            <button aria-label="Añadir comensal" className="table-icon-button min-h-12 min-w-12" disabled={partCount >= 99} onClick={() => setPartCount((count) => Math.min(99, count + 1))} type="button"><Plus /></button>
+            <UiButton aria-label="Quitar comensal" className="grid size-11 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] disabled:opacity-45 min-h-12 min-w-12" disabled={partCount <= 2} onClick={() => setPartCount((count) => Math.max(2, count - 1))} type="button"><Minus /></UiButton>
+            <UiInput className="h-14 w-24 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-center text-2xl font-black" id="equal-split-count" max={99} min={2} onChange={(event) => setPartCount(Math.max(2, Math.min(99, Number(event.target.value) || 2)))} type="number" value={partCount} />
+            <UiButton aria-label="Añadir comensal" className="grid size-11 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] disabled:opacity-45 min-h-12 min-w-12" disabled={partCount >= 99} onClick={() => setPartCount((count) => Math.min(99, count + 1))} type="button"><Plus /></UiButton>
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
@@ -115,14 +118,14 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, isBusy, manua
         </div>
         <p className="text-center text-xs text-[var(--muted)]">Si no divide exacto, los céntimos se ajustan automáticamente entre los cobros.</p>
         {localError ? <p className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-bold text-[var(--danger)]">{localError}</p> : null}
-        <button className="table-action primary w-full" disabled={isBusy || paying} onClick={() => void startSplit()} type="button"><Check size={18} /> Empezar a cobrar</button>
+        <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45 w-full" disabled={isBusy || paying} onClick={() => void startSplit()} type="button"><Check size={18} /> Empezar a cobrar</UiButton>
       </div> : <div className="!mt-6 !block space-y-5">
         <div className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5">
           <div className="flex items-end justify-between gap-4">
             <div><span className="text-sm font-bold text-[var(--muted)]">Han pagado</span><div className="mt-1 text-4xl font-black tabular-nums"><span className="text-[var(--accent)]">{split.paidParts}</span><span className="text-[var(--muted)]">/{split.partCount}</span></div></div>
             <div className="text-right"><span className="text-sm text-[var(--muted)]">Queda por cobrar</span><strong className="mt-1 block text-xl font-black">{formatMoney(split.remainingCents)}</strong></div>
           </div>
-          <div aria-label={`${split.paidParts} de ${split.partCount} pagados`} className="mt-4 h-2.5 overflow-hidden rounded-full bg-[var(--separator)]" role="progressbar" aria-valuemax={split.partCount} aria-valuemin={0} aria-valuenow={split.paidParts}><div className="h-full rounded-full bg-[var(--accent)] transition-[width]" style={{ width: `${split.paidParts / split.partCount * 100}%` }} /></div>
+          <ProgressBar aria-label={`${split.paidParts} de ${split.partCount} pagados`} className="mt-4" maxValue={split.partCount} value={split.paidParts}><ProgressBar.Track className="h-2.5 bg-[var(--separator)]"><ProgressBar.Fill className="bg-[var(--accent)]" /></ProgressBar.Track></ProgressBar>
           <p className="mt-3 text-sm font-semibold text-[var(--muted)]">{split.remainingParts === 1 ? 'Último cobro' : `Quedan ${split.remainingParts} personas`}</p>
         </div>
         {useDefaultDiscount && currentDiscount ? <p className="rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-2 text-sm font-semibold text-[var(--foreground)]">Este pago hereda el descuento de la comanda. Puedes cambiarlo o quitarlo solo para esta parte.</p> : null}
@@ -136,12 +139,12 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, isBusy, manua
 
     {discountOpen && split ? <DiscountModal description="Se aplicará solo al siguiente pago." discounts={discounts} isBusy={paying || isBusy} manualDiscountEnabled={manualDiscountEnabled} onCancel={() => setDiscountOpen(false)} onSelect={(discount) => { setCurrentDiscount(discount); setUseDefaultDiscount(false); setDiscountOpen(false) }} subtotalCents={split.nextPartCents} venueId={venueId} /> : null}
 
-    {pendingPayment ? <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, () => setPendingPayment(null), isBusy || paying)}>
-      <section aria-labelledby="equal-split-pending-title" aria-modal="true" className="table-modal max-w-md" role="dialog">
+    {pendingPayment ? <AppModal containerClassName="!max-w-md !p-4" dismissDisabled={isBusy || paying} label="Productos pendientes" onClose={() => setPendingPayment(null)}>
+      <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">
         <h2 id="equal-split-pending-title">Productos pendientes</h2>
         <p>Quedan {pendingPayment.pendingUnits} {pendingPayment.pendingUnits === 1 ? 'producto pendiente' : 'productos pendientes'} de servir.</p>
-        <div><button className="table-action secondary" onClick={() => setPendingPayment(null)} type="button">Volver</button><button className="table-action primary" onClick={() => void completePart(pendingPayment.method, pendingPayment.receivedCents, true, pendingPayment.discount, pendingPayment.useDefaultDiscount)} type="button">Cobrar igualmente</button></div>
+        <div><UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45" onClick={() => setPendingPayment(null)} type="button">Volver</UiButton><UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45" onClick={() => void completePart(pendingPayment.method, pendingPayment.receivedCents, true, pendingPayment.discount, pendingPayment.useDefaultDiscount)} type="button">Cobrar igualmente</UiButton></div>
       </section>
-    </div> : null}
-  </div>
+    </AppModal> : null}
+  </AppModal>
 }

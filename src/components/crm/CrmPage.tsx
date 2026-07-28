@@ -9,7 +9,6 @@ import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import type { CrmStats, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
-import './crm.css'
 
 export type CrmPageProps = {
   context: TenantContext
@@ -75,7 +74,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     if (!canAccessCrmSection(context.role, activeSection)) setActiveSection('dashboard')
   }, [activeSection, context.role])
 
-  const refreshStats = useCallback(async (options: { silent?: boolean } = {}) => {
+  const refreshStats = useCallback(async (options: { monthKey?: string; silent?: boolean } = {}) => {
     const loadStats = async () => {
       onError(null)
       if (!selectedVenueId) {
@@ -87,7 +86,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
         setStats(null)
         return
       }
-      setStats(await loadCrmStats(context, selectedVenue))
+      setStats(await loadCrmStats(context, selectedVenue, options.monthKey))
     }
     if (options.silent) {
       try { await loadStats() } catch (statsError) { onError(getReadableError(statsError)) }

@@ -1,4 +1,5 @@
 import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
+import type { ReservationStatus } from '../reservations/types'
 
 export type RestaurantTableShape = 'square' | 'rectangle' | 'round'
 export type RestaurantMapElementKind = 'wall' | 'column' | 'text'
@@ -12,7 +13,8 @@ export type OrderTable = { orderId: string; orderGroupId: string; tableId: strin
 export type RestaurantOrderLine = { id: string; tenantId: string; venueId: string; orderId: string; productId: string | null; variantId: string | null; productName: string; variantName: string; unitPriceCents: number; quantity: number; servedQuantity: number; fullyServedAt: string | null; modifiers: TicketLineModifier[]; components: TicketLineComponent[]; catalogSnapshot: SaleLineCatalogSnapshot; mixerProductId: string | null; mixer: TicketLineMixer | null; note: string | null; createdAt: string; updatedAt: string }
 export type TableLayoutEntry = { positionX: number; positionY: number; groupId: string | null }
 export type SessionTableLayout = { cashSessionId: string; revision: number; updatedAt: string; tables: Record<string, TableLayoutEntry> }
-export type RestaurantTableMapItem = RestaurantTable & { status: RestaurantTableStatus; orderId: string | null; orderOpenedAt: string | null; guestCount: number | null; totalCents: number; pendingUnits: number; groupTableIds: string[]; layoutGroupId?: string | null; layoutGroupTableIds?: string[] }
+export type RestaurantTableReservation = { id: string; customerName: string; customerPhone: string; partySize: number; startsAt: string; endsAt: string; status: ReservationStatus }
+export type RestaurantTableMapItem = RestaurantTable & { status: RestaurantTableStatus; orderId: string | null; orderOpenedAt: string | null; guestCount: number | null; totalCents: number; pendingUnits: number; groupTableIds: string[]; nextReservation: RestaurantTableReservation | null; reservationCount: number; layoutGroupId?: string | null; layoutGroupTableIds?: string[] }
 export type RestaurantMap = { areas: DiningArea[]; tables: RestaurantTableMapItem[]; layoutRevision?: number }
 export type RestaurantOrderDetail = { order: RestaurantOrder; cashRegisterName: string; lines: RestaurantOrderLine[]; tables: RestaurantTable[]; totalCents: number }
 export type RestaurantOrderGroupDetail = { id: string; orders: RestaurantOrderDetail[]; tables: RestaurantTable[] }

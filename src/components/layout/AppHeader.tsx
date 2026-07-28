@@ -1,37 +1,58 @@
-import { ArrowLeftRight, ChevronDown, Euro, LogOut, ReceiptText, RefreshCw, Settings, WalletCards, Wifi, WifiOff } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import type { CashSession } from '../../types'
-import { cx } from '../../utils/cx'
-import { Chip } from '../ui'
-import { ManualCashDrawerButton, PrintAgentStatusBadge } from '../../features/local-printing'
+import { Button as UiButton } from '../ui/Button'
+import { Dropdown, Label } from '@heroui/react'
+import {
+  ArrowLeftRight,
+  CalendarDays,
+  ChevronDown,
+  Euro,
+  LogOut,
+  ReceiptText,
+  RefreshCw,
+  Settings,
+  WalletCards,
+  Wifi,
+  WifiOff,
+} from "lucide-react";
+
+import type { CashSession } from "../../types";
+
+import { Chip } from "../ui";
+import {
+  ManualCashDrawerButton,
+  PrintAgentStatusBadge,
+} from "../../features/local-printing";
 
 type AppHeaderProps = {
-  cashSession: CashSession | null
-  canCloseCash: boolean
-  canManageCash: boolean
-  canOpenCashDrawer: boolean
-  isLoading: boolean
-  isOnline: boolean
-  onCloseCash: () => void
-  onOpenConfig: () => void
-  onOpenTicketHistory: () => void
-  onOpenCashMovements: () => void
-  onOpenCashClosingHistory: () => void
-  onRefreshCatalog: () => void
-  onLogout: () => void
-  pendingCount: number
-  themeMode: 'light' | 'dark'
-}
+  cashSession: CashSession | null;
+  canCloseCash: boolean;
+  canManageCash: boolean;
+  canOpenCashDrawer: boolean;
+  canOpenReservations: boolean;
+  isLoading: boolean;
+  isOnline: boolean;
+  onCloseCash: () => void;
+  onOpenConfig: () => void;
+  onOpenReservations: () => void;
+  onOpenTicketHistory: () => void;
+  onOpenCashMovements: () => void;
+  onOpenCashClosingHistory: () => void;
+  onRefreshCatalog: () => void;
+  onLogout: () => void;
+  pendingCount: number;
+  themeMode: "light" | "dark";
+};
 
 export function AppHeader({
   cashSession,
   canCloseCash,
   canManageCash,
   canOpenCashDrawer,
+  canOpenReservations,
   isLoading,
   isOnline,
   onCloseCash,
   onOpenConfig,
+  onOpenReservations,
   onOpenTicketHistory,
   onOpenCashMovements,
   onOpenCashClosingHistory,
@@ -40,137 +61,60 @@ export function AppHeader({
   pendingCount,
   themeMode,
 }: AppHeaderProps) {
-  const [menuOpen, setMenuOpen] = useState(false)
-  const menuRef = useRef<HTMLDivElement>(null)
+  const menuItems: Array<{
+    action: () => void
+    danger?: boolean
+    disabled?: boolean
+    icon: typeof RefreshCw
+    id: string
+    label: string
+  }> = [
+    { action: onRefreshCatalog, disabled: isLoading || !isOnline, icon: RefreshCw, id: 'refresh', label: 'Recargar catálogo' },
+  ]
 
-  useEffect(() => {
-    if (!menuOpen) {
-      return
-    }
-
-    function handlePointerDown(event: PointerEvent) {
-      if (menuRef.current?.contains(event.target as Node)) {
-        return
-      }
-
-      setMenuOpen(false)
-    }
-
-    function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape') {
-        setMenuOpen(false)
-      }
-    }
-
-    document.addEventListener('pointerdown', handlePointerDown)
-    document.addEventListener('keydown', handleKeyDown)
-
-    return () => {
-      document.removeEventListener('pointerdown', handlePointerDown)
-      document.removeEventListener('keydown', handleKeyDown)
-    }
-  }, [menuOpen])
-
-  function runMenuAction(action: () => void) {
-    setMenuOpen(false)
-    action()
+  if (cashSession) {
+    if (canCloseCash) menuItems.push({ action: onOpenTicketHistory, icon: ReceiptText, id: 'tickets', label: 'Histórico de tickets' })
+    if (canManageCash) menuItems.push({ action: onOpenCashMovements, disabled: isLoading || !isOnline, icon: ArrowLeftRight, id: 'movements', label: 'Entradas / salidas' })
+    menuItems.push({ action: onCloseCash, icon: Euro, id: 'close-cash', label: 'Cerrar caja' })
   }
+  if (canCloseCash) menuItems.push({ action: onOpenCashClosingHistory, icon: WalletCards, id: 'closings', label: 'Histórico de cierres' })
+  menuItems.push(
+    { action: onOpenConfig, icon: Settings, id: 'settings', label: 'Ajustes' },
+    { action: onLogout, danger: true, icon: LogOut, id: 'logout', label: 'Cerrar sesión' },
+  )
 
   return (
     <header className="shrink-0 border-b border-[var(--separator)] bg-[var(--surface)] pt-[max(1.5rem,env(safe-area-inset-top))]">
       <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2">
-        <div className="relative min-w-0" ref={menuRef}>
-          <button
-            aria-expanded={menuOpen}
-            aria-haspopup="menu"
-            className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius)] border border-transparent px-2 text-[var(--foreground)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-            onClick={() => setMenuOpen((current) => !current)}
-            type="button"
-          >
-            <img
-              src={themeMode === 'dark' ? '/logo_white.png' : '/logo_black.png'}
-              alt="TICKIT"
-              className="h-6 w-auto max-w-36 object-contain"
-            />
-            <ChevronDown className={cx('h-4 w-4 transition-transform', menuOpen && 'rotate-180')} />
-          </button>
+        <div className="flex min-w-0 flex-row gap-2">
+          <Dropdown>
+            <Dropdown.Trigger aria-label="Abrir menú principal de TICKIT" className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius)] px-2 text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)]">
+                <img src={themeMode === 'dark' ? '/logo_white.png' : '/logo_black.png'} alt="TICKIT" className="h-6 w-auto max-w-36 object-contain" />
+                <ChevronDown className="h-4 w-4" />
+              </Dropdown.Trigger>
+            <Dropdown.Popover className="!w-64 !max-w-[calc(100vw-2rem)]">
+              <Dropdown.Menu
+                disabledKeys={new Set(menuItems.filter((item) => item.disabled).map((item) => item.id))}
+                onAction={(key) => menuItems.find((item) => item.id === String(key))?.action()}
+              >
+                {menuItems.map((item) => {
+                  const Icon = item.icon
+                  return (
+                    <Dropdown.Item id={item.id} key={item.id} textValue={item.label} variant={item.danger ? 'danger' : undefined}>
+                      <Icon className={item.id === 'refresh' && isLoading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
+                      <Label>{item.label}</Label>
+                    </Dropdown.Item>
+                  )
+                })}
+              </Dropdown.Menu>
+            </Dropdown.Popover>
+          </Dropdown>
 
-          {menuOpen ? (
-            <div
-              className="absolute left-0 top-full z-50 mt-2 flex flex-col gap-2 w-64 max-w-[calc(100vw-2rem)] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-2 shadow-xl"
-              role="menu"
-            >
-              <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45"
-                disabled={isLoading || !isOnline}
-                onClick={() => runMenuAction(onRefreshCatalog)}
-                role="menuitem"
-                type="button"
-              >
-                <RefreshCw className={cx('h-4 w-4', isLoading && 'animate-spin')} />
-                <span>Recargar catalogo</span>
-              </button>
-              {cashSession ? (
-                <>
-                  {canCloseCash ? <button
-                    className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-                    onClick={() => runMenuAction(onOpenTicketHistory)}
-                    role="menuitem"
-                    type="button"
-                  >
-                    <ReceiptText className="h-4 w-4" />
-                    <span>Historico de tickets</span>
-                  </button> : null}
-                  {canManageCash ? <button
-                    className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-45"
-                    disabled={isLoading || !isOnline}
-                    onClick={() => runMenuAction(onOpenCashMovements)}
-                    role="menuitem"
-                    type="button"
-                  >
-                    <ArrowLeftRight className="h-4 w-4" />
-                    <span>Entradas / salidas</span>
-                  </button> : null}
-                  <button
-                    className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-                    onClick={() => runMenuAction(onCloseCash)}
-                    role="menuitem"
-                    type="button"
-                  >
-                    <Euro className="h-4 w-4" />
-                    <span>Cerrar caja</span>
-                  </button>
-                </>
-              ) : null}
-              {canCloseCash ? <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)]"
-                onClick={() => runMenuAction(onOpenCashClosingHistory)}
-                role="menuitem"
-                type="button"
-              >
-                <WalletCards className="h-4 w-4" />
-                <span>Historico de cierres</span>
-              </button> : null}
-              <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--foreground)] transition hover:bg-[var(--accent-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
-                onClick={() => runMenuAction(onOpenConfig)}
-                role="menuitem"
-                type="button"
-              >
-                <Settings className="h-4 w-4" />
-                <span>Ajustes</span>
-              </button>
-              
-              <button
-                className="flex min-h-11 w-full items-center gap-3 rounded-[var(--radius)] px-3 text-left text-sm font-semibold text-[var(--danger)] transition hover:bg-[var(--danger-soft)] focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--danger)]"
-                onClick={() => runMenuAction(onLogout)}
-                role="menuitem"
-                type="button"
-              >
-                <LogOut className="h-4 w-4" />
-                <span>Cerrar sesión</span>
-              </button>
-            </div>
+          {canOpenReservations ? (
+            <UiButton className="flex min-h-11 items-center gap-3 px-3 text-sm font-semibold" disabled={isLoading || !isOnline} onClick={onOpenReservations} type="button">
+              <CalendarDays className="h-4 w-4" />
+              <span>Reservas</span>
+            </UiButton>
           ) : null}
         </div>
 

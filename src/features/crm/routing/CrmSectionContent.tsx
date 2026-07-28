@@ -8,6 +8,9 @@ import { CatalogTransferCrm } from '../catalog/pages/CatalogTransferPage.tsx'
 import { DashboardCrm } from '../dashboard/pages/DashboardPage'
 import { DiscountsCrm } from '../discounts/pages/DiscountsPage'
 import { PlanCrm } from '../plan/pages/PlanPage'
+import { InventoryStockCrm } from '../inventory/pages/InventoryStockPage'
+import { InventoryWarehousesCrm } from '../inventory/pages/InventoryWarehousesPage'
+import { InventorySettingsCrm } from '../inventory/pages/InventorySettingsPage'
 import { SalesReportsCrm } from '../sales/pages/SalesReportsPage'
 import { CashClosingReportsCrm } from '../sales/pages/CashClosingReportsPage'
 import type { RunAction } from '../shared/types'
@@ -26,7 +29,7 @@ type Props = {
   mutateCatalog: (action: () => Promise<unknown>) => Promise<boolean>
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
-  onStatsRefresh: (options?: { silent?: boolean }) => Promise<void>
+  onStatsRefresh: (options?: { monthKey?: string; silent?: boolean }) => Promise<void>
   onVenuesChanged: () => Promise<void>
   runAction: RunAction
   selectedVenueId: string
@@ -34,7 +37,7 @@ type Props = {
   venues: CrmVenue[]
 }
 
-const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import'])
+const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import', 'inventory-stock'])
 
 export function CrmSectionContent({
   activeSection,
@@ -53,7 +56,7 @@ export function CrmSectionContent({
   venues,
 }: Props) {
   if (catalogSections.has(activeSection) && !catalog) {
-    return <section className="crm-panel !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
+    return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
   }
 
   switch (activeSection) {
@@ -77,6 +80,12 @@ export function CrmSectionContent({
       return catalog ? <CatalogTransferCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} venueName={venues.find((venue) => venue.id === selectedVenueId)?.name ?? 'local'} /> : null
     case 'tables':
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
+    case 'inventory-stock':
+      return catalog ? <InventoryStockCrm catalog={catalog} disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} /> : null
+    case 'inventory-warehouses':
+      return <InventoryWarehousesCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'inventory-settings':
+      return <InventorySettingsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'reports':
       return <SalesReportsCrm
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
@@ -96,7 +105,14 @@ export function CrmSectionContent({
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
     case 'stats':
-      return <StatsCrm disabled={disabled} onRefresh={onStatsRefresh} stats={stats} />
+      return <StatsCrm
+        dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
+        disabled={disabled}
+        key={selectedVenueId}
+        onRefresh={(monthKey) => onStatsRefresh({ monthKey })}
+        stats={stats}
+        timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
+      />
     case 'settings':
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':

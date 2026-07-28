@@ -1,7 +1,106 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { applyCrmOpenCashSalesTotals } from '../src/features/crm/analytics/services/analyticsModel.ts'
+import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildTopProductCombinations, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
+
+test('estadisticas separa productos top por mixer y modificadores sin duplicar mixers historicos', () => {
+  const combinations = buildTopProductCombinations([
+    {
+      productName: 'Brugal', quantity: 2, totalCents: 1_600,
+      modifiers: [{ id: 'mixer:cola', groupId: 'mixer', name: 'Coca-Cola' }, { id: 'ice', groupId: 'service', name: 'Sin hielo' }],
+      components: [{ type: 'mixer', productName: 'Coca-Cola', sortOrder: 0, modifiers: [] }],
+    },
+    {
+      productName: 'Brugal', quantity: 1, totalCents: 800,
+      modifiers: [{ id: 'mixer:cola', groupId: 'mixer', name: 'Coca-Cola' }, { id: 'ice', groupId: 'service', name: 'Sin hielo' }],
+      components: [],
+    },
+    {
+      productName: 'Brugal', quantity: 2, totalCents: 1_500, modifiers: [],
+      components: [{ type: 'mixer', productName: 'Sprite', sortOrder: 0, modifiers: [{ name: 'Limón' }] }],
+    },
+  ])
+
+  assert.deepEqual(combinations, [
+    {
+      productName: 'Brugal', mixers: ['Coca-Cola'], modifiers: ['Sin hielo'],
+      quantity: 3, totalCents: 2_400,
+    },
+    {
+      productName: 'Brugal', mixers: ['Sprite'], modifiers: ['Sprite · Limón'],
+      quantity: 2, totalCents: 1_500,
+    },
+  ])
+})
+
+test('el desglose por combinacion se muestra solo en estadisticas y no cambia el top del dashboard', async () => {
+  const [statsPage, dashboardPage] = await Promise.all([
+    readFile(new URL('../src/features/crm/analytics/pages/StatsPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/dashboard/pages/DashboardPage.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(statsPage, /<TopProductCombinationsList stats=\{stats\}/)
+  assert.match(statsPage, /Mixer: \{mixer\}/)
+  assert.match(statsPage, /Modificador: \{modifier\}/)
+  assert.match(dashboardPage, /<TopProductsList stats=\{stats\}/)
+  assert.doesNotMatch(dashboardPage, /TopProductCombinationsList/)
+})
+
+test('las ventas por hora se agrupan en la zona horaria del local', () => {
+  const hourlySales = buildHourlySalesStats([
+    { createdAt: '2026-07-10T18:10:00.000Z', totalCents: 500 },
+    { createdAt: '2026-07-11T18:45:00.000Z', totalCents: 1_000 },
+    { createdAt: '2026-07-11T22:30:00.000Z', totalCents: 750 },
+  ], 'Europe/Madrid')
+
+  assert.equal(hourlySales.length, 24)
+  assert.deepEqual(hourlySales[20], { hour: 20, ticketCount: 2, totalCents: 1_500 })
+  assert.deepEqual(hourlySales[0], { hour: 0, ticketCount: 1, totalCents: 750 })
+})
+
+test('estadisticas permite alternar el grafico horario entre tickets y facturacion', async () => {
+  const [statsPage, hourlyChart] = await Promise.all([
+    readFile(new URL('../src/features/crm/analytics/pages/StatsPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/analytics/components/HourlySalesChart.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(statsPage, /Actividad por hora/)
+  assert.match(statsPage, /hora local del establecimiento/)
+  assert.match(hourlyChart, /setMetric\('tickets'\)/)
+  assert.match(hourlyChart, /setMetric\('revenue'\)/)
+  assert.match(hourlyChart, /Más tickets/)
+  assert.match(hourlyChart, /Mayor facturación/)
+})
+
+test('el selector mensual recarga todos los paneles de estadisticas', async () => {
+  const [statsPage, routing, crmPage, analyticsService] = await Promise.all([
+    readFile(new URL('../src/features/crm/analytics/pages/StatsPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/routing/CrmSectionContent.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/crm/CrmPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(statsPage, /type="month"/)
+  assert.match(statsPage, /max=\{currentMonthKey\}/)
+  assert.match(statsPage, /loadedStats\?\.monthKey === selectedMonthKey/)
+  assert.match(statsPage, /void onRefresh\(monthKey\)/)
+  assert.match(routing, /onRefresh=\{\(monthKey\) => onStatsRefresh\(\{ monthKey \}\)\}/)
+  assert.match(crmPage, /loadCrmStats\(context, selectedVenue, options\.monthKey\)/)
+  assert.match(analyticsService, /monthKey: selectedMonthKey/)
+})
+
+test('los productos top de estadisticas se ordenan primero por unidades vendidas', () => {
+  const products = [
+    { productName: 'Producto caro', quantity: 2, totalCents: 10_000 },
+    { productName: 'Producto popular', quantity: 5, totalCents: 2_500 },
+    { productName: 'Producto popular premium', quantity: 5, totalCents: 3_000 },
+  ]
+
+  assert.deepEqual(
+    sortCrmTopProductsByUnits(products).map((product) => product.productName),
+    ['Producto popular premium', 'Producto popular', 'Producto caro'],
+  )
+})
 
 test('el dashboard muestra primero las cajas y permite filtrar por el local seleccionado', async () => {
   const [dashboard, routing, service, domain] = await Promise.all([
@@ -73,6 +172,8 @@ test('la resincronización de ventas solo sustituye el facturado de cada caja ab
     discountApplications: [],
     discountedTicketCount: 0,
     discountsCents: 0,
+    hourlySales: [],
+    monthKey: '2026-07',
     monthSalesCents: 0,
     monthTicketCount: 0,
     openCashSessions: [{
@@ -85,6 +186,7 @@ test('la resincronización de ventas solo sustituye el facturado de cada caja ab
       ticketCount: 1,
       cashCents: 1000,
     }, untouchedSession],
+    topProductCombinations: [],
     topProducts: [],
   }
 

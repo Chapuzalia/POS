@@ -1,9 +1,9 @@
+import { NativeSelect as UiNativeSelect } from '../ui/NativeSelect'
 import { CreditCard, Printer, Trash2, X } from 'lucide-react'
 import { formatMoney } from '../../lib/format'
 import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from '../../types'
-import { Button } from '../ui'
+import { AppModal, Button } from '../ui'
 import { usePrintAgent } from '../../features/local-printing'
-import { closeOnModalBackdrop } from './modalBackdrop'
 
 const paymentLabels: Record<HistoricalPaymentMethod, string> = {
   card: 'Tarjeta',
@@ -38,7 +38,7 @@ export function SessionTicketsModal({
   const totalCents = activeTickets.reduce((total, ticket) => total + ticket.totalCents, 0)
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onClose, isBusy)}>
+    <AppModal containerClassName="!max-w-3xl !p-4" dismissDisabled={isBusy} label="Tickets de la sesión" onClose={onClose}>
       <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
           <div>
@@ -95,7 +95,7 @@ export function SessionTicketsModal({
                       ) : (
                         <label className="flex min-h-10 items-center gap-2 rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
                           <CreditCard className="h-4 w-4 text-[var(--muted)]" />
-                          <select
+                          <UiNativeSelect
                             className="bg-transparent text-sm font-semibold text-[var(--field-foreground)] outline-none"
                             disabled={isBusy || ticket.status !== 'active'}
                             onChange={(event) => onChangePayment(ticket, event.target.value as PaymentMethod)}
@@ -107,7 +107,7 @@ export function SessionTicketsModal({
                             {paymentMethods.map((method) => (
                               <option key={method} value={method}>{paymentLabels[method]}</option>
                             ))}
-                          </select>
+                          </UiNativeSelect>
                         </label>
                       )}
                       <Button
@@ -146,6 +146,6 @@ export function SessionTicketsModal({
           )}
         </div>
       </section>
-    </div>
+    </AppModal>
   )
 }

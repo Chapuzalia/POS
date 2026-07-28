@@ -12,6 +12,7 @@ import type { CatalogData } from '../features/catalog/domain/types'
 import { subscribeToCatalogTabChanges } from '../features/catalog/data/catalog-realtime'
 import { removeProductSalesStats } from '../features/quick-sale/services/productSalesStats'
 import { useRestaurantController } from '../features/restaurant'
+import { useReservationsController } from '../features/reservations'
 import { useLoginActivity, useTenantSession } from '../features/session'
 import { loadTenantState } from '../features/session/services/loadTenantState'
 import { shouldResetTenantState } from '../features/session/session-state'
@@ -143,6 +144,16 @@ export function AppShell() {
     setBusy: setIsBusy,
     setMobileTicketOpen,
     syncPendingEvents: offline.syncPendingEvents,
+  })
+  const reservations = useReservationsController({
+    cashSession: cash.session,
+    context,
+    enabled: Boolean(context && !isBackofficeUser(context) && restaurant.tablesEnabled),
+    isOnline,
+    operationalMap: restaurant.map,
+    onError: setRestaurantError,
+    onOpenOrder: async (orderId) => { await restaurant.openExistingOrder(orderId) },
+    refreshOperationalMap: restaurant.reloadMap,
   })
 
   useRejectedSaleRecovery({
@@ -330,7 +341,7 @@ export function AppShell() {
       onLogout={session.logout}
     />
     if (isOnline && !restaurant.tablesConfigLoaded) return <LoadingScreen />
-    if (!cash.session) return <CashSessionGate
+    if (!cash.session && !reservations.isOpen) return <CashSessionGate
       cashClosings={cash.cashClosings}
       closingHistoryOpen={cash.closingHistoryOpen}
       completedClosing={cash.completedClosing}
@@ -342,6 +353,7 @@ export function AppShell() {
       onCloseCompletedClosing={() => cash.setCompletedClosing(null)}
       onLogout={() => void session.logout()}
       onOpen={cash.open}
+      onOpenReservations={reservations.open}
       onOpenClosingHistory={() => void cash.openClosingHistory()}
       onPrintClosing={(closing, isReprint) => void cash.printClosing(closing, isReprint ? { isReprint: true, copyNumber: closing.printCopies + 1 } : {})}
       onRefresh={() => void cash.options.refresh(context)}
@@ -380,6 +392,7 @@ export function AppShell() {
       productSalesStats={productSalesStats}
       quickSale={quickSale}
       restaurant={restaurant}
+      reservations={reservations}
       restaurantPaidFeedback={restaurantPaidFeedback}
       selectedThemeId={themeId}
       setThemeId={setThemeId}

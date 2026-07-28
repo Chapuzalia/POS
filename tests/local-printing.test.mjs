@@ -103,6 +103,8 @@ test('mapea cubatas, extras, efectivo e importes enteros con idempotencia establ
   assert.equal(payload.ticket.taxId, 'B12345678')
   assert.deepEqual(payload.ticket.items[0].additions, ['Coca-Cola', 'Limon'])
   assert.equal(payload.ticket.items[0].totalCents, 1800)
+  assert.equal(payload.ticket.subtotalCents, 1488)
+  assert.equal(payload.ticket.taxCents, 312)
   assert.equal(payload.ticket.discountCents, 200)
   assert.equal(payload.ticket.amountReceivedCents, 2000)
   assert.equal(payload.ticket.changeCents, 400)

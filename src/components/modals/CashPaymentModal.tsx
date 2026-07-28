@@ -1,10 +1,10 @@
+import { Input as UiInput } from '../ui/Input'
 import { X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
 import { cx } from '../../utils/cx'
-import { Button } from '../ui'
+import { AppModal, Button } from '../ui'
 import { addCashDenomination, cashDenominationsCents } from './cash-payment'
-import { closeOnModalBackdrop } from './modalBackdrop'
 
 type CashPaymentModalProps = {
   isBusy: boolean
@@ -45,7 +45,7 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
   }, [deliveredCents, difference, isBusy, onCancel, onConfirm])
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy)}>
+    <AppModal dismissDisabled={isBusy} label="Cobro en efectivo" onClose={onCancel}>
       <section className="w-full max-w-xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>
@@ -62,14 +62,16 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
           <p className="mt-1 font-mono text-4xl font-black tabular-nums">{formatMoney(totalCents)}</p>
         </div>
 
-        <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-5">
-          <Button onClick={selectExactAmount} type="button" variant="primary">Exacto</Button>
+        <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
+          <Button onClick={selectExactAmount} type="button" className="!text-xl" variant="primary">Exacto</Button>
           {cashDenominationsCents.map((amount) => (
             <Button
               key={amount}
+              className="bg-(--field) !text-xl"
               onClick={() => addDenomination(amount)}
               type="button"
               variant="tertiary"
+              size="lg"
             >
               {formatMoney(amount)}
             </Button>
@@ -80,7 +82,7 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
           <span className="text-sm font-semibold text-[var(--muted)]">Entregado</span>
           <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]">
             <span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">EUR</span>
-            <input
+            <UiInput
               className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none"
               inputMode="decimal"
               onChange={(event) => { initialExactRef.current = false; setDelivered(event.target.value) }}
@@ -116,6 +118,6 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
           Confirmar cobro
         </Button>
       </section>
-    </div>
+    </AppModal>
   )
 }

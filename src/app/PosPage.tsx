@@ -1,3 +1,5 @@
+import { Button as UiButton } from '../components/ui/Button'
+import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
 import { useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
@@ -12,7 +14,6 @@ import {
   ProductDialog,
   SessionTicketsModal,
 } from '../components/modals'
-import { closeOnModalBackdrop } from '../components/modals/modalBackdrop'
 import { CatalogPanel, MobileTicketModal, PaymentPanel, TicketPanel } from '../components/pos'
 import { AddProductFlyAnimation } from '../components/feedback/AddProductFlyAnimation'
 import { EqualSplitOrderModal } from '../features/tables/components/EqualSplitOrderModal'
@@ -23,12 +24,12 @@ import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
-import { usePosViewportLock } from './usePosViewportLock'
 import { calculateAppliedDiscount } from '../lib/discounts'
 import { getTicketTotal } from '../lib/format'
 import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
+import { ReservationsPage, type useReservationsController } from '../features/reservations'
 import type {
   CatalogStartTab,
   Discount,
@@ -42,6 +43,7 @@ import type {
 type CashController = ReturnType<typeof useCashSession>
 type QuickSaleController = ReturnType<typeof useQuickSale>
 type RestaurantController = ReturnType<typeof useRestaurantController>
+type ReservationsController = ReturnType<typeof useReservationsController>
 
 type AddFeedback = {
   announcement: string
@@ -79,6 +81,7 @@ type Props = {
   productSalesStats: ProductSalesStat[]
   quickSale: QuickSaleController
   restaurant: RestaurantController
+  reservations: ReservationsController
   restaurantPaidFeedback: PaymentMethod | null
   selectedThemeId: string
   setThemeId: (id: string) => void
@@ -86,7 +89,6 @@ type Props = {
 }
 
 export function PosPage(props: Props) {
-  usePosViewportLock()
   const [configOpen, setConfigOpen] = useState(false)
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -190,19 +192,21 @@ export function PosPage(props: Props) {
   }
 
   return (
-    <div className="flex h-dvh min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
+    <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
       <AppHeader
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true}
         canManageCash={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
+        canOpenReservations={Boolean(restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
         onCloseCash={() => void (async () => {
           if (await restaurant.requestCloseCash()) cash.openCloseModal()
         })()}
         onOpenConfig={() => setConfigOpen(true)}
+        onOpenReservations={props.reservations.open}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
         onOpenCashMovements={() => cash.setMovementModalOpen(true)}
         onOpenTicketHistory={() => void cash.ticketActions.openHistory()}
@@ -217,8 +221,9 @@ export function PosPage(props: Props) {
         </div>
       </div> : null}
       <AddProductFlyAnimation feedback={props.addFeedback.flyFeedback} />
+      {props.reservations.isOpen ? <ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /> : null}
 
-      {restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
+      {!props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
         isBusy={props.isBusy}
         isOnline={props.isOnline}
         onBack={() => void restaurant.returnToMap()}
@@ -232,7 +237,7 @@ export function PosPage(props: Props) {
         canSell={canSell}
       /> : null}
 
-      {restaurant.tablesEnabled && restaurant.posView.type === 'table_map' && cash.session ? <TableMapView
+      {!props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map' && cash.session ? <TableMapView
         canOpen={Boolean(props.context.canTakeOrders)}
         cashSessionId={cash.session.id}
         canQuickSale={props.context.canTakePayments === true}
@@ -254,6 +259,7 @@ export function PosPage(props: Props) {
         onMove={restaurant.moveOrder}
         onOpen={restaurant.openTableOrder}
         onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)}
+        onOpenReservation={(reservationId) => void props.reservations.openReservation(reservationId)}
         onQuickSale={() => {
           if (!props.context.canTakePayments) return
           restaurant.reset()
@@ -262,7 +268,7 @@ export function PosPage(props: Props) {
         selectedAreaId={restaurant.posView.areaId}
       /> : null}
 
-      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-lg:flex-col ${restaurant.tablesEnabled && restaurant.posView.type === 'table_map' ? 'hidden' : 'flex'}`}>
+      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-lg:flex-col ${props.reservations.isOpen || (restaurant.tablesEnabled && restaurant.posView.type === 'table_map') ? 'hidden' : 'flex'}`}>
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {activeTicketPanel}
           <PaymentPanel
@@ -286,7 +292,7 @@ export function PosPage(props: Props) {
         />
       </main>
 
-      {restaurant.tablesEnabled && restaurant.posView.type === 'table_map' ? null : <MobileTicketModal
+      {props.reservations.isOpen || (restaurant.tablesEnabled && restaurant.posView.type === 'table_map') ? null : <MobileTicketModal
         floatingButtonRef={props.floatingTicketButtonRef}
         isAddSuccess={props.addFeedback.isAddSuccess}
         isOpen={props.mobileTicketOpen}
@@ -314,20 +320,20 @@ export function PosPage(props: Props) {
         </div>
       </MobileTicketModal>}
 
-      {restaurant.pendingPayment ? <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, () => restaurant.setPendingPayment(null), props.isBusy)}>
-        <section className="table-modal" role="dialog" aria-modal="true" aria-labelledby="pending-service-title">
+      {restaurant.pendingPayment ? <AppModal containerClassName="!max-w-md !p-4" dismissDisabled={props.isBusy} label="Productos pendientes" onClose={() => restaurant.setPendingPayment(null)}>
+        <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">
           <h2 id="pending-service-title">Productos pendientes</h2>
           <p>Quedan {restaurant.pendingPayment.pendingUnits} {restaurant.pendingPayment.pendingUnits === 1 ? 'producto pendiente' : 'productos pendientes'} de servir.</p>
           <div>
-            <button className="table-action secondary" onClick={() => restaurant.setPendingPayment(null)} type="button">Volver a la comanda</button>
-            <button className="table-action primary" onClick={() => {
+            <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45" onClick={() => restaurant.setPendingPayment(null)} type="button">Volver a la comanda</UiButton>
+            <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45" onClick={() => {
               const payment = restaurant.pendingPayment
               restaurant.setPendingPayment(null)
               if (payment) void restaurant.completePayment(payment.method, payment.receivedCents, true)
-            }} type="button">Cobrar igualmente</button>
+            }} type="button">Cobrar igualmente</UiButton>
           </div>
         </section>
-      </div> : null}
+      </AppModal> : null}
       {restaurant.pendingLineRemoval ? <RemoveOrderLineModal
         isBusy={props.isBusy}
         line={restaurant.pendingLineRemoval}

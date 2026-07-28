@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Boxes, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Tags, Upload, Users } from 'lucide-react'
+import { Armchair, BarChart3, Boxes, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'reports' | 'x-reports' | 'import' | 'stats' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'reports' | 'x-reports' | 'inventory-stock' | 'inventory-warehouses' | 'inventory-settings' | 'import' | 'stats' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -18,6 +18,12 @@ export const reportNavItems: CrmNavItem[] = [
   { id: 'x-reports', label: 'Informes Z', icon: BarChart3 },
 ]
 
+export const inventoryNavItems: CrmNavItem[] = [
+  { id: 'inventory-stock', label: 'Stock', icon: Package },
+  { id: 'inventory-warehouses', label: 'Almacenes', icon: Warehouse },
+  { id: 'inventory-settings', label: 'Configuración', icon: Settings2 },
+]
+
 export const navItems: CrmNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'access', label: 'Accesos', icon: Users },
@@ -28,9 +34,10 @@ export const navItems: CrmNavItem[] = [
   { id: 'settings', label: 'Configuración', icon: Settings },
 ]
 
-export const allNavItems = [...navItems, ...productNavItems, ...reportNavItems]
+export const allNavItems = [...navItems, ...productNavItems, ...reportNavItems, ...inventoryNavItems]
 export const productSections = new Set<CrmSection>(productNavItems.map((item) => item.id))
 export const reportSections = new Set<CrmSection>(reportNavItems.map((item) => item.id))
+export const inventorySections = new Set<CrmSection>(inventoryNavItems.map((item) => item.id))
 
 export function getSectionTitle(section: CrmSection) {
   const titles: Partial<Record<CrmSection, string>> = {
@@ -45,6 +52,9 @@ export function getSectionTitle(section: CrmSection) {
     discounts: 'Descuentos del local',
     reports: 'Tickets',
     'x-reports': 'Informes Z',
+    'inventory-stock': 'Stock del local',
+    'inventory-warehouses': 'Almacenes del local',
+    'inventory-settings': 'Configuración de inventario',
     stats: 'Analítica comercial',
     settings: 'Configuración de locales',
     plan: 'Mi Plan',

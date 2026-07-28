@@ -1,10 +1,13 @@
+import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
+import { Input as UiInput } from '../../../../components/ui/Input'
+import { Button as UiButton } from '../../../../components/ui/Button'
+import { CrmModal } from '../../shared/components/CrmModal'
 import { RefreshCw, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { loadCashClosingHistory } from "../../../cash-registers/service";
 import { getCashClosingAmounts } from "../../../cash-registers/services/cashClosingAmounts";
 import { formatMoney } from "../../../../lib/format";
 import type { CashClosingRecord, TenantContext } from "../../../../types";
-import { KpiCard } from "../../dashboard/pages/DashboardPage";
 import type { RunAction } from "../../shared/types";
 import {
   buildCashClosingDailyValues,
@@ -281,26 +284,12 @@ function CashClosingDetailModal({
     (payment) => payment.code !== "cash" && payment.code !== "card",
   );
 
-  useEffect(() => {
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") onClose();
-    };
-    window.addEventListener("keydown", handleKeyDown);
-    return () => window.removeEventListener("keydown", handleKeyDown);
-  }, [onClose]);
 
   return (
-    <div
-      className="!fixed !inset-0 !z-50 !grid !place-items-center !bg-black/55 !p-4"
-      onMouseDown={(event) => {
-        if (event.target === event.currentTarget) onClose();
-      }}
-    >
+    <CrmModal label="Detalle del cierre" onClose={onClose} size="large">
       <section
         aria-labelledby="cash-closing-detail-title"
-        aria-modal="true"
         className="!max-h-[calc(100svh-32px)] !w-full !max-w-4xl !overflow-y-auto !rounded-2xl !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-2xl sm:!p-6"
-        role="dialog"
       >
         <header className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !pb-4">
           <div>
@@ -315,15 +304,15 @@ function CashClosingDetailModal({
               {dateFormatter.format(new Date(closing.closedAt))}
             </p>
           </div>
-          <button
+          <UiButton
             aria-label="Cerrar detalle del cierre"
             autoFocus
-            className="crm-icon-button !grid !size-10 !shrink-0 !place-items-center !rounded-xl !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
+            className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !grid !size-10 !shrink-0 !place-items-center !rounded-xl !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
             onClick={onClose}
             type="button"
           >
             <X className="!size-4" />
-          </button>
+          </UiButton>
         </header>
 
         <div className="!mt-5 !grid !gap-5">
@@ -486,7 +475,7 @@ function CashClosingDetailModal({
           </section>
         </div>
       </section>
-    </div>
+    </CrmModal>
   );
 }
 
@@ -536,26 +525,11 @@ export function CashClosingReportsCrm({
     () => buildCashClosingDailyValues(filteredClosings, operationalDayConfig),
     [filteredClosings, operationalDayConfig],
   );
-  const totalSalesCents = filteredClosings.reduce(
-    (total, closing) => total + closing.printSnapshot.summary.totalSalesCents,
-    0,
-  );
-  const totalDifferenceCents = filteredClosings.reduce(
-    (total, closing) =>
-      total +
-      closing.printSnapshot.differences.cashDifferenceCents +
-      closing.printSnapshot.differences.cardDifferenceCents,
-    0,
-  );
-  const totalTickets = filteredClosings.reduce(
-    (total, closing) => total + closing.printSnapshot.summary.salesCount,
-    0,
-  );
 
   return (
     <div className="!grid !grid-cols-1 !items-start !gap-4 xl:!gap-6">
-      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-panel-header !flex !min-h-[60px] !flex-wrap !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 md:!px-[22px]">
+      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="flex min-h-11 items-center justify-between gap-2.5 border-b border-[var(--crm-border-subtle)] px-4 py-3 text-[var(--crm-text)] [&_h2]:m-0 [&_p]:m-0 [&_p]:mt-1 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)] !flex !min-h-[60px] !flex-wrap !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 md:!px-[22px]">
           <div>
             <h2 className="!text-base !font-bold">Evolución de cierres</h2>
             <p>Valor total de los cierres agrupado por día operativo</p>
@@ -563,8 +537,8 @@ export function CashClosingReportsCrm({
           <div className="!flex !flex-wrap !items-end !gap-2">
             <label className="!grid !gap-1 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
               Día operativo desde
-              <input
-                className="crm-field !min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-[13px] !text-[var(--crm-text)]"
+              <UiInput
+                className="!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-[13px] !text-[var(--crm-text)]"
                 max={dateTo || undefined}
                 onChange={(event) => setDateFrom(event.target.value)}
                 type="date"
@@ -573,55 +547,33 @@ export function CashClosingReportsCrm({
             </label>
             <label className="!grid !gap-1 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
               Día operativo hasta
-              <input
-                className="crm-field !min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-[13px] !text-[var(--crm-text)]"
+              <UiInput
+                className="!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-[13px] !text-[var(--crm-text)]"
                 min={dateFrom || undefined}
                 onChange={(event) => setDateTo(event.target.value)}
                 type="date"
                 value={dateTo}
               />
             </label>
-            <button
+            <UiButton
               aria-label="Actualizar informes X"
-              className="crm-icon-button !inline-flex !size-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
+              className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
               disabled={disabled}
               onClick={() => void runAction(refresh)}
               type="button"
             >
               <RefreshCw className="!size-4" />
-            </button>
+            </UiButton>
           </div>
         </div>
         <div className="!px-[18px] !pt-3 !pb-2 md:!px-[22px]">
           <ClosingValuesChart values={dailyValues} />
         </div>
-        <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-2 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
-          <KpiCard
-            color="blue"
-            label="Cierres"
-            value={filteredClosings.length}
-          />
-          <KpiCard
-            color="green"
-            label="Valor de cierres"
-            value={formatMoney(totalSalesCents)}
-          />
-          <KpiCard
-            color="neutral"
-            label="Tickets incluidos"
-            value={totalTickets}
-          />
-          <KpiCard
-            color="neutral"
-            label="Descuadre acumulado"
-            value={formatMoney(totalDifferenceCents)}
-          />
-        </div>
       </section>
 
-      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-list-toolbar !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
-          <div className="crm-list-title">
+      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="flex items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] p-3 max-[760px]:flex-col max-[760px]:items-stretch !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
+          <div className="min-w-0 [&_h2]:m-0 [&_h2]:text-[17px] [&_h2]:font-bold [&_h2]:tracking-[-0.02em] [&_h2]:text-[var(--crm-text)] [&_p]:mt-1 [&_p]:mb-0 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)]">
             <h2>Cierres de caja</h2>
             <p>
               {closings
@@ -631,10 +583,10 @@ export function CashClosingReportsCrm({
           </div>
         </div>
         <div className="!overflow-x-auto">
-          <table className="!w-full !min-w-[1050px] !border-collapse">
+          <UiDataTable className="!w-full !min-w-[1050px] !border-collapse">
             <thead>
               <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
-                <th className="!px-[22px] !py-3">Fecha</th>
+                <th className="!px-[22px] !py-3">Fecha Cierre</th>
                 <th className="!px-3 !py-3">Caja / turno</th>
                 <th className="!px-3 !py-3">Ventas</th>
                 <th className="!px-3 !py-3">Efectivo</th>
@@ -729,7 +681,7 @@ export function CashClosingReportsCrm({
                 );
               })}
             </tbody>
-          </table>
+          </UiDataTable>
           {closings && !filteredClosings.length ? (
             <div className="!grid !min-h-44 !place-items-center !px-6 !text-center !text-sm !font-semibold !text-[var(--crm-text-muted)]">
               No hay cierres de caja para el periodo seleccionado.

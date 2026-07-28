@@ -1,3 +1,6 @@
+import { TextArea as UiTextArea } from '../../../../components/ui/TextArea'
+import { Input as UiInput } from '../../../../components/ui/Input'
+import { Button as UiButton } from '../../../../components/ui/Button'
 import { COMMON_TAX_RATES } from '../../../../lib/tax'
 import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
@@ -138,8 +141,8 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
 
   return (
     <>
-      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-panel-header !flex !min-h-[72px] !flex-col !items-stretch !justify-between !gap-4 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] sm:!flex-row sm:!items-center md:!px-[22px]">
+      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="flex min-h-11 items-center justify-between gap-2.5 border-b border-[var(--crm-border-subtle)] px-4 py-3 text-[var(--crm-text)] [&_h2]:m-0 [&_p]:m-0 [&_p]:mt-1 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)] !flex !min-h-[72px] !flex-col !items-stretch !justify-between !gap-4 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] sm:!flex-row sm:!items-center md:!px-[22px]">
           <div>
             <h2 className="!m-0 !text-base !font-bold">Configuración de locales</h2>
             <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Edita sus datos fiscales, cambia el nombre o crea un local desde una plantilla.</p>
@@ -148,15 +151,15 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
             <span className="!text-xs !font-semibold !text-[var(--crm-text-muted)]">
               {venueLimit === null ? 'Consultando plan…' : `${venueUsage} / ${venueLimit} locales`}
             </span>
-            <button
-              className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
+            <UiButton
+              className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
               disabled={disabled || !hasVenueCapacity}
               onClick={() => setIsCreateOpen(true)}
               title={!hasVenueCapacity && venueLimit !== null ? 'Has alcanzado el límite de locales de tu plan' : undefined}
               type="button"
             >
               <Plus className="h-4 w-4" /> Nuevo local
-            </button>
+            </UiButton>
           </div> : null}
         </div>
         <div className="!grid !grid-cols-1 !gap-4 !px-[18px] !pt-5 !pb-[22px] md:!grid-cols-2 md:!px-[22px] xl:!grid-cols-3">
@@ -167,16 +170,16 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
                 <span className="!text-[10px] !font-semibold !text-[var(--crm-text-muted)]">{templateLabels.get(venue.catalogProfile) ?? 'Personalizado'}</span>
               </div>
               <Field label="Nombre del local">
-                <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.name} disabled={disabled} maxLength={80} name="name" required />
+                <UiInput className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.name} disabled={disabled} maxLength={80} name="name" required />
               </Field>
               <Field label="Razón social">
-                <input autoComplete="organization" className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.legalName} disabled={disabled} maxLength={80} name="legalName" placeholder="Empresa Ejemplo SL" />
+                <UiInput autoComplete="organization" className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.legalName} disabled={disabled} maxLength={80} name="legalName" placeholder="Empresa Ejemplo SL" />
               </Field>
               <Field label="NIF/CIF">
-                <input className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.taxId} disabled={disabled} maxLength={80} name="taxId" placeholder="B12345678" />
+                <UiInput className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.taxId} disabled={disabled} maxLength={80} name="taxId" placeholder="B12345678" />
               </Field>
               <Field label="Dirección">
-                <textarea autoComplete="street-address" className="crm-input !min-h-20 !w-full !resize-y !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !py-3 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.address} disabled={disabled} maxLength={300} name="address" placeholder="Calle, número, localidad" rows={2} />
+                <UiTextArea autoComplete="street-address" className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !min-h-20 !w-full !resize-y !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !py-3 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.address} disabled={disabled} maxLength={300} name="address" placeholder="Calle, número, localidad" rows={2} />
               </Field>
               <Field label="IVA por defecto">
                 <CrmSelect
@@ -186,10 +189,10 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
                   options={COMMON_TAX_RATES.map((rate) => ({ label: rate + ' %', value: String(rate) }))}
                 />
               </Field>
-              <p className="crm-form-help">Se aplicará a los productos que no tengan un IVA específico.</p>
+              <p className="m-0 text-xs leading-6 text-[var(--crm-text-muted)]">Se aplicará a los productos que no tengan un IVA específico.</p>
               <Field label="Hora de cambio de día">
-                <input
-                  className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+                <UiInput
+                  className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
                   defaultValue={venue.dayChangeTime ?? ''}
                   disabled={disabled}
                   name="dayChangeTime"
@@ -197,18 +200,18 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
                   type="time"
                 />
               </Field>
-              <p className="crm-form-help">Vacío usa días naturales. Si indicas una hora, las ventas anteriores se contabilizan en el día operativo anterior.</p>
-              <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled} type="submit">
+              <p className="m-0 text-xs leading-6 text-[var(--crm-text-muted)]">Vacío usa días naturales. Si indicas una hora, las ventas anteriores se contabilizan en el día operativo anterior.</p>
+              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled} type="submit">
                 <Save className="h-4 w-4" /> Guardar configuración
-              </button>
+              </UiButton>
             </form>
           ))}
           {!venues.length ? <EmptyList message="No hay locales configurados." /> : null}
         </div>
       </section>
 
-      <section className="crm-panel !mt-4 !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-panel-header !flex !min-h-[72px] !items-start !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-[var(--crm-text)] md:!px-[22px]">
+      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !mt-4 !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="flex min-h-11 items-center justify-between gap-2.5 border-b border-[var(--crm-border-subtle)] px-4 py-3 text-[var(--crm-text)] [&_h2]:m-0 [&_p]:m-0 [&_p]:mt-1 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)] !flex !min-h-[72px] !items-start !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-[var(--crm-text)] md:!px-[22px]">
           <div className="!grid !size-10 !shrink-0 !place-items-center !rounded-[10px] !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]">
             <KeyRound className="!size-[18px]" />
           </div>
@@ -221,9 +224,9 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
         </div>
         <form className="!grid !max-w-2xl !gap-4 !px-[18px] !pt-5 !pb-[22px] md:!grid-cols-2 md:!px-[22px]" onSubmit={(event) => void submitPasswordChange(event)}>
           <Field label="Nueva contraseña">
-            <input
+            <UiInput
               autoComplete="new-password"
-              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+              className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
               disabled={disabled}
               minLength={CRM_PASSWORD_MIN_LENGTH}
               onChange={(event) => setNewPassword(event.target.value)}
@@ -233,9 +236,9 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
             />
           </Field>
           <Field label="Confirmar contraseña">
-            <input
+            <UiInput
               autoComplete="new-password"
-              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+              className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
               disabled={disabled}
               minLength={CRM_PASSWORD_MIN_LENGTH}
               onChange={(event) => setPasswordConfirmation(event.target.value)}
@@ -244,14 +247,14 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
               value={passwordConfirmation}
             />
           </Field>
-          <p className="crm-form-help md:!col-span-2">Usa al menos {CRM_PASSWORD_MIN_LENGTH} caracteres. Este cambio solo afecta al usuario CRM conectado.</p>
-          <button
-            className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white md:!w-fit"
+          <p className="m-0 text-xs leading-6 text-[var(--crm-text-muted)] md:!col-span-2">Usa al menos {CRM_PASSWORD_MIN_LENGTH} caracteres. Este cambio solo afecta al usuario CRM conectado.</p>
+          <UiButton
+            className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white md:!w-fit"
             disabled={disabled || newPassword.length < CRM_PASSWORD_MIN_LENGTH || newPassword !== passwordConfirmation}
             type="submit"
           >
             <Save className="h-4 w-4" /> Actualizar contraseña
-          </button>
+          </UiButton>
         </form>
       </section>
 
@@ -262,11 +265,11 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
               <h2 className="!m-0 !text-lg !font-bold">Nuevo local</h2>
               <p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Elige una plantilla para preparar su catálogo inicial.</p>
             </div>
-            <button aria-label="Cerrar" className="crm-icon-button !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={() => setIsCreateOpen(false)} type="button"><X className="!size-4" /></button>
+            <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={() => setIsCreateOpen(false)} type="button"><X className="!size-4" /></UiButton>
           </div>
           <form className="!grid !gap-4 !px-5 !py-5" onSubmit={(event) => void submitNewVenue(event)}>
             <Field label="Nombre del local">
-              <input autoFocus className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !outline-none" disabled={disabled} maxLength={80} onChange={(event) => setNewVenueName(event.target.value)} required value={newVenueName} />
+              <UiInput autoFocus className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !outline-none" disabled={disabled} maxLength={80} onChange={(event) => setNewVenueName(event.target.value)} required value={newVenueName} />
             </Field>
             <Field label="Plantilla">
               <CrmSelect
@@ -282,8 +285,8 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
               <div><strong className="!text-[13px]">{selectedTemplate.label}</strong><p className="!mt-1 !mb-0 !text-xs !leading-5 !text-[var(--crm-text-muted)]">{selectedTemplate.description}</p></div>
             </div>
             <div className="!flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !pt-4">
-              <button className="crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setIsCreateOpen(false)} type="button">Cancelar</button>
-              <button className="crm-primary-button !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !newVenueName.trim() || !hasVenueCapacity} type="submit"><Plus className="!size-4" />Crear local</button>
+              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setIsCreateOpen(false)} type="button">Cancelar</UiButton>
+              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !newVenueName.trim() || !hasVenueCapacity} type="submit"><Plus className="!size-4" />Crear local</UiButton>
             </div>
           </form>
         </CrmModal>

@@ -1,3 +1,6 @@
+import { Input as UiInput } from '../../../components/ui/Input'
+import { Button as UiButton } from '../../../components/ui/Button'
+import { AppModal } from '../../../components/ui/AppModal'
 import { useDeferredValue, useMemo, useState } from 'react'
 import {
   Check,
@@ -10,7 +13,6 @@ import {
   X,
 } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
-import { closeOnModalBackdrop } from '../../../components/modals/modalBackdrop'
 import { PaymentPanel } from '../../../components/pos'
 import { calculateAppliedDiscount } from '../../../lib/discounts'
 import { formatMoney, normalizeText } from '../../../lib/format'
@@ -146,16 +148,14 @@ export function SplitOrderModal({
   }
 
   return (
-    <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, onClose, isBusy || paying)}>
+    <AppModal containerClassName={step === 'select' ? '!max-w-[760px] !p-0 sm:!p-4' : '!max-w-[560px] !p-0 sm:!p-4'} dismissDisabled={isBusy || paying} label={step === 'select' ? 'Seleccionar productos' : 'Cobrar selección'} onClose={onClose}>
       <section
         aria-labelledby="split-order-title"
-        aria-modal="true"
-        className={`table-modal max-h-[calc(100svh-2.5rem)] overflow-y-auto ${
+        className={`w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 max-h-[calc(100svh-2.5rem)] overflow-y-auto ${
           step === 'select'
             ? '!w-[min(760px,100%)]'
             : '!w-[min(560px,100%)]'
         }`}
-        role="dialog"
       >
         <header className="flex items-start justify-between gap-4">
           <div>
@@ -171,15 +171,15 @@ export function SplitOrderModal({
             </p>
           </div>
 
-          <button
+          <UiButton
             aria-label="Cerrar"
-            className="table-icon-button"
+            className="grid size-11 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] disabled:opacity-45"
             disabled={isBusy || paying}
             onClick={onClose}
             type="button"
           >
             <X size={19} />
-          </button>
+          </UiButton>
         </header>
 
         {step === 'select' ? (
@@ -195,7 +195,7 @@ export function SplitOrderModal({
               </div>
 
               {normalizedSearchQuery ? (
-                <button
+                <UiButton
                   className="shrink-0 rounded-[var(--radius)] border border-[var(--separator)] px-3 py-2 text-sm font-bold"
                   disabled={isBusy || visibleLines.length === 0}
                   onClick={() => setQuantities((current) => ({
@@ -207,7 +207,7 @@ export function SplitOrderModal({
                   type="button"
                 >
                   Seleccionar visibles
-                </button>
+                </UiButton>
               ) : null}
             </div>
 
@@ -218,7 +218,7 @@ export function SplitOrderModal({
                   className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-[var(--muted)]"
                   size={18}
                 />
-                <input
+                <UiInput
                   aria-label="Buscar productos de la comanda"
                   autoComplete="off"
                   className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] py-2 !pl-10 pr-3 outline-none focus:border-[var(--accent)]"
@@ -262,7 +262,7 @@ export function SplitOrderModal({
                       </div>
 
                       <div className="flex shrink-0 items-center gap-1">
-                        <button
+                        <UiButton
                           aria-label={`Restar ${line.productName}`}
                           className="grid min-h-10 min-w-10 place-items-center rounded-[var(--radius)] border border-[var(--separator)]"
                           disabled={isBusy || selected === 0}
@@ -274,11 +274,11 @@ export function SplitOrderModal({
                           type="button"
                         >
                           <Minus size={16} />
-                        </button>
+                        </UiButton>
                         <span className="w-8 text-center font-mono font-black tabular-nums">
                           {selected}
                         </span>
-                        <button
+                        <UiButton
                           aria-label={`Sumar ${line.productName}`}
                           className="grid min-h-10 min-w-10 place-items-center rounded-[var(--radius)] border border-[var(--separator)]"
                           disabled={isBusy || selected === line.quantity}
@@ -290,7 +290,7 @@ export function SplitOrderModal({
                           type="button"
                         >
                           <Plus size={16} />
-                        </button>
+                        </UiButton>
                       </div>
                     </div>
 
@@ -331,15 +331,15 @@ export function SplitOrderModal({
                 </strong>
               </div>
 
-              <button
-                className="table-action primary"
+              <UiButton
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45"
                 disabled={isBusy || moves.length === 0}
                 onClick={() => setStep('pay')}
                 type="button"
               >
                 <ReceiptEuro size={18} />
                 Cobrar ítems seleccionados
-              </button>
+              </UiButton>
             </div>
           </div>
         ) : (
@@ -393,15 +393,15 @@ export function SplitOrderModal({
               </p>
             ) : null}
 
-            <button
-              className="table-action secondary w-full"
+            <UiButton
+              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45 w-full"
               disabled={isBusy || paying}
               onClick={() => setStep('select')}
               type="button"
             >
               <ChevronLeft size={18} />
               Cambiar selección
-            </button>
+            </UiButton>
           </div>
         )}
       </section>
@@ -435,12 +435,10 @@ export function SplitOrderModal({
       ) : null}
 
       {pendingPayment ? (
-        <div className="table-modal-backdrop" onClick={(event) => closeOnModalBackdrop(event, () => setPendingPayment(null), isBusy || paying)}>
+        <AppModal containerClassName="!max-w-md !p-4" dismissDisabled={isBusy || paying} label="Productos pendientes" onClose={() => setPendingPayment(null)}>
           <section
             aria-labelledby="split-items-pending-title"
-            aria-modal="true"
-            className="table-modal max-w-md"
-            role="dialog"
+            className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 max-w-md"
           >
             <h2 id="split-items-pending-title">Productos pendientes</h2>
             <p>
@@ -451,15 +449,15 @@ export function SplitOrderModal({
               de servir.
             </p>
             <div>
-              <button
-                className="table-action secondary"
+              <UiButton
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45"
                 onClick={() => setPendingPayment(null)}
                 type="button"
               >
                 Volver
-              </button>
-              <button
-                className="table-action primary"
+              </UiButton>
+              <UiButton
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45"
                 onClick={() => void completePayment(
                   pendingPayment.method,
                   pendingPayment.receivedCents,
@@ -469,11 +467,11 @@ export function SplitOrderModal({
                 type="button"
               >
                 Cobrar igualmente
-              </button>
+              </UiButton>
             </div>
           </section>
-        </div>
+        </AppModal>
       ) : null}
-    </div>
+    </AppModal>
   )
 }

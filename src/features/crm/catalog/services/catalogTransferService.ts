@@ -239,7 +239,15 @@ export async function importRevoIntoFinalCatalog(
       return existing.id
     }
     const created = { id: catalogAdminService.uuid(), name: formatName.trim(), active: true, sortOrder: (catalog.saleFormats.length + formatSaves.length) * 10 }
-    formatsByName.set(formatKey, { ...created, tenantId: catalog.tenantId, venueId: catalog.venueId, createdAt: '', updatedAt: '' })
+    formatsByName.set(formatKey, {
+      ...created,
+      tenantId: catalog.tenantId,
+      venueId: catalog.venueId,
+      inventoryConsumptionQuantity: null,
+      inventoryConsumptionUnitId: null,
+      createdAt: '',
+      updatedAt: '',
+    })
     formatSaves.push(created)
     result.formats += 1
     return created.id

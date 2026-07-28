@@ -1,3 +1,4 @@
+import { Input as UiInput } from '../ui/Input'
 import { DoorOpen, Euro } from 'lucide-react'
 import { useState } from 'react'
 import { parseMoneyToCents } from '../../lib/format'
@@ -28,7 +29,7 @@ export function OpenCashPanel({ disabled, isBusy, onOpen }: OpenCashPanelProps) 
           <span className="text-sm font-semibold text-[var(--muted)]">Fondo inicial</span>
           <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]">
             <span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">EUR</span>
-            <input
+            <UiInput
               className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none"
               inputMode="decimal"
               onChange={(event) => setOpeningFloat(event.target.value)}

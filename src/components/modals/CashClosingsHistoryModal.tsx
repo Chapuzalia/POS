@@ -2,8 +2,7 @@ import { LoaderCircle, Printer, X } from 'lucide-react'
 import type { CashClosingRecord } from '../../types'
 import { formatMoney } from '../../lib/format'
 import { formatReceiptDate } from '../../features/local-printing/services/receiptFormatters'
-import { Button } from '../ui'
-import { closeOnModalBackdrop } from './modalBackdrop'
+import { AppModal, Button } from '../ui'
 
 const statusLabels: Record<CashClosingRecord['printStatus'], string> = {
   not_requested: 'No solicitada', pending: 'Pendiente', printed: 'Impresa', failed: 'Error', unknown: 'Desconocida',
@@ -16,7 +15,7 @@ export function CashClosingsHistoryModal({ canReprint, closings, printingClosing
   onClose: () => void
   onReprint: (closing: CashClosingRecord) => void
 }) {
-  return <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/55 p-4" onClick={(event) => closeOnModalBackdrop(event, onClose, Boolean(printingClosingId))}>
+  return <AppModal containerClassName="!max-w-4xl !p-4" dismissDisabled={Boolean(printingClosingId)} label="Histórico de cierres" onClose={onClose}>
     <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
       <div className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
         <div><h2 className="text-2xl font-black">Historico de cierres</h2><p className="text-sm text-[var(--muted)]">Las copias se generan desde la instantanea guardada al cerrar.</p></div>
@@ -45,5 +44,5 @@ export function CashClosingsHistoryModal({ canReprint, closings, printingClosing
         </div>
       </div>
     </section>
-  </div>
+  </AppModal>
 }

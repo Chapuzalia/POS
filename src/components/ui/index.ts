@@ -1,3 +1,8 @@
+export { Checkbox } from './Checkbox'
+export { AppModal } from './AppModal'
 export { Button } from './Button'
 export { Chip } from './Chip'
 export { Metric } from './Metric'
+export { Input } from './Input'
+export { TextArea } from './TextArea'
+export { Select } from './Select'

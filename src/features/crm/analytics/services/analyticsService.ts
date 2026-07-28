@@ -1,8 +1,9 @@
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
-import { getOperationalMonthStartIso } from '../../../../lib/operationalDay'
+import { getOperationalDateKey, getOperationalMonthRangeIso } from '../../../../lib/operationalDay'
 import { supabase } from '../../../../lib/supabase'
 import { type CrmStats, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
 import { type NameRow } from '../../sales/services/salesReportsService'
+import { buildHourlySalesStats, buildTopProductCombinations, sortCrmTopProductsByUnits } from './analyticsModel.ts'
 export { applyCrmOpenCashSalesTotals } from './analyticsModel.ts'
 
 export type SaleStatsRow = {
@@ -16,10 +17,22 @@ export type TicketLineStatsRow = {
   quantity: number
   allocated_quantity: number | null
   line_total_cents: number
+  modifiers: Array<{
+    id?: string
+    groupId?: string
+    name?: string
+  }> | null
+  ticket_line_components: Array<{
+    component_type: 'mixer' | 'menu_component'
+    product_name_snapshot: string
+    sort_order: number
+    metadata: { modifiers?: Array<{ name?: string }> } | null
+  }> | null
 }
 
 export type TicketWithLinesStatsRow = {
   id: string
+  local_created_at: string
   total_cents: number
   discount_id: string | null
   discount_name: string | null
@@ -66,23 +79,42 @@ export async function loadCrmOpenCashSalesTotals(
   return totalsByCashSession
 }
 
-export async function loadCrmStats(context: TenantContext, venue: CrmVenue): Promise<CrmStats> {
+export async function loadCrmStats(context: TenantContext, venue: CrmVenue, monthKey?: string): Promise<CrmStats> {
   const client = requireSupabase()
-  const monthStart = getOperationalMonthStartIso({
+  const operationalDayConfig = {
     dayChangeTime: venue.dayChangeTime,
     timeZone: venue.timeZone,
-  })
+  }
+  const selectedMonthKey = monthKey ?? getOperationalDateKey(new Date(), operationalDayConfig).slice(0, 7)
+  const monthRange = getOperationalMonthRangeIso(operationalDayConfig, selectedMonthKey)
   let salesQuery = client
     .from('sales')
     .select('id, payment_method, total_cents')
     .eq('tenant_id', context.tenantId)
-    .gte('local_created_at', monthStart)
+    .gte('local_created_at', monthRange.startIso)
+    .lt('local_created_at', monthRange.endIso)
   let ticketsQuery = client
     .from('tickets')
-    .select('id, total_cents, discount_id, discount_name, discount_amount_cents, ticket_lines(product_name, quantity, allocated_quantity, line_total_cents)')
+    .select(`
+      id,
+      local_created_at,
+      total_cents,
+      discount_id,
+      discount_name,
+      discount_amount_cents,
+      ticket_lines(
+        product_name,
+        quantity,
+        allocated_quantity,
+        line_total_cents,
+        modifiers,
+        ticket_line_components(component_type, product_name_snapshot, sort_order, metadata)
+      )
+    `)
     .eq('tenant_id', context.tenantId)
     .eq('status', 'paid')
-    .gte('local_created_at', monthStart)
+    .gte('local_created_at', monthRange.startIso)
+    .lt('local_created_at', monthRange.endIso)
   let openSessionsQuery = client
     .from('cash_sessions')
     .select('id, venue_id, device_id, opened_at, opening_float_cents')
@@ -246,10 +278,27 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue): Pro
     })).sort((a, b) => b.discountedCents - a.discountedCents),
     discountedTicketCount,
     discountsCents,
+    hourlySales: buildHourlySalesStats(paidTickets.map((ticket) => ({
+      createdAt: ticket.local_created_at,
+      totalCents: ticket.total_cents,
+    })), venue.timeZone),
+    monthKey: selectedMonthKey,
     monthSalesCents,
     monthTicketCount: paidTickets.length,
     openCashSessions,
-    topProducts: [...topProductMap.values()].sort((a, b) => b.totalCents - a.totalCents).slice(0, 8),
+    topProductCombinations: buildTopProductCombinations(lines.map((line) => ({
+      productName: line.product_name,
+      quantity: Number(line.allocated_quantity ?? line.quantity),
+      totalCents: line.line_total_cents,
+      modifiers: line.modifiers,
+      components: (line.ticket_line_components ?? []).map((component) => ({
+        type: component.component_type,
+        productName: component.product_name_snapshot,
+        sortOrder: component.sort_order,
+        modifiers: component.metadata?.modifiers ?? [],
+      })),
+    }))).slice(0, 8),
+    topProducts: sortCrmTopProductsByUnits([...topProductMap.values()]).slice(0, 8),
   }
 }
 

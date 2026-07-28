@@ -1,10 +1,11 @@
+import { Input as UiInput } from '../ui/Input'
 import { Percent, Tags, X } from 'lucide-react'
 import { useState } from 'react'
 import { calculateDiscount, formatDiscountRounding, formatDiscountValue, getActiveVenueDiscounts } from '../../lib/discounts'
 import { parseMoneyToCents } from '../../lib/format'
 import type { AppliedDiscount, Discount, DiscountCalculationType } from '../../types'
-import { Button } from '../ui'
-import { closeOnModalBackdrop } from './modalBackdrop'
+import { AppModal, Button } from '../ui'
+import { DiscountOptionRow } from './DiscountOptionRow'
 
 type DiscountModalProps = {
   description?: string
@@ -55,25 +56,26 @@ export function DiscountModal({
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/55 p-0 sm:items-center sm:p-4" onClick={(event) => closeOnModalBackdrop(event, onCancel, isBusy)}>
-      <section aria-labelledby="discount-title" aria-modal="true" className="max-h-[85svh] w-full overflow-y-auto rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-xl sm:rounded-[var(--radius)]" role="dialog">
+    <AppModal dismissDisabled={isBusy} label="Aplicar descuento" onClose={onCancel} placement="center">
+      <section aria-labelledby="discount-title" className="max-h-[85svh] w-full max-w-xl overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold" id="discount-title">Aplicar descuento</h2>
             <p className="text-sm text-[var(--muted)]">{description}</p>
           </div>
-          <Button disabled={isBusy} onClick={onCancel} size="sm" type="button" variant="tertiary">
+          <button className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-[var(--foreground)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:pointer-events-none disabled:opacity-45" disabled={isBusy} onClick={onCancel} type="button">
             <X className="h-4 w-4" />
-          </Button>
+          </button>
         </div>
 
         <div className="mt-5 grid gap-2">
           {availableDiscounts.map((discount) => (
-            <button
-              className="flex min-h-14 items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 py-3 text-left hover:border-[var(--accent)]"
+            <DiscountOptionRow
+              color={discount.color}
               disabled={isBusy}
               key={discount.id}
-              onClick={() => onSelect({
+              label={discount.name}
+              onSelect={() => onSelect({
                 discountId: discount.id,
                 name: discount.name,
                 type: discount.type,
@@ -82,17 +84,9 @@ export function DiscountModal({
                 roundingIncrementCents: discount.roundingIncrementCents,
                 color: discount.color,
               })}
-              type="button"
-            >
-              <span className="flex items-center gap-3">
-                <span className="h-3 w-3 rounded-full border border-black/10" style={{ backgroundColor: discount.color ?? 'var(--accent)' }} />
-                <strong>{discount.name}</strong>
-              </span>
-              <span className="flex flex-col items-end">
-                <strong className="font-mono">{formatDiscountValue(discount.type, discount.value)}</strong>
-                {discount.roundingIncrementCents ? <small className="text-xs text-[var(--muted)]">{formatDiscountRounding(discount.roundingIncrementCents)}</small> : null}
-              </span>
-            </button>
+              roundingLabel={discount.roundingIncrementCents ? formatDiscountRounding(discount.roundingIncrementCents) : null}
+              valueLabel={formatDiscountValue(discount.type, discount.value)}
+            />
           ))}
           {!availableDiscounts.length && !manualDiscountEnabled ? (
             <p className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-5 text-center text-sm font-semibold text-[var(--muted)]">No hay descuentos disponibles para este local.</p>
@@ -102,10 +96,10 @@ export function DiscountModal({
         {manualDiscountEnabled ? (
           <div className="mt-4 border-t border-[var(--separator)] pt-4">
             {!manualOpen ? (
-              <Button fullWidth onClick={() => setManualOpen(true)} type="button" variant="tertiary">
+              <button className="flex h-11 min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]" onClick={() => setManualOpen(true)} type="button">
                 <Tags className="h-4 w-4" />
                 Descuento manual
-              </Button>
+              </button>
             ) : (
               <div className="grid gap-3 rounded-[var(--radius)] bg-[var(--background)] p-4">
                 <div className="grid grid-cols-2 gap-2">
@@ -116,7 +110,7 @@ export function DiscountModal({
                   <span className="text-sm font-semibold text-[var(--muted)]">{manualType === 'percentage' ? 'Porcentaje' : 'Importe'}</span>
                   <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
                     <Percent className="h-4 w-4 text-[var(--muted)]" />
-                    <input autoFocus className="min-w-0 flex-1 bg-transparent px-3 outline-none" inputMode="decimal" onChange={(event) => { setManualValue(event.target.value); setValidationError(null) }} value={manualValue} />
+                    <UiInput autoFocus className="min-w-0 flex-1 bg-transparent px-3 outline-none" inputMode="decimal" onChange={(event) => { setManualValue(event.target.value); setValidationError(null) }} value={manualValue} />
                     <span className="text-sm font-bold text-[var(--muted)]">{manualType === 'percentage' ? '%' : 'EUR'}</span>
                   </div>
                 </label>
@@ -127,6 +121,6 @@ export function DiscountModal({
           </div>
         ) : null}
       </section>
-    </div>
+    </AppModal>
   )
 }

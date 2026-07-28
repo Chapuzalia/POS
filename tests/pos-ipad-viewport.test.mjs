@@ -2,34 +2,57 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-test('the POS viewport disables native browser scaling on iPad', async () => {
-  const [html, page, header] = await Promise.all([
+test('the app uses a visual-viewport height without disabling accessible scaling', async () => {
+  const [html, app, page, header, styles] = await Promise.all([
     readFile(new URL('../index.html', import.meta.url), 'utf8'),
+    readFile(new URL('../src/App.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/components/layout/AppHeader.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/index.css', import.meta.url), 'utf8'),
   ])
-  assert.match(html, /maximum-scale=1/)
-  assert.match(html, /user-scalable=no/)
+  assert.doesNotMatch(html, /maximum-scale=1/)
+  assert.doesNotMatch(html, /user-scalable=no/)
   assert.match(html, /viewport-fit=cover/)
-  assert.match(page, /h-dvh/)
+  assert.match(app, /h-\[var\(--app-height,100dvh\)\]/)
+  assert.match(app, /useIOSPWAViewportFix/)
+  assert.match(page, /h-full/)
   assert.match(page, /safe-area-inset-bottom/)
   assert.match(header, /safe-area-inset-top/)
+  assert.match(styles, /#root[\s\S]+height: var\(--app-height, 100dvh\)/)
+  assert.match(styles, /font-size: max\(16px, 1em\)/)
 })
 
-test('the POS locks Safari gestures while preserving the custom table-map viewport', async () => {
-  const [hook, styles, mapStyles, viewport] = await Promise.all([
-    readFile(new URL('../src/app/usePosViewportLock.ts', import.meta.url), 'utf8'),
+test('the global hook repairs only installed iOS/iPadOS PWA viewports', async () => {
+  const [hook, styles, mapView, viewport] = await Promise.all([
+    readFile(new URL('../src/hooks/useIOSPWAViewportFix.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/index.css', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/tables/components/map-viewport.css', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/tables/useMapViewport.ts', import.meta.url), 'utf8'),
   ])
 
-  assert.match(hook, /gesturestart/)
-  assert.match(hook, /event\.touches\.length > 1/)
-  assert.match(hook, /passive: false/)
-  assert.match(styles, /html\.pos-viewport-locked[\s\S]+overscroll-behavior: none[\s\S]+touch-action: pan-x pan-y/)
-  assert.match(styles, /body\.pos-viewport-locked[\s\S]+position: fixed/)
-  assert.match(mapStyles, /\.table-map-canvas\{cursor:grab;touch-action:none\}/)
+  assert.match(hook, /iPad\|iPhone\|iPod/)
+  assert.match(hook, /platform === 'MacIntel'/)
+  assert.match(hook, /maxTouchPoints > 1/)
+  assert.match(hook, /standalone === true/)
+  assert.match(hook, /display-mode: standalone/)
+  assert.match(hook, /window\.visualViewport/)
+  assert.match(hook, /viewport\.addEventListener\('resize'/)
+  assert.match(hook, /viewport\.addEventListener\('scroll'/)
+  assert.match(hook, /window\.innerHeight - viewport\.height/)
+  assert.match(hook, /--app-height/)
+  assert.match(hook, /window\.scrollTo\(0, 0\)/)
+  assert.match(hook, /document\.documentElement\.scrollTop = 0/)
+  assert.match(hook, /document\.body\.scrollTop = 0/)
+  assert.match(hook, /requestAnimationFrame/)
+  assert.match(hook, /setTimeout/)
+  assert.match(hook, /focusout/)
+  assert.match(hook, /pageshow/)
+  assert.match(hook, /visibilitychange/)
+  assert.doesNotMatch(styles, /body\.pos-viewport-locked/)
+  assert.doesNotMatch(styles, /body[^{]*\{[^}]*position:\s*fixed/)
+  assert.match(mapView, /touch-none/)
+  assert.match(mapView, /cursor-grab/)
+  assert.doesNotMatch(styles, /\.table-map-canvas\b/)
   assert.match(viewport, /pinchRef/)
   assert.match(viewport, /zoomAtPoint/)
 })

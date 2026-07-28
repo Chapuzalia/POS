@@ -1,7 +1,8 @@
+import { Button as UiButton } from '../ui/Button'
 import { Check, ReceiptText, X } from 'lucide-react'
 import { useEffect, useRef, type ReactNode, type RefObject } from 'react'
 import { formatMoney } from '../../lib/format'
-import { Button } from '../ui'
+import { AppModal, Button } from '../ui'
 
 type MobileTicketModalProps = {
   children: ReactNode
@@ -75,11 +76,11 @@ export function MobileTicketModal({
 
   return (
     <>
-      <button
+      <UiButton
         aria-controls="mobile-ticket-modal"
         aria-expanded={isOpen}
         aria-label={`Abrir ${title.toLowerCase()}: ${itemCount} productos, total ${formatMoney(totalCents)}`}
-        className={`fixed z-30 grid h-16 w-16 place-items-center rounded-full border text-[var(--accent-foreground)] shadow-[0_12px_32px_rgba(17,24,39,0.32)] transition hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] lg:hidden ${isAddSuccess ? 'ticket-feedback-success border-[var(--success)] bg-[var(--success)]' : 'border-[var(--accent)] bg-[var(--accent)]'}`}
+        className={`fixed bottom-[max(1rem,env(safe-area-inset-bottom))] right-[max(1rem,env(safe-area-inset-right))] z-30 grid h-16 w-16 place-items-center rounded-full border text-[var(--accent-foreground)] shadow-[0_12px_32px_rgba(17,24,39,0.32)] transition hover:brightness-105 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] lg:hidden ${isAddSuccess ? 'animate-[ticket-feedback-success_150ms_ease-out] motion-reduce:animate-none border-[var(--success)] bg-[var(--success)]' : 'border-[var(--accent)] bg-[var(--accent)]'}`}
         ref={(element) => {
           triggerButtonRef.current = element
           floatingButtonRef.current = element
@@ -88,28 +89,21 @@ export function MobileTicketModal({
         type="button"
         onClick={onOpen}
       >
-        <span aria-hidden="true" className={isAddSuccess ? 'ticket-feedback-icon grid h-7 w-7 place-items-center overflow-hidden' : 'grid h-7 w-7 place-items-center'}>
+        <span aria-hidden="true" className={isAddSuccess ? 'animate-[ticket-feedback-icon_150ms_ease-out] motion-reduce:animate-none grid h-7 w-7 place-items-center overflow-hidden' : 'grid h-7 w-7 place-items-center'}>
           {isAddSuccess ? <Check className="h-7 w-7" /> : <ReceiptText className="h-7 w-7" />}
         </span>
-        <span className={`absolute -right-1 -top-1 grid min-h-6 min-w-6 place-items-center rounded-full border-2 border-[var(--surface)] bg-[var(--danger)] px-1 text-xs font-black leading-none text-white ${shouldAnimateCount ? 'ticket-count-pop' : ''}`} key={shouldAnimateCount ? successId : 'ticket-count'}>
+        <span className={`absolute -right-1 -top-1 grid min-h-6 min-w-6 place-items-center rounded-full border-2 border-[var(--surface)] bg-[var(--danger)] px-1 text-xs font-black leading-none text-white ${shouldAnimateCount ? 'animate-[ticket-count-pop_210ms_ease-out] motion-reduce:animate-none' : ''}`} key={shouldAnimateCount ? successId : 'ticket-count'}>
           {itemCount > 99 ? '99+' : itemCount}
         </span>
-      </button>
+      </UiButton>
 
       {isOpen ? (
-        <div className="fixed inset-0 z-40 lg:hidden">
-          <button
-            aria-label={`Cerrar ${title.toLowerCase()}`}
-            className="absolute inset-0 h-full w-full cursor-default bg-black/60"
-            onClick={onClose}
-            type="button"
-          />
+        <AppModal backdropClassName="lg:!hidden" containerClassName="!max-w-full !p-0 lg:!hidden" dialogClassName="!min-h-[65dvh] !rounded-t-2xl !rounded-b-none !border-b-0 !bg-[var(--background)]" label={title} onClose={onClose} placement="bottom">
+
           <section
             aria-labelledby="mobile-ticket-title"
-            aria-modal="true"
             className="absolute inset-x-0 bottom-0 flex max-h-[calc(100dvh-1rem)] min-h-[65dvh] flex-col overflow-hidden rounded-t-2xl border border-b-0 border-[var(--separator)] bg-[var(--background)] text-[var(--foreground)] shadow-[var(--shadow)]"
             id="mobile-ticket-modal"
-            role="dialog"
           >
             <header className="flex items-center justify-between gap-4 border-b border-[var(--separator)] bg-[var(--surface)] px-4 py-3">
               <div className="min-w-0">
@@ -124,7 +118,7 @@ export function MobileTicketModal({
             </header>
             {children}
           </section>
-        </div>
+        </AppModal>
       ) : null}
     </>
   )

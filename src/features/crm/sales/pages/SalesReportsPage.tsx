@@ -1,3 +1,5 @@
+import { Input as UiInput } from '../../../../components/ui/Input'
+import { Button as UiButton } from '../../../../components/ui/Button'
 import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, SlidersHorizontal, X } from 'lucide-react'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination'
 import { CrmModal } from '../../shared/components/CrmModal'
@@ -167,23 +169,23 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
 
   return (
     <div className="!grid !grid-cols-1 !items-start !gap-4 xl:!gap-6">
-      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-panel-header !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
+      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="flex min-h-11 items-center justify-between gap-2.5 border-b border-[var(--crm-border-subtle)] px-4 py-3 text-[var(--crm-text)] [&_h2]:m-0 [&_p]:m-0 [&_p]:mt-1 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)] !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <div>
             <h2>Resumen histórico</h2>
             <p>Datos del local seleccionado</p>
           </div>
-          <button
+          <UiButton
             aria-label="Actualizar informes de ventas"
-            className="crm-icon-button !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
+            className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
             disabled={disabled}
             onClick={() => void runAction(refresh)}
             type="button"
           >
             <RefreshCw className="h-4 w-4" />
-          </button>
+          </UiButton>
         </div>
-        <div className="crm-kpi-strip !grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
+        <div className="!grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
           <KpiCard color="neutral" label="Subtotal" value={formatMoney(reportTotals.subtotalCents)} />
           <KpiCard color="blue" label="Impuestos" value={formatMoney(reportTotals.taxAmountCents)} />
           <KpiCard color="green" label="Total" value={formatMoney(reportTotals.totalCents)} />
@@ -191,18 +193,18 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
         </div>
       </section>
 
-      <section className="crm-panel !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <div className="crm-list-toolbar !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
-          <div className="crm-list-title">
+      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="flex items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] p-3 max-[760px]:flex-col max-[760px]:items-stretch !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
+          <div className="min-w-0 [&_h2]:m-0 [&_h2]:text-[17px] [&_h2]:font-bold [&_h2]:tracking-[-0.02em] [&_h2]:text-[var(--crm-text)] [&_p]:mt-1 [&_p]:mb-0 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)]">
             <h2>{activeTab.label}</h2>
             <p>{reports ? `${totalResults} resultados` : 'Cargando información de ventas...'}</p>
           </div>
-          <button
+          <UiButton
             aria-controls="crm-sales-report-filters"
             aria-expanded={isFiltersOpen}
             className={isFiltersOpen
               ? '!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-blue)] !shadow-none !transition-[background-color,color,transform] !duration-150'
-              : 'crm-secondary-button !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+              : 'inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
             onClick={() => setIsFiltersOpen((current) => !current)}
             type="button"
           >
@@ -213,16 +215,16 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
                 {activeFilterCount}
               </span>
             ) : null}
-          </button>
+          </UiButton>
         </div>
 
         <div aria-label="Subsecciones de informes" className="!flex !gap-2 !overflow-x-auto !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-3 md:!px-[22px]" role="tablist">
           {salesReportTabs.map((tab) => (
-            <button
+            <UiButton
               aria-selected={activeView === tab.id}
               className={activeView === tab.id
                 ? '!inline-flex !min-h-10 !shrink-0 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-blue-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-blue)] !shadow-none !transition-[background-color,color,transform] !duration-150'
-                : 'crm-secondary-button !inline-flex !min-h-10 !shrink-0 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
+                : 'inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !shrink-0 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
               key={tab.id}
               onClick={() => {
                 setActiveView(tab.id)
@@ -234,15 +236,15 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
               type="button"
             >
               {tab.label}
-            </button>
+            </UiButton>
           ))}
         </div>
 
         {isFiltersOpen ? (
         <div className="!grid !grid-cols-1 !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[18px] !py-4 sm:!grid-cols-2 lg:!grid-cols-5 md:!px-[22px]" id="crm-sales-report-filters">
           <Field label="Día operativo desde">
-            <input
-              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+            <UiInput
+              className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
               max={dateTo || undefined}
               onChange={(event) => {
                 setDateFrom(event.target.value)
@@ -253,8 +255,8 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
             />
           </Field>
           <Field label="Día operativo hasta">
-            <input
-              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+            <UiInput
+              className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
               min={dateFrom || undefined}
               onChange={(event) => {
                 setDateTo(event.target.value)
@@ -265,8 +267,8 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
             />
           </Field>
           <Field label="Producto">
-            <input
-              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+            <UiInput
+              className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
               list="crm-report-products"
               onChange={(event) => {
                 setProductQuery(event.target.value)
@@ -281,8 +283,8 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
             </datalist>
           </Field>
           <Field label="Categoría">
-            <input
-              className="crm-input !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
+            <UiInput
+              className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
               list="crm-report-categories"
               onChange={(event) => {
                 setCategoryQuery(event.target.value)
@@ -312,15 +314,15 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
             />
           </Field>
           <div className="!flex !items-end sm:!col-span-2 lg:!col-span-4 xl:!col-span-1">
-            <button
-              className="crm-secondary-button !inline-flex !h-11 !w-full !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150 xl:!w-auto"
+            <UiButton
+              className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !h-11 !w-full !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150 xl:!w-auto"
               disabled={!hasActiveFilters}
               onClick={clearFilters}
               type="button"
             >
               <X className="!size-4" />
               Limpiar
-            </button>
+            </UiButton>
           </div>
         </div>
         ) : null}
@@ -382,8 +384,8 @@ export function SalesReportTicketsTable({
   tickets: CrmSalesReports['tickets']
 }) {
   return (
-    <div className="crm-data-table !grid !overflow-auto">
-      <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[1040px] !grid-cols-[minmax(160px,0.8fr)_minmax(170px,1fr)_90px_120px_minmax(170px,1fr)_100px_120px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
+    <div className="grid overflow-auto !grid !overflow-auto">
+      <div className="sticky top-0 z-[1] grid min-w-[920px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface-soft)] px-3 py-2.5 text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[1040px] !grid-cols-[minmax(160px,0.8fr)_minmax(170px,1fr)_90px_120px_minmax(170px,1fr)_100px_120px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ticket" onSort={onSort} sortKey="ticketId" />
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Fecha" onSort={onSort} sortKey="createdAt" />
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Artículos" onSort={onSort} sortKey="quantity" />
@@ -393,14 +395,14 @@ export function SalesReportTicketsTable({
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Total" onSort={onSort} sortKey="totalCents" />
       </div>
       {tickets.map((ticket) => (
-        <button
+        <UiButton
           aria-label={`Ver detalles del ticket ${ticket.id.slice(0, 8)}`}
-          className="crm-data-row !grid !min-h-[72px] !w-full !min-w-[1040px] !cursor-pointer !grid-cols-[minmax(160px,0.8fr)_minmax(170px,1fr)_90px_120px_minmax(170px,1fr)_100px_120px] !items-center !gap-3.5 !border-0 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]"
+          className="grid min-h-16 min-w-[920px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] px-3 py-2.5 text-[13px] font-medium text-[var(--crm-text-secondary)] transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] !grid !min-h-[72px] !w-full !min-w-[1040px] !cursor-pointer !grid-cols-[minmax(160px,0.8fr)_minmax(170px,1fr)_90px_120px_minmax(170px,1fr)_100px_120px] !items-center !gap-3.5 !border-0 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]"
           key={ticket.id}
           onClick={() => onSelect(ticket.id)}
           type="button"
         >
-          <div className="crm-cell-main">
+          <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
             <strong>#{ticket.id.slice(0, 8).toUpperCase()}</strong>
             <span>{ticket.lineCount} líneas</span>
           </div>
@@ -409,12 +411,12 @@ export function SalesReportTicketsTable({
           <span>{getReportPaymentLabel(ticket)}</span>
           <span className="!truncate">{getReportDiscountLabel(ticket)}</span>
           <span className={ticket.status === 'paid'
-            ? 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
-            : 'crm-status-pill !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>
+            ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
+            : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>
             {ticket.status === 'paid' ? 'Cobrado' : 'Anulado'}
           </span>
           <strong className="!font-mono !text-[var(--crm-text)]">{formatMoney(ticket.totalCents)}</strong>
-        </button>
+        </UiButton>
       ))}
       {!tickets.length ? <EmptyList message={isLoading ? 'Cargando tickets...' : 'No hay tickets para este local.'} /> : null}
     </div>
@@ -438,7 +440,7 @@ export function SalesReportSortHeader({
   const SortIcon = isActive ? currentDirection === 'asc' ? ArrowUp : ArrowDown : ArrowUpDown
 
   return (
-    <button
+    <UiButton
       aria-label={`Ordenar por ${label}`}
       className={isActive
         ? '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-secondary)] !shadow-none'
@@ -448,7 +450,7 @@ export function SalesReportSortHeader({
     >
       <span>{label}</span>
       <SortIcon className="!size-3.5" />
-    </button>
+    </UiButton>
   )
 }
 
@@ -463,19 +465,19 @@ export function SalesReportTicketModal({
 
   return (
     <CrmModal label={`Detalle del ticket ${ticket.id.slice(0, 8)}`} onClose={onClose} size="large">
-      <div className="crm-editor-header !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
+      <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] bg-transparent p-3 text-[var(--crm-text)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:text-[15px] [&_span]:font-bold [&_small]:truncate [&_small]:text-xs [&_small]:font-medium [&_small]:text-[var(--crm-text-muted)] !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
         <div>
           <span>Ticket #{ticket.id.slice(0, 8).toUpperCase()}</span>
           <small>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</small>
         </div>
-        <button
+        <UiButton
           aria-label="Cerrar detalle del ticket"
-          className="crm-editor-close !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,transform] !duration-150"
+          className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-muted)] shadow-none transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,transform] !duration-150"
           onClick={onClose}
           type="button"
         >
           <X className="h-4 w-4" />
-        </button>
+        </UiButton>
       </div>
 
       <div className="!min-h-0 !overflow-y-auto !px-[18px] !py-5 md:!px-[22px]">
@@ -523,7 +525,7 @@ export function SalesReportTicketModal({
           </div>
           {ticket.lines.map((line) => (
             <div className="!grid !min-h-[68px] !min-w-[660px] !grid-cols-[minmax(240px,1fr)_minmax(150px,0.65fr)_80px_120px_120px] !items-center !gap-3 !border-b !border-[var(--crm-border)] !px-4 !py-3 !text-[13px] !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={line.id}>
-              <div className="crm-cell-main">
+              <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
                 <strong>{line.productName}</strong>
                 {line.modifiers.length ? (
                   <span>{line.modifiers.map((modifier) => `+ ${modifier.name}${modifier.priceCents ? ` (${formatMoney(modifier.priceCents)})` : ''}`).join(' · ')}</span>
@@ -575,8 +577,8 @@ export function SalesReportAggregateTable({
   sortKey: SalesReportSortKey
 }) {
   return (
-    <div className="crm-data-table !grid !overflow-auto">
-      <div className="crm-data-head !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[760px] !grid-cols-[minmax(250px,1fr)_120px_120px_150px_150px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
+    <div className="grid overflow-auto !grid !overflow-auto">
+      <div className="sticky top-0 z-[1] grid min-w-[920px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface-soft)] px-3 py-2.5 text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[760px] !grid-cols-[minmax(250px,1fr)_120px_120px_150px_150px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label={labelHeading} onSort={onSort} sortKey="label" />
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Tickets" onSort={onSort} sortKey="ticketCount" />
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Unidades" onSort={onSort} sortKey="quantity" />
@@ -584,8 +586,8 @@ export function SalesReportAggregateTable({
         <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ventas" onSort={onSort} sortKey="totalCents" />
       </div>
       {items.map((item) => (
-        <div className="crm-data-row !grid !min-h-[72px] !min-w-[760px] !grid-cols-[minmax(250px,1fr)_120px_120px_150px_150px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]" key={item.id}>
-          <div className="crm-cell-main">
+        <div className="grid min-h-16 min-w-[920px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] px-3 py-2.5 text-[13px] font-medium text-[var(--crm-text-secondary)] transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] !grid !min-h-[72px] !min-w-[760px] !grid-cols-[minmax(250px,1fr)_120px_120px_150px_150px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]" key={item.id}>
+          <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
             <strong>{item.label}</strong>
             <span>{item.ticketCount === 1 ? '1 operación' : `${item.ticketCount} operaciones`}</span>
           </div>

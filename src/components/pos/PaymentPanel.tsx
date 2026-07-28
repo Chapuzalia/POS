@@ -3,6 +3,7 @@ import { formatDiscountValue, getDiscountLabel } from '../../lib/discounts'
 import { formatMoney } from '../../lib/format'
 import type { AppliedDiscount, PaymentMethod } from '../../types'
 import { Button } from '../ui'
+import { PosCatalogTab } from './PosCatalogTab'
 
 const paymentOptions: Array<{ id: PaymentMethod; label: string; icon: LucideIcon }> = [
   { id: 'cash', label: 'Efectivo', icon: Coins },
@@ -47,32 +48,35 @@ export function PaymentPanel({
     ) : null}
 
     <div className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 text-sm">
-      <div className="flex justify-between gap-3 text-[var(--muted)]">
-        <span>Subtotal</span>
-        <span className="font-mono font-bold">
-          {formatMoney(subtotalCents)}
-        </span>
-      </div>
+      
 
       {discount ? (
-        <div className="mt-2 flex justify-between gap-3 text-[var(--danger)]">
-          <span className="min-w-0 truncate">
-            {discount.name} ·{' '}
-            {formatDiscountValue(
-              discount.calculationType,
-              discount.value,
-            )}
-          </span>
+        <div className="border-b border-[var(--separator)] pb-2">
+          <div className="flex justify-between gap-3 text-[var(--muted)]">
+            <span>Subtotal</span>
+            <span className="font-mono font-bold">
+              {formatMoney(subtotalCents)}
+            </span>
+          </div>
+          <div className="mt-2 flex justify-between gap-3 text-[var(--danger)]">
+            <span className="min-w-0 truncate">
+              {discount.name} ·{' '}
+              {formatDiscountValue(
+                discount.calculationType,
+                discount.value,
+              )}
+            </span>
 
-          <span className="font-mono font-bold">
-            −{formatMoney(subtotalCents - totalCents)}
-          </span>
+            <span className="font-mono font-bold">
+              −{formatMoney(subtotalCents - totalCents)}
+            </span>
+          </div>
         </div>
       ) : null}
 
-      <div className="mt-2 flex justify-between gap-3 border-t border-[var(--separator)] pt-2 text-base font-black">
+      <div className="flex justify-between gap-3 items-center text-base font-black">
         <span>Total a cobrar</span>
-        <span className="font-mono">{formatMoney(totalCents)}</span>
+        <span className="font-extrabold text-3xl">{formatMoney(totalCents)}</span>
       </div>
     </div>
 
@@ -90,65 +94,29 @@ export function PaymentPanel({
             : payment.icon
 
         return (
-          <Button
-            className="flex flex-col items-center justify-center"
+          <PosCatalogTab
+            active={feedback === payment.id}
             disabled={disabled || totalCents === 0}
-            fullWidth
+            icon={Icon}
             key={payment.id}
-            onClick={() => onPayment(payment.id)}
+            label={payment.label}
+            onSelect={() => onPayment(payment.id)}
             size="lg"
-            type="button"
-            variant={
-              feedback === payment.id
-                ? 'primary'
-                : 'secondary'
-            }
-          >
-            <Icon className="h-6 w-6" />
-            <span>{payment.label}</span>
-          </Button>
+          />
         )
       })}
 
       {allowDiscount ? (
-        <Button
-          aria-label={
-            discount
-              ? 'Eliminar descuento'
-              : 'Añadir descuento'
-          }
-          className="flex flex-col items-center justify-center"
-          disabled={
-            discount
-              ? disabled
-              : disabled || totalCents === 0
-          }
-          fullWidth
-          onClick={
-            discount
-              ? onRemoveDiscount
-              : onOpenDiscount
-          }
+        <PosCatalogTab
+          active={Boolean(discount)}
+          ariaLabel={discount ? 'Eliminar descuento' : 'Añadir descuento'}
+          disabled={discount ? disabled : disabled || totalCents === 0}
+          icon={discount ? X : Percent}
+          label={discount ? getDiscountLabel(discount) : 'Descuento'}
+          onSelect={discount ? onRemoveDiscount : onOpenDiscount}
           size="lg"
-          type="button"
-          variant={
-            discount
-              ? "dangerSoft"
-              : "tertiary"
-          }
-        >
-          {discount ? (
-            <X className="h-6 w-6" />
-          ) : (
-            <Percent className="h-6 w-6" />
-          )}
-
-          <span>
-            {discount
-              ? getDiscountLabel(discount)
-              : 'Descuento'}
-          </span>
-        </Button>
+          tone={discount ? 'danger' : 'default'}
+        />
       ) : null}
     </div>
 
