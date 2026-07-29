@@ -185,10 +185,23 @@ export function useCashSession(options: Options) {
     options.onError('La caja con la que estabas trabajando se ha cerrado.')
   }, [options, session, setTickets])
 
-  const handleAutomaticSession = useCallback((nextSession: CashSession) => {
-    if (options.context) saveCachedCashSession(options.context, nextSession)
+  const handleAutomaticSession = useCallback(async (nextSession: CashSession) => {
+    if (!options.context) return
+    saveCachedCashSession(options.context, nextSession)
     setSession(nextSession)
-  }, [options.context])
+    try {
+      const [remoteLedger, remoteTickets] = await Promise.all([
+        loadSalesLedgerFromSupabase(options.context, nextSession.id),
+        loadSessionTicketsFromSupabase(options.context, nextSession.id),
+      ])
+      setLedger(remoteLedger)
+      saveSaleLedger(options.context, remoteLedger)
+      setTickets(remoteTickets)
+      saveSessionTickets(options.context, nextSession.id, remoteTickets)
+    } catch (error) {
+      options.onError(getReadableError(error))
+    }
+  }, [options, setTickets])
 
   const cashOptions = useCashRegisterOptions({
     context: options.context,

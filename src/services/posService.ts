@@ -443,19 +443,21 @@ export async function loadOpenCashSession(context: TenantContext) {
     .select('id, tenant_id, venue_id, opened_by_device_id, opened_by, opened_at, opening_float_cents, cash_register_id, cash_registers(name)')
     .eq('tenant_id', context.tenantId)
     .eq('venue_id', context.venueId)
+    .eq('opened_by_device_id', context.deviceId)
     .eq('status', 'open')
     .order('opened_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
 
   if (error) {
     throw error
   }
 
-  if (!data?.length) {
+  if (!data) {
     return null
   }
 
-  const selected = data.length === 1 ? data[0] : null
-  if (!selected) return null
+  const selected = data
 
   return {
     id: selected.id as string,

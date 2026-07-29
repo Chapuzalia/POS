@@ -179,6 +179,10 @@ export function clearSaleLedger(context: TenantContext) {
   removeKey(ledgerKey(context))
 }
 
+export function removeSaleFromLedger(context: TenantContext, saleId: string) {
+  saveSaleLedger(context, getSaleLedger(context).filter((record) => record.id !== saleId))
+}
+
 export function getSessionTickets(context: TenantContext, cashSessionId: string) {
   return readJson<SessionTicketRecord[]>(sessionTicketsKey(context, cashSessionId), [])
 }

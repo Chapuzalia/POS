@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { createId } from '../../../lib/format'
-import { enqueueOfflineEvent } from '../../../lib/offlineStore'
+import { enqueueOfflineEvent, forgetOfflineEvent, getOfflineQueue } from '../../../lib/offlineStore'
 import { loadSessionTicketsFromSupabase } from '../../../services/posService'
 import type { CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
 import { nowIso } from '../../../utils/dates'
@@ -60,6 +60,13 @@ export function useCashTicketActions(options: Options) {
     const nextTickets = options.tickets.map((item) => item.id === ticket.id ? { ...item, paymentMethod, payload: { ...item.payload, sale: { ...item.payload.sale, paymentMethod }, payment: { ...currentPayment, method: paymentMethod, receivedCents, changeCents: 0 } } } : item)
     options.persistTickets(nextTickets)
     options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod } : sale))
+    const pendingSale = getOfflineQueue().find((event) =>
+      event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
+    if (pendingSale) {
+      forgetOfflineEvent(pendingSale.id)
+      options.refreshPendingCount()
+      return
+    }
     enqueueOfflineEvent({ id: createId(), kind: 'sale_payment_changed', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: { saleId: ticket.payload.sale.id, paymentId: currentPayment.id, paymentMethod, receivedCents, changeCents: 0 } })
     options.refreshPendingCount(); void options.syncPendingEvents()
   }, [options])
@@ -70,6 +77,13 @@ export function useCashTicketActions(options: Options) {
     options.persistTickets(options.tickets.map((item) => item.id === ticket.id ? { ...item, status: 'voided' } : item))
     options.persistLedger(options.ledger.filter((sale) => sale.id !== ticket.id))
     options.subtractProductSalesStats(ticket.payload.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, lineTotalCents: line.lineTotalCents })))
+    const pendingSale = getOfflineQueue().find((event) =>
+      event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
+    if (pendingSale) {
+      forgetOfflineEvent(pendingSale.id)
+      options.refreshPendingCount()
+      return
+    }
     enqueueOfflineEvent({ id: createId(), kind: 'sale_voided', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: { saleId: ticket.payload.sale.id, ticketId: ticket.payload.ticket.id } })
     options.refreshPendingCount(); void options.syncPendingEvents()
   }, [options])

@@ -11,7 +11,7 @@ import { getReadableError } from '../utils/errors'
 
 type RejectedSaleEvent = Extract<OfflineEvent, { kind: 'sale_created' }>
 
-function isClosedCashRejection(event: OfflineEvent, error: unknown): event is RejectedSaleEvent {
+function isPermanentRejection(event: OfflineEvent, error: unknown): event is RejectedSaleEvent {
   if (event.kind !== 'sale_created' || !error || typeof error !== 'object') {
     return false
   }
@@ -21,7 +21,7 @@ function isClosedCashRejection(event: OfflineEvent, error: unknown): event is Re
     (value) => typeof value === 'string' && value.toLocaleLowerCase().includes('caja cerrada'),
   )
 
-  return databaseError.code === '55000' || hasClosedCashMessage
+  return ['22023', '55000', 'P0001'].includes(String(databaseError.code)) || hasClosedCashMessage
 }
 
 export function useOfflineSync(isOnline: boolean) {
@@ -75,7 +75,7 @@ export function useOfflineSync(isOnline: boolean) {
           await syncEvent(event)
           forgetOfflineEvent(event.id)
         } catch (syncError) {
-          if (isClosedCashRejection(event, syncError)) {
+          if (isPermanentRejection(event, syncError)) {
             forgetOfflineEvent(event.id)
             setRejectedSaleEvent(event)
             continue
