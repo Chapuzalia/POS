@@ -39,7 +39,7 @@ export function PosProductCard({
       </span>
       <span className="flex min-h-[88px] w-full flex-1 flex-col justify-between gap-2 p-3">
         <span className="min-w-0">
-          <span className="line-clamp-2 block text-sm font-bold leading-snug">
+          <span className="line-clamp-2 block text-lg font-bold leading-snug">
             {item.product.name}
           </span>
           {formatCount > 1 ? (
