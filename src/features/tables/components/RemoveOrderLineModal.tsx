@@ -13,7 +13,7 @@ export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm }: Prop
   const served = line.servedQuantity > 0
 
   return (
-    <AppModal containerClassName="!max-w-md !p-0 sm:!p-4" dismissDisabled={isBusy} label="Eliminar producto" onClose={onCancel} placement="bottom">
+    <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={448} dismissDisabled={isBusy} label="Eliminar producto" onClose={onCancel} placement="bottom">
       <section aria-labelledby="remove-order-line-title" className="w-full rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-md sm:rounded-[var(--radius)]">
         <div className="flex items-start justify-between gap-4">
           <div>

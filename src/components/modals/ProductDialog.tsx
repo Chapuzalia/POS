@@ -570,13 +570,10 @@ export function ProductDialog({
 
   return (
     <AppModal
-      containerClassName={
-        isChoosingMixer
-          ? "!w-[calc(100vw-32px)] !max-w-5xl !p-0"
-          : "!max-w-xl !p-4"
-      }
+      containerClassName={isChoosingMixer ? "!w-[calc(100vw-32px)] !p-0" : "!p-4"}
+      maxWidth={isChoosingMixer ? 1024 : 576}
       dialogClassName={cx(
-        isChoosingMixer && "!w-full !max-w-none",
+        isChoosingMixer && "!w-full",
         isClosing &&
           "animate-[product-dialog-backdrop-close_170ms_ease-out_forwards] motion-reduce:animate-none",
       )}

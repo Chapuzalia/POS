@@ -37,7 +37,7 @@ export function ConfigModal({
 
   if (section === 'printing') {
     return (
-      <AppModal containerClassName="!max-w-5xl !p-0 sm:!p-4" label="Configuración de impresión" onClose={onClose} placement="bottom">
+      <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={1024} label="Configuración de impresión" onClose={onClose} placement="bottom">
         <section className="flex max-h-[100svh] w-full flex-col bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[94svh] sm:max-w-5xl sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]">
           <div className="flex items-center justify-between gap-3 border-b border-[var(--separator)] p-4">
             <Button onClick={() => setSection('general')} size="sm" type="button" variant="tertiary"><ArrowLeft className="h-4 w-4" />Ajustes</Button>
@@ -51,7 +51,7 @@ export function ConfigModal({
 
   return (
     <AppModal label="Configuración" onClose={onClose}>
-      <section className="w-full max-w-xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
+      <section className="max-h-[calc(100dvh-24px)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[calc(100dvh-48px)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold">Configuracion</h2>
@@ -69,6 +69,14 @@ export function ConfigModal({
           <Metric label="Usuario" value={context.userName} />
           <Metric label="Pendiente sync" value={String(pendingCount)} tone={pendingCount ? 'danger' : 'success'} />
         </div>
+
+        <button
+          onClick={() => {
+            throw new Error('This is your first error!');
+          }}
+        >
+          Break the world
+        </button>
 
         <UiButton className="mt-5 flex min-h-14 w-full items-center justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-left transition hover:border-[var(--accent)]" onClick={() => setSection('printing')} type="button">
           <span className="flex items-center gap-3"><Printer className="h-5 w-5 text-[var(--accent)]" /><span><strong className="block">Hardware · Impresion</strong><small className="text-[var(--muted)]">Agente local, impresoras, cajon y diagnostico</small></span></span>

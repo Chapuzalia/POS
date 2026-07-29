@@ -46,7 +46,7 @@ test('POS categories share the product card footprint and responsive grid', () =
 
 test('mixer choices use the reference three-column horizontal selector', () => {
   assert.match(productDialog, /<PosMixerCard/)
-  assert.ok(productDialog.includes('!max-w-5xl'))
+  assert.ok(productDialog.includes('maxWidth={isChoosingMixer ? 1024 : 576}'))
   assert.ok(productDialog.includes('grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3'))
   assert.match(mixerCard, /<button/)
   assert.match(mixerCard, /h-28 min-h-28/)

@@ -1,32 +1,34 @@
-import { Modal } from '@heroui/react'
-import type { ReactNode } from 'react'
+import { Modal } from "@heroui/react";
+import type { CSSProperties, ReactNode } from "react";
 
 type AppModalProps = {
-  backdropClassName?: string
-  children: ReactNode
-  containerClassName?: string
-  dialogClassName?: string
-  dismissDisabled?: boolean
-  label: string
-  onClose: () => void
-  placement?: 'center' | 'bottom'
-}
+  backdropClassName?: string;
+  children: ReactNode;
+  containerClassName?: string;
+  dialogClassName?: string;
+  dismissDisabled?: boolean;
+  label: string;
+  maxWidth?: CSSProperties["maxWidth"];
+  onClose: () => void;
+  placement?: "center" | "bottom";
+};
 
 export function AppModal({
-  backdropClassName = '',
+  backdropClassName = "",
   children,
-  containerClassName = '!max-w-[640px] !p-0 sm:!p-4',
-  dialogClassName = '',
+  containerClassName = "!p-3 sm:!p-6",
+  dialogClassName = "",
   dismissDisabled = false,
   label,
+  maxWidth = 1200,
   onClose,
-  placement = 'center',
+  placement = "center",
 }: AppModalProps) {
   return (
     <Modal
       isOpen
       onOpenChange={(isOpen) => {
-        if (!isOpen && !dismissDisabled) onClose()
+        if (!isOpen && !dismissDisabled) onClose();
       }}
     >
       <Modal.Backdrop
@@ -35,19 +37,19 @@ export function AppModal({
         isKeyboardDismissDisabled={dismissDisabled}
       >
         <Modal.Container
-          className={containerClassName}
+          className={`!max-w-none ${containerClassName}`}
           placement={placement}
           scroll="inside"
-          size="lg"
         >
           <Modal.Dialog
             aria-label={label}
             className={`!w-full !max-h-[calc(100dvh-24px)] !overflow-hidden !rounded-[var(--radius)] !border !border-[var(--separator)] !bg-[var(--surface)] !p-0 !text-[var(--foreground)] !shadow-[var(--shadow)] [&>*]:!max-w-none ${dialogClassName}`}
+            style={{ maxWidth }}
           >
             {children}
           </Modal.Dialog>
         </Modal.Container>
       </Modal.Backdrop>
     </Modal>
-  )
+  );
 }

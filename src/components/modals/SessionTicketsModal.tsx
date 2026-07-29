@@ -38,7 +38,7 @@ export function SessionTicketsModal({
   const totalCents = activeTickets.reduce((total, ticket) => total + ticket.totalCents, 0)
 
   return (
-    <AppModal containerClassName="!max-w-3xl !p-4" dismissDisabled={isBusy} label="Tickets de la sesión" onClose={onClose}>
+    <AppModal containerClassName="!p-4" maxWidth={768} dismissDisabled={isBusy} label="Tickets de la sesión" onClose={onClose}>
       <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
           <div>

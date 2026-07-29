@@ -66,7 +66,7 @@ export function CashMovementModal({ isOnline, isSaving, onCancel, onConfirm }: P
     }
   }
 
-  return <AppModal containerClassName="!max-w-2xl !p-0 sm:!p-4" dismissDisabled={busy} label="Movimiento de efectivo" onClose={onCancel} placement="bottom">
+  return <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={672} dismissDisabled={busy} label="Movimiento de efectivo" onClose={onCancel} placement="bottom">
     <section aria-labelledby="cash-movement-title" className="flex max-h-[92svh] w-full flex-col overflow-hidden rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-2xl sm:rounded-[var(--radius)]">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
         <div><h2 className="text-2xl font-bold" id="cash-movement-title">Movimientos de caja</h2><p className="mt-1 text-sm text-[var(--muted)]">Registra una entrada o salida de efectivo sin generar una venta.</p></div>
