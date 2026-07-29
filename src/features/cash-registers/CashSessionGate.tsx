@@ -115,7 +115,7 @@ export function CashSessionGate({
           >
             <h2 className="font-black">Abrir nueva caja</h2>
             <UiNativeSelect
-              className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] !bg-amber-300 bg-[var(--field)] px-3"
+              className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]"
               disabled={!available.length || isBusy}
               onChange={(event) => setRegisterId(event.target.value)}
               value={registerId}
