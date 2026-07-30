@@ -42,3 +42,12 @@ test('POS modal families use the shared HeroUI modal policy', async () => {
     assert.doesNotMatch(source, /aria-modal|role=["']dialog["']|closeOnModalBackdrop/)
   }
 })
+
+test('the cash movement modal is centered and keeps long actions inside its width', async () => {
+  const source = await readFile(new URL('../src/components/modals/CashMovementModal.tsx', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(source, /placement=["']bottom["']/)
+  assert.match(source, /containerClassName=["']!p-4["']/)
+  assert.match(source, /min-w-0 max-w-full/)
+  assert.match(source, /!whitespace-normal/)
+})
