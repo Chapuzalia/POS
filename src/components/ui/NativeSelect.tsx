@@ -83,7 +83,7 @@ export function NativeSelect({
         selectedKey={selectedValue || null}
         variant="secondary"
       >
-        <HeroSelect.Trigger>
+        <HeroSelect.Trigger className="min-h-12 flex items-center">
           <HeroSelect.Value>{selectedOption?.label ?? 'Seleccionar opcion'}</HeroSelect.Value>
           <HeroSelect.Indicator />
         </HeroSelect.Trigger>

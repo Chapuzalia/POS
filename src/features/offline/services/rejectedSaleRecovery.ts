@@ -2,7 +2,18 @@ import type { OfflineEvent, TicketLine } from '../../../types'
 
 type RejectedSale = Extract<OfflineEvent, { kind: 'sale_created' }>
 
-export function getRejectedSaleRecovery(event: RejectedSale, hasCurrentTicket: boolean) {
+interface RejectedSaleRecovery {
+  appendToCurrentTicket: boolean
+  closedSessionId: string
+  discount: RejectedSale['payload']['ticket']['discount'] | null
+  linesToRestore: TicketLine[]
+  rejectedSaleId: string
+}
+
+export function getRejectedSaleRecovery(
+  event: RejectedSale,
+  hasCurrentTicket: boolean,
+): RejectedSaleRecovery {
   const lines: TicketLine[] = event.payload.lines.map((line) => ({
     id: line.id,
     modifiers: line.modifiers,
@@ -19,9 +30,10 @@ export function getRejectedSaleRecovery(event: RejectedSale, hasCurrentTicket: b
     catalogSnapshot: line.catalogSnapshot,
   }))
   return {
+    appendToCurrentTicket: hasCurrentTicket,
     closedSessionId: event.payload.ticket.cashSessionId,
     discount: event.payload.ticket.discount ?? null,
-    linesToRestore: hasCurrentTicket ? null : lines,
+    linesToRestore: lines,
     rejectedSaleId: event.payload.sale.id,
   }
 }

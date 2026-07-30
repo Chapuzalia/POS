@@ -1,8 +1,8 @@
 import { useEffect, useRef } from 'react'
 import {
-  clearSaleLedger,
   clearSessionTickets,
   getCachedTicket,
+  removeSaleFromLedger,
   saveCachedCashSession,
   saveCachedTicket,
 } from '../../../lib/offlineStore'
@@ -41,18 +41,20 @@ export function useRejectedSaleRecovery(options: Options) {
   useEffect(() => {
     if (!context || !rejectedSaleEvent || rejectedSaleEvent.tenantId !== context.tenantId) return
     const current = latestRef.current
-    const recovery = getRejectedSaleRecovery(rejectedSaleEvent, getCachedTicket(context).length > 0)
-    if (recovery.linesToRestore) {
-      current.setTicketLines(recovery.linesToRestore)
-      saveCachedTicket(context, recovery.linesToRestore)
-    }
+    const currentTicket = getCachedTicket(context)
+    const recovery = getRejectedSaleRecovery(rejectedSaleEvent, currentTicket.length > 0)
+    const restoredLines = recovery.appendToCurrentTicket
+      ? [...currentTicket, ...recovery.linesToRestore]
+      : recovery.linesToRestore
+    current.setTicketLines(restoredLines)
+    saveCachedTicket(context, restoredLines)
     current.setDiscount(recovery.discount)
     if (current.cashSession?.id === recovery.closedSessionId) {
       current.setCashSession(null)
       saveCachedCashSession(context, null)
     }
     current.setSalesLedger((ledger) => ledger.filter((sale) => sale.id !== recovery.rejectedSaleId))
-    clearSaleLedger(context)
+    removeSaleFromLedger(context, recovery.rejectedSaleId)
     current.setSessionTickets((tickets) => tickets.filter((ticket) => ticket.id !== recovery.rejectedSaleId))
     clearSessionTickets(context, recovery.closedSessionId)
     current.resetCashUi()
