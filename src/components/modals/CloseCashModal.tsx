@@ -52,7 +52,7 @@ export function CloseCashModal({ cashSession, isBusy, onCancel, onConfirm, summa
 
   return (
     <AppModal dismissDisabled={isBusy} label="Cierre de caja" onClose={onCancel}>
-      <section className="max-h-[calc(100svh-32px)] w-full max-w-3xl overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
+      <section className="max-h-[calc(100svh-32px)] w-full max-w-3xl overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold">Cierre de caja</h2>

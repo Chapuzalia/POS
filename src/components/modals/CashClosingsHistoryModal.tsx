@@ -21,7 +21,7 @@ export function CashClosingsHistoryModal({ canReprint, closings, printingClosing
         <div><h2 className="text-2xl font-black">Historico de cierres</h2><p className="text-sm text-[var(--muted)]">Las copias se generan desde la instantanea guardada al cerrar.</p></div>
         <Button onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
       </div>
-      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-5">
         <div className="grid gap-3">
           {closings.map((closing) => {
             const printing = printingClosingId === closing.id

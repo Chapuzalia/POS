@@ -37,7 +37,8 @@ test('the global hook repairs only installed iOS/iPadOS PWA viewports', async ()
   assert.match(hook, /display-mode: standalone/)
   assert.match(hook, /window\.visualViewport/)
   assert.match(hook, /viewport\.addEventListener\('resize'/)
-  assert.match(hook, /viewport\.addEventListener\('scroll'/)
+  assert.doesNotMatch(hook, /viewport\.addEventListener\('scroll'/)
+  assert.doesNotMatch(hook, /viewport\.removeEventListener\('scroll'/)
   assert.match(hook, /window\.innerHeight - viewport\.height/)
   assert.match(hook, /--app-height/)
   assert.match(hook, /window\.scrollTo\(0, 0\)/)
@@ -48,6 +49,10 @@ test('the global hook repairs only installed iOS/iPadOS PWA viewports', async ()
   assert.match(hook, /focusout/)
   assert.match(hook, /pageshow/)
   assert.match(hook, /visibilitychange/)
+  assert.match(styles, /html,\s*body\s*\{[^}]*overflow:\s*hidden;[^}]*overscroll-behavior:\s*none;/)
+  assert.match(styles, /#root\s*\{[^}]*overflow:\s*hidden;[^}]*overscroll-behavior:\s*none;/)
+  assert.doesNotMatch(styles, /touch-action:\s*none/)
+  assert.doesNotMatch(hook, /touch(?:start|move)/)
   assert.doesNotMatch(styles, /body\.pos-viewport-locked/)
   assert.doesNotMatch(styles, /body[^{]*\{[^}]*position:\s*fixed/)
   assert.match(mapView, /touch-none/)
@@ -55,4 +60,28 @@ test('the global hook repairs only installed iOS/iPadOS PWA viewports', async ()
   assert.doesNotMatch(styles, /\.table-map-canvas\b/)
   assert.match(viewport, /pinchRef/)
   assert.match(viewport, /zoomAtPoint/)
+})
+
+test('POS vertical scroll zones keep momentum and contain overscroll', async () => {
+  const sources = await Promise.all([
+    '../src/components/pos/CatalogPanel.tsx',
+    '../src/components/pos/TicketPanel.tsx',
+    '../src/components/modals/SessionTicketsModal.tsx',
+    '../src/components/modals/CashClosingsHistoryModal.tsx',
+    '../src/components/modals/ProductDialog.tsx',
+    '../src/components/modals/ConfigModal.tsx',
+    '../src/features/reservations/components/ReservationsPage.tsx',
+    '../src/features/reservations/components/ReservationList.tsx',
+    '../src/features/reservations/components/ReservationFormModal.tsx',
+    '../src/features/reservations/components/ReservationDetailPanel.tsx',
+    '../src/features/reservations/components/ReservationMapView.tsx',
+    '../src/features/tables/components/RestaurantOrderPanel.tsx',
+    '../src/features/tables/components/TableMapView.tsx',
+  ].map((path) => readFile(new URL(path, import.meta.url), 'utf8')))
+
+  for (const source of sources) {
+    assert.match(source, /overflow-y-auto/)
+    assert.match(source, /overscroll-contain/)
+    assert.match(source, /\[-webkit-overflow-scrolling:touch\]/)
+  }
 })

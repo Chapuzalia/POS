@@ -638,7 +638,7 @@ export function TableMapView(props: Props) {
       ) ?? null;
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-auto p-[18px] max-[760px]:p-3">
+    <main className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-[18px] max-[760px]:p-3">
       <header className="flex items-center justify-between gap-[18px] max-[760px]:flex-col max-[760px]:items-stretch [&_h1]:m-0 [&_h1]:text-2xl [&_p]:mb-0 [&_p]:mt-1 [&_p]:text-[var(--muted)]">
         <div>
           <h1>Mapa de mesas</h1>

@@ -165,7 +165,7 @@ export function ReservationFormModal(props: Props) {
             <X />
           </UiButton>
         </header>
-        <div className="grid gap-4 overflow-auto p-[18px]">
+        <div className="grid gap-4 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-[18px]">
           {lockedSchedule ? (
             <div className="flex items-center gap-2 rounded-[var(--radius)] bg-[var(--accent-soft)] px-3 py-[11px] text-[13px] font-semibold">
               La reserva ya está sentada. Su horario y sus mesas no pueden

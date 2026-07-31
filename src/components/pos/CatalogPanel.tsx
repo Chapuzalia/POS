@@ -366,7 +366,7 @@ export function CatalogPanel({
           </div>
         </label>
 
-        <div className="min-h-0 flex-1 overflow-y-auto p-4">
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-4">
           {selectedCategory ? (
             <div className="mb-3 flex items-center gap-2">
               <Button

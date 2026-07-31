@@ -84,7 +84,7 @@ export function ReservationDetailPanel(props: Props) {
             <X />
           </UiButton>
         </header>
-        <div className="grid content-start gap-[18px] overflow-auto p-[18px]">
+        <div className="grid content-start gap-[18px] overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-[18px]">
           <dl>
             <div>
               <dt>

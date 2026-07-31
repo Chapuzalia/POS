@@ -117,7 +117,6 @@ export function useIOSPWAViewportFix() {
 
     updateAppHeight()
     viewport.addEventListener('resize', handleViewportChange)
-    viewport.addEventListener('scroll', handleViewportChange)
     document.addEventListener('focusout', handleFocusOut)
     window.addEventListener('pageshow', handlePageShow)
     document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -125,7 +124,6 @@ export function useIOSPWAViewportFix() {
     return () => {
       disposed = true
       viewport.removeEventListener('resize', handleViewportChange)
-      viewport.removeEventListener('scroll', handleViewportChange)
       document.removeEventListener('focusout', handleFocusOut)
       window.removeEventListener('pageshow', handlePageShow)
       document.removeEventListener('visibilitychange', handleVisibilityChange)

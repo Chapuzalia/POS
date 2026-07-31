@@ -3,7 +3,7 @@ import { AppModal, Button } from '../../../components/ui'
 
 export function CertificateHelpDialog({ baseUrl, onClose }: { baseUrl: string; onClose: () => void }) {
   return <AppModal label="Ayuda para instalar el certificado" onClose={onClose} placement="bottom">
-    <section className="max-h-[100svh] w-full overflow-y-auto rounded-t-[var(--radius)] bg-[var(--surface)] p-5 text-[var(--foreground)] sm:max-w-xl sm:rounded-[var(--radius)]">
+    <section className="max-h-[100svh] w-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-t-[var(--radius)] bg-[var(--surface)] p-5 text-[var(--foreground)] sm:max-w-xl sm:rounded-[var(--radius)]">
       <div className="flex justify-between gap-3"><div><h2 className="text-xl font-black">Certificado y red local</h2><p className="text-sm text-[var(--muted)]">Safari no permite ignorar errores TLS desde JavaScript.</p></div><Button onClick={onClose} size="sm" variant="tertiary"><X className="h-4 w-4" /></Button></div>
       <ol className="mt-5 grid list-decimal gap-3 pl-5 text-sm leading-6">
         <li>Abre <strong className="break-all">{baseUrl}/health</strong> directamente en Safari.</li>
