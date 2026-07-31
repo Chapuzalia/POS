@@ -1,4 +1,6 @@
 import type { SaleCreatedPayload } from '../../../types/index.ts'
+import { allocateNetTotalToLines } from '../../../lib/discounts.ts'
+import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import type { PrintRequest, PrintTicketItem } from '../types.ts'
 import { shouldOpenCashDrawer } from './cashDrawerRules.ts'
 
@@ -47,12 +49,24 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
   const isReprint = options.isReprint === true
   const copyNumber = options.copyNumber || 0
   const payments = sale.payment ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }] : []
-  const hasTaxSnapshot = sale.lines.some((line) => Boolean(line.fiscalSnapshot))
-  const taxCents = sale.lines.reduce((total, line) => total + (line.fiscalSnapshot?.taxAmountCents || 0), 0)
-  const taxableBaseCents = sale.lines.reduce(
-    (total, line) => total + (line.fiscalSnapshot?.taxableBaseCents ?? line.lineTotalCents),
-    0,
+  const hasCompleteFiscalSnapshot = sale.lines.length > 0 && sale.lines.every(
+    (line) => line.fiscalSnapshot && isValidTaxRate(line.fiscalSnapshot.taxRate),
   )
+  const fiscalSnapshots = hasCompleteFiscalSnapshot
+    ? allocateNetTotalToLines(sale.lines.map((line) => line.lineTotalCents), sale.sale.totalCents)
+      .map((grossTotalCents, index) => ({
+        taxRate: sale.lines[index].fiscalSnapshot!.taxRate,
+        ...calculateTaxFromGross(grossTotalCents, sale.lines[index].fiscalSnapshot!.taxRate),
+      }))
+    : null
+  const taxCents = fiscalSnapshots?.reduce((total, snapshot) => total + snapshot.taxAmountCents, 0)
+  const taxableBaseCents = fiscalSnapshots?.reduce((total, snapshot) => total + snapshot.taxableBaseCents, 0)
+  const items = sale.lines.map((line, index) => {
+    const item = mapSaleLineToPrintItem(line)
+    if (fiscalSnapshots) return { ...item, taxCents: fiscalSnapshots[index].taxAmountCents }
+    const { taxCents: _taxCents, ...itemWithoutTax } = item
+    return itemWithoutTax
+  })
   return {
     requestId: isReprint ? `print:${sale.sale.id}:copy:${copyNumber}` : `print:${sale.sale.id}:original`,
     printerId: options.printerId,
@@ -63,10 +77,10 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
       ...(options.establishment.taxId ? { taxId: options.establishment.taxId } : {}),
       ticketNumber: sale.ticket.id,
       date: sale.sale.createdAt,
-      items: sale.lines.map(mapSaleLineToPrintItem),
-      subtotalCents: hasTaxSnapshot ? taxableBaseCents : sale.ticket.subtotalCents,
+      items,
+      subtotalCents: taxableBaseCents ?? sale.ticket.subtotalCents,
       discountCents: sale.ticket.discountAmountCents,
-      ...(hasTaxSnapshot ? { taxCents } : {}),
+      ...(taxCents === undefined ? {} : { taxCents }),
       totalCents: sale.sale.totalCents,
       ...(sale.payment ? {
         paymentMethod: sale.payment.method,

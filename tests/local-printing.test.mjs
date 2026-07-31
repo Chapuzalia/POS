@@ -7,6 +7,7 @@ import { normalizePrintAgentUrl } from '../src/features/local-printing/utils/nor
 import { sanitizePrintDiagnostics } from '../src/features/local-printing/utils/sanitizePrintDiagnostics.ts'
 import { getAutomaticSaleHardwareAction, shouldOpenCashDrawer } from '../src/features/local-printing/services/cashDrawerRules.ts'
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
+import { buildSalePayload } from '../src/features/quick-sale/services/salePayload.ts'
 import { pollPrintJob } from '../src/features/local-printing/services/jobPolling.ts'
 import { clearPrintAgentConfig, loadPrintAgentConfig, savePrintAgentConfig } from '../src/features/local-printing/services/printAgentStorage.ts'
 import { printRequestSchema } from '../src/features/local-printing/schemas/printSchemas.ts'
@@ -37,6 +38,39 @@ const sale = {
     venueId: 'mess', deviceId: 'ipad', userId: 'user', totalCents: 1600, paymentMethod: 'cash', createdAt: '2026-07-18T16:30:00+02:00',
   },
   payment: { id: 'payment', tenantId: 'tenant', saleId: 'sale_123', method: 'cash', amountCents: 1600, receivedCents: 2000, changeCents: 400 },
+}
+
+const quickSaleContext = { tenantId: 'tenant', venueId: 'mess', venueDefaultTaxRate: 21, deviceId: 'ipad', userId: 'user' }
+const quickSaleCashSession = { id: 'cash', cashRegisterId: 'register' }
+
+function quickSaleLine(id, unitPriceCents, vatRate) {
+  return {
+    id, productId: `product-${id}`, productName: id, variantId: `variant-${id}`, variantName: id,
+    basePriceCents: unitPriceCents, componentDeltaCents: 0, modifierDeltaCents: 0,
+    unitPriceCents, quantity: 1, modifiers: [], components: [],
+    catalogSnapshot: {
+      placementId: null, productType: 'standard', productId: `product-${id}`, productName: id,
+      variantId: `variant-${id}`, variantName: id, basePriceCents: unitPriceCents, vatRate,
+      categoryId: null, categoryName: '', catalogTabId: null, catalogTabName: '',
+      saleFormatId: null, saleFormatName: id,
+    },
+  }
+}
+
+const twentyPercentDiscount = {
+  discountId: null, name: 'Manual 20 %', type: 'manual', calculationType: 'percentage', value: 20,
+  roundingIncrementCents: null, color: null,
+}
+
+function buildQuickSalePayload(...args) {
+  const originalWindow = globalThis.window
+  globalThis.window = { ...originalWindow, crypto: globalThis.crypto }
+  try {
+    return buildSalePayload(...args)
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+  }
 }
 
 test('normaliza hostnames, IPv4 e IPv6 y aplica HTTPS con el puerto 8443', () => {
@@ -103,13 +137,105 @@ test('mapea cubatas, extras, efectivo e importes enteros con idempotencia establ
   assert.equal(payload.ticket.taxId, 'B12345678')
   assert.deepEqual(payload.ticket.items[0].additions, ['Coca-Cola', 'Limon'])
   assert.equal(payload.ticket.items[0].totalCents, 1800)
-  assert.equal(payload.ticket.subtotalCents, 1488)
-  assert.equal(payload.ticket.taxCents, 312)
+  assert.equal(payload.ticket.items[0].taxCents, 278)
+  assert.equal(payload.ticket.subtotalCents, 1322)
+  assert.equal(payload.ticket.taxCents, 278)
   assert.equal(payload.ticket.discountCents, 200)
   assert.equal(payload.ticket.amountReceivedCents, 2000)
   assert.equal(payload.ticket.changeCents, 400)
   assert.equal(payload.options.openCashDrawer, true)
   assert.equal(printRequestSchema.parse(payload).ticket.totalCents, 1600)
+})
+
+test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipos', () => {
+  const payload = buildQuickSalePayload(
+    quickSaleContext,
+    quickSaleCashSession,
+    [quickSaleLine('IVA 21', 1210, 21), quickSaleLine('IVA 10', 1100, 10)],
+    'cash',
+    2310,
+    null,
+  )
+
+  assert.deepEqual(payload.lines.map((line) => line.fiscalSnapshot), [
+    { taxRate: 21, grossTotalCents: 1210, taxableBaseCents: 1000, taxAmountCents: 210 },
+    { taxRate: 10, grossTotalCents: 1100, taxableBaseCents: 1000, taxAmountCents: 100 },
+  ])
+
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main' })
+  assert.equal(request.ticket.subtotalCents, 2000)
+  assert.equal(request.ticket.discountCents, 0)
+  assert.equal(request.ticket.taxCents, 310)
+  assert.equal(request.ticket.totalCents, 2310)
+})
+
+test('la venta rapida reparte el descuento y recalcula el IVA final de cada tipo', () => {
+  const payload = buildQuickSalePayload(
+    quickSaleContext,
+    quickSaleCashSession,
+    [quickSaleLine('IVA 21', 1210, 21), quickSaleLine('IVA 10', 1100, 10)],
+    'card',
+    null,
+    twentyPercentDiscount,
+  )
+
+  assert.equal(payload.ticket.subtotalCents, 2310)
+  assert.equal(payload.ticket.discountAmountCents, 462)
+  assert.equal(payload.ticket.totalCents, 1848)
+  assert.deepEqual(payload.lines.map((line) => line.fiscalSnapshot), [
+    { taxRate: 21, grossTotalCents: 968, taxableBaseCents: 800, taxAmountCents: 168 },
+    { taxRate: 10, grossTotalCents: 880, taxableBaseCents: 800, taxAmountCents: 80 },
+  ])
+
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main' })
+  assert.deepEqual(request.ticket.items.map((item) => item.taxCents), [168, 80])
+  assert.equal(request.ticket.subtotalCents, 1600)
+  assert.equal(request.ticket.discountCents, 462)
+  assert.equal(request.ticket.taxCents, 248)
+  assert.equal(request.ticket.totalCents, 1848)
+})
+
+test('omite todo el desglose fiscal si alguna linea de venta rapida no tiene IVA', () => {
+  const payload = buildQuickSalePayload(
+    { ...quickSaleContext, venueDefaultTaxRate: undefined },
+    quickSaleCashSession,
+    [quickSaleLine('Con IVA', 1210, 21), quickSaleLine('Sin dato fiscal', 500, null)],
+    'card',
+    null,
+    twentyPercentDiscount,
+  )
+  assert.ok(payload.lines[0].fiscalSnapshot)
+  assert.equal(payload.lines[1].fiscalSnapshot, null)
+
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main' })
+  assert.equal(request.ticket.subtotalCents, 1710)
+  assert.equal(request.ticket.discountCents, 342)
+  assert.equal(request.ticket.totalCents, 1368)
+  assert.equal(request.ticket.taxCents, undefined)
+  assert.deepEqual(request.ticket.items.map((item) => item.taxCents), [undefined, undefined])
+})
+
+test('la venta rapida aplica el IVA predeterminado del local a productos que lo heredan', () => {
+  const payload = buildQuickSalePayload(
+    quickSaleContext,
+    quickSaleCashSession,
+    [quickSaleLine('IVA heredado', 10000, null)],
+    'card',
+    null,
+    null,
+  )
+  assert.deepEqual(payload.lines[0].fiscalSnapshot, {
+    taxRate: 21,
+    grossTotalCents: 10000,
+    taxableBaseCents: 8264,
+    taxAmountCents: 1736,
+  })
+
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main' })
+  assert.equal(request.ticket.subtotalCents, 8264)
+  assert.equal(request.ticket.taxCents, 1736)
+  assert.equal(request.ticket.totalCents, 10000)
+  assert.equal(request.ticket.subtotalCents + request.ticket.taxCents, request.ticket.totalCents)
 })
 
 test('la reimpresion usa COPIA, un ID de copia y nunca abre el cajon', () => {
