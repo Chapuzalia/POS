@@ -17,7 +17,7 @@ export function ReservationList({ onSelect, reservations, searchMode }: Props) {
     return <div className="grid min-h-[220px] flex-1 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] font-extrabold text-[var(--muted)]">No se han encontrado reservas.</div>
   }
   return (
-    <div className="min-w-0 flex-1 overflow-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]" role="list">
+    <div className="min-w-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]" role="list">
       {reservations.map((reservation) => {
         const late = isReservationLate(reservation)
         const timing = reservationTimingLabel(reservation)

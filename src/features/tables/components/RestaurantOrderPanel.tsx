@@ -53,7 +53,7 @@ export function RestaurantOrderPanel(props: Props) {
   const pendingUnits = getOrderPendingUnits(order.lines)
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-3">
+      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
         {order.lines.length === 0 ? <div className="flex min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">Pulsa un producto para anadirlo a la comanda.</div> : null}
         {pendingLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Por servir</h2><div className="space-y-2">{pendingLines.map((line) => <OrderLineRow {...lineProps} isBusy={isBusy} key={line.id} line={line} />)}</div></section> : null}
         {servedLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--success)]">Servido</h2><div className="space-y-2">{servedLines.map((line) => <OrderLineRow {...lineProps} isBusy={isBusy} key={line.id} line={line} />)}</div></section> : null}

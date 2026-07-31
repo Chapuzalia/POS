@@ -85,7 +85,7 @@ export function AppHeader({
 
   return (
     <header className="shrink-0 border-b border-[var(--separator)] bg-[var(--surface)] pt-[max(1.5rem,env(safe-area-inset-top))]">
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-2">
+      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-0">
         <div className="flex min-w-0 flex-row gap-2">
           <Dropdown>
             <Dropdown.Trigger aria-label="Abrir menú principal de TICKIT" className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius)] px-2 text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)]">

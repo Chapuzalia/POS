@@ -43,7 +43,7 @@ export function ConfigModal({
             <Button onClick={() => setSection('general')} size="sm" type="button" variant="tertiary"><ArrowLeft className="h-4 w-4" />Ajustes</Button>
             <Button onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto p-4 sm:p-5"><PrintAgentSettings canConfigure={canManageHardware} canOpenDrawer={canManageHardware} /></div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-4 sm:p-5"><PrintAgentSettings canConfigure={canManageHardware} canOpenDrawer={canManageHardware} /></div>
         </section>
       </AppModal>
     )
@@ -51,7 +51,7 @@ export function ConfigModal({
 
   return (
     <AppModal label="Configuración" onClose={onClose}>
-      <section className="max-h-[calc(100dvh-24px)] w-full max-w-xl overflow-y-auto overscroll-contain rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[calc(100dvh-48px)]">
+      <section className="max-h-[calc(100dvh-24px)] w-full max-w-xl overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[calc(100dvh-48px)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold">Configuracion</h2>

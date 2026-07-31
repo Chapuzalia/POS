@@ -72,7 +72,7 @@ export function CashMovementModal({ isOnline, isSaving, onCancel, onConfirm }: P
         <div className="min-w-0"><h2 className="text-2xl font-bold" id="cash-movement-title">Movimientos de caja</h2><p className="mt-1 text-sm text-[var(--muted)]">Registra una entrada o salida de efectivo sin generar una venta.</p></div>
         <Button aria-label="Cerrar" className="shrink-0" disabled={busy} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
       </header>
-      <div className="min-h-0 flex-1 overflow-y-auto p-5">
+      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-5">
         <fieldset className="min-w-0" disabled={busy}>
           <legend className="text-sm font-semibold text-[var(--muted)]">Tipo de movimiento</legend>
           <div className="mt-2 grid min-w-0 gap-2 md:grid-cols-3">

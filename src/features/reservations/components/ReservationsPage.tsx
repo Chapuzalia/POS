@@ -51,7 +51,7 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
   }));
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-auto p-[18px] max-[760px]:p-3">
+    <main className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-[18px] max-[760px]:p-3">
       <header className="grid grid-cols-[1fr_auto_1fr] items-center gap-4 max-[1000px]:grid-cols-[1fr_auto] max-[760px]:flex max-[760px]:flex-col max-[760px]:items-stretch [&_svg]:size-[18px]">
         <div className="flex items-center gap-2 max-[760px]:justify-between [&>h1]:m-0 [&>h1]:text-2xl">
           <UiButton

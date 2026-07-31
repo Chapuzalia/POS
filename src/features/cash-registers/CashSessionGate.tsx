@@ -68,7 +68,7 @@ export function CashSessionGate({
   const canOpen =
     context.canOpenCashSession === true && context.deviceMode !== "satellite";
   return (
-    <main className="h-full overflow-y-auto bg-[var(--background)] p-4 text-[var(--foreground)]">
+    <main className="h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] bg-[var(--background)] p-4 text-[var(--foreground)]">
       <section className="mx-auto mt-[8vh] w-full max-w-2xl space-y-5 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
         <div>
           <h1 className="text-2xl font-black">

@@ -57,7 +57,7 @@ export function DiscountModal({
 
   return (
     <AppModal dismissDisabled={isBusy} label="Aplicar descuento" onClose={onCancel} placement="center">
-      <section aria-labelledby="discount-title" className="max-h-[85svh] w-full max-w-xl overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
+      <section aria-labelledby="discount-title" className="max-h-[85svh] w-full max-w-xl overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold" id="discount-title">Aplicar descuento</h2>

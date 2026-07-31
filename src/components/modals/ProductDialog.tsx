@@ -584,7 +584,7 @@ export function ProductDialog({
       <section
         ref={dialogRef}
         className={cx(
-          "max-h-[calc(100svh-32px)] w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]",
+          "max-h-[calc(100svh-32px)] w-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]",
           isChoosingMixer ? "max-w-none" : "max-w-xl",
           isClosing &&
             "pointer-events-none animate-[product-dialog-close_170ms_ease-out_forwards] motion-reduce:animate-none",
