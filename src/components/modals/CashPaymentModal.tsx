@@ -1,69 +1,106 @@
-import { Input as UiInput } from '../ui/Input'
-import { X } from 'lucide-react'
-import { useEffect, useRef, useState } from 'react'
-import { centsToInput, formatMoney, parseMoneyToCents } from '../../lib/format'
-import { cx } from '../../utils/cx'
-import { AppModal, Button } from '../ui'
-import { addCashDenomination, cashDenominationsCents } from './cash-payment'
+import { Input as UiInput } from "../ui/Input";
+import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { centsToInput, formatMoney, parseMoneyToCents } from "../../lib/format";
+import { cx } from "../../utils/cx";
+import { AppModal, Button } from "../ui";
+import { addCashDenomination, cashDenominationsCents } from "./cash-payment";
 
 type CashPaymentModalProps = {
-  isBusy: boolean
-  onCancel: () => void
-  onConfirm: (receivedCents: number) => void
-  totalCents: number
-}
+  isBusy: boolean;
+  onCancel: () => void;
+  onConfirm: (receivedCents: number) => void;
+  totalCents: number;
+};
 
-export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: CashPaymentModalProps) {
-  const [delivered, setDelivered] = useState(centsToInput(totalCents))
-  const deliveredCents = parseMoneyToCents(delivered)
-  const difference = deliveredCents - totalCents
-  const initialExactRef = useRef(true)
+export function CashPaymentModal({
+  isBusy,
+  onCancel,
+  onConfirm,
+  totalCents,
+}: CashPaymentModalProps) {
+  const [delivered, setDelivered] = useState(centsToInput(totalCents));
+  const deliveredCents = parseMoneyToCents(delivered);
+  const difference = deliveredCents - totalCents;
+  const initialExactRef = useRef(true);
 
   function selectExactAmount() {
-    initialExactRef.current = true
-    setDelivered(centsToInput(totalCents))
+    initialExactRef.current = true;
+    setDelivered(centsToInput(totalCents));
   }
 
   function addDenomination(amount: number) {
-    setDelivered((current) => centsToInput(addCashDenomination(parseMoneyToCents(current), amount, initialExactRef.current)))
-    initialExactRef.current = false
+    setDelivered((current) =>
+      centsToInput(
+        addCashDenomination(
+          parseMoneyToCents(current),
+          amount,
+          initialExactRef.current,
+        ),
+      ),
+    );
+    initialExactRef.current = false;
   }
 
   useEffect(() => {
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !isBusy) {
-        onCancel()
+      if (event.key === "Escape" && !isBusy) {
+        onCancel();
       }
 
-      if (event.key === 'Enter' && !isBusy && difference >= 0) {
-        onConfirm(deliveredCents)
+      if (event.key === "Enter" && !isBusy && difference >= 0) {
+        onConfirm(deliveredCents);
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [deliveredCents, difference, isBusy, onCancel, onConfirm])
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [deliveredCents, difference, isBusy, onCancel, onConfirm]);
 
   return (
-    <AppModal dismissDisabled={isBusy} label="Cobro en efectivo" onClose={onCancel}>
+    <AppModal
+      dismissDisabled={isBusy}
+      maxWidth={600}
+      label="Cobro en efectivo"
+      onClose={onCancel}
+    >
       <section className="w-full max-w-xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold">Cobro en efectivo</h2>
-            <p className="text-sm text-[var(--muted)]">Confirma el importe entregado.</p>
+            <p className="text-sm text-[var(--muted)]">
+              Confirma el importe entregado.
+            </p>
           </div>
-          <Button disabled={isBusy} onClick={onCancel} size="sm" type="button" variant="tertiary">
+          <Button
+            disabled={isBusy}
+            onClick={onCancel}
+            size="sm"
+            type="button"
+            variant="tertiary"
+          >
             <X className="h-4 w-4" />
           </Button>
         </div>
 
         <div className="mt-5 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4">
-          <p className="text-sm font-semibold text-[var(--muted)]">Total a cobrar</p>
-          <p className="mt-1 font-mono text-4xl font-black tabular-nums">{formatMoney(totalCents)}</p>
+          <p className="text-sm font-semibold text-[var(--muted)]">
+            Total a cobrar
+          </p>
+          <p className="mt-1 font-mono text-4xl font-black tabular-nums">
+            {formatMoney(totalCents)}
+          </p>
         </div>
 
         <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
-          <Button onClick={selectExactAmount} type="button" className="!text-xl" variant="primary">Exacto</Button>
+          <Button
+            onClick={selectExactAmount}
+            type="button"
+            className="!text-xl"
+            variant="primary"
+          >
+            Exacto
+          </Button>
           {cashDenominationsCents.map((amount) => (
             <Button
               key={amount}
@@ -79,16 +116,32 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
         </div>
 
         <label className="mt-4 block">
-          <span className="text-sm font-semibold text-[var(--muted)]">Entregado</span>
+          <span className="text-sm font-semibold text-[var(--muted)]">
+            Entregado
+          </span>
           <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]">
-            <span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">EUR</span>
+            <span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">
+              EUR
+            </span>
             <UiInput
               className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none"
               inputMode="decimal"
-              onChange={(event) => { initialExactRef.current = false; setDelivered(event.target.value) }}
+              onChange={(event) => {
+                initialExactRef.current = false;
+                setDelivered(event.target.value);
+              }}
               value={delivered}
             />
-            <Button className="mr-1" onClick={() => { initialExactRef.current = false; setDelivered('0.00') }} size="sm" type="button" variant="tertiary">
+            <Button
+              className="mr-1"
+              onClick={() => {
+                initialExactRef.current = false;
+                setDelivered("0.00");
+              }}
+              size="sm"
+              type="button"
+              variant="tertiary"
+            >
               <X className="h-4 w-4" />
             </Button>
           </div>
@@ -96,14 +149,18 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
 
         <div
           className={cx(
-            'mt-4 rounded-[var(--radius)] border p-4',
+            "mt-4 rounded-[var(--radius)] border p-4",
             difference >= 0
-              ? 'border-[var(--success)] bg-[var(--success-soft)] text-[var(--success)]'
-              : 'border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]',
+              ? "border-[var(--success)] bg-[var(--success-soft)] text-[var(--success)]"
+              : "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]",
           )}
         >
-          <p className="text-sm font-semibold">{difference >= 0 ? 'Cambio' : 'Falta'}</p>
-          <p className="font-mono text-2xl font-black tabular-nums">{formatMoney(Math.abs(difference))}</p>
+          <p className="text-sm font-semibold">
+            {difference >= 0 ? "Cambio" : "Falta"}
+          </p>
+          <p className="font-mono text-2xl font-black tabular-nums">
+            {formatMoney(Math.abs(difference))}
+          </p>
         </div>
 
         <Button
@@ -119,5 +176,5 @@ export function CashPaymentModal({ isBusy, onCancel, onConfirm, totalCents }: Ca
         </Button>
       </section>
     </AppModal>
-  )
+  );
 }

@@ -1,25 +1,34 @@
-import { Input as UiInput } from '../ui/Input'
-import { Percent, Tags, X } from 'lucide-react'
-import { useState } from 'react'
-import { calculateDiscount, formatDiscountRounding, formatDiscountValue, getActiveVenueDiscounts } from '../../lib/discounts'
-import { parseMoneyToCents } from '../../lib/format'
-import type { AppliedDiscount, Discount, DiscountCalculationType } from '../../types'
-import { AppModal, Button } from '../ui'
-import { DiscountOptionRow } from './DiscountOptionRow'
+import { Input as UiInput } from "../ui/Input";
+import { Percent, Tags, X } from "lucide-react";
+import { useState } from "react";
+import {
+  calculateDiscount,
+  formatDiscountRounding,
+  formatDiscountValue,
+  getActiveVenueDiscounts,
+} from "../../lib/discounts";
+import { parseMoneyToCents } from "../../lib/format";
+import type {
+  AppliedDiscount,
+  Discount,
+  DiscountCalculationType,
+} from "../../types";
+import { AppModal, Button } from "../ui";
+import { DiscountOptionRow } from "./DiscountOptionRow";
 
 type DiscountModalProps = {
-  description?: string
-  discounts: Discount[]
-  isBusy: boolean
-  manualDiscountEnabled: boolean
-  onCancel: () => void
-  onSelect: (discount: AppliedDiscount) => void
-  subtotalCents: number
-  venueId: string
-}
+  description?: string;
+  discounts: Discount[];
+  isBusy: boolean;
+  manualDiscountEnabled: boolean;
+  onCancel: () => void;
+  onSelect: (discount: AppliedDiscount) => void;
+  subtotalCents: number;
+  venueId: string;
+};
 
 export function DiscountModal({
-  description = 'Se aplicará a la cuenta completa.',
+  description = "Se aplicará a la cuenta completa.",
   discounts,
   isBusy,
   manualDiscountEnabled,
@@ -28,42 +37,62 @@ export function DiscountModal({
   subtotalCents,
   venueId,
 }: DiscountModalProps) {
-  const [manualOpen, setManualOpen] = useState(false)
-  const availableDiscounts = getActiveVenueDiscounts(discounts, venueId)
-  const [manualType, setManualType] = useState<DiscountCalculationType>('percentage')
-  const [manualValue, setManualValue] = useState('')
-  const [validationError, setValidationError] = useState<string | null>(null)
+  const [manualOpen, setManualOpen] = useState(false);
+  const availableDiscounts = getActiveVenueDiscounts(discounts, venueId);
+  const [manualType, setManualType] =
+    useState<DiscountCalculationType>("percentage");
+  const [manualValue, setManualValue] = useState("");
+  const [validationError, setValidationError] = useState<string | null>(null);
 
   function applyManual() {
-    const value = manualType === 'fixed'
-      ? parseMoneyToCents(manualValue)
-      : Number(manualValue.replace(',', '.'))
+    const value =
+      manualType === "fixed"
+        ? parseMoneyToCents(manualValue)
+        : Number(manualValue.replace(",", "."));
 
     try {
-      calculateDiscount(subtotalCents, manualType, value)
+      calculateDiscount(subtotalCents, manualType, value);
       onSelect({
         discountId: null,
-        name: 'Descuento manual',
-        type: 'manual',
+        name: "Descuento manual",
+        type: "manual",
         calculationType: manualType,
         value,
         roundingIncrementCents: null,
         color: null,
-      })
+      });
     } catch (error) {
-      setValidationError(error instanceof Error ? error.message : 'El descuento no es válido.')
+      setValidationError(
+        error instanceof Error ? error.message : "El descuento no es válido.",
+      );
     }
   }
 
   return (
-    <AppModal dismissDisabled={isBusy} label="Aplicar descuento" onClose={onCancel} placement="center">
-      <section aria-labelledby="discount-title" className="max-h-[85svh] w-full max-w-xl overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
+    <AppModal
+      dismissDisabled={isBusy}
+      label="Aplicar descuento"
+      onClose={onCancel}
+      maxWidth={600}
+      placement="center"
+    >
+      <section
+        aria-labelledby="discount-title"
+        className="max-h-[85svh] w-full max-w-xl overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]"
+      >
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold" id="discount-title">Aplicar descuento</h2>
+            <h2 className="text-2xl font-bold" id="discount-title">
+              Aplicar descuento
+            </h2>
             <p className="text-sm text-[var(--muted)]">{description}</p>
           </div>
-          <button className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-[var(--foreground)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:pointer-events-none disabled:opacity-45" disabled={isBusy} onClick={onCancel} type="button">
+          <button
+            className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] text-[var(--foreground)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:pointer-events-none disabled:opacity-45"
+            disabled={isBusy}
+            onClick={onCancel}
+            type="button"
+          >
             <X className="h-4 w-4" />
           </button>
         </div>
@@ -75,52 +104,103 @@ export function DiscountModal({
               disabled={isBusy}
               key={discount.id}
               label={discount.name}
-              onSelect={() => onSelect({
-                discountId: discount.id,
-                name: discount.name,
-                type: discount.type,
-                calculationType: discount.type,
-                value: discount.value,
-                roundingIncrementCents: discount.roundingIncrementCents,
-                color: discount.color,
-              })}
-              roundingLabel={discount.roundingIncrementCents ? formatDiscountRounding(discount.roundingIncrementCents) : null}
+              onSelect={() =>
+                onSelect({
+                  discountId: discount.id,
+                  name: discount.name,
+                  type: discount.type,
+                  calculationType: discount.type,
+                  value: discount.value,
+                  roundingIncrementCents: discount.roundingIncrementCents,
+                  color: discount.color,
+                })
+              }
+              roundingLabel={
+                discount.roundingIncrementCents
+                  ? formatDiscountRounding(discount.roundingIncrementCents)
+                  : null
+              }
               valueLabel={formatDiscountValue(discount.type, discount.value)}
             />
           ))}
           {!availableDiscounts.length && !manualDiscountEnabled ? (
-            <p className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-5 text-center text-sm font-semibold text-[var(--muted)]">No hay descuentos disponibles para este local.</p>
+            <p className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-5 text-center text-sm font-semibold text-[var(--muted)]">
+              No hay descuentos disponibles para este local.
+            </p>
           ) : null}
         </div>
 
         {manualDiscountEnabled ? (
           <div className="mt-4 border-t border-[var(--separator)] pt-4">
             {!manualOpen ? (
-              <button className="flex h-11 min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]" onClick={() => setManualOpen(true)} type="button">
+              <button
+                className="flex h-11 min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-sm font-medium text-[var(--foreground)] transition hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]"
+                onClick={() => setManualOpen(true)}
+                type="button"
+              >
                 <Tags className="h-4 w-4" />
                 Descuento manual
               </button>
             ) : (
               <div className="grid gap-3 rounded-[var(--radius)] bg-[var(--background)] p-4">
                 <div className="grid grid-cols-2 gap-2">
-                  <Button active={manualType === 'percentage'} onClick={() => setManualType('percentage')} type="button" variant="secondary">Porcentaje</Button>
-                  <Button active={manualType === 'fixed'} onClick={() => setManualType('fixed')} type="button" variant="secondary">Importe fijo</Button>
+                  <Button
+                    active={manualType === "percentage"}
+                    onClick={() => setManualType("percentage")}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Porcentaje
+                  </Button>
+                  <Button
+                    active={manualType === "fixed"}
+                    onClick={() => setManualType("fixed")}
+                    type="button"
+                    variant="secondary"
+                  >
+                    Importe fijo
+                  </Button>
                 </div>
                 <label>
-                  <span className="text-sm font-semibold text-[var(--muted)]">{manualType === 'percentage' ? 'Porcentaje' : 'Importe'}</span>
+                  <span className="text-sm font-semibold text-[var(--muted)]">
+                    {manualType === "percentage" ? "Porcentaje" : "Importe"}
+                  </span>
                   <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
                     <Percent className="h-4 w-4 text-[var(--muted)]" />
-                    <UiInput autoFocus className="min-w-0 flex-1 bg-transparent px-3 outline-none" inputMode="decimal" onChange={(event) => { setManualValue(event.target.value); setValidationError(null) }} value={manualValue} />
-                    <span className="text-sm font-bold text-[var(--muted)]">{manualType === 'percentage' ? '%' : 'EUR'}</span>
+                    <UiInput
+                      autoFocus
+                      className="min-w-0 flex-1 bg-transparent px-3 outline-none"
+                      inputMode="decimal"
+                      onChange={(event) => {
+                        setManualValue(event.target.value);
+                        setValidationError(null);
+                      }}
+                      value={manualValue}
+                    />
+                    <span className="text-sm font-bold text-[var(--muted)]">
+                      {manualType === "percentage" ? "%" : "EUR"}
+                    </span>
                   </div>
                 </label>
-                {validationError ? <p className="text-sm font-semibold text-[var(--danger)]">{validationError}</p> : null}
-                <Button disabled={isBusy || !manualValue.trim()} fullWidth onClick={applyManual} type="button" variant="primary">Aplicar descuento manual</Button>
+                {validationError ? (
+                  <p className="text-sm font-semibold text-[var(--danger)]">
+                    {validationError}
+                  </p>
+                ) : null}
+                <Button
+                  disabled={isBusy || !manualValue.trim()}
+                  fullWidth
+                  onClick={applyManual}
+                  type="button"
+                  variant="primary"
+                >
+                  Aplicar descuento manual
+                </Button>
               </div>
             )}
           </div>
         ) : null}
       </section>
     </AppModal>
-  )
+  );
 }
