@@ -69,6 +69,7 @@ export type TenantContext = {
   venueAddress?: string
   venueLegalName?: string
   venueTaxId?: string
+  venueDefaultTaxRate?: number
   deviceId: string
   deviceName: string
   deviceMode?: DeviceMode

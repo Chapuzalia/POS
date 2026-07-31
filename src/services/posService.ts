@@ -1,24 +1,18 @@
-import { createId, getLineTotal, getTicketTotal } from '../lib/format'
-import { assertValidTicketPayment, calculateAppliedDiscount } from '../lib/discounts'
 import { loadPosCatalog } from '../features/catalog/data/load-pos-catalog.ts'
 import { normalizeCatalogSnapshot } from '../features/catalog/services/catalogSnapshots.ts'
 import { supabase } from '../lib/supabase'
 export { summarizeSales } from '../features/cash-registers/services/cashSummary.ts'
+export { buildSalePayload } from '../features/quick-sale/services/salePayload.ts'
 import type {
-  AppliedDiscount,
   CashClosedPayload,
-  CashSession,
   HistoricalPaymentMethod,
   LoginInput,
   OfflineEvent,
-  PaymentMethod,
   ProductSalesStat,
   SaleCreatedPayload,
-  SaleLinePayload,
   SaleRecord,
   SessionTicketRecord,
   TenantContext,
-  TicketLine,
   TicketLineFiscalSnapshot,
   TicketLineModifier,
 } from '../types'
@@ -32,7 +26,6 @@ import type {
   UserMembershipRow,
   VenueRow,
 } from '../types/supabase'
-import { nowIso } from '../utils/dates'
 import { getReadableError } from '../utils/errors'
 import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
 async function requireExclusiveLogin(context: TenantContext) {
@@ -177,7 +170,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name, address, legal_name, tax_id')
+      .select('id, name, address, legal_name, tax_id, default_tax_rate')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
@@ -213,6 +206,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     venueAddress: venue.address ?? undefined,
     venueLegalName: venue.legal_name ?? undefined,
     venueTaxId: venue.tax_id ?? undefined,
+    venueDefaultTaxRate: Number(venue.default_tax_rate),
     deviceId: device.id,
     deviceName: device.name,
     deviceMode: device.device_mode,
@@ -349,7 +343,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name, address, legal_name, tax_id')
+      .select('id, name, address, legal_name, tax_id, default_tax_rate')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
@@ -381,6 +375,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     venueAddress: venue.address ?? undefined,
     venueLegalName: venue.legal_name ?? undefined,
     venueTaxId: venue.tax_id ?? undefined,
+    venueDefaultTaxRate: Number(venue.default_tax_rate),
     deviceId: device.id,
     deviceName: device.name,
     deviceMode: device.device_mode,
@@ -813,82 +808,6 @@ export function mergeLedgers(localRecords: SaleRecord[], remoteRecords: SaleReco
   localRecords.forEach((record) => recordsById.set(record.id, record))
 
   return [...recordsById.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
-}
-
-export function buildSalePayload(
-  context: TenantContext,
-  cashSession: CashSession,
-  lines: TicketLine[],
-  paymentMethod: PaymentMethod | null,
-  receivedCents: number | null,
-  discount: AppliedDiscount | null,
-): SaleCreatedPayload {
-  const createdAt = nowIso()
-  const ticketId = createId()
-  const saleId = createId()
-  const subtotalCents = getTicketTotal(lines)
-  const { discountAmountCents, totalCents } = calculateAppliedDiscount(subtotalCents, discount)
-  assertValidTicketPayment(totalCents, paymentMethod)
-  const saleLines: SaleLinePayload[] = lines.map((line) => ({
-    id: createId(),
-    ticketId,
-    tenantId: context.tenantId,
-    productId: line.productId,
-    variantId: line.variantId,
-    productName: line.productName,
-    variantName: line.variantName,
-    basePriceCents: line.basePriceCents,
-    componentDeltaCents: line.componentDeltaCents,
-    modifierDeltaCents: line.modifierDeltaCents,
-    grossBeforeDiscountCents: line.unitPriceCents,
-    quantity: line.quantity,
-    unitPriceCents: line.unitPriceCents,
-    lineTotalCents: getLineTotal(line),
-    modifiers: line.modifiers,
-    components: line.components,
-    catalogSnapshot: line.catalogSnapshot,
-    fiscalSnapshot: null,
-  }))
-
-  return {
-    ticket: {
-      id: ticketId,
-      tenantId: context.tenantId,
-      cashSessionId: cashSession.id,
-      cashRegisterId: cashSession.cashRegisterId,
-      venueId: context.venueId,
-      deviceId: context.deviceId,
-      userId: context.userId,
-      subtotalCents,
-      discount,
-      discountAmountCents,
-      totalCents,
-      createdAt,
-    },
-    lines: saleLines,
-    sale: {
-      id: saleId,
-      tenantId: context.tenantId,
-      ticketId,
-      cashSessionId: cashSession.id,
-      cashRegisterId: cashSession.cashRegisterId,
-      venueId: context.venueId,
-      deviceId: context.deviceId,
-      userId: context.userId,
-      totalCents,
-      paymentMethod,
-      createdAt,
-    },
-    payment: paymentMethod ? {
-      id: createId(),
-      tenantId: context.tenantId,
-      saleId,
-      method: paymentMethod,
-      amountCents: totalCents,
-      receivedCents,
-      changeCents: Math.max(0, (receivedCents ?? totalCents) - totalCents),
-    } : null,
-  }
 }
 
 export async function syncEvent(event: OfflineEvent) {

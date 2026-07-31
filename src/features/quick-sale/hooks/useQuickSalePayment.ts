@@ -1,7 +1,7 @@
 import { useCallback } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
-import { buildSalePayload } from '../../../services/posService'
+import { buildSalePayload } from '../services/salePayload'
 import type { AppliedDiscount, CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
 
 type Options = {
