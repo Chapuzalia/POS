@@ -1,5 +1,4 @@
 import { TextArea as UiTextArea } from "../ui/TextArea";
-import { Input as UiInput } from "../ui/Input";
 import { Button as UiButton } from "../ui/Button";
 import {
   ArrowDownToLine,
@@ -17,6 +16,7 @@ import type { CashMovement, CashMovementType } from "../../types";
 import { cx } from "../../utils/cx";
 import { getReadableError } from "../../utils/errors";
 import { AppModal, Button } from "../ui";
+import { NumericKeypadModal } from "../ui/NumericKeypadModal";
 
 type Props = {
   isOnline: boolean;
@@ -66,6 +66,7 @@ export function CashMovementModal({
 }: Props) {
   const [type, setType] = useState<CashMovementType | null>(null);
   const [amount, setAmount] = useState("");
+  const [amountKeypadOpen, setAmountKeypadOpen] = useState(false);
   const [notes, setNotes] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -85,6 +86,12 @@ export function CashMovementModal({
     isOnline &&
     !busy,
   );
+
+  function handleAmountConfirm(value: string) {
+    setAmount(centsToInput(parseMoneyToCents(value)));
+    setError(null);
+    setAmountKeypadOpen(false);
+  }
 
   async function submit() {
     if (!selected || !canSubmit) return;
@@ -133,17 +140,18 @@ export function CashMovementModal({
   }
 
   return (
-    <AppModal
-      containerClassName="!p-4"
-      maxWidth={672}
-      dismissDisabled={busy}
-      label="Movimiento de efectivo"
-      onClose={onCancel}
-    >
-      <section
-        aria-labelledby="cash-movement-title"
-        className="flex max-h-[calc(100dvh-2rem)] min-w-0 max-w-full flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]"
+    <>
+      <AppModal
+        containerClassName="!p-4"
+        maxWidth={672}
+        dismissDisabled={busy || amountKeypadOpen}
+        label="Movimiento de efectivo"
+        onClose={onCancel}
       >
+        <section
+          aria-labelledby="cash-movement-title"
+          className="flex max-h-[calc(100dvh-2rem)] min-w-0 max-w-full flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]"
+        >
         <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
           <div className="min-w-0">
             <h2 className="text-2xl font-bold" id="cash-movement-title">
@@ -203,37 +211,32 @@ export function CashMovementModal({
           </fieldset>
           {selected ? (
             <div className="mt-5 grid gap-4">
-              <label>
+              <div>
                 <span className="text-sm font-semibold text-[var(--muted)]">
                   Importe
                 </span>
-                <div className="mt-1 flex h-12 items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)]">
+                <button
+                  aria-label="Introducir importe"
+                  autoFocus
+                  className="mt-1 flex h-12 w-full items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] text-left text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
+                  disabled={busy}
+                  onClick={() => setAmountKeypadOpen(true)}
+                  type="button"
+                >
                   <span className="px-3 font-mono text-sm font-bold text-[var(--muted)]">
                     EUR
                   </span>
-                  <UiInput
-                    autoFocus
-                    className="h-full min-w-0 flex-1 bg-transparent px-2 font-mono text-[var(--field-foreground)] outline-none"
-                    disabled={busy}
-                    inputMode="decimal"
-                    onBlur={() => {
-                      if (amountCents > 0) setAmount(centsToInput(amountCents));
-                    }}
-                    onChange={(event) => {
-                      setAmount(event.target.value);
-                      setError(null);
-                    }}
-                    placeholder="0,00"
-                    value={amount}
-                  />
-                </div>
-              </label>
+                  <span className="min-w-0 flex-1 px-2 font-mono">
+                    {amount || "0,00"}
+                  </span>
+                </button>
+              </div>
               <label>
                 <span className="text-sm font-semibold text-[var(--muted)]">
                   Motivo
                 </span>
                 <UiTextArea
-                  className="mt-1 min-h-24 w-full resize-y rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] p-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
+                  className="mt-1 min-h-14 h-14 w-full resize-y rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] p-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
                   disabled={busy}
                   onChange={(event) => {
                     setNotes(event.target.value);
@@ -297,7 +300,22 @@ export function CashMovementModal({
             </div>
           ) : null}
         </div>
-      </section>
-    </AppModal>
+        </section>
+      </AppModal>
+
+      {amountKeypadOpen ? (
+        <NumericKeypadModal
+          confirmLabel="Aceptar"
+          disabled={busy}
+          initialValue={amount || "0"}
+          maxFractionDigits={2}
+          onCancel={() => setAmountKeypadOpen(false)}
+          onConfirm={handleAmountConfirm}
+          showCloseButton={false}
+          title="Importe"
+          unit="EUR"
+        />
+      ) : null}
+    </>
   );
 }

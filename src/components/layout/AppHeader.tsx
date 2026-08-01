@@ -100,7 +100,7 @@ export function AppHeader({
                 {menuItems.map((item) => {
                   const Icon = item.icon
                   return (
-                    <Dropdown.Item id={item.id} key={item.id} textValue={item.label} variant={item.danger ? 'danger' : undefined}>
+                    <Dropdown.Item className="flex items-center gap-2 h-12" id={item.id} key={item.id} textValue={item.label} variant={item.danger ? 'danger' : undefined}>
                       <Icon className={item.id === 'refresh' && isLoading ? 'h-4 w-4 animate-spin' : 'h-4 w-4'} />
                       <Label>{item.label}</Label>
                     </Dropdown.Item>

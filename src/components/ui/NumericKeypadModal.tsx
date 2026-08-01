@@ -18,6 +18,7 @@ export type NumericKeypadModalProps = {
   subtitle?: string;
   title?: string;
   unit?: string;
+  showCloseButton?: boolean;
 };
 
 const digitKeys = ["7", "8", "9", "4", "5", "6", "1", "2", "3"] as const;
@@ -58,6 +59,7 @@ export function NumericKeypadModal({
   subtitle,
   title,
   unit,
+  showCloseButton = true,
 }: NumericKeypadModalProps) {
   const safeMaxDigits = Math.max(1, maxDigits);
   const [value, setValue] = useState(() =>
@@ -174,16 +176,16 @@ export function NumericKeypadModal({
     <AppModal
       containerClassName="!p-3"
       dismissDisabled={disabled}
-      label={title}
+      label={title ?? "Teclado numérico"}
       maxWidth={430}
       onClose={onCancel}
     >
       <section
         aria-labelledby="numeric-keypad-title"
-        className="w-full bg-[var(--surface)] p-4 text-[var(--foreground)] sm:p-5"
+        className="w-full bg-[var(--surface)] p-5 text-[var(--foreground)] sm:p-5"
       >
         <header className="flex items-start justify-between gap-4">
-          <div className="min-w-0">
+          <div className="min-w-0 mb-4">
             <h2 className="text-xl font-bold" id="numeric-keypad-title">
               {title}
             </h2>
@@ -191,22 +193,24 @@ export function NumericKeypadModal({
               <p className="mt-1 text-sm text-[var(--muted)]">{subtitle}</p>
             ) : null}
           </div>
-          <Button
-            aria-label="Cerrar teclado numérico"
-            className="shrink-0 !rounded-none"
-            disabled={disabled}
-            onClick={onCancel}
-            size="lg"
-            type="button"
-            variant="tertiary"
-          >
-            <X aria-hidden="true" className="h-4 w-4" />
-          </Button>
+          {showCloseButton ? (
+            <Button
+              aria-label="Cerrar teclado numérico"
+              className="shrink-0 !rounded-none mb-4"
+              disabled={disabled}
+              onClick={onCancel}
+              size="lg"
+              type="button"
+              variant="tertiary"
+            >
+              <X aria-hidden="true" className="h-4 w-4" />
+            </Button>
+          ) : null}
         </header>
 
         <output
           aria-live="polite"
-          className="mt-4 flex min-h-20 items-center justify-end gap-3 overflow-hidden rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-5 py-3 text-right text-[var(--field-foreground)]"
+          className="mt-0 flex min-h-20 items-center justify-end gap-3 overflow-hidden rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-5 py-3 text-right text-[var(--field-foreground)]"
         >
           <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-4xl font-black tabular-nums">
             {value}
