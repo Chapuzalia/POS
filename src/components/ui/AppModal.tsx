@@ -7,7 +7,7 @@ type AppModalProps = {
   containerClassName?: string;
   dialogClassName?: string;
   dismissDisabled?: boolean;
-  label: string;
+  label?: string;
   maxWidth?: CSSProperties["maxWidth"];
   onClose: () => void;
   placement?: "center" | "bottom";

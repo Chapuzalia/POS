@@ -1,6 +1,6 @@
-import { NativeSelect as UiNativeSelect } from "../../components/ui/NativeSelect";
-import { Input as UiInput } from "../../components/ui/Input";
 import { Button as UiButton } from "../../components/ui/Button";
+import { NativeSelect as UiNativeSelect } from "../../components/ui/NativeSelect";
+import { NumericKeypadModal } from "../../components/ui/NumericKeypadModal";
 import { useState } from "react";
 import type {
   CashClosingRecord,
@@ -65,8 +65,10 @@ export function CashSessionGate({
     context.defaultCashRegisterId ?? available[0]?.id ?? "",
   );
   const [openingFloat, setOpeningFloat] = useState("0.00");
+  const [openingFloatKeypadOpen, setOpeningFloatKeypadOpen] = useState(false);
   const canOpen =
     context.canOpenCashSession === true && context.deviceMode !== "satellite";
+
   return (
     <main className="h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] bg-[var(--background)] p-4 text-[var(--foreground)]">
       <section className="mx-auto mt-[8vh] w-full max-w-2xl space-y-5 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
@@ -126,12 +128,17 @@ export function CashSessionGate({
                 </option>
               ))}
             </UiNativeSelect>
-            <UiInput
-              className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3"
-              inputMode="decimal"
-              onChange={(event) => setOpeningFloat(event.target.value)}
-              value={openingFloat}
-            />
+            <UiButton
+              aria-haspopup="dialog"
+              className="min-h-12 w-full !justify-between rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-4 font-mono text-[var(--field-foreground)]"
+              disabled={isBusy}
+              onClick={() => setOpeningFloatKeypadOpen(true)}
+              type="button"
+              variant="tertiary"
+            >
+              <span className="tabular-nums">{openingFloat}</span>
+              <span className="text-sm font-bold text-[var(--muted)]">EUR</span>
+            </UiButton>
             <UiButton
               className="min-h-12 w-full rounded-[var(--radius)] bg-[var(--accent)] font-bold text-[var(--accent-foreground)] disabled:opacity-45"
               disabled={!isOnline || isBusy || !registerId || !available.length}
@@ -145,7 +152,7 @@ export function CashSessionGate({
         ) : null}
         <div className="grid gap-3 sm:grid-cols-2">
           <UiButton
-            className="min-h-11 rounded-[var(--radius)] w-full border border-[var(--separator)]"
+            className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)]"
             disabled={!isOnline}
             onClick={onOpenReservations}
             type="button"
@@ -153,7 +160,7 @@ export function CashSessionGate({
             Reservas
           </UiButton>
           <UiButton
-            className="min-h-11 rounded-[var(--radius)] w-full border border-[var(--separator)]"
+            className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)]"
             disabled={isBusy || !isOnline}
             onClick={onRefresh}
             type="button"
@@ -161,7 +168,7 @@ export function CashSessionGate({
             Comprobar de nuevo
           </UiButton>
           <UiButton
-            className="min-h-11 rounded-[var(--radius)] w-full border border-[var(--separator)]"
+            className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)]"
             disabled={!isOnline}
             onClick={onOpenClosingHistory}
             type="button"
@@ -169,7 +176,7 @@ export function CashSessionGate({
             Historico de cierres
           </UiButton>
           <UiButton
-            className="min-h-11 rounded-[var(--radius)] w-full border border-[var(--separator)]"
+            className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)]"
             onClick={onLogout}
             type="button"
           >
@@ -177,6 +184,21 @@ export function CashSessionGate({
           </UiButton>
         </div>
       </section>
+
+      {openingFloatKeypadOpen ? (
+        <NumericKeypadModal
+          decimalSeparator="."
+          disabled={isBusy}
+          initialValue={openingFloat}
+          maxFractionDigits={2}
+          onCancel={() => setOpeningFloatKeypadOpen(false)}
+          onConfirm={(value) => {
+            setOpeningFloat(value);
+            setOpeningFloatKeypadOpen(false);
+          }}
+          unit="EUR"
+        />
+      ) : null}
       {completedClosing ? (
         <CashClosingResultModal
           closing={completedClosing}
