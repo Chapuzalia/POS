@@ -8,6 +8,13 @@ export type PaymentMethod = 'cash' | 'card'
 export type HistoricalPaymentMethod = PaymentMethod | 'invitation' | 'other'
 
 export type DiscountCalculationType = 'percentage' | 'fixed'
+export type DiscountRuleKind = 'discount' | 'promotion'
+export type DiscountScope = 'general' | 'specific'
+
+export type DiscountTarget = {
+  productId: string
+  variantId: string | null
+}
 export type DiscountSnapshotType = DiscountCalculationType | 'manual'
 export type DiscountRoundingIncrementCents = 5 | 10 | 50 | 100
 
@@ -22,6 +29,14 @@ export type Discount = {
   color: string | null
   isActive: boolean
   sortOrder: number
+  ruleKind: DiscountRuleKind
+  scope: DiscountScope
+  targets: DiscountTarget[]
+  requiresPin: boolean
+  activeWeekdays: number[]
+  startsAt: string | null
+  endsAt: string | null
+  autoApply: boolean
 }
 
 export type DiscountCreateInput = {
@@ -32,8 +47,17 @@ export type DiscountCreateInput = {
   roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
   isActive: boolean
-}
 
+  ruleKind: DiscountRuleKind
+  scope: DiscountScope
+  targets: DiscountTarget[]
+  requiresPin: boolean
+  pin: string | null
+  activeWeekdays: number[]
+  startsAt: string | null
+  endsAt: string | null
+  autoApply: boolean
+}
 export type AppliedDiscount = {
   discountId: string | null
   name: string
@@ -42,6 +66,20 @@ export type AppliedDiscount = {
   value: number
   roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
+
+  ruleKind?: DiscountRuleKind
+  scope?: DiscountScope
+  targets?: DiscountTarget[]
+  requiresPin?: boolean
+  activeWeekdays?: number[]
+  startsAt?: string | null
+  endsAt?: string | null
+  automatic?: boolean
+  calculationLines?: Array<{
+    productId: string
+    variantId: string | null
+    grossCents: number
+  }>
 }
 
 export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'cashier'
@@ -304,6 +342,8 @@ export type SaleLinePayload = {
   components: TicketLineComponent[]
   catalogSnapshot: SaleLineCatalogSnapshot
   fiscalSnapshot: TicketLineFiscalSnapshot | null
+  discountAmountCents?: number
+  netTotalCents?: number
 }
 
 export type SaleCreatedPayload = {

@@ -1,4 +1,4 @@
-import { allocateNetTotalToLines, assertValidTicketPayment, calculateAppliedDiscount } from '../../../lib/discounts.ts'
+import { assertValidTicketPayment, calculateDiscountForLines } from '../../../lib/discounts.ts'
 import { createId, getLineTotal, getTicketTotal } from '../../../lib/format.ts'
 import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import type {
@@ -24,16 +24,19 @@ export function buildSalePayload(
   const ticketId = createId()
   const saleId = createId()
   const subtotalCents = getTicketTotal(lines)
-  const { discountAmountCents, totalCents } = calculateAppliedDiscount(subtotalCents, discount)
-  assertValidTicketPayment(totalCents, paymentMethod)
   const grossLineTotals = lines.map(getLineTotal)
-  const netLineTotals = allocateNetTotalToLines(grossLineTotals, totalCents)
+  const calculation = calculateDiscountForLines(
+    lines.map((line, index) => ({ ...line, grossCents: grossLineTotals[index] })),
+    discount,
+  )
+  const { discountAmountCents, totalCents } = calculation
+  assertValidTicketPayment(totalCents, paymentMethod)
   const saleLines: SaleLinePayload[] = lines.map((line, index) => {
     const taxRate = line.fiscalSnapshot?.taxRate
       ?? line.catalogSnapshot.vatRate
       ?? context.venueDefaultTaxRate
     const fiscalSnapshot = taxRate !== undefined && isValidTaxRate(taxRate)
-      ? { taxRate, ...calculateTaxFromGross(netLineTotals[index], taxRate) }
+      ? { taxRate, ...calculateTaxFromGross(calculation.lineAllocations[index].netCents, taxRate) }
       : null
 
     return {
@@ -51,6 +54,8 @@ export function buildSalePayload(
       quantity: line.quantity,
       unitPriceCents: line.unitPriceCents,
       lineTotalCents: grossLineTotals[index],
+      discountAmountCents: calculation.lineAllocations[index].discountAmountCents,
+      netTotalCents: calculation.lineAllocations[index].netCents,
       modifiers: line.modifiers,
       components: line.components,
       catalogSnapshot: line.catalogSnapshot,
@@ -68,7 +73,14 @@ export function buildSalePayload(
       deviceId: context.deviceId,
       userId: context.userId,
       subtotalCents,
-      discount,
+      discount: discount ? {
+        ...discount,
+        calculationLines: lines.map((line, index) => ({
+          productId: line.productId,
+          variantId: line.variantId || null,
+          grossCents: grossLineTotals[index],
+        })),
+      } : null,
       discountAmountCents,
       totalCents,
       createdAt,

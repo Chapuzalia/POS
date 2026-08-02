@@ -75,6 +75,25 @@ type Options = {
   syncPendingEvents: () => Promise<void>
 }
 
+function withCalculationLines(
+  discount: AppliedDiscount | null,
+  lines: Array<{
+    productId: string | null
+    variantId: string | null
+    unitPriceCents: number
+    quantity: number
+  }>,
+) {
+  return discount ? {
+    ...discount,
+    calculationLines: lines.map((line) => ({
+      productId: line.productId ?? '',
+      variantId: line.variantId,
+      grossCents: line.unitPriceCents * line.quantity,
+    })),
+  } : null
+}
+
 export function useRestaurantController(options: Options) {
   const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
   const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
@@ -259,7 +278,7 @@ export function useRestaurantController(options: Options) {
         current.order.id,
         partCount,
         current.order.revision,
-        options.appliedDiscount,
+        withCalculationLines(options.appliedDiscount, current.lines),
       )
       setEqualSplit(configured)
       return configured
@@ -290,10 +309,11 @@ export function useRestaurantController(options: Options) {
     options.setBusy(true)
     options.onError(null)
     try {
-      const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending, discount, useDefaultDiscount)
+      const paymentLines = getEqualSplitPrintLines(current.lines, equalSplit)
+      const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount)
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
-        const printLines = getEqualSplitPrintLines(current.lines, equalSplit)
+        const printLines = paymentLines
         void options.printSale(buildRestaurantPrintPayload({
           cashSession: options.cashSession,
           context: options.context,
@@ -344,9 +364,10 @@ export function useRestaurantController(options: Options) {
     try {
       const saved = await draft.flush()
       if (!saved) throw new Error('No se pudo guardar la comanda antes del cobro.')
-      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, receivedCents, allowPending, discount)
+      const paymentLines = getMovedRestaurantPrintLines(saved.lines, moves)
+      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, receivedCents, allowPending, withCalculationLines(discount, paymentLines))
       if (!result.requiresConfirmation) {
-        const printLines = getMovedRestaurantPrintLines(saved.lines, moves)
+        const printLines = paymentLines
         void options.printSale(buildRestaurantPrintPayload({
           cashSession: options.cashSession,
           context: options.context,
@@ -469,7 +490,7 @@ export function useRestaurantController(options: Options) {
         setPendingPayment({ method, receivedCents, pendingUnits: pendingCheck.pendingUnits })
         return
       }
-      const result = await closeRestaurantOrder(saved.order.id, method, receivedCents, forceWithPending, options.appliedDiscount)
+      const result = await closeRestaurantOrder(saved.order.id, method, receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines))
       if (result.requiresConfirmation) {
         setPendingPayment({ method, receivedCents, pendingUnits: result.pendingUnits })
         return

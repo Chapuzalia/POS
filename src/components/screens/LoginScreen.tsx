@@ -1,26 +1,26 @@
-import { Input as UiInput } from '../ui/Input'
-import { Checkbox as UiCheckbox } from '../ui/Checkbox'
-import { LogIn, TriangleAlert, WifiOff, Wifi } from 'lucide-react'
-import { useEffect, useRef, useState, type FormEvent } from 'react'
-import type { LoginInput, TenantContext } from '../../types'
-import { AppModal, Button, Chip } from '../ui'
+import { Input as UiInput } from "../ui/Input";
+import { Checkbox as UiCheckbox } from "../ui/Checkbox";
+import { LogIn, TriangleAlert, WifiOff, Wifi } from "lucide-react";
+import { useEffect, useRef, useState, type FormEvent } from "react";
+import type { LoginInput, TenantContext } from "../../types";
+import { AppModal, Button, Chip } from "../ui";
 
-const rememberedEmailKey = 'club-pos:remembered-email'
+const rememberedEmailKey = "club-pos:remembered-email";
 
 function getRememberedEmail() {
   try {
-    return window.localStorage.getItem(rememberedEmailKey) ?? ''
+    return window.localStorage.getItem(rememberedEmailKey) ?? "";
   } catch {
-    return ''
+    return "";
   }
 }
 
 function saveRememberedEmail(email: string, shouldRemember: boolean) {
   try {
     if (shouldRemember) {
-      window.localStorage.setItem(rememberedEmailKey, email)
+      window.localStorage.setItem(rememberedEmailKey, email);
     } else {
-      window.localStorage.removeItem(rememberedEmailKey)
+      window.localStorage.removeItem(rememberedEmailKey);
     }
   } catch {
     // El acceso debe seguir funcionando aunque el navegador bloquee el almacenamiento local.
@@ -28,17 +28,17 @@ function saveRememberedEmail(email: string, shouldRemember: boolean) {
 }
 
 type LoginScreenProps = {
-  allowOfflineEnter: boolean
-  cachedContext: TenantContext | null
-  conflictAccountName: string | null
-  error: string | null
-  isBusy: boolean
-  isOnline: boolean
-  onCancelLoginConflict: () => void
-  onForceLoginConflict: () => void
-  onLogin: (input: LoginInput) => Promise<void>
-  onOfflineEnter: () => void
-}
+  allowOfflineEnter: boolean;
+  cachedContext: TenantContext | null;
+  conflictAccountName: string | null;
+  error: string | null;
+  isBusy: boolean;
+  isOnline: boolean;
+  onCancelLoginConflict: () => void;
+  onForceLoginConflict: () => void;
+  onLogin: (input: LoginInput) => Promise<void>;
+  onOfflineEnter: () => void;
+};
 
 export function LoginScreen({
   allowOfflineEnter,
@@ -52,34 +52,36 @@ export function LoginScreen({
   onLogin,
   onOfflineEnter,
 }: LoginScreenProps) {
-  const [email, setEmail] = useState(getRememberedEmail)
-  const [password, setPassword] = useState('')
-  const [rememberAccount, setRememberAccount] = useState(() => Boolean(getRememberedEmail()))
-  const cancelConflictButtonRef = useRef<HTMLButtonElement>(null)
+  const [email, setEmail] = useState(getRememberedEmail);
+  const [password, setPassword] = useState("");
+  const [rememberAccount, setRememberAccount] = useState(() =>
+    Boolean(getRememberedEmail()),
+  );
+  const cancelConflictButtonRef = useRef<HTMLButtonElement>(null);
 
   useEffect(() => {
-    if (!conflictAccountName) return undefined
+    if (!conflictAccountName) return undefined;
 
-    cancelConflictButtonRef.current?.focus()
+    cancelConflictButtonRef.current?.focus();
 
     function handleKeyDown(event: KeyboardEvent) {
-      if (event.key === 'Escape' && !isBusy) {
-        onCancelLoginConflict()
+      if (event.key === "Escape" && !isBusy) {
+        onCancelLoginConflict();
       }
     }
 
-    window.addEventListener('keydown', handleKeyDown)
-    return () => window.removeEventListener('keydown', handleKeyDown)
-  }, [conflictAccountName, isBusy, onCancelLoginConflict])
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [conflictAccountName, isBusy, onCancelLoginConflict]);
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const normalizedEmail = email.trim()
-    saveRememberedEmail(normalizedEmail, rememberAccount)
+    event.preventDefault();
+    const normalizedEmail = email.trim();
+    saveRememberedEmail(normalizedEmail, rememberAccount);
     void onLogin({
       email: normalizedEmail,
       password,
-    })
+    });
   }
 
   return (
@@ -87,17 +89,26 @@ export function LoginScreen({
       <section className="w-full max-w-md rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
-            <p className="text-sm font-bold uppercase tracking-normal text-[var(--accent)]">TPV multi-tenant</p>
-            <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)]">Acceso al negocio</h1>
+            <p className="text-sm font-bold uppercase tracking-normal text-[var(--accent)]">
+              TPV multi-tenant
+            </p>
+            <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)]">
+              Acceso al negocio
+            </h1>
           </div>
-          <Chip icon={isOnline ? Wifi : WifiOff} tone={isOnline ? 'success' : 'danger'}>
-            {isOnline ? 'Online' : 'Offline'}
+          <Chip
+            icon={isOnline ? Wifi : WifiOff}
+            tone={isOnline ? "success" : "danger"}
+          >
+            {isOnline ? "Online" : "Offline"}
           </Chip>
         </div>
 
         <form className="space-y-4" onSubmit={handleSubmit}>
           <label className="block">
-            <span className="text-sm font-semibold text-[var(--muted)]">Email</span>
+            <span className="text-sm font-semibold text-[var(--muted)]">
+              Email
+            </span>
             <UiInput
               className="mt-1 h-12 w-full rounded-(--radius) !border bg-(--field)! px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               autoComplete="username"
@@ -109,7 +120,9 @@ export function LoginScreen({
             />
           </label>
           <label className="block">
-            <span className="text-sm font-semibold text-[var(--muted)]">Contrasena</span>
+            <span className="text-sm font-semibold text-[var(--muted)]">
+              Contrasena
+            </span>
             <UiInput
               className="mt-1 h-12 w-full rounded-[var(--radius)] border-1 !bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
               autoComplete="current-password"
@@ -119,21 +132,40 @@ export function LoginScreen({
               value={password}
             />
           </label>
-          <UiCheckbox checked={rememberAccount} className="min-h-11 text-sm font-semibold text-[var(--foreground)]" onChange={setRememberAccount}>Recordar cuenta</UiCheckbox>
+          <UiCheckbox
+            checked={rememberAccount}
+            className="min-h-11 text-sm font-semibold text-[var(--foreground)]"
+            onChange={setRememberAccount}
+          >
+            Recordar cuenta
+          </UiCheckbox>
           {error ? (
             <div className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
               {error}
             </div>
           ) : null}
 
-          <Button disabled={!isOnline || isBusy} fullWidth size="lg" type="submit" variant="primary">
+          <Button
+            disabled={!isOnline || isBusy}
+            fullWidth
+            size="lg"
+            type="submit"
+            variant="primary"
+          >
             <LogIn className="h-5 w-5" />
             Entrar
           </Button>
         </form>
 
-        {allowOfflineEnter && cachedContext?.role === 'cashier' ? (
-          <Button className="mt-3" disabled={isBusy} fullWidth onClick={onOfflineEnter} type="button" variant="secondary">
+        {allowOfflineEnter && cachedContext?.role === "cashier" ? (
+          <Button
+            className="mt-3"
+            disabled={isBusy}
+            fullWidth
+            onClick={onOfflineEnter}
+            type="button"
+            variant="secondary"
+          >
             <WifiOff className="h-5 w-5" />
             Entrar offline en {cachedContext.tenantName}
           </Button>
@@ -141,7 +173,13 @@ export function LoginScreen({
       </section>
 
       {conflictAccountName ? (
-        <AppModal containerClassName="!p-4" maxWidth={512} dismissDisabled label="Esta cuenta ya está conectada" onClose={onCancelLoginConflict}>
+        <AppModal
+          containerClassName="!p-4"
+          maxWidth={512}
+          dismissDisabled
+          label="Esta cuenta ya está conectada"
+          onClose={onCancelLoginConflict}
+        >
           <section
             aria-describedby="login-conflict-description"
             aria-labelledby="login-conflict-title"
@@ -152,9 +190,20 @@ export function LoginScreen({
                 <TriangleAlert className="h-6 w-6" />
               </span>
               <div>
-                <h2 className="text-xl font-black" id="login-conflict-title">Esta cuenta ya esta conectada</h2>
-                <p className="mt-2 text-sm leading-6 text-[var(--muted)]" id="login-conflict-description">
-                  La cuenta <strong className="text-[var(--foreground)]">{conflictAccountName}</strong> esta abierta en otro dispositivo o pestana. Si fuerzas la conexion, la sesion anterior se cerrara y podria perder cambios que aun no haya guardado.
+                <h2 className="text-xl font-black" id="login-conflict-title">
+                  Esta cuenta ya esta conectada
+                </h2>
+                <p
+                  className="mt-2 text-sm leading-6 text-[var(--muted)]"
+                  id="login-conflict-description"
+                >
+                  La cuenta{" "}
+                  <strong className="text-[var(--foreground)]">
+                    {conflictAccountName}
+                  </strong>{" "}
+                  esta abierta en otro dispositivo o pestana. Si fuerzas la
+                  conexion, la sesion anterior se cerrara y podria perder
+                  cambios que aun no haya guardado.
                 </p>
               </div>
             </div>
@@ -165,17 +214,28 @@ export function LoginScreen({
               </div>
             ) : null}
 
-            <div className="mt-6 grid gap-3 sm:grid-cols-2">
-              <Button disabled={isBusy} onClick={onCancelLoginConflict} ref={cancelConflictButtonRef} type="button" variant="secondary">
+            <div className="mt-6 grid gap-3 grid-cols-2 justify-items-center">
+              <Button
+                disabled={isBusy}
+                onClick={onCancelLoginConflict}
+                ref={cancelConflictButtonRef}
+                type="button"
+                variant="secondary"
+              >
                 Cancelar login
               </Button>
-              <Button disabled={isBusy} onClick={onForceLoginConflict} type="button" variant="danger">
-                {isBusy ? 'Conectando...' : 'Forzar conexion'}
+              <Button
+                disabled={isBusy}
+                onClick={onForceLoginConflict}
+                type="button"
+                variant="danger"
+              >
+                {isBusy ? "Conectando..." : "Forzar conexion"}
               </Button>
             </div>
           </section>
         </AppModal>
       ) : null}
     </main>
-  )
+  );
 }

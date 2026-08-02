@@ -1,12 +1,14 @@
 import { Check, CheckCheck, Minus, Plus, Trash2 } from 'lucide-react'
 import { formatMoney } from '../../../lib/format'
 import { getLineAdditionNames } from '../../../lib/mixers'
+import type { LineDiscountAllocation } from '../../../lib/discounts'
 import { Button } from '../../../components/ui'
 import { canDecreaseLineQuantity, getOrderPendingUnits, getPendingQuantity } from '../service-status'
 import type { RestaurantOrderDetail, RestaurantOrderLine } from '../types'
 
 type Props = {
   isBusy: boolean
+  lineDiscounts: Record<string, LineDiscountAllocation>
   order: RestaurantOrderDetail
   onDecrement: (lineId: string) => void
   onEdit: (line: RestaurantOrderLine) => void
@@ -17,7 +19,7 @@ type Props = {
   onServeOne: (lineId: string) => void
 }
 
-function OrderLineRow({ isBusy, line, onDecrement, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder'> & { line: RestaurantOrderLine }) {
+function OrderLineRow({ discount, isBusy, line, onDecrement, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder' | 'lineDiscounts'> & { discount?: LineDiscountAllocation; line: RestaurantOrderLine }) {
   const pending = getPendingQuantity(line)
   const additionNames = getLineAdditionNames(line.modifiers, line.mixer)
   return (
@@ -29,7 +31,11 @@ function OrderLineRow({ isBusy, line, onDecrement, onIncrement, onRemove, onServ
           <p className="mt-1 text-sm font-semibold text-[var(--muted)]">
             {pending === 0 ? 'Todo servido' : `${line.servedQuantity} servidas - ${pending} ${pending === 1 ? 'pendiente' : 'pendientes'}`}
           </p>
-          <p className="mt-1 font-mono text-sm">{formatMoney(line.unitPriceCents * line.quantity)}</p>
+          {discount && discount.discountAmountCents > 0 ? <p className="mt-1 flex flex-wrap items-baseline gap-2 font-mono text-sm">
+            <span className="text-[var(--muted)] line-through">{formatMoney(discount.grossCents)}</span>
+            <strong className="text-[var(--success)]">{formatMoney(discount.netCents)}</strong>
+            <span className="text-xs font-semibold text-[var(--success)]">?{formatMoney(discount.discountAmountCents)}</span>
+          </p> : <p className="mt-1 font-mono text-sm">{formatMoney(line.unitPriceCents * line.quantity)}</p>}
         </div>
         <div className="flex items-center gap-1">
           <Button aria-label="Reducir cantidad" disabled={isBusy || !canDecreaseLineQuantity(line)} onClick={() => onDecrement(line.id)} size="sm" type="button" variant="tertiary"><Minus className="h-4 w-4" /></Button>
@@ -47,7 +53,7 @@ function OrderLineRow({ isBusy, line, onDecrement, onIncrement, onRemove, onServ
 }
 
 export function RestaurantOrderPanel(props: Props) {
-  const { isBusy, order, onServeAllOrder, ...lineProps } = props
+  const { isBusy, lineDiscounts, order, onServeAllOrder, ...lineProps } = props
   const pendingLines = order.lines.filter((line) => getPendingQuantity(line) > 0)
   const servedLines = order.lines.filter((line) => getPendingQuantity(line) === 0)
   const pendingUnits = getOrderPendingUnits(order.lines)
@@ -55,8 +61,8 @@ export function RestaurantOrderPanel(props: Props) {
     <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
         {order.lines.length === 0 ? <div className="flex min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">Pulsa un producto para anadirlo a la comanda.</div> : null}
-        {pendingLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Por servir</h2><div className="space-y-2">{pendingLines.map((line) => <OrderLineRow {...lineProps} isBusy={isBusy} key={line.id} line={line} />)}</div></section> : null}
-        {servedLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--success)]">Servido</h2><div className="space-y-2">{servedLines.map((line) => <OrderLineRow {...lineProps} isBusy={isBusy} key={line.id} line={line} />)}</div></section> : null}
+        {pendingLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Por servir</h2><div className="space-y-2">{pendingLines.map((line) => <OrderLineRow {...lineProps} discount={lineDiscounts[line.id]} isBusy={isBusy} key={line.id} line={line} />)}</div></section> : null}
+        {servedLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--success)]">Servido</h2><div className="space-y-2">{servedLines.map((line) => <OrderLineRow {...lineProps} discount={lineDiscounts[line.id]} isBusy={isBusy} key={line.id} line={line} />)}</div></section> : null}
       </div>
       <div className="space-y-3 border-t border-[var(--separator)] p-4">
         {pendingUnits > 0 ? <Button disabled={isBusy} fullWidth onClick={onServeAllOrder} size="lg" type="button" variant="primary"><CheckCheck className="h-5 w-5" /> Marcar {pendingUnits} {pendingUnits === 1 ? 'producto' : 'productos'} como servidos</Button> : order.lines.length ? <p className="text-center font-bold text-[var(--success)]">Todo servido OK</p> : null}

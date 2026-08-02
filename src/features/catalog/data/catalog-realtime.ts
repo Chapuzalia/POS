@@ -20,6 +20,45 @@ export function subscribeToCatalogTabChanges(context: TenantContext, onChange: (
         if (!row.tenant_id || row.tenant_id === context.tenantId) onChange()
       },
     )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'discounts',
+        filter: `venue_id=eq.${context.venueId}`,
+      },
+      (payload) => {
+        const row = (Object.keys(payload.new).length ? payload.new : payload.old) as { tenant_id?: string }
+        if (!row.tenant_id || row.tenant_id === context.tenantId) onChange()
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: '*',
+        schema: 'public',
+        table: 'discount_targets',
+        filter: `venue_id=eq.${context.venueId}`,
+      },
+      (payload) => {
+        const row = (Object.keys(payload.new).length ? payload.new : payload.old) as { tenant_id?: string }
+        if (!row.tenant_id || row.tenant_id === context.tenantId) onChange()
+      },
+    )
+    .on(
+      'postgres_changes',
+      {
+        event: 'UPDATE',
+        schema: 'public',
+        table: 'venues',
+        filter: `id=eq.${context.venueId}`,
+      },
+      (payload) => {
+        const row = (Object.keys(payload.new).length ? payload.new : payload.old) as { tenant_id?: string }
+        if (!row.tenant_id || row.tenant_id === context.tenantId) onChange()
+      },
+    )
     .subscribe()
 
   return () => {

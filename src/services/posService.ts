@@ -510,6 +510,15 @@ type SessionTicketQueryRow = {
   discount_value: number | string | null
   discount_rounding_increment_cents: 5 | 10 | 50 | 100 | null
   discount_amount_cents: number | null
+  discount_rule_kind: 'discount' | 'promotion' | null
+  discount_scope: 'general' | 'specific' | null
+  discount_automatic: boolean
+  discount_snapshot: {
+    targets?: Array<{ productId: string; variantId: string | null }>
+    activeWeekdays?: number[]
+    startsAt?: string | null
+    endsAt?: string | null
+  } | null
   total_cents: number
   local_created_at: string
   ticket_lines: Array<{
@@ -525,6 +534,8 @@ type SessionTicketQueryRow = {
     tax_rate: number | null
     taxable_base_cents: number | null
     tax_amount_cents: number | null
+    discount_amount_cents: number
+    net_total_cents: number
     modifiers: TicketLineModifier[]
     sale_format_id: string | null
     sale_format_name_snapshot: string | null
@@ -588,6 +599,10 @@ export async function loadSessionTicketsFromSupabase(
         discount_amount_cents,
         total_cents,
         local_created_at,
+        discount_rule_kind,
+        discount_scope,
+        discount_automatic,
+        discount_snapshot,
         ticket_lines (
           id,
           product_id,
@@ -601,6 +616,8 @@ export async function loadSessionTicketsFromSupabase(
           tax_rate,
           taxable_base_cents,
           tax_amount_cents,
+          discount_amount_cents,
+          net_total_cents,
           modifiers
           ,sale_format_id,
           sale_format_name_snapshot,
@@ -683,6 +700,8 @@ export async function loadSessionTicketsFromSupabase(
         unitPriceCents: line.unit_price_cents,
         lineTotalCents: line.line_total_cents,
         fiscalSnapshot: mapFiscalSnapshot(line),
+        discountAmountCents: line.discount_amount_cents,
+        netTotalCents: line.net_total_cents,
         modifiers: line.modifiers ?? [],
         components: loggedLine?.components ?? (line.ticket_line_components ?? []).map((component) => ({
           id: component.id, type: component.component_type, selectionGroupId: component.selection_group_id,
@@ -716,6 +735,14 @@ export async function loadSessionTicketsFromSupabase(
                 : Number(ticket.discount_value),
               roundingIncrementCents: ticket.discount_rounding_increment_cents,
               color: null,
+              ruleKind: ticket.discount_rule_kind ?? 'discount',
+              scope: ticket.discount_scope ?? 'general',
+              targets: ticket.discount_snapshot?.targets ?? [],
+              requiresPin: false,
+              activeWeekdays: ticket.discount_snapshot?.activeWeekdays ?? [],
+              startsAt: ticket.discount_snapshot?.startsAt ?? null,
+              endsAt: ticket.discount_snapshot?.endsAt ?? null,
+              automatic: ticket.discount_automatic,
             }
           : null,
         discountAmountCents: ticket.discount_amount_cents ?? 0,

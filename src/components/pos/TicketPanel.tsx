@@ -1,6 +1,7 @@
 import { Minus, Plus, Trash2 } from "lucide-react";
 import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { formatMoney, getLineTotal } from "../../lib/format";
+import type { LineDiscountAllocation } from "../../lib/discounts";
 import { getLineAdditionNames } from "../../lib/mixers";
 import type { TicketLine } from "../../types";
 import { cx } from "../../utils/cx";
@@ -8,6 +9,7 @@ import { Button } from "../ui";
 
 type TicketPanelProps = {
   isBusy: boolean;
+  lineDiscounts: LineDiscountAllocation[];
   lines: TicketLine[];
   onClear: () => void;
   onDecrement: (lineId: string) => void;
@@ -27,6 +29,7 @@ function isTicketLineActionTarget(target: EventTarget | null) {
 }
 
 export function TicketPanel({
+  lineDiscounts,
   isBusy,
   lines,
   onDecrement,
@@ -42,13 +45,14 @@ export function TicketPanel({
           </div>
         ) : (
           <div className="space-y-2">
-            {lines.map((line) => (
+            {lines.map((line, index) => (
               <TicketLineRow
                 isBusy={isBusy}
                 key={line.id}
                 line={line}
                 onDecrement={onDecrement}
                 onIncrement={onIncrement}
+                discount={lineDiscounts[index]}
                 onRemove={onRemove}
               />
             ))}
@@ -65,9 +69,11 @@ type TicketLineRowProps = {
   onDecrement: (lineId: string) => void;
   onIncrement: (lineId: string) => void;
   onRemove: (lineId: string) => void;
+  discount?: LineDiscountAllocation;
 };
 
 function TicketLineRow({
+  discount,
   isBusy,
   line,
   onDecrement,
@@ -192,7 +198,13 @@ function TicketLineRow({
           <p className="mt-1 font-mono text-sm tabular-nums text-[var(--muted)]">
             {formatMoney(line.unitPriceCents)}/u
           </p>
-          {line.quantity > 1 ? (
+          {discount && discount.discountAmountCents > 0 ? (
+            <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
+              <span className="font-mono text-sm tabular-nums text-[var(--muted)] line-through">{formatMoney(discount.grossCents)}</span>
+              <strong className="font-mono tabular-nums text-[var(--success)]">{formatMoney(discount.netCents)}</strong>
+              <span className="text-xs font-semibold text-[var(--success)]">?{formatMoney(discount.discountAmountCents)}</span>
+            </div>
+          ) : line.quantity > 1 ? (
             <p className="font-mono text-sm font-bold tabular-nums text-[var(--foreground)]">
               {formatMoney(getLineTotal(line))}
             </p>

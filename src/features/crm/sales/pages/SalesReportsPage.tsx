@@ -1,5 +1,6 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
+import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
 import { ArrowDown, ArrowUp, ArrowUpDown, RefreshCw, SlidersHorizontal, X } from 'lucide-react'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination'
 import { CrmModal } from '../../shared/components/CrmModal'
@@ -384,40 +385,81 @@ export function SalesReportTicketsTable({
   tickets: CrmSalesReports['tickets']
 }) {
   return (
-    <div className="grid overflow-auto !grid !overflow-auto">
-      <div className="sticky top-0 z-[1] grid min-w-[920px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface-soft)] px-3 py-2.5 text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[1040px] !grid-cols-[minmax(160px,0.8fr)_minmax(170px,1fr)_90px_120px_minmax(170px,1fr)_100px_120px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ticket" onSort={onSort} sortKey="ticketId" />
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Fecha" onSort={onSort} sortKey="createdAt" />
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Artículos" onSort={onSort} sortKey="quantity" />
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Método" onSort={onSort} sortKey="paymentMethod" />
-        <span>Descuento</span>
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Estado" onSort={onSort} sortKey="status" />
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Total" onSort={onSort} sortKey="totalCents" />
-      </div>
-      {tickets.map((ticket) => (
-        <UiButton
-          aria-label={`Ver detalles del ticket ${ticket.id.slice(0, 8)}`}
-          className="grid min-h-16 min-w-[920px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] px-3 py-2.5 text-[13px] font-medium text-[var(--crm-text-secondary)] transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] !grid !min-h-[72px] !w-full !min-w-[1040px] !cursor-pointer !grid-cols-[minmax(160px,0.8fr)_minmax(170px,1fr)_90px_120px_minmax(170px,1fr)_100px_120px] !items-center !gap-3.5 !border-0 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-left !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !shadow-none !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]"
-          key={ticket.id}
-          onClick={() => onSelect(ticket.id)}
-          type="button"
-        >
-          <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
-            <strong>#{ticket.id.slice(0, 8).toUpperCase()}</strong>
-            <span>{ticket.lineCount} líneas</span>
-          </div>
-          <span>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</span>
-          <span>{ticket.quantity} uds.</span>
-          <span>{getReportPaymentLabel(ticket)}</span>
-          <span className="!truncate">{getReportDiscountLabel(ticket)}</span>
-          <span className={ticket.status === 'paid'
-            ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
-            : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>
-            {ticket.status === 'paid' ? 'Cobrado' : 'Anulado'}
-          </span>
-          <strong className="!font-mono !text-[var(--crm-text)]">{formatMoney(ticket.totalCents)}</strong>
-        </UiButton>
-      ))}
+    <div className="!overflow-x-auto">
+      <UiDataTable aria-label="Tickets de ventas" className="!w-full !min-w-[1040px] !border-collapse">
+        <thead>
+          <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
+            <th className="!min-w-40 !px-[22px] !py-3">
+              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ticket" onSort={onSort} sortKey="ticketId" />
+            </th>
+            <th className="!min-w-[170px] !px-3 !py-3">
+              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Fecha" onSort={onSort} sortKey="createdAt" />
+            </th>
+            <th className="!min-w-[90px] !px-3 !py-3">
+              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Artículos" onSort={onSort} sortKey="quantity" />
+            </th>
+            <th className="!min-w-[120px] !px-3 !py-3">
+              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Método" onSort={onSort} sortKey="paymentMethod" />
+            </th>
+            <th className="!min-w-[170px] !px-3 !py-3">Descuento</th>
+            <th className="!min-w-[100px] !px-3 !py-3">
+              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Estado" onSort={onSort} sortKey="status" />
+            </th>
+            <th className="!min-w-[120px] !px-[22px] !py-3">
+              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Total" onSort={onSort} sortKey="totalCents" />
+            </th>
+          </tr>
+        </thead>
+        <tbody>
+          {tickets.map((ticket) => (
+            <tr
+              aria-label={`Ver detalles del ticket ${ticket.id.slice(0, 8)}`}
+              className="!cursor-pointer !border-b !border-[var(--crm-border-subtle)] !outline-none hover:!bg-[var(--crm-surface-soft)] focus-visible:!bg-[var(--crm-surface-soft)] last:!border-0"
+              key={ticket.id}
+              onClick={() => onSelect(ticket.id)}
+              onKeyDown={(event) => {
+                if (event.key === 'Enter' || event.key === ' ') {
+                  event.preventDefault()
+                  onSelect(ticket.id)
+                }
+              }}
+              role="button"
+              tabIndex={0}
+            >
+              <td className="!px-[22px] !py-4">
+                <strong className="!block !truncate !text-sm !font-semibold !text-[var(--crm-text)]">
+                  #{ticket.id.slice(0, 8).toUpperCase()}
+                </strong>
+                <span className="!block !truncate !text-xs !font-medium !text-[var(--crm-text-muted)]">
+                  {ticket.lineCount} líneas
+                </span>
+              </td>
+              <td className="!whitespace-nowrap !px-3 !py-4 !text-[13px] !font-medium !text-[var(--crm-text-secondary)]">
+                {crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}
+              </td>
+              <td className="!whitespace-nowrap !px-3 !py-4 !text-[13px] !font-medium !text-[var(--crm-text-secondary)]">
+                {ticket.quantity} uds.
+              </td>
+              <td className="!px-3 !py-4 !text-[13px] !font-medium !text-[var(--crm-text-secondary)]">
+                {getReportPaymentLabel(ticket)}
+              </td>
+              <td className="!max-w-[170px] !truncate !px-3 !py-4 !text-[13px] !font-medium !text-[var(--crm-text-secondary)]">
+                {getReportDiscountLabel(ticket)}
+              </td>
+              <td className="!px-3 !py-4">
+                <span className={ticket.status === 'paid'
+                  ? '!inline-flex !min-h-6 !w-fit !items-center !whitespace-nowrap !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
+                  : '!inline-flex !min-h-6 !w-fit !items-center !whitespace-nowrap !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>
+                  {ticket.status === 'paid' ? 'Cobrado' : 'Anulado'}
+                </span>
+              </td>
+              <td className="!whitespace-nowrap !px-[22px] !py-4 !font-mono !text-[13px] !font-bold !text-[var(--crm-text)]">
+                {formatMoney(ticket.totalCents)}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </UiDataTable>
       {!tickets.length ? <EmptyList message={isLoading ? 'Cargando tickets...' : 'No hay tickets para este local.'} /> : null}
     </div>
   )

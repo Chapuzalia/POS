@@ -6,7 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Minus, Plus, UsersRound, X } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
 import { PaymentPanel } from '../../../components/pos'
-import { calculateAppliedDiscount } from '../../../lib/discounts'
+import { calculateAppliedDiscount, calculateDiscountForLines, type DiscountScheduleContext } from '../../../lib/discounts'
 import { formatMoney } from '../../../lib/format'
 import type { AppliedDiscount, Discount, PaymentMethod } from '../../../types'
 import type { PayRestaurantEqualPartResult, RestaurantEqualSplit, RestaurantOrderDetail } from '../types'
@@ -17,7 +17,11 @@ type Props = {
   isBusy: boolean
   discounts: Discount[]
   defaultDiscount: AppliedDiscount | null
+  discountSchedule: Omit<DiscountScheduleContext, 'now'>
+  validatePin: (discountId: string, pin: string) => Promise<boolean>
+  validateManualPin: (venueId: string, pin: string) => Promise<boolean>
   manualDiscountEnabled: boolean
+  manualDiscountRequiresPin: boolean
   order: RestaurantOrderDetail
   split: RestaurantEqualSplit | null
   onClose: () => void
@@ -27,7 +31,7 @@ type Props = {
   venueId: string
 }
 
-export function EqualSplitOrderModal({ defaultDiscount, discounts, isBusy, manualDiscountEnabled, onClose, onCompleted, onConfigure, onPay, order, split, venueId }: Props) {
+export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSchedule, isBusy, manualDiscountEnabled, manualDiscountRequiresPin, onClose, onCompleted, onConfigure, onPay, order, split, validateManualPin, validatePin, venueId }: Props) {
   const [partCount, setPartCount] = useState(Math.max(2, order.order.guestCount))
   const [cashOpen, setCashOpen] = useState(false)
   const [paying, setPaying] = useState(false)
@@ -51,7 +55,10 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, isBusy, manua
 
   const totalCents = split?.totalCents ?? order.totalCents
   const nextPartCents = split?.nextPartCents ?? Math.floor(totalCents / partCount) + (totalCents % partCount > 0 ? 1 : 0)
-  const setupDiscount = calculateAppliedDiscount(totalCents, defaultDiscount)
+  const setupDiscount = calculateDiscountForLines(
+    order.lines.map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.quantity * line.unitPriceCents })),
+    defaultDiscount,
+  )
   const inheritedSetupDiscountAmount = Math.floor(setupDiscount.discountAmountCents / partCount) + (setupDiscount.discountAmountCents % partCount > 0 ? 1 : 0)
   const setupTotal = setupDiscount.totalCents
   const setupPartTotal = nextPartCents - inheritedSetupDiscountAmount
@@ -137,7 +144,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, isBusy, manua
 
     {cashOpen && split ? <CashPaymentModal isBusy={paying || isBusy} onCancel={() => setCashOpen(false)} onConfirm={(receivedCents) => { setCashOpen(false); void completePart('cash', receivedCents) }} totalCents={nextPayment.totalCents} /> : null}
 
-    {discountOpen && split ? <DiscountModal description="Se aplicará solo al siguiente pago." discounts={discounts} isBusy={paying || isBusy} manualDiscountEnabled={manualDiscountEnabled} onCancel={() => setDiscountOpen(false)} onSelect={(discount) => { setCurrentDiscount(discount); setUseDefaultDiscount(false); setDiscountOpen(false) }} subtotalCents={split.nextPartCents} venueId={venueId} /> : null}
+    {discountOpen && split ? <DiscountModal description="Se aplicará solo al siguiente pago." discounts={discounts} isBusy={paying || isBusy} manualDiscountEnabled={manualDiscountEnabled} manualDiscountRequiresPin={manualDiscountRequiresPin} onCancel={() => setDiscountOpen(false)} onSelect={(discount) => { setCurrentDiscount(discount); setUseDefaultDiscount(false); setDiscountOpen(false) }} schedule={discountSchedule} subtotalCents={split.nextPartCents} validateManualPin={validateManualPin} validatePin={validatePin} venueId={venueId} /> : null}
 
     {pendingPayment ? <AppModal containerClassName="!p-4" maxWidth={448} dismissDisabled={isBusy || paying} label="Productos pendientes" onClose={() => setPendingPayment(null)}>
       <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">

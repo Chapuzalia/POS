@@ -38,7 +38,7 @@ export function mapSaleLineToPrintItem(line: SaleCreatedPayload['lines'][number]
     name: lineName(line),
     quantity: line.quantity,
     unitPriceCents: line.unitPriceCents,
-    totalCents: line.lineTotalCents,
+    totalCents: line.netTotalCents ?? line.lineTotalCents,
     ...(additions.length ? { additions } : {}),
     ...(line.fiscalSnapshot ? { taxCents: line.fiscalSnapshot.taxAmountCents } : {}),
   }
@@ -53,7 +53,7 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     (line) => line.fiscalSnapshot && isValidTaxRate(line.fiscalSnapshot.taxRate),
   )
   const fiscalSnapshots = hasCompleteFiscalSnapshot
-    ? allocateNetTotalToLines(sale.lines.map((line) => line.lineTotalCents), sale.sale.totalCents)
+    ? allocateNetTotalToLines(sale.lines.map((line) => line.netTotalCents ?? line.lineTotalCents), sale.sale.totalCents)
       .map((grossTotalCents, index) => ({
         taxRate: sale.lines[index].fiscalSnapshot!.taxRate,
         ...calculateTaxFromGross(grossTotalCents, sale.lines[index].fiscalSnapshot!.taxRate),

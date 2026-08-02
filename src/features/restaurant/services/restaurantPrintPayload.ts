@@ -6,6 +6,7 @@ import type {
   TenantContext,
 } from '../../../types/index.ts'
 import type { RestaurantEqualSplit, RestaurantOrderLine, RestaurantOrderLineMove } from '../../tables/types.ts'
+import { calculateDiscountForLines } from '../../../lib/discounts.ts'
 import { normalizeCatalogSnapshot } from '../../catalog/services/catalogSnapshots.ts'
 
 export type RestaurantPrintLine = RestaurantOrderLine & { lineTotalCents?: number }
@@ -45,6 +46,12 @@ type BuildRestaurantPrintPayloadInput = {
 
 export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadInput): SaleCreatedPayload {
   const discountAmountCents = Math.max(0, input.subtotalCents - input.totalCents)
+  const grossLineTotals = input.lines.map((line) => line.lineTotalCents ?? line.unitPriceCents * line.quantity)
+  const calculated = calculateDiscountForLines(
+    input.lines.map((line, index) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: grossLineTotals[index] })),
+    input.discount,
+  )
+  const lineAllocations = calculated.totalCents === input.totalCents ? calculated.lineAllocations : null
   return {
     ticket: {
       id: input.ticketId,
@@ -60,7 +67,7 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       totalCents: input.totalCents,
       createdAt: input.createdAt,
     },
-    lines: input.lines.map((line) => {
+    lines: input.lines.map((line, index) => {
       const components = printComponents(line)
       const modifierDeltaCents = line.modifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
         + components.reduce((total, component) => total + (component.modifiers ?? []).reduce((sum, modifier) => sum + modifier.priceCents, 0), 0)
@@ -79,7 +86,9 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       grossBeforeDiscountCents: line.unitPriceCents,
       quantity: line.quantity,
       unitPriceCents: line.unitPriceCents,
-      lineTotalCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity,
+      lineTotalCents: grossLineTotals[index],
+      discountAmountCents: lineAllocations?.[index].discountAmountCents,
+      netTotalCents: lineAllocations?.[index].netCents,
       modifiers: line.modifiers,
       components,
       catalogSnapshot: normalizeCatalogSnapshot(line.catalogSnapshot, { productId: line.productId, productName: line.productName, variantId: line.variantId, variantName: line.variantName, basePriceCents: line.unitPriceCents }),
