@@ -103,6 +103,14 @@ export type PrintTicket = {
   footer?: string
   copyLabel?: string
   deferredLabel?: string
+  fiscal?: {
+    provider: 'verifactu' | 'ticketbai'
+    status: string
+    uuid?: string
+    externalCode?: string
+    verificationUrl?: string
+    qrBase64?: string
+  }
 }
 
 export type PrintRequest = {

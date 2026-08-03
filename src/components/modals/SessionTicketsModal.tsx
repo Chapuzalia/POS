@@ -35,7 +35,6 @@ export function SessionTicketsModal({
 }: SessionTicketsModalProps) {
   const { isPrintingTicket } = usePrintAgent()
   const activeTickets = tickets.filter((ticket) => ticket.status === 'active')
-  const totalCents = activeTickets.reduce((total, ticket) => total + ticket.totalCents, 0)
 
   return (
     <AppModal containerClassName="!p-4" maxWidth={768} dismissDisabled={isBusy} label="Tickets de la sesión" onClose={onClose}>
@@ -44,7 +43,7 @@ export function SessionTicketsModal({
           <div>
             <h2 className="text-2xl font-bold">Historico de tickets</h2>
             <p className="text-sm text-[var(--muted)]">
-              {activeTickets.length} activos - {formatMoney(totalCents)}
+              {activeTickets.length} activos
             </p>
           </div>
           <Button disabled={isBusy} onClick={onClose} size="sm" type="button" variant="tertiary">

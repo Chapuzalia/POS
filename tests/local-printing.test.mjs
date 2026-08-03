@@ -263,12 +263,13 @@ test('la preferencia de ticket decide entre imprimir, abrir cajon o no actuar', 
   assert.equal(getAutomaticSaleHardwareAction({ payments: card, isReprint: true, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true } }), 'print')
 })
 
-test('la venta rapida inicia la impresion antes de sincronizar y tambien lo intenta offline', () => {
+test('la venta rapida espera el QR fiscal online y tambien intenta imprimir offline', () => {
   const source = readFileSync(new URL('../src/features/quick-sale/hooks/useQuickSalePayment.ts', import.meta.url), 'utf8')
-  const printIndex = source.indexOf('const printTask = options.printSale(payload)')
-  const syncIndex = source.indexOf('void options.syncPendingEvents()')
-  assert.ok(printIndex >= 0 && syncIndex > printIndex)
-  assert.doesNotMatch(source, /if \(!options\.isOnline\)/)
+  const syncIndex = source.indexOf('await options.syncPendingEvents()')
+  const fiscalIndex = source.indexOf('await loadFiscalReceiptData(')
+  const printIndex = source.indexOf('const printTask = options.printSale(printPayload)')
+  assert.ok(syncIndex >= 0 && fiscalIndex > syncIndex && printIndex > fiscalIndex)
+  assert.match(source, /if \(options\.isOnline\) \{[\s\S]*await options\.syncPendingEvents\(\)[\s\S]*\}\n    const printTask/)
 })
 
 test('construye el ticket de mesa localmente en cuanto la RPC devuelve sus IDs', () => {

@@ -1,5 +1,6 @@
 import { loadPosCatalog } from '../features/catalog/data/load-pos-catalog.ts'
 import { normalizeCatalogSnapshot } from '../features/catalog/services/catalogSnapshots.ts'
+import { autoIssueFiscalTicket, voidTicketWithFiscalCancellation } from '../features/fiscal/service.ts'
 import { supabase } from '../lib/supabase'
 export { summarizeSales } from '../features/cash-registers/services/cashSummary.ts'
 export { buildSalePayload } from '../features/quick-sale/services/salePayload.ts'
@@ -567,6 +568,15 @@ type SessionTicketQueryRow = {
       change_cents: number
     }> | null
   }> | null
+  fiscal_invoices: Array<{
+    id: string
+    provider: 'verifactu' | 'ticketbai'
+    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+    external_uuid: string | null
+    external_code: string | null
+    qr_base64: string | null
+    verification_url: string | null
+  }> | null
 }
 
 export async function loadSessionTicketsFromSupabase(
@@ -647,6 +657,9 @@ export async function loadSessionTicketsFromSupabase(
             received_cents,
             change_cents
           )
+        ),
+        fiscal_invoices (
+          id, provider, status, external_uuid, external_code, qr_base64, verification_url
         )
       `)
       .eq('tenant_id', context.tenantId)
@@ -772,6 +785,17 @@ export async function loadSessionTicketsFromSupabase(
         receivedCents: payment.received_cents,
         changeCents: payment.change_cents,
       } : null,
+      ...(ticket.fiscal_invoices?.[0] ? {
+        fiscal: {
+          invoiceId: ticket.fiscal_invoices[0].id,
+          provider: ticket.fiscal_invoices[0].provider,
+          status: ticket.fiscal_invoices[0].status,
+          uuid: ticket.fiscal_invoices[0].external_uuid,
+          externalCode: ticket.fiscal_invoices[0].external_code,
+          qrBase64: ticket.fiscal_invoices[0].qr_base64,
+          verificationUrl: ticket.fiscal_invoices[0].verification_url,
+        },
+      } : {}),
     }
 
     return {
@@ -879,6 +903,14 @@ export async function syncEvent(event: OfflineEvent) {
       throw error
     }
 
+    try {
+      await autoIssueFiscalTicket(event.tenantId, event.payload.ticket.id)
+    } catch (fiscalError) {
+      // The sale is already immutable and synchronized. Fiscal errors are persisted
+      // by the backend and must not cause the sale event itself to be replayed.
+      console.error('Automatic fiscal submission failed', fiscalError)
+    }
+
     return
   }
 
@@ -912,37 +944,7 @@ export async function syncEvent(event: OfflineEvent) {
   }
 
   if (event.kind === 'sale_voided') {
-    const { saleId, ticketId } = event.payload
-    const { error: paymentError } = await supabase
-      .from('sale_payments')
-      .delete()
-      .eq('tenant_id', event.tenantId)
-      .eq('sale_id', saleId)
-
-    if (paymentError) {
-      throw paymentError
-    }
-
-    const { error: saleError } = await supabase
-      .from('sales')
-      .delete()
-      .eq('tenant_id', event.tenantId)
-      .eq('id', saleId)
-
-    if (saleError) {
-      throw saleError
-    }
-
-    const { error: ticketError } = await supabase
-      .from('tickets')
-      .update({ status: 'void' })
-      .eq('tenant_id', event.tenantId)
-      .eq('id', ticketId)
-
-    if (ticketError) {
-      throw ticketError
-    }
-
+    await voidTicketWithFiscalCancellation(event.tenantId, event.payload.ticketId)
     return
   }
 

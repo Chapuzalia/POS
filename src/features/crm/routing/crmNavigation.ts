@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Boxes, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
+import { Armchair, BarChart3, Boxes, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PlugZap, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'reports' | 'x-reports' | 'inventory-stock' | 'inventory-warehouses' | 'inventory-settings' | 'import' | 'stats' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'reports' | 'x-reports' | 'inventory-stock' | 'inventory-warehouses' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -30,6 +30,7 @@ export const navItems: CrmNavItem[] = [
   { id: 'tables', label: 'Mesas y zonas', icon: Armchair },
   { id: 'import', label: 'Importar / exportar', icon: Upload },
   { id: 'stats', label: 'Estadísticas', icon: BarChart3 },
+  { id: 'integrations', label: 'Integraciones', icon: PlugZap },
   { id: 'plan', label: 'Mi Plan', icon: Gauge },
   { id: 'settings', label: 'Configuración', icon: Settings },
 ]
@@ -56,6 +57,7 @@ export function getSectionTitle(section: CrmSection) {
     'inventory-warehouses': 'Almacenes del local',
     'inventory-settings': 'Configuración de inventario',
     stats: 'Analítica comercial',
+    integrations: 'Integraciones',
     settings: 'Configuración de locales',
     plan: 'Mi Plan',
   }

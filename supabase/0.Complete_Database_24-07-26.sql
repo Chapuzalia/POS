@@ -14679,3 +14679,29 @@ revoke all on function public.validate_manual_discount_pin(uuid, text) from publ
 grant execute on function public.validate_manual_discount_pin(uuid, text) to authenticated;
 revoke all on function public.enforce_manual_discount_pin() from public;
 
+-- Ticket creation RPCs omit the per-line discount columns. Fill their valid
+-- gross defaults before constraints run, then let the allocation trigger
+-- distribute any ticket-level discount after the complete insert statement.
+create or replace function public.set_ticket_line_discount_defaults()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.discount_amount_cents := coalesce(new.discount_amount_cents, 0);
+  new.net_total_cents := coalesce(
+    new.net_total_cents,
+    new.line_total_cents - new.discount_amount_cents
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists set_ticket_line_discount_defaults_trigger
+  on public.ticket_lines;
+create trigger set_ticket_line_discount_defaults_trigger
+before insert on public.ticket_lines
+for each row execute function public.set_ticket_line_discount_defaults();
+
+revoke all on function public.set_ticket_line_discount_defaults() from public;
+

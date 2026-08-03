@@ -2,6 +2,7 @@ import { useCallback } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
 import { buildSalePayload } from '../services/salePayload'
+import { loadFiscalReceiptData } from '../../fiscal/service'
 import type { AppliedDiscount, CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
 
 type Options = {
@@ -28,15 +29,28 @@ export function useQuickSalePayment(options: Options) {
     if (!context || !cashSession || lines.length === 0) return
     const payload = buildSalePayload(context, cashSession, lines, paymentMethod, receivedCents, options.discount)
     const saleRecord: SaleRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt }
+    const ticketRecord: SessionTicketRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt, status: 'active', payload, printStatus: 'not_requested', printAttempts: 0 }
     enqueueOfflineEvent({ id: createId(), kind: 'sale_created', tenantId: context.tenantId, createdAt: payload.sale.createdAt, attempts: 0, payload })
     options.persistLedger([...options.ledger, saleRecord])
-    options.persistTickets([{ id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt, status: 'active', payload, printStatus: 'not_requested', printAttempts: 0 }, ...options.tickets])
+    options.persistTickets([ticketRecord, ...options.tickets])
     options.mergeProductStats(lines)
     options.persistLines([])
     options.refreshPendingCount()
     options.resetUi(paymentMethod)
-    const printTask = options.printSale(payload)
-    if (options.isOnline) void options.syncPendingEvents()
+    let printPayload = payload
+    if (options.isOnline) {
+      await options.syncPendingEvents()
+      try {
+        const fiscal = await loadFiscalReceiptData(context.tenantId, payload.ticket.id)
+        if (fiscal) {
+          printPayload = { ...payload, fiscal }
+          options.persistTickets([{ ...ticketRecord, payload: printPayload }, ...options.tickets])
+        }
+      } catch (fiscalError) {
+        console.error('Could not load fiscal QR before printing', fiscalError)
+      }
+    }
+    const printTask = options.printSale(printPayload)
     await printTask
   }, [options])
 }

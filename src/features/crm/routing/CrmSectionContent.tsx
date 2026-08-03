@@ -11,6 +11,7 @@ import { PlanCrm } from '../plan/pages/PlanPage'
 import { InventoryStockCrm } from '../inventory/pages/InventoryStockPage'
 import { InventoryWarehousesCrm } from '../inventory/pages/InventoryWarehousesPage'
 import { InventorySettingsCrm } from '../inventory/pages/InventorySettingsPage'
+import { IntegrationsCrm } from '../integrations/pages/IntegrationsPage'
 import { SalesReportsCrm } from '../sales/pages/SalesReportsPage'
 import { CashClosingReportsCrm } from '../sales/pages/CashClosingReportsPage'
 import type { RunAction } from '../shared/types'
@@ -113,6 +114,8 @@ export function CrmSectionContent({
         stats={stats}
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
+    case 'integrations':
+      return <IntegrationsCrm disabled={disabled} runAction={runAction} tenantContext={context} />
     case 'settings':
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':

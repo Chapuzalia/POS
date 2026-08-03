@@ -39,6 +39,7 @@ import {
   saveRestaurantOrderLines,
 } from '../../tables/service'
 import { canDecreaseLineQuantity } from '../../tables/service-status'
+import { autoIssueFiscalTicket } from '../../fiscal/service'
 import type {
   PayRestaurantEqualPartResult,
   PayRestaurantOrderItemsResult,
@@ -52,6 +53,15 @@ import { useRestaurantDraft } from './useRestaurantDraft'
 import { isRestaurantRevisionConflict, requiresConfirmedRestaurantLineRemoval, shouldSaveBeforeLeavingOrder } from '../draft-policy'
 import { getRestaurantCashClosureError } from '../services/validateCashClosure'
 import { useRestaurantRealtime } from './useRestaurantRealtime'
+
+async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string) {
+  try {
+    return (await autoIssueFiscalTicket(context.tenantId, ticketId)).fiscal
+  } catch (error) {
+    console.error('Automatic fiscal submission failed before restaurant print', error)
+    return undefined
+  }
+}
 
 type PendingPayment = { method: PaymentMethod | null; receivedCents: number | null; pendingUnits: number }
 
@@ -314,6 +324,7 @@ export function useRestaurantController(options: Options) {
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
         const printLines = paymentLines
+        const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
         void options.printSale(buildRestaurantPrintPayload({
           cashSession: options.cashSession,
           context: options.context,
@@ -327,6 +338,7 @@ export function useRestaurantController(options: Options) {
           subtotalCents: getRestaurantPrintSubtotal(printLines),
           ticketId: result.ticketId,
           totalCents: result.paidAmountCents,
+          fiscal,
         }))
         await refreshSales(result.saleId, 'Pago completado sin imprimir', false)
         const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
@@ -368,6 +380,7 @@ export function useRestaurantController(options: Options) {
       const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, receivedCents, allowPending, withCalculationLines(discount, paymentLines))
       if (!result.requiresConfirmation) {
         const printLines = paymentLines
+        const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
         void options.printSale(buildRestaurantPrintPayload({
           cashSession: options.cashSession,
           context: options.context,
@@ -381,6 +394,7 @@ export function useRestaurantController(options: Options) {
           subtotalCents: result.subtotalCents,
           ticketId: result.ticketId,
           totalCents: result.totalCents,
+          fiscal,
         }))
         await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
         const [nextOrder, nextMap] = await Promise.all([
@@ -495,6 +509,7 @@ export function useRestaurantController(options: Options) {
         setPendingPayment({ method, receivedCents, pendingUnits: result.pendingUnits })
         return
       }
+      const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
       void options.printSale(buildRestaurantPrintPayload({
         cashSession: options.cashSession,
         context: options.context,
@@ -508,6 +523,7 @@ export function useRestaurantController(options: Options) {
         subtotalCents: getRestaurantPrintSubtotal(saved.lines),
         ticketId: result.ticketId,
         totalCents: result.totalCents,
+        fiscal,
       }))
       await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
       const nextOrder = result.nextOrderId ? await loadRestaurantOrder(options.context, result.nextOrderId) : null

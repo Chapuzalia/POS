@@ -90,6 +90,16 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
       } : {}),
       ...(options.footer ? { footer: options.footer } : {}),
       ...(isReprint ? { copyLabel: 'COPIA' } : {}),
+      ...(sale.fiscal ? {
+        fiscal: {
+          provider: sale.fiscal.provider,
+          status: sale.fiscal.status,
+          ...(sale.fiscal.uuid ? { uuid: sale.fiscal.uuid } : {}),
+          ...(sale.fiscal.externalCode ? { externalCode: sale.fiscal.externalCode } : {}),
+          ...(sale.fiscal.verificationUrl ? { verificationUrl: sale.fiscal.verificationUrl } : {}),
+          ...(sale.fiscal.qrBase64 ? { qrBase64: sale.fiscal.qrBase64 } : {}),
+        },
+      } : {}),
     },
     options: {
       cut: options.cut !== false,
