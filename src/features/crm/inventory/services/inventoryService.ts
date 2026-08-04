@@ -9,6 +9,8 @@ import type {
   InventoryProductSetting,
   InventorySnapshot,
   InventoryStockLevel,
+  InventoryWarehouseRouting,
+  InventoryWarehouseStockSummary,
   InventoryUnit,
   InventoryWarehouse,
 } from '../types'
@@ -48,9 +50,23 @@ type InventoryProductSettingRow = {
 }
 
 type InventoryStockLevelRow = {
+  is_enabled: boolean
   product_id: string
   warehouse_id: string
   quantity: number | string
+}
+
+type InventoryDeviceRow = {
+  id: string
+  is_active: boolean
+  name: string
+}
+
+type InventoryDeviceWarehouseRow = {
+  device_id: string
+  is_enabled: boolean
+  priority: number
+  warehouse_id: string
 }
 
 function mapInventoryUnit(row: InventoryUnitRow): InventoryUnit {
@@ -138,6 +154,28 @@ export async function loadInventoryWarehouses(context: TenantContext, venueId: s
   return ((data ?? []) as InventoryWarehouseRow[]).map(mapInventoryWarehouse)
 }
 
+export async function loadInventoryWarehouseStockSummaries(
+  context: TenantContext,
+  venueId: string,
+): Promise<InventoryWarehouseStockSummary[]> {
+  const { data, error } = await requireSupabase()
+    .from('inventory_stock_levels')
+    .select('warehouse_id, quantity')
+    .eq('tenant_id', context.tenantId)
+    .eq('venue_id', venueId)
+  if (error) throw error
+
+  const counts = new Map<string, number>()
+  for (const row of (data ?? []) as Array<{ warehouse_id: string; quantity: number | string }>) {
+    if (Number(row.quantity) === 0) continue
+    counts.set(row.warehouse_id, (counts.get(row.warehouse_id) ?? 0) + 1)
+  }
+  return [...counts].map(([warehouseId, nonZeroProductCount]) => ({
+    nonZeroProductCount,
+    warehouseId,
+  }))
+}
+
 export async function createInventoryWarehouse(
   context: TenantContext,
   venueId: string,
@@ -157,6 +195,22 @@ export async function createInventoryWarehouse(
   if (error) throw error
 }
 
+export async function deleteInventoryWarehouse(
+  context: TenantContext,
+  venueId: string,
+  warehouseId: string,
+  targetWarehouseId: string | null,
+) {
+  const { data, error } = await requireSupabase().rpc('delete_inventory_warehouse', {
+    p_tenant_id: context.tenantId,
+    p_venue_id: venueId,
+    p_warehouse_id: warehouseId,
+    p_target_warehouse_id: targetWarehouseId,
+  })
+  if (error) throw error
+  return Number(data ?? 0)
+}
+
 export async function loadInventorySnapshot(context: TenantContext, venueId: string): Promise<InventorySnapshot> {
   const client = requireSupabase()
   const [units, warehouses, settingsResult, levelsResult] = await Promise.all([
@@ -167,7 +221,7 @@ export async function loadInventorySnapshot(context: TenantContext, venueId: str
       .eq('tenant_id', context.tenantId)
       .eq('venue_id', venueId),
     client.from('inventory_stock_levels')
-      .select('product_id, warehouse_id, quantity')
+      .select('product_id, warehouse_id, quantity, is_enabled')
       .eq('tenant_id', context.tenantId)
       .eq('venue_id', venueId),
   ])
@@ -181,6 +235,7 @@ export async function loadInventorySnapshot(context: TenantContext, venueId: str
     unitId: row.unit_id,
   }))
   const levels = ((levelsResult.data ?? []) as InventoryStockLevelRow[]).map<InventoryStockLevel>((row) => ({
+    enabled: row.is_enabled,
     productId: row.product_id,
     warehouseId: row.warehouse_id,
     quantity: Number(row.quantity),
@@ -188,12 +243,46 @@ export async function loadInventorySnapshot(context: TenantContext, venueId: str
   return { levels, settings, units, warehouses }
 }
 
+export async function loadInventoryWarehouseRouting(
+  context: TenantContext,
+  venueId: string,
+): Promise<InventoryWarehouseRouting> {
+  const client = requireSupabase()
+  const [devicesResult, assignmentsResult] = await Promise.all([
+    client.from('devices')
+      .select('id, name, is_active')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venueId)
+      .order('name'),
+    client.from('inventory_device_warehouses')
+      .select('device_id, warehouse_id, is_enabled, priority')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venueId),
+  ])
+  if (devicesResult.error) throw devicesResult.error
+  if (assignmentsResult.error) throw assignmentsResult.error
+
+  return {
+    devices: ((devicesResult.data ?? []) as InventoryDeviceRow[]).map((row) => ({
+      active: row.is_active,
+      id: row.id,
+      name: row.name,
+    })),
+    assignments: ((assignmentsResult.data ?? []) as InventoryDeviceWarehouseRow[]).map((row) => ({
+      deviceId: row.device_id,
+      enabled: row.is_enabled,
+      priority: row.priority,
+      warehouseId: row.warehouse_id,
+    })),
+  }
+}
+
 export async function saveInventoryProductStock(
   context: TenantContext,
   venueId: string,
   productId: string,
   unitId: string,
-  levels: Array<{ warehouseId: string; quantity: number }>,
+  levels: Array<{ enabled: boolean; warehouseId: string; quantity: number }>,
 ) {
   const { error } = await requireSupabase().rpc('set_inventory_product_stock', {
     p_tenant_id: context.tenantId,
@@ -201,9 +290,38 @@ export async function saveInventoryProductStock(
     p_product_id: productId,
     p_unit_id: unitId,
     p_levels: levels.map((level) => ({
+      enabled: level.enabled,
       warehouseId: level.warehouseId,
       quantity: level.quantity,
     })),
   })
   if (error) throw error
+}
+
+export async function saveInventoryDeviceWarehouses(
+  context: TenantContext,
+  venueId: string,
+  deviceId: string,
+  assignments: Array<{ enabled: boolean; priority: number; warehouseId: string }>,
+) {
+  const { error } = await requireSupabase().rpc('set_inventory_device_warehouses', {
+    p_tenant_id: context.tenantId,
+    p_venue_id: venueId,
+    p_device_id: deviceId,
+    p_assignments: assignments.map((assignment) => ({
+      enabled: assignment.enabled,
+      priority: assignment.priority,
+      warehouseId: assignment.warehouseId,
+    })),
+  })
+  if (error) throw error
+}
+
+export async function setVenueInventoryEnabled(venueId: string, enabled: boolean) {
+  const { data, error } = await requireSupabase().rpc('set_venue_inventory_enabled', {
+    p_venue_id: venueId,
+    p_enabled: enabled,
+  })
+  if (error) throw error
+  return Boolean(data)
 }

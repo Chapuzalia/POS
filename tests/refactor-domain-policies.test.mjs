@@ -44,7 +44,9 @@ test('rejected offline sale restores its ticket and discount without overwriting
   assert.equal(recovery.rejectedSaleId, 'sale-1')
   assert.equal(recovery.linesToRestore[0].quantity, 2)
   assert.equal(recovery.discount.amountCents, 100)
-  assert.equal(getRejectedSaleRecovery(event, true).linesToRestore, null)
+  const recoveryWithCurrentTicket = getRejectedSaleRecovery(event, true)
+  assert.equal(recoveryWithCurrentTicket.linesToRestore, null)
+  assert.equal(recoveryWithCurrentTicket.discount, null)
 })
 
 test('closed cash cleanup removes session, ledger, and ticket history', () => {

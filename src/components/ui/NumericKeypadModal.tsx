@@ -9,6 +9,8 @@ export type NumericKeypadModalProps = {
   confirmLabel?: string;
   decimalSeparator?: "." | ",";
   disabled?: boolean;
+  error?: string | null;
+  password?: boolean;
   initialValue?: string;
   maxDigits?: number;
   maxFractionDigits?: number;
@@ -30,6 +32,7 @@ function sanitizeValue(
   maxDigits: number,
   maxFractionDigits?: number,
 ) {
+  if (value === "") return "";
   const normalized = value.replace(",", ".").replace(/[^\d.]/g, "");
   const [integerPart = "", ...fractionParts] = normalized.split(".");
   const integer =
@@ -50,6 +53,8 @@ export function NumericKeypadModal({
   confirmLabel = "Aceptar",
   decimalSeparator = ",",
   disabled = false,
+  error,
+  password,
   initialValue = "0",
   maxDigits = 12,
   maxFractionDigits,
@@ -192,6 +197,14 @@ export function NumericKeypadModal({
             {subtitle ? (
               <p className="mt-1 text-sm text-[var(--muted)]">{subtitle}</p>
             ) : null}
+            {error ? (
+              <p
+                aria-live="polite"
+                className="mt-2 text-sm font-semibold text-[var(--danger)]"
+              >
+                {error}
+              </p>
+            ) : null}
           </div>
           {showCloseButton ? (
             <Button
@@ -213,7 +226,7 @@ export function NumericKeypadModal({
           className="mt-0 flex min-h-20 items-center justify-end gap-3 overflow-hidden rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-5 py-3 text-right text-[var(--field-foreground)]"
         >
           <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-4xl font-black tabular-nums">
-            {value}
+            {password ? "*".repeat(value.length) : value}
           </span>
           {unit ? (
             <span className="shrink-0 text-sm font-bold text-[var(--muted)]">

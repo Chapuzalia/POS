@@ -1,13 +1,15 @@
-import { useCallback, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { sileo } from 'sileo'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
 import { getDefaultProductLineSelection } from '../../catalog/services/saleLineBuilder'
-import { calculateAppliedDiscount } from '../../../lib/discounts'
-import { getTicketTotal } from '../../../lib/format'
+import { calculateDiscountForLines, resolveTicketDiscount, type DiscountScheduleContext } from '../../../lib/discounts'
+import { getLineTotal, getTicketTotal } from '../../../lib/format'
 import { saveCachedTicket } from '../../../lib/offlineStore'
 import { loadProductSalesStatsFromSupabase } from '../../../services/posService'
 import type {
   AppliedDiscount,
   CashSession,
+  Discount,
   PaymentMethod,
   ProductLineSelection,
   ProductSalesStat,
@@ -36,6 +38,8 @@ export type ProductDialogState = {
 }
 
 type Options = {
+  discounts: Discount[]
+  discountSchedule: Omit<DiscountScheduleContext, 'now'>
   catalog: CatalogData | null
   cashSession: CashSession | null
   context: TenantContext | null
@@ -60,6 +64,29 @@ export function useQuickSale(options: Options) {
   const [cashPaymentOpen, setCashPaymentOpen] = useState(false)
   const [discountModalOpen, setDiscountModalOpen] = useState(false)
   const [paidFeedback, setPaidFeedback] = useState<PaymentMethod | null>(null)
+  const activeDiscount = resolveTicketDiscount(
+    discount,
+    options.discounts,
+    options.context?.venueId ?? '',
+    options.discountSchedule,
+  )
+
+  const activePromotionId = activeDiscount?.ruleKind === 'promotion'
+    ? activeDiscount.discountId ?? activeDiscount.name
+    : null
+  const activePromotionName = activeDiscount?.ruleKind === 'promotion' ? activeDiscount.name : null
+
+  const previousPromotionRef = useRef<{ id: string; name: string } | null>(null)
+  useEffect(() => {
+    const previous = previousPromotionRef.current
+    if (previous && !activePromotionId) {
+      sileo.info({ title: `${previous.name} ha dejado de estar disponible` })
+    }
+    previousPromotionRef.current = activePromotionId && activePromotionName
+      ? { id: activePromotionId, name: activePromotionName }
+      : null
+  }, [activePromotionId, activePromotionName])
+
 
   const persistLines = useCallback((nextLines: TicketLine[]) => {
     setLines(nextLines)
@@ -74,7 +101,7 @@ export function useQuickSale(options: Options) {
     context: options.context,
     cashSession: options.cashSession,
     lines,
-    discount,
+    discount: activeDiscount,
     ledger: options.ledger,
     tickets: options.tickets,
     isOnline: options.isOnline,
@@ -133,8 +160,8 @@ export function useQuickSale(options: Options) {
   }, [options])
   const subtotalCents = useMemo(() => getTicketTotal(lines), [lines])
   const discountCalculation = useMemo(
-    () => calculateAppliedDiscount(subtotalCents, discount),
-    [discount, subtotalCents],
+    () => calculateDiscountForLines(lines.map((line) => ({ ...line, grossCents: getLineTotal(line) })), activeDiscount),
+    [activeDiscount, lines],
   )
 
   const reset = useCallback((nextLines: TicketLine[] = []) => {
@@ -160,10 +187,11 @@ export function useQuickSale(options: Options) {
     closeDiscountModal: () => setDiscountModalOpen(false),
     closeProductDialog: () => setProductDialog(null),
     completePayment,
-    discount,
+    discount: activeDiscount,
     discountAmountCents: discountCalculation.discountAmountCents,
     discountModalOpen,
     hydrate: (nextLines: TicketLine[]) => setLines(nextLines),
+    lineDiscounts: discountCalculation.lineAllocations,
     lines,
     openCashPayment: () => setCashPaymentOpen(true),
     openDiscountModal: () => setDiscountModalOpen(true),

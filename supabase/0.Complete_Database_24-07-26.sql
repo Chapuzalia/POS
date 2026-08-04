@@ -11786,7 +11786,6 @@ create table public.inventory_stock_levels (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (warehouse_id, product_id),
-  constraint inventory_stock_levels_quantity_check check (quantity >= 0),
   constraint inventory_stock_levels_warehouse_scope_fk
     foreign key (warehouse_id, tenant_id, venue_id)
     references public.inventory_warehouses(id, tenant_id, venue_id)
@@ -12330,7 +12329,6 @@ create table public.inventory_stock_movements (
   constraint inventory_stock_movements_delta_check
     check (
       stock_quantity_delta < 0
-      and stock_quantity_after >= 0
       and stock_quantity_before + stock_quantity_delta = stock_quantity_after
     )
 );
@@ -12593,6 +12591,8 @@ declare
   v_remaining numeric(18, 6);
   v_take numeric(18, 6);
   v_stock record;
+  v_overflow_warehouse_id uuid;
+  v_overflow_quantity numeric(18, 6);
 begin
   if p_product_id is null
     or coalesce(p_sold_quantity, 0) <= 0
@@ -12710,12 +12710,76 @@ begin
     exit when v_remaining <= 0;
   end loop;
 
-  if v_remaining > 0 then
-    raise exception 'INVENTORY_INSUFFICIENT_STOCK product=% missing=%',
-      p_product_id,
-      v_remaining
-      using errcode = 'P0001';
-  end if;
+  if v_remaining <= 0 then return; end if;
+
+  select w.id into v_overflow_warehouse_id
+  from public.inventory_warehouses w
+  where w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id
+    and w.is_active = true
+  order by w.sort_order, w.name, w.id
+  limit 1;
+
+  if v_overflow_warehouse_id is null then return; end if;
+
+  insert into public.inventory_stock_levels (
+    warehouse_id,
+    product_id,
+    tenant_id,
+    venue_id,
+    quantity
+  )
+  values (
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_tenant_id,
+    p_venue_id,
+    0
+  )
+  on conflict (warehouse_id, product_id) do nothing;
+
+  select l.quantity into v_overflow_quantity
+  from public.inventory_stock_levels l
+  where l.warehouse_id = v_overflow_warehouse_id
+    and l.product_id = p_product_id
+  for update;
+
+  update public.inventory_stock_levels
+  set quantity = quantity - v_remaining,
+      updated_at = now()
+  where warehouse_id = v_overflow_warehouse_id
+    and product_id = p_product_id;
+
+  insert into public.inventory_stock_movements (
+    tenant_id,
+    venue_id,
+    warehouse_id,
+    product_id,
+    ticket_line_id,
+    sale_format_id,
+    source_type,
+    stock_quantity_delta,
+    stock_quantity_before,
+    stock_quantity_after,
+    format_consumption_quantity,
+    sold_quantity,
+    content_unit_id
+  )
+  values (
+    p_tenant_id,
+    p_venue_id,
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_ticket_line_id,
+    v_sale_format_id,
+    p_source_type,
+    -v_remaining,
+    v_overflow_quantity,
+    v_overflow_quantity - v_remaining,
+    v_format_quantity,
+    p_sold_quantity,
+    v_content_unit_id
+  );
 end;
 $$;
 
@@ -13349,6 +13413,8 @@ declare
   v_remaining numeric(18, 6);
   v_take numeric(18, 6);
   v_stock record;
+  v_overflow_warehouse_id uuid;
+  v_overflow_quantity numeric(18, 6);
 begin
   if p_product_id is null
     or coalesce(p_sold_quantity, 0) <= 0
@@ -13473,12 +13539,76 @@ begin
     exit when v_remaining <= 0;
   end loop;
 
-  if v_remaining > 0 then
-    raise exception 'INVENTORY_INSUFFICIENT_STOCK product=% missing=%',
-      p_product_id,
-      v_remaining
-      using errcode = 'P0001';
-  end if;
+  if v_remaining <= 0 then return; end if;
+
+  select w.id into v_overflow_warehouse_id
+  from public.inventory_warehouses w
+  where w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id
+    and w.is_active = true
+  order by w.sort_order, w.name, w.id
+  limit 1;
+
+  if v_overflow_warehouse_id is null then return; end if;
+
+  insert into public.inventory_stock_levels (
+    warehouse_id,
+    product_id,
+    tenant_id,
+    venue_id,
+    quantity
+  )
+  values (
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_tenant_id,
+    p_venue_id,
+    0
+  )
+  on conflict (warehouse_id, product_id) do nothing;
+
+  select l.quantity into v_overflow_quantity
+  from public.inventory_stock_levels l
+  where l.warehouse_id = v_overflow_warehouse_id
+    and l.product_id = p_product_id
+  for update;
+
+  update public.inventory_stock_levels
+  set quantity = quantity - v_remaining,
+      updated_at = now()
+  where warehouse_id = v_overflow_warehouse_id
+    and product_id = p_product_id;
+
+  insert into public.inventory_stock_movements (
+    tenant_id,
+    venue_id,
+    warehouse_id,
+    product_id,
+    ticket_line_id,
+    sale_format_id,
+    source_type,
+    stock_quantity_delta,
+    stock_quantity_before,
+    stock_quantity_after,
+    format_consumption_quantity,
+    sold_quantity,
+    content_unit_id
+  )
+  values (
+    p_tenant_id,
+    p_venue_id,
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_ticket_line_id,
+    v_sale_format_id,
+    p_source_type,
+    -v_remaining,
+    v_overflow_quantity,
+    v_overflow_quantity - v_remaining,
+    v_format_quantity,
+    p_sold_quantity,
+    v_content_unit_id
+  );
 end;
 $$;
 
@@ -13831,3 +13961,2033 @@ revoke execute on function public.set_inventory_product_stock(
 revoke execute on function public.set_inventory_product_stock(
   uuid, uuid, uuid, uuid, numeric, uuid, jsonb
 ) from authenticated;
+
+-- Upgrade block: 20260802120000_add_discount_promotions.sql
+-- Unified discounts and scheduled promotions.
+-- Existing rows remain manual, general discounts through safe defaults.
+
+create schema if not exists extensions;
+create extension if not exists pgcrypto with schema extensions;
+
+alter table public.discounts
+  add column if not exists rule_kind text not null default 'discount',
+  add column if not exists scope text not null default 'general',
+  add column if not exists requires_pin boolean not null default false,
+  add column if not exists active_weekdays smallint[] not null default '{}'::smallint[],
+  add column if not exists starts_at time without time zone,
+  add column if not exists ends_at time without time zone,
+  add column if not exists auto_apply boolean not null default false;
+
+alter table public.discounts drop constraint if exists discounts_rule_kind_check;
+alter table public.discounts add constraint discounts_rule_kind_check
+  check (rule_kind in ('discount', 'promotion'));
+alter table public.discounts drop constraint if exists discounts_scope_check;
+alter table public.discounts add constraint discounts_scope_check
+  check (scope in ('general', 'specific'));
+alter table public.discounts drop constraint if exists discounts_schedule_check;
+alter table public.discounts add constraint discounts_schedule_check check (
+  (rule_kind = 'discount'
+    and cardinality(active_weekdays) = 0
+    and starts_at is null
+    and ends_at is null
+    and auto_apply = false)
+  or
+  (rule_kind = 'promotion'
+    and cardinality(active_weekdays) > 0
+    and active_weekdays <@ array[1,2,3,4,5,6,7]::smallint[]
+    and starts_at is not null
+    and ends_at is not null
+    and starts_at <> ends_at)
+);
+alter table public.discounts drop constraint if exists discounts_auto_pin_check;
+alter table public.discounts add constraint discounts_auto_pin_check
+  check (not (auto_apply and requires_pin));
+
+create table if not exists public.discount_targets (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  discount_id uuid not null references public.discounts(id) on delete cascade,
+  product_id uuid not null references public.products(id) on delete cascade,
+  variant_id uuid references public.product_variants(id) on delete cascade,
+  created_at timestamptz not null default now()
+);
+
+create unique index if not exists discount_targets_whole_product_unique
+  on public.discount_targets(discount_id, product_id) where variant_id is null;
+create unique index if not exists discount_targets_variant_unique
+  on public.discount_targets(discount_id, product_id, variant_id) where variant_id is not null;
+create index if not exists discount_targets_rule_idx
+  on public.discount_targets(tenant_id, venue_id, discount_id);
+create index if not exists discounts_active_rules_idx
+  on public.discounts(tenant_id, venue_id, is_active, rule_kind, auto_apply, sort_order);
+
+create table if not exists public.discount_secrets (
+  discount_id uuid primary key references public.discounts(id) on delete cascade,
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  pin_hash text not null,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.discount_pin_grants (
+  id uuid primary key default gen_random_uuid(),
+  discount_id uuid not null references public.discounts(id) on delete cascade,
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+create index if not exists discount_pin_grants_lookup_idx
+  on public.discount_pin_grants(user_id, discount_id, expires_at);
+
+alter table public.discount_targets enable row level security;
+alter table public.discount_secrets enable row level security;
+alter table public.discount_pin_grants enable row level security;
+
+drop policy if exists discount_targets_select on public.discount_targets;
+create policy discount_targets_select on public.discount_targets for select to authenticated
+  using (
+    public.user_is_tenant_admin(tenant_id)
+    or (
+      public.user_has_venue_access(tenant_id, venue_id)
+      and exists (
+        select 1 from public.discounts d
+        where d.id = discount_id and d.is_active
+      )
+    )
+  );
+drop policy if exists discount_targets_owner_manage on public.discount_targets;
+create policy discount_targets_owner_manage on public.discount_targets for all to authenticated
+  using (public.user_is_tenant_admin(tenant_id))
+  with check (public.user_is_tenant_admin(tenant_id));
+
+-- Intentionally no direct policies for secrets or one-use validation grants.
+revoke all on public.discount_secrets from anon, authenticated;
+revoke all on public.discount_pin_grants from anon, authenticated;
+
+alter table public.tickets
+  add column if not exists discount_rule_kind text,
+  add column if not exists discount_scope text,
+  add column if not exists discount_automatic boolean not null default false,
+  add column if not exists discount_snapshot jsonb;
+
+alter table public.ticket_lines
+  add column if not exists discount_amount_cents integer not null default 0,
+  add column if not exists net_total_cents integer;
+
+update public.ticket_lines
+set net_total_cents = line_total_cents - discount_amount_cents
+where net_total_cents is null;
+
+alter table public.ticket_lines alter column net_total_cents set not null;
+alter table public.ticket_lines drop constraint if exists ticket_lines_discount_amount_cents_check;
+alter table public.ticket_lines add constraint ticket_lines_discount_amount_cents_check
+  check (discount_amount_cents >= 0 and discount_amount_cents <= line_total_cents);
+alter table public.ticket_lines drop constraint if exists ticket_lines_net_total_cents_check;
+alter table public.ticket_lines add constraint ticket_lines_net_total_cents_check
+  check (net_total_cents = line_total_cents - discount_amount_cents);
+alter table public.ticket_lines drop constraint if exists ticket_lines_fiscal_snapshot_check;
+alter table public.ticket_lines add constraint ticket_lines_fiscal_snapshot_check check (
+  (tax_rate is null and taxable_base_cents is null and tax_amount_cents is null)
+  or (
+    tax_rate between 0 and 100
+    and taxable_base_cents >= 0
+    and tax_amount_cents >= 0
+    and taxable_base_cents + tax_amount_cents = net_total_cents
+  )
+);
+
+create or replace function public.discount_rule_is_active_at(
+  p_rule public.discounts,
+  p_timezone text,
+  p_day_change_time time without time zone,
+  p_at timestamptz default now()
+) returns boolean
+language plpgsql stable
+set search_path = ''
+as $$
+declare
+  local_at timestamp without time zone;
+  local_time time without time zone;
+  local_date date;
+  operational_date date;
+  schedule_date date;
+  overnight boolean;
+begin
+  if p_rule.rule_kind <> 'promotion' then return true; end if;
+  if cardinality(p_rule.active_weekdays) = 0
+    or p_rule.starts_at is null or p_rule.ends_at is null
+    or p_rule.starts_at = p_rule.ends_at then return false; end if;
+
+  local_at := p_at at time zone p_timezone;
+  local_time := local_at::time;
+  local_date := local_at::date;
+  operational_date := local_date - case
+    when local_time < coalesce(p_day_change_time, '00:00'::time) then 1 else 0 end;
+  overnight := p_rule.ends_at < p_rule.starts_at;
+
+  if overnight then
+    if not (local_time >= p_rule.starts_at or local_time < p_rule.ends_at) then return false; end if;
+    schedule_date := case
+      when local_time < p_rule.ends_at then least(operational_date, local_date - 1)
+      else operational_date
+    end;
+  else
+    if not (local_time >= p_rule.starts_at and local_time < p_rule.ends_at) then return false; end if;
+    schedule_date := operational_date;
+  end if;
+
+  return extract(isodow from schedule_date)::smallint = any(p_rule.active_weekdays);
+end;
+$$;
+
+create or replace function public.upsert_discount_rule(
+  p_discount_id uuid,
+  p_venue_id uuid,
+  p_input jsonb,
+  p_pin text default null
+) returns uuid
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  tenant_id_value uuid;
+  rule_id uuid := coalesce(p_discount_id, gen_random_uuid());
+  rule_kind_value text := coalesce(p_input ->> 'ruleKind', 'discount');
+  scope_value text := coalesce(p_input ->> 'scope', 'general');
+  requires_pin_value boolean := coalesce((p_input ->> 'requiresPin')::boolean, false);
+  auto_apply_value boolean := coalesce((p_input ->> 'autoApply')::boolean, false);
+  target jsonb;
+  product_id_value uuid;
+  variant_id_value uuid;
+begin
+  select v.tenant_id into tenant_id_value
+  from public.venues v where v.id = p_venue_id;
+  if tenant_id_value is null or not public.user_is_tenant_admin(tenant_id_value) then
+    raise exception 'No se puede administrar esta regla' using errcode = '42501';
+  end if;
+  if nullif(btrim(p_input ->> 'name'), '') is null then raise exception 'El nombre es obligatorio'; end if;
+  if p_input ->> 'type' not in ('percentage', 'fixed') then raise exception 'Tipo de descuento no válido'; end if;
+  if (p_input ->> 'value')::numeric <= 0
+    or (p_input ->> 'type' = 'percentage' and (p_input ->> 'value')::numeric > 100) then
+    raise exception 'Valor de descuento no válido';
+  end if;
+  if rule_kind_value not in ('discount', 'promotion') or scope_value not in ('general', 'specific') then
+    raise exception 'Tipo o ámbito de regla no válido';
+  end if;
+  if auto_apply_value and (rule_kind_value <> 'promotion' or requires_pin_value) then
+    raise exception 'Una promoción automática no puede requerir PIN';
+  end if;
+  if rule_kind_value = 'promotion' and (
+    jsonb_array_length(coalesce(p_input -> 'activeWeekdays', '[]'::jsonb)) = 0
+    or nullif(p_input ->> 'startsAt', '') is null
+    or nullif(p_input ->> 'endsAt', '') is null
+    or (p_input ->> 'startsAt')::time = (p_input ->> 'endsAt')::time
+  ) then raise exception 'La programación de la promoción no es válida'; end if;
+  if requires_pin_value and p_pin is not null and p_pin !~ '^[0-9]{4,8}$' then
+    raise exception 'El PIN debe contener entre 4 y 8 dígitos';
+  end if;
+  if p_discount_id is not null and not exists (
+    select 1 from public.discounts d
+    where d.id = p_discount_id and d.tenant_id = tenant_id_value and d.venue_id = p_venue_id
+  ) then raise exception 'La regla no existe en este local' using errcode = '42501'; end if;
+
+  insert into public.discounts (
+    id, tenant_id, venue_id, name, type, value, rounding_increment_cents,
+    color, is_active, rule_kind, scope, requires_pin, active_weekdays,
+    starts_at, ends_at, auto_apply, sort_order
+  ) values (
+    rule_id, tenant_id_value, p_venue_id, btrim(p_input ->> 'name'),
+    p_input ->> 'type', (p_input ->> 'value')::numeric,
+    nullif(p_input ->> 'roundingIncrementCents', '')::integer,
+    nullif(p_input ->> 'color', ''), coalesce((p_input ->> 'isActive')::boolean, true),
+    rule_kind_value, scope_value, requires_pin_value,
+    case when rule_kind_value = 'promotion' then
+      array(select jsonb_array_elements_text(p_input -> 'activeWeekdays')::smallint)
+      else '{}'::smallint[] end,
+    case when rule_kind_value = 'promotion' then (p_input ->> 'startsAt')::time else null end,
+    case when rule_kind_value = 'promotion' then (p_input ->> 'endsAt')::time else null end,
+    case when rule_kind_value = 'promotion' then auto_apply_value else false end,
+    0
+  )
+  on conflict (id) do update set
+    name = excluded.name,
+    type = excluded.type,
+    value = excluded.value,
+    rounding_increment_cents = excluded.rounding_increment_cents,
+    color = excluded.color,
+    is_active = excluded.is_active,
+    rule_kind = excluded.rule_kind,
+    scope = excluded.scope,
+    requires_pin = excluded.requires_pin,
+    active_weekdays = excluded.active_weekdays,
+    starts_at = excluded.starts_at,
+    ends_at = excluded.ends_at,
+    auto_apply = excluded.auto_apply,
+    updated_at = now();
+
+  delete from public.discount_targets where discount_id = rule_id;
+  if scope_value = 'specific' then
+    if jsonb_typeof(p_input -> 'targets') is distinct from 'array'
+      or jsonb_array_length(p_input -> 'targets') = 0 then
+      raise exception 'Selecciona al menos un producto o variante';
+    end if;
+    for target in select value from jsonb_array_elements(p_input -> 'targets')
+    loop
+      product_id_value := (target ->> 'productId')::uuid;
+      variant_id_value := nullif(target ->> 'variantId', '')::uuid;
+      if not exists (
+        select 1 from public.products p
+        where p.id = product_id_value and p.tenant_id = tenant_id_value and p.venue_id = p_venue_id
+      ) then raise exception 'Producto no válido para este local'; end if;
+      if variant_id_value is not null and not exists (
+        select 1 from public.product_variants pv
+        where pv.id = variant_id_value and pv.product_id = product_id_value
+          and pv.tenant_id = tenant_id_value and pv.venue_id = p_venue_id
+      ) then raise exception 'Variante no válida para este producto'; end if;
+      insert into public.discount_targets(tenant_id, venue_id, discount_id, product_id, variant_id)
+      values (tenant_id_value, p_venue_id, rule_id, product_id_value, variant_id_value)
+      on conflict do nothing;
+    end loop;
+  end if;
+
+  if not requires_pin_value then
+    delete from public.discount_secrets where discount_id = rule_id;
+  elsif p_pin is not null then
+    insert into public.discount_secrets(discount_id, tenant_id, venue_id, pin_hash, updated_at)
+    values (rule_id, tenant_id_value, p_venue_id, extensions.crypt(p_pin, extensions.gen_salt('bf', 10)), now())
+    on conflict (discount_id) do update
+      set pin_hash = excluded.pin_hash, updated_at = now();
+  elsif not exists (select 1 from public.discount_secrets where discount_id = rule_id) then
+    raise exception 'Configura un PIN de entre 4 y 8 dígitos';
+  end if;
+
+  return rule_id;
+end;
+$$;
+
+create or replace function public.validate_discount_pin(
+  p_discount_id uuid,
+  p_pin text
+) returns boolean
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  rule_row public.discounts%rowtype;
+  secret_hash text;
+begin
+  if p_pin !~ '^[0-9]{4,8}$' then return false; end if;
+  select d.* into rule_row from public.discounts d where d.id = p_discount_id;
+  if rule_row.id is null or not rule_row.is_active or not rule_row.requires_pin
+    or not public.user_has_venue_access(rule_row.tenant_id, rule_row.venue_id) then return false; end if;
+  select s.pin_hash into secret_hash from public.discount_secrets s where s.discount_id = p_discount_id;
+  if secret_hash is null or extensions.crypt(p_pin, secret_hash) <> secret_hash then return false; end if;
+
+  delete from public.discount_pin_grants
+  where user_id = auth.uid() and discount_id = p_discount_id;
+  insert into public.discount_pin_grants(discount_id, tenant_id, venue_id, user_id, expires_at)
+  values (p_discount_id, rule_row.tenant_id, rule_row.venue_id, auth.uid(), now() + interval '5 minutes');
+  return true;
+end;
+$$;
+
+create or replace function public.resolve_ticket_discount_for_lines(
+  p_tenant_id uuid,
+  p_venue_id uuid,
+  p_lines jsonb,
+  p_discount jsonb default null,
+  p_at timestamptz default now()
+) returns jsonb
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  configured public.discounts%rowtype;
+  venue_row public.venues%rowtype;
+  line_record record;
+  selected_id uuid;
+  subtotal_cents integer := 0;
+  eligible_subtotal integer := 0;
+  requested_amount integer := 0;
+  amount_cents integer := 0;
+  eligible_net integer := 0;
+  remaining_gross integer;
+  remaining_net integer;
+  line_gross integer;
+  line_net integer;
+  line_eligible boolean;
+  allocations jsonb := '[]'::jsonb;
+  targets_snapshot jsonb := '[]'::jsonb;
+  snapshot_type text;
+  calculation_type text;
+  snapshot_name text;
+  snapshot_value numeric;
+  fixed_value_cents integer;
+  rounding_increment integer;
+  grant_id uuid;
+begin
+  if jsonb_typeof(p_lines) is distinct from 'array' then raise exception 'Las líneas del descuento no son válidas'; end if;
+  select v.* into venue_row from public.venues v
+  where v.id = p_venue_id and v.tenant_id = p_tenant_id;
+  if venue_row.id is null then raise exception 'Local no válido' using errcode = '42501'; end if;
+
+  select d.* into configured
+  from public.discounts d
+  where d.tenant_id = p_tenant_id and d.venue_id = p_venue_id
+    and d.is_active and d.rule_kind = 'promotion' and d.auto_apply
+    and public.discount_rule_is_active_at(d, venue_row.timezone, venue_row.day_change_time, p_at)
+  order by d.sort_order, d.name, d.id
+  limit 1;
+
+  if configured.id is null and p_discount is not null and jsonb_typeof(p_discount) = 'object'
+    and nullif(p_discount ->> 'discountId', '') is not null then
+    selected_id := (p_discount ->> 'discountId')::uuid;
+    select d.* into configured from public.discounts d
+    where d.id = selected_id and d.tenant_id = p_tenant_id
+      and d.venue_id = p_venue_id and d.is_active;
+    if configured.id is null then raise exception 'El descuento configurado ya no está disponible'; end if;
+    if configured.rule_kind = 'promotion'
+      and not public.discount_rule_is_active_at(configured, venue_row.timezone, venue_row.day_change_time, p_at) then
+      raise exception 'La promoción ha dejado de estar disponible';
+    end if;
+  end if;
+
+  if configured.id is not null then
+    if configured.requires_pin then
+      delete from public.discount_pin_grants g
+      where g.id = (
+        select g2.id from public.discount_pin_grants g2
+        where g2.user_id = auth.uid() and g2.discount_id = configured.id and g2.expires_at > now()
+        order by g2.created_at desc limit 1
+      )
+      returning g.id into grant_id;
+      if grant_id is null then raise exception 'La validación del PIN ha caducado'; end if;
+    end if;
+    snapshot_type := configured.type;
+    calculation_type := configured.type;
+    snapshot_name := configured.name;
+    snapshot_value := configured.value;
+    fixed_value_cents := round(configured.value * 100)::integer;
+    rounding_increment := configured.rounding_increment_cents;
+    select coalesce(jsonb_agg(jsonb_build_object(
+      'productId', t.product_id,
+      'variantId', t.variant_id
+    ) order by t.product_id, t.variant_id), '[]'::jsonb)
+    into targets_snapshot from public.discount_targets t where t.discount_id = configured.id;
+  elsif p_discount is not null and p_discount ->> 'type' = 'manual' then
+    if not venue_row.manual_discount_enabled then raise exception 'El descuento manual no está permitido'; end if;
+    snapshot_type := 'manual';
+    calculation_type := p_discount ->> 'calculationType';
+    snapshot_name := coalesce(nullif(btrim(p_discount ->> 'name'), ''), 'Descuento manual');
+    if calculation_type not in ('percentage', 'fixed') then raise exception 'Tipo de descuento no válido'; end if;
+    if calculation_type = 'fixed' then
+      fixed_value_cents := (p_discount ->> 'value')::integer;
+      snapshot_value := fixed_value_cents::numeric / 100;
+    else snapshot_value := (p_discount ->> 'value')::numeric; end if;
+  end if;
+
+  for line_record in select value, ordinality from jsonb_array_elements(p_lines) with ordinality
+  loop
+    line_gross := (line_record.value ->> 'grossCents')::integer;
+    if line_gross < 0 then raise exception 'Importe de línea no válido'; end if;
+    subtotal_cents := subtotal_cents + line_gross;
+    line_eligible := configured.id is null
+      or configured.scope = 'general'
+      or exists (
+        select 1 from public.discount_targets t
+        where t.discount_id = configured.id
+          and t.product_id = nullif(line_record.value ->> 'productId', '')::uuid
+          and (t.variant_id is null or t.variant_id = nullif(line_record.value ->> 'variantId', '')::uuid)
+      );
+    if snapshot_type is not null and line_eligible then eligible_subtotal := eligible_subtotal + line_gross; end if;
+  end loop;
+
+  if snapshot_type is not null then
+    if calculation_type = 'percentage' then
+      if snapshot_value <= 0 or snapshot_value > 100 then raise exception 'Porcentaje no válido'; end if;
+      requested_amount := round(eligible_subtotal * snapshot_value / 100)::integer;
+    else
+      if fixed_value_cents <= 0 then raise exception 'Importe fijo no válido'; end if;
+      requested_amount := fixed_value_cents;
+    end if;
+    amount_cents := least(eligible_subtotal, requested_amount);
+    eligible_net := eligible_subtotal - amount_cents;
+    if rounding_increment is not null then
+      eligible_net := least(eligible_subtotal, greatest(0,
+        round(eligible_net::numeric / rounding_increment)::integer * rounding_increment));
+      amount_cents := eligible_subtotal - eligible_net;
+    end if;
+  end if;
+
+  remaining_gross := eligible_subtotal;
+  remaining_net := eligible_net;
+  for line_record in select value, ordinality from jsonb_array_elements(p_lines) with ordinality
+  loop
+    line_gross := (line_record.value ->> 'grossCents')::integer;
+    line_eligible := snapshot_type is not null and (
+      configured.id is null
+      or configured.scope = 'general'
+      or exists (
+        select 1 from public.discount_targets t
+        where t.discount_id = configured.id
+          and t.product_id = nullif(line_record.value ->> 'productId', '')::uuid
+          and (t.variant_id is null or t.variant_id = nullif(line_record.value ->> 'variantId', '')::uuid)
+      )
+    );
+    if line_eligible then
+      line_net := case when remaining_gross <= 0 then 0
+        else round(line_gross::numeric * remaining_net / remaining_gross)::integer end;
+      remaining_gross := remaining_gross - line_gross;
+      remaining_net := remaining_net - line_net;
+    else line_net := line_gross; end if;
+    allocations := allocations || jsonb_build_array(jsonb_build_object(
+      'index', line_record.ordinality - 1,
+      'lineId', line_record.value ->> 'lineId',
+      'eligible', line_eligible,
+      'grossCents', line_gross,
+      'discountAmountCents', line_gross - line_net,
+      'netCents', line_net
+    ));
+  end loop;
+
+  return jsonb_build_object(
+    'discountId', configured.id,
+    'name', snapshot_name,
+    'type', snapshot_type,
+    'calculationType', calculation_type,
+    'value', case when calculation_type = 'fixed' then fixed_value_cents else snapshot_value end,
+    'storedValue', snapshot_value,
+    'roundingIncrementCents', rounding_increment,
+    'ruleKind', coalesce(configured.rule_kind, 'discount'),
+    'scope', coalesce(configured.scope, 'general'),
+    'targets', targets_snapshot,
+    'automatic', coalesce(configured.auto_apply, false),
+    'eligibleSubtotalCents', eligible_subtotal,
+    'amountCents', amount_cents,
+    'totalCents', subtotal_cents - amount_cents,
+    'lineAllocations', allocations
+  );
+end;
+$$;
+
+-- Backward-compatible entry point. New clients include authoritative line inputs.
+create or replace function public.resolve_ticket_discount(
+  p_tenant_id uuid,
+  p_venue_id uuid,
+  p_subtotal_cents integer,
+  p_discount jsonb default null
+) returns jsonb
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  lines jsonb;
+  result jsonb;
+begin
+  lines := case
+    when jsonb_typeof(p_discount -> 'calculationLines') = 'array'
+      then p_discount -> 'calculationLines'
+    else jsonb_build_array(jsonb_build_object(
+      'productId', null, 'variantId', null, 'grossCents', p_subtotal_cents
+    ))
+  end;
+  result := public.resolve_ticket_discount_for_lines(
+    p_tenant_id, p_venue_id, lines, p_discount, now()
+  );
+  if (result ->> 'totalCents')::integer + (result ->> 'amountCents')::integer <> p_subtotal_cents then
+    raise exception 'Las líneas del descuento no coinciden con el subtotal';
+  end if;
+  return result;
+end;
+$$;
+
+create or replace function public.capture_ticket_discount_snapshot()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  rule_row public.discounts%rowtype;
+  targets jsonb := '[]'::jsonb;
+begin
+  if new.discount_type is null then
+    new.discount_rule_kind := null;
+    new.discount_scope := null;
+    new.discount_automatic := false;
+    new.discount_snapshot := null;
+    return new;
+  end if;
+  if new.discount_id is not null then
+    select d.* into rule_row from public.discounts d where d.id = new.discount_id;
+    select coalesce(jsonb_agg(jsonb_build_object('productId', t.product_id, 'variantId', t.variant_id)), '[]'::jsonb)
+    into targets from public.discount_targets t where t.discount_id = new.discount_id;
+    new.discount_rounding_increment_cents := rule_row.rounding_increment_cents;
+  end if;
+  new.discount_rule_kind := coalesce(rule_row.rule_kind, 'discount');
+  new.discount_scope := coalesce(rule_row.scope, 'general');
+  new.discount_automatic := coalesce(rule_row.auto_apply, false);
+  new.discount_snapshot := jsonb_build_object(
+    'discountId', new.discount_id,
+    'name', new.discount_name,
+    'type', new.discount_type,
+    'calculationType', new.discount_value_type,
+    'storedValue', new.discount_value,
+    'amountCents', new.discount_amount_cents,
+    'roundingIncrementCents', new.discount_rounding_increment_cents,
+    'ruleKind', new.discount_rule_kind,
+    'scope', new.discount_scope,
+    'targets', targets,
+    'automatic', new.discount_automatic,
+    'activeWeekdays', coalesce(to_jsonb(rule_row.active_weekdays), '[]'::jsonb),
+    'startsAt', rule_row.starts_at,
+    'endsAt', rule_row.ends_at
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists capture_ticket_discount_snapshot_trigger on public.tickets;
+create trigger capture_ticket_discount_snapshot_trigger
+before insert on public.tickets
+for each row execute function public.capture_ticket_discount_snapshot();
+
+create or replace function public.allocate_inserted_ticket_line_discounts()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+declare
+  ticket_row public.tickets%rowtype;
+  ticket_id_value uuid;
+  line_row public.ticket_lines%rowtype;
+  eligible_total integer;
+  remaining_gross integer;
+  remaining_net integer;
+  line_net integer;
+  eligible boolean;
+begin
+  for ticket_id_value in select distinct n.ticket_id from new_ticket_lines n
+  loop
+    select t.* into ticket_row from public.tickets t where t.id = ticket_id_value;
+    if coalesce(ticket_row.discount_amount_cents, 0) = 0 then
+      update public.ticket_lines set discount_amount_cents = 0, net_total_cents = line_total_cents
+      where ticket_id = ticket_id_value;
+      continue;
+    end if;
+    select coalesce(sum(tl.line_total_cents), 0)::integer into eligible_total
+    from public.ticket_lines tl
+    where tl.ticket_id = ticket_id_value and (
+      coalesce(ticket_row.discount_scope, 'general') = 'general'
+      or exists (
+        select 1 from jsonb_array_elements(coalesce(ticket_row.discount_snapshot -> 'targets', '[]'::jsonb)) target
+        where target ->> 'productId' = tl.product_id::text
+          and (target ->> 'variantId' is null or target ->> 'variantId' = tl.variant_id::text)
+      )
+    );
+    if ticket_row.discount_amount_cents > eligible_total then
+      raise exception 'El descuento supera el subtotal elegible';
+    end if;
+    remaining_gross := eligible_total;
+    remaining_net := eligible_total - ticket_row.discount_amount_cents;
+    for line_row in select * from public.ticket_lines where ticket_id = ticket_id_value order by created_at, id
+    loop
+      eligible := coalesce(ticket_row.discount_scope, 'general') = 'general'
+        or exists (
+          select 1 from jsonb_array_elements(coalesce(ticket_row.discount_snapshot -> 'targets', '[]'::jsonb)) target
+          where target ->> 'productId' = line_row.product_id::text
+            and (target ->> 'variantId' is null or target ->> 'variantId' = line_row.variant_id::text)
+        );
+      if eligible then
+        line_net := case when remaining_gross <= 0 then 0
+          else round(line_row.line_total_cents::numeric * remaining_net / remaining_gross)::integer end;
+        remaining_gross := remaining_gross - line_row.line_total_cents;
+        remaining_net := remaining_net - line_net;
+      else line_net := line_row.line_total_cents; end if;
+      update public.ticket_lines
+      set net_total_cents = line_net,
+          discount_amount_cents = line_total_cents - line_net
+      where id = line_row.id;
+    end loop;
+  end loop;
+  return null;
+end;
+$$;
+
+drop trigger if exists allocate_inserted_ticket_line_discounts_trigger on public.ticket_lines;
+create trigger allocate_inserted_ticket_line_discounts_trigger
+after insert on public.ticket_lines
+referencing new table as new_ticket_lines
+for each statement execute function public.allocate_inserted_ticket_line_discounts();
+
+revoke all on function public.upsert_discount_rule(uuid, uuid, jsonb, text) from public;
+grant execute on function public.upsert_discount_rule(uuid, uuid, jsonb, text) to authenticated;
+revoke all on function public.validate_discount_pin(uuid, text) from public;
+grant execute on function public.validate_discount_pin(uuid, text) to authenticated;
+revoke all on function public.resolve_ticket_discount_for_lines(uuid, uuid, jsonb, jsonb, timestamptz) from public;
+grant execute on function public.resolve_ticket_discount_for_lines(uuid, uuid, jsonb, jsonb, timestamptz) to authenticated;
+
+
+
+-- Upgrade block: optional PIN for the free-form manual discount.
+-- Optional PIN protection for the free-form manual discount.
+
+alter table public.venues
+  add column if not exists manual_discount_requires_pin boolean not null default false;
+
+create table if not exists public.manual_discount_secrets (
+  venue_id uuid primary key references public.venues(id) on delete cascade,
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  pin_hash text not null,
+  updated_at timestamptz not null default now()
+);
+
+create table if not exists public.manual_discount_pin_grants (
+  id uuid primary key default gen_random_uuid(),
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  user_id uuid not null references auth.users(id) on delete cascade,
+  expires_at timestamptz not null,
+  created_at timestamptz not null default now()
+);
+
+create index if not exists manual_discount_pin_grants_lookup_idx
+  on public.manual_discount_pin_grants(user_id, venue_id, expires_at);
+
+alter table public.manual_discount_secrets enable row level security;
+alter table public.manual_discount_pin_grants enable row level security;
+
+-- Secrets and grants are available only through the security-definer functions below.
+revoke all on public.manual_discount_secrets from anon, authenticated;
+revoke all on public.manual_discount_pin_grants from anon, authenticated;
+
+create or replace function public.update_manual_discount_settings(
+  p_venue_id uuid,
+  p_enabled boolean,
+  p_requires_pin boolean,
+  p_pin text default null
+) returns void
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  tenant_id_value uuid;
+begin
+  select v.tenant_id into tenant_id_value
+  from public.venues v
+  where v.id = p_venue_id;
+
+  if tenant_id_value is null or not public.user_is_tenant_admin(tenant_id_value) then
+    raise exception 'No puedes configurar el descuento manual de este local' using errcode = '42501';
+  end if;
+
+  if p_pin is not null and p_pin !~ '^[0-9]{4,8}$' then
+    raise exception 'El PIN debe contener entre 4 y 8 dígitos';
+  end if;
+
+  if not p_requires_pin then
+    delete from public.manual_discount_secrets where venue_id = p_venue_id;
+  elsif p_pin is not null then
+    insert into public.manual_discount_secrets(venue_id, tenant_id, pin_hash, updated_at)
+    values (
+      p_venue_id,
+      tenant_id_value,
+      extensions.crypt(p_pin, extensions.gen_salt('bf', 10)),
+      now()
+    )
+    on conflict (venue_id) do update
+      set pin_hash = excluded.pin_hash,
+          tenant_id = excluded.tenant_id,
+          updated_at = now();
+  elsif not exists (
+    select 1 from public.manual_discount_secrets s where s.venue_id = p_venue_id
+  ) then
+    raise exception 'Configura un PIN de entre 4 y 8 dígitos';
+  end if;
+
+  update public.venues
+  set manual_discount_enabled = p_enabled,
+      manual_discount_requires_pin = p_requires_pin,
+      updated_at = now()
+  where id = p_venue_id and tenant_id = tenant_id_value;
+end;
+$$;
+
+create or replace function public.validate_manual_discount_pin(
+  p_venue_id uuid,
+  p_pin text
+) returns boolean
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  venue_row public.venues%rowtype;
+  secret_hash text;
+begin
+  if p_pin !~ '^[0-9]{4,8}$' then return false; end if;
+
+  select v.* into venue_row
+  from public.venues v
+  where v.id = p_venue_id;
+
+  if venue_row.id is null
+    or not venue_row.manual_discount_enabled
+    or not venue_row.manual_discount_requires_pin
+    or not public.user_has_venue_access(venue_row.tenant_id, venue_row.id)
+  then
+    return false;
+  end if;
+
+  select s.pin_hash into secret_hash
+  from public.manual_discount_secrets s
+  where s.venue_id = p_venue_id;
+
+  if secret_hash is null or extensions.crypt(p_pin, secret_hash) <> secret_hash then
+    return false;
+  end if;
+
+  delete from public.manual_discount_pin_grants
+  where user_id = auth.uid() and venue_id = p_venue_id;
+
+  insert into public.manual_discount_pin_grants(venue_id, tenant_id, user_id, expires_at)
+  values (p_venue_id, venue_row.tenant_id, auth.uid(), now() + interval '5 minutes');
+
+  return true;
+end;
+$$;
+
+create or replace function public.enforce_manual_discount_pin()
+returns trigger
+language plpgsql security definer
+set search_path = ''
+as $$
+declare
+  requires_pin boolean;
+  grant_id uuid;
+begin
+  if new.discount_type is distinct from 'manual' then
+    return new;
+  end if;
+
+  select v.manual_discount_requires_pin into requires_pin
+  from public.venues v
+  where v.id = new.venue_id and v.tenant_id = new.tenant_id;
+
+  if coalesce(requires_pin, false) then
+    delete from public.manual_discount_pin_grants g
+    where g.id = (
+      select g2.id
+      from public.manual_discount_pin_grants g2
+      where g2.user_id = auth.uid()
+        and g2.venue_id = new.venue_id
+        and g2.tenant_id = new.tenant_id
+        and g2.expires_at > now()
+      order by g2.created_at desc
+      limit 1
+    )
+    returning g.id into grant_id;
+
+    if grant_id is null then
+      raise exception 'La validación del PIN del descuento manual ha caducado';
+    end if;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop trigger if exists enforce_manual_discount_pin_trigger on public.tickets;
+create trigger enforce_manual_discount_pin_trigger
+before insert on public.tickets
+for each row execute function public.enforce_manual_discount_pin();
+
+revoke all on function public.update_manual_discount_settings(uuid, boolean, boolean, text) from public;
+grant execute on function public.update_manual_discount_settings(uuid, boolean, boolean, text) to authenticated;
+revoke all on function public.validate_manual_discount_pin(uuid, text) from public;
+grant execute on function public.validate_manual_discount_pin(uuid, text) to authenticated;
+revoke all on function public.enforce_manual_discount_pin() from public;
+
+-- Ticket creation RPCs omit the per-line discount columns. Fill their valid
+-- gross defaults before constraints run, then let the allocation trigger
+-- distribute any ticket-level discount after the complete insert statement.
+create or replace function public.set_ticket_line_discount_defaults()
+returns trigger
+language plpgsql
+set search_path = ''
+as $$
+begin
+  new.discount_amount_cents := coalesce(new.discount_amount_cents, 0);
+  new.net_total_cents := coalesce(
+    new.net_total_cents,
+    new.line_total_cents - new.discount_amount_cents
+  );
+  return new;
+end;
+$$;
+
+drop trigger if exists set_ticket_line_discount_defaults_trigger
+  on public.ticket_lines;
+create trigger set_ticket_line_discount_defaults_trigger
+before insert on public.ticket_lines
+for each row execute function public.set_ticket_line_discount_defaults();
+
+revoke all on function public.set_ticket_line_discount_defaults() from public;
+
+-- Inventory warehouse routing by product and POS device.
++-- Configure which products belong to each warehouse and which warehouses each
+-- POS device may consume from. Device priority uses the lowest number first.
+
+alter table public.inventory_stock_levels
+  add column if not exists is_enabled boolean not null default true;
+
+do $$
+begin
+  if not exists (
+    select 1
+    from pg_constraint
+    where conrelid = 'public.devices'::regclass
+      and conname = 'devices_inventory_scope_unique'
+  ) then
+    alter table public.devices
+      add constraint devices_inventory_scope_unique
+      unique (id, tenant_id, venue_id);
+  end if;
+end;
+$$;
+
+create table if not exists public.inventory_device_warehouses (
+  device_id uuid not null,
+  warehouse_id uuid not null,
+  tenant_id uuid not null,
+  venue_id uuid not null,
+  is_enabled boolean not null default true,
+  priority integer not null default 1,
+  created_at timestamptz not null default now(),
+  updated_at timestamptz not null default now(),
+  primary key (device_id, warehouse_id),
+  constraint inventory_device_warehouses_priority_check
+    check (priority between 1 and 9999),
+  constraint inventory_device_warehouses_device_scope_fk
+    foreign key (device_id, tenant_id, venue_id)
+    references public.devices(id, tenant_id, venue_id)
+    on delete cascade,
+  constraint inventory_device_warehouses_warehouse_scope_fk
+    foreign key (warehouse_id, tenant_id, venue_id)
+    references public.inventory_warehouses(id, tenant_id, venue_id)
+    on delete cascade
+);
+
+create index if not exists inventory_device_warehouses_venue_idx
+  on public.inventory_device_warehouses
+  (tenant_id, venue_id, device_id, is_enabled, priority);
+
+drop trigger if exists set_inventory_device_warehouses_updated_at
+  on public.inventory_device_warehouses;
+create trigger set_inventory_device_warehouses_updated_at
+before update on public.inventory_device_warehouses
+for each row execute function public.set_updated_at();
+
+alter table public.inventory_device_warehouses enable row level security;
+
+drop policy if exists inventory_device_warehouses_select
+  on public.inventory_device_warehouses;
+create policy inventory_device_warehouses_select
+on public.inventory_device_warehouses
+for select
+to authenticated
+using (
+  public.user_is_tenant_admin(tenant_id)
+  or public.user_has_venue_access(tenant_id, venue_id)
+);
+
+revoke all on table public.inventory_device_warehouses from public, anon;
+grant select on table public.inventory_device_warehouses to authenticated;
+
+create or replace function public.set_inventory_device_warehouses(
+  p_tenant_id uuid,
+  p_venue_id uuid,
+  p_device_id uuid,
+  p_assignments jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_assignments jsonb := coalesce(p_assignments, '[]'::jsonb);
+  v_assignment jsonb;
+  v_assignment_count integer;
+  v_valid_warehouse_count integer;
+  v_warehouse_id uuid;
+  v_enabled boolean;
+  v_priority integer;
+begin
+  if not public.user_is_tenant_admin(p_tenant_id) then
+    raise exception 'INVENTORY_FORBIDDEN' using errcode = '42501';
+  end if;
+
+  if not exists (
+    select 1
+    from public.devices d
+    where d.id = p_device_id
+      and d.tenant_id = p_tenant_id
+      and d.venue_id = p_venue_id
+  ) then
+    raise exception 'INVENTORY_DEVICE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  if jsonb_typeof(v_assignments) <> 'array' then
+    raise exception 'INVENTORY_INVALID_DEVICE_WAREHOUSES' using errcode = '22023';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(v_assignments) item
+    where jsonb_typeof(item) <> 'object'
+      or nullif(btrim(item ->> 'warehouseId'), '') is null
+      or (item ->> 'warehouseId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      or coalesce(jsonb_typeof(item -> 'enabled'), 'null') <> 'boolean'
+      or coalesce(jsonb_typeof(item -> 'priority'), 'null') <> 'number'
+      or (item ->> 'priority')::numeric <> trunc((item ->> 'priority')::numeric)
+      or (item ->> 'priority')::numeric not between 1 and 9999
+  ) then
+    raise exception 'INVENTORY_INVALID_DEVICE_WAREHOUSES' using errcode = '22023';
+  end if;
+
+  select count(*) into v_assignment_count
+  from jsonb_array_elements(v_assignments);
+
+  if (
+    select count(distinct item ->> 'warehouseId')
+    from jsonb_array_elements(v_assignments) item
+  ) <> v_assignment_count then
+    raise exception 'INVENTORY_DUPLICATE_WAREHOUSE' using errcode = '22023';
+  end if;
+
+  if (
+    select count(distinct (item ->> 'priority')::integer)
+    from jsonb_array_elements(v_assignments) item
+    where (item ->> 'enabled')::boolean
+  ) <> (
+    select count(*)
+    from jsonb_array_elements(v_assignments) item
+    where (item ->> 'enabled')::boolean
+  ) then
+    raise exception 'INVENTORY_DUPLICATE_PRIORITY' using errcode = '22023';
+  end if;
+
+  select count(*) into v_valid_warehouse_count
+  from public.inventory_warehouses w
+  where w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id
+    and w.id in (
+      select (item ->> 'warehouseId')::uuid
+      from jsonb_array_elements(v_assignments) item
+    );
+
+  if v_valid_warehouse_count <> v_assignment_count then
+    raise exception 'INVENTORY_WAREHOUSE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  for v_assignment in
+    select item from jsonb_array_elements(v_assignments) item
+  loop
+    v_warehouse_id := (v_assignment ->> 'warehouseId')::uuid;
+    v_enabled := (v_assignment ->> 'enabled')::boolean;
+    v_priority := (v_assignment ->> 'priority')::integer;
+
+    insert into public.inventory_device_warehouses (
+      device_id,
+      warehouse_id,
+      tenant_id,
+      venue_id,
+      is_enabled,
+      priority
+    )
+    values (
+      p_device_id,
+      v_warehouse_id,
+      p_tenant_id,
+      p_venue_id,
+      v_enabled,
+      v_priority
+    )
+    on conflict (device_id, warehouse_id) do update
+    set is_enabled = excluded.is_enabled,
+        priority = excluded.priority,
+        updated_at = now();
+  end loop;
+
+  delete from public.inventory_device_warehouses dw
+  where dw.device_id = p_device_id
+    and dw.tenant_id = p_tenant_id
+    and dw.venue_id = p_venue_id
+    and not exists (
+      select 1
+      from jsonb_array_elements(v_assignments) item
+      where (item ->> 'warehouseId')::uuid = dw.warehouse_id
+    );
+end;
+$$;
+
+revoke all on function public.set_inventory_device_warehouses(
+  uuid,
+  uuid,
+  uuid,
+  jsonb
+) from public, anon;
+grant execute on function public.set_inventory_device_warehouses(
+  uuid,
+  uuid,
+  uuid,
+  jsonb
+) to authenticated;
+
+create or replace function public.set_inventory_product_stock(
+  p_tenant_id uuid,
+  p_venue_id uuid,
+  p_product_id uuid,
+  p_unit_id uuid,
+  p_levels jsonb
+)
+returns void
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_levels jsonb := coalesce(p_levels, '[]'::jsonb);
+  v_content_quantity numeric(18, 6);
+  v_content_unit_id uuid;
+  v_current_unit_id uuid;
+  v_level jsonb;
+  v_level_count integer;
+  v_valid_warehouse_count integer;
+  v_quantity numeric(18, 6);
+  v_warehouse_id uuid;
+  v_enabled boolean;
+begin
+  if not public.user_is_tenant_admin(p_tenant_id) then
+    raise exception 'INVENTORY_FORBIDDEN' using errcode = '42501';
+  end if;
+
+  if not exists (
+    select 1 from public.venues v
+    where v.id = p_venue_id and v.tenant_id = p_tenant_id
+  ) then
+    raise exception 'INVENTORY_VENUE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  if not exists (
+    select 1 from public.products p
+    where p.id = p_product_id
+      and p.tenant_id = p_tenant_id
+      and p.venue_id = p_venue_id
+  ) then
+    raise exception 'INVENTORY_PRODUCT_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  select u.content_quantity, u.content_unit_id
+  into v_content_quantity, v_content_unit_id
+  from public.inventory_units u
+  where u.id = p_unit_id
+    and u.tenant_id = p_tenant_id
+    and u.venue_id = p_venue_id
+    and u.is_active = true;
+
+  if v_content_unit_id is null then
+    raise exception 'INVENTORY_UNIT_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  if jsonb_typeof(v_levels) <> 'array' then
+    raise exception 'INVENTORY_INVALID_LEVELS' using errcode = '22023';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(v_levels) item
+    where jsonb_typeof(item) <> 'object'
+      or nullif(btrim(item ->> 'warehouseId'), '') is null
+      or (item ->> 'warehouseId') !~* '^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+      or jsonb_typeof(item -> 'quantity') <> 'number'
+      or (item ? 'enabled' and jsonb_typeof(item -> 'enabled') <> 'boolean')
+  ) then
+    raise exception 'INVENTORY_INVALID_LEVELS' using errcode = '22023';
+  end if;
+
+  select count(*) into v_level_count
+  from jsonb_array_elements(v_levels);
+
+  if (
+    select count(distinct item ->> 'warehouseId')
+    from jsonb_array_elements(v_levels) item
+  ) <> v_level_count then
+    raise exception 'INVENTORY_DUPLICATE_WAREHOUSE' using errcode = '22023';
+  end if;
+
+  select count(*) into v_valid_warehouse_count
+  from public.inventory_warehouses w
+  where w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id
+    and w.id in (
+      select (item ->> 'warehouseId')::uuid
+      from jsonb_array_elements(v_levels) item
+    );
+
+  if v_valid_warehouse_count <> v_level_count then
+    raise exception 'INVENTORY_WAREHOUSE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  if exists (
+    select 1
+    from jsonb_array_elements(v_levels) item
+    where (item ->> 'quantity')::numeric < 0
+      or round((item ->> 'quantity')::numeric, 6) <> (item ->> 'quantity')::numeric
+      or (item ->> 'quantity')::numeric > 999999999999.999999
+  ) then
+    raise exception 'INVENTORY_INVALID_QUANTITY' using errcode = '22023';
+  end if;
+
+  select s.unit_id into v_current_unit_id
+  from public.inventory_product_settings s
+  where s.product_id = p_product_id
+    and s.tenant_id = p_tenant_id
+    and s.venue_id = p_venue_id;
+
+  if v_current_unit_id is not null
+    and v_current_unit_id is distinct from p_unit_id
+    and exists (
+      select 1
+      from public.inventory_stock_levels l
+      where l.product_id = p_product_id
+        and l.tenant_id = p_tenant_id
+        and l.venue_id = p_venue_id
+        and l.quantity <> 0
+    )
+  then
+    raise exception 'INVENTORY_PACKAGE_CHANGE_WITH_STOCK' using errcode = '22023';
+  end if;
+
+  insert into public.inventory_product_settings (
+    product_id,
+    tenant_id,
+    venue_id,
+    unit_id,
+    content_quantity,
+    content_unit_id
+  )
+  values (
+    p_product_id,
+    p_tenant_id,
+    p_venue_id,
+    p_unit_id,
+    v_content_quantity,
+    v_content_unit_id
+  )
+  on conflict (product_id) do update
+  set unit_id = excluded.unit_id,
+      content_quantity = excluded.content_quantity,
+      content_unit_id = excluded.content_unit_id,
+      updated_at = now();
+
+  for v_level in
+    select item from jsonb_array_elements(v_levels) item
+  loop
+    v_warehouse_id := (v_level ->> 'warehouseId')::uuid;
+    v_quantity := (v_level ->> 'quantity')::numeric(18, 6);
+    v_enabled := coalesce((v_level ->> 'enabled')::boolean, true);
+
+    insert into public.inventory_stock_levels (
+      warehouse_id,
+      product_id,
+      tenant_id,
+      venue_id,
+      quantity,
+      is_enabled
+    )
+    values (
+      v_warehouse_id,
+      p_product_id,
+      p_tenant_id,
+      p_venue_id,
+      v_quantity,
+      v_enabled
+    )
+    on conflict (warehouse_id, product_id) do update
+    set quantity = excluded.quantity,
+        is_enabled = excluded.is_enabled,
+        updated_at = now();
+  end loop;
+
+  delete from public.inventory_product_format_consumptions
+  where product_id = p_product_id
+    and tenant_id = p_tenant_id
+    and venue_id = p_venue_id;
+end;
+$$;
+
+create or replace function public.consume_inventory_product(
+  p_ticket_line_id uuid,
+  p_tenant_id uuid,
+  p_venue_id uuid,
+  p_device_id uuid,
+  p_product_id uuid,
+  p_variant_id uuid,
+  p_sold_quantity numeric,
+  p_source_type text
+)
+returns void
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_variant_id uuid := p_variant_id;
+  v_sale_format_id uuid;
+  v_format_quantity numeric(18, 6);
+  v_format_unit_id uuid;
+  v_stock_unit_id uuid;
+  v_content_quantity numeric(18, 6);
+  v_content_unit_id uuid;
+  v_required_stock numeric(18, 6);
+  v_remaining numeric(18, 6);
+  v_take numeric(18, 6);
+  v_stock record;
+  v_has_device_config boolean := false;
+  v_overflow_warehouse_id uuid;
+  v_overflow_quantity numeric(18, 6);
+begin
+  if p_product_id is null
+    or coalesce(p_sold_quantity, 0) <= 0
+    or p_source_type not in ('product', 'mixer', 'menu_component')
+  then
+    return;
+  end if;
+
+  if v_variant_id is null then
+    select pv.id into v_variant_id
+    from public.product_variants pv
+    where pv.product_id = p_product_id
+      and pv.tenant_id = p_tenant_id
+      and pv.venue_id = p_venue_id
+      and pv.is_active = true
+    order by pv.is_default desc, pv.sort_order, pv.id
+    limit 1;
+  end if;
+
+  select
+    pv.catalog_sale_format_id,
+    f.inventory_consumption_quantity,
+    f.inventory_consumption_unit_id
+  into
+    v_sale_format_id,
+    v_format_quantity,
+    v_format_unit_id
+  from public.product_variants pv
+  join public.catalog_sale_formats f
+    on f.id = pv.catalog_sale_format_id
+   and f.tenant_id = pv.tenant_id
+   and f.venue_id = pv.venue_id
+  where pv.id = v_variant_id
+    and pv.product_id = p_product_id
+    and pv.tenant_id = p_tenant_id
+    and pv.venue_id = p_venue_id;
+
+  if v_format_quantity is null or v_format_unit_id is null then return; end if;
+
+  select s.unit_id, u.content_quantity, u.content_unit_id
+  into v_stock_unit_id, v_content_quantity, v_content_unit_id
+  from public.inventory_product_settings s
+  join public.inventory_units u
+    on u.id = s.unit_id
+   and u.tenant_id = s.tenant_id
+   and u.venue_id = s.venue_id
+  where s.product_id = p_product_id
+    and s.tenant_id = p_tenant_id
+    and s.venue_id = p_venue_id;
+
+  if v_stock_unit_id is null then return; end if;
+
+  if v_content_unit_id <> v_format_unit_id then
+    raise exception 'INVENTORY_CONSUMPTION_UNIT_MISMATCH product=% format=%',
+      p_product_id,
+      v_sale_format_id
+      using errcode = '22023';
+  end if;
+
+  v_required_stock := round(
+    (v_format_quantity * p_sold_quantity) / v_content_quantity,
+    6
+  );
+  if v_required_stock <= 0 then return; end if;
+  v_remaining := v_required_stock;
+
+  if p_device_id is not null then
+    select exists (
+      select 1
+      from public.inventory_device_warehouses dw
+      where dw.device_id = p_device_id
+        and dw.tenant_id = p_tenant_id
+        and dw.venue_id = p_venue_id
+    ) into v_has_device_config;
+  end if;
+
+  for v_stock in
+    select l.warehouse_id, l.quantity, w.sort_order, w.name
+    from public.inventory_stock_levels l
+    join public.inventory_warehouses w
+      on w.id = l.warehouse_id
+     and w.tenant_id = l.tenant_id
+     and w.venue_id = l.venue_id
+    left join public.inventory_device_warehouses dw
+      on dw.device_id = p_device_id
+     and dw.warehouse_id = l.warehouse_id
+     and dw.tenant_id = l.tenant_id
+     and dw.venue_id = l.venue_id
+    where l.product_id = p_product_id
+      and l.tenant_id = p_tenant_id
+      and l.venue_id = p_venue_id
+      and l.is_enabled = true
+      and l.quantity > 0
+      and w.is_active = true
+      and (not v_has_device_config or coalesce(dw.is_enabled, false))
+    order by
+      case when v_has_device_config then dw.priority else w.sort_order end,
+      w.sort_order,
+      w.name,
+      w.id
+    for update of l
+  loop
+    v_take := least(v_remaining, v_stock.quantity);
+
+    update public.inventory_stock_levels
+    set quantity = quantity - v_take,
+        updated_at = now()
+    where warehouse_id = v_stock.warehouse_id
+      and product_id = p_product_id;
+
+    insert into public.inventory_stock_movements (
+      tenant_id,
+      venue_id,
+      warehouse_id,
+      product_id,
+      ticket_line_id,
+      sale_format_id,
+      source_type,
+      stock_quantity_delta,
+      stock_quantity_before,
+      stock_quantity_after,
+      format_consumption_quantity,
+      sold_quantity,
+      content_unit_id
+    )
+    values (
+      p_tenant_id,
+      p_venue_id,
+      v_stock.warehouse_id,
+      p_product_id,
+      p_ticket_line_id,
+      v_sale_format_id,
+      p_source_type,
+      -v_take,
+      v_stock.quantity,
+      v_stock.quantity - v_take,
+      v_format_quantity,
+      p_sold_quantity,
+      v_content_unit_id
+    );
+
+    v_remaining := round(v_remaining - v_take, 6);
+    exit when v_remaining <= 0;
+  end loop;
+
+  if v_remaining <= 0 then return; end if;
+
+  select l.warehouse_id, l.quantity
+  into v_overflow_warehouse_id, v_overflow_quantity
+  from public.inventory_stock_levels l
+  join public.inventory_warehouses w
+    on w.id = l.warehouse_id
+   and w.tenant_id = l.tenant_id
+   and w.venue_id = l.venue_id
+  left join public.inventory_device_warehouses dw
+    on dw.device_id = p_device_id
+   and dw.warehouse_id = l.warehouse_id
+   and dw.tenant_id = l.tenant_id
+   and dw.venue_id = l.venue_id
+  where l.product_id = p_product_id
+    and l.tenant_id = p_tenant_id
+    and l.venue_id = p_venue_id
+    and l.is_enabled = true
+    and w.is_active = true
+    and (not v_has_device_config or coalesce(dw.is_enabled, false))
+  order by
+    case when v_has_device_config then dw.priority else w.sort_order end,
+    w.sort_order,
+    w.name,
+    w.id
+  limit 1
+  for update of l;
+
+  if v_overflow_warehouse_id is null then return; end if;
+
+  update public.inventory_stock_levels
+  set quantity = quantity - v_remaining,
+      updated_at = now()
+  where warehouse_id = v_overflow_warehouse_id
+    and product_id = p_product_id;
+
+  insert into public.inventory_stock_movements (
+    tenant_id,
+    venue_id,
+    warehouse_id,
+    product_id,
+    ticket_line_id,
+    sale_format_id,
+    source_type,
+    stock_quantity_delta,
+    stock_quantity_before,
+    stock_quantity_after,
+    format_consumption_quantity,
+    sold_quantity,
+    content_unit_id
+  )
+  values (
+    p_tenant_id,
+    p_venue_id,
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_ticket_line_id,
+    v_sale_format_id,
+    p_source_type,
+    -v_remaining,
+    v_overflow_quantity,
+    v_overflow_quantity - v_remaining,
+    v_format_quantity,
+    p_sold_quantity,
+    v_content_unit_id
+  );
+end;
+$$;
+
+create or replace function public.consume_ticket_line_inventory()
+returns trigger
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_venue_id uuid;
+  v_device_id uuid;
+  v_sold_quantity numeric(18, 9);
+  v_component record;
+  v_modifier jsonb;
+  v_mixer_product_id uuid;
+  v_mixer_variant_id uuid;
+begin
+  select t.venue_id, t.device_id
+  into v_venue_id, v_device_id
+  from public.tickets t
+  where t.id = new.ticket_id
+    and t.tenant_id = new.tenant_id;
+
+  if v_venue_id is null then
+    raise exception 'INVENTORY_TICKET_SCOPE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  v_sold_quantity := coalesce(new.allocated_quantity, new.quantity::numeric);
+
+  perform public.consume_inventory_product(
+    new.id,
+    new.tenant_id,
+    v_venue_id,
+    v_device_id,
+    new.product_id,
+    new.variant_id,
+    v_sold_quantity,
+    'product'
+  );
+
+  for v_component in
+    select c.component_type, c.product_id, c.variant_id, c.quantity
+    from public.ticket_line_components c
+    where c.ticket_line_id = new.id
+      and c.tenant_id = new.tenant_id
+      and c.product_id is not null
+  loop
+    perform public.consume_inventory_product(
+      new.id,
+      new.tenant_id,
+      v_venue_id,
+      v_device_id,
+      v_component.product_id,
+      v_component.variant_id,
+      v_sold_quantity * v_component.quantity,
+      case
+        when v_component.component_type = 'mixer' then 'mixer'
+        else 'menu_component'
+      end
+    );
+  end loop;
+
+  if not exists (
+    select 1
+    from public.ticket_line_components c
+    where c.ticket_line_id = new.id
+      and c.component_type = 'mixer'
+  ) then
+    for v_modifier in
+      select value
+      from jsonb_array_elements(coalesce(new.modifiers, '[]'::jsonb))
+      where value ->> 'id' ~* '^mixer:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    loop
+      v_mixer_product_id := substring(v_modifier ->> 'id' from 7)::uuid;
+      select pv.id into v_mixer_variant_id
+      from public.product_variants pv
+      where pv.product_id = v_mixer_product_id
+        and pv.tenant_id = new.tenant_id
+        and pv.venue_id = v_venue_id
+        and pv.is_active = true
+      order by pv.is_default desc, pv.sort_order, pv.id
+      limit 1;
+
+      perform public.consume_inventory_product(
+        new.id,
+        new.tenant_id,
+        v_venue_id,
+        v_device_id,
+        v_mixer_product_id,
+        v_mixer_variant_id,
+        v_sold_quantity,
+        'mixer'
+      );
+    end loop;
+  end if;
+
+  return new;
+end;
+$$;
+
+drop function if exists public.consume_inventory_product(
+  uuid,
+  uuid,
+  uuid,
+  uuid,
+  uuid,
+  numeric,
+  text
+);
+
+revoke all on function public.consume_inventory_product(
+  uuid,
+  uuid,
+  uuid,
+  uuid,
+  uuid,
+  uuid,
+  numeric,
+  text
+) from public, anon, authenticated;
+
+comment on column public.inventory_stock_levels.is_enabled is
+  'Whether this product is stocked and may be consumed from this warehouse.';
+comment on table public.inventory_device_warehouses is
+  'Warehouse access and stock consumption priority configured per POS device.';
+comment on function public.set_inventory_device_warehouses(uuid, uuid, uuid, jsonb) is
+  'Atomically replaces warehouse access and consumption priority for one POS device.';
+
+-- Venue-level inventory master switch.
++-- Allow each venue to disable inventory control completely while keeping the
+-- Stock page available as the place where it can be enabled again.
+
+alter table public.venues
+  add column if not exists inventory_enabled boolean not null default true;
+
+create or replace function public.set_venue_inventory_enabled(
+  p_venue_id uuid,
+  p_enabled boolean
+)
+returns boolean
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_venue public.venues%rowtype;
+begin
+  if p_enabled is null then
+    raise exception 'INVENTORY_INVALID_ENABLED' using errcode = '22023';
+  end if;
+
+  select * into v_venue
+  from public.venues
+  where id = p_venue_id
+  for update;
+
+  if v_venue.id is null
+    or not public.user_is_tenant_admin(v_venue.tenant_id)
+  then
+    raise exception 'INVENTORY_FORBIDDEN' using errcode = '42501';
+  end if;
+
+  update public.venues
+  set inventory_enabled = p_enabled,
+      updated_at = now()
+  where id = v_venue.id;
+
+  return p_enabled;
+end;
+$$;
+
+revoke all on function public.set_venue_inventory_enabled(uuid, boolean)
+  from public, anon;
+grant execute on function public.set_venue_inventory_enabled(uuid, boolean)
+  to authenticated;
+
+create or replace function public.consume_ticket_line_inventory()
+returns trigger
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_venue_id uuid;
+  v_device_id uuid;
+  v_inventory_enabled boolean;
+  v_sold_quantity numeric(18, 9);
+  v_component record;
+  v_modifier jsonb;
+  v_mixer_product_id uuid;
+  v_mixer_variant_id uuid;
+begin
+  select t.venue_id, t.device_id, v.inventory_enabled
+  into v_venue_id, v_device_id, v_inventory_enabled
+  from public.tickets t
+  join public.venues v
+    on v.id = t.venue_id
+   and v.tenant_id = t.tenant_id
+  where t.id = new.ticket_id
+    and t.tenant_id = new.tenant_id;
+
+  if v_venue_id is null then
+    raise exception 'INVENTORY_TICKET_SCOPE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  if not v_inventory_enabled then
+    return new;
+  end if;
+
+  v_sold_quantity := coalesce(new.allocated_quantity, new.quantity::numeric);
+
+  perform public.consume_inventory_product(
+    new.id,
+    new.tenant_id,
+    v_venue_id,
+    v_device_id,
+    new.product_id,
+    new.variant_id,
+    v_sold_quantity,
+    'product'
+  );
+
+  for v_component in
+    select c.component_type, c.product_id, c.variant_id, c.quantity
+    from public.ticket_line_components c
+    where c.ticket_line_id = new.id
+      and c.tenant_id = new.tenant_id
+      and c.product_id is not null
+  loop
+    perform public.consume_inventory_product(
+      new.id,
+      new.tenant_id,
+      v_venue_id,
+      v_device_id,
+      v_component.product_id,
+      v_component.variant_id,
+      v_sold_quantity * v_component.quantity,
+      case
+        when v_component.component_type = 'mixer' then 'mixer'
+        else 'menu_component'
+      end
+    );
+  end loop;
+
+  if not exists (
+    select 1
+    from public.ticket_line_components c
+    where c.ticket_line_id = new.id
+      and c.component_type = 'mixer'
+  ) then
+    for v_modifier in
+      select value
+      from jsonb_array_elements(coalesce(new.modifiers, '[]'::jsonb))
+      where value ->> 'id' ~* '^mixer:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    loop
+      v_mixer_product_id := substring(v_modifier ->> 'id' from 7)::uuid;
+      select pv.id into v_mixer_variant_id
+      from public.product_variants pv
+      where pv.product_id = v_mixer_product_id
+        and pv.tenant_id = new.tenant_id
+        and pv.venue_id = v_venue_id
+        and pv.is_active = true
+      order by pv.is_default desc, pv.sort_order, pv.id
+      limit 1;
+
+      perform public.consume_inventory_product(
+        new.id,
+        new.tenant_id,
+        v_venue_id,
+        v_device_id,
+        v_mixer_product_id,
+        v_mixer_variant_id,
+        v_sold_quantity,
+        'mixer'
+      );
+    end loop;
+  end if;
+
+  return new;
+end;
+$$;
+
+revoke all on function public.consume_ticket_line_inventory()
+  from public, anon, authenticated;
+
+comment on column public.venues.inventory_enabled is
+  'Master switch for all automatic inventory control in this venue.';
+comment on function public.set_venue_inventory_enabled(uuid, boolean) is
+  'Enables or disables all inventory control for a venue.';
+
+-- Safe warehouse deletion with stock transfer.
++-- Delete a warehouse safely. Non-zero product balances must be transferred to
+-- another active warehouse in the same venue before the source is removed.
+
+create or replace function public.delete_inventory_warehouse(
+  p_tenant_id uuid,
+  p_venue_id uuid,
+  p_warehouse_id uuid,
+  p_target_warehouse_id uuid default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_source public.inventory_warehouses%rowtype;
+  v_target public.inventory_warehouses%rowtype;
+  v_level record;
+  v_transfer_count integer := 0;
+begin
+  if not public.user_is_tenant_admin(p_tenant_id) then
+    raise exception 'INVENTORY_FORBIDDEN' using errcode = '42501';
+  end if;
+
+  select * into v_source
+  from public.inventory_warehouses w
+  where w.id = p_warehouse_id
+    and w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id
+  for update;
+
+  if v_source.id is null then
+    raise exception 'INVENTORY_WAREHOUSE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  if p_target_warehouse_id = p_warehouse_id then
+    raise exception 'INVENTORY_WAREHOUSE_TRANSFER_SAME' using errcode = '22023';
+  end if;
+
+  -- Lock every source balance so consumption cannot change it between the
+  -- transfer and the cascading warehouse deletion.
+  for v_level in
+    select l.product_id, l.quantity
+    from public.inventory_stock_levels l
+    where l.warehouse_id = p_warehouse_id
+      and l.tenant_id = p_tenant_id
+      and l.venue_id = p_venue_id
+    order by l.product_id
+    for update
+  loop
+    if v_level.quantity = 0 then
+      continue;
+    end if;
+
+    if p_target_warehouse_id is null then
+      raise exception 'INVENTORY_WAREHOUSE_TRANSFER_REQUIRED' using errcode = '22023';
+    end if;
+
+    if v_target.id is null then
+      select * into v_target
+      from public.inventory_warehouses w
+      where w.id = p_target_warehouse_id
+        and w.tenant_id = p_tenant_id
+        and w.venue_id = p_venue_id
+        and w.is_active = true
+      for update;
+
+      if v_target.id is null then
+        raise exception 'INVENTORY_TARGET_WAREHOUSE_NOT_FOUND' using errcode = 'P0002';
+      end if;
+    end if;
+
+    insert into public.inventory_stock_levels as destination (
+      warehouse_id,
+      product_id,
+      tenant_id,
+      venue_id,
+      quantity,
+      is_enabled
+    )
+    values (
+      p_target_warehouse_id,
+      v_level.product_id,
+      p_tenant_id,
+      p_venue_id,
+      v_level.quantity,
+      true
+    )
+    on conflict (warehouse_id, product_id) do update
+    set quantity = destination.quantity + excluded.quantity,
+        is_enabled = true,
+        updated_at = now();
+
+    v_transfer_count := v_transfer_count + 1;
+  end loop;
+
+  delete from public.inventory_warehouses w
+  where w.id = p_warehouse_id
+    and w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id;
+
+  return v_transfer_count;
+end;
+$$;
+
+revoke all on function public.delete_inventory_warehouse(
+  uuid,
+  uuid,
+  uuid,
+  uuid
+) from public, anon;
+grant execute on function public.delete_inventory_warehouse(
+  uuid,
+  uuid,
+  uuid,
+  uuid
+) to authenticated;
+
+comment on function public.delete_inventory_warehouse(uuid, uuid, uuid, uuid) is
+  'Transfers every non-zero product balance to another active warehouse and atomically deletes the source.';
+
+-- Manager venue scope
+create table if not exists public.manager_venue_assignments (
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  manager_user_id uuid not null references auth.users(id) on delete cascade,
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (tenant_id, manager_user_id, venue_id)
+);
+
+create index if not exists manager_venue_assignments_user_idx
+  on public.manager_venue_assignments(manager_user_id, tenant_id);
+
+create or replace function public.validate_manager_venue_assignment()
+returns trigger
+language plpgsql
+security definer
+set search_path to ''
+as $$
+begin
+  if not exists (
+    select 1 from public.tenant_memberships tm
+    where tm.tenant_id = new.tenant_id
+      and tm.user_id = new.manager_user_id
+      and tm.role = 'manager'
+      and tm.is_active = true
+  ) then
+    raise exception 'MANAGER_MEMBERSHIP_REQUIRED' using errcode = '23514';
+  end if;
+
+  if not exists (
+    select 1 from public.venues v
+    where v.id = new.venue_id and v.tenant_id = new.tenant_id and v.is_active = true
+  ) then
+    raise exception 'MANAGER_VENUE_SCOPE_MISMATCH' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists validate_manager_venue_assignment on public.manager_venue_assignments;
+create trigger validate_manager_venue_assignment
+before insert or update on public.manager_venue_assignments
+for each row execute function public.validate_manager_venue_assignment();
+
+alter table public.manager_venue_assignments enable row level security;
+
+drop policy if exists manager_venue_assignments_select on public.manager_venue_assignments;
+create policy manager_venue_assignments_select
+on public.manager_venue_assignments for select to authenticated
+using (
+  manager_user_id = (select auth.uid())
+  or public.user_has_tenant_role(tenant_id, array['owner'::text])
+);
+
+drop policy if exists manager_venue_assignments_owner_manage on public.manager_venue_assignments;
+create policy manager_venue_assignments_owner_manage
+on public.manager_venue_assignments for all to authenticated
+using (public.user_has_tenant_role(tenant_id, array['owner'::text]))
+with check (public.user_has_tenant_role(tenant_id, array['owner'::text]));
+
+revoke all on table public.manager_venue_assignments from public, anon;
+grant select, insert, update, delete on table public.manager_venue_assignments to authenticated;
+grant all on table public.manager_venue_assignments to service_role;
+
+create or replace function public.set_manager_venue_assignments(
+  p_tenant_id uuid,
+  p_manager_user_id uuid,
+  p_venue_ids uuid[]
+)
+returns uuid[]
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_venue_ids uuid[];
+begin
+  if auth.role() <> 'service_role'
+    and not public.user_has_tenant_role(p_tenant_id, array['owner'::text])
+  then
+    raise exception 'MANAGER_SCOPE_FORBIDDEN' using errcode = '42501';
+  end if;
+  select coalesce(array_agg(distinct venue_id), array[]::uuid[])
+  into v_venue_ids
+  from unnest(coalesce(p_venue_ids, array[]::uuid[])) as ids(venue_id);
+  if cardinality(v_venue_ids) = 0 then raise exception 'MANAGER_SCOPE_EMPTY' using errcode = '22023'; end if;
+  if not exists (
+    select 1 from public.tenant_memberships tm
+    where tm.tenant_id = p_tenant_id and tm.user_id = p_manager_user_id
+      and tm.role = 'manager' and tm.is_active = true
+  ) then raise exception 'MANAGER_MEMBERSHIP_REQUIRED' using errcode = '22023'; end if;
+  if (
+    select count(*) from public.venues v
+    where v.tenant_id = p_tenant_id and v.id = any(v_venue_ids) and v.is_active = true
+  ) <> cardinality(v_venue_ids) then
+    raise exception 'MANAGER_VENUE_SCOPE_MISMATCH' using errcode = '22023';
+  end if;
+  delete from public.manager_venue_assignments
+  where tenant_id = p_tenant_id and manager_user_id = p_manager_user_id;
+  insert into public.manager_venue_assignments(tenant_id, manager_user_id, venue_id)
+  select p_tenant_id, p_manager_user_id, venue_id from unnest(v_venue_ids) as ids(venue_id);
+  return v_venue_ids;
+end;
+$$;
+
+revoke all on function public.set_manager_venue_assignments(uuid, uuid, uuid[]) from public, anon;
+grant execute on function public.set_manager_venue_assignments(uuid, uuid, uuid[]) to authenticated, service_role;
+

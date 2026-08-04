@@ -13,6 +13,7 @@ type Props = {
   context: TenantContext
   disabled: boolean
   error: string | null
+  inventoryEnabled: boolean
   isOnline: boolean
   onLogout: () => void
   onSectionChange: (section: CrmSection) => void
@@ -21,7 +22,7 @@ type Props = {
   venues: CrmVenue[]
 }
 
-export function CrmShell({ activeSection, children, context, disabled, error, isOnline, onLogout, onSectionChange, onVenueChange, selectedVenueId, venues }: Props) {
+export function CrmShell({ activeSection, children, context, disabled, error, inventoryEnabled, isOnline, onLogout, onSectionChange, onVenueChange, selectedVenueId, venues }: Props) {
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [crmTheme, setCrmTheme] = useState<CrmTheme>(getInitialCrmTheme)
 
@@ -40,6 +41,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, is
       <CrmSidebar
         activeSection={activeSection}
         context={context}
+        inventoryEnabled={inventoryEnabled}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         onLogout={onLogout}

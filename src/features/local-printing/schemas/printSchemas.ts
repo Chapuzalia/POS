@@ -36,6 +36,14 @@ export const printRequestSchema = z.object({
     footer: z.string().trim().max(500).optional(),
     copyLabel: z.string().trim().max(80).optional(),
     deferredLabel: z.string().trim().max(80).optional(),
+    fiscal: z.object({
+      provider: z.enum(['verifactu', 'ticketbai']),
+      status: z.string().trim().min(1).max(40),
+      uuid: z.string().trim().max(100).optional(),
+      externalCode: z.string().trim().max(200).optional(),
+      verificationUrl: z.string().url().max(2000).optional(),
+      qrBase64: z.string().trim().max(250000).optional(),
+    }).optional(),
   }),
   options: z.object({
     cut: z.boolean(),

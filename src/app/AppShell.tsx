@@ -69,6 +69,11 @@ export function AppShell() {
   const [catalog, setCatalog] = useState<CatalogData | null>(null)
   const [discounts, setDiscounts] = useState<Discount[]>([])
   const [manualDiscountEnabled, setManualDiscountEnabled] = useState(false)
+  const [manualDiscountRequiresPin, setManualDiscountRequiresPin] = useState(false)
+  const [discountSchedule, setDiscountSchedule] = useState({
+    dayChangeTime: null as string | null,
+    timeZone: 'Europe/Madrid',
+  })
   const [catalogStartTab, setCatalogStartTab] = useState<CatalogStartTab>(() => getCatalogStartTab())
   const [productSalesStats, setProductSalesStats] = useState<ProductSalesStat[]>([])
   const [isBootstrapping, setIsBootstrapping] = useState(true)
@@ -112,6 +117,8 @@ export function AppShell() {
   const quickSale = useQuickSale({
     catalog,
     cashSession: cash.session,
+    discounts,
+    discountSchedule,
     context,
     isOnline,
     ledger: cash.ledger,
@@ -180,7 +187,9 @@ export function AppShell() {
     setCatalog(null)
     setDiscounts([])
     setManualDiscountEnabled(false)
+    setManualDiscountRequiresPin(false)
     setProductSalesStats([])
+    setDiscountSchedule({ dayChangeTime: null, timeZone: 'Europe/Madrid' })
     setPendingLoginContext(null)
     setMobileTicketOpen(false)
     setRestaurantPaidFeedback(null)
@@ -219,6 +228,8 @@ export function AppShell() {
     setCatalog(state.catalog)
     setDiscounts(state.discounts)
     setManualDiscountEnabled(state.manualDiscountEnabled)
+    setManualDiscountRequiresPin(state.manualDiscountRequiresPin)
+    setDiscountSchedule(state.discountSchedule)
     setProductSalesStats(state.productSalesStats)
     quickSale.hydrate(isBackofficeUser(nextContext) ? [] : getCachedTicket(nextContext))
     const nextTickets = state.cashSession ? getSessionTickets(nextContext, state.cashSession.id) : []
@@ -227,6 +238,8 @@ export function AppShell() {
       catalog: state.catalog,
       discounts: state.discounts,
       manualDiscountEnabled: state.manualDiscountEnabled,
+      manualDiscountRequiresPin: state.manualDiscountRequiresPin,
+      discountSchedule: state.discountSchedule,
     })
     saveCachedProductSalesStats(nextContext.tenantId, state.productSalesStats)
     const previousSession = getCachedCashSession(nextContext)
@@ -244,6 +257,8 @@ export function AppShell() {
     setCatalog(cachedCatalog?.catalog ?? null)
     setDiscounts(cachedCatalog?.discounts ?? [])
     setManualDiscountEnabled(cachedCatalog?.manualDiscountEnabled ?? false)
+    setManualDiscountRequiresPin(cachedCatalog?.manualDiscountRequiresPin ?? false)
+    setDiscountSchedule(cachedCatalog?.discountSchedule ?? { dayChangeTime: null, timeZone: 'Europe/Madrid' })
     setProductSalesStats(getCachedProductSalesStats(cachedContext.tenantId))
     const cachedSession = getCachedCashSession(cachedContext)
     cash.hydrate(
@@ -282,6 +297,8 @@ export function AppShell() {
       setCatalog(nextCatalog.catalog)
       setDiscounts(nextCatalog.discounts)
       setManualDiscountEnabled(nextCatalog.manualDiscountEnabled)
+      setManualDiscountRequiresPin(nextCatalog.manualDiscountRequiresPin)
+      setDiscountSchedule(nextCatalog.discountSchedule)
       persistProductSalesStats(nextStats)
       saveCachedCatalog(activeContext, nextCatalog)
     } catch (refreshError) {
@@ -365,7 +382,9 @@ export function AppShell() {
       addFeedback={addFeedback}
       catalog={catalog}
       discounts={discounts}
+      discountSchedule={discountSchedule}
       manualDiscountEnabled={manualDiscountEnabled}
+      manualDiscountRequiresPin={manualDiscountRequiresPin}
       cash={cash}
       catalogStartTab={catalogStartTab}
       context={context}

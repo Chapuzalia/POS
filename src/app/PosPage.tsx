@@ -24,8 +24,9 @@ import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
-import { calculateAppliedDiscount } from '../lib/discounts'
-import { getTicketTotal } from '../lib/format'
+import { calculateDiscountForLines, type DiscountScheduleContext } from '../lib/discounts'
+import { getLineTotal, getTicketTotal } from '../lib/format'
+import { validateConfiguredDiscountPin, validateManualDiscountPin } from '../services/discountRules'
 import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
@@ -59,7 +60,9 @@ type Props = {
   catalog: CatalogData | null
   catalogStartTab: CatalogStartTab
   discounts: Discount[]
+  discountSchedule: Omit<DiscountScheduleContext, 'now'>
   manualDiscountEnabled: boolean
+  manualDiscountRequiresPin: boolean
   context: TenantContext
   error: string | null
   floatingTicketButtonRef: RefObject<HTMLButtonElement | null>
@@ -121,7 +124,11 @@ export function PosPage(props: Props) {
       && (restaurant.posView.type !== 'table_order' || props.isOnline),
   )
   const subtotalCents = getTicketTotal(activeLines)
-  const totalCents = calculateAppliedDiscount(subtotalCents, quickSale.discount).totalCents
+  const discountCalculation = calculateDiscountForLines(
+    activeLines.map((line) => ({ ...line, grossCents: getLineTotal(line) })),
+    quickSale.discount,
+  )
+  const totalCents = discountCalculation.totalCents
   const itemCount = activeLines.reduce((total, line) => total + line.quantity, 0)
   const paidFeedback = restaurant.posView.type === 'table_order'
     ? props.restaurantPaidFeedback
@@ -135,6 +142,9 @@ export function PosPage(props: Props) {
   const activeTicketPanel: ReactNode = restaurant.posView.type === 'table_order' && restaurant.order
     ? <RestaurantOrderPanel
         isBusy={props.isBusy || !props.isOnline}
+        lineDiscounts={Object.fromEntries(
+          activeLines.map((line, index) => [line.id, discountCalculation.lineAllocations[index]]),
+        )}
         onDecrement={(lineId) => updateQuantity(lineId, -1)}
         onIncrement={(lineId) => updateQuantity(lineId, 1)}
         onEdit={(line) => {
@@ -178,6 +188,7 @@ export function PosPage(props: Props) {
         lines={activeLines}
         onClear={quickSale.clear}
         onDecrement={(lineId) => updateQuantity(lineId, -1)}
+        lineDiscounts={discountCalculation.lineAllocations}
         onIncrement={(lineId) => updateQuantity(lineId, 1)}
         onRemove={quickSale.removeLine}
       />
@@ -342,19 +353,25 @@ export function PosPage(props: Props) {
       /> : null}
       {restaurant.splitOrderGroup && restaurant.order ? <SplitOrderModal
         defaultDiscount={quickSale.discount}
+        discountSchedule={props.discountSchedule}
         discounts={props.discounts}
         isBusy={props.isBusy}
         manualDiscountEnabled={props.manualDiscountEnabled}
+        manualDiscountRequiresPin={props.manualDiscountRequiresPin}
         onClose={() => restaurant.setSplitOrderGroup(null)}
         onPay={restaurant.paySelectedOrderItems}
         order={restaurant.order}
         venueId={props.context.venueId}
+        validatePin={validateConfiguredDiscountPin}
+        validateManualPin={validateManualDiscountPin}
       /> : null}
       {restaurant.equalSplitOpen && restaurant.order ? <EqualSplitOrderModal
         defaultDiscount={quickSale.discount}
         discounts={props.discounts}
+        discountSchedule={props.discountSchedule}
         isBusy={props.isBusy}
         manualDiscountEnabled={props.manualDiscountEnabled}
+        manualDiscountRequiresPin={props.manualDiscountRequiresPin}
         onClose={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onCompleted={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onConfigure={restaurant.configureEqualSplit}
@@ -362,6 +379,8 @@ export function PosPage(props: Props) {
         order={restaurant.order}
         split={restaurant.equalSplit}
         venueId={props.context.venueId}
+        validatePin={validateConfiguredDiscountPin}
+        validateManualPin={validateManualDiscountPin}
       /> : null}
       {quickSale.cashPaymentOpen ? <CashPaymentModal
         isBusy={props.isBusy}
@@ -390,9 +409,13 @@ export function PosPage(props: Props) {
         discounts={props.discounts}
         isBusy={props.isBusy}
         manualDiscountEnabled={props.manualDiscountEnabled}
+        manualDiscountRequiresPin={props.manualDiscountRequiresPin}
         onCancel={quickSale.closeDiscountModal}
         onSelect={(discount) => { quickSale.setDiscount(discount); quickSale.closeDiscountModal() }}
         subtotalCents={subtotalCents}
+        schedule={props.discountSchedule}
+        validatePin={validateConfiguredDiscountPin}
+        validateManualPin={validateManualDiscountPin}
         venueId={props.context.venueId}
       /> : null}
       {cash.movementModalOpen && cash.session ? <CashMovementModal

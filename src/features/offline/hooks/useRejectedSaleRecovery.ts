@@ -43,12 +43,11 @@ export function useRejectedSaleRecovery(options: Options) {
     const current = latestRef.current
     const currentTicket = getCachedTicket(context)
     const recovery = getRejectedSaleRecovery(rejectedSaleEvent, currentTicket.length > 0)
-    const restoredLines = recovery.appendToCurrentTicket
-      ? [...currentTicket, ...recovery.linesToRestore]
-      : recovery.linesToRestore
-    current.setTicketLines(restoredLines)
-    saveCachedTicket(context, restoredLines)
-    current.setDiscount(recovery.discount)
+    if (recovery.linesToRestore) {
+      current.setTicketLines(recovery.linesToRestore)
+      saveCachedTicket(context, recovery.linesToRestore)
+      current.setDiscount(recovery.discount)
+    }
     if (current.cashSession?.id === recovery.closedSessionId) {
       current.setCashSession(null)
       saveCachedCashSession(context, null)
@@ -58,7 +57,9 @@ export function useRejectedSaleRecovery(options: Options) {
     current.setSessionTickets((tickets) => tickets.filter((ticket) => ticket.id !== recovery.rejectedSaleId))
     clearSessionTickets(context, recovery.closedSessionId)
     current.resetCashUi()
-    current.setError('La venta no se ha registrado porque la caja estaba cerrada. El ticket se ha recuperado para cobrarlo tras abrir una caja nueva.')
+    current.setError(recovery.linesToRestore
+      ? 'La venta no se ha registrado porque la caja estaba cerrada. El ticket se ha recuperado para cobrarlo tras abrir una caja nueva.'
+      : 'La venta no se ha registrado porque la caja estaba cerrada. El ticket actual se ha conservado sin mezclarlo con la venta rechazada.')
     current.clearRejectedSaleEvent()
   }, [context, rejectedSaleEvent])
 }

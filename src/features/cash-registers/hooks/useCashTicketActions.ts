@@ -5,6 +5,7 @@ import { loadSessionTicketsFromSupabase } from '../../../services/posService'
 import type { CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
+import { voidTicketWithFiscalCancellation } from '../../fiscal/service'
 import { nextPrintCopyNumber, usePrintAgentStore } from '../../local-printing'
 
 type Options = {
@@ -71,21 +72,40 @@ export function useCashTicketActions(options: Options) {
     options.refreshPendingCount(); void options.syncPendingEvents()
   }, [options])
 
-  const voidTicket = useCallback((ticket: SessionTicketRecord) => {
+  const voidTicket = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
-    if (!context || ticket.status !== 'active' || !window.confirm('Eliminar este ticket de la sesion?')) return
-    options.persistTickets(options.tickets.map((item) => item.id === ticket.id ? { ...item, status: 'voided' } : item))
-    options.persistLedger(options.ledger.filter((sale) => sale.id !== ticket.id))
-    options.subtractProductSalesStats(ticket.payload.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, lineTotalCents: line.lineTotalCents })))
+    if (!context || ticket.status !== 'active') return
     const pendingSale = getOfflineQueue().find((event) =>
       event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
     if (pendingSale) {
+      if (!window.confirm('Eliminar este ticket de la sesion? Todavia no se ha enviado a Verifacti.')) return
       forgetOfflineEvent(pendingSale.id)
+      options.persistTickets(options.tickets.map((item) => item.id === ticket.id ? { ...item, status: 'voided' } : item))
+      options.persistLedger(options.ledger.filter((sale) => sale.id !== ticket.id))
+      options.subtractProductSalesStats(ticket.payload.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, lineTotalCents: line.lineTotalCents })))
       options.refreshPendingCount()
       return
     }
-    enqueueOfflineEvent({ id: createId(), kind: 'sale_voided', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: { saleId: ticket.payload.sale.id, ticketId: ticket.payload.ticket.id } })
-    options.refreshPendingCount(); void options.syncPendingEvents()
+
+    if (!options.isOnline) {
+      options.setError('Necesitas conexion para anular un ticket que ya puede haberse enviado a Verifacti.')
+      return
+    }
+    if (!window.confirm('Eliminar este ticket? Si tiene una factura enviada, se solicitara su anulacion fiscal en Verifacti.')) return
+
+    options.setBusy(true)
+    options.setError(null)
+    try {
+      await voidTicketWithFiscalCancellation(context.tenantId, ticket.payload.ticket.id)
+      options.persistTickets(options.tickets.map((item) => item.id === ticket.id ? { ...item, status: 'voided' } : item))
+      options.persistLedger(options.ledger.filter((sale) => sale.id !== ticket.id))
+      options.subtractProductSalesStats(ticket.payload.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, lineTotalCents: line.lineTotalCents })))
+      options.refreshPendingCount()
+    } catch (error) {
+      options.setError(getReadableError(error))
+    } finally {
+      options.setBusy(false)
+    }
   }, [options])
 
   return { openHistory, reprint, changePayment, voidTicket }

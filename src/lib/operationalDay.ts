@@ -3,7 +3,7 @@ export type OperationalDayConfig = {
   timeZone: string
 }
 
-type ZonedDateTimeParts = {
+export type ZonedDateTimeParts = {
   year: number
   month: number
   day: number
@@ -32,7 +32,7 @@ function getZonedDateTimeFormatter(timeZone: string) {
   return formatter
 }
 
-function getZonedDateTimeParts(value: Date, timeZone: string): ZonedDateTimeParts {
+export function getZonedDateTimeParts(value: Date, timeZone: string): ZonedDateTimeParts {
   const parts = Object.fromEntries(
     getZonedDateTimeFormatter(timeZone)
       .formatToParts(value)
@@ -50,11 +50,11 @@ function getZonedDateTimeParts(value: Date, timeZone: string): ZonedDateTimePart
   }
 }
 
-function toIsoDate({ year, month, day }: Pick<ZonedDateTimeParts, 'year' | 'month' | 'day'>) {
+export function toIsoDate({ year, month, day }: Pick<ZonedDateTimeParts, 'year' | 'month' | 'day'>) {
   return `${String(year).padStart(4, '0')}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`
 }
 
-function shiftIsoDate(isoDate: string, days: number) {
+export function shiftIsoDate(isoDate: string, days: number) {
   const [year, month, day] = isoDate.split('-').map(Number)
   const shifted = new Date(Date.UTC(year, month - 1, day + days))
   return `${shifted.getUTCFullYear()}-${String(shifted.getUTCMonth() + 1).padStart(2, '0')}-${String(shifted.getUTCDate()).padStart(2, '0')}`

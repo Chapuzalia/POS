@@ -1,5 +1,7 @@
 import type { ResolvedCatalogItem } from '../../features/catalog/domain/types'
 
+export const TOP_ITEMS_LIMIT = 12
+
 function getRepresentativePriority(item: ResolvedCatalogItem) {
   if (item.placement.pinnedVariantId === null) return 0
   if (item.variant.isDefault) return 1
@@ -29,4 +31,8 @@ export function getAvailableFormatCounts(items: readonly ResolvedCatalogItem[]) 
   }
 
   return new Map([...variantsByProduct].map(([productId, variantIds]) => [productId, variantIds.size]))
+}
+
+export function limitTopCatalogItems<T>(items: readonly T[]) {
+  return items.slice(0, TOP_ITEMS_LIMIT)
 }

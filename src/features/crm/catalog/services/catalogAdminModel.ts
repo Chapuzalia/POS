@@ -294,3 +294,175 @@ export function buildProductDuplicationPlan(
     image: source.image,
   }
 }
+
+function normalizedCatalogName(value: string) {
+  return value.trim().toLocaleLowerCase('es').normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+}
+
+export function buildCrossVenueProductDuplicationPlan(
+  sourceCatalog: CatalogData,
+  targetCatalog: CatalogData,
+  sourceProductId: string,
+  createId: () => string,
+) {
+  const source = sourceCatalog.products.find((product) => product.id === sourceProductId)
+  if (!source) throw new Error('El producto que quieres duplicar ya no existe.')
+  if (sourceCatalog.tenantId !== targetCatalog.tenantId) throw new Error('No se puede duplicar un producto a otro negocio.')
+
+  const productId = createId()
+  const variantIdBySourceId = new Map<string, string>()
+  const targetFormatByName = new Map(targetCatalog.saleFormats.map((format) => [normalizedCatalogName(format.name), format]))
+  const newFormatBySourceId = new Map<string, { id: string; name: string; active: boolean; sortOrder: number }>()
+  const variants = sourceCatalog.variants
+    .filter((variant) => variant.productId === sourceProductId)
+    .map((variant) => {
+      const id = createId()
+      variantIdBySourceId.set(variant.id, id)
+      const sourceFormat = variant.formatId
+        ? sourceCatalog.saleFormats.find((format) => format.id === variant.formatId) ?? null
+        : null
+      let formatId = ''
+      if (sourceFormat) {
+        const existing = targetFormatByName.get(normalizedCatalogName(sourceFormat.name))
+        if (existing) {
+          formatId = existing.id
+        } else {
+          let created = newFormatBySourceId.get(sourceFormat.id)
+          if (!created) {
+            created = {
+              id: createId(),
+              name: sourceFormat.name,
+              active: sourceFormat.active,
+              sortOrder: (targetCatalog.saleFormats.length + newFormatBySourceId.size) * 10,
+            }
+            newFormatBySourceId.set(sourceFormat.id, created)
+          }
+          formatId = created.id
+        }
+      }
+      return {
+        id,
+        formatId,
+        name: variant.name,
+        priceCents: variant.priceCents,
+        sku: variant.sku,
+        active: variant.active,
+        isDefault: variant.isDefault,
+        sortOrder: variant.sortOrder,
+      }
+    })
+  if (!variants.length) throw new Error('No se puede duplicar un producto sin variantes.')
+
+  const batch: CatalogBatchCommand[] = [{
+    command: 'create_product',
+    payload: {
+      id: productId,
+      type: source.type,
+      name: source.name,
+      description: source.description,
+      vatRate: source.vatRate,
+      active: source.active,
+      sortOrder: targetCatalog.products.length * 10,
+      variants,
+    },
+  }]
+
+  const targetTabIdByKey = new Map<string, string>()
+  for (const tab of targetCatalog.tabs) {
+    targetTabIdByKey.set(normalizedCatalogName(tab.key), tab.id)
+    targetTabIdByKey.set(normalizedCatalogName(tab.label), tab.id)
+  }
+  const targetCategoryIdByName = new Map(targetCatalog.categories.map((category) => [normalizedCatalogName(category.name), category.id]))
+  const targetTabCategoryKeys = new Set(targetCatalog.tabCategories.map((item) => `${item.tabId}:${item.categoryId}`))
+  const relationCountByTabId = new Map(targetCatalog.tabs.map((tab) => [tab.id, targetCatalog.tabCategories.filter((item) => item.tabId === tab.id).length]))
+  let nextTabSortOrder = targetCatalog.tabs.length * 10
+  let nextCategorySortOrder = targetCatalog.categories.length * 10
+  for (const placement of sourceCatalog.placements.filter((item) => item.productId === sourceProductId)) {
+    const sourceTab = sourceCatalog.tabs.find((tab) => tab.id === placement.tabId)
+    const sourceCategory = sourceCatalog.categories.find((category) => category.id === placement.categoryId)
+    if (!sourceTab) continue
+    let targetTabId = targetTabIdByKey.get(normalizedCatalogName(sourceTab.key))
+      ?? targetTabIdByKey.get(normalizedCatalogName(sourceTab.label))
+    if (!targetTabId) {
+      targetTabId = createId()
+      batch.push({
+        command: 'save_tab',
+        payload: { id: targetTabId, key: sourceTab.key, label: sourceTab.label, icon: sourceTab.icon, active: sourceTab.active, sortOrder: nextTabSortOrder },
+      })
+      nextTabSortOrder += 10
+      targetTabIdByKey.set(normalizedCatalogName(sourceTab.key), targetTabId)
+      targetTabIdByKey.set(normalizedCatalogName(sourceTab.label), targetTabId)
+    }
+    let targetCategoryId = sourceCategory ? targetCategoryIdByName.get(normalizedCatalogName(sourceCategory.name)) : null
+    if (sourceCategory && !targetCategoryId) {
+      targetCategoryId = createId()
+      batch.push({
+        command: 'save_category',
+        payload: { id: targetCategoryId, name: sourceCategory.name, icon: sourceCategory.icon, active: sourceCategory.active, unused: sourceCategory.unused, sortOrder: nextCategorySortOrder },
+      })
+      nextCategorySortOrder += 10
+      targetCategoryIdByName.set(normalizedCatalogName(sourceCategory.name), targetCategoryId)
+    }
+    if (targetCategoryId && !targetTabCategoryKeys.has(`${targetTabId}:${targetCategoryId}`)) {
+      batch.push({
+        command: 'save_tab_category',
+        payload: { id: createId(), tabId: targetTabId, categoryId: targetCategoryId, active: true, sortOrder: (relationCountByTabId.get(targetTabId) ?? 0) * 10 },
+      })
+      targetTabCategoryKeys.add(`${targetTabId}:${targetCategoryId}`)
+      relationCountByTabId.set(targetTabId, (relationCountByTabId.get(targetTabId) ?? 0) + 1)
+    }
+    batch.push({
+      command: 'create_placement',
+      payload: {
+        id: createId(),
+        productId,
+        tabId: targetTabId,
+        categoryId: targetCategoryId ?? null,
+        pinnedVariantId: placement.pinnedVariantId ? variantIdBySourceId.get(placement.pinnedVariantId) ?? null : null,
+        featured: placement.featured,
+        active: placement.active,
+        sortOrder: placement.sortOrder,
+      },
+    })
+  }
+
+  const targetSelectionGroupByName = new Map(targetCatalog.selectionGroups.map((group) => [`${normalizedCatalogName(group.name)}:${group.type}`, group]))
+  const targetModifierGroupByName = new Map(targetCatalog.modifierGroups.map((group) => [normalizedCatalogName(group.name), group]))
+  const assignments = [
+    ...sourceCatalog.selectionAssignments.filter((item) => item.productId === sourceProductId).map((assignment) => ({ assignment, domain: 'selection' as const })),
+    ...sourceCatalog.modifierAssignments.filter((item) => item.productId === sourceProductId).map((assignment) => ({ assignment, domain: 'modifier' as const })),
+  ]
+  for (const { assignment, domain } of assignments) {
+    const sourceGroup = domain === 'selection'
+      ? sourceCatalog.selectionGroups.find((group) => group.id === assignment.groupId)
+      : sourceCatalog.modifierGroups.find((group) => group.id === assignment.groupId)
+    const targetGroup = domain === 'selection' && sourceGroup && 'type' in sourceGroup
+      ? targetSelectionGroupByName.get(`${normalizedCatalogName(sourceGroup.name)}:${sourceGroup.type}`)
+      : sourceGroup ? targetModifierGroupByName.get(normalizedCatalogName(sourceGroup.name)) : null
+    if (!targetGroup) continue
+    batch.push({
+      command: 'save_assignment',
+      payload: {
+        id: createId(),
+        domain,
+        productId,
+        groupId: targetGroup.id,
+        displayName: assignment.displayName,
+        minSelection: assignment.minSelection,
+        maxSelection: assignment.maxSelection,
+        appliesToAllVariants: assignment.appliesToAllVariants,
+        variantIds: assignment.variantIds.map((id) => variantIdBySourceId.get(id)).filter((id): id is string => Boolean(id)),
+        active: assignment.active,
+        sortOrder: assignment.sortOrder,
+      },
+    })
+  }
+
+  return {
+    batch,
+    image: source.image,
+    newFormats: [...newFormatBySourceId.values()],
+    productId,
+    variantFormats: variants.flatMap((variant) => variant.formatId ? [{ variantId: variant.id, formatId: variant.formatId }] : []),
+  }
+}

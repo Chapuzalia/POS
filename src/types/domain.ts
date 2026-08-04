@@ -8,6 +8,13 @@ export type PaymentMethod = 'cash' | 'card'
 export type HistoricalPaymentMethod = PaymentMethod | 'invitation' | 'other'
 
 export type DiscountCalculationType = 'percentage' | 'fixed'
+export type DiscountRuleKind = 'discount' | 'promotion'
+export type DiscountScope = 'general' | 'specific'
+
+export type DiscountTarget = {
+  productId: string
+  variantId: string | null
+}
 export type DiscountSnapshotType = DiscountCalculationType | 'manual'
 export type DiscountRoundingIncrementCents = 5 | 10 | 50 | 100
 
@@ -22,6 +29,14 @@ export type Discount = {
   color: string | null
   isActive: boolean
   sortOrder: number
+  ruleKind: DiscountRuleKind
+  scope: DiscountScope
+  targets: DiscountTarget[]
+  requiresPin: boolean
+  activeWeekdays: number[]
+  startsAt: string | null
+  endsAt: string | null
+  autoApply: boolean
 }
 
 export type DiscountCreateInput = {
@@ -32,8 +47,17 @@ export type DiscountCreateInput = {
   roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
   isActive: boolean
-}
 
+  ruleKind: DiscountRuleKind
+  scope: DiscountScope
+  targets: DiscountTarget[]
+  requiresPin: boolean
+  pin: string | null
+  activeWeekdays: number[]
+  startsAt: string | null
+  endsAt: string | null
+  autoApply: boolean
+}
 export type AppliedDiscount = {
   discountId: string | null
   name: string
@@ -42,6 +66,20 @@ export type AppliedDiscount = {
   value: number
   roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
+
+  ruleKind?: DiscountRuleKind
+  scope?: DiscountScope
+  targets?: DiscountTarget[]
+  requiresPin?: boolean
+  activeWeekdays?: number[]
+  startsAt?: string | null
+  endsAt?: string | null
+  automatic?: boolean
+  calculationLines?: Array<{
+    productId: string
+    variantId: string | null
+    grossCents: number
+  }>
 }
 
 export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'cashier'
@@ -99,6 +137,7 @@ export type CrmVenue = {
   taxId: string
   sortOrder: number
   isActive: boolean
+  inventoryEnabled: boolean
   tablesEnabled: boolean
   defaultTaxRate: number
   timeZone: string
@@ -130,6 +169,7 @@ export type CrmAccessUser = {
   fullName: string
   isActive: boolean
   role: 'owner' | 'manager'
+  venueIds: string[]
 }
 
 export type TicketLineModifier = {
@@ -304,6 +344,8 @@ export type SaleLinePayload = {
   components: TicketLineComponent[]
   catalogSnapshot: SaleLineCatalogSnapshot
   fiscalSnapshot: TicketLineFiscalSnapshot | null
+  discountAmountCents?: number
+  netTotalCents?: number
 }
 
 export type SaleCreatedPayload = {
@@ -344,6 +386,15 @@ export type SaleCreatedPayload = {
     receivedCents: number | null
     changeCents: number
   } | null
+  fiscal?: {
+    invoiceId: string
+    provider: 'verifactu' | 'ticketbai'
+    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+    uuid: string | null
+    qrBase64: string | null
+    verificationUrl: string | null
+    externalCode: string | null
+  }
 }
 
 export type CashClosedPayload = {
@@ -558,6 +609,24 @@ export type CrmSalesReportTicket = {
   status: 'paid' | 'void'
   subtotalCents: number
   totalCents: number
+  fiscal: {
+    id: string
+    provider: 'verifactu' | 'ticketbai'
+    environment: 'test' | 'production'
+    invoiceType: 'normal' | 'simplified' | 'corrective'
+    series: string
+    number: string
+    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+    externalUuid: string | null
+    externalCode: string | null
+    qrBase64: string | null
+    verificationUrl: string | null
+    errorCode: string | null
+    errorMessage: string | null
+    attempts: number
+    sentAt: string | null
+    confirmedAt: string | null
+  } | null
 }
 
 export type CrmSalesReportAggregate = {

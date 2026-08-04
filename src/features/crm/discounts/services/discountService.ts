@@ -1,6 +1,16 @@
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
-import { type Discount, type DiscountCreateInput, type TenantContext } from '../../../../types'
-import { validateDiscountDefinition } from '../../../../lib/discounts'
+import {
+  type Discount,
+  type DiscountCreateInput,
+  type DiscountTarget,
+  type TenantContext,
+} from '../../../../types'
+import { validateDiscountRule } from '../../../../lib/discounts'
+
+export type DiscountTargetRow = {
+  product_id: string
+  variant_id: string | null
+}
 
 export type DiscountRow = {
   id: string
@@ -13,7 +23,27 @@ export type DiscountRow = {
   color: string | null
   is_active: boolean
   sort_order: number
+  rule_kind?: 'discount' | 'promotion'
+  scope?: 'general' | 'specific'
+  requires_pin?: boolean
+  active_weekdays?: number[]
+  starts_at?: string | null
+  ends_at?: string | null
+  auto_apply?: boolean
+  discount_targets?: DiscountTargetRow[]
 }
+
+export type DiscountTargetProductOption = {
+  id: string
+  name: string
+  variants: Array<{ id: string; name: string }>
+}
+
+const discountColumns = `
+  id, tenant_id, venue_id, name, type, value, rounding_increment_cents, color,
+  is_active, sort_order, rule_kind, scope, requires_pin, active_weekdays,
+  starts_at, ends_at, auto_apply, discount_targets(product_id, variant_id)
+`
 
 export function mapDiscount(row: DiscountRow): Discount {
   return {
@@ -27,6 +57,17 @@ export function mapDiscount(row: DiscountRow): Discount {
     color: row.color,
     isActive: row.is_active,
     sortOrder: row.sort_order,
+    ruleKind: row.rule_kind ?? 'discount',
+    scope: row.scope ?? 'general',
+    targets: (row.discount_targets ?? []).map((target) => ({
+      productId: target.product_id,
+      variantId: target.variant_id,
+    })),
+    requiresPin: Boolean(row.requires_pin),
+    activeWeekdays: row.active_weekdays ?? [],
+    startsAt: row.starts_at?.slice(0, 5) ?? null,
+    endsAt: row.ends_at?.slice(0, 5) ?? null,
+    autoApply: Boolean(row.auto_apply),
   }
 }
 
@@ -41,42 +82,56 @@ export function serializeDiscountValue(type: DiscountCreateInput['type'], value:
 export async function loadCrmDiscounts(context: TenantContext, venueId: string): Promise<Discount[]> {
   const { data, error } = await requireSupabase()
     .from('discounts')
-    .select('id, tenant_id, venue_id, name, type, value, rounding_increment_cents, color, is_active, sort_order')
+    .select(discountColumns)
     .eq('tenant_id', context.tenantId)
     .eq('venue_id', venueId)
     .order('sort_order')
     .order('name')
   if (error) throw error
-  return ((data ?? []) as DiscountRow[]).map(mapDiscount)
+  return ((data ?? []) as unknown as DiscountRow[]).map(mapDiscount)
 }
 
-export async function createDiscount(context: TenantContext, input: DiscountCreateInput) {
-  const name = validateDiscountDefinition(input.name, input.type, input.value)
-  const { error } = await requireSupabase().from('discounts').insert({
-    tenant_id: context.tenantId,
-    venue_id: input.venueId,
-    name,
-    type: input.type,
-    value: serializeDiscountValue(input.type, input.value),
-    rounding_increment_cents: input.roundingIncrementCents,
-    color: input.color || null,
-    is_active: input.isActive,
-    sort_order: 0,
+async function saveDiscountRule(
+  _context: TenantContext,
+  discountId: string | null,
+  input: DiscountCreateInput,
+) {
+  const name = validateDiscountRule(input)
+  const { error } = await requireSupabase().rpc('upsert_discount_rule', {
+    p_discount_id: discountId,
+    p_venue_id: input.venueId,
+    p_input: {
+      name,
+      rounding_increment_cents: input.roundingIncrementCents,
+      type: input.type,
+      value: serializeDiscountValue(input.type, input.value),
+      roundingIncrementCents: input.roundingIncrementCents,
+      color: input.color || null,
+      isActive: input.isActive,
+      ruleKind: input.ruleKind,
+      scope: input.scope,
+      targets: input.targets,
+      requiresPin: input.requiresPin,
+      activeWeekdays: input.ruleKind === 'promotion' ? input.activeWeekdays : [],
+      startsAt: input.ruleKind === 'promotion' ? input.startsAt : null,
+      endsAt: input.ruleKind === 'promotion' ? input.endsAt : null,
+      autoApply: input.ruleKind === 'promotion' && input.autoApply,
+    },
+    p_pin: input.requiresPin ? input.pin : null,
   })
   if (error) throw error
 }
 
-export async function updateDiscount(context: TenantContext, discountId: string, input: Omit<DiscountCreateInput, 'venueId'>) {
-  const name = validateDiscountDefinition(input.name, input.type, input.value)
-  const { error } = await requireSupabase().from('discounts').update({
-    name,
-    type: input.type,
-    value: serializeDiscountValue(input.type, input.value),
-    rounding_increment_cents: input.roundingIncrementCents,
-    color: input.color || null,
-    is_active: input.isActive,
-  }).eq('tenant_id', context.tenantId).eq('id', discountId)
-  if (error) throw error
+export async function createDiscount(context: TenantContext, input: DiscountCreateInput) {
+  await saveDiscountRule(context, null, input)
+}
+
+export async function updateDiscount(
+  context: TenantContext,
+  discountId: string,
+  input: DiscountCreateInput,
+) {
+  await saveDiscountRule(context, discountId, input)
 }
 
 export async function setDiscountActive(context: TenantContext, discountId: string, isActive: boolean) {
@@ -85,15 +140,90 @@ export async function setDiscountActive(context: TenantContext, discountId: stri
   if (error) throw error
 }
 
-export async function loadManualDiscountEnabled(context: TenantContext, venueId: string) {
-  const { data, error } = await requireSupabase().from('venues').select('manual_discount_enabled')
-    .eq('tenant_id', context.tenantId).eq('id', venueId).single<{ manual_discount_enabled: boolean }>()
+export async function validateDiscountPin(discountId: string, pin: string) {
+  if (!/^\d{4,8}$/.test(pin)) return false
+  const { data, error } = await requireSupabase().rpc('validate_discount_pin', {
+    p_discount_id: discountId,
+    p_pin: pin,
+  })
   if (error) throw error
-  return data.manual_discount_enabled
+  return data === true
+}
+
+export async function loadDiscountTargetOptions(
+  context: TenantContext,
+  venueId: string,
+): Promise<DiscountTargetProductOption[]> {
+  const { data, error } = await requireSupabase()
+    .from('products')
+    .select('id, name, product_variants(id, name)')
+    .eq('tenant_id', context.tenantId)
+    .eq('venue_id', venueId)
+    .eq('is_active', true)
+    .order('name')
+  if (error) throw error
+  return ((data ?? []) as Array<{
+    id: string
+    name: string
+    product_variants?: Array<{ id: string; name: string }>
+  }>).map((product) => ({
+    id: product.id,
+    name: product.name,
+    variants: [...(product.product_variants ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'es')),
+  }))
+}
+
+export function normalizeDiscountTargets(targets: DiscountTarget[]) {
+  const seen = new Set<string>()
+  return targets.filter((target) => {
+    const key = `${target.productId}:${target.variantId ?? '*'}`
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+export type ManualDiscountSettings = {
+  enabled: boolean
+  requiresPin: boolean
+}
+
+export async function loadManualDiscountSettings(context: TenantContext, venueId: string): Promise<ManualDiscountSettings> {
+  const { data, error } = await requireSupabase().from('venues').select('manual_discount_enabled, manual_discount_requires_pin')
+    .eq('tenant_id', context.tenantId).eq('id', venueId).single<{
+      manual_discount_enabled: boolean
+      manual_discount_requires_pin: boolean
+    }>()
+  if (error) throw error
+  return {
+    enabled: data.manual_discount_enabled,
+    requiresPin: data.manual_discount_requires_pin,
+  }
+}
+
+export async function saveManualDiscountSettings(
+  _context: TenantContext,
+  venueId: string,
+  settings: ManualDiscountSettings & { pin: string | null },
+) {
+  if (settings.pin !== null && !/^\d{4,8}$/.test(settings.pin)) {
+    throw new Error('El PIN debe contener entre 4 y 8 dígitos.')
+  }
+  const { error } = await requireSupabase().rpc('update_manual_discount_settings', {
+    p_venue_id: venueId,
+    p_enabled: settings.enabled,
+    p_requires_pin: settings.requiresPin,
+    p_pin: settings.pin,
+  })
+  if (error) throw error
+}
+
+export async function loadManualDiscountEnabled(context: TenantContext, venueId: string) {
+  return (await loadManualDiscountSettings(context, venueId)).enabled
 }
 
 export async function setManualDiscountEnabled(context: TenantContext, venueId: string, enabled: boolean) {
-  const { error } = await requireSupabase().from('venues').update({ manual_discount_enabled: enabled })
-    .eq('tenant_id', context.tenantId).eq('id', venueId)
-  if (error) throw error
+  const current = await loadManualDiscountSettings(context, venueId)
+  await saveManualDiscountSettings(context, venueId, { enabled, requiresPin: current.requiresPin, pin: null })
+
 }

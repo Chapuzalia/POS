@@ -30,7 +30,9 @@ test('the products table reserves a stable column for all row actions', () => {
   assert.ok(productsPage.includes('grid-cols-[minmax(160px,1.2fr)_105px_64px_68px_104px_minmax(120px,.9fr)_168px]'))
   assert.ok(productsPage.includes('min-w-[940px]'))
   assert.ok(productsPage.includes('Duplicar ${summary.product.name}'))
-  assert.match(productsPage, /catalogAdminService.duplicateProduct/)
+  assert.match(productsPage, /<Dropdown>/)
+  assert.match(productsPage, /Duplicar aquí/)
+  assert.match(productsPage, /Duplicar en \{venue\.name\}/)
 })
 
 test('product sorting lives in clickable column headers without manual reorder controls', () => {

@@ -171,6 +171,7 @@ button {
 }
 
 :root:has(.crm-shell:not([data-crm-theme='dark'])) {
+  --background: #f3f5f7;
   --crm-popover-bg: #ffffff;
   --crm-popover-border: #d4dae2;
   --crm-popover-text: #15171a;
@@ -181,6 +182,7 @@ button {
 }
 
 :root:has(.crm-shell[data-crm-theme='dark']) {
+  --background: #000000;
   --crm-popover-bg: #181a1c;
   --crm-popover-border: #2a2d30;
   --crm-popover-text: #f4f4f5;

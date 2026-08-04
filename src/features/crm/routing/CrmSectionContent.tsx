@@ -11,6 +11,7 @@ import { PlanCrm } from '../plan/pages/PlanPage'
 import { InventoryStockCrm } from '../inventory/pages/InventoryStockPage'
 import { InventoryWarehousesCrm } from '../inventory/pages/InventoryWarehousesPage'
 import { InventorySettingsCrm } from '../inventory/pages/InventorySettingsPage'
+import { IntegrationsCrm } from '../integrations/pages/IntegrationsPage'
 import { SalesReportsCrm } from '../sales/pages/SalesReportsPage'
 import { CashClosingReportsCrm } from '../sales/pages/CashClosingReportsPage'
 import type { RunAction } from '../shared/types'
@@ -25,10 +26,13 @@ type Props = {
   catalog: CatalogData | null
   context: TenantContext
   disabled: boolean
+  duplicateCatalogProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
+  inventoryEnabled: boolean
   isCatalogLoading: boolean
   mutateCatalog: (action: () => Promise<unknown>) => Promise<boolean>
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
+  onInventoryEnabledChange: () => Promise<void>
   onStatsRefresh: (options?: { monthKey?: string; silent?: boolean }) => Promise<void>
   onVenuesChanged: () => Promise<void>
   runAction: RunAction
@@ -44,10 +48,13 @@ export function CrmSectionContent({
   catalog,
   context,
   disabled,
+  duplicateCatalogProduct,
+  inventoryEnabled,
   isCatalogLoading,
   mutateCatalog,
   onCatalogChanged,
   onError,
+  onInventoryEnabledChange,
   onStatsRefresh,
   onVenuesChanged,
   runAction,
@@ -59,11 +66,15 @@ export function CrmSectionContent({
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
   }
 
+  if (!inventoryEnabled && (activeSection === 'inventory-warehouses' || activeSection === 'inventory-settings')) {
+    return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">Control de stock desactivado</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Actívalo desde la página Stock para acceder a esta configuración.</p></section>
+  }
+
   switch (activeSection) {
     case 'dashboard':
       return catalog ? <DashboardCrm activeCategories={catalog.categories.filter((category) => category.active).length} activeProducts={catalog.products.filter((product) => product.active).length} categories={catalog.categories} disabled={disabled} onRefresh={onStatsRefresh} placements={catalog.placements} products={catalog.products} selectedVenueId={selectedVenueId} stats={stats} /> : null
     case 'products':
-      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
       return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'categories':
@@ -81,7 +92,7 @@ export function CrmSectionContent({
     case 'tables':
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
     case 'inventory-stock':
-      return catalog ? <InventoryStockCrm catalog={catalog} disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} /> : null
+      return catalog ? <InventoryStockCrm catalog={catalog} disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} /> : null
     case 'inventory-warehouses':
       return <InventoryWarehousesCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-settings':
@@ -113,6 +124,8 @@ export function CrmSectionContent({
         stats={stats}
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
+    case 'integrations':
+      return <IntegrationsCrm disabled={disabled} runAction={runAction} tenantContext={context} />
     case 'settings':
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':

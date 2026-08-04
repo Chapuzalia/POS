@@ -1,9 +1,10 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
-import { Copy, LogOut, MonitorSmartphone, Pencil, Plus, RefreshCw, Save, ShieldCheck, Trash2, X } from 'lucide-react'
-import { type FormEvent, useCallback, useEffect, useState } from 'react'
+import { Checkbox as UiCheckbox } from '../../../../components/ui/Checkbox'
+import { Copy, LogOut, MapPin, MonitorSmartphone, Pencil, Plus, RefreshCw, Save, ShieldCheck, Trash2, X } from 'lucide-react'
+import { type Dispatch, type FormEvent, type SetStateAction, useCallback, useEffect, useState } from 'react'
 import { sileo } from 'sileo'
-import { type CrmDevice, type DeviceMode, type TenantContext } from '../../../../types'
+import { type CrmDevice, type CrmVenue, type DeviceMode, type TenantContext } from '../../../../types'
 import { CrmModal } from '../../shared/components/CrmModal'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { EmptyList } from '../../shared/components/EmptyList'
@@ -18,6 +19,7 @@ import {
   deleteCrmDevice,
   loadCrmAccessData,
   releaseCrmDeviceLogin,
+  updateManagerVenueAssignments,
   updateCrmDevice,
 } from '../services/accessService'
 
@@ -57,6 +59,9 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
   const [userEmail, setUserEmail] = useState('')
   const [userPassword, setUserPassword] = useState('')
   const [userRole, setUserRole] = useState<'owner' | 'manager'>('manager')
+  const [userVenueIds, setUserVenueIds] = useState<string[]>([])
+  const [editingManagerId, setEditingManagerId] = useState<string | null>(null)
+  const [editingManagerVenueIds, setEditingManagerVenueIds] = useState<string[]>([])
 
   const refresh = useCallback(async () => {
     setData(await loadCrmAccessData(tenantContext))
@@ -84,6 +89,7 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
     setUserEmail('')
     setUserPassword('')
     setUserRole('manager')
+    setUserVenueIds(data.venues.filter((venue) => venue.isActive).map((venue) => venue.id))
     setIsUserModalOpen(true)
   }
 
@@ -94,6 +100,7 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
         email: userEmail,
         password: userPassword,
         role: userRole,
+        venueIds: userRole === 'manager' ? userVenueIds : [],
       })
       setData((current) => ({
         ...current,
@@ -101,6 +108,30 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
       }))
       setIsUserModalOpen(false)
       sileo.success({ title: 'Usuario CRM creado' })
+    })
+  }
+
+  function toggleVenue(venueId: string, checked: boolean, setter: Dispatch<SetStateAction<string[]>>) {
+    setter((current) => checked ? [...new Set([...current, venueId])] : current.filter((id) => id !== venueId))
+  }
+
+  function openManagerVenues(user: CrmAccessData['users'][number]) {
+    if (user.role !== 'manager') return
+    setEditingManagerId(user.id)
+    setEditingManagerVenueIds(user.venueIds.filter((venueId) => data.venues.some((venue) => venue.id === venueId && venue.isActive)))
+  }
+
+  async function saveManagerVenues(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!editingManagerId) return
+    await runAction(async () => {
+      const venueIds = await updateManagerVenueAssignments(tenantContext, editingManagerId, editingManagerVenueIds)
+      setData((current) => ({
+        ...current,
+        users: current.users.map((user) => user.id === editingManagerId ? { ...user, venueIds } : user),
+      }))
+      setEditingManagerId(null)
+      sileo.success({ title: 'Locales del manager actualizados' })
     })
   }
 
@@ -220,9 +251,7 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
                     </div>
                     <div className="!flex !flex-wrap !items-center !justify-start !gap-2 md:!justify-end">
                       <UiButton aria-label={`Editar dispositivo ${device.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !size-10 !items-center !justify-center !rounded-[10px] !bg-[var(--crm-blue)] !text-white" disabled={disabled || !device.account} onClick={() => startEditingDevice(device)} title="Editar nombre, modo o contraseña" type="button"><Pencil className="!size-4" /></UiButton>
-                      {tenantContext.role === 'owner' ? (
-                        <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !bg-[var(--crm-surface-soft)] !px-3 !text-[13px] !font-semibold" disabled={disabled || !device.account?.hasActiveLogin} onClick={() => void releaseDeviceLogin(device)} title={device.account?.loginHeartbeatAt ? `Última actividad: ${formatCrmDateTime(device.account.loginHeartbeatAt)}` : 'Cerrar la sesión de este dispositivo'} type="button"><LogOut className="!size-4" /> Liberar</UiButton>
-                      ) : null}
+                      <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !bg-[var(--crm-surface-soft)] !px-3 !text-[13px] !font-semibold" disabled={disabled || !device.account?.hasActiveLogin} onClick={() => void releaseDeviceLogin(device)} title={device.account?.loginHeartbeatAt ? `Última actividad: ${formatCrmDateTime(device.account.loginHeartbeatAt)}` : 'Cerrar la sesión de este dispositivo'} type="button"><LogOut className="!size-4" /> Liberar</UiButton>
                       <UiButton aria-label={`Eliminar dispositivo ${device.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95 !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !bg-[var(--crm-red-soft)] !px-3 !text-[13px] !font-semibold !text-[var(--crm-red)]" disabled={disabled} onClick={() => void removeDevice(device)} title="Eliminar definitivamente" type="button"><Trash2 className="!size-4" /> Eliminar</UiButton>
                     </div>
                   </div>
@@ -251,24 +280,26 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
           </div>
         </section>
 
-        <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] xl:!col-span-2">
+        {tenantContext.role === 'owner' ? <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)] xl:!col-span-2">
           <div className="flex items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] p-3 max-[760px]:flex-col max-[760px]:items-stretch !flex !items-center !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
             <div className="min-w-0 [&_h2]:m-0 [&_h2]:text-[17px] [&_h2]:font-bold [&_h2]:tracking-[-0.02em] [&_h2]:text-[var(--crm-text)] [&_p]:mt-1 [&_p]:mb-0 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)]"><h2>Usuarios con acceso al CRM</h2><p>{data.users.length} usuarios gestores · las cuentas técnicas de dispositivos no aparecen aquí</p></div>
-            <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !shrink-0 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || tenantContext.role !== 'owner'} onClick={openUserModal} type="button">
+            <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !shrink-0 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} onClick={openUserModal} type="button">
               <Plus className="!size-4" /> <span className="!hidden sm:!inline">Añadir usuario</span><span className="sm:!hidden">Añadir</span>
             </UiButton>
           </div>
           <div className="!divide-y !divide-[var(--crm-border-subtle)]">
             {data.users.map((user) => (
-              <div className="!grid !min-h-[68px] !items-center !gap-3 !px-[18px] !py-3 sm:!grid-cols-[minmax(0,1fr)_140px_100px] md:!px-[22px]" key={user.id}>
+              <div className="!grid !min-h-[68px] !items-center !gap-3 !px-[18px] !py-3 sm:!grid-cols-[minmax(0,1fr)_110px_minmax(160px,.8fr)_80px_auto] md:!px-[22px]" key={user.id}>
                 <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{user.fullName || user.email}</strong><span>{user.email}</span></div>
                 <span className="!text-sm !font-semibold !text-[var(--crm-text-secondary)]">{roleLabels[user.role]}</span>
+                <span className="!text-xs !font-medium !text-[var(--crm-text-muted)]">{user.role === 'owner' ? 'Todos los locales' : user.venueIds.map((venueId) => venueById.get(venueId)?.name).filter(Boolean).join(', ') || 'Sin locales'}</span>
                 <span className={user.isActive ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold !inline-flex !min-h-6 !w-fit !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]' : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold !inline-flex !min-h-6 !w-fit !rounded-full !bg-[var(--crm-surface-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-text-secondary)]'}>{user.isActive ? 'Activo' : 'Inactivo'}</span>
+                {user.role === 'manager' ? <UiButton aria-label={`Gestionar locales de ${user.email}`} className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-text-secondary)]" disabled={disabled} onClick={() => openManagerVenues(user)} type="button"><MapPin className="!size-4" /> Locales</UiButton> : <span />}
               </div>
             ))}
             {!data.users.length ? <EmptyList message="No hay usuarios gestores configurados." /> : null}
           </div>
-        </section>
+        </section> : null}
       </div>
 
       {isUserModalOpen ? (
@@ -318,12 +349,43 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
                   value={userRole}
                 />
               </Field>
+              {userRole === 'manager' ? (
+                <VenueScopePicker
+                  disabled={disabled}
+                  onChange={(venueId, checked) => toggleVenue(venueId, checked, setUserVenueIds)}
+                  selectedVenueIds={userVenueIds}
+                  venues={data.venues}
+                />
+              ) : null}
               <p className="m-0 text-xs leading-6 text-[var(--crm-text-muted)]">La contraseña debe tener al menos {CRM_USER_PASSWORD_MIN_LENGTH} caracteres.</p>
               <div className="!flex !flex-col-reverse !gap-2 sm:!flex-row sm:!justify-end">
                 <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !px-4 !text-[13px] !font-semibold" disabled={disabled} onClick={() => setIsUserModalOpen(false)} type="button">Cancelar</UiButton>
-                <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !userEmail.trim() || userPassword.length < CRM_USER_PASSWORD_MIN_LENGTH} type="submit">
+                <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !userEmail.trim() || userPassword.length < CRM_USER_PASSWORD_MIN_LENGTH || (userRole === 'manager' && !userVenueIds.length)} type="submit">
                   <ShieldCheck className="!size-4" /> Crear usuario
                 </UiButton>
+              </div>
+            </div>
+          </form>
+        </CrmModal>
+      ) : null}
+
+      {editingManagerId ? (
+        <CrmModal label="Locales del manager" onClose={() => setEditingManagerId(null)}>
+          <form onSubmit={(event) => void saveManagerVenues(event)}>
+            <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
+              <div><h2 className="!m-0 !text-lg !font-bold">Locales permitidos</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">El manager solo podrá ver y gestionar los locales seleccionados.</p></div>
+              <UiButton aria-label="Cerrar" className="!inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0" disabled={disabled} onClick={() => setEditingManagerId(null)} type="button"><X className="!size-4" /></UiButton>
+            </div>
+            <div className="!grid !gap-4 !px-5 !py-5">
+              <VenueScopePicker
+                disabled={disabled}
+                onChange={(venueId, checked) => toggleVenue(venueId, checked, setEditingManagerVenueIds)}
+                selectedVenueIds={editingManagerVenueIds}
+                venues={data.venues}
+              />
+              <div className="!flex !justify-end !gap-2">
+                <UiButton className="!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold" disabled={disabled} onClick={() => setEditingManagerId(null)} type="button">Cancelar</UiButton>
+                <UiButton className="!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !editingManagerVenueIds.length} type="submit"><Save className="mr-2 inline !size-4" />Guardar locales</UiButton>
               </div>
             </div>
           </form>
@@ -356,5 +418,39 @@ function CredentialRow({ label, large = false, onCopy, value }: { label: string;
         <UiButton aria-label={`Copiar ${label.toLowerCase()}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !shrink-0 !items-center !justify-center !rounded-[9px] !bg-[var(--crm-input-bg)] !text-[var(--crm-text-secondary)]" onClick={onCopy} type="button"><Copy className="!size-4" /></UiButton>
       </div>
     </div>
+  )
+}
+
+function VenueScopePicker({
+  disabled,
+  onChange,
+  selectedVenueIds,
+  venues,
+}: {
+  disabled: boolean
+  onChange: (venueId: string, checked: boolean) => void
+  selectedVenueIds: string[]
+  venues: CrmVenue[]
+}) {
+  const activeVenues = venues.filter((venue) => venue.isActive)
+  const allSelected = activeVenues.length > 0 && activeVenues.every((venue) => selectedVenueIds.includes(venue.id))
+  return (
+    <fieldset className="!grid !gap-2 !rounded-[10px] !border !border-[var(--crm-border-subtle)] !p-3">
+      <legend className="!px-1 !text-xs !font-semibold !text-[var(--crm-text-muted)]">Locales permitidos</legend>
+      <UiCheckbox
+        checked={allSelected}
+        disabled={disabled || !activeVenues.length}
+        onChange={(checked) => activeVenues.forEach((venue) => onChange(venue.id, checked))}
+      >
+        Todos los locales
+      </UiCheckbox>
+      <div className="!grid !gap-2 sm:!grid-cols-2">
+        {activeVenues.map((venue) => (
+          <UiCheckbox checked={selectedVenueIds.includes(venue.id)} disabled={disabled} key={venue.id} onChange={(checked) => onChange(venue.id, checked)}>
+            {venue.name}
+          </UiCheckbox>
+        ))}
+      </div>
+    </fieldset>
   )
 }

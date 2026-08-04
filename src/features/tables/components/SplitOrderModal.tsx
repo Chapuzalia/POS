@@ -14,7 +14,7 @@ import {
 } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
 import { PaymentPanel } from '../../../components/pos'
-import { calculateAppliedDiscount } from '../../../lib/discounts'
+import { calculateDiscountForLines, type DiscountScheduleContext } from '../../../lib/discounts'
 import { formatMoney, normalizeText } from '../../../lib/format'
 import type { AppliedDiscount, Discount, PaymentMethod } from '../../../types'
 import type {
@@ -34,7 +34,11 @@ type Props = {
   defaultDiscount: AppliedDiscount | null
   discounts: Discount[]
   isBusy: boolean
+  discountSchedule: Omit<DiscountScheduleContext, 'now'>
+  validatePin: (discountId: string, pin: string) => Promise<boolean>
+  validateManualPin: (venueId: string, pin: string) => Promise<boolean>
   manualDiscountEnabled: boolean
+  manualDiscountRequiresPin: boolean
   onClose: () => void
   onPay: (
     moves: RestaurantOrderLineMove[],
@@ -48,12 +52,16 @@ type Props = {
 }
 
 export function SplitOrderModal({
+  discountSchedule,
   defaultDiscount,
   discounts,
   isBusy,
   manualDiscountEnabled,
+  manualDiscountRequiresPin,
   onClose,
   onPay,
+  validatePin,
+  validateManualPin,
   order,
   venueId,
 }: Props) {
@@ -81,7 +89,11 @@ export function SplitOrderModal({
     (sum, line) => sum + (quantities[line.id] ?? 0) * line.unitPriceCents,
     0,
   )
-  const paymentTotals = calculateAppliedDiscount(subtotalCents, currentDiscount)
+  const paymentTotals = calculateDiscountForLines(
+    order.lines.filter((line) => (quantities[line.id] ?? 0) > 0)
+      .map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: (quantities[line.id] ?? 0) * line.unitPriceCents })),
+    currentDiscount,
+  )
   const normalizedSearchQuery = normalizeText(deferredSearchQuery.trim())
 
   const visibleLines = useMemo(() => {
@@ -424,6 +436,7 @@ export function SplitOrderModal({
           discounts={discounts}
           isBusy={paying || isBusy}
           manualDiscountEnabled={manualDiscountEnabled}
+          manualDiscountRequiresPin={manualDiscountRequiresPin}
           onCancel={() => setDiscountOpen(false)}
           onSelect={(discount) => {
             setCurrentDiscount(discount)
@@ -431,6 +444,9 @@ export function SplitOrderModal({
           }}
           subtotalCents={subtotalCents}
           venueId={venueId}
+          schedule={discountSchedule}
+          validatePin={validatePin}
+          validateManualPin={validateManualPin}
         />
       ) : null}
 

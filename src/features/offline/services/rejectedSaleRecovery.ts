@@ -3,10 +3,9 @@ import type { OfflineEvent, TicketLine } from '../../../types'
 type RejectedSale = Extract<OfflineEvent, { kind: 'sale_created' }>
 
 interface RejectedSaleRecovery {
-  appendToCurrentTicket: boolean
   closedSessionId: string
   discount: RejectedSale['payload']['ticket']['discount'] | null
-  linesToRestore: TicketLine[]
+  linesToRestore: TicketLine[] | null
   rejectedSaleId: string
 }
 
@@ -30,10 +29,9 @@ export function getRejectedSaleRecovery(
     catalogSnapshot: line.catalogSnapshot,
   }))
   return {
-    appendToCurrentTicket: hasCurrentTicket,
     closedSessionId: event.payload.ticket.cashSessionId,
-    discount: event.payload.ticket.discount ?? null,
-    linesToRestore: lines,
+    discount: hasCurrentTicket ? null : event.payload.ticket.discount ?? null,
+    linesToRestore: hasCurrentTicket ? null : lines,
     rejectedSaleId: event.payload.sale.id,
   }
 }

@@ -404,11 +404,25 @@ Deno.serve(async (request) => {
       .eq('user_id', authData.user.id)
       .maybeSingle()
 
-    if (membershipError || !membership?.is_active || membership.role !== 'owner') {
-      return response({ error: 'Solo el propietario puede gestionar el negocio' }, 403)
+    if (membershipError || !membership?.is_active || !['owner', 'manager'].includes(membership.role)) {
+      return response({ error: 'No tienes permisos para gestionar los accesos del negocio' }, 403)
     }
 
+    const isOwner = membership.role === 'owner'
+    const managerVenueIds = new Set<string>()
+    if (!isOwner) {
+      const { data: managerVenues, error: managerVenuesError } = await adminClient
+        .from('manager_venue_assignments')
+        .select('venue_id')
+        .eq('tenant_id', tenantId)
+        .eq('manager_user_id', authData.user.id)
+      if (managerVenuesError) throw managerVenuesError
+      for (const item of managerVenues ?? []) managerVenueIds.add(item.venue_id)
+    }
+    const canManageVenue = (venueId: string) => isOwner || managerVenueIds.has(venueId)
+
     if (action === 'create-venue') {
+      if (!isOwner) return response({ error: 'Solo el owner puede crear locales' }, 403)
       const name = String(body.name ?? '').trim()
       const catalogProfile = String(body.catalogProfile ?? '')
       if (!name || name.length > 80 || !['bar_classic', 'restaurant', 'custom'].includes(catalogProfile)) {
@@ -537,6 +551,7 @@ Deno.serve(async (request) => {
       }
     }
     if (action === 'tenant-plan') {
+      if (!isOwner) return response({ error: 'Solo el owner puede consultar el plan' }, 403)
       const [tenantResult, venueUsage, deviceUsage] = await Promise.all([
         adminClient
           .from('tenants')
@@ -563,29 +578,22 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'release-login') {
-      if (membership.role !== 'owner') {
-        return response({ error: 'Solo el owner puede liberar sesiones de usuario' }, 403)
-      }
-
       const userId = String(body.userId ?? '')
       if (!userId || userId === authData.user.id) {
         return response({ error: 'Usuario no valido' }, 400)
       }
 
-      const { data: targetMembership, error: targetMembershipError } = await adminClient
-        .from('tenant_memberships')
-        .select('user_id')
-        .eq('tenant_id', tenantId)
-        .eq('user_id', userId)
-        .eq('role', 'cashier')
-        .maybeSingle()
-
-      if (targetMembershipError) {
-        throw targetMembershipError
+      const [{ data: targetMembership, error: targetMembershipError }, { data: targetAssignment, error: targetAssignmentError }] = await Promise.all([
+        adminClient.from('tenant_memberships').select('user_id').eq('tenant_id', tenantId).eq('user_id', userId).eq('role', 'cashier').maybeSingle(),
+        adminClient.from('device_user_assignments').select('venue_id').eq('tenant_id', tenantId).eq('user_id', userId).limit(1).maybeSingle(),
+      ])
+      if (targetMembershipError || targetAssignmentError) {
+        throw targetMembershipError ?? targetAssignmentError
       }
-      if (!targetMembership) {
-        return response({ error: 'El usuario no pertenece a este negocio' }, 404)
+      if (!targetMembership || !targetAssignment) {
+        return response({ error: 'El usuario no pertenece a un dispositivo de este negocio' }, 404)
       }
+      if (!canManageVenue(targetAssignment.venue_id)) return response({ error: 'No tienes acceso al local de este dispositivo' }, 403)
 
       const { error: releaseError } = await adminClient
         .from('user_login_leases')
@@ -599,8 +607,28 @@ Deno.serve(async (request) => {
       return response({ ok: true })
     }
 
+    if (action === 'set-manager-venues') {
+      if (!isOwner) return response({ error: 'Solo el owner puede asignar locales a managers' }, 403)
+
+      const managerUserId = String(body.managerUserId ?? '')
+      const venueIds = [...new Set(
+        (Array.isArray(body.venueIds) ? body.venueIds : []).map((value: unknown) => String(value)),
+      )]
+      if (!managerUserId || managerUserId === authData.user.id || !venueIds.length) {
+        return response({ error: 'Selecciona un manager y al menos un local' }, 400)
+      }
+
+      const { data: savedVenueIds, error: saveError } = await authClient.rpc('set_manager_venue_assignments', {
+        p_manager_user_id: managerUserId,
+        p_tenant_id: tenantId,
+        p_venue_ids: venueIds,
+      })
+      if (saveError) return response({ error: saveError.message || 'No se pudieron guardar los locales del manager' }, 400)
+      return response({ venueIds: savedVenueIds ?? venueIds })
+    }
+
     if (action === 'list') {
-      const [{ data: memberships, error: membershipsError }, { data: assignments, error: assignmentsError }] =
+      const [{ data: memberships, error: membershipsError }, { data: assignments, error: assignmentsError }, { data: managerScopes, error: managerScopesError }] =
         await Promise.all([
           adminClient
             .from('tenant_memberships')
@@ -610,16 +638,21 @@ Deno.serve(async (request) => {
             .from('device_user_assignments')
             .select('user_id, venue_id, device_id, is_active')
             .eq('tenant_id', tenantId),
+          adminClient
+            .from('manager_venue_assignments')
+            .select('manager_user_id, venue_id')
+            .eq('tenant_id', tenantId),
         ])
 
-      if (membershipsError || assignmentsError) {
-        throw membershipsError ?? assignmentsError
+      if (membershipsError || assignmentsError || managerScopesError) {
+        throw membershipsError ?? assignmentsError ?? managerScopesError
       }
 
-      const deviceUserIds = new Set((assignments ?? []).map((item) => item.user_id))
-      const managementMemberships = (memberships ?? []).filter((item) =>
+      const visibleAssignments = (assignments ?? []).filter((item) => canManageVenue(item.venue_id))
+      const deviceUserIds = new Set(visibleAssignments.map((item) => item.user_id))
+      const managementMemberships = isOwner ? (memberships ?? []).filter((item) =>
         ['owner', 'manager'].includes(item.role)
-      )
+      ) : []
       const requestedUserIds = new Set([
         ...deviceUserIds,
         ...managementMemberships.map((item) => item.user_id),
@@ -655,9 +688,14 @@ Deno.serve(async (request) => {
       const membershipByUser = new Map((memberships ?? []).map((item) => [item.user_id, item]))
       const leaseByUser = new Map((leases ?? []).map((item) => [item.user_id, item]))
       const authUserById = new Map(authUsers.map((user) => [user.id, user]))
+      const venueIdsByManager = new Map<string, string[]>()
+      for (const scope of managerScopes ?? []) {
+        venueIdsByManager.set(scope.manager_user_id, [...(venueIdsByManager.get(scope.manager_user_id) ?? []), scope.venue_id])
+      }
       const now = Date.now()
 
       return response({
+        allowedVenueIds: isOwner ? null : [...managerVenueIds],
         users: managementMemberships.map((userMembership) => {
           const user = authUserById.get(userMembership.user_id)
           return {
@@ -666,9 +704,10 @@ Deno.serve(async (request) => {
             fullName: String(user?.user_metadata?.full_name ?? ''),
             isActive: Boolean(userMembership.is_active),
             role: userMembership.role,
+            venueIds: userMembership.role === 'manager' ? venueIdsByManager.get(userMembership.user_id) ?? [] : [],
           }
         }),
-        deviceAccounts: (assignments ?? []).map((assignment) => {
+        deviceAccounts: visibleAssignments.map((assignment) => {
           const user = authUserById.get(assignment.user_id)
           const userMembership = membershipByUser.get(assignment.user_id)
           const lease = leaseByUser.get(assignment.user_id)
@@ -690,9 +729,13 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'create-crm-user') {
+      if (!isOwner) return response({ error: 'Un manager no puede crear otros usuarios gestores' }, 403)
       const email = String(body.email ?? '').trim().toLowerCase()
       const password = String(body.password ?? '')
       const role = String(body.role ?? '')
+      const venueIds = [...new Set(
+        (Array.isArray(body.venueIds) ? body.venueIds : []).map((value: unknown) => String(value)),
+      )]
 
       if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
         return response({ error: 'Introduce un email válido' }, 400)
@@ -702,6 +745,19 @@ Deno.serve(async (request) => {
       }
       if (!['owner', 'manager'].includes(role)) {
         return response({ error: 'El rol debe ser owner o manager' }, 400)
+      }
+      if (role === 'manager' && !venueIds.length) {
+        return response({ error: 'Selecciona al menos un local para el manager' }, 400)
+      }
+      if (role === 'manager') {
+        const { count, error: venuesError } = await adminClient
+          .from('venues')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true)
+          .in('id', venueIds)
+        if (venuesError) throw venuesError
+        if ((count ?? 0) !== venueIds.length) return response({ error: 'Alguno de los locales no pertenece al negocio' }, 400)
       }
 
       const { data: created, error: createError } = await adminClient.auth.admin.createUser({
@@ -735,6 +791,12 @@ Deno.serve(async (request) => {
         ])
         const setupError = setupResults.find((result) => result.error)?.error
         if (setupError) throw setupError
+        if (role === 'manager') {
+          const { error: scopesError } = await adminClient.from('manager_venue_assignments').insert(
+            venueIds.map((venueId) => ({ tenant_id: tenantId, manager_user_id: userId, venue_id: venueId })),
+          )
+          if (scopesError) throw scopesError
+        }
       } catch (setupError) {
         await adminClient.auth.admin.deleteUser(userId, true)
         throw setupError
@@ -747,6 +809,7 @@ Deno.serve(async (request) => {
           fullName: '',
           isActive: true,
           role,
+          venueIds: role === 'manager' ? venueIds : [],
         },
       }, 201)
     }
@@ -765,6 +828,7 @@ Deno.serve(async (request) => {
       ])
       if (venueError || tenantError) throw venueError ?? tenantError
       if (!venue || !tenant) return response({ error: 'El local o el negocio no existen o están desactivados' }, 400)
+      if (!canManageVenue(venue.id)) return response({ error: 'No tienes acceso a este local' }, 403)
 
       const emailDevice = normalizeEmailPart(deviceName) || 'dispositivo'
       const emailVenue = normalizeEmailPart(venue.name, '-') || 'local'
@@ -875,6 +939,7 @@ Deno.serve(async (request) => {
       ])
       if (deviceError || assignmentError || tenantError) throw deviceError ?? assignmentError ?? tenantError
       if (!device) return response({ error: 'El dispositivo no existe' }, 404)
+      if (!canManageVenue(device.venue_id)) return response({ error: 'No tienes acceso al local de este dispositivo' }, 403)
       if (!assignment) return response({ error: 'El dispositivo no tiene credenciales asociadas' }, 409)
       if (!tenant) return response({ error: 'El negocio no existe o esta desactivado' }, 400)
 
@@ -979,11 +1044,12 @@ Deno.serve(async (request) => {
       if (!deviceId) return response({ error: 'Dispositivo no valido' }, 400)
 
       const [{ data: device, error: deviceError }, { data: assignment, error: assignmentError }] = await Promise.all([
-        adminClient.from('devices').select('id, name').eq('tenant_id', tenantId).eq('id', deviceId).maybeSingle(),
+        adminClient.from('devices').select('id, name, venue_id').eq('tenant_id', tenantId).eq('id', deviceId).maybeSingle(),
         adminClient.from('device_user_assignments').select('user_id').eq('tenant_id', tenantId).eq('device_id', deviceId).limit(1).maybeSingle(),
       ])
       if (deviceError || assignmentError) throw deviceError ?? assignmentError
       if (!device) return response({ error: 'El dispositivo no existe' }, 404)
+      if (!canManageVenue(device.venue_id)) return response({ error: 'No tienes acceso al local de este dispositivo' }, 403)
 
       const [{ data: openSession, error: openSessionError }, { data: openOrder, error: openOrderError }] = await Promise.all([
         adminClient
@@ -1047,6 +1113,7 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'retire-device') {
+      if (!isOwner) return response({ error: 'Esta operación solo está disponible para el owner' }, 403)
       const deviceId = String(body.deviceId ?? '')
       if (!deviceId) return response({ error: 'Dispositivo no válido' }, 400)
 
@@ -1065,6 +1132,7 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'update') {
+      if (!isOwner) return response({ error: 'Esta operación solo está disponible para el owner' }, 403)
       const userId = String(body.userId ?? '')
       const email = String(body.email ?? '').trim().toLowerCase()
       const fullName = String(body.fullName ?? '').trim()
@@ -1199,6 +1267,7 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'delete') {
+      if (!isOwner) return response({ error: 'Esta operación solo está disponible para el owner' }, 403)
       const userId = String(body.userId ?? '')
       if (!userId || userId === authData.user.id) {
         return response({ error: 'Usuario no valido' }, 400)
@@ -1267,6 +1336,7 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'set-active') {
+      if (!isOwner) return response({ error: 'Esta operación solo está disponible para el owner' }, 403)
       const userId = String(body.userId ?? '')
       const isActive = Boolean(body.isActive)
 

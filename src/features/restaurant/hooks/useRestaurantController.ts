@@ -39,6 +39,7 @@ import {
   saveRestaurantOrderLines,
 } from '../../tables/service'
 import { canDecreaseLineQuantity } from '../../tables/service-status'
+import { autoIssueFiscalTicket } from '../../fiscal/service'
 import type {
   PayRestaurantEqualPartResult,
   PayRestaurantOrderItemsResult,
@@ -52,6 +53,15 @@ import { useRestaurantDraft } from './useRestaurantDraft'
 import { isRestaurantRevisionConflict, requiresConfirmedRestaurantLineRemoval, shouldSaveBeforeLeavingOrder } from '../draft-policy'
 import { getRestaurantCashClosureError } from '../services/validateCashClosure'
 import { useRestaurantRealtime } from './useRestaurantRealtime'
+
+async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string) {
+  try {
+    return (await autoIssueFiscalTicket(context.tenantId, ticketId)).fiscal
+  } catch (error) {
+    console.error('Automatic fiscal submission failed before restaurant print', error)
+    return undefined
+  }
+}
 
 type PendingPayment = { method: PaymentMethod | null; receivedCents: number | null; pendingUnits: number }
 
@@ -73,6 +83,25 @@ type Options = {
   setBusy: (busy: boolean) => void
   setMobileTicketOpen: (open: boolean) => void
   syncPendingEvents: () => Promise<void>
+}
+
+function withCalculationLines(
+  discount: AppliedDiscount | null,
+  lines: Array<{
+    productId: string | null
+    variantId: string | null
+    unitPriceCents: number
+    quantity: number
+  }>,
+) {
+  return discount ? {
+    ...discount,
+    calculationLines: lines.map((line) => ({
+      productId: line.productId ?? '',
+      variantId: line.variantId,
+      grossCents: line.unitPriceCents * line.quantity,
+    })),
+  } : null
 }
 
 export function useRestaurantController(options: Options) {
@@ -259,7 +288,7 @@ export function useRestaurantController(options: Options) {
         current.order.id,
         partCount,
         current.order.revision,
-        options.appliedDiscount,
+        withCalculationLines(options.appliedDiscount, current.lines),
       )
       setEqualSplit(configured)
       return configured
@@ -290,10 +319,12 @@ export function useRestaurantController(options: Options) {
     options.setBusy(true)
     options.onError(null)
     try {
-      const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending, discount, useDefaultDiscount)
+      const paymentLines = getEqualSplitPrintLines(current.lines, equalSplit)
+      const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount)
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
-        const printLines = getEqualSplitPrintLines(current.lines, equalSplit)
+        const printLines = paymentLines
+        const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
         void options.printSale(buildRestaurantPrintPayload({
           cashSession: options.cashSession,
           context: options.context,
@@ -307,6 +338,7 @@ export function useRestaurantController(options: Options) {
           subtotalCents: getRestaurantPrintSubtotal(printLines),
           ticketId: result.ticketId,
           totalCents: result.paidAmountCents,
+          fiscal,
         }))
         await refreshSales(result.saleId, 'Pago completado sin imprimir', false)
         const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
@@ -344,9 +376,11 @@ export function useRestaurantController(options: Options) {
     try {
       const saved = await draft.flush()
       if (!saved) throw new Error('No se pudo guardar la comanda antes del cobro.')
-      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, receivedCents, allowPending, discount)
+      const paymentLines = getMovedRestaurantPrintLines(saved.lines, moves)
+      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, receivedCents, allowPending, withCalculationLines(discount, paymentLines))
       if (!result.requiresConfirmation) {
-        const printLines = getMovedRestaurantPrintLines(saved.lines, moves)
+        const printLines = paymentLines
+        const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
         void options.printSale(buildRestaurantPrintPayload({
           cashSession: options.cashSession,
           context: options.context,
@@ -360,6 +394,7 @@ export function useRestaurantController(options: Options) {
           subtotalCents: result.subtotalCents,
           ticketId: result.ticketId,
           totalCents: result.totalCents,
+          fiscal,
         }))
         await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
         const [nextOrder, nextMap] = await Promise.all([
@@ -469,11 +504,12 @@ export function useRestaurantController(options: Options) {
         setPendingPayment({ method, receivedCents, pendingUnits: pendingCheck.pendingUnits })
         return
       }
-      const result = await closeRestaurantOrder(saved.order.id, method, receivedCents, forceWithPending, options.appliedDiscount)
+      const result = await closeRestaurantOrder(saved.order.id, method, receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines))
       if (result.requiresConfirmation) {
         setPendingPayment({ method, receivedCents, pendingUnits: result.pendingUnits })
         return
       }
+      const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
       void options.printSale(buildRestaurantPrintPayload({
         cashSession: options.cashSession,
         context: options.context,
@@ -487,6 +523,7 @@ export function useRestaurantController(options: Options) {
         subtotalCents: getRestaurantPrintSubtotal(saved.lines),
         ticketId: result.ticketId,
         totalCents: result.totalCents,
+        fiscal,
       }))
       await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
       const nextOrder = result.nextOrderId ? await loadRestaurantOrder(options.context, result.nextOrderId) : null

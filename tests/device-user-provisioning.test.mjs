@@ -82,6 +82,27 @@ test('accesos integra las credenciales y la edición dentro de cada dispositivo'
   assert.match(edgeFunction, /\['owner', 'manager'\]/)
 })
 
+test('el owner asigna locales al manager y el manager solo administra dispositivos de su ambito', async () => {
+  const [permissions, accessPage, accessService, edgeFunction, migration] = await Promise.all([
+    readFile(new URL('../src/features/crm/routing/crmPermissions.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260805000000_add_manager_venue_assignments.sql', import.meta.url), 'utf8'),
+  ])
+
+  assert.doesNotMatch(permissions, /OWNER_ONLY_SECTIONS[^\n]*access/)
+  assert.match(accessPage, /VenueScopePicker/)
+  assert.match(accessPage, /tenantContext\.role === 'owner' \? <section/)
+  assert.match(accessService, /action: "set-manager-venues"/)
+  assert.match(accessService, /manager_venue_assignments/)
+  assert.match(edgeFunction, /allowedVenueIds: isOwner \? null : \[\.\.\.managerVenueIds\]/)
+  assert.match(edgeFunction, /if \(!canManageVenue\(venue\.id\)\)/)
+  assert.match(migration, /manager_user_id = \(select auth\.uid\(\)\)/i)
+  assert.match(migration, /function public\.set_manager_venue_assignments/i)
+  assert.match(edgeFunction, /authClient\.rpc\('set_manager_venue_assignments'/)
+})
+
 test('los headers de dispositivos y usuarios usan Tailwind con tokens del tema CRM', async () => {
   const accessPage = await readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8')
 

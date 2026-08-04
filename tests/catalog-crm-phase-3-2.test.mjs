@@ -4,6 +4,7 @@ import test from 'node:test'
 import { resolveCatalogItem } from '../src/features/catalog/domain/resolver.ts'
 import {
   buildProductCreationBatch,
+  buildCrossVenueProductDuplicationPlan,
   buildProductDuplicationPlan,
   filterCatalogProducts,
   getCatalogProductSummaries,
@@ -134,6 +135,44 @@ test('product duplication preserves catalog values and remaps every product-owne
   assert.equal(modifierAssignment.payload.domain, 'modifier')
   assert.deepEqual(modifierAssignment.payload.variantIds, [createProduct.payload.variants[0].id])
   assert.equal(plan.image.storagePath, source.image.storagePath)
+})
+
+test('cross-venue duplication maps formats and locations without reusing source identifiers', () => {
+  const sourceCatalog = {
+    ...catalog,
+    saleFormats: [{ ...base('format-source'), name: 'Copa', inventoryConsumptionQuantity: null, inventoryConsumptionUnitId: null, active: true }],
+    variants: catalog.variants.map((variant) => variant.id === 'v-drink' ? { ...variant, formatId: 'format-source' } : variant),
+  }
+  const targetCatalog = {
+    ...catalog,
+    venueId: 'venue-target',
+    products: [],
+    variants: [],
+    placements: [],
+    saleFormats: [{ ...base('format-target'), venueId: 'venue-target', name: 'Copa', inventoryConsumptionQuantity: null, inventoryConsumptionUnitId: null, active: true }],
+    tabs: [{ ...catalog.tabs[0], id: 'tab-target', venueId: 'venue-target' }],
+    categories: [{ ...catalog.categories[0], id: 'category-target', venueId: 'venue-target' }],
+    tabCategories: [{ ...catalog.tabCategories[0], id: 'tc-target', venueId: 'venue-target', tabId: 'tab-target', categoryId: 'category-target' }],
+    selectionGroups: [], selectionOptions: [], selectionAssignments: [], modifierGroups: [], modifiers: [], modifierAssignments: [],
+  }
+  let nextId = 0
+  const plan = buildCrossVenueProductDuplicationPlan(sourceCatalog, targetCatalog, 'p-drink', () => `target-${++nextId}`)
+  const createProduct = plan.batch.find((item) => item.command === 'create_product')
+  const placement = plan.batch.find((item) => item.command === 'create_placement')
+
+  assert.equal(createProduct.payload.variants[0].formatId, 'format-target')
+  assert.deepEqual(plan.newFormats, [])
+  assert.equal(placement.payload.tabId, 'tab-target')
+  assert.equal(placement.payload.categoryId, 'category-target')
+  assert.notEqual(createProduct.payload.id, 'p-drink')
+
+  const emptyTarget = { ...targetCatalog, saleFormats: [], tabs: [], categories: [], tabCategories: [] }
+  const createdStructurePlan = buildCrossVenueProductDuplicationPlan(sourceCatalog, emptyTarget, 'p-drink', () => `new-${++nextId}`)
+  assert.equal(createdStructurePlan.newFormats[0].name, 'Copa')
+  assert.deepEqual(
+    createdStructurePlan.batch.map((item) => item.command),
+    ['create_product', 'save_tab', 'save_category', 'save_tab_category', 'create_placement'],
+  )
 })
 
 test('all CRM reorder operations emit one collision-free deterministic payload', () => {

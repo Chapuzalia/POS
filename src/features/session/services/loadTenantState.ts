@@ -11,8 +11,10 @@ import { isBackofficeUser } from '../../../app/app-permissions'
 
 const emptyCatalogState = {
   catalog: null,
+  discountSchedule: { dayChangeTime: null, timeZone: 'Europe/Madrid' },
   discounts: [],
   manualDiscountEnabled: false,
+  manualDiscountRequiresPin: false,
 }
 
 export async function loadTenantState(context: TenantContext) {
@@ -33,8 +35,10 @@ export async function loadTenantState(context: TenantContext) {
   const remoteLedger = cashSession ? await loadSalesLedgerFromSupabase(context, cashSession.id) : []
   return {
     catalog: posCatalog.catalog,
+    discountSchedule: posCatalog.discountSchedule,
     discounts: posCatalog.discounts,
     manualDiscountEnabled: posCatalog.manualDiscountEnabled,
+    manualDiscountRequiresPin: posCatalog.manualDiscountRequiresPin,
     cashSession,
     productSalesStats,
     salesLedger: mergeLedgers(localLedger, remoteLedger),

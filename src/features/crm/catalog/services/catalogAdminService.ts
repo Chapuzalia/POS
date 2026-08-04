@@ -7,7 +7,7 @@ import {
   resizeProductImageToWebp,
 } from '../../../../lib/productImages.ts'
 import { supabase } from '../../../../lib/supabase.ts'
-import { buildProductDuplicationPlan } from './catalogAdminModel.ts'
+import { buildCrossVenueProductDuplicationPlan, buildProductDuplicationPlan } from './catalogAdminModel.ts'
 
 export const CRM_CATALOG_IMAGE_MAX_SOURCE_BYTES = 10 * 1024 * 1024
 export const CRM_CATALOG_IMAGE_TYPES = ['image/jpeg', 'image/png', 'image/webp', 'image/avif'] as const
@@ -69,6 +69,41 @@ export const catalogAdminService = {
         // Preserve the image error: it describes the incomplete duplication while
         // the next forced catalog refresh will still expose any failed rollback.
       }
+      throw error
+    }
+    return plan.productId
+  },
+
+  async duplicateProductToVenue(sourceCatalog: CatalogData, targetVenueId: string, sourceProductId: string) {
+    if (sourceCatalog.venueId === targetVenueId) return this.duplicateProduct(sourceCatalog, sourceProductId)
+
+    const targetCatalog = await repository.getCatalog(targetVenueId, 'admin', true)
+    const plan = buildCrossVenueProductDuplicationPlan(sourceCatalog, targetCatalog, sourceProductId, uuid)
+    await commands.executeBatchWithVariantFormats(targetVenueId, plan.batch, plan.variantFormats, plan.newFormats)
+    if (!plan.image) return plan.productId
+
+    const client = requireClient()
+    const targetPath = `${sourceCatalog.tenantId}/${targetVenueId}/products/${plan.productId}/${uuid()}.webp`
+    try {
+      const { data: imageBlob, error: downloadError } = await client.storage.from(PRODUCT_IMAGE_BUCKET).download(plan.image.storagePath)
+      if (downloadError || !imageBlob) throw downloadError ?? new Error('No se pudo leer la imagen original.')
+      const { error: uploadError } = await client.storage.from(PRODUCT_IMAGE_BUCKET).upload(targetPath, imageBlob, {
+        cacheControl: '31536000',
+        contentType: plan.image.mimeType,
+        upsert: false,
+      })
+      if (uploadError) throw uploadError
+      await commands.saveProductImage(targetVenueId, {
+        id: uuid(),
+        productId: plan.productId,
+        storagePath: targetPath,
+        mimeType: plan.image.mimeType,
+        sizeBytes: plan.image.sizeBytes,
+        sha256: plan.image.sha256,
+      })
+    } catch (error) {
+      await client.storage.from(PRODUCT_IMAGE_BUCKET).remove([targetPath])
+      try { await commands.deleteProduct(targetVenueId, plan.productId) } catch { /* Preserve the original copy error. */ }
       throw error
     }
     return plan.productId

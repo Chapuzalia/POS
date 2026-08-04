@@ -16,10 +16,11 @@ test('manager login creates a backoffice context without requiring a POS device'
   assert.match(sessionLoader, /if \(isBackofficeUser\(context\)\)/)
 })
 
-test('manager data access is enabled while owner-only CRM sections stay hidden', async () => {
-  const [schema, migration, shell, settings, edgeFunction] = await Promise.all([
+test('manager data access is scoped by venue while true owner-only sections stay hidden', async () => {
+  const [schema, migration, scopeMigration, shell, settings, edgeFunction] = await Promise.all([
     readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/migrations/20260725213000_enable_manager_crm_access.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260805000000_add_manager_venue_assignments.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/layout/CrmSidebar.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/venues/pages/VenueSettingsPage.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8'),
@@ -30,5 +31,8 @@ test('manager data access is enabled while owner-only CRM sections stay hidden',
   assert.match(migration, managerRoles)
   assert.match(shell, /filter\(\(item\) => canAccessCrmSection\(context\.role, item\.id\)\)/)
   assert.match(settings, /if \(isOwner\) void runAction\(refreshPlan\)/)
-  assert.match(edgeFunction, /membership\.role !== 'owner'/)
+  assert.match(scopeMigration, /create table if not exists public\.manager_venue_assignments/i)
+  assert.match(edgeFunction, /\['owner', 'manager'\]\.includes\(membership\.role\)/)
+  assert.match(edgeFunction, /canManageVenue\(device\.venue_id\)/)
+  assert.match(edgeFunction, /Un manager no puede crear otros usuarios gestores/)
 })

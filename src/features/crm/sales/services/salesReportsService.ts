@@ -57,6 +57,24 @@ export type SalesReportTicketRow = {
   discount_amount_cents: number | null
   ticket_lines: SalesReportLineRow[] | null
   total_cents: number
+  fiscal_invoices: Array<{
+    id: string
+    provider: 'verifactu' | 'ticketbai'
+    environment: 'test' | 'production'
+    invoice_type: 'normal' | 'simplified' | 'corrective'
+    series: string
+    number: string
+    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+    external_uuid: string | null
+    external_code: string | null
+    qr_base64: string | null
+    verification_url: string | null
+    error_code: string | null
+    error_message: string | null
+    attempts: number
+    sent_at: string | null
+    confirmed_at: string | null
+  }> | null
 }
 
 export type MutableSalesReportAggregate = CrmSalesReportAggregate & {
@@ -163,6 +181,11 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
           ),
           sales (
             payment_method
+          ),
+          fiscal_invoices (
+            id, provider, environment, invoice_type, series, number, status,
+            external_uuid, external_code, qr_base64, verification_url,
+            error_code, error_message, attempts, sent_at, confirmed_at
           )
         `)
         .eq('tenant_id', context.tenantId)
@@ -299,6 +322,24 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
       status: ticket.status,
       subtotalCents: ticket.subtotal_cents,
       totalCents: ticket.total_cents,
+      fiscal: ticket.fiscal_invoices?.[0] ? {
+        id: ticket.fiscal_invoices[0].id,
+        provider: ticket.fiscal_invoices[0].provider,
+        environment: ticket.fiscal_invoices[0].environment,
+        invoiceType: ticket.fiscal_invoices[0].invoice_type,
+        series: ticket.fiscal_invoices[0].series,
+        number: ticket.fiscal_invoices[0].number,
+        status: ticket.fiscal_invoices[0].status,
+        externalUuid: ticket.fiscal_invoices[0].external_uuid,
+        externalCode: ticket.fiscal_invoices[0].external_code,
+        qrBase64: ticket.fiscal_invoices[0].qr_base64,
+        verificationUrl: ticket.fiscal_invoices[0].verification_url,
+        errorCode: ticket.fiscal_invoices[0].error_code,
+        errorMessage: ticket.fiscal_invoices[0].error_message,
+        attempts: ticket.fiscal_invoices[0].attempts,
+        sentAt: ticket.fiscal_invoices[0].sent_at,
+        confirmedAt: ticket.fiscal_invoices[0].confirmed_at,
+      } : null,
     })),
   }
 }

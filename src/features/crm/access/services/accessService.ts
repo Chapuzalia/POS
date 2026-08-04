@@ -39,7 +39,7 @@ export async function loadCrmAccessData(
     client
       .from("venues")
       .select(
-        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone, catalog_profile",
+        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, default_tax_rate, timezone, catalog_profile",
       )
       .eq("tenant_id", context.tenantId)
       .order("sort_order"),
@@ -51,6 +51,7 @@ export async function loadCrmAccessData(
       .eq("tenant_id", context.tenantId)
       .order("name"),
     client.functions.invoke<{
+      allowedVenueIds: string[] | null;
       deviceAccounts: CrmDeviceAccountRow[];
       users: CrmAccessUser[];
     }>("manage-pos-users", {
@@ -81,9 +82,12 @@ export async function loadCrmAccessData(
       },
     ]),
   );
+  const allowedVenueIds = accessResult.data?.allowedVenueIds;
+  const canAccessVenue = (venueId: string) => context.role === "owner"
+    || (Array.isArray(allowedVenueIds) && allowedVenueIds.includes(venueId));
 
   return {
-    venues: (venueRows ?? []).map((venue) => ({
+    venues: (venueRows ?? []).filter((venue) => canAccessVenue(venue.id as string)).map((venue) => ({
       id: venue.id as string,
       name: venue.name as string,
       catalogProfile: venue.catalog_profile as CatalogProfile,
@@ -95,11 +99,12 @@ export async function loadCrmAccessData(
       taxId: (venue.tax_id as string | null) ?? "",
       sortOrder: venue.sort_order as number,
       isActive: venue.is_active as boolean,
+      inventoryEnabled: venue.inventory_enabled as boolean,
       tablesEnabled: venue.tables_enabled as boolean,
       defaultTaxRate: Number(venue.default_tax_rate),
       timeZone: venue.timezone as string,
     })),
-    devices: (deviceRows ?? []).map((device) => ({
+    devices: (deviceRows ?? []).filter((device) => canAccessVenue(device.venue_id as string)).map((device) => ({
       id: device.id as string,
       venueId: device.venue_id as string,
       name: device.name as string,
@@ -116,19 +121,33 @@ export async function loadCrmVenues(
   context: TenantContext,
 ): Promise<CrmVenue[]> {
   const client = requireSupabase();
-  const { data, error } = await client
-    .from("venues")
-    .select(
-      "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone, catalog_profile",
-    )
-    .eq("tenant_id", context.tenantId)
-    .order("sort_order");
+  const [venuesResult, assignmentsResult] = await Promise.all([
+    client
+      .from("venues")
+      .select(
+        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, default_tax_rate, timezone, catalog_profile",
+      )
+      .eq("tenant_id", context.tenantId)
+      .order("sort_order"),
+    context.role === "manager"
+      ? client
+        .from("manager_venue_assignments")
+        .select("venue_id")
+        .eq("tenant_id", context.tenantId)
+        .eq("manager_user_id", context.userId)
+      : Promise.resolve({ data: null, error: null }),
+  ]);
+  const { data, error } = venuesResult;
+  const assignmentError = assignmentsResult.error;
 
-  if (error) {
-    throw error;
+  if (error || assignmentError) {
+    throw error ?? assignmentError;
   }
+  const managerVenueIds = context.role === "manager"
+    ? new Set((assignmentsResult.data ?? []).map((item) => item.venue_id as string))
+    : null;
 
-  return (data ?? []).map((venue) => ({
+  return (data ?? []).filter((venue) => !managerVenueIds || managerVenueIds.has(venue.id as string)).map((venue) => ({
     id: venue.id as string,
     name: venue.name as string,
     catalogProfile: venue.catalog_profile as CatalogProfile,
@@ -140,6 +159,7 @@ export async function loadCrmVenues(
     taxId: (venue.tax_id as string | null) ?? "",
     sortOrder: venue.sort_order as number,
     isActive: venue.is_active as boolean,
+    inventoryEnabled: venue.inventory_enabled as boolean,
     tablesEnabled: venue.tables_enabled as boolean,
     defaultTaxRate: Number(venue.default_tax_rate),
     timeZone: venue.timezone as string,
@@ -290,6 +310,7 @@ export async function createCrmUser(
     email: string;
     password: string;
     role: CrmAccessUser["role"];
+    venueIds: string[];
   },
 ) {
   const email = input.email.trim().toLowerCase();
@@ -319,6 +340,7 @@ export async function createCrmUser(
       password: input.password,
       role: input.role,
       tenantId: context.tenantId,
+      venueIds: input.venueIds,
     },
   });
 
@@ -332,6 +354,31 @@ export async function createCrmUser(
     );
   }
   return data.user;
+}
+
+export async function updateManagerVenueAssignments(
+  context: TenantContext,
+  managerUserId: string,
+  venueIds: string[],
+) {
+  if (context.role !== "owner") throw new Error("Solo el owner puede asignar locales a managers.");
+  if (!venueIds.length) throw new Error("Selecciona al menos un local.");
+
+  const { data, error } = await requireSupabase().functions.invoke<{ error?: string; venueIds?: string[] }>(
+    "manage-pos-users",
+    {
+      body: {
+        action: "set-manager-venues",
+        managerUserId,
+        tenantId: context.tenantId,
+        venueIds,
+      },
+    },
+  );
+  if (error || data?.error) {
+    throw new Error(await getFunctionInvokeErrorMessage(data, error, "No se pudieron actualizar los locales del manager."));
+  }
+  return data?.venueIds ?? venueIds;
 }
 
 export async function updateCrmDevice(
