@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 
 const KEYBOARD_HEIGHT_THRESHOLD = 120
 const RETRY_DELAY_MS = 180
+const PAGE_ZOOM_SCALE_TOLERANCE = 0.01
 
 type AppleNavigator = Navigator & {
   standalone?: boolean
@@ -17,8 +18,13 @@ function isStandalonePWA(navigatorValue: AppleNavigator) {
     || window.matchMedia('(display-mode: standalone)').matches
 }
 
+function isPageZoomed(viewport: VisualViewport) {
+  return Math.abs(viewport.scale - 1) > PAGE_ZOOM_SCALE_TOLERANCE
+}
+
 function isKeyboardOpen(viewport: VisualViewport) {
-  return window.innerHeight - viewport.height > KEYBOARD_HEIGHT_THRESHOLD
+  return !isPageZoomed(viewport)
+    && window.innerHeight - viewport.height > KEYBOARD_HEIGHT_THRESHOLD
 }
 
 function isEditableElement(target: EventTarget | null) {
@@ -41,6 +47,7 @@ export function useIOSPWAViewportFix() {
     const root = document.documentElement
     const animationFrames = new Set<number>()
     const timeouts = new Set<number>()
+    let unzoomedAppHeight = viewport.height
     let keyboardWasOpen = isKeyboardOpen(viewport)
     let disposed = false
 
@@ -62,7 +69,14 @@ export function useIOSPWAViewportFix() {
     }
 
     const updateAppHeight = () => {
-      root.style.setProperty('--app-height', `${viewport.height}px`)
+      // Pinch zoom shrinks and offsets the visual viewport without changing the
+      // layout viewport. WebKit can report a reduced window.innerHeight as well,
+      // so retain the last reliable height observed at scale 1 without a keyboard.
+      const pageZoomed = isPageZoomed(viewport)
+      const keyboardOpen = isKeyboardOpen(viewport)
+      if (!pageZoomed && !keyboardOpen) unzoomedAppHeight = viewport.height
+      const appHeight = pageZoomed ? unzoomedAppHeight : viewport.height
+      root.style.setProperty('--app-height', `${appHeight}px`)
     }
 
     const repairViewport = (reason: string) => {

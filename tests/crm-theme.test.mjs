@@ -38,4 +38,6 @@ test('light theme separates the canvas, cards and form controls through tokens',
   assert.ok(select.includes('border-[var(--crm-input-border)]'))
   assert.ok(select.includes('bg-[var(--crm-input-bg)]'))
   assert.ok(styles.includes(":root:has(.crm-shell:not([data-crm-theme='dark']))"))
+  assert.match(styles, /:root:has\(\.crm-shell:not\(\[data-crm-theme='dark'\]\)\) \{[\s\S]*?--background: #f3f5f7/)
+  assert.match(styles, /:root:has\(\.crm-shell\[data-crm-theme='dark'\]\) \{[\s\S]*?--background: #000000/)
 })
