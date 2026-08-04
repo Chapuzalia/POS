@@ -43,6 +43,14 @@ const negativeStockMigration = readFileSync(
   new URL('../supabase/migrations/20260804120000_allow_negative_inventory_stock.sql', import.meta.url),
   'utf8',
 )
+const warehouseRoutingMigration = readFileSync(
+  new URL('../supabase/migrations/20260804210000_add_inventory_warehouse_routing.sql', import.meta.url),
+  'utf8',
+)
+const inventoryToggleMigration = readFileSync(
+  new URL('../supabase/migrations/20260804220000_add_inventory_control_toggle.sql', import.meta.url),
+  'utf8',
+)
 const consolidatedDatabase = readFileSync(
   new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url),
   'utf8',
@@ -180,6 +188,35 @@ test('las ventas permiten agotar el stock y continuar en negativo', () => {
   )
 })
 
+test('el consumo respeta almacenes habilitados por producto y la prioridad de cada TPV', () => {
+  for (const sql of [warehouseRoutingMigration, consolidatedDatabase]) {
+    assert.match(sql, /add column if not exists is_enabled boolean not null default true/)
+    assert.match(sql, /create table if not exists public\.inventory_device_warehouses/)
+    assert.match(sql, /create or replace function public\.set_inventory_device_warehouses/)
+    assert.match(sql, /select t\.venue_id, t\.device_id/)
+    assert.match(sql, /l\.is_enabled = true/)
+    assert.match(sql, /not v_has_device_config or coalesce\(dw\.is_enabled, false\)/)
+    assert.match(sql, /case when v_has_device_config then dw\.priority else w\.sort_order end/)
+    assert.match(sql, /v_overflow_quantity - v_remaining/)
+  }
+  assert.match(warehouseRoutingMigration, /INVENTORY_DUPLICATE_PRIORITY/)
+  assert.match(warehouseRoutingMigration, /grant execute on function public\.set_inventory_device_warehouses/)
+})
+
+test('el interruptor general desactiva todo consumo de stock por local', () => {
+  for (const sql of [inventoryToggleMigration, consolidatedDatabase]) {
+    assert.match(sql, /add column if not exists inventory_enabled boolean not null default true/)
+    assert.match(sql, /create or replace function public\.set_venue_inventory_enabled/)
+    assert.match(sql, /select t\.venue_id, t\.device_id, v\.inventory_enabled/)
+    assert.match(sql, /if not v_inventory_enabled then\s+return new;/)
+  }
+  assert.ok(
+    inventoryToggleMigration.indexOf('if not v_inventory_enabled then')
+      < inventoryToggleMigration.indexOf('perform public.consume_inventory_product'),
+  )
+  assert.match(inventoryToggleMigration, /grant execute on function public\.set_venue_inventory_enabled/)
+})
+
 test('guarda la unidad de contenido antes de crear los niveles de stock', () => {
   const completeSettingInsert = stockUpsertRepairMigration.indexOf(
     'insert into public.inventory_product_settings',
@@ -252,4 +289,37 @@ test('las pantallas permiten crear configuracion y editar stock por almacen', ()
   assert.match(settingsPage, /Botella 70 cl/)
   assert.match(settingsPage, /contentQuantity/)
   assert.match(settingsPage, /contentUnitId/)
+})
+
+test('el listado de stock abre el detalle por producto y permite buscar, filtrar y paginar', () => {
+  assert.match(stockPage, /placeholder="Buscar producto"/)
+  assert.match(stockPage, /ariaLabel="Filtrar por categoría"/)
+  assert.match(stockPage, /categoryIdsByProduct/)
+  assert.match(stockPage, /CRM_PAGE_SIZE/)
+  assert.match(stockPage, /<CrmPagination/)
+  assert.match(stockPage, /onClick=\{\(\) => openProduct\(row\.product\.id\)\}/)
+  assert.match(stockPage, /<CrmModal label=\{`Stock de \$\{selectedProduct\.name\}`\}/)
+  assert.match(stockPage, /Stock según almacén/)
+  assert.match(stockPage, /type="submit"><Save[^>]*\/> Guardar<\/UiButton>/)
+  assert.doesNotMatch(stockPage, /snapshot\.warehouses\.map\(\(warehouse\) => <th/)
+  assert.doesNotMatch(stockPage, /aria-label=\{`Guardar stock de/)
+})
+
+test('el producto y cada TPV permiten elegir almacenes y prioridad de consumo', () => {
+  assert.match(stockPage, /enabledByWarehouse/)
+  assert.match(stockPage, /type="checkbox"/)
+  assert.match(stockPage, /Producto disponible en este almacén/)
+  assert.match(warehousesPage, /Acceso y prioridad por TPV/)
+  assert.match(warehousesPage, /saveInventoryDeviceWarehouses/)
+  assert.match(warehousesPage, /Guardar configuración/)
+  assert.match(warehousesPage, /Prioridad/)
+})
+
+test('la pagina Stock conserva el interruptor y oculta la configuracion cuando esta apagado', () => {
+  assert.match(stockPage, /aria-label="Activar control de stock"/)
+  assert.match(stockPage, /setVenueInventoryEnabled/)
+  assert.match(stockPage, /inventoryEnabled \? \(/)
+  assert.match(stockPage, /las páginas de almacenes y configuración permanecerán ocultas/)
+  assert.match(shell, /inventoryEnabled \|\| item\.id === 'inventory-stock'/)
+  assert.match(routes, /Control de stock desactivado/)
 })

@@ -26,10 +26,12 @@ type Props = {
   catalog: CatalogData | null
   context: TenantContext
   disabled: boolean
+  inventoryEnabled: boolean
   isCatalogLoading: boolean
   mutateCatalog: (action: () => Promise<unknown>) => Promise<boolean>
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
+  onInventoryEnabledChange: () => Promise<void>
   onStatsRefresh: (options?: { monthKey?: string; silent?: boolean }) => Promise<void>
   onVenuesChanged: () => Promise<void>
   runAction: RunAction
@@ -45,10 +47,12 @@ export function CrmSectionContent({
   catalog,
   context,
   disabled,
+  inventoryEnabled,
   isCatalogLoading,
   mutateCatalog,
   onCatalogChanged,
   onError,
+  onInventoryEnabledChange,
   onStatsRefresh,
   onVenuesChanged,
   runAction,
@@ -58,6 +62,10 @@ export function CrmSectionContent({
 }: Props) {
   if (catalogSections.has(activeSection) && !catalog) {
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
+  }
+
+  if (!inventoryEnabled && (activeSection === 'inventory-warehouses' || activeSection === 'inventory-settings')) {
+    return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">Control de stock desactivado</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Actívalo desde la página Stock para acceder a esta configuración.</p></section>
   }
 
   switch (activeSection) {
@@ -82,7 +90,7 @@ export function CrmSectionContent({
     case 'tables':
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
     case 'inventory-stock':
-      return catalog ? <InventoryStockCrm catalog={catalog} disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} /> : null
+      return catalog ? <InventoryStockCrm catalog={catalog} disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} /> : null
     case 'inventory-warehouses':
       return <InventoryWarehousesCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-settings':

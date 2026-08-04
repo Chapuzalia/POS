@@ -74,6 +74,14 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     if (!canAccessCrmSection(context.role, activeSection)) setActiveSection('dashboard')
   }, [activeSection, context.role])
 
+  const inventoryEnabled = venues.find((venue) => venue.id === selectedVenueId)?.inventoryEnabled ?? true
+
+  useEffect(() => {
+    if (!inventoryEnabled && (activeSection === 'inventory-warehouses' || activeSection === 'inventory-settings')) {
+      setActiveSection('inventory-stock')
+    }
+  }, [activeSection, inventoryEnabled])
+
   const refreshStats = useCallback(async (options: { monthKey?: string; silent?: boolean } = {}) => {
     const loadStats = async () => {
       onError(null)
@@ -160,12 +168,13 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
   if (!canAccessCrm(context.role)) return null
   const disabled = !isOnline || isBusy || isCatalogLoading
 
-  return <CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
-    if (canAccessCrmSection(context.role, section)) setActiveSection(section)
+  return <CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
+    const inventorySectionBlocked = !inventoryEnabled && (section === 'inventory-warehouses' || section === 'inventory-settings')
+    if (canAccessCrmSection(context.role, section) && !inventorySectionBlocked) setActiveSection(section)
   }} onVenueChange={(venueId) => {
     setStats(null)
     setSelectedVenueId(venueId)
   }} selectedVenueId={selectedVenueId} venues={venues}>
-    <CrmSectionContent activeSection={activeSection} catalog={catalog} context={context} disabled={disabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+    <CrmSectionContent activeSection={activeSection} catalog={catalog} context={context} disabled={disabled} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
   </CrmShell>
 }

@@ -53,9 +53,6 @@ export function InventorySettingsCrm({ disabled, runAction, selectedVenueId, ten
           <Plus className="!size-4" /> Nueva unidad
         </UiButton>
       </div>
-      <div className="!mx-[18px] !mt-[18px] !rounded-xl !bg-[var(--crm-blue-soft)] !p-4 !text-sm !font-medium !text-[var(--crm-text-secondary)] md:!mx-[22px]">
-        Crea primero una unidad base, por ejemplo <strong>Mililitros (ml)</strong>. Después puedes crear <strong>Botella 70 cl</strong> e indicar aquí que equivale a <strong>700 ml</strong>. Esa capacidad se reutilizará en todos los productos.
-      </div>
 
       <div className="!overflow-x-auto">
         <div className="!min-w-[660px]">

@@ -19,6 +19,7 @@ import type { CrmTheme } from './crmTheme'
 type Props = {
   activeSection: CrmSection
   context: TenantContext
+  inventoryEnabled: boolean
   isOpen: boolean
   onClose: () => void
   onLogout: () => void
@@ -99,7 +100,7 @@ function SidebarCollapsible({ activeSection, icon: Icon, isOpen, items, label, o
   )
 }
 
-export function CrmSidebar({ activeSection, context, isOpen, onClose, onLogout, onSectionChange, onToggleTheme, theme }: Props) {
+export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, onClose, onLogout, onSectionChange, onToggleTheme, theme }: Props) {
   const [isProductsOpen, setIsProductsOpen] = useState(productSections.has(activeSection))
   const [isInventoryOpen, setIsInventoryOpen] = useState(inventorySections.has(activeSection))
   const [isReportsOpen, setIsReportsOpen] = useState(reportSections.has(activeSection))
@@ -120,6 +121,8 @@ export function CrmSidebar({ activeSection, context, isOpen, onClose, onLogout, 
   }, [activeSection])
 
   const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id))
+  const allowedInventoryItems = allowed(inventoryNavItems)
+    .filter((item) => inventoryEnabled || item.id === 'inventory-stock')
   const navigate = (section: CrmSection) => {
     onSectionChange(section)
     onClose()
@@ -171,7 +174,7 @@ export function CrmSidebar({ activeSection, context, isOpen, onClose, onLogout, 
             <p className="!mx-2.5 !mt-0 !mb-2 !text-[10px] !leading-tight !font-bold !tracking-[0.14em] !text-[var(--crm-sidebar-muted)] !uppercase" id="crm-nav-management">Gestion</p>
             <div className="!grid !gap-[3px]">
               <SidebarCollapsible activeSection={activeSection} icon={Boxes} isOpen={isProductsOpen} items={allowed(productNavItems)} label="Productos" onNavigate={navigate} onToggle={() => setIsProductsOpen((value) => !value)} sections={productSections} />
-              <SidebarCollapsible activeSection={activeSection} icon={Package} isOpen={isInventoryOpen} items={allowed(inventoryNavItems)} label="Inventario" onNavigate={navigate} onToggle={() => setIsInventoryOpen((value) => !value)} sections={inventorySections} />
+              <SidebarCollapsible activeSection={activeSection} icon={Package} isOpen={isInventoryOpen} items={allowedInventoryItems} label="Inventario" onNavigate={navigate} onToggle={() => setIsInventoryOpen((value) => !value)} sections={inventorySections} />
               {allowed(navItems.slice(2, 3)).map((item) => (
                 <SidebarNavItem activeSection={activeSection} item={item} key={item.id} onNavigate={navigate} />
               ))}

@@ -39,7 +39,7 @@ export async function loadCrmAccessData(
     client
       .from("venues")
       .select(
-        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone, catalog_profile",
+        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, default_tax_rate, timezone, catalog_profile",
       )
       .eq("tenant_id", context.tenantId)
       .order("sort_order"),
@@ -95,6 +95,7 @@ export async function loadCrmAccessData(
       taxId: (venue.tax_id as string | null) ?? "",
       sortOrder: venue.sort_order as number,
       isActive: venue.is_active as boolean,
+      inventoryEnabled: venue.inventory_enabled as boolean,
       tablesEnabled: venue.tables_enabled as boolean,
       defaultTaxRate: Number(venue.default_tax_rate),
       timeZone: venue.timezone as string,
@@ -119,7 +120,7 @@ export async function loadCrmVenues(
   const { data, error } = await client
     .from("venues")
     .select(
-      "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, tables_enabled, default_tax_rate, timezone, catalog_profile",
+      "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, default_tax_rate, timezone, catalog_profile",
     )
     .eq("tenant_id", context.tenantId)
     .order("sort_order");
@@ -140,6 +141,7 @@ export async function loadCrmVenues(
     taxId: (venue.tax_id as string | null) ?? "",
     sortOrder: venue.sort_order as number,
     isActive: venue.is_active as boolean,
+    inventoryEnabled: venue.inventory_enabled as boolean,
     tablesEnabled: venue.tables_enabled as boolean,
     defaultTaxRate: Number(venue.default_tax_rate),
     timeZone: venue.timezone as string,

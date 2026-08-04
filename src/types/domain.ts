@@ -137,6 +137,7 @@ export type CrmVenue = {
   taxId: string
   sortOrder: number
   isActive: boolean
+  inventoryEnabled: boolean
   tablesEnabled: boolean
   defaultTaxRate: number
   timeZone: string
