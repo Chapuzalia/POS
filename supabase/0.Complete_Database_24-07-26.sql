@@ -11786,7 +11786,6 @@ create table public.inventory_stock_levels (
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (warehouse_id, product_id),
-  constraint inventory_stock_levels_quantity_check check (quantity >= 0),
   constraint inventory_stock_levels_warehouse_scope_fk
     foreign key (warehouse_id, tenant_id, venue_id)
     references public.inventory_warehouses(id, tenant_id, venue_id)
@@ -12330,7 +12329,6 @@ create table public.inventory_stock_movements (
   constraint inventory_stock_movements_delta_check
     check (
       stock_quantity_delta < 0
-      and stock_quantity_after >= 0
       and stock_quantity_before + stock_quantity_delta = stock_quantity_after
     )
 );
@@ -12593,6 +12591,8 @@ declare
   v_remaining numeric(18, 6);
   v_take numeric(18, 6);
   v_stock record;
+  v_overflow_warehouse_id uuid;
+  v_overflow_quantity numeric(18, 6);
 begin
   if p_product_id is null
     or coalesce(p_sold_quantity, 0) <= 0
@@ -12710,12 +12710,76 @@ begin
     exit when v_remaining <= 0;
   end loop;
 
-  if v_remaining > 0 then
-    raise exception 'INVENTORY_INSUFFICIENT_STOCK product=% missing=%',
-      p_product_id,
-      v_remaining
-      using errcode = 'P0001';
-  end if;
+  if v_remaining <= 0 then return; end if;
+
+  select w.id into v_overflow_warehouse_id
+  from public.inventory_warehouses w
+  where w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id
+    and w.is_active = true
+  order by w.sort_order, w.name, w.id
+  limit 1;
+
+  if v_overflow_warehouse_id is null then return; end if;
+
+  insert into public.inventory_stock_levels (
+    warehouse_id,
+    product_id,
+    tenant_id,
+    venue_id,
+    quantity
+  )
+  values (
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_tenant_id,
+    p_venue_id,
+    0
+  )
+  on conflict (warehouse_id, product_id) do nothing;
+
+  select l.quantity into v_overflow_quantity
+  from public.inventory_stock_levels l
+  where l.warehouse_id = v_overflow_warehouse_id
+    and l.product_id = p_product_id
+  for update;
+
+  update public.inventory_stock_levels
+  set quantity = quantity - v_remaining,
+      updated_at = now()
+  where warehouse_id = v_overflow_warehouse_id
+    and product_id = p_product_id;
+
+  insert into public.inventory_stock_movements (
+    tenant_id,
+    venue_id,
+    warehouse_id,
+    product_id,
+    ticket_line_id,
+    sale_format_id,
+    source_type,
+    stock_quantity_delta,
+    stock_quantity_before,
+    stock_quantity_after,
+    format_consumption_quantity,
+    sold_quantity,
+    content_unit_id
+  )
+  values (
+    p_tenant_id,
+    p_venue_id,
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_ticket_line_id,
+    v_sale_format_id,
+    p_source_type,
+    -v_remaining,
+    v_overflow_quantity,
+    v_overflow_quantity - v_remaining,
+    v_format_quantity,
+    p_sold_quantity,
+    v_content_unit_id
+  );
 end;
 $$;
 
@@ -13349,6 +13413,8 @@ declare
   v_remaining numeric(18, 6);
   v_take numeric(18, 6);
   v_stock record;
+  v_overflow_warehouse_id uuid;
+  v_overflow_quantity numeric(18, 6);
 begin
   if p_product_id is null
     or coalesce(p_sold_quantity, 0) <= 0
@@ -13473,12 +13539,76 @@ begin
     exit when v_remaining <= 0;
   end loop;
 
-  if v_remaining > 0 then
-    raise exception 'INVENTORY_INSUFFICIENT_STOCK product=% missing=%',
-      p_product_id,
-      v_remaining
-      using errcode = 'P0001';
-  end if;
+  if v_remaining <= 0 then return; end if;
+
+  select w.id into v_overflow_warehouse_id
+  from public.inventory_warehouses w
+  where w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id
+    and w.is_active = true
+  order by w.sort_order, w.name, w.id
+  limit 1;
+
+  if v_overflow_warehouse_id is null then return; end if;
+
+  insert into public.inventory_stock_levels (
+    warehouse_id,
+    product_id,
+    tenant_id,
+    venue_id,
+    quantity
+  )
+  values (
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_tenant_id,
+    p_venue_id,
+    0
+  )
+  on conflict (warehouse_id, product_id) do nothing;
+
+  select l.quantity into v_overflow_quantity
+  from public.inventory_stock_levels l
+  where l.warehouse_id = v_overflow_warehouse_id
+    and l.product_id = p_product_id
+  for update;
+
+  update public.inventory_stock_levels
+  set quantity = quantity - v_remaining,
+      updated_at = now()
+  where warehouse_id = v_overflow_warehouse_id
+    and product_id = p_product_id;
+
+  insert into public.inventory_stock_movements (
+    tenant_id,
+    venue_id,
+    warehouse_id,
+    product_id,
+    ticket_line_id,
+    sale_format_id,
+    source_type,
+    stock_quantity_delta,
+    stock_quantity_before,
+    stock_quantity_after,
+    format_consumption_quantity,
+    sold_quantity,
+    content_unit_id
+  )
+  values (
+    p_tenant_id,
+    p_venue_id,
+    v_overflow_warehouse_id,
+    p_product_id,
+    p_ticket_line_id,
+    v_sale_format_id,
+    p_source_type,
+    -v_remaining,
+    v_overflow_quantity,
+    v_overflow_quantity - v_remaining,
+    v_format_quantity,
+    p_sold_quantity,
+    v_content_unit_id
+  );
 end;
 $$;
 

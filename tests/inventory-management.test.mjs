@@ -39,6 +39,10 @@ const unitCapacityMigration = readFileSync(
   new URL('../supabase/migrations/20260727250000_move_inventory_capacity_to_units.sql', import.meta.url),
   'utf8',
 )
+const negativeStockMigration = readFileSync(
+  new URL('../supabase/migrations/20260804120000_allow_negative_inventory_stock.sql', import.meta.url),
+  'utf8',
+)
 const consolidatedDatabase = readFileSync(
   new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url),
   'utf8',
@@ -146,9 +150,34 @@ test('cada linea vendida descuenta producto principal y mixer de forma atomica',
     assert.match(sql, /v_component\.component_type = 'mixer'/)
     assert.match(sql, /\^mixer:/)
     assert.match(sql, /order by w\.sort_order, w\.name, w\.id/)
-    assert.match(sql, /INVENTORY_INSUFFICIENT_STOCK/)
     assert.match(sql, /after insert on public\.ticket_lines/)
   }
+  assert.match(automaticConsumptionMigration, /INVENTORY_INSUFFICIENT_STOCK/)
+})
+
+test('las ventas permiten agotar el stock y continuar en negativo', () => {
+  assert.match(
+    negativeStockMigration,
+    /drop constraint if exists inventory_stock_levels_quantity_check/,
+  )
+  assert.match(
+    negativeStockMigration,
+    /drop constraint if exists inventory_stock_movements_delta_check/,
+  )
+
+  for (const sql of [negativeStockMigration, consolidatedDatabase]) {
+    assert.match(sql, /v_overflow_warehouse_id uuid/)
+    assert.match(sql, /insert into public\.inventory_stock_levels[\s\S]*on conflict \(warehouse_id, product_id\) do nothing/)
+    assert.match(sql, /set quantity = quantity - v_remaining/)
+    assert.match(sql, /v_overflow_quantity - v_remaining/)
+  }
+
+  assert.doesNotMatch(negativeStockMigration, /INVENTORY_INSUFFICIENT_STOCK/)
+  assert.doesNotMatch(consolidatedDatabase, /stock_quantity_after >= 0/)
+  assert.doesNotMatch(
+    consolidatedDatabase,
+    /constraint inventory_stock_levels_quantity_check check \(quantity >= 0\)/,
+  )
 })
 
 test('guarda la unidad de contenido antes de crear los niveles de stock', () => {
