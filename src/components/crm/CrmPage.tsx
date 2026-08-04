@@ -7,6 +7,7 @@ import { resolveSelectedVenueId } from '../../features/crm/venues/services/venue
 import { applyCrmOpenCashSalesTotals, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
+import { catalogAdminService } from '../../features/crm/catalog/services/catalogAdminService.ts'
 import type { CrmStats, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 
@@ -59,6 +60,24 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
       setIsBusy(false)
     }
   }, [onError, refreshAdminCatalog, refreshCurrentProjectedCatalog])
+
+  const duplicateCatalogProduct = useCallback(async (sourceProductId: string, targetVenueId: string) => {
+    if (!catalog) return false
+    setIsBusy(true)
+    onError(null)
+    try {
+      if (targetVenueId === catalog.venueId) await catalogAdminService.duplicateProduct(catalog, sourceProductId)
+      else await catalogAdminService.duplicateProductToVenue(catalog, targetVenueId, sourceProductId)
+      await onCatalogChanged(targetVenueId)
+      if (targetVenueId === selectedVenueId) await refreshAdminCatalog(true)
+      return true
+    } catch (actionError) {
+      onError(getReadableError(actionError))
+      return false
+    } finally {
+      setIsBusy(false)
+    }
+  }, [catalog, onCatalogChanged, onError, refreshAdminCatalog, selectedVenueId])
 
   const refreshVenues = useCallback(async () => {
     const nextVenues = await loadCrmVenues(context)
@@ -175,6 +194,6 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     setStats(null)
     setSelectedVenueId(venueId)
   }} selectedVenueId={selectedVenueId} venues={venues}>
-    <CrmSectionContent activeSection={activeSection} catalog={catalog} context={context} disabled={disabled} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+    <CrmSectionContent activeSection={activeSection} catalog={catalog} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
   </CrmShell>
 }

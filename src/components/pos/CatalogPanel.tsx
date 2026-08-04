@@ -26,6 +26,7 @@ import { Button } from "../ui";
 import {
   getAvailableFormatCounts,
   groupCatalogItemsByProduct,
+  limitTopCatalogItems,
 } from "./catalogPanelModel";
 import { PosCategoryCard } from "./PosCategoryCard";
 import { PosCatalogTab } from "./PosCatalogTab";
@@ -202,9 +203,8 @@ export function CatalogPanel({
     [activeItems],
   );
 
-  const visibleEntries = useMemo(
-    () =>
-      groupCatalogItemsByProduct(activeItems).sort((left, right) => {
+  const visibleEntries = useMemo(() => {
+    const sortedEntries = groupCatalogItemsByProduct(activeItems).sort((left, right) => {
         if (productFilter !== "top") return compareItems(left, right);
         const firstStat = productSalesById.get(left.product.id);
         const secondStat = productSalesById.get(right.product.id);
@@ -213,9 +213,11 @@ export function CatalogPanel({
           (secondStat?.totalCents ?? 0) - (firstStat?.totalCents ?? 0) ||
           compareItems(left, right)
         );
-      }),
-    [activeItems, productFilter, productSalesById],
-  );
+      });
+    return productFilter === "top"
+      ? limitTopCatalogItems(sortedEntries)
+      : sortedEntries;
+  }, [activeItems, productFilter, productSalesById]);
 
   const visibleCategories = useMemo(() => {
     if (!catalog) return [];

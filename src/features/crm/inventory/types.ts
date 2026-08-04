@@ -25,6 +25,11 @@ export type InventoryWarehouse = {
   updatedAt: string
 }
 
+export type InventoryWarehouseStockSummary = {
+  nonZeroProductCount: number
+  warehouseId: string
+}
+
 export type InventoryProductSetting = {
   contentQuantity: number
   contentUnitId: string

@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { getAvailableFormatCounts, groupCatalogItemsByProduct } from '../src/components/pos/catalogPanelModel.ts'
+import { getAvailableFormatCounts, groupCatalogItemsByProduct, limitTopCatalogItems, TOP_ITEMS_LIMIT } from '../src/components/pos/catalogPanelModel.ts'
 
 function item({ productId, placementId, pinnedVariantId, variantId, isDefault = false }) {
   return {
@@ -31,6 +31,15 @@ test('top items prefers an unpinned appearance so the product default drives the
 
   assert.equal(entries.length, 1)
   assert.equal(entries[0].placement.id, 'placement-product')
+})
+
+test('top items only keeps the first 12 products after ranking', () => {
+  const rankedProducts = Array.from({ length: 20 }, (_, index) => ({ id: `product-${index + 1}` }))
+  const visibleProducts = limitTopCatalogItems(rankedProducts)
+
+  assert.equal(TOP_ITEMS_LIMIT, 12)
+  assert.equal(visibleProducts.length, 12)
+  assert.deepEqual(visibleProducts.map((product) => product.id), rankedProducts.slice(0, 12).map((product) => product.id))
 })
 
 test('format counts only include the different formats represented in the current tab', () => {

@@ -169,6 +169,7 @@ export type CrmAccessUser = {
   fullName: string
   isActive: boolean
   role: 'owner' | 'manager'
+  venueIds: string[]
 }
 
 export type TicketLineModifier = {

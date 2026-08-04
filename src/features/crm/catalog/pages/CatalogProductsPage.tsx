@@ -1,8 +1,11 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
-import { ArrowDown, ArrowUp, ArrowUpDown, Boxes, Copy, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Dropdown, Label } from '@heroui/react'
+import { ArrowDown, ArrowUp, ArrowUpDown, Boxes, ChevronDown, Copy, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
+import { sileo } from 'sileo'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
+import type { CrmVenue } from '../../../../types'
 import { formatMoney } from '../../../../lib/format.ts'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination.tsx'
 import { CrmSelect } from '../../shared/components/CrmSelect.tsx'
@@ -21,7 +24,9 @@ type Props = {
   catalog: CatalogData
   defaultTaxRate: number
   disabled: boolean
+  duplicateProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
   mutate: (action: () => Promise<unknown>) => Promise<boolean>
+  venues: CrmVenue[]
 }
 
 const defaultFilters: CatalogProductFilters = {
@@ -42,7 +47,7 @@ function priceLabel(summary: CatalogProductSummary) {
   return `${formatMoney(summary.minPriceCents)} – ${formatMoney(summary.maxPriceCents ?? summary.minPriceCents)}`
 }
 
-export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }: Props) {
+export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicateProduct, mutate, venues }: Props) {
   const [filters, setFilters] = useState(defaultFilters)
   const [sortKey, setSortKey] = useState<CatalogProductSortKey>('product')
   const [sortDirection, setSortDirection] = useState<CatalogProductSortDirection>('asc')
@@ -116,6 +121,13 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
     if (saved && editorProductId === summary.product.id) setEditorProductId(null)
   }
 
+  async function duplicate(summary: CatalogProductSummary, targetVenueId: string) {
+    const saved = await duplicateProduct(summary.product.id, targetVenueId)
+    if (!saved) return
+    const targetVenue = venues.find((venue) => venue.id === targetVenueId)
+    sileo.success({ title: targetVenueId === catalog.venueId ? 'Producto duplicado' : `Producto copiado en ${targetVenue?.name ?? 'el local'}` })
+  }
+
   return (
     <div className="grid min-w-0 items-start gap-4">
       <CatalogPanel>
@@ -166,7 +178,19 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, mutate }
               <span>{summary.tabs.map((tab) => tab.label).join(', ') || 'Sin apariciones'}<br /><small>{summary.categories.map((category) => category.name).join(', ')}</small></span>
               <div className="flex min-w-0 items-center justify-end gap-[7px]">
                 <UiButton aria-label={`Editar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => setEditorProductId(summary.product.id)} type="button"><Pencil className="!size-4" /></UiButton>
-                <UiButton aria-label={`Duplicar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.duplicateProduct(catalog, summary.product.id))} title="Duplicar producto" type="button"><Copy className="!size-4" /></UiButton>
+                <Dropdown>
+                  <Dropdown.Trigger aria-label={`Duplicar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-0 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] disabled:opacity-50" isDisabled={disabled}>
+                    <Copy className="!size-4" /><ChevronDown className="!-mr-1 !size-3" />
+                  </Dropdown.Trigger>
+                  <Dropdown.Popover className="!w-64" placement="bottom end">
+                    <Dropdown.Menu onAction={(key) => void duplicate(summary, String(key))}>
+                      <Dropdown.Item id={catalog.venueId} textValue="Duplicar aquí"><Copy className="!size-4" /><Label>Duplicar aquí</Label></Dropdown.Item>
+                      {venues.filter((venue) => venue.isActive && venue.id !== catalog.venueId).map((venue) => (
+                        <Dropdown.Item id={venue.id} key={venue.id} textValue={`Duplicar en ${venue.name}`}><Copy className="!size-4" /><Label>Duplicar en {venue.name}</Label></Dropdown.Item>
+                      ))}
+                    </Dropdown.Menu>
+                  </Dropdown.Popover>
+                </Dropdown>
                 <UiButton aria-label={summary.product.active ? 'Desactivar' : 'Activar'} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.setProductActive(catalog.venueId, summary.product.id, !summary.product.active))} type="button">{summary.product.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</UiButton>
                 <UiButton aria-label={`Eliminar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95" disabled={disabled} onClick={() => void removeProduct(summary)} type="button"><Trash2 className="!size-4" /></UiButton>
               </div>

@@ -10,6 +10,7 @@ import type {
   InventorySnapshot,
   InventoryStockLevel,
   InventoryWarehouseRouting,
+  InventoryWarehouseStockSummary,
   InventoryUnit,
   InventoryWarehouse,
 } from '../types'
@@ -153,6 +154,28 @@ export async function loadInventoryWarehouses(context: TenantContext, venueId: s
   return ((data ?? []) as InventoryWarehouseRow[]).map(mapInventoryWarehouse)
 }
 
+export async function loadInventoryWarehouseStockSummaries(
+  context: TenantContext,
+  venueId: string,
+): Promise<InventoryWarehouseStockSummary[]> {
+  const { data, error } = await requireSupabase()
+    .from('inventory_stock_levels')
+    .select('warehouse_id, quantity')
+    .eq('tenant_id', context.tenantId)
+    .eq('venue_id', venueId)
+  if (error) throw error
+
+  const counts = new Map<string, number>()
+  for (const row of (data ?? []) as Array<{ warehouse_id: string; quantity: number | string }>) {
+    if (Number(row.quantity) === 0) continue
+    counts.set(row.warehouse_id, (counts.get(row.warehouse_id) ?? 0) + 1)
+  }
+  return [...counts].map(([warehouseId, nonZeroProductCount]) => ({
+    nonZeroProductCount,
+    warehouseId,
+  }))
+}
+
 export async function createInventoryWarehouse(
   context: TenantContext,
   venueId: string,
@@ -170,6 +193,22 @@ export async function createInventoryWarehouse(
     sort_order: 0,
   })
   if (error) throw error
+}
+
+export async function deleteInventoryWarehouse(
+  context: TenantContext,
+  venueId: string,
+  warehouseId: string,
+  targetWarehouseId: string | null,
+) {
+  const { data, error } = await requireSupabase().rpc('delete_inventory_warehouse', {
+    p_tenant_id: context.tenantId,
+    p_venue_id: venueId,
+    p_warehouse_id: warehouseId,
+    p_target_warehouse_id: targetWarehouseId,
+  })
+  if (error) throw error
+  return Number(data ?? 0)
 }
 
 export async function loadInventorySnapshot(context: TenantContext, venueId: string): Promise<InventorySnapshot> {

@@ -51,6 +51,10 @@ const inventoryToggleMigration = readFileSync(
   new URL('../supabase/migrations/20260804220000_add_inventory_control_toggle.sql', import.meta.url),
   'utf8',
 )
+const warehouseDeletionMigration = readFileSync(
+  new URL('../supabase/migrations/20260804230000_delete_inventory_warehouse_with_transfer.sql', import.meta.url),
+  'utf8',
+)
 const consolidatedDatabase = readFileSync(
   new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url),
   'utf8',
@@ -217,6 +221,22 @@ test('el interruptor general desactiva todo consumo de stock por local', () => {
   assert.match(inventoryToggleMigration, /grant execute on function public\.set_venue_inventory_enabled/)
 })
 
+test('el borrado de almacenes transfiere atomicamente cualquier stock restante', () => {
+  for (const sql of [warehouseDeletionMigration, consolidatedDatabase]) {
+    assert.match(sql, /create or replace function public\.delete_inventory_warehouse/)
+    assert.match(sql, /for update/)
+    assert.match(sql, /INVENTORY_WAREHOUSE_TRANSFER_REQUIRED/)
+    assert.match(sql, /insert into public\.inventory_stock_levels as destination/)
+    assert.match(sql, /destination\.quantity \+ excluded\.quantity/)
+    assert.match(sql, /delete from public\.inventory_warehouses/)
+  }
+  assert.ok(
+    warehouseDeletionMigration.indexOf('insert into public.inventory_stock_levels as destination')
+      < warehouseDeletionMigration.indexOf('delete from public.inventory_warehouses'),
+  )
+  assert.match(warehouseDeletionMigration, /grant execute on function public\.delete_inventory_warehouse/)
+})
+
 test('guarda la unidad de contenido antes de crear los niveles de stock', () => {
   const completeSettingInsert = stockUpsertRepairMigration.indexOf(
     'insert into public.inventory_product_settings',
@@ -322,4 +342,12 @@ test('la pagina Stock conserva el interruptor y oculta la configuracion cuando e
   assert.match(stockPage, /las páginas de almacenes y configuración permanecerán ocultas/)
   assert.match(shell, /inventoryEnabled \|\| item\.id === 'inventory-stock'/)
   assert.match(routes, /Control de stock desactivado/)
+})
+
+test('la pagina de almacenes confirma el borrado y solicita destino cuando queda stock', () => {
+  assert.match(warehousesPage, /deleteInventoryWarehouse/)
+  assert.match(warehousesPage, /loadInventoryWarehouseStockSummaries/)
+  assert.match(warehousesPage, /Eliminar almacén/)
+  assert.match(warehousesPage, /Almacén de destino/)
+  assert.match(warehousesPage, /Selecciona dónde transferir sus cantidades antes de eliminarlo/)
 })

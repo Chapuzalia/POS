@@ -1,7 +1,7 @@
 import { TextArea as UiTextArea } from '../../../../components/ui/TextArea'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
-import { Monitor, Plus, Save, Warehouse, X } from 'lucide-react'
+import { Monitor, Plus, Save, Trash2, Warehouse, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { TenantContext } from '../../../../types'
 import { CrmModal } from '../../shared/components/CrmModal'
@@ -11,11 +11,13 @@ import { Field } from '../../shared/components/Field'
 import type { RunAction } from '../../shared/types'
 import {
   createInventoryWarehouse,
+  deleteInventoryWarehouse,
+  loadInventoryWarehouseStockSummaries,
   loadInventoryWarehouses,
   loadInventoryWarehouseRouting,
   saveInventoryDeviceWarehouses,
 } from '../services/inventoryService'
-import type { InventoryWarehouse, InventoryWarehouseRouting } from '../types'
+import type { InventoryWarehouse, InventoryWarehouseRouting, InventoryWarehouseStockSummary } from '../types'
 
 type Props = {
   disabled: boolean
@@ -27,26 +29,36 @@ type Props = {
 export function InventoryWarehousesCrm({ disabled, runAction, selectedVenueId, tenantContext }: Props) {
   const [warehouses, setWarehouses] = useState<InventoryWarehouse[]>([])
   const [routing, setRouting] = useState<InventoryWarehouseRouting>({ assignments: [], devices: [] })
+  const [stockSummaries, setStockSummaries] = useState<InventoryWarehouseStockSummary[]>([])
   const [creating, setCreating] = useState(false)
+  const [deletingWarehouseId, setDeletingWarehouseId] = useState<string | null>(null)
 
   const refresh = useCallback(async () => {
     if (!selectedVenueId) {
       setWarehouses([])
       setRouting({ assignments: [], devices: [] })
+      setStockSummaries([])
       return
     }
-    const [nextWarehouses, nextRouting] = await Promise.all([
+    const [nextWarehouses, nextRouting, nextStockSummaries] = await Promise.all([
       loadInventoryWarehouses(tenantContext, selectedVenueId),
       loadInventoryWarehouseRouting(tenantContext, selectedVenueId),
+      loadInventoryWarehouseStockSummaries(tenantContext, selectedVenueId),
     ])
     setWarehouses(nextWarehouses)
     setRouting(nextRouting)
+    setStockSummaries(nextStockSummaries)
   }, [selectedVenueId, tenantContext])
 
   useEffect(() => {
     setCreating(false)
+    setDeletingWarehouseId(null)
     void runAction(refresh)
   }, [refresh, runAction])
+
+  const deletingWarehouse = deletingWarehouseId
+    ? warehouses.find((warehouse) => warehouse.id === deletingWarehouseId) ?? null
+    : null
 
   return (
     <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
@@ -61,18 +73,19 @@ export function InventoryWarehousesCrm({ disabled, runAction, selectedVenueId, t
       </div>
 
       <div className="!overflow-x-auto">
-        <div className="!min-w-[680px]">
-          <div className="!grid !grid-cols-[minmax(220px,1fr)_minmax(260px,1.3fr)_120px] !gap-4 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !py-3 !text-[11px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
-            <span>Almacén</span><span>Descripción</span><span>Estado</span>
+        <div className="!min-w-[760px]">
+          <div className="!grid !grid-cols-[minmax(220px,1fr)_minmax(260px,1.3fr)_120px_52px] !gap-4 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !py-3 !text-[11px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
+            <span>Almacén</span><span>Descripción</span><span>Estado</span><span className="!sr-only">Acciones</span>
           </div>
           {warehouses.map((warehouse) => (
-            <div className="!grid !min-h-16 !grid-cols-[minmax(220px,1fr)_minmax(260px,1.3fr)_120px] !items-center !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !py-3 !text-[13px]" key={warehouse.id}>
+            <div className="!grid !min-h-16 !grid-cols-[minmax(220px,1fr)_minmax(260px,1.3fr)_120px_52px] !items-center !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !py-3 !text-[13px]" key={warehouse.id}>
               <div className="!flex !min-w-0 !items-center !gap-3">
                 <span className="!grid !size-9 !shrink-0 !place-items-center !rounded-[10px] !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]"><Warehouse className="!size-4" /></span>
                 <strong className="!truncate">{warehouse.name}</strong>
               </div>
               <span className="!text-[var(--crm-text-secondary)]">{warehouse.description || 'Sin descripción'}</span>
               <span className={warehouse.active ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-green-soft)] text-[var(--crm-green)] !w-fit' : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-red-soft)] text-[var(--crm-red)] !w-fit'}>{warehouse.active ? 'Activo' : 'Inactivo'}</span>
+              <UiButton aria-label={`Eliminar ${warehouse.name}`} className="!inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-red-soft)] !p-0 !text-[var(--crm-red)] !shadow-none hover:!brightness-95" disabled={disabled} onClick={() => setDeletingWarehouseId(warehouse.id)} title="Eliminar almacén" type="button"><Trash2 className="!size-4" /></UiButton>
             </div>
           ))}
         </div>
@@ -99,7 +112,103 @@ export function InventoryWarehousesCrm({ disabled, runAction, selectedVenueId, t
           tenantContext={tenantContext}
         />
       ) : null}
+
+      {deletingWarehouse ? (
+        <WarehouseDeleteModal
+          disabled={disabled}
+          onClose={() => setDeletingWarehouseId(null)}
+          onSaved={async () => { await refresh(); setDeletingWarehouseId(null) }}
+          runAction={runAction}
+          selectedVenueId={selectedVenueId}
+          stockProductCount={stockSummaries.find((summary) => summary.warehouseId === deletingWarehouse.id)?.nonZeroProductCount ?? 0}
+          tenantContext={tenantContext}
+          warehouse={deletingWarehouse}
+          warehouses={warehouses}
+        />
+      ) : null}
     </section>
+  )
+}
+
+function WarehouseDeleteModal({
+  disabled,
+  onClose,
+  onSaved,
+  runAction,
+  selectedVenueId,
+  stockProductCount,
+  tenantContext,
+  warehouse,
+  warehouses,
+}: {
+  disabled: boolean
+  onClose: () => void
+  onSaved: () => Promise<void>
+  runAction: RunAction
+  selectedVenueId: string
+  stockProductCount: number
+  tenantContext: TenantContext
+  warehouse: InventoryWarehouse
+  warehouses: InventoryWarehouse[]
+}) {
+  const [targetWarehouseId, setTargetWarehouseId] = useState('')
+  const needsTransfer = stockProductCount > 0
+  const targetWarehouses = warehouses.filter((candidate) => (
+    candidate.id !== warehouse.id && candidate.active
+  ))
+
+  async function remove() {
+    if (needsTransfer && !targetWarehouseId) return
+    await runAction(async () => {
+      await deleteInventoryWarehouse(
+        tenantContext,
+        selectedVenueId,
+        warehouse.id,
+        needsTransfer ? targetWarehouseId : null,
+      )
+      await onSaved()
+    })
+  }
+
+  return (
+    <CrmModal label={`Eliminar ${warehouse.name}`} onClose={onClose}>
+      <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]">
+        <div className="!min-w-0">
+          <h2 className="!m-0 !truncate !text-lg !font-bold">Eliminar {warehouse.name}</h2>
+          <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Esta operación también eliminará sus asignaciones a los TPV.</p>
+        </div>
+        <UiButton aria-label="Cerrar" className="!inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" disabled={disabled} onClick={onClose} type="button"><X className="!size-4" /></UiButton>
+      </div>
+
+      <div className="!grid !gap-4 !px-[18px] !py-5 md:!px-[22px]">
+        {needsTransfer ? (
+          <>
+            <div className="!rounded-xl !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !font-semibold !text-[var(--crm-yellow)]">
+              Este almacén contiene {stockProductCount} {stockProductCount === 1 ? 'producto con stock' : 'productos con stock'}. Selecciona dónde transferir sus cantidades antes de eliminarlo.
+            </div>
+            <label className="!grid !gap-1.5">
+              <span className="!text-xs !font-semibold !text-[var(--crm-text-secondary)]">Almacén de destino</span>
+              <CrmSelect
+                ariaLabel={`Almacén de destino para ${warehouse.name}`}
+                disabled={disabled || !targetWarehouses.length}
+                onChange={setTargetWarehouseId}
+                options={targetWarehouses.map((candidate) => ({ label: candidate.name, value: candidate.id }))}
+                placeholder="Selecciona un almacén"
+                value={targetWarehouseId}
+              />
+            </label>
+            {!targetWarehouses.length ? <p className="!m-0 !rounded-xl !bg-[var(--crm-red-soft)] !p-3 !text-sm !font-semibold !text-[var(--crm-red)]">Necesitas crear o activar otro almacén antes de poder eliminar este.</p> : null}
+          </>
+        ) : (
+          <p className="!m-0 !text-sm !font-medium !text-[var(--crm-text-secondary)]">El almacén no contiene cantidades de stock. Se puede eliminar directamente.</p>
+        )}
+      </div>
+
+      <div className="!flex !justify-end !gap-2 !border-t !border-[var(--crm-border-subtle)] !px-[18px] !py-4 md:!px-[22px]">
+        <UiButton className="!inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)]" disabled={disabled} onClick={onClose} type="button">Cancelar</UiButton>
+        <UiButton className="!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-red)]" disabled={disabled || (needsTransfer && !targetWarehouseId)} onClick={() => { void remove() }} type="button"><Trash2 className="!size-4" /> Eliminar almacén</UiButton>
+      </div>
+    </CrmModal>
   )
 }
 

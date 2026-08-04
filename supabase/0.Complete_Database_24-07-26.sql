@@ -15761,3 +15761,233 @@ comment on column public.venues.inventory_enabled is
 comment on function public.set_venue_inventory_enabled(uuid, boolean) is
   'Enables or disables all inventory control for a venue.';
 
+-- Safe warehouse deletion with stock transfer.
++-- Delete a warehouse safely. Non-zero product balances must be transferred to
+-- another active warehouse in the same venue before the source is removed.
+
+create or replace function public.delete_inventory_warehouse(
+  p_tenant_id uuid,
+  p_venue_id uuid,
+  p_warehouse_id uuid,
+  p_target_warehouse_id uuid default null
+)
+returns integer
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_source public.inventory_warehouses%rowtype;
+  v_target public.inventory_warehouses%rowtype;
+  v_level record;
+  v_transfer_count integer := 0;
+begin
+  if not public.user_is_tenant_admin(p_tenant_id) then
+    raise exception 'INVENTORY_FORBIDDEN' using errcode = '42501';
+  end if;
+
+  select * into v_source
+  from public.inventory_warehouses w
+  where w.id = p_warehouse_id
+    and w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id
+  for update;
+
+  if v_source.id is null then
+    raise exception 'INVENTORY_WAREHOUSE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  if p_target_warehouse_id = p_warehouse_id then
+    raise exception 'INVENTORY_WAREHOUSE_TRANSFER_SAME' using errcode = '22023';
+  end if;
+
+  -- Lock every source balance so consumption cannot change it between the
+  -- transfer and the cascading warehouse deletion.
+  for v_level in
+    select l.product_id, l.quantity
+    from public.inventory_stock_levels l
+    where l.warehouse_id = p_warehouse_id
+      and l.tenant_id = p_tenant_id
+      and l.venue_id = p_venue_id
+    order by l.product_id
+    for update
+  loop
+    if v_level.quantity = 0 then
+      continue;
+    end if;
+
+    if p_target_warehouse_id is null then
+      raise exception 'INVENTORY_WAREHOUSE_TRANSFER_REQUIRED' using errcode = '22023';
+    end if;
+
+    if v_target.id is null then
+      select * into v_target
+      from public.inventory_warehouses w
+      where w.id = p_target_warehouse_id
+        and w.tenant_id = p_tenant_id
+        and w.venue_id = p_venue_id
+        and w.is_active = true
+      for update;
+
+      if v_target.id is null then
+        raise exception 'INVENTORY_TARGET_WAREHOUSE_NOT_FOUND' using errcode = 'P0002';
+      end if;
+    end if;
+
+    insert into public.inventory_stock_levels as destination (
+      warehouse_id,
+      product_id,
+      tenant_id,
+      venue_id,
+      quantity,
+      is_enabled
+    )
+    values (
+      p_target_warehouse_id,
+      v_level.product_id,
+      p_tenant_id,
+      p_venue_id,
+      v_level.quantity,
+      true
+    )
+    on conflict (warehouse_id, product_id) do update
+    set quantity = destination.quantity + excluded.quantity,
+        is_enabled = true,
+        updated_at = now();
+
+    v_transfer_count := v_transfer_count + 1;
+  end loop;
+
+  delete from public.inventory_warehouses w
+  where w.id = p_warehouse_id
+    and w.tenant_id = p_tenant_id
+    and w.venue_id = p_venue_id;
+
+  return v_transfer_count;
+end;
+$$;
+
+revoke all on function public.delete_inventory_warehouse(
+  uuid,
+  uuid,
+  uuid,
+  uuid
+) from public, anon;
+grant execute on function public.delete_inventory_warehouse(
+  uuid,
+  uuid,
+  uuid,
+  uuid
+) to authenticated;
+
+comment on function public.delete_inventory_warehouse(uuid, uuid, uuid, uuid) is
+  'Transfers every non-zero product balance to another active warehouse and atomically deletes the source.';
+
+-- Manager venue scope
+create table if not exists public.manager_venue_assignments (
+  tenant_id uuid not null references public.tenants(id) on delete cascade,
+  manager_user_id uuid not null references auth.users(id) on delete cascade,
+  venue_id uuid not null references public.venues(id) on delete cascade,
+  created_at timestamptz not null default now(),
+  primary key (tenant_id, manager_user_id, venue_id)
+);
+
+create index if not exists manager_venue_assignments_user_idx
+  on public.manager_venue_assignments(manager_user_id, tenant_id);
+
+create or replace function public.validate_manager_venue_assignment()
+returns trigger
+language plpgsql
+security definer
+set search_path to ''
+as $$
+begin
+  if not exists (
+    select 1 from public.tenant_memberships tm
+    where tm.tenant_id = new.tenant_id
+      and tm.user_id = new.manager_user_id
+      and tm.role = 'manager'
+      and tm.is_active = true
+  ) then
+    raise exception 'MANAGER_MEMBERSHIP_REQUIRED' using errcode = '23514';
+  end if;
+
+  if not exists (
+    select 1 from public.venues v
+    where v.id = new.venue_id and v.tenant_id = new.tenant_id and v.is_active = true
+  ) then
+    raise exception 'MANAGER_VENUE_SCOPE_MISMATCH' using errcode = '23514';
+  end if;
+  return new;
+end;
+$$;
+
+drop trigger if exists validate_manager_venue_assignment on public.manager_venue_assignments;
+create trigger validate_manager_venue_assignment
+before insert or update on public.manager_venue_assignments
+for each row execute function public.validate_manager_venue_assignment();
+
+alter table public.manager_venue_assignments enable row level security;
+
+drop policy if exists manager_venue_assignments_select on public.manager_venue_assignments;
+create policy manager_venue_assignments_select
+on public.manager_venue_assignments for select to authenticated
+using (
+  manager_user_id = (select auth.uid())
+  or public.user_has_tenant_role(tenant_id, array['owner'::text])
+);
+
+drop policy if exists manager_venue_assignments_owner_manage on public.manager_venue_assignments;
+create policy manager_venue_assignments_owner_manage
+on public.manager_venue_assignments for all to authenticated
+using (public.user_has_tenant_role(tenant_id, array['owner'::text]))
+with check (public.user_has_tenant_role(tenant_id, array['owner'::text]));
+
+revoke all on table public.manager_venue_assignments from public, anon;
+grant select, insert, update, delete on table public.manager_venue_assignments to authenticated;
+grant all on table public.manager_venue_assignments to service_role;
+
+create or replace function public.set_manager_venue_assignments(
+  p_tenant_id uuid,
+  p_manager_user_id uuid,
+  p_venue_ids uuid[]
+)
+returns uuid[]
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_venue_ids uuid[];
+begin
+  if auth.role() <> 'service_role'
+    and not public.user_has_tenant_role(p_tenant_id, array['owner'::text])
+  then
+    raise exception 'MANAGER_SCOPE_FORBIDDEN' using errcode = '42501';
+  end if;
+  select coalesce(array_agg(distinct venue_id), array[]::uuid[])
+  into v_venue_ids
+  from unnest(coalesce(p_venue_ids, array[]::uuid[])) as ids(venue_id);
+  if cardinality(v_venue_ids) = 0 then raise exception 'MANAGER_SCOPE_EMPTY' using errcode = '22023'; end if;
+  if not exists (
+    select 1 from public.tenant_memberships tm
+    where tm.tenant_id = p_tenant_id and tm.user_id = p_manager_user_id
+      and tm.role = 'manager' and tm.is_active = true
+  ) then raise exception 'MANAGER_MEMBERSHIP_REQUIRED' using errcode = '22023'; end if;
+  if (
+    select count(*) from public.venues v
+    where v.tenant_id = p_tenant_id and v.id = any(v_venue_ids) and v.is_active = true
+  ) <> cardinality(v_venue_ids) then
+    raise exception 'MANAGER_VENUE_SCOPE_MISMATCH' using errcode = '22023';
+  end if;
+  delete from public.manager_venue_assignments
+  where tenant_id = p_tenant_id and manager_user_id = p_manager_user_id;
+  insert into public.manager_venue_assignments(tenant_id, manager_user_id, venue_id)
+  select p_tenant_id, p_manager_user_id, venue_id from unnest(v_venue_ids) as ids(venue_id);
+  return v_venue_ids;
+end;
+$$;
+
+revoke all on function public.set_manager_venue_assignments(uuid, uuid, uuid[]) from public, anon;
+grant execute on function public.set_manager_venue_assignments(uuid, uuid, uuid[]) to authenticated, service_role;
+

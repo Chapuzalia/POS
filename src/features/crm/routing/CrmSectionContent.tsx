@@ -26,6 +26,7 @@ type Props = {
   catalog: CatalogData | null
   context: TenantContext
   disabled: boolean
+  duplicateCatalogProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
   inventoryEnabled: boolean
   isCatalogLoading: boolean
   mutateCatalog: (action: () => Promise<unknown>) => Promise<boolean>
@@ -47,6 +48,7 @@ export function CrmSectionContent({
   catalog,
   context,
   disabled,
+  duplicateCatalogProduct,
   inventoryEnabled,
   isCatalogLoading,
   mutateCatalog,
@@ -72,7 +74,7 @@ export function CrmSectionContent({
     case 'dashboard':
       return catalog ? <DashboardCrm activeCategories={catalog.categories.filter((category) => category.active).length} activeProducts={catalog.products.filter((product) => product.active).length} categories={catalog.categories} disabled={disabled} onRefresh={onStatsRefresh} placements={catalog.placements} products={catalog.products} selectedVenueId={selectedVenueId} stats={stats} /> : null
     case 'products':
-      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
       return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'categories':
