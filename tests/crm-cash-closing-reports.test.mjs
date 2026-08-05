@@ -6,6 +6,7 @@ import { getCashClosingAmounts } from '../src/features/cash-registers/services/c
 import {
   buildCashClosingDailyValues,
   filterCashClosingsByDate,
+  projectCashClosingCounts,
 } from '../src/features/crm/sales/services/cashClosingReportModel.ts'
 
 function closing(id, closedAt, totalSalesCents) {
@@ -70,6 +71,31 @@ test('cash-closing reports separate invoicing, card cashback and the cash to wit
   })
 })
 
+test('editing final counts recalculates both differences without mutating the original snapshot', () => {
+  const snapshot = {
+    expectedAndCounted: {
+      expectedCashCents: 10000,
+      countedCashCents: 10000,
+      expectedCardCents: 7500,
+      countedCardCents: 7500,
+    },
+    differences: { cashDifferenceCents: 0, cardDifferenceCents: 0 },
+  }
+  const updated = projectCashClosingCounts(snapshot, 9850, 7600)
+
+  assert.deepEqual(updated.expectedAndCounted, {
+    expectedCashCents: 10000,
+    countedCashCents: 9850,
+    expectedCardCents: 7500,
+    countedCardCents: 7600,
+  })
+  assert.deepEqual(updated.differences, {
+    cashDifferenceCents: -150,
+    cardDifferenceCents: 100,
+  })
+  assert.equal(snapshot.expectedAndCounted.countedCashCents, 10000)
+})
+
 test('cash-closing reports render the chart and the detailed table', async () => {
   const source = await readFile(new URL('../src/features/crm/sales/pages/CashClosingReportsPage.tsx', import.meta.url), 'utf8')
   const cashRegisterService = await readFile(new URL('../src/features/cash-registers/service.ts', import.meta.url), 'utf8')
@@ -94,4 +120,27 @@ test('cash-closing reports render the chart and the detailed table', async () =>
   assert.match(source, /onMouseEnter=\{\(\) => setHoveredPointIndex\(index\)\}/)
   assert.match(source, /cash-closing-tooltip-shadow/)
   assert.match(source, /hoveredPoint\.totalCents/)
+  assert.match(source, /Editar conteos/)
+  assert.match(source, /Conteo final datáfono/)
+  assert.match(source, /Guardar conteos/)
+  assert.match(cashRegisterService, /update_cash_closing_counts/)
+})
+
+test('cash-closing count corrections are authorized, atomic and audited in SQL', async () => {
+  const sqlDocuments = await Promise.all([
+    readFile(new URL('../supabase/migrations/20260805010000_update_cash_closing_counts.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
+  ])
+
+  for (const sql of sqlDocuments) {
+    assert.match(sql, /function public\.update_cash_closing_counts/i)
+    assert.match(sql, /for update/i)
+    assert.match(sql, /membership_role not in \('owner', 'manager'\)/i)
+    assert.match(sql, /manager_venue_assignments/i)
+    assert.match(sql, /counted_cash_cents = p_counted_cash_cents/i)
+    assert.match(sql, /counted_card_cents = p_counted_card_cents/i)
+    assert.match(sql, /print_snapshot = updated_snapshot/i)
+    assert.match(sql, /insert into public\.cash_closing_count_edits/i)
+    assert.match(sql, /grant execute on function public\.update_cash_closing_counts/i)
+  }
 })
