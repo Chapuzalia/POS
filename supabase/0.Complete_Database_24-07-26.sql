@@ -4020,11 +4020,13 @@ declare
 begin
   -- Un cambio ajeno a la identidad fiscal no debe recalcular un ticket cerrado
   -- ni completar artificialmente lineas historicas que carecian de snapshot.
+  -- El total neto forma parte de esa identidad porque incorpora el descuento.
   if tg_op = 'UPDATE'
     and new.tenant_id is not distinct from old.tenant_id
     and new.ticket_id is not distinct from old.ticket_id
     and new.product_id is not distinct from old.product_id
-    and new.line_total_cents is not distinct from old.line_total_cents then
+    and new.line_total_cents is not distinct from old.line_total_cents
+    and new.net_total_cents is not distinct from old.net_total_cents then
     new.tax_rate := old.tax_rate;
     new.taxable_base_cents := old.taxable_base_cents;
     new.tax_amount_cents := old.tax_amount_cents;
@@ -4065,7 +4067,7 @@ begin
 
   select *
   into breakdown
-  from public.calculate_tax_from_gross(new.line_total_cents, effective_tax_rate);
+  from public.calculate_tax_from_gross(new.net_total_cents, effective_tax_rate);
 
   -- Se ignora cualquier valor fiscal aportado por el cliente.
   new.tax_rate := effective_tax_rate;
@@ -6274,7 +6276,7 @@ COMMENT ON COLUMN public.ticket_lines.taxable_base_cents IS 'Snapshot de la base
 -- Name: COLUMN ticket_lines.tax_amount_cents; Type: COMMENT; Schema: public; Owner: -
 --
 
-COMMENT ON COLUMN public.ticket_lines.tax_amount_cents IS 'Snapshot de la cuota de IVA de la linea; base + cuota = line_total_cents.';
+COMMENT ON COLUMN public.ticket_lines.tax_amount_cents IS 'Snapshot de la cuota de IVA de la linea; base + cuota = net_total_cents.';
 
 
 --
