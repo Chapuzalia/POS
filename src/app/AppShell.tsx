@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CrmPage } from '../components/crm/CrmPage'
 import { SuperAdminPage } from '../components/superadmin/SuperAdminPage'
 import { LoginScreen } from '../components/screens/LoginScreen'
-import { LoadingScreen, MissingConfigScreen } from '../components/screens/StateScreens'
+import { LoadingScreen, MissingConfigScreen, PosStartupReveal } from '../components/screens/StateScreens'
 import themesData from '../config/themes.json'
 import { CashSessionGate } from '../features/cash-registers/CashSessionGate'
 import { useCashSession } from '../features/cash-registers'
@@ -358,7 +358,7 @@ export function AppShell() {
       onLogout={session.logout}
     />
     if (isOnline && !restaurant.tablesConfigLoaded) return <LoadingScreen />
-    if (!cash.session && !reservations.isOpen) return <CashSessionGate
+    if (!cash.session && !reservations.isOpen) return <PosStartupReveal><CashSessionGate
       cashClosings={cash.cashClosings}
       closingHistoryOpen={cash.closingHistoryOpen}
       completedClosing={cash.completedClosing}
@@ -377,8 +377,8 @@ export function AppShell() {
       registers={cash.options.registers}
       printingClosingId={cash.printingClosingId}
       sessions={cash.options.sessions}
-    />
-    return <PosPage
+    /></PosStartupReveal>
+    return <PosStartupReveal><PosPage
       addFeedback={addFeedback}
       catalog={catalog}
       discounts={discounts}
@@ -416,7 +416,7 @@ export function AppShell() {
       selectedThemeId={themeId}
       setThemeId={setThemeId}
       themes={themes}
-    />
+    /></PosStartupReveal>
   }}</AppRouter>
 }
 
