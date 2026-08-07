@@ -1,10 +1,29 @@
 import { getOperationalDateKey, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
-import type { CashClosingRecord } from '../../../../types'
+import type { CashClosingPrintSnapshot, CashClosingRecord } from '../../../../types'
 
 export type CashClosingDailyValue = {
   closingCount: number
   date: string
   totalCents: number
+}
+
+export function projectCashClosingCounts(
+  snapshot: CashClosingPrintSnapshot,
+  countedCashCents: number,
+  countedCardCents: number,
+): CashClosingPrintSnapshot {
+  return {
+    ...snapshot,
+    expectedAndCounted: {
+      ...snapshot.expectedAndCounted,
+      countedCashCents,
+      countedCardCents,
+    },
+    differences: {
+      cashDifferenceCents: countedCashCents - snapshot.expectedAndCounted.expectedCashCents,
+      cardDifferenceCents: countedCardCents - snapshot.expectedAndCounted.expectedCardCents,
+    },
+  }
 }
 
 export function getCashClosingDay(closing: CashClosingRecord, config: OperationalDayConfig) {

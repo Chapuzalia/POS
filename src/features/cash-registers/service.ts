@@ -167,6 +167,20 @@ export async function loadCashClosingHistory(context: TenantContext, limit = 50)
   return ((data ?? []) as ClosingRow[]).map(mapClosing)
 }
 
+export async function updateCashClosingCounts(context: TenantContext, input: {
+  closingId: string
+  countedCashCents: number
+  countedCardCents: number
+}) {
+  const { error } = await client().rpc('update_cash_closing_counts', {
+    p_cash_closing_id: input.closingId,
+    p_counted_cash_cents: input.countedCashCents,
+    p_counted_card_cents: input.countedCardCents,
+  })
+  if (error) throw error
+  return loadCashClosing(context, input.closingId)
+}
+
 export async function recordCashClosingPrintResult(context: TenantContext, input: {
   closingId: string
   printerId: string

@@ -15,6 +15,7 @@ test('CRM permissions allow managers without exposing owner-only sections', () =
   assert.equal(canAccessCrmSection('manager', 'products'), true)
   assert.equal(canAccessCrmSection('manager', 'settings'), true)
   assert.equal(canAccessCrmSection('manager', 'access'), true)
+  assert.equal(canAccessCrmSection('manager', 'integrations'), true)
   assert.equal(canAccessCrmSection('manager', 'plan'), false)
 })
 

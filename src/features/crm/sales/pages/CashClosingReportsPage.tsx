@@ -2,16 +2,21 @@ import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { CrmModal } from '../../shared/components/CrmModal'
-import { RefreshCw, X } from "lucide-react";
+import { Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { loadCashClosingHistory } from "../../../cash-registers/service";
+import { sileo } from "sileo";
+import {
+  loadCashClosingHistory,
+  updateCashClosingCounts,
+} from "../../../cash-registers/service";
 import { getCashClosingAmounts } from "../../../cash-registers/services/cashClosingAmounts";
-import { formatMoney } from "../../../../lib/format";
+import { centsToInput, formatMoney } from "../../../../lib/format";
 import type { CashClosingRecord, TenantContext } from "../../../../types";
 import type { RunAction } from "../../shared/types";
 import {
   buildCashClosingDailyValues,
   filterCashClosingsByDate,
+  projectCashClosingCounts,
   type CashClosingDailyValue,
 } from "../services/cashClosingReportModel";
 import type { OperationalDayConfig } from "../../../../lib/operationalDay";
@@ -268,14 +273,84 @@ function DetailValue({
   );
 }
 
+const MAX_CLOSING_COUNT_CENTS = 2_147_483_647;
+
+function parseClosingCount(value: string) {
+  const normalized = value.trim().replace(",", ".");
+  if (!/^\d+(?:\.\d{0,2})?$/.test(normalized)) return null;
+  const cents = Math.round(Number(normalized) * 100);
+  return Number.isSafeInteger(cents) && cents <= MAX_CLOSING_COUNT_CENTS
+    ? cents
+    : null;
+}
+
+function ClosingCountInput({
+  disabled,
+  invalid,
+  label,
+  onChange,
+  value,
+}: {
+  disabled: boolean;
+  invalid: boolean;
+  label: string;
+  onChange: (value: string) => void;
+  value: string;
+}) {
+  return (
+    <label className="!block !rounded-xl !bg-[var(--crm-blue-soft)] !p-3">
+      <span className="!block !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
+        {label}
+      </span>
+      <span className="!mt-1 !flex !items-center !gap-2">
+        <UiInput
+          aria-invalid={invalid}
+          className="!h-9 !min-h-9 !rounded-lg !border !border-[var(--crm-border)] !bg-[var(--crm-surface)] !px-2.5 !font-mono !text-sm !font-bold !text-[var(--crm-text)] focus:!border-[var(--crm-blue)]"
+          disabled={disabled}
+          inputMode="decimal"
+          onChange={(event) => onChange(event.target.value)}
+          value={value}
+        />
+        <span className="!font-mono !text-sm !font-bold !text-[var(--crm-text-muted)]">
+          €
+        </span>
+      </span>
+    </label>
+  );
+}
+
 function CashClosingDetailModal({
   closing,
+  disabled,
   onClose,
+  onSave,
 }: {
   closing: CashClosingRecord;
+  disabled: boolean;
   onClose: () => void;
+  onSave: (
+    countedCashCents: number,
+    countedCardCents: number,
+  ) => Promise<boolean>;
 }) {
-  const snapshot = closing.printSnapshot;
+  const [isEditing, setIsEditing] = useState(false);
+  const [isSaving, setIsSaving] = useState(false);
+  const [countedCash, setCountedCash] = useState(() =>
+    centsToInput(closing.printSnapshot.expectedAndCounted.countedCashCents),
+  );
+  const [countedCard, setCountedCard] = useState(() =>
+    centsToInput(closing.printSnapshot.expectedAndCounted.countedCardCents),
+  );
+  const countedCashCents = parseClosingCount(countedCash);
+  const countedCardCents = parseClosingCount(countedCard);
+  const snapshot =
+    isEditing && countedCashCents !== null && countedCardCents !== null
+      ? projectCashClosingCounts(
+          closing.printSnapshot,
+          countedCashCents,
+          countedCardCents,
+        )
+      : closing.printSnapshot;
   const amounts = getCashClosingAmounts(snapshot);
   const totalDifferenceCents =
     snapshot.differences.cashDifferenceCents +
@@ -283,10 +358,57 @@ function CashClosingDetailModal({
   const otherPayments = snapshot.payments.filter(
     (payment) => payment.code !== "cash" && payment.code !== "card",
   );
+  const countsChanged =
+    countedCashCents !==
+      closing.printSnapshot.expectedAndCounted.countedCashCents ||
+    countedCardCents !==
+      closing.printSnapshot.expectedAndCounted.countedCardCents;
+
+  function beginEditing() {
+    setCountedCash(
+      centsToInput(closing.printSnapshot.expectedAndCounted.countedCashCents),
+    );
+    setCountedCard(
+      centsToInput(closing.printSnapshot.expectedAndCounted.countedCardCents),
+    );
+    setIsEditing(true);
+  }
+
+  function cancelEditing() {
+    setIsEditing(false);
+    setCountedCash(
+      centsToInput(closing.printSnapshot.expectedAndCounted.countedCashCents),
+    );
+    setCountedCard(
+      centsToInput(closing.printSnapshot.expectedAndCounted.countedCardCents),
+    );
+  }
+
+  async function saveCounts() {
+    if (
+      countedCashCents === null ||
+      countedCardCents === null ||
+      !countsChanged
+    ) {
+      return;
+    }
+    setIsSaving(true);
+    try {
+      if (await onSave(countedCashCents, countedCardCents)) {
+        setIsEditing(false);
+      }
+    } finally {
+      setIsSaving(false);
+    }
+  }
 
 
   return (
-    <CrmModal label="Detalle del cierre" onClose={onClose} size="large">
+    <CrmModal
+      label="Detalle del cierre"
+      onClose={isSaving ? () => undefined : onClose}
+      size="large"
+    >
       <section
         aria-labelledby="cash-closing-detail-title"
         className="!max-h-[calc(100svh-32px)] !w-full !max-w-4xl !overflow-y-auto !rounded-2xl !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-2xl sm:!p-6"
@@ -304,15 +426,27 @@ function CashClosingDetailModal({
               {dateFormatter.format(new Date(closing.closedAt))}
             </p>
           </div>
-          <UiButton
-            aria-label="Cerrar detalle del cierre"
-            autoFocus
-            className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !grid !size-10 !shrink-0 !place-items-center !rounded-xl !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
-            onClick={onClose}
-            type="button"
-          >
-            <X className="!size-4" />
-          </UiButton>
+          <div className="!flex !shrink-0 !items-center !gap-2">
+            {!isEditing ? (
+              <UiButton
+                className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-xl !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-bold !text-[var(--crm-blue)]"
+                disabled={disabled}
+                onClick={beginEditing}
+                type="button"
+              >
+                <Pencil className="!size-4" /> Editar conteos
+              </UiButton>
+            ) : null}
+            <UiButton
+              aria-label="Cerrar detalle del cierre"
+              className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !grid !size-10 !shrink-0 !place-items-center !rounded-xl !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
+              disabled={isSaving}
+              onClick={onClose}
+              type="button"
+            >
+              <X className="!size-4" />
+            </UiButton>
+          </div>
         </header>
 
         <div className="!mt-5 !grid !gap-5">
@@ -362,12 +496,22 @@ function CashClosingDetailModal({
                   snapshot.expectedAndCounted.expectedCashCents,
                 )}
               />
-              <DetailValue
-                label="Conteo final efectivo"
-                value={formatMoney(
-                  snapshot.expectedAndCounted.countedCashCents,
-                )}
-              />
+              {isEditing ? (
+                <ClosingCountInput
+                  disabled={disabled || isSaving}
+                  invalid={countedCashCents === null}
+                  label="Conteo final efectivo"
+                  onChange={setCountedCash}
+                  value={countedCash}
+                />
+              ) : (
+                <DetailValue
+                  label="Conteo final efectivo"
+                  value={formatMoney(
+                    snapshot.expectedAndCounted.countedCashCents,
+                  )}
+                />
+              )}
               <DetailValue
                 label={
                   amounts.cashToWithdrawCents >= 0
@@ -404,12 +548,22 @@ function CashClosingDetailModal({
                 label="Datáfono esperado"
                 value={formatMoney(amounts.cardTerminalExpectedCents)}
               />
-              <DetailValue
-                label="Tarjeta declarada"
-                value={formatMoney(
-                  snapshot.expectedAndCounted.countedCardCents,
-                )}
-              />
+              {isEditing ? (
+                <ClosingCountInput
+                  disabled={disabled || isSaving}
+                  invalid={countedCardCents === null}
+                  label="Conteo final datáfono"
+                  onChange={setCountedCard}
+                  value={countedCard}
+                />
+              ) : (
+                <DetailValue
+                  label="Conteo final datáfono"
+                  value={formatMoney(
+                    snapshot.expectedAndCounted.countedCardCents,
+                  )}
+                />
+              )}
               <DetailValue
                 label="Diferencia tarjeta"
                 tone={
@@ -460,6 +614,40 @@ function CashClosingDetailModal({
               </p>
             </div>
           </section>
+
+          {isEditing ? (
+            <section className="!flex !flex-col !gap-3 !rounded-xl !border !border-[var(--crm-blue)] !bg-[var(--crm-blue-soft)] !p-4 sm:!flex-row sm:!items-center sm:!justify-between">
+              <p className="!text-xs !font-semibold !text-[var(--crm-text-secondary)]">
+                Se recalcularán los descuadres. Las próximas copias del cierre
+                usarán los conteos corregidos.
+              </p>
+              <div className="!flex !shrink-0 !justify-end !gap-2">
+                <UiButton
+                  className="!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-surface)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)]"
+                  disabled={isSaving}
+                  onClick={cancelEditing}
+                  type="button"
+                >
+                  Cancelar
+                </UiButton>
+                <UiButton
+                  className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
+                  disabled={
+                    disabled ||
+                    isSaving ||
+                    countedCashCents === null ||
+                    countedCardCents === null ||
+                    !countsChanged
+                  }
+                  onClick={() => void saveCounts()}
+                  type="button"
+                >
+                  <Save className="!size-4" />
+                  {isSaving ? "Guardando…" : "Guardar conteos"}
+                </UiButton>
+              </div>
+            </section>
+          ) : null}
 
           <section className="!grid !gap-3 !border-t !border-[var(--crm-border-subtle)] !pt-4 !text-xs !text-[var(--crm-text-muted)] sm:!grid-cols-2">
             <p>
@@ -524,6 +712,33 @@ export function CashClosingReportsCrm({
   const dailyValues = useMemo(
     () => buildCashClosingDailyValues(filteredClosings, operationalDayConfig),
     [filteredClosings, operationalDayConfig],
+  );
+
+  const saveClosingCounts = useCallback(
+    async (
+      closingId: string,
+      countedCashCents: number,
+      countedCardCents: number,
+    ) => {
+      let updatedClosing: CashClosingRecord | null = null;
+      await runAction(async () => {
+        updatedClosing = await updateCashClosingCounts(
+          { ...tenantContext, venueId: selectedVenueId },
+          { closingId, countedCashCents, countedCardCents },
+        );
+      });
+      if (!updatedClosing) return false;
+      const savedClosing: CashClosingRecord = updatedClosing;
+      setClosings((current) =>
+        current?.map((item) =>
+          item.id === savedClosing.id ? savedClosing : item,
+        ) ?? null,
+      );
+      setSelectedClosing(savedClosing);
+      sileo.success({ title: "Conteos del cierre actualizados" });
+      return true;
+    },
+    [runAction, selectedVenueId, tenantContext],
   );
 
   return (
@@ -692,7 +907,15 @@ export function CashClosingReportsCrm({
       {selectedClosing ? (
         <CashClosingDetailModal
           closing={selectedClosing}
+          disabled={disabled}
           onClose={() => setSelectedClosing(null)}
+          onSave={(countedCashCents, countedCardCents) =>
+            saveClosingCounts(
+              selectedClosing.id,
+              countedCashCents,
+              countedCardCents,
+            )
+          }
         />
       ) : null}
     </div>
