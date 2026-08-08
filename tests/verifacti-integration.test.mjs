@@ -377,3 +377,14 @@ test('el borrado remoto solicita la anulacion fiscal antes de poner el ticket en
   assert.match(posService, /event\.kind === 'sale_voided'[\s\S]*await voidTicketWithFiscalCancellation\(event\.tenantId, event\.payload\.ticketId\)/)
   assert.doesNotMatch(posService.match(/if \(event\.kind === 'sale_voided'\)[\s\S]*?\n  \}/)?.[0] ?? '', /from\('sales'\)[\s\S]*\.delete\(\)/)
 })
+
+test('el borrado no exige clave de cifrado cuando la integracion fiscal no interviene', async () => {
+  const api = await readFile(new URL('../supabase/functions/verifacti-api/index.ts', import.meta.url), 'utf8')
+  const requiredEnvironment = api.match(/function requiredEnvironment\(\) \{[\s\S]*?\n\}/)?.[0] ?? ''
+  const issueInvoice = api.match(/async function issueInvoice\([\s\S]*?\n\}/)?.[0] ?? ''
+
+  assert.doesNotMatch(requiredEnvironment, /!encryptionKey/)
+  assert.match(api, /function requireEncryptionKey\(encryptionKey: string \| undefined\)/)
+  assert.match(issueInvoice, /if \(!settings\?\.enabled\) return \{ skipped: true, reason: 'integration_disabled' \}[\s\S]*requireEncryptionKey\(encryptionKey\)/)
+  assert.match(api, /if \(action === 'void-ticket'\)[\s\S]*if \(invoice\)[\s\S]*await queueInvoiceCancellation/)
+})
