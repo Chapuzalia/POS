@@ -22,6 +22,7 @@ import { RestaurantOrderPanel } from '../features/tables/components/RestaurantOr
 import { SplitOrderModal } from '../features/tables/components/SplitOrderModal'
 import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
+import { useMobileTableMapLayout } from '../features/tables/useMobileTableMapLayout'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
 import { calculateDiscountForLines, type DiscountScheduleContext } from '../lib/discounts'
@@ -93,6 +94,7 @@ type Props = {
 
 export function PosPage(props: Props) {
   const [configOpen, setConfigOpen] = useState(false)
+  const mobileTableMapLayout = useMobileTableMapLayout()
   const restaurant = props.restaurant
   const quickSale = props.quickSale
   const cash = props.cash
@@ -133,6 +135,7 @@ export function PosPage(props: Props) {
   const paidFeedback = restaurant.posView.type === 'table_order'
     ? props.restaurantPaidFeedback
     : quickSale.paidFeedback
+  const tableMapVisible = !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map'
 
   const updateQuantity = (lineId: string, direction: 1 | -1) => {
     if (restaurant.posView.type === 'table_order') restaurant.changeLineQuantity(lineId, direction)
@@ -211,6 +214,7 @@ export function PosPage(props: Props) {
         canManageCash={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenReservations={Boolean(restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
+        compactMobile={tableMapVisible && mobileTableMapLayout}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
         onCloseCash={() => void (async () => {
@@ -255,6 +259,7 @@ export function PosPage(props: Props) {
         isBusy={props.isBusy}
         isOnline={props.isOnline}
         map={restaurant.map}
+        mobileLayout={mobileTableMapLayout}
         moveOrderId={restaurant.moveOrderId}
         onAreaChange={(areaId) => restaurant.setPosView({ type: 'table_map', areaId })}
         onCancelMove={() => restaurant.setMoveOrderId(null)}

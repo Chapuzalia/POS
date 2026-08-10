@@ -83,6 +83,8 @@ test('la integración incluye menú, pantalla, mapa operativo y un único SQL ra
     readFile(new URL('../src/features/tables/types.ts', import.meta.url), 'utf8'),
   ])
   assert.match(header, />Reservas</)
+  assert.match(header, /sr-only sm:not-sr-only/)
+  assert.match(header, /hidden sm:block[\s\S]*<PrintAgentStatusBadge \/>/)
   assert.match(page, /Nueva reserva/)
   assert.match(tableMap, /ReservationTableBadge/)
   assert.match(tableTypes, /nextReservation: RestaurantTableReservation \| null/)

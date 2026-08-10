@@ -40,6 +40,7 @@ type AppHeaderProps = {
   onLogout: () => void;
   pendingCount: number;
   themeMode: "light" | "dark";
+  compactMobile?: boolean;
 };
 
 export function AppHeader({
@@ -60,6 +61,7 @@ export function AppHeader({
   onLogout,
   pendingCount,
   themeMode,
+  compactMobile = false,
 }: AppHeaderProps) {
   const menuItems: Array<{
     action: () => void
@@ -84,12 +86,12 @@ export function AppHeader({
   )
 
   return (
-    <header className="shrink-0 border-b border-[var(--separator)] bg-[var(--surface)] pt-[max(1.5rem,env(safe-area-inset-top))]">
-      <div className="mx-auto flex max-w-[1600px] flex-wrap items-center justify-between gap-3 px-4 py-0">
+    <header className={`shrink-0 border-b border-[var(--separator)] bg-[var(--surface)] ${compactMobile ? 'pt-[max(.5rem,env(safe-area-inset-top))]' : 'pt-[max(1.5rem,env(safe-area-inset-top))]'}`}>
+      <div className={`mx-auto flex max-w-[1600px] items-center justify-between py-0 ${compactMobile ? 'flex-nowrap gap-1 px-2' : 'flex-wrap gap-3 px-4'}`}>
         <div className="flex min-w-0 flex-row gap-2">
           <Dropdown>
             <Dropdown.Trigger aria-label="Abrir menú principal de TICKIT" className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius)] px-2 text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)]">
-                <img src={themeMode === 'dark' ? '/logo_white.png' : '/logo_black.png'} alt="TICKIT" className="h-6 w-auto max-w-36 object-contain" />
+                <img src={themeMode === 'dark' ? '/logo_white.png' : '/logo_black.png'} alt="TICKIT" className={`${compactMobile ? 'h-5' : 'h-6'} w-auto max-w-36 object-contain`} />
                 <ChevronDown className="h-4 w-4" />
               </Dropdown.Trigger>
             <Dropdown.Popover className="!w-64 !max-w-[calc(100vw-2rem)]">
@@ -111,19 +113,23 @@ export function AppHeader({
           </Dropdown>
 
           {canOpenReservations ? (
-            <UiButton className="flex min-h-11 items-center gap-3 px-3 text-sm font-semibold" disabled={isLoading || !isOnline} onClick={onOpenReservations} type="button">
+            <UiButton aria-label="Reservas" className={`min-h-11 items-center gap-0 px-3 text-sm font-semibold sm:gap-3 ${compactMobile ? 'hidden' : 'flex'}`} disabled={isLoading || !isOnline} onClick={onOpenReservations} type="button">
               <CalendarDays className="h-4 w-4" />
-              <span>Reservas</span>
+              <span className="sr-only sm:not-sr-only">Reservas</span>
             </UiButton>
           ) : null}
         </div>
 
-        <div className="flex flex-wrap items-center justify-end gap-2">
+        <div className={`flex items-center justify-end ${compactMobile ? 'flex-nowrap gap-1' : 'flex-wrap gap-2'}`}>
           {cashSession ? <Chip>{`Caja: ${cashSession.cashRegisterName}`}</Chip> : null}
-          <ManualCashDrawerButton canOpenDrawer={canOpenCashDrawer} />
-          <PrintAgentStatusBadge />
+          <div className={compactMobile ? 'hidden' : 'contents'}>
+            <ManualCashDrawerButton canOpenDrawer={canOpenCashDrawer} />
+          </div>
+          <div className={compactMobile ? 'hidden' : 'hidden sm:block'}>
+            <PrintAgentStatusBadge />
+          </div>
           <Chip icon={isOnline ? Wifi : WifiOff} tone={isOnline ? 'success' : 'danger'} />
-          {pendingCount ? <Chip tone="warning">{`${pendingCount} pendientes`}</Chip> : null}
+          {pendingCount ? <div className={compactMobile ? 'hidden' : 'contents'}><Chip tone="warning">{`${pendingCount} pendientes`}</Chip></div> : null}
         </div>
       </div>
     </header>
