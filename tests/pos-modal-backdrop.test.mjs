@@ -61,4 +61,8 @@ test('the ticket history payment selector renders one shared border', async () =
   assert.match(nativeSelect, /triggerClassName\?: string/)
   assert.match(modal, /triggerClassName="!min-h-8 !border-0 !bg-transparent !px-0 !shadow-none"/)
   assert.match(modal, /focus-within:border-\[var\(--accent\)\]/)
+  assert.match(nativeSelect, /HeroSelect\.Value className="min-w-0 flex-1 truncate pr-1"/)
+  assert.match(nativeSelect, /HeroSelect\.Indicator className="!static !inset-auto ml-1 shrink-0"/)
+  assert.match(nativeSelect, /className="relative pr-10/)
+  assert.match(nativeSelect, /className="absolute right-3 top-1\/2 -translate-y-1\/2"/)
 })
