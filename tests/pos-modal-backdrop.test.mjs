@@ -51,3 +51,14 @@ test('the cash movement modal is centered and keeps long actions inside its widt
   assert.match(source, /min-w-0 max-w-full/)
   assert.match(source, /!whitespace-normal/)
 })
+
+test('the ticket history payment selector renders one shared border', async () => {
+  const [modal, nativeSelect] = await Promise.all([
+    readFile(new URL('../src/components/modals/SessionTicketsModal.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/ui/NativeSelect.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(nativeSelect, /triggerClassName\?: string/)
+  assert.match(modal, /triggerClassName="!min-h-8 !border-0 !bg-transparent !px-0 !shadow-none"/)
+  assert.match(modal, /focus-within:border-\[var\(--accent\)\]/)
+})

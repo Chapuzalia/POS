@@ -19,7 +19,7 @@ type NativeOption = {
   value: string
 }
 
-export type NativeSelectProps = ComponentProps<'select'>
+export type NativeSelectProps = ComponentProps<'select'> & { triggerClassName?: string }
 
 function collectOptions(children: ReactNode): NativeOption[] {
   const options: NativeOption[] = []
@@ -55,6 +55,7 @@ export function NativeSelect({
   name,
   onChange,
   required,
+  triggerClassName,
   value,
 }: NativeSelectProps) {
   const options = collectOptions(children)
@@ -83,7 +84,7 @@ export function NativeSelect({
         selectedKey={selectedValue || null}
         variant="secondary"
       >
-        <HeroSelect.Trigger className="min-h-12 flex items-center">
+        <HeroSelect.Trigger className={`min-h-12 flex items-center ${triggerClassName ?? ''}`}>
           <HeroSelect.Value>{selectedOption?.label ?? 'Seleccionar opcion'}</HeroSelect.Value>
           <HeroSelect.Indicator />
         </HeroSelect.Trigger>

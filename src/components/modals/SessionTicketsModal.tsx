@@ -92,12 +92,13 @@ export function SessionTicketsModal({
                       {ticket.totalCents === 0 ? (
                         <span className="text-sm font-semibold text-[var(--muted)]">Pago no requerido</span>
                       ) : (
-                        <label className="flex min-h-10 items-center gap-2 rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
+                        <label className="flex min-h-10 items-center gap-2 rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3 transition-[border-color,box-shadow] focus-within:border-[var(--accent)] focus-within:shadow-[0_0_0_2px_color-mix(in_srgb,var(--accent)_24%,transparent)]">
                           <CreditCard className="h-4 w-4 text-[var(--muted)]" />
                           <UiNativeSelect
-                            className="bg-transparent text-sm font-semibold text-[var(--field-foreground)] outline-none"
+                            className="bg-transparent text-sm font-semibold text-[var(--field-foreground)] !outline-none"
                             disabled={isBusy || ticket.status !== 'active'}
                             onChange={(event) => onChangePayment(ticket, event.target.value as PaymentMethod)}
+                            triggerClassName="!min-h-8 !border-0 !bg-transparent !px-0 !shadow-none"
                             value={ticket.paymentMethod ?? ''}
                           >
                             {ticket.paymentMethod === 'invitation' || ticket.paymentMethod === 'other' ? (
