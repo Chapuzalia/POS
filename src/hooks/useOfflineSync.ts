@@ -8,21 +8,9 @@ import { supabaseConfig } from '../lib/supabase'
 import { syncEvent } from '../services/posService'
 import type { OfflineEvent } from '../types'
 import { getReadableError } from '../utils/errors'
+import { isClosedCashSaleRejection } from '../features/offline/services/cashSessionRejection'
 
 type RejectedSaleEvent = Extract<OfflineEvent, { kind: 'sale_created' }>
-
-function isPermanentRejection(event: OfflineEvent, error: unknown): event is RejectedSaleEvent {
-  if (event.kind !== 'sale_created' || !error || typeof error !== 'object') {
-    return false
-  }
-
-  const databaseError = error as { code?: unknown; details?: unknown; message?: unknown }
-  const hasClosedCashMessage = [databaseError.message, databaseError.details].some(
-    (value) => typeof value === 'string' && value.toLocaleLowerCase().includes('caja cerrada'),
-  )
-
-  return ['22023', '55000', 'P0001'].includes(String(databaseError.code)) || hasClosedCashMessage
-}
 
 export function useOfflineSync(isOnline: boolean) {
   const initialQueue = getOfflineQueue()
@@ -75,7 +63,7 @@ export function useOfflineSync(isOnline: boolean) {
           await syncEvent(event)
           forgetOfflineEvent(event.id)
         } catch (syncError) {
-          if (isPermanentRejection(event, syncError)) {
+          if (isClosedCashSaleRejection(event, syncError)) {
             forgetOfflineEvent(event.id)
             setRejectedSaleEvent(event)
             continue
