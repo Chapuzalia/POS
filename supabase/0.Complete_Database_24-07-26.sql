@@ -858,7 +858,7 @@ begin
   insert into public.user_login_leases (
     user_id, auth_session_id, client_id, heartbeat_at, expires_at
   ) values (
-    current_user_id, current_session_id, p_client_id, now(), now() + interval '30 minutes'
+    current_user_id, current_session_id, p_client_id, now(), now() + interval '4 hours'
   )
   on conflict (user_id) do update set
     auth_session_id = excluded.auth_session_id,
@@ -1580,7 +1580,7 @@ begin
   insert into public.user_login_leases (
     user_id, auth_session_id, client_id, heartbeat_at, expires_at
   ) values (
-    current_user_id, current_session_id, p_client_id, now(), now() + interval '30 minutes'
+    current_user_id, current_session_id, p_client_id, now(), now() + interval '4 hours'
   )
   on conflict (user_id) do update set
     auth_session_id = excluded.auth_session_id,
@@ -2093,7 +2093,7 @@ declare
 begin
   update public.user_login_leases
   set heartbeat_at = now(),
-      expires_at = now() + interval '30 minutes'
+      expires_at = now() + interval '4 hours'
   where user_id = current_user_id
     and auth_session_id = current_session_id
     and client_id = p_client_id
@@ -6327,7 +6327,7 @@ CREATE TABLE public.user_login_leases (
     auth_session_id text NOT NULL,
     client_id uuid NOT NULL,
     heartbeat_at timestamp with time zone DEFAULT now() NOT NULL,
-    expires_at timestamp with time zone DEFAULT (now() + '00:30:00'::interval) NOT NULL
+    expires_at timestamp with time zone DEFAULT (now() + '04:00:00'::interval) NOT NULL
 );
 
 
