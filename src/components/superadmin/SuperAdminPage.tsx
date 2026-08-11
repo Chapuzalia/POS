@@ -1,7 +1,8 @@
 import { Input as UiInput } from '../ui/Input'
 import { Button as UiButton } from '../ui/Button'
+import { Checkbox as UiCheckbox } from '../ui/Checkbox'
 import { AppModal } from '../ui/AppModal'
-import { Building2, ChevronRight, Crown, Eye, LogOut, Menu, Pencil, Plus, Power, RefreshCw, Store, Trash2, UserRound, X } from 'lucide-react'
+import { Building2, Check, ChevronRight, Crown, Eye, LockKeyhole, LogOut, Menu, Pencil, Plus, Power, RefreshCw, Store, Trash2, UserRound, X } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
   createPlatformTenant,
@@ -9,6 +10,8 @@ import {
   loadPlatformTenants,
   setPlatformTenantActive,
   updatePlatformTenant,
+  type PlatformFeature,
+  type PlatformTenantFeature,
   type PlatformTenant,
 } from '../../services/platformService'
 import type { TenantContext } from '../../types'
@@ -52,6 +55,7 @@ type SuperAdminModalProps = {
 function SuperAdminModal({ children, label, onClose, size = 'compact' }: SuperAdminModalProps) {
   return (
     <AppModal
+      backdropClassName="crm-shell"
       containerClassName="!p-3 sm:!p-6"
       maxWidth={size === 'large' ? 820 : 560}
       dialogClassName="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !flex !max-h-[calc(100dvh-24px)] !flex-col !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] sm:!max-h-[calc(100dvh-48px)] sm:!rounded-[var(--crm-radius-lg)]"
@@ -65,6 +69,7 @@ function SuperAdminModal({ children, label, onClose, size = 'compact' }: SuperAd
 
 export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: SuperAdminPageProps) {
   const [tenants, setTenants] = useState<PlatformTenant[]>([])
+  const [platformFeatures, setPlatformFeatures] = useState<PlatformFeature[]>([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [tenantModal, setTenantModal] = useState<TenantModalState>(null)
   const [isBusy, setIsBusy] = useState(false)
@@ -82,9 +87,12 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [editingTenantSlug, setEditingTenantSlug] = useState('')
   const [editingMaxVenues, setEditingMaxVenues] = useState(1)
   const [editingMaxDevices, setEditingMaxDevices] = useState(5)
+  const [editingTenantFeatures, setEditingTenantFeatures] = useState<PlatformTenantFeature[]>([])
 
   const refresh = useCallback(async () => {
-    setTenants(await loadPlatformTenants())
+    const platform = await loadPlatformTenants()
+    setTenants(platform.tenants)
+    setPlatformFeatures(platform.features)
   }, [])
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
@@ -161,7 +169,17 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
     setEditingTenantSlug(tenant.slug)
     setEditingMaxVenues(tenant.limits.venues)
     setEditingMaxDevices(tenant.limits.devices)
+    setEditingTenantFeatures(Array.isArray(tenant.features) ? tenant.features : [])
     setTenantModal({ mode: 'edit', tenant })
+  }
+
+  function setEditingFeature(feature: PlatformTenantFeature, enabled: boolean) {
+    setEditingTenantFeatures((current) => {
+      const next = new Set(current)
+      if (enabled) next.add(feature)
+      else next.delete(feature)
+      return platformFeatures.filter((candidate) => !candidate.isCore && next.has(candidate.key)).map((candidate) => candidate.key)
+    })
   }
 
   async function handleUpdateTenant(event: FormEvent<HTMLFormElement>, tenant: PlatformTenant) {
@@ -173,6 +191,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
         tenantSlug: editingTenantSlug.trim(),
         maxDevices: editingMaxDevices,
         maxVenues: editingMaxVenues,
+        features: editingTenantFeatures,
       })
       await refresh()
       setTenantModal(null)
@@ -203,6 +222,8 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   }
 
   const inputClassName = 'h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150'
+  const coreFeatures = platformFeatures.filter((feature) => feature.isCore)
+  const optionalFeatures = platformFeatures.filter((feature) => !feature.isCore)
 
   return (
     <div className="crm-shell !flex !h-full !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased">
@@ -341,7 +362,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
           </div>
           <form className="!grid !min-h-0 !grid-cols-1 !gap-4 !overflow-y-auto !px-5 !py-5 sm:!grid-cols-2 sm:!px-6" onSubmit={(event) => void handleSubmit(event)}>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Nombre del negocio</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => { const name = event.target.value; setTenantName(name); if (!slugEdited) setTenantSlug(slugify(name)) }} required value={tenantName} /></label>
-            <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Slug</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => { setSlugEdited(true); setTenantSlug(slugify(event.target.value)) }} pattern="[a-z0-9]+(?:[_-][a-z0-9]+)*" required value={tenantSlug} /></label>
+            <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Slug</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => { setSlugEdited(true); setTenantSlug(slugify(event.target.value)) }} pattern="[a-z0-9]+(?:(?:_|-)[a-z0-9]+)*" required value={tenantSlug} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Primer local</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setVenueName(event.target.value)} required value={venueName} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Nombre del OWNER</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setOwnerFullName(event.target.value)} required value={ownerFullName} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Email del OWNER</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setOwnerEmail(event.target.value)} required type="email" value={ownerEmail} /></label>
@@ -360,20 +381,55 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       ) : null}
 
       {tenantModal?.mode === 'edit' ? (
-        <SuperAdminModal label={`Editar ${tenantModal.tenant.name}`} onClose={() => setTenantModal(null)}>
+        <SuperAdminModal label={`Editar ${tenantModal.tenant.name}`} onClose={() => setTenantModal(null)} size="large">
           <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
-            <div><h2 className="!m-0 !text-lg !font-bold">Editar negocio</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Actualiza sus datos y límites del plan.</p></div>
+            <div><h2 className="!m-0 !text-lg !font-bold">Editar negocio</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Actualiza sus datos, límites del plan y módulos disponibles.</p></div>
             <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton>
           </div>
-          <form className="!grid !gap-4 !px-5 !py-5" onSubmit={(event) => void handleUpdateTenant(event, tenantModal.tenant)}>
+          <form className="!grid !min-h-0 !gap-4 !overflow-y-auto !px-5 !py-5 sm:!grid-cols-2 sm:!px-6" onSubmit={(event) => void handleUpdateTenant(event, tenantModal.tenant)}>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Nombre del negocio</span><UiInput className={inputClassName} disabled={isBusy} onChange={(event) => setEditingTenantName(event.target.value)} required value={editingTenantName} /></label>
-            <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Slug</span><UiInput className={inputClassName} disabled={isBusy} onChange={(event) => setEditingTenantSlug(slugify(event.target.value))} pattern="[a-z0-9]+(?:[_-][a-z0-9]+)*" required value={editingTenantSlug} /></label>
-            <fieldset className="!grid !grid-cols-2 !gap-3 !rounded-[12px] !border-0 !bg-[var(--crm-surface-soft)] !p-4">
+            <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Slug</span><UiInput className={inputClassName} disabled={isBusy} onChange={(event) => setEditingTenantSlug(slugify(event.target.value))} pattern="[a-z0-9]+(?:(?:_|-)[a-z0-9]+)*" required value={editingTenantSlug} /></label>
+            <fieldset className="!col-span-full !grid !grid-cols-2 !gap-3 !rounded-[12px] !border-0 !bg-[var(--crm-surface-soft)] !p-4">
               <legend className="!mb-2 !px-1 !text-xs !font-bold">Límites del plan</legend>
               <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[10px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Locales</span><UiInput className={inputClassName} disabled={isBusy} min={tenantModal.tenant.venueCount} onChange={(event) => setEditingMaxVenues(Number(event.target.value))} required type="number" value={editingMaxVenues} /></label>
               <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[10px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Dispositivos</span><UiInput className={inputClassName} disabled={isBusy} min={tenantModal.tenant.deviceCount} onChange={(event) => setEditingMaxDevices(Number(event.target.value))} required type="number" value={editingMaxDevices} /></label>
             </fieldset>
-            <div className="!flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !pt-4">
+            <section className="!col-span-full !grid !gap-3" aria-labelledby="tenant-features-heading">
+              <div>
+                <h3 className="!m-0 !text-sm !font-bold" id="tenant-features-heading">Features del negocio</h3>
+                <p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">El núcleo está siempre incluido. Activa los módulos adicionales contratados.</p>
+              </div>
+              <div className="!overflow-hidden !rounded-[14px] !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)]">
+                <div className="!border-b !border-[var(--crm-border-subtle)] !p-4">
+                  <div className="!mb-3 !flex !items-center !gap-2">
+                    <span className="!grid !size-7 !place-items-center !rounded-lg !bg-[var(--crm-green-soft)] !text-[var(--crm-green)]"><LockKeyhole className="!size-3.5" /></span>
+                    <div><strong className="!block !text-xs">Núcleo básico</strong><span className="!text-[10px] !font-semibold !text-[var(--crm-green)]">Siempre incluido</span></div>
+                  </div>
+                  <div className="!flex !flex-wrap !gap-1.5">{coreFeatures.map((feature) => <span className="!inline-flex !items-center !gap-1 !rounded-full !bg-[var(--crm-surface)] !px-2.5 !py-1.5 !text-[10px] !font-semibold !text-[var(--crm-text-secondary)]" key={feature.key}><Check className="!size-3 !text-[var(--crm-green)]" />{feature.name}</span>)}</div>
+                </div>
+                <div className="!bg-[var(--crm-surface)]">
+                  <div className="!flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-4 !py-3">
+                    <span className="!text-[11px] !font-bold !uppercase !tracking-[0.08em] !text-[var(--crm-text-secondary)]">Módulos opcionales</span>
+                    <span className="!shrink-0 !rounded-md !bg-[var(--crm-blue-soft)] !px-2 !py-1 !text-[10px] !font-bold !text-[var(--crm-blue)]">{editingTenantFeatures.length} de {optionalFeatures.length} activos</span>
+                  </div>
+                  <div className="!grid sm:!grid-cols-2">
+                    {optionalFeatures.map((feature) => (
+                      <UiCheckbox
+                        aria-label={feature.name}
+                        checked={editingTenantFeatures.includes(feature.key)}
+                        className="!min-h-[70px] !items-start !rounded-none !border-0 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !px-4 !py-3.5 !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)] data-[selected=true]:!bg-[var(--crm-surface)] last:!border-b-0 sm:[&:nth-child(odd)]:!border-r sm:[&:nth-last-child(-n+2)]:!border-b-0"
+                        disabled={isBusy}
+                        key={feature.key}
+                        onChange={(enabled) => setEditingFeature(feature.key, enabled)}
+                      >
+                        <span className="!grid !gap-0.5"><strong className="!text-[13px] !font-semibold !text-[var(--crm-text)]">{feature.name}</strong><span className="!text-[11px] !font-medium !leading-snug !text-[var(--crm-text-muted)]">{feature.description}</span></span>
+                      </UiCheckbox>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            </section>
+            <div className="!col-span-full !flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !pt-4">
               <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cancelar</UiButton>
               <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={isBusy || !editingTenantName.trim() || !editingTenantSlug} type="submit"><Pencil className="!size-4" />Guardar cambios</UiButton>
             </div>

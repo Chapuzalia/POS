@@ -50,6 +50,15 @@ export async function openCashRegisterSession(context: TenantContext, cashRegist
   return session
 }
 
+export async function selectCashRegisterSession(context: TenantContext, cashSessionId: string) {
+  const { data, error } = await client().rpc('select_device_cash_session', {
+    p_cash_session_id: cashSessionId,
+    p_device_id: context.deviceId,
+  })
+  if (error) throw error
+  if (data !== true) throw new Error('No se pudo vincular el dispositivo con la caja seleccionada.')
+}
+
 function isCashMovementType(value: string | null): value is CashMovementType {
   return value === 'cash_in' || value === 'cash_out' || value === 'card_cashback'
 }

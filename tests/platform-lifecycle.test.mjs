@@ -71,3 +71,57 @@ test('los usuarios tpv comparten el limite de dispositivos', async () => {
   assert.match(migration, /select max_devices into resource_limit/)
   assert.match(migration, /role = 'cashier'/)
 })
+
+test('las features usan un catalogo relacional y se asignan completas a negocios existentes', async () => {
+  const [featureMigration, consolidatedSchema] = await Promise.all([
+    readFile(new URL('../supabase/migrations/20260811220000_add_tenant_features.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
+  ])
+
+  for (const source of [featureMigration, consolidatedSchema]) {
+    assert.match(source, /create table if not exists public\.platform_features/i)
+    assert.match(source, /create table if not exists public\.tenant_feature_assignments/i)
+    assert.match(source, /primary key \(tenant_id, feature_key\)/i)
+    assert.match(source, /alter table public\.tenant_feature_assignments enable row level security/i)
+    assert.match(source, /create or replace function public\.update_platform_tenant_config/i)
+  }
+
+  assert.match(featureMigration, /from public\.tenants tenant\s+cross join public\.platform_features feature/i)
+  assert.match(featureMigration, /where feature\.is_core = false\s+and feature\.is_active = true/i)
+  assert.match(featureMigration, /assign_default_tenant_features_after_insert/i)
+  assert.match(featureMigration, /feature\.enabled_by_default = true/i)
+  assert.doesNotMatch(featureMigration, /enabled_features text\[\]/i)
+})
+
+test('el superadmin carga el catalogo de features y guarda asignaciones de forma atomica', async () => {
+  const [edgeFunction, platformService, superadminPage] = await Promise.all([
+    readFile(new URL('../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/services/platformService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(edgeFunction, /from\('platform_features'\)/)
+  assert.match(edgeFunction, /from\('tenant_feature_assignments'\)/)
+  assert.match(edgeFunction, /rpc\('update_platform_tenant_config'/)
+  assert.match(platformService, /features: PlatformFeature\[\]/)
+  assert.match(platformService, /Array\.isArray\(tenant\.features\) \? tenant\.features : \[\]/)
+  assert.match(superadminPage, /Features del negocio/)
+  assert.match(superadminPage, /El núcleo está siempre incluido/)
+  assert.match(superadminPage, /features: editingTenantFeatures/)
+})
+
+test('el selector de features usa un panel compacto y conserva el fondo neutro al seleccionar', async () => {
+  const source = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(source, /Módulos opcionales/)
+  assert.match(source, /!min-h-\[70px\]/)
+  assert.match(source, /data-\[selected=true\]:!bg-\[var\(--crm-surface\)\]/)
+  assert.doesNotMatch(source, /data-\[selected=true\]:!bg-\[var\(--crm-blue-soft\)\]/)
+})
+
+test('los slugs del superadmin usan un pattern compatible con Unicode v', async () => {
+  const source = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
+
+  assert.doesNotMatch(source, /pattern="\[a-z0-9\]\+\(\?:\[_-\]/)
+  assert.equal((source.match(/pattern="\[a-z0-9\]\+\(\?:\(\?:_\|-\)\[a-z0-9\]\+\)\*"/g) ?? []).length, 2)
+})

@@ -30,3 +30,6 @@ backups/
 
 # Sentry Config File
 .env.sentry-build-plugin
+
+# Superdesign generated component templates
+.superdesign/tmp/

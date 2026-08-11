@@ -7,6 +7,11 @@ const corsHeaders = {
   'Content-Type': 'application/json',
 }
 
+function normalizePlatformFeatures(value: unknown) {
+  if (!Array.isArray(value) || value.some((feature) => typeof feature !== 'string' || !feature.trim())) return null
+  return [...new Set(value.map((feature) => feature.trim()))]
+}
+
 function response(body: unknown, status = 200) {
   return new Response(JSON.stringify(body), { headers: corsHeaders, status })
 }
@@ -86,17 +91,19 @@ Deno.serve(async (request) => {
         return response({ error: 'Solo un superadmin puede consultar todos los negocios' }, 403)
       }
 
-      const [tenantsResult, ownersResult, venuesResult, devicesResult] = await Promise.all([
+      const [tenantsResult, ownersResult, venuesResult, devicesResult, featureAssignmentsResult, featureCatalogResult] = await Promise.all([
         adminClient.from('tenants').select('id, name, slug, is_active, max_venues, max_devices, created_at').order('created_at', { ascending: false }),
         adminClient
           .from('tenant_memberships')
           .select('tenant_id, user_id, role, is_active'),
         adminClient.from('venues').select('id, tenant_id, name, is_active').order('sort_order'),
         adminClient.from('devices').select('tenant_id, is_active'),
+        adminClient.from('tenant_feature_assignments').select('tenant_id, feature_key'),
+        adminClient.from('platform_features').select('key, name, description, is_core, enabled_by_default, sort_order').eq('is_active', true).order('sort_order'),
       ])
 
-      if (tenantsResult.error || ownersResult.error || venuesResult.error || devicesResult.error) {
-        throw tenantsResult.error ?? ownersResult.error ?? venuesResult.error ?? devicesResult.error
+      if (tenantsResult.error || ownersResult.error || venuesResult.error || devicesResult.error || featureAssignmentsResult.error || featureCatalogResult.error) {
+        throw tenantsResult.error ?? ownersResult.error ?? venuesResult.error ?? devicesResult.error ?? featureAssignmentsResult.error ?? featureCatalogResult.error
       }
 
       const ownerMemberships = (ownersResult.data ?? []).filter((membership) => membership.role === 'owner')
@@ -144,8 +151,22 @@ Deno.serve(async (request) => {
         if (!device.is_active) continue
         deviceCountByTenant.set(device.tenant_id, (deviceCountByTenant.get(device.tenant_id) ?? 0) + 1)
       }
+      const featuresByTenant = new Map<string, string[]>()
+      for (const assignment of featureAssignmentsResult.data ?? []) {
+        const tenantFeatures = featuresByTenant.get(assignment.tenant_id) ?? []
+        tenantFeatures.push(assignment.feature_key)
+        featuresByTenant.set(assignment.tenant_id, tenantFeatures)
+      }
 
       return response({
+        features: (featureCatalogResult.data ?? []).map((feature) => ({
+          key: feature.key,
+          name: feature.name,
+          description: feature.description,
+          isCore: feature.is_core,
+          enabledByDefault: feature.enabled_by_default,
+          sortOrder: feature.sort_order,
+        })),
         tenants: (tenantsResult.data ?? []).map((tenant) => ({
           id: tenant.id,
           name: tenant.name,
@@ -157,6 +178,7 @@ Deno.serve(async (request) => {
           memberCount: memberCountByTenant.get(tenant.id) ?? 0,
           venueCount: venueCountByTenant.get(tenant.id) ?? 0,
           venues: venuesByTenant.get(tenant.id) ?? [],
+          features: featuresByTenant.get(tenant.id) ?? [],
           limits: {
             devices: tenant.max_devices,
             venues: tenant.max_venues,
@@ -301,49 +323,35 @@ Deno.serve(async (request) => {
       const tenantSlug = String(body.tenantSlug ?? '').trim().toLowerCase()
       const maxVenues = Number(body.maxVenues)
       const maxDevices = Number(body.maxDevices)
+      const enabledFeatures = normalizePlatformFeatures(body.features)
       if (
         !targetTenantId || !tenantName || !/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(tenantSlug)
         || !Number.isInteger(maxVenues) || maxVenues < 1
         || !Number.isInteger(maxDevices) || maxDevices < 0
+        || enabledFeatures === null
       ) {
         return response({ error: 'Nombre, slug o límites del plan no válidos' }, 400)
       }
 
-      const [venueUsage, deviceUsage] = await Promise.all([
-        adminClient.from('venues').select('id', { count: 'exact', head: true }).eq('tenant_id', targetTenantId),
-        adminClient.from('devices').select('id', { count: 'exact', head: true }).eq('tenant_id', targetTenantId).eq('is_active', true),
-      ])
-      const usageError = venueUsage.error ?? deviceUsage.error
-      if (usageError) throw usageError
-      if (maxVenues < (venueUsage.count ?? 0) || maxDevices < (deviceUsage.count ?? 0)) {
-        return response({ error: 'Los límites no pueden ser inferiores al uso actual del negocio' }, 400)
-      }
-
-      const { data: conflictingTenant, error: conflictError } = await adminClient
-        .from('tenants')
-        .select('id')
-        .eq('slug', tenantSlug)
-        .neq('id', targetTenantId)
-        .maybeSingle()
-      if (conflictError) throw conflictError
-      if (conflictingTenant) {
-        return response({ error: 'Ya existe un negocio con ese slug' }, 409)
-      }
-
       const { data: updatedTenant, error: updateError } = await adminClient
-        .from('tenants')
-        .update({
-          name: tenantName,
-          slug: tenantSlug,
-          max_venues: maxVenues,
-          max_devices: maxDevices,
+        .rpc('update_platform_tenant_config', {
+          p_tenant_id: targetTenantId,
+          p_name: tenantName,
+          p_slug: tenantSlug,
+          p_max_venues: maxVenues,
+          p_max_devices: maxDevices,
+          p_feature_keys: enabledFeatures,
         })
-        .eq('id', targetTenantId)
-        .select('id, name, slug')
         .maybeSingle()
-      if (updateError) throw updateError
+      if (updateError) {
+        const status = updateError.code === '23505' ? 409
+          : updateError.code === 'P0002' ? 404
+            : ['22023', 'P0001'].includes(updateError.code ?? '') ? 400
+              : 500
+        return response({ error: updateError.message }, status)
+      }
       if (!updatedTenant) return response({ error: 'Negocio no encontrado' }, 404)
-      return response({ tenant: updatedTenant })
+      return response({ tenant: { ...updatedTenant, features: enabledFeatures } })
     }
 
     if (action === 'platform-set-tenant-active') {

@@ -6,6 +6,7 @@ test('the shared POS modal delegates dismissal, focus trap and Escape to HeroUI'
   const source = await readFile(new URL('../src/components/ui/AppModal.tsx', import.meta.url), 'utf8')
 
   assert.match(source, /from ["']@heroui\/react["']/)
+  assert.match(source, /<Modal\.Trigger aria-hidden="true" className="hidden" tabIndex=\{-1\} \/>/)
   assert.match(source, /<Modal\.Backdrop/)
   assert.match(source, /isDismissable=\{!dismissDisabled\}/)
   assert.match(source, /isKeyboardDismissDisabled=\{dismissDisabled\}/)
@@ -41,6 +42,12 @@ test('POS modal families use the shared HeroUI modal policy', async () => {
     assert.match(source, /<AppModal/, `${sourcePath} must use the shared HeroUI modal`)
     assert.doesNotMatch(source, /aria-modal|role=["']dialog["']|closeOnModalBackdrop/)
   }
+})
+
+test('the superadmin modal carries its CRM theme variables into the HeroUI portal', async () => {
+  const source = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(source, /backdropClassName=["']crm-shell["']/)
 })
 
 test('the cash movement modal is centered and keeps long actions inside its width', async () => {

@@ -165,6 +165,14 @@ export function useReservationsController(options: Options) {
     onRefresh: refresh,
   })
 
+  useEffect(() => {
+    if (options.enabled) return
+    setIsOpen(false)
+    setEditor(null)
+    setCurrentDetail(null)
+    setQuery('')
+  }, [options.enabled, setCurrentDetail])
+
   const openCreate = useCallback((tableIds: string[] = []) => {
     setSelectedTableIds(tableIds)
     setConflicts([])

@@ -120,7 +120,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
     if (reportSections.has(activeSection)) setIsReportsOpen(true)
   }, [activeSection])
 
-  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id))
+  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features))
   const allowedInventoryItems = allowed(inventoryNavItems)
     .filter((item) => inventoryEnabled || item.id === 'inventory-stock')
   const navigate = (section: CrmSection) => {
@@ -174,7 +174,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
             <p className="!mx-2.5 !mt-0 !mb-2 !text-[10px] !leading-tight !font-bold !tracking-[0.14em] !text-[var(--crm-sidebar-muted)] !uppercase" id="crm-nav-management">Gestion</p>
             <div className="!grid !gap-[3px]">
               <SidebarCollapsible activeSection={activeSection} icon={Boxes} isOpen={isProductsOpen} items={allowed(productNavItems)} label="Productos" onNavigate={navigate} onToggle={() => setIsProductsOpen((value) => !value)} sections={productSections} />
-              <SidebarCollapsible activeSection={activeSection} icon={Package} isOpen={isInventoryOpen} items={allowedInventoryItems} label="Inventario" onNavigate={navigate} onToggle={() => setIsInventoryOpen((value) => !value)} sections={inventorySections} />
+              {allowedInventoryItems.length ? <SidebarCollapsible activeSection={activeSection} icon={Package} isOpen={isInventoryOpen} items={allowedInventoryItems} label="Inventario" onNavigate={navigate} onToggle={() => setIsInventoryOpen((value) => !value)} sections={inventorySections} /> : null}
               {allowed(navItems.slice(2, 3)).map((item) => (
                 <SidebarNavItem activeSection={activeSection} item={item} key={item.id} onNavigate={navigate} />
               ))}

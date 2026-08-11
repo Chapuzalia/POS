@@ -15,6 +15,7 @@ import {
 } from "../../components/modals";
 
 type Props = {
+  canOpenReservations: boolean;
   context: TenantContext;
   isBusy: boolean;
   isOnline: boolean;
@@ -36,6 +37,7 @@ type Props = {
 };
 
 export function CashSessionGate({
+  canOpenReservations,
   cashClosings,
   closingHistoryOpen,
   completedClosing,
@@ -151,14 +153,14 @@ export function CashSessionGate({
           </form>
         ) : null}
         <div className="grid gap-3 sm:grid-cols-2">
-          <UiButton
+          {canOpenReservations ? <UiButton
             className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)]"
             disabled={!isOnline}
             onClick={onOpenReservations}
             type="button"
           >
             Reservas
-          </UiButton>
+          </UiButton> : null}
           <UiButton
             className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)]"
             disabled={isBusy || !isOnline}

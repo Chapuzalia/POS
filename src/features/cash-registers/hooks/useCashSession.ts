@@ -185,30 +185,11 @@ export function useCashSession(options: Options) {
     options.onError('La caja con la que estabas trabajando se ha cerrado.')
   }, [options, session, setTickets])
 
-  const handleAutomaticSession = useCallback(async (nextSession: CashSession) => {
-    if (!options.context) return
-    saveCachedCashSession(options.context, nextSession)
-    setSession(nextSession)
-    try {
-      const [remoteLedger, remoteTickets] = await Promise.all([
-        loadSalesLedgerFromSupabase(options.context, nextSession.id),
-        loadSessionTicketsFromSupabase(options.context, nextSession.id),
-      ])
-      setLedger(remoteLedger)
-      saveSaleLedger(options.context, remoteLedger)
-      setTickets(remoteTickets)
-      saveSessionTickets(options.context, nextSession.id, remoteTickets)
-    } catch (error) {
-      options.onError(getReadableError(error))
-    }
-  }, [options, setTickets])
-
   const cashOptions = useCashRegisterOptions({
     context: options.context,
     currentSession: session,
     isOnline: options.isOnline,
     onClosedRemotely: handleClosedRemotely,
-    onSessionSelected: handleAutomaticSession,
   })
 
   const handleActiveSessionChanged = useCallback(async (
@@ -327,13 +308,12 @@ export function useCashSession(options: Options) {
     if (!options.context || !options.isOnline) return
     options.setBusy(true)
     try {
-      persistSession(nextSession)
       const joined = await joinCashSessionLifecycle(options.context, nextSession)
+      persistSession(nextSession)
       persistLedger(joined.ledger)
       setTickets(joined.tickets)
       saveSessionTickets(options.context, nextSession.id, joined.tickets)
     } catch (error) {
-      persistSession(null)
       options.onError(getReadableError(error))
     } finally {
       options.setBusy(false)

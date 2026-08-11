@@ -20,6 +20,7 @@ import { TableManagementPage } from '../../table-management/TableManagementPage'
 import type { CatalogData } from '../../catalog/domain/types.ts'
 import type { CrmStats, CrmVenue, TenantContext } from '../../../types'
 import type { CrmSection } from './crmNavigation'
+import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 
 type Props = {
   activeSection: CrmSection
@@ -76,7 +77,7 @@ export function CrmSectionContent({
     case 'products':
       return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
-      return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} inventoryFeatureEnabled={hasTenantFeature(context, 'inventory')} mutate={mutateCatalog} /> : null
     case 'categories':
       return catalog ? <CatalogStructureCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'selection-groups':

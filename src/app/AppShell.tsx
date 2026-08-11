@@ -19,6 +19,7 @@ import { shouldResetTenantState } from '../features/session/session-state'
 import { useAddProductFeedback } from '../hooks/useAddProductFeedback'
 import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useThemeTokens } from '../hooks/useThemeTokens'
+import { hasTenantFeature } from '../features/platform/tenantFeatureAccess'
 import {
   clearSaleLedger,
   clearSessionTickets,
@@ -40,6 +41,7 @@ import {
 import { supabaseConfig } from '../lib/supabase'
 import { releaseLocalLoginLock } from '../services/loginLeaseService'
 import {
+  loadTenantFeatures,
   loadPosCatalogFromSupabase,
   loadProductSalesStatsFromSupabase,
   logoutTenant,
@@ -94,6 +96,42 @@ export function AppShell() {
   const [restaurantPaidFeedback, setRestaurantPaidFeedback] = useState<PaymentMethod | null>(null)
   const floatingTicketButtonRef = useRef<HTMLButtonElement>(null)
   const addFeedback = useAddProductFeedback(floatingTicketButtonRef)
+  const tenantIdForFeatureSync = context && !isSuperadmin(context) ? context.tenantId : null
+
+  useEffect(() => {
+    if (!tenantIdForFeatureSync || !isOnline) return undefined
+    let active = true
+    const refreshFeatures = async () => {
+      try {
+        const features = await loadTenantFeatures(tenantIdForFeatureSync)
+        if (!active || features === undefined) return
+        setContext((current) => {
+          if (!current || current.tenantId !== tenantIdForFeatureSync) return current
+          const unchanged = current.features?.length === features.length
+            && current.features.every((feature, index) => feature === features[index])
+          if (unchanged) return current
+          const nextContext = { ...current, features }
+          saveCachedContext(nextContext)
+          return nextContext
+        })
+      } catch {
+        // A temporary refresh failure must not interrupt an active POS session.
+      }
+    }
+    const handleFocus = () => { void refreshFeatures() }
+    const handleVisibility = () => {
+      if (document.visibilityState === 'visible') void refreshFeatures()
+    }
+    const intervalId = window.setInterval(() => void refreshFeatures(), 60_000)
+    window.addEventListener('focus', handleFocus)
+    document.addEventListener('visibilitychange', handleVisibility)
+    return () => {
+      active = false
+      window.clearInterval(intervalId)
+      window.removeEventListener('focus', handleFocus)
+      document.removeEventListener('visibilitychange', handleVisibility)
+    }
+  }, [isOnline, tenantIdForFeatureSync])
 
   const persistProductSalesStats = useCallback((stats: ProductSalesStat[]) => {
     setProductSalesStats(stats)
@@ -114,6 +152,7 @@ export function AppShell() {
     subtractProductSalesStats,
     syncPendingEvents: offline.syncPendingEvents,
   })
+  const discountsFeatureEnabled = Boolean(context && hasTenantFeature(context, 'discounts'))
   const quickSale = useQuickSale({
     catalog,
     cashSession: cash.session,
@@ -133,12 +172,19 @@ export function AppShell() {
     syncPendingEvents: offline.syncPendingEvents,
     tickets: cash.tickets,
   })
+  const closeDiscountModal = quickSale.closeDiscountModal
+  const setAppliedDiscount = quickSale.setDiscount
+  useEffect(() => {
+    if (discountsFeatureEnabled) return
+    setAppliedDiscount(null)
+    closeDiscountModal()
+  }, [closeDiscountModal, discountsFeatureEnabled, setAppliedDiscount])
   const restaurant = useRestaurantController({
-    appliedDiscount: quickSale.discount,
+    appliedDiscount: discountsFeatureEnabled ? quickSale.discount : null,
     catalog,
     cashSession: cash.session,
     context,
-    enabled: Boolean(context && !isBackofficeUser(context)),
+    enabled: Boolean(context && !isBackofficeUser(context) && hasTenantFeature(context, 'restaurant')),
     isBusy,
     isOnline,
     onAddFeedback: addFeedback.triggerAddFeedback,
@@ -155,7 +201,7 @@ export function AppShell() {
   const reservations = useReservationsController({
     cashSession: cash.session,
     context,
-    enabled: Boolean(context && !isBackofficeUser(context) && restaurant.tablesEnabled),
+    enabled: Boolean(context && !isBackofficeUser(context) && hasTenantFeature(context, 'restaurant') && hasTenantFeature(context, 'reservations') && restaurant.tablesEnabled),
     isOnline,
     operationalMap: restaurant.map,
     onError: setRestaurantError,
@@ -359,6 +405,7 @@ export function AppShell() {
     />
     if (isOnline && !restaurant.tablesConfigLoaded) return <LoadingScreen />
     if (!cash.session && !reservations.isOpen) return <PosStartupReveal><CashSessionGate
+      canOpenReservations={hasTenantFeature(context, 'restaurant') && hasTenantFeature(context, 'reservations')}
       cashClosings={cash.cashClosings}
       closingHistoryOpen={cash.closingHistoryOpen}
       completedClosing={cash.completedClosing}

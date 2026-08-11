@@ -28,6 +28,7 @@ import type {
   VenueRow,
 } from '../types/supabase'
 import { getReadableError } from '../utils/errors'
+import { normalizeTenantFeatures } from '../features/platform/tenantFeatureAccess'
 import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
 async function requireExclusiveLogin(context: TenantContext) {
   if (await claimLoginLease()) {
@@ -54,6 +55,17 @@ function mapFiscalSnapshot(row: {
     taxAmountCents: row.tax_amount_cents,
     grossTotalCents: row.line_total_cents,
   }
+}
+
+export async function loadTenantFeatures(tenantId: string) {
+  if (!supabase) return undefined
+  const { data, error } = await supabase.rpc('get_current_tenant_features', { p_tenant_id: tenantId })
+  if (error) {
+    // Keep deployments compatible while the feature migration and PostgREST schema cache propagate.
+    if (['42883', 'PGRST202'].includes(error.code ?? '')) return undefined
+    throw new Error(`No se pudieron cargar las features del negocio: ${getReadableError(error)}`)
+  }
+  return normalizeTenantFeatures(data)
 }
 
 export async function loginTenant(input: LoginInput): Promise<TenantContext> {
@@ -133,6 +145,8 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw new Error(`No se pudo cargar el negocio asignado: ${getReadableError(tenantError)}`)
   }
 
+  const features = await loadTenantFeatures(tenant.id)
+
   if (membership.role === 'owner' || membership.role === 'manager') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
@@ -145,6 +159,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
       userId: user.id,
       userName: user.user_metadata.full_name ?? user.email ?? 'Usuario CRM',
       role: membership.role,
+      features,
     })
   }
 
@@ -220,6 +235,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
+    features,
   })
 }
 
@@ -310,6 +326,8 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new TenantSessionError('El usuario ya no tiene acceso activo a este negocio.')
   }
 
+  const features = await loadTenantFeatures(tenant.id)
+
   if (membership.role === 'owner' || membership.role === 'manager') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
@@ -322,6 +340,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
       userId: user.id,
       userName: user.user_metadata.full_name ?? user.email ?? 'Usuario CRM',
       role: membership.role,
+      features,
     })
   }
 
@@ -389,6 +408,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
+    features,
   })
 }
 
@@ -436,13 +456,12 @@ export async function loadOpenCashSession(context: TenantContext) {
 
   const { data, error } = await supabase
     .from('cash_sessions')
-    .select('id, tenant_id, venue_id, opened_by_device_id, opened_by, opened_at, opening_float_cents, cash_register_id, cash_registers(name)')
+    .select('id, tenant_id, venue_id, opened_by_device_id, opened_by, opened_at, opening_float_cents, cash_register_id, cash_registers(name), selected_by:devices!devices_active_cash_session_id_fkey!inner(id, is_active)')
     .eq('tenant_id', context.tenantId)
     .eq('venue_id', context.venueId)
-    .eq('opened_by_device_id', context.deviceId)
+    .eq('selected_by.id', context.deviceId)
+    .eq('selected_by.is_active', true)
     .eq('status', 'open')
-    .order('opened_at', { ascending: false })
-    .limit(1)
     .maybeSingle()
 
   if (error) {

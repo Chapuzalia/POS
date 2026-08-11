@@ -1,7 +1,7 @@
 import { Button as UiButton } from '../components/ui/Button'
 import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
 import {
   CashPaymentModal,
@@ -25,8 +25,10 @@ import { TableOrderBar } from '../features/tables/components/TableOrderBar'
 import { useMobileTableMapLayout } from '../features/tables/useMobileTableMapLayout'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
+import { hasTenantFeature } from '../features/platform/tenantFeatureAccess'
 import { calculateDiscountForLines, type DiscountScheduleContext } from '../lib/discounts'
 import { getLineTotal, getTicketTotal } from '../lib/format'
+import { addDiagnosticBreadcrumb } from '../lib/diagnostics'
 import { validateConfiguredDiscountPin, validateManualDiscountPin } from '../services/discountRules'
 import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
@@ -98,6 +100,14 @@ export function PosPage(props: Props) {
   const restaurant = props.restaurant
   const quickSale = props.quickSale
   const cash = props.cash
+  const discountsEnabled = hasTenantFeature(props.context, 'discounts')
+  const restaurantEnabled = hasTenantFeature(props.context, 'restaurant')
+  const reservationsEnabled = restaurantEnabled && hasTenantFeature(props.context, 'reservations')
+  const appliedDiscount = discountsEnabled ? quickSale.discount : null
+  useEffect(() => {
+    addDiagnosticBreadcrumb('pos.mount', { venueId: props.context.venueId })
+    return () => addDiagnosticBreadcrumb('pos.unmount', { venueId: props.context.venueId })
+  }, [props.context.venueId])
   const resolvedCatalog = useMemo(() => props.catalog ? resolveSellableCatalog(props.catalog) : null, [props.catalog])
   const activeLines: TicketLine[] = restaurant.posView.type === 'table_order' && restaurant.order
     ? restaurant.order.lines.map((line) => ({
@@ -128,14 +138,14 @@ export function PosPage(props: Props) {
   const subtotalCents = getTicketTotal(activeLines)
   const discountCalculation = calculateDiscountForLines(
     activeLines.map((line) => ({ ...line, grossCents: getLineTotal(line) })),
-    quickSale.discount,
+    appliedDiscount,
   )
   const totalCents = discountCalculation.totalCents
   const itemCount = activeLines.reduce((total, line) => total + line.quantity, 0)
   const paidFeedback = restaurant.posView.type === 'table_order'
     ? props.restaurantPaidFeedback
     : quickSale.paidFeedback
-  const tableMapVisible = !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map'
+  const tableMapVisible = restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map'
 
   const updateQuantity = (lineId: string, direction: 1 | -1) => {
     if (restaurant.posView.type === 'table_order') restaurant.changeLineQuantity(lineId, direction)
@@ -213,7 +223,7 @@ export function PosPage(props: Props) {
         canCloseCash={props.context.canCloseCashSession === true}
         canManageCash={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
-        canOpenReservations={Boolean(restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
+        canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
         compactMobile={tableMapVisible && mobileTableMapLayout}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
@@ -236,9 +246,9 @@ export function PosPage(props: Props) {
         </div>
       </div> : null}
       <AddProductFlyAnimation feedback={props.addFeedback.flyFeedback} />
-      {props.reservations.isOpen ? <ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /> : null}
+      {reservationsEnabled && props.reservations.isOpen ? <ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /> : null}
 
-      {!props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
+      {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
         isBusy={props.isBusy}
         isOnline={props.isOnline}
         onBack={() => void restaurant.returnToMap()}
@@ -252,7 +262,7 @@ export function PosPage(props: Props) {
         canSell={canSell}
       /> : null}
 
-      {!props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map' && cash.session ? <TableMapView
+      {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map' && cash.session ? <TableMapView
         canOpen={Boolean(props.context.canTakeOrders)}
         cashSessionId={cash.session.id}
         canQuickSale={props.context.canTakePayments === true}
@@ -284,11 +294,12 @@ export function PosPage(props: Props) {
         selectedAreaId={restaurant.posView.areaId}
       /> : null}
 
-      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-lg:flex-col ${props.reservations.isOpen || (restaurant.tablesEnabled && restaurant.posView.type === 'table_map') ? 'hidden' : 'flex'}`}>
+      <main className={`mx-auto min-h-0 w-full max-w-[1600px] flex-1 gap-4 overflow-hidden p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-lg:flex-col ${reservationsEnabled && props.reservations.isOpen || tableMapVisible ? 'hidden' : 'flex'}`}>
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {activeTicketPanel}
           <PaymentPanel
-            discount={quickSale.discount}
+            allowDiscount={discountsEnabled}
+            discount={appliedDiscount}
             disabled={!canSell}
             feedback={paidFeedback}
             heading={undefined}
@@ -308,7 +319,7 @@ export function PosPage(props: Props) {
         />
       </main>
 
-      {props.reservations.isOpen || (restaurant.tablesEnabled && restaurant.posView.type === 'table_map') ? null : <MobileTicketModal
+      {reservationsEnabled && props.reservations.isOpen || tableMapVisible ? null : <MobileTicketModal
         floatingButtonRef={props.floatingTicketButtonRef}
         isAddSuccess={props.addFeedback.isAddSuccess}
         isOpen={props.mobileTicketOpen}
@@ -323,7 +334,8 @@ export function PosPage(props: Props) {
         <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
           {activeTicketPanel}
           <PaymentPanel
-            discount={quickSale.discount}
+            allowDiscount={discountsEnabled}
+            discount={appliedDiscount}
             disabled={!canSell}
             feedback={paidFeedback}
             heading={undefined}
@@ -336,7 +348,7 @@ export function PosPage(props: Props) {
         </div>
       </MobileTicketModal>}
 
-      {restaurant.pendingPayment ? <AppModal containerClassName="!p-4" maxWidth={448} dismissDisabled={props.isBusy} label="Productos pendientes" onClose={() => restaurant.setPendingPayment(null)}>
+      {restaurantEnabled && restaurant.pendingPayment ? <AppModal containerClassName="!p-4" maxWidth={448} dismissDisabled={props.isBusy} label="Productos pendientes" onClose={() => restaurant.setPendingPayment(null)}>
         <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">
           <h2 id="pending-service-title">Productos pendientes</h2>
           <p>Quedan {restaurant.pendingPayment.pendingUnits} {restaurant.pendingPayment.pendingUnits === 1 ? 'producto pendiente' : 'productos pendientes'} de servir.</p>
@@ -350,19 +362,19 @@ export function PosPage(props: Props) {
           </div>
         </section>
       </AppModal> : null}
-      {restaurant.pendingLineRemoval ? <RemoveOrderLineModal
+      {restaurantEnabled && restaurant.pendingLineRemoval ? <RemoveOrderLineModal
         isBusy={props.isBusy}
         line={restaurant.pendingLineRemoval}
         onCancel={() => restaurant.setPendingLineRemoval(null)}
         onConfirm={() => void restaurant.confirmLineRemoval()}
       /> : null}
-      {restaurant.splitOrderGroup && restaurant.order ? <SplitOrderModal
-        defaultDiscount={quickSale.discount}
+      {restaurantEnabled && restaurant.splitOrderGroup && restaurant.order ? <SplitOrderModal
+        defaultDiscount={appliedDiscount}
         discountSchedule={props.discountSchedule}
-        discounts={props.discounts}
+        discounts={discountsEnabled ? props.discounts : []}
         isBusy={props.isBusy}
-        manualDiscountEnabled={props.manualDiscountEnabled}
-        manualDiscountRequiresPin={props.manualDiscountRequiresPin}
+        manualDiscountEnabled={discountsEnabled && props.manualDiscountEnabled}
+        manualDiscountRequiresPin={discountsEnabled && props.manualDiscountRequiresPin}
         onClose={() => restaurant.setSplitOrderGroup(null)}
         onPay={restaurant.paySelectedOrderItems}
         order={restaurant.order}
@@ -370,13 +382,13 @@ export function PosPage(props: Props) {
         validatePin={validateConfiguredDiscountPin}
         validateManualPin={validateManualDiscountPin}
       /> : null}
-      {restaurant.equalSplitOpen && restaurant.order ? <EqualSplitOrderModal
-        defaultDiscount={quickSale.discount}
-        discounts={props.discounts}
+      {restaurantEnabled && restaurant.equalSplitOpen && restaurant.order ? <EqualSplitOrderModal
+        defaultDiscount={appliedDiscount}
+        discounts={discountsEnabled ? props.discounts : []}
         discountSchedule={props.discountSchedule}
         isBusy={props.isBusy}
-        manualDiscountEnabled={props.manualDiscountEnabled}
-        manualDiscountRequiresPin={props.manualDiscountRequiresPin}
+        manualDiscountEnabled={discountsEnabled && props.manualDiscountEnabled}
+        manualDiscountRequiresPin={discountsEnabled && props.manualDiscountRequiresPin}
         onClose={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onCompleted={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onConfigure={restaurant.configureEqualSplit}
@@ -410,7 +422,7 @@ export function PosPage(props: Props) {
           : quickSale.addLine(sellable, selection, item, sourceElement)}
         onCancel={quickSale.closeProductDialog}
       /> : null}
-      {quickSale.discountModalOpen ? <DiscountModal
+      {discountsEnabled && quickSale.discountModalOpen ? <DiscountModal
         discounts={props.discounts}
         isBusy={props.isBusy}
         manualDiscountEnabled={props.manualDiscountEnabled}

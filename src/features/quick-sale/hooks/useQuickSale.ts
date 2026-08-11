@@ -20,6 +20,7 @@ import type {
 } from '../../../types'
 import { addProductSalesStats } from '../services/productSalesStats'
 import { addQuickSaleTicketLine, changeQuickSaleTicketLineQuantity } from '../services/ticketLines'
+import { applyQuickSaleLinesUpdate } from '../services/lineUpdates'
 import { useQuickSalePayment } from './useQuickSalePayment'
 
 export type AddCatalogLine = (
@@ -88,10 +89,17 @@ export function useQuickSale(options: Options) {
   }, [activePromotionId, activePromotionName])
 
 
-  const persistLines = useCallback((nextLines: TicketLine[]) => {
-    setLines(nextLines)
-    if (options.context) saveCachedTicket(options.context, nextLines)
+  const updateLines = useCallback((update: (previous: TicketLine[]) => TicketLine[]) => {
+    setLines((previous) => applyQuickSaleLinesUpdate(
+      previous,
+      update,
+      (next) => { if (options.context) saveCachedTicket(options.context, next) },
+    ))
   }, [options.context])
+
+  const persistLines = useCallback((nextLines: TicketLine[]) => {
+    updateLines(() => nextLines)
+  }, [updateLines])
 
   const mergeProductStats = useCallback((soldLines: TicketLine[]) => {
     options.persistProductSalesStats(addProductSalesStats(options.productSalesStats, soldLines))
@@ -122,11 +130,12 @@ export function useQuickSale(options: Options) {
   })
 
   const addLine = useCallback<AddCatalogLine>((sellable, selection, item, sourceElement) => {
-    if (!options.catalog) return false
-    persistLines(addQuickSaleTicketLine(lines, options.catalog, sellable, selection, item))
+    const catalog = options.catalog
+    if (!catalog) return false
+    updateLines((previous) => addQuickSaleTicketLine(previous, catalog, sellable, selection, item))
     options.onAddFeedback({ feedbackType: 'added', productName: sellable.product.name, sourceElement })
     return true
-  }, [lines, options, persistLines])
+  }, [options, updateLines])
 
   const selectProduct = useCallback((
     item: ResolvedCatalogItem,
@@ -177,10 +186,10 @@ export function useQuickSale(options: Options) {
     addLine,
     cashPaymentOpen,
     changeQuantity: (lineId: string, direction: 1 | -1) => {
-      persistLines(changeQuickSaleTicketLineQuantity(lines, lineId, direction))
+      updateLines((previous) => changeQuickSaleTicketLineQuantity(previous, lineId, direction))
     },
     clear: () => {
-      persistLines([])
+      updateLines(() => [])
       setDiscount(null)
     },
     closeCashPayment: () => setCashPaymentOpen(false),
@@ -199,7 +208,7 @@ export function useQuickSale(options: Options) {
     paidFeedback,
     productDialog,
     refreshProductStats,
-    removeLine: (lineId: string) => persistLines(lines.filter((line) => line.id !== lineId)),
+    removeLine: (lineId: string) => updateLines((previous) => previous.filter((line) => line.id !== lineId)),
     reset,
     selectProduct,
     setDiscount,

@@ -13,6 +13,7 @@ import { forceClaimLoginLease, releaseLocalLoginLock } from '../../../services/l
 import type { LoginInput, TenantContext } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
 import { isBackofficeUser } from '../../../app/app-permissions'
+import { addDiagnosticBreadcrumb } from '../../../lib/diagnostics'
 
 type UseTenantSessionOptions<TenantState> = {
   isOnline: boolean
@@ -33,6 +34,7 @@ type UseTenantSessionOptions<TenantState> = {
 
 export function useTenantSession<TenantState>(options: UseTenantSessionOptions<TenantState>) {
   const latestOptionsRef = useRef(options)
+  const hasRestoredOnceRef = useRef(false)
   latestOptionsRef.current = options
   const {
     applyOfflineState, applyTenantState, clearActiveState, isOnline, loadTenantState,
@@ -72,11 +74,18 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
       current.setIsBusy(true)
       current.setIsLoading(true)
       current.setError(null)
+      const source = hasRestoredOnceRef.current ? 'reconnect' : 'initial'
+      addDiagnosticBreadcrumb('session.restore_started', { source, venueId: cachedContext.venueId })
+      let succeeded = false
       try {
         const context = await restoreTenantContext(cachedContext)
         if (!isBackofficeUser(context)) await current.syncPendingEvents()
         const state = await current.loadTenantState(context)
-        if (!cancelled) current.applyTenantState(context, state)
+        if (!cancelled) {
+          current.applyTenantState(context, state)
+          hasRestoredOnceRef.current = true
+          succeeded = true
+        }
       } catch (error) {
         if (!cancelled) {
           const leaseConflict = error instanceof LoginLeaseConflictError
@@ -93,6 +102,11 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
           }
         }
       } finally {
+        addDiagnosticBreadcrumb('session.restore_finished', {
+          source,
+          succeeded,
+          venueId: cachedContext.venueId,
+        })
         if (!cancelled) {
           current.setIsBootstrapping(false)
           current.setIsBusy(false)

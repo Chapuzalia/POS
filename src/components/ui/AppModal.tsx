@@ -31,6 +31,7 @@ export function AppModal({
         if (!isOpen && !dismissDisabled) onClose();
       }}
     >
+      <Modal.Trigger aria-hidden="true" className="sr-only" tabIndex={-1} />
       <Modal.Backdrop
         className={`!z-[70] !bg-black/55 ${backdropClassName}`}
         isDismissable={!dismissDisabled}
