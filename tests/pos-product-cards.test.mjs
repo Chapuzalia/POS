@@ -14,6 +14,10 @@ const [catalogPanel, productDialog, productCard, mixerCard, categoryCard, catalo
 
 test('catalog tabs keep icon and label inside bordered fixed-height cards', () => {
   assert.match(catalogPanel, /<PosCatalogTab/)
+  assert.ok(catalogPanel.includes('auto-cols-[minmax(4.75rem,1fr)]'))
+  assert.ok(catalogPanel.includes('md:auto-cols-[minmax(5.25rem,1fr)]'))
+  assert.ok(catalogPanel.includes('touch-pan-x'))
+  assert.ok(catalogPanel.includes('overscroll-x-contain'))
   assert.ok(catalogTab.includes('h-14 min-h-14'))
   assert.ok(catalogTab.includes('border-[var(--separator)]'))
   assert.ok(catalogTab.includes('bg-[var(--accent)]'))

@@ -295,11 +295,11 @@ export function CatalogPanel({
     <section className="flex min-h-0 min-w-0 flex-1 flex-col gap-2">
       <div className="relative min-w-0 max-w-full">
         <div
-          className="[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden min-w-0 max-w-full overflow-x-auto pb-1"
+          className="[scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden min-w-0 max-w-full touch-pan-x overflow-x-auto overscroll-x-contain pb-1 [-webkit-overflow-scrolling:touch]"
           onScroll={updateTabScrollState}
           ref={tabsScrollerRef}
         >
-          <div className="grid min-w-full grid-flow-col gap-2 lg:auto-cols-[calc((100%-3rem)/7)]">
+          <div className="grid min-w-full grid-flow-col auto-cols-[minmax(4.75rem,1fr)] gap-2 sm:auto-cols-[minmax(5rem,1fr)] md:auto-cols-[minmax(5.25rem,1fr)]">
             {filterOptions.map((option) => {
               const Icon = option.icon;
               return (
