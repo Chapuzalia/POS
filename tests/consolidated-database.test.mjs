@@ -31,5 +31,6 @@ test('el consolidado contiene el estado final de las últimas migraciones', () =
   assert.equal(schema.match(/CREATE FUNCTION public\.get_catalog_without_formats\(/gi)?.length, 1)
   assert.doesNotMatch(schema, /ALTER FUNCTION public\.get_catalog[\s\S]*RENAME TO/i)
   assert.doesNotMatch(schema, /devices_tenant_id_venue_id_name_key/)
+  assert.doesNotMatch(schema, /^(?:<{7}|={7}|>{7})/m)
   assert.equal((schema.match(/\$\$/g)?.length ?? 0) % 2, 0)
 })

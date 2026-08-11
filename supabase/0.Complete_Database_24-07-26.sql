@@ -16348,7 +16348,6 @@ revoke all on function public.update_cash_closing_counts(uuid, integer, integer)
 grant execute on function public.update_cash_closing_counts(uuid, integer, integer)
   to authenticated, service_role;
 
-<<<<<<< HEAD
 --
 -- Tenant feature catalog and assignments
 --
@@ -16547,7 +16546,11 @@ grant execute on function public.get_current_tenant_features(uuid) to authentica
 
 comment on function public.get_current_tenant_features(uuid) is
   'Returns the active optional features for an authenticated member of the requested tenant.';
-=======
+
+--
+-- Inventory consumption failure isolation
+--
+
 -- Inventory is an auxiliary side effect of a sale. A malformed recipe or an
 -- inconsistent stock row must not roll back a valid payment. Keep the whole
 -- line consumption in one PL/pgSQL subtransaction, record the diagnostic and
@@ -16733,5 +16736,4 @@ revoke all on function public.consume_ticket_line_inventory()
 
 comment on table public.inventory_consumption_failures is
   'Diagnostics for inventory side effects that were rolled back without rejecting the related sale.';
->>>>>>> 6155dc940425370dd5319af12f9fa75a8bcc9070
 
