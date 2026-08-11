@@ -55,6 +55,14 @@ const warehouseDeletionMigration = readFileSync(
   new URL('../supabase/migrations/20260804230000_delete_inventory_warehouse_with_transfer.sql', import.meta.url),
   'utf8',
 )
+const nonBlockingConsumptionMigration = readFileSync(
+  new URL('../supabase/migrations/20260811120000_prevent_inventory_from_rejecting_sales.sql', import.meta.url),
+  'utf8',
+)
+const packagedConsumptionFixMigration = readFileSync(
+  new URL('../supabase/migrations/20260811130000_fix_packaged_inventory_consumption.sql', import.meta.url),
+  'utf8',
+)
 const consolidatedDatabase = readFileSync(
   new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url),
   'utf8',
@@ -101,6 +109,8 @@ test('las cantidades admiten unidades completas y consumos fraccionarios control
 test('calcula cubatas, chupitos y mixers en la unidad fisica de stock', () => {
   assert.equal(calculateStockUnitConsumption(80, 1, 700), 0.114286)
   assert.equal(calculateStockUnitConsumption(45, 1, 700), 0.064286)
+  assert.equal(calculateStockUnitConsumption(1, 1, 24), 0.041667)
+  assert.equal(calculateStockUnitConsumption(1, 1, 24, 12), 0.5)
   assert.equal(calculateStockUnitConsumption(1, 1, 1), 1)
   assert.equal(calculateStockUnitConsumption(1, 2, 1), 2)
 })
@@ -165,6 +175,35 @@ test('cada linea vendida descuenta producto principal y mixer de forma atomica',
     assert.match(sql, /after insert on public\.ticket_lines/)
   }
   assert.match(automaticConsumptionMigration, /INVENTORY_INSUFFICIENT_STOCK/)
+})
+
+test('un fallo de inventario conserva la venta y revierte el consumo parcial de la linea', () => {
+  for (const sql of [nonBlockingConsumptionMigration, consolidatedDatabase]) {
+    assert.match(sql, /create table (?:if not exists )?public\.inventory_consumption_failures/)
+    assert.match(sql, /create or replace function public\.consume_ticket_line_inventory\(\)/)
+    assert.match(sql, /exception\s+when others then\s+get stacked diagnostics/i)
+    assert.match(sql, /insert into public\.inventory_consumption_failures/)
+    assert.match(sql, /raise warning 'INVENTORY_CONSUMPTION_FAILED/)
+    assert.match(sql, /return new;\s+end;/)
+  }
+})
+
+test('convierte formatos y envases compatibles antes de descontar el stock', () => {
+  for (const sql of [packagedConsumptionFixMigration, consolidatedDatabase]) {
+    assert.match(sql, /join public\.inventory_units format_unit/)
+    assert.match(sql, /join public\.inventory_units format_base/)
+    assert.match(sql, /join public\.inventory_units stock_base/)
+    assert.match(sql, /v_units_compatible := v_stock_base_unit_id = v_format_base_unit_id/)
+    assert.match(
+      sql,
+      /v_format_quantity\s+\* v_format_unit_content_quantity\s+\* p_sold_quantity[\s\S]*\/ v_stock_content_quantity/,
+    )
+    assert.match(sql, /v_stock_base_decimal_places = 0[\s\S]*v_format_base_decimal_places = 0/)
+  }
+  assert.doesNotMatch(
+    packagedConsumptionFixMigration,
+    /if v_content_unit_id <> v_format_unit_id/,
+  )
 })
 
 test('las ventas permiten agotar el stock y continuar en negativo', () => {

@@ -858,7 +858,7 @@ begin
   insert into public.user_login_leases (
     user_id, auth_session_id, client_id, heartbeat_at, expires_at
   ) values (
-    current_user_id, current_session_id, p_client_id, now(), now() + interval '30 minutes'
+    current_user_id, current_session_id, p_client_id, now(), now() + interval '4 hours'
   )
   on conflict (user_id) do update set
     auth_session_id = excluded.auth_session_id,
@@ -1599,7 +1599,7 @@ begin
   insert into public.user_login_leases (
     user_id, auth_session_id, client_id, heartbeat_at, expires_at
   ) values (
-    current_user_id, current_session_id, p_client_id, now(), now() + interval '30 minutes'
+    current_user_id, current_session_id, p_client_id, now(), now() + interval '4 hours'
   )
   on conflict (user_id) do update set
     auth_session_id = excluded.auth_session_id,
@@ -2112,7 +2112,7 @@ declare
 begin
   update public.user_login_leases
   set heartbeat_at = now(),
-      expires_at = now() + interval '30 minutes'
+      expires_at = now() + interval '4 hours'
   where user_id = current_user_id
     and auth_session_id = current_session_id
     and client_id = p_client_id
@@ -6399,7 +6399,7 @@ CREATE TABLE public.user_login_leases (
     auth_session_id text NOT NULL,
     client_id uuid NOT NULL,
     heartbeat_at timestamp with time zone DEFAULT now() NOT NULL,
-    expires_at timestamp with time zone DEFAULT (now() + '00:30:00'::interval) NOT NULL
+    expires_at timestamp with time zone DEFAULT (now() + '04:00:00'::interval) NOT NULL
 );
 
 
@@ -15353,9 +15353,18 @@ declare
   v_sale_format_id uuid;
   v_format_quantity numeric(18, 6);
   v_format_unit_id uuid;
+  v_format_unit_content_quantity numeric(18, 6);
+  v_format_base_unit_id uuid;
+  v_format_base_name text;
+  v_format_base_symbol text;
+  v_format_base_decimal_places smallint;
   v_stock_unit_id uuid;
-  v_content_quantity numeric(18, 6);
-  v_content_unit_id uuid;
+  v_stock_content_quantity numeric(18, 6);
+  v_stock_base_unit_id uuid;
+  v_stock_base_name text;
+  v_stock_base_symbol text;
+  v_stock_base_decimal_places smallint;
+  v_units_compatible boolean;
   v_required_stock numeric(18, 6);
   v_remaining numeric(18, 6);
   v_take numeric(18, 6);
@@ -15385,45 +15394,110 @@ begin
   select
     pv.catalog_sale_format_id,
     f.inventory_consumption_quantity,
-    f.inventory_consumption_unit_id
+    f.inventory_consumption_unit_id,
+    format_unit.content_quantity,
+    format_unit.content_unit_id,
+    format_base.name,
+    format_base.symbol,
+    format_base.decimal_places
   into
     v_sale_format_id,
     v_format_quantity,
-    v_format_unit_id
+    v_format_unit_id,
+    v_format_unit_content_quantity,
+    v_format_base_unit_id,
+    v_format_base_name,
+    v_format_base_symbol,
+    v_format_base_decimal_places
   from public.product_variants pv
   join public.catalog_sale_formats f
     on f.id = pv.catalog_sale_format_id
    and f.tenant_id = pv.tenant_id
    and f.venue_id = pv.venue_id
+  join public.inventory_units format_unit
+    on format_unit.id = f.inventory_consumption_unit_id
+   and format_unit.tenant_id = f.tenant_id
+   and format_unit.venue_id = f.venue_id
+  join public.inventory_units format_base
+    on format_base.id = format_unit.content_unit_id
+   and format_base.tenant_id = format_unit.tenant_id
+   and format_base.venue_id = format_unit.venue_id
   where pv.id = v_variant_id
     and pv.product_id = p_product_id
     and pv.tenant_id = p_tenant_id
     and pv.venue_id = p_venue_id;
 
-  if v_format_quantity is null or v_format_unit_id is null then return; end if;
+  if v_format_quantity is null
+    or v_format_unit_id is null
+    or v_format_unit_content_quantity is null
+    or v_format_base_unit_id is null
+  then
+    return;
+  end if;
 
-  select s.unit_id, u.content_quantity, u.content_unit_id
-  into v_stock_unit_id, v_content_quantity, v_content_unit_id
+  select
+    s.unit_id,
+    stock_unit.content_quantity,
+    stock_unit.content_unit_id,
+    stock_base.name,
+    stock_base.symbol,
+    stock_base.decimal_places
+  into
+    v_stock_unit_id,
+    v_stock_content_quantity,
+    v_stock_base_unit_id,
+    v_stock_base_name,
+    v_stock_base_symbol,
+    v_stock_base_decimal_places
   from public.inventory_product_settings s
-  join public.inventory_units u
-    on u.id = s.unit_id
-   and u.tenant_id = s.tenant_id
-   and u.venue_id = s.venue_id
+  join public.inventory_units stock_unit
+    on stock_unit.id = s.unit_id
+   and stock_unit.tenant_id = s.tenant_id
+   and stock_unit.venue_id = s.venue_id
+  join public.inventory_units stock_base
+    on stock_base.id = stock_unit.content_unit_id
+   and stock_base.tenant_id = stock_unit.tenant_id
+   and stock_base.venue_id = stock_unit.venue_id
   where s.product_id = p_product_id
     and s.tenant_id = p_tenant_id
     and s.venue_id = p_venue_id;
 
   if v_stock_unit_id is null then return; end if;
 
-  if v_content_unit_id <> v_format_unit_id then
-    raise exception 'INVENTORY_CONSUMPTION_UNIT_MISMATCH product=% format=%',
+  v_units_compatible := v_stock_base_unit_id = v_format_base_unit_id
+    or lower(btrim(v_stock_base_name)) = lower(btrim(v_format_base_name))
+    or (
+      btrim(v_stock_base_symbol) <> ''
+      and lower(btrim(v_stock_base_symbol)) = lower(btrim(v_format_base_symbol))
+    )
+    or (
+      v_stock_base_decimal_places = 0
+      and v_format_base_decimal_places = 0
+      and (
+        lower(v_stock_base_name) ~ '(unidad|pieza|botell|lata|envase)'
+        or lower(v_stock_base_symbol) ~ '^(u|ud|uds|pz|bot)$'
+      )
+      and (
+        lower(v_format_base_name) ~ '(unidad|pieza|botell|lata|envase)'
+        or lower(v_format_base_symbol) ~ '^(u|ud|uds|pz|bot)$'
+      )
+    );
+
+  if not v_units_compatible then
+    raise exception 'INVENTORY_CONSUMPTION_UNIT_MISMATCH product=% format=% stock_unit=% format_unit=%',
       p_product_id,
-      v_sale_format_id
+      v_sale_format_id,
+      v_stock_base_unit_id,
+      v_format_base_unit_id
       using errcode = '22023';
   end if;
 
   v_required_stock := round(
-    (v_format_quantity * p_sold_quantity) / v_content_quantity,
+    (
+      v_format_quantity
+      * v_format_unit_content_quantity
+      * p_sold_quantity
+    ) / v_stock_content_quantity,
     6
   );
   if v_required_stock <= 0 then return; end if;
@@ -15501,7 +15575,7 @@ begin
       v_stock.quantity - v_take,
       v_format_quantity,
       p_sold_quantity,
-      v_content_unit_id
+      v_stock_base_unit_id
     );
 
     v_remaining := round(v_remaining - v_take, 6);
@@ -15572,7 +15646,7 @@ begin
     v_overflow_quantity - v_remaining,
     v_format_quantity,
     p_sold_quantity,
-    v_content_unit_id
+    v_stock_base_unit_id
   );
 end;
 $$;
@@ -16274,6 +16348,7 @@ revoke all on function public.update_cash_closing_counts(uuid, integer, integer)
 grant execute on function public.update_cash_closing_counts(uuid, integer, integer)
   to authenticated, service_role;
 
+<<<<<<< HEAD
 --
 -- Tenant feature catalog and assignments
 --
@@ -16472,4 +16547,191 @@ grant execute on function public.get_current_tenant_features(uuid) to authentica
 
 comment on function public.get_current_tenant_features(uuid) is
   'Returns the active optional features for an authenticated member of the requested tenant.';
+=======
+-- Inventory is an auxiliary side effect of a sale. A malformed recipe or an
+-- inconsistent stock row must not roll back a valid payment. Keep the whole
+-- line consumption in one PL/pgSQL subtransaction, record the diagnostic and
+-- let the ticket insert finish.
+
+create table public.inventory_consumption_failures (
+  id uuid primary key default gen_random_uuid(),
+  tenant_id uuid not null,
+  venue_id uuid,
+  ticket_line_id uuid not null,
+  product_id uuid,
+  error_code text not null,
+  error_message text not null,
+  created_at timestamptz not null default now(),
+  constraint inventory_consumption_failures_error_code_check
+    check (btrim(error_code) <> '' and char_length(error_code) <= 20),
+  constraint inventory_consumption_failures_error_message_check
+    check (btrim(error_message) <> '' and char_length(error_message) <= 1000)
+);
+
+create index inventory_consumption_failures_venue_created_idx
+  on public.inventory_consumption_failures (tenant_id, venue_id, created_at desc);
+
+alter table public.inventory_consumption_failures enable row level security;
+
+create policy inventory_consumption_failures_select
+on public.inventory_consumption_failures
+for select
+to authenticated
+using (
+  public.user_is_tenant_admin(tenant_id)
+  or (
+    venue_id is not null
+    and public.user_has_venue_access(tenant_id, venue_id)
+  )
+);
+
+revoke all on table public.inventory_consumption_failures from public, anon;
+grant select on table public.inventory_consumption_failures to authenticated;
+
+create or replace function public.consume_ticket_line_inventory()
+returns trigger
+language plpgsql
+security definer
+set search_path to ''
+as $$
+declare
+  v_venue_id uuid;
+  v_device_id uuid;
+  v_inventory_enabled boolean;
+  v_sold_quantity numeric(18, 9);
+  v_component record;
+  v_modifier jsonb;
+  v_mixer_product_id uuid;
+  v_mixer_variant_id uuid;
+  v_error_code text;
+  v_error_message text;
+begin
+  select t.venue_id, t.device_id, v.inventory_enabled
+  into v_venue_id, v_device_id, v_inventory_enabled
+  from public.tickets t
+  join public.venues v
+    on v.id = t.venue_id
+   and v.tenant_id = t.tenant_id
+  where t.id = new.ticket_id
+    and t.tenant_id = new.tenant_id;
+
+  if v_venue_id is null then
+    raise exception 'INVENTORY_TICKET_SCOPE_NOT_FOUND' using errcode = 'P0002';
+  end if;
+
+  if not v_inventory_enabled then
+    return new;
+  end if;
+
+  v_sold_quantity := coalesce(new.allocated_quantity, new.quantity::numeric);
+
+  perform public.consume_inventory_product(
+    new.id,
+    new.tenant_id,
+    v_venue_id,
+    v_device_id,
+    new.product_id,
+    new.variant_id,
+    v_sold_quantity,
+    'product'
+  );
+
+  for v_component in
+    select c.component_type, c.product_id, c.variant_id, c.quantity
+    from public.ticket_line_components c
+    where c.ticket_line_id = new.id
+      and c.tenant_id = new.tenant_id
+      and c.product_id is not null
+  loop
+    perform public.consume_inventory_product(
+      new.id,
+      new.tenant_id,
+      v_venue_id,
+      v_device_id,
+      v_component.product_id,
+      v_component.variant_id,
+      v_sold_quantity * v_component.quantity,
+      case
+        when v_component.component_type = 'mixer' then 'mixer'
+        else 'menu_component'
+      end
+    );
+  end loop;
+
+  if not exists (
+    select 1
+    from public.ticket_line_components c
+    where c.ticket_line_id = new.id
+      and c.component_type = 'mixer'
+  ) then
+    for v_modifier in
+      select value
+      from jsonb_array_elements(coalesce(new.modifiers, '[]'::jsonb))
+      where value ->> 'id' ~* '^mixer:[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$'
+    loop
+      v_mixer_product_id := substring(v_modifier ->> 'id' from 7)::uuid;
+      select pv.id into v_mixer_variant_id
+      from public.product_variants pv
+      where pv.product_id = v_mixer_product_id
+        and pv.tenant_id = new.tenant_id
+        and pv.venue_id = v_venue_id
+        and pv.is_active = true
+      order by pv.is_default desc, pv.sort_order, pv.id
+      limit 1;
+
+      perform public.consume_inventory_product(
+        new.id,
+        new.tenant_id,
+        v_venue_id,
+        v_device_id,
+        v_mixer_product_id,
+        v_mixer_variant_id,
+        v_sold_quantity,
+        'mixer'
+      );
+    end loop;
+  end if;
+
+  return new;
+exception
+  when others then
+    get stacked diagnostics
+      v_error_code = returned_sqlstate,
+      v_error_message = message_text;
+
+    begin
+      insert into public.inventory_consumption_failures (
+        tenant_id,
+        venue_id,
+        ticket_line_id,
+        product_id,
+        error_code,
+        error_message
+      ) values (
+        new.tenant_id,
+        v_venue_id,
+        new.id,
+        new.product_id,
+        coalesce(nullif(v_error_code, ''), 'UNKNOWN'),
+        left(coalesce(nullif(v_error_message, ''), 'Unknown inventory error'), 1000)
+      );
+    exception
+      when others then
+        null;
+    end;
+
+    raise warning 'INVENTORY_CONSUMPTION_FAILED ticket_line=% sqlstate=% error=%',
+      new.id,
+      v_error_code,
+      v_error_message;
+    return new;
+end;
+$$;
+
+revoke all on function public.consume_ticket_line_inventory()
+  from public, anon, authenticated;
+
+comment on table public.inventory_consumption_failures is
+  'Diagnostics for inventory side effects that were rolled back without rejecting the related sale.';
+>>>>>>> 6155dc940425370dd5319af12f9fa75a8bcc9070
 
