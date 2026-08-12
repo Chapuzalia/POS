@@ -1,13 +1,18 @@
-import { normalizeText } from './format'
-type RevoCategoryFamily = 'alcohol' | 'mixer' | 'beer' | 'beer_bottle' | 'soft_bottle' | 'cocktail' | 'other'
-type RevoSellingFormat = 'cubata' | 'copa' | 'shot' | 'beer_bottle' | 'soft_bottle' | 'cocktail'
+import { normalizeText } from './format.ts'
+
+const DEFAULT_REVO_FORMAT = 'Unidad'
+const DEFAULT_REVO_TAB = 'Productos'
+const DEFAULT_REVO_CATEGORY = 'Otros'
 
 export type RevoImportVariant = {
+  formatName: string
   name: string
   priceCents: number
-  saleFormat: RevoSellingFormat
+  sku: string | null
   sortOrder: number
   sourceFormat: string
+  sourceFormatId: string
+  sourceItemFormatId: string
 }
 
 export type RevoImportProduct = {
@@ -16,7 +21,9 @@ export type RevoImportProduct = {
   name: string
   sourceCategories: string[]
   sourceIds: string[]
+  tabName: string
   variants: RevoImportVariant[]
+  vatRate: number | null
   warnings: string[]
 }
 
@@ -24,22 +31,6 @@ export type RevoImportParseResult = {
   products: RevoImportProduct[]
   skippedRows: number
   warnings: string[]
-}
-
-type RevoCategoryMapping = {
-  categoryKind: RevoCategoryFamily
-  categoryName: string
-}
-
-const saleFormatOrder: RevoSellingFormat[] = ['cubata', 'copa', 'shot', 'beer_bottle', 'soft_bottle', 'cocktail']
-
-const variantNames: Record<RevoSellingFormat, string> = {
-  beer_bottle: 'Botellin',
-  cocktail: 'Coctel',
-  copa: 'Copa',
-  cubata: 'Cubata',
-  shot: 'Chupito',
-  soft_bottle: 'Botellin',
 }
 
 function cleanText(value: string) {
@@ -50,171 +41,46 @@ function normalizeImportKey(value: string) {
   return normalizeText(value).replace(/[^a-z0-9]+/g, ' ').trim()
 }
 
-function titleCase(value: string) {
-  return cleanText(value)
-    .toLowerCase()
-    .split(' ')
-    .filter(Boolean)
-    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
-    .join(' ')
+function displayName(value: string) {
+  const cleaned = cleanText(value)
+  return cleaned ? cleaned.charAt(0).toLocaleUpperCase('es') + cleaned.slice(1) : cleaned
+}
+
+function parseLocalizedNumber(value: string) {
+  const compact = cleanText(value).replace(/\s/g, '').replace(/[^\d,.-]/g, '')
+  if (!compact || !/^-?[\d.,]+$/.test(compact)) return null
+
+  const commaIndex = compact.lastIndexOf(',')
+  const dotIndex = compact.lastIndexOf('.')
+  const decimalIndex = Math.max(commaIndex, dotIndex)
+  let normalized = compact
+
+  if (decimalIndex >= 0) {
+    const integerPart = compact.slice(0, decimalIndex).replace(/[.,]/g, '')
+    const decimalPart = compact.slice(decimalIndex + 1).replace(/[.,]/g, '')
+    normalized = `${integerPart}.${decimalPart}`
+  }
+
+  const parsed = Number(normalized)
+  return Number.isFinite(parsed) ? parsed : null
 }
 
 function parseEuroCents(value: string) {
-  const normalized = value
-    .replace(/\s/g, '')
-    .replace(/[^\d,.-]/g, '')
-    .replace(/\./g, '')
-    .replace(',', '.')
-  const parsed = Number.parseFloat(normalized)
+  const parsed = parseLocalizedNumber(value)
+  if (parsed === null || parsed < 0) return null
+  const cents = Math.round(parsed * 100)
+  return Number.isSafeInteger(cents) ? cents : null
+}
 
-  if (!Number.isFinite(parsed)) {
-    return 0
-  }
-
-  return Math.max(0, Math.round(parsed * 100))
+function parseVatRate(value: string) {
+  if (!cleanText(value)) return null
+  const parsed = parseLocalizedNumber(value)
+  return parsed !== null && parsed >= 0 && parsed <= 100 ? parsed : null
 }
 
 function parseActive(value: string) {
-  return cleanText(value) !== '0'
-}
-
-function getVariantName(saleFormat: RevoSellingFormat, sourceFormat: string) {
-  if (normalizeImportKey(sourceFormat).includes('ampolla')) {
-    return 'Botella'
-  }
-
-  return variantNames[saleFormat]
-}
-
-function getCategoryMapping(categoryGroupName: string, categoryName: string): RevoCategoryMapping {
-  const sourceName = cleanText(categoryName || categoryGroupName || 'Otros')
-  const categoryKey = normalizeImportKey(categoryName)
-  const groupKey = normalizeImportKey(categoryGroupName)
-  const focusedKey = categoryKey || groupKey
-  const key = `${categoryKey} ${groupKey}`.trim()
-
-  if (focusedKey.includes('vi ') || focusedKey.includes('vins') || focusedKey.includes('vino') || focusedKey.includes('cava')) {
-    return { categoryKind: 'alcohol', categoryName: 'Vinos y Cavas' }
-  }
-
-  if (focusedKey.includes('ginebra') || focusedKey === 'gin') {
-    return { categoryKind: 'alcohol', categoryName: 'Ginebra' }
-  }
-
-  if (focusedKey.includes('ron')) {
-    return { categoryKind: 'alcohol', categoryName: 'Ron' }
-  }
-
-  if (focusedKey.includes('whisky') || focusedKey.includes('wisky')) {
-    return { categoryKind: 'alcohol', categoryName: 'Whisky' }
-  }
-
-  if (focusedKey.includes('vodka')) {
-    return { categoryKind: 'alcohol', categoryName: 'Vodka' }
-  }
-
-  if (focusedKey.includes('tequila')) {
-    return { categoryKind: 'alcohol', categoryName: 'Tequila' }
-  }
-
-  if (focusedKey.includes('xupit') || focusedKey.includes('xarrup') || focusedKey.includes('chupit')) {
-    return { categoryKind: 'alcohol', categoryName: 'Chupitos' }
-  }
-
-  if (focusedKey.includes('refresc') || focusedKey.includes('suc') || focusedKey.includes('refresco')) {
-    return { categoryKind: 'mixer', categoryName: 'Mixers y refrescos' }
-  }
-
-  if (focusedKey.includes('cerves') || focusedKey.includes('cervez')) {
-    return { categoryKind: 'beer_bottle', categoryName: 'Cervezas' }
-  }
-
-  if (focusedKey.includes('coct') || focusedKey.includes('cock') || focusedKey.includes('ctel') || focusedKey.includes('mojito')) {
-    return { categoryKind: 'cocktail', categoryName: 'Cocteles' }
-  }
-
-  if (focusedKey.includes('licor')) {
-    return { categoryKind: 'alcohol', categoryName: 'Licores' }
-  }
-
-  if (key.includes('vi ') || key.includes('vins') || key.includes('vino') || key.includes('cava')) {
-    return { categoryKind: 'alcohol', categoryName: 'Vinos y Cavas' }
-  }
-
-  if (key.includes('refresc') || key.includes('suc') || key.includes('refresco')) {
-    return { categoryKind: 'mixer', categoryName: 'Mixers y refrescos' }
-  }
-
-  if (key.includes('cerves') || key.includes('cervez')) {
-    return { categoryKind: 'beer_bottle', categoryName: 'Cervezas' }
-  }
-
-  if (key.includes('coct') || key.includes('cock') || key.includes('ctel') || key.includes('mojito')) {
-    return { categoryKind: 'cocktail', categoryName: 'Cocteles' }
-  }
-
-  if (key.includes('altre') || key.includes('otro')) {
-    return { categoryKind: 'other', categoryName: 'Otros' }
-  }
-
-  return { categoryKind: 'other', categoryName: titleCase(sourceName) || 'Otros' }
-}
-
-function getDefaultRevoSellingFormat(categoryKind: RevoCategoryFamily, categoryName: string): RevoSellingFormat {
-  if (categoryKind === 'mixer' || categoryKind === 'soft_bottle') {
-    return 'soft_bottle'
-  }
-  if (categoryKind === 'beer_bottle' || categoryKind === 'beer') {
-    return 'beer_bottle'
-  }
-  if (categoryKind === 'cocktail') {
-    return 'cocktail'
-  }
-  if (normalizeImportKey(categoryName).includes('chupit')) {
-    return 'shot'
-  }
-
-  return categoryKind === 'alcohol' ? 'copa' : 'soft_bottle'
-}
-
-function getRevoSellingFormat(
-  sourceFormat: string,
-  categoryKind: RevoCategoryFamily,
-  categoryName: string,
-): { saleFormat: RevoSellingFormat | null; warning?: string } {
-  const formatKey = normalizeImportKey(sourceFormat)
-
-  if (!formatKey) {
-    return { saleFormat: getDefaultRevoSellingFormat(categoryKind, categoryName) }
-  }
-
-  if (formatKey.includes('cubata')) {
-    return { saleFormat: 'cubata' }
-  }
-  if (formatKey.includes('copa')) {
-    return { saleFormat: 'copa' }
-  }
-  if (formatKey.includes('xupit') || formatKey.includes('xarrup') || formatKey.includes('chupit') || formatKey.includes('shot')) {
-    return { saleFormat: 'shot' }
-  }
-  if (formatKey.includes('coct') || formatKey.includes('cock')) {
-    return { saleFormat: 'cocktail' }
-  }
-  if (formatKey.includes('botell')) {
-    return { saleFormat: categoryKind === 'beer_bottle' || categoryKind === 'beer' ? 'beer_bottle' : 'soft_bottle' }
-  }
-  if (formatKey.includes('ampolla')) {
-    const saleFormat = categoryKind === 'beer_bottle' || categoryKind === 'beer' ? 'beer_bottle' : 'soft_bottle'
-    return {
-      saleFormat,
-      warning: saleFormat === 'soft_bottle' ? 'Formato Ampolla importado como Botella por falta de formato botella.' : undefined,
-    }
-  }
-
-  return {
-    saleFormat: null,
-    warning: `Formato no soportado: ${sourceFormat}`,
-  }
+  const normalized = normalizeImportKey(value)
+  return !['0', 'false', 'no'].includes(normalized)
 }
 
 function parseCsvRows(csvText: string) {
@@ -232,46 +98,43 @@ function parseCsvRows(csvText: string) {
       index += 1
       continue
     }
-
     if (char === '"') {
       inQuotes = !inQuotes
       continue
     }
-
     if (char === ';' && !inQuotes) {
       row.push(cell)
       cell = ''
       continue
     }
-
     if ((char === '\n' || char === '\r') && !inQuotes) {
-      if (char === '\r' && nextChar === '\n') {
-        index += 1
-      }
+      if (char === '\r' && nextChar === '\n') index += 1
       row.push(cell)
-      if (row.some((value) => value.trim())) {
-        rows.push(row)
-      }
+      if (row.some((value) => value.trim())) rows.push(row)
       row = []
       cell = ''
       continue
     }
-
     cell += char
   }
 
   row.push(cell)
-  if (row.some((value) => value.trim())) {
-    rows.push(row)
-  }
-
+  if (row.some((value) => value.trim())) rows.push(row)
   return rows
 }
 
 export function parseRevoItemsCsv(csvText: string): RevoImportParseResult {
   const rows = parseCsvRows(csvText.replace(/^\uFEFF/, ''))
-  const headers = rows[0]?.map((header) => cleanText(header).replace(/^\uFEFF/, '')) ?? []
+  if (!rows.length) throw new Error('El CSV de REVO est\u00e1 vac\u00edo.')
+
+  const headers = rows[0].map((header) => cleanText(header).replace(/^\uFEFF/, ''))
   const headerIndex = new Map(headers.map((header, index) => [header, index]))
+  const requiredHeaders = ['id', 'category.group.name', 'category.name', 'name', 'active', 'sellingFormat', 'price']
+  const missingHeaders = requiredHeaders.filter((header) => !headerIndex.has(header))
+  if (missingHeaders.length) {
+    throw new Error(`El CSV de REVO no contiene las columnas requeridas: ${missingHeaders.join(', ')}.`)
+  }
+
   const productsByKey = new Map<string, RevoImportProduct>()
   const warnings: string[] = []
   let skippedRows = 0
@@ -281,56 +144,74 @@ export function parseRevoItemsCsv(csvText: string): RevoImportParseResult {
   }
 
   rows.slice(1).forEach((row, rowIndex) => {
+    const csvRowNumber = rowIndex + 2
     const sourceId = read(row, 'id')
     const productName = read(row, 'name')
-    const price = read(row, 'price')
+    const rawPrice = read(row, 'price')
+    const priceCents = parseEuroCents(rawPrice)
 
-    if (!productName || !price) {
+    if (!productName || priceCents === null) {
       skippedRows += 1
+      warnings.push(`Fila ${csvRowNumber} omitida: nombre o precio no v\u00e1lido.`)
       return
     }
 
-    const categoryGroupName = read(row, 'category.group.name')
-    const categoryName = read(row, 'category.name')
-    const categoryMapping = getCategoryMapping(categoryGroupName, categoryName)
+    const sourceGroupName = read(row, 'category.group.name')
+    const sourceCategoryName = read(row, 'category.name')
+    const tabName = sourceGroupName || DEFAULT_REVO_TAB
+    const categoryName = sourceCategoryName || DEFAULT_REVO_CATEGORY
     const sourceFormat = read(row, 'sellingFormat')
-    const formatResult = getRevoSellingFormat(sourceFormat, categoryMapping.categoryKind, categoryMapping.categoryName)
+    const formatName = displayName(sourceFormat) || DEFAULT_REVO_FORMAT
+    const sourceFormatId = read(row, 'sellingFormatId')
+    const sourceFormatOrder = Number.parseInt(sourceFormatId, 10)
+    const productKey = sourceId
+      ? `id:${sourceId}`
+      : `fallback:${normalizeImportKey(tabName)}:${normalizeImportKey(categoryName)}:${normalizeImportKey(productName)}`
+    const sourceCategory = cleanText([sourceGroupName, sourceCategoryName].filter(Boolean).join(' / '))
+    const parsedVatRate = parseVatRate(read(row, 'tax'))
+    const rawTaxRate = read(row, 'tax')
+    const current = productsByKey.get(productKey) ?? ({
+      active: false,
+      categoryName,
+      name: productName,
+      sourceCategories: [],
+      sourceIds: [],
+      tabName,
+      variants: [],
+      vatRate: parsedVatRate,
+      warnings: [],
+    } satisfies RevoImportProduct)
 
-    if (!formatResult.saleFormat) {
-      skippedRows += 1
-      warnings.push(`Fila ${rowIndex + 2} omitida (${productName}): ${formatResult.warning}`)
-      return
+    if (normalizeImportKey(current.name) !== normalizeImportKey(productName)) {
+      current.warnings.push(`Fila ${csvRowNumber}: el ID ${sourceId} aparece con otro nombre (${productName}).`)
+    }
+    if (normalizeImportKey(current.tabName) !== normalizeImportKey(tabName)
+      || normalizeImportKey(current.categoryName) !== normalizeImportKey(categoryName)) {
+      current.warnings.push(`Fila ${csvRowNumber}: el ID ${sourceId} aparece en otra categor\u00eda (${tabName} / ${categoryName}).`)
+    }
+    if (rawTaxRate && parsedVatRate === null) {
+      current.warnings.push(`Fila ${csvRowNumber}: IVA no v\u00e1lido (${rawTaxRate}); se usar\u00e1 el predeterminado del local.`)
+    } else if (current.vatRate !== null && parsedVatRate !== null && current.vatRate !== parsedVatRate) {
+      current.warnings.push(`Fila ${csvRowNumber}: el IVA no coincide con las otras variantes; se conserva ${current.vatRate}%.`)
+    } else if (current.vatRate === null) {
+      current.vatRate = parsedVatRate
     }
 
-    const productKey = `${normalizeImportKey(categoryMapping.categoryName)}::${normalizeImportKey(productName)}`
-    const variantName = getVariantName(formatResult.saleFormat, sourceFormat)
-    const variantKey = normalizeImportKey(variantName)
-    const sourceCategory = cleanText([categoryGroupName, categoryName].filter(Boolean).join(' / '))
-    const rowWarning = formatResult.warning ? [`Fila ${rowIndex + 2}: ${formatResult.warning}`] : []
-    const current =
-      productsByKey.get(productKey) ??
-      ({
-        active: false,
-        categoryName: categoryMapping.categoryName,
-        name: productName,
-        sourceCategories: [],
-        sourceIds: [],
-        variants: [],
-        warnings: [],
-      } satisfies RevoImportProduct)
-
-    const existingVariantIndex = current.variants.findIndex((variant) => normalizeImportKey(variant.name) === variantKey)
+    const variantKey = normalizeImportKey(formatName)
     const variant: RevoImportVariant = {
-      name: variantName,
-      priceCents: parseEuroCents(price),
-      saleFormat: formatResult.saleFormat,
-      sortOrder: saleFormatOrder.indexOf(formatResult.saleFormat) + 1,
-      sourceFormat: sourceFormat || variantName,
+      formatName,
+      name: formatName,
+      priceCents,
+      sku: read(row, 'barcode') || null,
+      sortOrder: Number.isSafeInteger(sourceFormatOrder) && sourceFormatOrder >= 0 ? sourceFormatOrder : current.variants.length,
+      sourceFormat,
+      sourceFormatId,
+      sourceItemFormatId: read(row, 'item_format_id'),
     }
-
+    const existingVariantIndex = current.variants.findIndex((item) => normalizeImportKey(item.formatName) === variantKey)
     if (existingVariantIndex >= 0) {
       current.variants[existingVariantIndex] = variant
-      current.warnings.push(`Formato duplicado actualizado: ${variantName}`)
+      current.warnings.push(`Fila ${csvRowNumber}: formato duplicado actualizado (${formatName}).`)
     } else {
       current.variants.push(variant)
     }
@@ -338,28 +219,17 @@ export function parseRevoItemsCsv(csvText: string): RevoImportParseResult {
     current.active = current.active || parseActive(read(row, 'active'))
     current.sourceIds = [...new Set([...current.sourceIds, sourceId].filter(Boolean))]
     current.sourceCategories = [...new Set([...current.sourceCategories, sourceCategory].filter(Boolean))]
-    current.warnings = [...current.warnings, ...rowWarning]
     productsByKey.set(productKey, current)
   })
 
   const products = [...productsByKey.values()]
-    .filter((product) => {
-      if (!product.variants.length) {
-        skippedRows += 1
-        warnings.push(`Producto omitido sin formatos validos: ${product.name}`)
-        return false
-      }
-      return true
-    })
     .map((product) => ({
       ...product,
-      variants: [...product.variants].sort((a, b) => a.sortOrder - b.sortOrder),
+      variants: [...product.variants].sort((left, right) => left.sortOrder - right.sortOrder || left.formatName.localeCompare(right.formatName, 'es')),
     }))
-    .sort((a, b) => a.categoryName.localeCompare(b.categoryName) || a.name.localeCompare(b.name))
+    .sort((left, right) => left.tabName.localeCompare(right.tabName, 'es')
+      || left.categoryName.localeCompare(right.categoryName, 'es')
+      || left.name.localeCompare(right.name, 'es'))
 
-  return {
-    products,
-    skippedRows,
-    warnings,
-  }
+  return { products, skippedRows, warnings }
 }

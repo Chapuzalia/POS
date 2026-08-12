@@ -1,9 +1,14 @@
-import type { CatalogBatchCommand } from '../../../catalog/data/commands.ts'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
+import { CatalogDomainError, toCatalogDomainError } from '../../../catalog/domain/errors.ts'
 import type { RevoImportProduct } from '../../../../lib/revoImport.ts'
 import { PRODUCT_IMAGE_BUCKET } from '../../../../lib/productImages.ts'
 import { supabase } from '../../../../lib/supabase.ts'
 import { catalogAdminService } from './catalogAdminService.ts'
+import {
+  buildRevoCatalogImportPlan,
+  splitRevoCatalogImportPlan,
+  type FinalCatalogImportResult,
+} from './revoCatalogImportPlan.ts'
 import {
   CATALOG_EXPORT_FORMAT,
   CATALOG_EXPORT_SCHEMA_VERSION,
@@ -31,6 +36,70 @@ type CatalogImportProgressHandler = (progress: CatalogImportProgress) => void
 
 function reportProgress(handler: CatalogImportProgressHandler | undefined, value: number, label: string) {
   handler?.({ label, value: Math.min(100, Math.max(0, Math.round(value))) })
+}
+
+function catalogErrorDiagnostic(error: unknown) {
+  if (!(error instanceof Error)) return 'Error desconocido del servidor.'
+  const databaseDetails = error instanceof CatalogDomainError ? error.details : {}
+  const parts = [
+    error.message,
+    databaseDetails.databaseMessage,
+    databaseDetails.databaseDetails,
+    databaseDetails.databaseHint,
+    databaseDetails.databaseCode ? `Código PostgreSQL: ${String(databaseDetails.databaseCode)}` : null,
+  ].filter((part): part is string => typeof part === 'string' && part.trim().length > 0)
+  return [...new Set(parts)].join(' · ')
+}
+
+async function materializeRevoSaleFormats(
+  catalog: CatalogData,
+  products: readonly RevoImportProduct[],
+  onProgress?: CatalogImportProgressHandler,
+) {
+  const requiredFormats = new Map<string, string>()
+  for (const product of products) {
+    for (const variant of product.variants) {
+      const formatKey = key(variant.formatName)
+      if (!requiredFormats.has(formatKey)) requiredFormats.set(formatKey, variant.formatName.trim())
+    }
+  }
+
+  const existingFormats = new Map(catalog.saleFormats.map((format) => [key(format.name), format]))
+  let sortOrder = catalog.saleFormats.reduce((maximum, format) => Math.max(maximum, format.sortOrder), -10) + 10
+  let completed = 0
+  let created = 0
+  for (const [formatKey, formatName] of requiredFormats) {
+    const existing = existingFormats.get(formatKey)
+    if (!existing) {
+      await catalogAdminService.saveSaleFormat(catalog.venueId, {
+        name: formatName,
+        active: true,
+        sortOrder,
+      })
+      sortOrder += 10
+      created += 1
+    } else if (!existing.active) {
+      await catalogAdminService.saveSaleFormat(catalog.venueId, {
+        id: existing.id,
+        name: existing.name,
+        inventoryConsumptionQuantity: existing.inventoryConsumptionQuantity,
+        inventoryConsumptionUnitId: existing.inventoryConsumptionUnitId,
+        active: true,
+        sortOrder: existing.sortOrder,
+      })
+    }
+    completed += 1
+    reportProgress(
+      onProgress,
+      8 + (completed / Math.max(1, requiredFormats.size)) * 12,
+      `Preparando formatos REVO (${completed}/${requiredFormats.size})`,
+    )
+  }
+
+  return {
+    catalog: await catalogAdminService.load(catalog.venueId, true),
+    created,
+  }
 }
 
 function downloadJson(value: unknown, venueName: string) {
@@ -200,12 +269,83 @@ export async function importOwnCatalog(
   }
 }
 
-export type FinalCatalogImportResult = {
+export type { FinalCatalogImportResult } from './revoCatalogImportPlan.ts'
+
+export type CatalogClearCounts = {
   categories: number
   formats: number
-  products: number
-  variants: number
+  images: number
+  modifierAssignments: number
+  modifierGroups: number
+  modifiers: number
   placements: number
+  products: number
+  selectionAssignments: number
+  selectionGroups: number
+  selectionOptions: number
+  tabCategories: number
+  tabs: number
+  variants: number
+}
+
+export type CatalogClearResult = {
+  counts: CatalogClearCounts
+  imageFilesRemoved: number
+  imageStorageCleanupPending: boolean
+}
+
+function catalogClearFallbackCounts(catalog: CatalogData): CatalogClearCounts {
+  return {
+    categories: catalog.categories.length,
+    formats: catalog.saleFormats.length,
+    images: catalog.products.filter((product) => product.image !== null).length,
+    modifierAssignments: catalog.modifierAssignments.length,
+    modifierGroups: catalog.modifierGroups.length,
+    modifiers: catalog.modifiers.length,
+    placements: catalog.placements.length,
+    products: catalog.products.length,
+    selectionAssignments: catalog.selectionAssignments.length,
+    selectionGroups: catalog.selectionGroups.length,
+    selectionOptions: catalog.selectionOptions.length,
+    tabCategories: catalog.tabCategories.length,
+    tabs: catalog.tabs.length,
+    variants: catalog.variants.length,
+  }
+}
+
+function readCatalogClearCounts(value: unknown, fallback: CatalogClearCounts) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return fallback
+  const source = value as Record<string, unknown>
+  return Object.fromEntries(Object.entries(fallback).map(([name, fallbackValue]) => {
+    const parsed = source[name]
+    return [name, typeof parsed === 'number' && Number.isSafeInteger(parsed) && parsed >= 0 ? parsed : fallbackValue]
+  })) as CatalogClearCounts
+}
+
+export async function clearFinalCatalog(catalog: CatalogData): Promise<CatalogClearResult> {
+  const client = requireClient()
+  const fallbackCounts = catalogClearFallbackCounts(catalog)
+  const { data, error } = await client.rpc('clear_catalog', { p_venue_id: catalog.venueId })
+  if (error) throw toCatalogDomainError(error, 'No se pudo borrar el catálogo del local.')
+
+  catalogAdminService.invalidate(catalog.venueId)
+  const response = data && typeof data === 'object' && !Array.isArray(data)
+    ? data as Record<string, unknown>
+    : {}
+  const removedImagePaths = Array.isArray(response.removedImagePaths)
+    ? [...new Set(response.removedImagePaths.filter((path): path is string => typeof path === 'string' && path.length > 0))]
+    : []
+  let imageStorageCleanupPending = false
+  if (removedImagePaths.length) {
+    const { error: storageError } = await client.storage.from(PRODUCT_IMAGE_BUCKET).remove(removedImagePaths)
+    imageStorageCleanupPending = storageError !== null
+  }
+
+  return {
+    counts: readCatalogClearCounts(response.counts, fallbackCounts),
+    imageFilesRemoved: imageStorageCleanupPending ? 0 : removedImagePaths.length,
+    imageStorageCleanupPending,
+  }
 }
 
 export async function importRevoIntoFinalCatalog(
@@ -215,97 +355,34 @@ export async function importRevoIntoFinalCatalog(
 ): Promise<FinalCatalogImportResult> {
   if (!products.length) throw new Error('No hay productos para importar.')
   reportProgress(onProgress, 5, 'Preparando archivo REVO')
-  const batch: CatalogBatchCommand[] = []
-  const categoriesByName = new Map(catalog.categories.map((category) => [key(category.name), category.id]))
-  const formatsByName = new Map(catalog.saleFormats.map((format) => [key(format.name), format]))
-  const productsByName = new Map(catalog.products.map((product) => [key(product.name), product]))
-  const formatSaves: Array<{ id: string; name: string; active: boolean; sortOrder: number }> = []
-  const variantFormats: Array<{ variantId: string; formatId: string }> = []
-  let tabId = catalog.tabs.find((tab) => tab.active)?.id
-  if (!tabId) {
-    tabId = catalogAdminService.uuid()
-    batch.push({ command: 'save_tab', payload: { id: tabId, key: 'productos', label: 'Productos', icon: 'receipt', active: true, sortOrder: 0 } })
-  }
-  const associatedCategoryIds = new Set(catalog.tabCategories.filter((relation) => relation.tabId === tabId).map((relation) => relation.categoryId))
-  const result: FinalCatalogImportResult = { categories: 0, formats: 0, products: 0, variants: 0, placements: 0 }
+  const latestCatalog = await catalogAdminService.load(catalog.venueId, true)
+  const prepared = await materializeRevoSaleFormats(latestCatalog, products, onProgress)
+  const plan = buildRevoCatalogImportPlan(prepared.catalog, products, catalogAdminService.uuid)
+  const chunks = splitRevoCatalogImportPlan(plan)
+  reportProgress(onProgress, 25, `Catálogo preparado (${products.length} productos)`)
 
-  function getFormatId(formatName: string) {
-    const formatKey = key(formatName)
-    const existing = formatsByName.get(formatKey)
-    if (existing) {
-      if (!existing.active && !formatSaves.some((format) => format.id === existing.id)) {
-        formatSaves.push({ id: existing.id, name: existing.name, active: true, sortOrder: existing.sortOrder })
-      }
-      return existing.id
-    }
-    const created = { id: catalogAdminService.uuid(), name: formatName.trim(), active: true, sortOrder: (catalog.saleFormats.length + formatSaves.length) * 10 }
-    formatsByName.set(formatKey, {
-      ...created,
-      tenantId: catalog.tenantId,
-      venueId: catalog.venueId,
-      inventoryConsumptionQuantity: null,
-      inventoryConsumptionUnitId: null,
-      createdAt: '',
-      updatedAt: '',
-    })
-    formatSaves.push(created)
-    result.formats += 1
-    return created.id
-  }
-
-  for (const [productIndex, imported] of products.entries()) {
+  for (const [index, chunk] of chunks.entries()) {
     reportProgress(
       onProgress,
-      10 + (productIndex / products.length) * 60,
-      `Preparando productos (${productIndex + 1}/${products.length})`,
+      25 + (index / Math.max(1, chunks.length)) * 70,
+      `Guardando catálogo REVO (${index + 1}/${chunks.length})`,
     )
-    const categoryKey = key(imported.categoryName)
-    let categoryId = categoriesByName.get(categoryKey)
-    if (!categoryId) {
-      categoryId = catalogAdminService.uuid()
-      categoriesByName.set(categoryKey, categoryId)
-      batch.push({ command: 'save_category', payload: { id: categoryId, name: imported.categoryName, active: true, unused: false, sortOrder: categoriesByName.size * 10 } })
-      result.categories += 1
-    }
-    if (!associatedCategoryIds.has(categoryId)) {
-      associatedCategoryIds.add(categoryId)
-      batch.push({ command: 'save_tab_category', payload: { id: catalogAdminService.uuid(), tabId, categoryId, active: true, sortOrder: associatedCategoryIds.size * 10 } } as CatalogBatchCommand)
-    }
-
-    const existing = productsByName.get(key(imported.name))
-    const productId = existing?.id ?? catalogAdminService.uuid()
-    if (existing) {
-      batch.push({ command: 'update_product', payload: { id: productId, type: 'standard', name: imported.name, active: imported.active, sortOrder: existing.sortOrder } })
-      const existingVariants = catalog.variants.filter((variant) => variant.productId === productId)
-      const variantsByName = new Map(existingVariants.map((variant) => [key(variant.name), variant]))
-      imported.variants.forEach((variant, index) => {
-        const current = variantsByName.get(key(variant.name))
-        const formatId = getFormatId(variant.name)
-        const variantId = current?.id ?? catalogAdminService.uuid()
-        batch.push(current
-          ? { command: 'update_variant', payload: { id: variantId, productId, name: variant.name, priceCents: variant.priceCents, sku: current.sku, active: true, isDefault: current.isDefault, sortOrder: index * 10 } }
-          : { command: 'create_variant', payload: { id: variantId, productId, name: variant.name, priceCents: variant.priceCents, sku: null, active: true, isDefault: existingVariants.length === 0 && index === 0, sortOrder: index * 10 } })
-        variantFormats.push({ variantId, formatId })
-        result.variants += 1
-      })
-    } else {
-      const variants = imported.variants.map((variant, index) => {
-        const id = catalogAdminService.uuid()
-        const formatId = getFormatId(variant.name)
-        variantFormats.push({ variantId: id, formatId })
-        return { id, formatId, name: variant.name, priceCents: variant.priceCents, active: true, isDefault: index === 0, sortOrder: index * 10 }
-      })
-      batch.push({ command: 'create_product', payload: { id: productId, type: 'standard', name: imported.name, description: null, vatRate: null, active: imported.active, sortOrder: catalog.products.length * 10 + result.products * 10, variants } })
-      result.products += 1
-      result.variants += variants.length
-    }
-    if (!catalog.placements.some((placement) => placement.productId === productId && placement.tabId === tabId && placement.categoryId === categoryId)) {
-      batch.push({ command: 'create_placement', payload: { id: catalogAdminService.uuid(), productId, tabId, categoryId, pinnedVariantId: null, featured: false, active: true, sortOrder: result.placements * 10 } })
-      result.placements += 1
+    try {
+      if (chunk.variantFormats.length) {
+        await catalogAdminService.batchWithVariantFormats(
+          prepared.catalog.venueId,
+          chunk.batch,
+          chunk.variantFormats,
+        )
+      } else {
+        await catalogAdminService.batch(prepared.catalog.venueId, chunk.batch)
+      }
+    } catch (error) {
+      const detail = catalogErrorDiagnostic(error)
+      throw new Error(`Error en el lote REVO ${index + 1}/${chunks.length}: ${detail}`, { cause: error })
     }
   }
-  reportProgress(onProgress, 75, 'Guardando catálogo REVO')
-  await catalogAdminService.batchWithVariantFormats(catalog.venueId, batch, variantFormats, formatSaves)
+  plan.result.formats = prepared.created
   reportProgress(onProgress, 100, 'Importación REVO completada')
-  return result
+  return plan.result
 }

@@ -5,6 +5,7 @@ import type { CatalogStartTab, TenantContext, ThemeDefinition } from '../../type
 import { PrintAgentSettings } from '../../features/local-printing'
 import { AppModal, Button, Metric } from '../ui'
 import { Select } from '../ui/Select'
+import * as Sentry from "@sentry/react"
 
 type ConfigModalProps = {
   catalogStartTab: CatalogStartTab
@@ -72,7 +73,7 @@ export function ConfigModal({
 
         <button
           onClick={() => {
-            throw new Error('This is your first error!');
+            throw new Error('This is a test error for Sentry integration')
           }}
         >
           Break the world
