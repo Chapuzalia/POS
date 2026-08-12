@@ -76,11 +76,12 @@ export type ReservationTableOption = ReservationTable & {
   conflicts: ReservationConflict[]
 }
 
-export type ReservationsView = 'list' | 'map'
+export type ReservationsView = 'list' | 'timeline' | 'map'
 
 export type ReservationEditorState = {
   reservation: Reservation | null
   preselectedTableIds: string[]
+  preselectedStartsAt?: string
 }
 
 export type ReservationMap = {
@@ -108,7 +109,7 @@ export type ReservationsController = {
   map: ReservationMap
   open: () => void
   openReservation: (reservationId: string) => Promise<void>
-  openCreate: (tableIds?: string[]) => void
+  openCreate: (tableIds?: string[], startsAt?: string) => void
   openDetail: (reservation: Reservation) => void
   openEdit: (reservation: Reservation) => void
   pendingConflictDraft: ReservationDraft | null

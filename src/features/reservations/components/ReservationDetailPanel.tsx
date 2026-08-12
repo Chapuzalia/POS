@@ -75,16 +75,16 @@ export function ReservationDetailPanel(props: Props) {
 
   return (
     <>
-      <div className="contents max-[1000px]:fixed max-[1000px]:inset-0 max-[1000px]:z-40 max-[1000px]:flex max-[1000px]:justify-end">
+      <div className="contents max-lg:fixed max-lg:inset-0 max-lg:z-40 max-lg:flex max-lg:justify-end">
         <button
           aria-label="Cerrar detalle"
-          className="absolute inset-0 hidden border-0 bg-black/40 max-[1000px]:block"
+          className="absolute inset-0 hidden border-0 bg-black/40 max-lg:block"
           onClick={props.onClose}
           type="button"
         />
         <aside
           aria-label={`Reserva de ${reservation.customerName}`}
-          className="relative z-[1] flex w-[min(390px,36vw)] min-w-[350px] flex-col overflow-hidden rounded-2xl border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)] max-[1000px]:h-full max-[1000px]:w-[min(440px,100%)] max-[1000px]:min-w-0 max-[1000px]:rounded-none max-[760px]:w-full"
+          className="relative z-[1] flex w-96 min-w-88 flex-col overflow-hidden rounded-2xl border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)] max-lg:h-full max-lg:w-full max-lg:max-w-md max-lg:min-w-0 max-lg:rounded-none max-md:max-w-none"
         >
           <header className="flex items-start justify-between gap-3 border-b border-[var(--separator)] p-5">
             <div className="min-w-0">
@@ -136,21 +136,21 @@ export function ReservationDetailPanel(props: Props) {
             </div>
 
             <dl className="m-0 grid gap-3">
-              <div className="grid grid-cols-[94px_minmax(0,1fr)] gap-3">
+              <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3">
                 <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
                   <CalendarDays size={17} />
                   Fecha
                 </dt>
                 <dd className="m-0 font-extrabold capitalize">{date}</dd>
               </div>
-              <div className="grid grid-cols-[94px_minmax(0,1fr)] gap-3">
+              <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3">
                 <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
                   <Clock3 size={17} />
                   Hora
                 </dt>
                 <dd className="m-0 font-extrabold">{time}</dd>
               </div>
-              <div className="grid grid-cols-[94px_minmax(0,1fr)] gap-3">
+              <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3">
                 <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
                   <Utensils size={17} />
                   Mesas
@@ -259,7 +259,7 @@ export function ReservationDetailPanel(props: Props) {
                 Abrir comanda
               </UiButton>
             ) : null}
-            <div className="grid grid-cols-3 gap-2 max-[390px]:grid-cols-2">
+            <div className="grid grid-cols-2 gap-2 sm:grid-cols-3">
               {actions.arrive && props.canManage ? (
                 <UiButton
                   className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm font-extrabold text-[var(--foreground)]"

@@ -33,6 +33,7 @@ type Props = {
   onSave: (draft: ReservationDraft, allowConflict: boolean) => Promise<boolean>;
   onTableIdsChange: (tableIds: string[]) => void;
   preselectedTableIds: string[];
+  preselectedStartsAt?: string;
   reservation: Reservation | null;
   tables: ReservationTable[];
   timeZone: string;
@@ -157,6 +158,8 @@ function InfiniteTimeColumn({
 export function ReservationFormModal(props: Props) {
   const initialSchedule = props.reservation
     ? localParts(props.reservation.startsAt, props.timeZone)
+    : props.preselectedStartsAt
+      ? localParts(props.preselectedStartsAt, props.timeZone)
     : { date: props.date, time: "20:00" };
   const initialValues = useMemo(
     () => ({
@@ -254,7 +257,7 @@ export function ReservationFormModal(props: Props) {
     : [...minuteOptions, minute].sort((a, b) => a - b);
   const dateTimeValue = new CalendarDateTime(year, month, day, hour, minute);
   const inputClass =
-    "h-12 w-full rounded-xl border border-[var(--field-border)] bg-[var(--surface)] px-3 text-base font-semibold text-[var(--foreground)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] disabled:bg-[var(--surface-secondary)] disabled:text-[var(--muted)] max-[760px]:bg-[var(--background)]";
+    "h-12 w-full rounded-xl border border-[var(--field-border)] bg-[var(--background)] px-3 text-base font-semibold text-[var(--foreground)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] disabled:bg-[var(--surface-secondary)] disabled:text-[var(--muted)] md:bg-[var(--surface)]";
 
   useLayoutEffect(() => {
     const calendarPane = calendarPaneRef.current;
@@ -353,30 +356,30 @@ export function ReservationFormModal(props: Props) {
   return (
     <>
       <AppModal
-        containerClassName="!items-end !p-0 min-[761px]:!items-center min-[761px]:!p-6"
-        dialogClassName="!max-h-[calc(100dvh-56px)] !rounded-b-none !rounded-t-[20px] !border-x-0 !border-b-0 min-[761px]:!max-h-[calc(100dvh-48px)] min-[761px]:!rounded-2xl min-[761px]:!border"
+        containerClassName="!items-end !p-0 md:!items-center md:!p-6"
+        dialogClassName="!max-h-[calc(100dvh-3.5rem)] !rounded-b-none !rounded-t-2xl !border-x-0 !border-b-0 md:!max-h-[calc(100dvh-3rem)] md:!rounded-2xl md:!border"
         dismissDisabled={props.disabled}
         label={props.reservation ? "Editar reserva" : "Nueva reserva"}
         maxWidth={1200}
         onClose={requestClose}
         placement="bottom"
       >
-        <section className="flex h-[calc(100dvh-56px)] w-full flex-col overflow-hidden bg-[var(--surface)] text-[var(--foreground)] min-[761px]:h-[min(780px,calc(100dvh-48px))]">
-          <div aria-hidden="true" className="flex h-5 shrink-0 items-center justify-center min-[761px]:hidden">
+        <section className="flex h-[calc(100dvh-3.5rem)] w-full flex-col overflow-hidden bg-[var(--surface)] text-[var(--foreground)] md:h-[min(48.75rem,calc(100dvh-3rem))]">
+          <div aria-hidden="true" className="flex h-5 shrink-0 items-center justify-center md:hidden">
             <span className="h-1 w-10 rounded-full bg-[var(--separator)]" />
           </div>
-          <header className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--separator)] px-5 pb-4 min-[761px]:p-6">
+          <header className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--separator)] px-5 pb-4 md:p-6">
             <div>
-              <h2 className="m-0 text-xl font-black min-[761px]:text-[22px]">
+              <h2 className="m-0 text-xl font-black md:text-2xl">
                 {props.reservation ? "Editar reserva" : "Nueva reserva"}
               </h2>
-              <p className="mb-0 mt-1 text-[11px] font-semibold text-[var(--muted)] min-[761px]:text-xs">
+              <p className="mb-0 mt-1 text-[11px] font-semibold text-[var(--muted)] md:text-xs">
                 Horario del local · {props.timeZone}
               </p>
             </div>
             <UiButton
               aria-label="Cerrar formulario"
-              className="grid size-10 shrink-0 place-items-center rounded-full border-0 bg-[var(--background)] text-[var(--muted)] min-[761px]:size-11 min-[761px]:rounded-xl min-[761px]:border min-[761px]:border-[var(--separator)] min-[761px]:bg-[var(--surface)] min-[761px]:text-[var(--foreground)]"
+              className="grid size-10 shrink-0 place-items-center rounded-full border-0 bg-[var(--background)] text-[var(--muted)] md:size-11 md:rounded-xl md:border md:border-[var(--separator)] md:bg-[var(--surface)] md:text-[var(--foreground)]"
               onClick={requestClose}
               type="button"
             >
@@ -384,7 +387,7 @@ export function ReservationFormModal(props: Props) {
             </UiButton>
           </header>
 
-          <nav aria-label="Secciones de la reserva" className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--separator)] bg-[var(--surface)] px-5 py-3 min-[761px]:hidden">
+          <nav aria-label="Secciones de la reserva" className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--separator)] bg-[var(--surface)] px-5 py-3 md:hidden">
             {(["service", "client", "tables"] as const).map((section, index) => {
               const label = section === "service" ? "Servicio" : section === "client" ? "Cliente" : "Mesas";
               const active = activeMobileSection === section;
@@ -397,8 +400,8 @@ export function ReservationFormModal(props: Props) {
             })}
           </nav>
 
-          <div className="grid min-h-0 flex-1 grid-cols-[minmax(0,1.15fr)_minmax(360px,0.85fr)] max-[900px]:grid-cols-1 max-[900px]:overflow-y-auto max-[900px]:overscroll-contain max-[900px]:bg-[var(--background)] max-[900px]:[-webkit-overflow-scrolling:touch] max-[760px]:pb-[132px]" onScroll={trackMobileSection} ref={formScrollRef}>
-            <div className="overflow-y-auto overscroll-contain p-4 [-webkit-overflow-scrolling:touch] max-[900px]:overflow-visible min-[761px]:p-6 min-[901px]:border-r min-[901px]:border-[var(--separator)]">
+          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto overscroll-contain bg-[var(--background)] pb-32 [-webkit-overflow-scrolling:touch] md:pb-0 lg:grid-cols-5 lg:overflow-hidden lg:bg-transparent" onScroll={trackMobileSection} ref={formScrollRef}>
+            <div className="overflow-visible overscroll-contain p-4 [-webkit-overflow-scrolling:touch] md:p-6 lg:col-span-3 lg:overflow-y-auto lg:border-r lg:border-[var(--separator)]">
               {lockedSchedule ? (
                 <div className="mb-5 flex items-start gap-2 rounded-xl bg-[var(--accent-soft)] p-3 text-sm font-semibold">
                   <ShieldAlert className="mt-0.5 shrink-0" size={18} />
@@ -419,8 +422,8 @@ export function ReservationFormModal(props: Props) {
                 </div>
               ) : null}
 
-              <div className="grid gap-4 min-[761px]:gap-7">
-                <section className="grid scroll-mt-4 gap-4 rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-4 shadow-[0_2px_8px_rgba(17,24,39,.04)] min-[761px]:rounded-none min-[761px]:border-0 min-[761px]:p-0 min-[761px]:shadow-none" ref={serviceSectionRef}>
+              <div className="grid gap-4 md:gap-7">
+                <section className="grid scroll-mt-4 gap-4 rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-4 shadow-[0_2px_8px_rgba(17,24,39,.04)] md:rounded-none md:border-0 md:p-0 md:shadow-none" ref={serviceSectionRef}>
                   <div>
                     <span className="text-[11px] font-black uppercase tracking-wider text-[var(--accent)]">
                       1 · Servicio
@@ -460,7 +463,7 @@ export function ReservationFormModal(props: Props) {
                         Fecha y hora *
                       </Label>
                       <DateField.Group
-                        className="min-h-12 cursor-pointer rounded-xl border border-[var(--field-border)] bg-[var(--background)] px-3 shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] disabled:cursor-not-allowed min-[761px]:bg-[var(--surface)]"
+                        className="min-h-12 cursor-pointer rounded-xl border border-[var(--field-border)] bg-[var(--background)] px-3 shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] disabled:cursor-not-allowed md:bg-[var(--surface)]"
                         fullWidth
                         onClick={(event) => {
                           if (
@@ -471,7 +474,7 @@ export function ReservationFormModal(props: Props) {
                         }}
                         variant="secondary"
                       >
-                        <DateField.Input className="min-w-0 flex-1 text-base font-semibold">
+                        <DateField.Input  className="min-w-0 flex-1 text-base font-semibold">
                           {(segment) => (
                             <DateField.Segment
                               className="rounded px-0.5 text-[var(--foreground)] data-[placeholder]:text-[var(--muted)]"
@@ -488,12 +491,12 @@ export function ReservationFormModal(props: Props) {
                           </DatePicker.Trigger>
                         </DateField.Suffix>
                       </DateField.Group>
-                      <DatePicker.Popover className="w-[min(660px,calc(100vw-24px))] rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-0 shadow-[var(--shadow)]">
+                      <DatePicker.Popover className="w-[calc(100vw-1.5rem)] max-w-2xl rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-0 shadow-[var(--shadow)]">
                         <div
-                          className="grid grid-cols-[minmax(300px,1fr)_240px] items-stretch max-[620px]:grid-cols-1"
+                          className="grid grid-cols-1 items-stretch sm:grid-cols-5"
                           ref={dateTimeLayoutRef}
                         >
-                          <div className="p-4 sm:p-5" ref={calendarPaneRef}>
+                          <div className="p-4 sm:col-span-3 sm:p-5" ref={calendarPaneRef}>
                             <Calendar aria-label="Seleccionar fecha de la reserva">
                               <Calendar.Header>
                                 <Calendar.NavButton slot="previous" />
@@ -518,7 +521,7 @@ export function ReservationFormModal(props: Props) {
                           </div>
                           <section
                             aria-label="Seleccionar hora de la reserva"
-                            className="relative min-h-0 border-l border-[var(--separator)] bg-[var(--background)] max-[620px]:h-[var(--calendar-pane-height)] max-[620px]:border-l-0 max-[620px]:border-t"
+                            className="relative h-[var(--calendar-pane-height)] min-h-0 border-t border-[var(--separator)] bg-[var(--background)] sm:col-span-2 sm:h-auto sm:border-l sm:border-t-0"
                           >
                             <div className="absolute inset-0 flex min-h-0 flex-col">
                               <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--separator)] px-4 py-3">
@@ -596,7 +599,7 @@ export function ReservationFormModal(props: Props) {
                         onChange={(event) =>
                           setDuration(Number(event.target.value))
                         }
-                        triggerClassName="!min-h-12 !rounded-xl !border !border-[var(--field-border)] !bg-[var(--background)] !px-3 !text-sm !font-semibold !shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] min-[761px]:!bg-[var(--surface)] min-[761px]:!text-base"
+                        triggerClassName="!min-h-12 !rounded-xl !border !border-[var(--field-border)] !bg-[var(--background)] !px-3 !text-sm !font-semibold !shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] md:!bg-[var(--surface)] md:!text-base"
                         value={duration}
                       >
                         {durationOptions.map((minutes) => (
@@ -609,7 +612,7 @@ export function ReservationFormModal(props: Props) {
                     </label>
                     <div className="grid gap-1.5 text-[13px] font-extrabold">
                       <span>Personas *</span>
-                      <div className="grid h-12 grid-cols-[44px_minmax(44px,1fr)_44px] overflow-hidden rounded-xl border border-[var(--field-border)] bg-[var(--background)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] min-[761px]:grid-cols-[48px_minmax(52px,1fr)_48px] min-[761px]:bg-[var(--surface)]">
+                      <div className="grid h-12 grid-cols-[3rem_minmax(3rem,1fr)_3rem] overflow-hidden rounded-xl border border-[var(--field-border)] bg-[var(--background)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] md:bg-[var(--surface)]">
                         <UiButton
                           aria-label="Quitar una persona"
                           className="grid min-h-12 place-items-center border-0 border-r border-[var(--separator)] bg-[var(--surface-secondary)] text-[var(--foreground)] disabled:opacity-40"
@@ -651,7 +654,7 @@ export function ReservationFormModal(props: Props) {
                   </div>
                 </section>
 
-                <section className="grid scroll-mt-4 gap-4 rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-4 shadow-[0_2px_8px_rgba(17,24,39,.04)] min-[761px]:rounded-none min-[761px]:border-x-0 min-[761px]:border-b-0 min-[761px]:p-0 min-[761px]:pt-6 min-[761px]:shadow-none" ref={clientSectionRef}>
+                <section className="grid scroll-mt-4 gap-4 rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-4 shadow-[0_2px_8px_rgba(17,24,39,.04)] md:rounded-none md:border-x-0 md:border-b-0 md:p-0 md:pt-6 md:shadow-none" ref={clientSectionRef}>
                   <div>
                     <span className="text-[11px] font-black uppercase tracking-wider text-[var(--accent)]">
                       2 · Cliente
@@ -660,8 +663,8 @@ export function ReservationFormModal(props: Props) {
                       Datos de contacto y preferencias
                     </h3>
                   </div>
-                  <div className="grid grid-cols-2 gap-3 max-[560px]:grid-cols-1 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[13px] [&_label]:font-extrabold">
-                    <label className="col-span-full max-[560px]:col-span-1">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[13px] [&_label]:font-extrabold">
+                    <label className="sm:col-span-full">
                       Nombre *
                       <input
                         autoFocus
@@ -705,10 +708,10 @@ export function ReservationFormModal(props: Props) {
                         value={customerEmail}
                       />
                     </label>
-                    <label className="col-span-full max-[560px]:col-span-1">
+                    <label className="sm:col-span-full">
                       Notas opcionales
                       <textarea
-                        className="min-h-20 w-full resize-y rounded-xl border border-[var(--field-border)] bg-[var(--surface)] p-3 text-base font-medium text-[var(--foreground)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] max-[760px]:bg-[var(--background)] min-[761px]:min-h-24"
+                        className="min-h-20 w-full resize-y rounded-xl border border-[var(--field-border)] bg-[var(--background)] p-3 text-base font-medium text-[var(--foreground)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] outline-none focus:border-[var(--accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] md:min-h-24 md:bg-[var(--surface)]"
                         onChange={(event) => setNotes(event.target.value)}
                         rows={3}
                         value={notes}
@@ -719,8 +722,8 @@ export function ReservationFormModal(props: Props) {
               </div>
             </div>
 
-            <aside className="flex min-h-0 scroll-mt-4 flex-col bg-[var(--background)] max-[900px]:border-t max-[900px]:border-[var(--separator)] max-[760px]:border-t-0" ref={tablesSectionRef}>
-              <div className="overflow-y-auto overscroll-contain p-4 [-webkit-overflow-scrolling:touch] max-[900px]:overflow-visible max-[760px]:m-4 max-[760px]:rounded-2xl max-[760px]:border max-[760px]:border-[var(--separator)] max-[760px]:bg-[var(--surface)] max-[760px]:shadow-[0_2px_8px_rgba(17,24,39,.04)] min-[761px]:p-6">
+            <aside className="flex min-h-0 scroll-mt-4 flex-col border-t border-[var(--separator)] bg-[var(--background)] lg:col-span-2 lg:border-t-0" ref={tablesSectionRef}>
+              <div className="m-4 overflow-visible rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-4 shadow-[0_2px_8px_rgba(17,24,39,.04)] [-webkit-overflow-scrolling:touch] md:m-0 md:rounded-none md:border-0 md:p-6 md:shadow-none lg:overflow-y-auto">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
                     <span className="text-[11px] font-black uppercase tracking-wider text-[var(--accent)]">
@@ -836,8 +839,8 @@ export function ReservationFormModal(props: Props) {
                   })}
                 </div>
               </div>
-              <footer className="mt-auto border-t border-[var(--separator)] bg-[var(--surface)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] max-[760px]:fixed max-[760px]:inset-x-0 max-[760px]:bottom-0 max-[760px]:z-20 max-[760px]:shadow-[0_-8px_20px_rgba(17,24,39,.05)]">
-                <div className="mb-3 flex items-center justify-between gap-3 text-xs min-[761px]:text-sm">
+              <footer className="fixed inset-x-0 bottom-0 z-20 mt-auto border-t border-[var(--separator)] bg-[var(--surface)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-8px_20px_rgba(17,24,39,.05)] md:static md:shadow-none">
+                <div className="mb-3 flex items-center justify-between gap-3 text-xs md:text-sm">
                   <span className="flex items-center gap-2 font-extrabold text-[var(--foreground)]">
                     <i aria-hidden="true" className="size-2 rounded-full bg-[var(--success)]" />
                     Resumen de reserva
@@ -862,14 +865,14 @@ export function ReservationFormModal(props: Props) {
                 ) : null}
                 <div className="grid grid-cols-[auto_minmax(0,1fr)] gap-2">
                   <UiButton
-                    className="min-h-12 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] min-[761px]:min-h-11"
+                    className="min-h-12 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] md:min-h-11"
                     onClick={requestClose}
                     type="button"
                   >
                     Cancelar
                   </UiButton>
                   <UiButton
-                    className={`min-h-12 rounded-xl border px-4 font-extrabold min-[761px]:min-h-11 ${hasActiveConflicts ? "border-[var(--warning)] bg-[var(--surface)] text-[var(--warning)]" : "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]"}`}
+                    className={`min-h-12 rounded-xl border px-4 font-extrabold md:min-h-11 ${hasActiveConflicts ? "border-[var(--warning)] bg-[var(--surface)] text-[var(--warning)]" : "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]"}`}
                     disabled={
                       props.disabled ||
                       (hasActiveConflicts && !conflictAcknowledged)

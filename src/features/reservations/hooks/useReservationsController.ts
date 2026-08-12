@@ -173,11 +173,11 @@ export function useReservationsController(options: Options) {
     setQuery('')
   }, [options.enabled, setCurrentDetail])
 
-  const openCreate = useCallback((tableIds: string[] = []) => {
+  const openCreate = useCallback((tableIds: string[] = [], startsAt?: string) => {
     setSelectedTableIds(tableIds)
     setConflicts([])
     setPendingConflictDraft(null)
-    setEditor({ reservation: null, preselectedTableIds: tableIds })
+    setEditor({ reservation: null, preselectedTableIds: tableIds, preselectedStartsAt: startsAt })
   }, [])
 
   const openEdit = useCallback((reservation: Reservation) => {

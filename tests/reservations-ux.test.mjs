@@ -2,12 +2,13 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const [page, list, detail, form, map] = await Promise.all([
+const [page, list, detail, form, map, timeline] = await Promise.all([
   readFile(new URL('../src/features/reservations/components/ReservationsPage.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationList.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationDetailPanel.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationFormModal.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationMapView.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../src/features/reservations/components/ReservationTimelineView.tsx', import.meta.url), 'utf8'),
 ])
 
 test('el mapa permite desplazar el lienzo desde el espacio entre mesas', () => {
@@ -16,8 +17,24 @@ test('el mapa permite desplazar el lienzo desde el espacio entre mesas', () => {
   assert.match(map, /onPointerMove=\{viewportApi\.moveBackgroundPointer\}/)
 })
 
+test('reservas ofrece una tercera vista temporal operativa', () => {
+  assert.match(page, /aria-label="Vista de horario"/)
+  assert.match(page, /controller\.view === ["']timeline["']/)
+  assert.match(timeline, /aria-label="Horario de reservas"/)
+  assert.match(timeline, /PIXELS_PER_MINUTE/)
+  assert.match(timeline, /placeInLanes/)
+  assert.match(timeline, /Reservas solapadas/)
+  assert.match(timeline, /Hora actual/)
+  assert.match(timeline, /sticky left-0/)
+  assert.match(timeline, /zonedLocalToUtc/)
+  assert.doesNotMatch(timeline, /matchMedia/)
+  assert.match(timeline, /scrollWidth <= scroller\.clientWidth/)
+  assert.match(timeline, /scrollTo\(\{\s*left:/)
+  assert.match(timeline, /Desplazar horario de reservas/)
+})
+
 test('reservas convierte excepciones y zonas en filtros operativos', () => {
-  assert.match(page, /type ReservationFilter = 'all' \| 'upcoming' \| 'arrived' \| 'late' \| 'unassigned'/)
+  assert.match(page, /type ReservationFilter = ["']all["'] \| ["']upcoming["'] \| ["']arrived["'] \| ["']late["'] \| ["']unassigned["']/)
   assert.match(page, /aria-label="Filtros de reservas"/)
   assert.match(page, /Filtrar por zona/)
   assert.match(page, /type="date"/)
@@ -37,13 +54,17 @@ test('la lista usa una tabla real, separa el historial y conserva la seleccion',
   assert.doesNotMatch(list, /<UiButton/)
 })
 
-test('la vista general movil prioriza controles compactos y filas sin altura sobrante', () => {
-  assert.match(page, /max-\[760px\]:rounded-none max-\[760px\]:border-x-0/)
-  assert.match(page, /max-\[760px\]:w-full max-\[760px\]:basis-full/)
-  assert.match(page, /max-\[760px\]:min-h-0 max-\[760px\]:flex-none/)
-  assert.match(list, /max-\[760px\]:grid max-\[760px\]:grid-cols-/)
-  assert.match(list, /max-\[760px\]:flex-none max-\[760px\]:overflow-visible/)
-  assert.match(list, /max-\[760px\]:space-y-2/)
+test('la vista general movil usa los breakpoints predefinidos de Tailwind', () => {
+  assert.match(page, /md:gap-3 md:p-4/)
+  assert.match(page, /md:w-auto/)
+  assert.match(page, /md:min-h-105 md:flex-1/)
+  assert.match(list, /max-md:grid max-md:grid-cols-/)
+  assert.match(list, /max-md:flex-none max-md:overflow-visible/)
+  assert.match(list, /max-md:block max-md:space-y-2/)
+  assert.match(page, /aria-label="Filtros de reservas"/)
+  assert.match(page, /min-h-14 shrink-0/)
+  assert.doesNotMatch(page, /(max|min)-\[\d+px\]/)
+  assert.doesNotMatch(list, /(max|min)-\[\d+px\]/)
 })
 
 test('el detalle anticipa la asignacion de mesa antes de sentar', () => {
@@ -63,7 +84,7 @@ test('el formulario previene descarte, pasado, capacidad y override accidental',
 
 test('el formulario usa controles tactiles y una fecha-hora unificada', () => {
   assert.match(form, /placement="bottom"/)
-  assert.match(form, /min-\[761px\]:!items-center/)
+  assert.match(form, /md:!items-center/)
   assert.match(form, /<DatePicker/)
   assert.match(form, /granularity="minute"/)
   assert.match(form, /shouldCloseOnSelect=\{false\}/)
@@ -79,11 +100,12 @@ test('el formulario usa controles tactiles y una fecha-hora unificada', () => {
   assert.match(form, /cursor-pointer/)
   assert.match(form, /activeMobileSection/)
   assert.match(form, /Resumen de reserva/)
-  assert.match(form, /h-\[calc\(100dvh-56px\)\]/)
-  assert.match(form, /rounded-t-\[20px\]/)
-  assert.match(form, /max-\[760px\]:fixed/)
+  assert.match(form, /h-\[calc\(100dvh-3\.5rem\)\]/)
+  assert.match(form, /rounded-t-2xl/)
+  assert.match(form, /fixed inset-x-0 bottom-0/)
   assert.match(form, /bg-\[var\(--accent-soft\)\]/)
   assert.doesNotMatch(form, /min-h-\[390px\]|h-\[220px\]/)
+  assert.doesNotMatch(form, /(max|min)-\[\d+px\]/)
   assert.match(form, /aria-label="Quitar una persona"/)
   assert.match(form, /aria-label="A.adir una persona"/)
   assert.doesNotMatch(form, /type="number"/)
