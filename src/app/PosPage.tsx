@@ -224,7 +224,7 @@ export function PosPage(props: Props) {
         canManageCash={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
-        compactMobile={tableMapVisible && mobileTableMapLayout}
+        compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
         onCloseCash={() => void (async () => {

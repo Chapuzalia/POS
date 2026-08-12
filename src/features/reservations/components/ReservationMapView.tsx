@@ -53,7 +53,7 @@ export function ReservationMapView(props: Props) {
           onWheel={viewportApi.onWheel}
           ref={canvasRef}
         >
-          <div className="absolute z-[2]" style={{ width: planeSize.width * viewport.zoom, height: planeSize.height * viewport.zoom, left: viewport.panX, top: viewport.panY }}>
+          <div className="map-transform-layer absolute z-[2]" style={{ width: planeSize.width * viewport.zoom, height: planeSize.height * viewport.zoom, left: viewport.panX, top: viewport.panY }}>
             {tables.map((table) => {
               const tableReservations = props.reservations.filter((reservation) => reservation.tableIds.includes(table.id))
               const next = getNextReservationForTable(tableReservations, table.id, new Date(0))

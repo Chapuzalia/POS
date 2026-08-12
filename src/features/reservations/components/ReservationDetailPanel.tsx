@@ -1,6 +1,7 @@
-import { Input as UiInput } from "../../../components/ui/Input";
-import { Button as UiButton } from "../../../components/ui/Button";
+import { useEffect, useState } from "react";
 import { AppModal } from "../../../components/ui/AppModal";
+import { Button as UiButton } from "../../../components/ui/Button";
+import { Input as UiInput } from "../../../components/ui/Input";
 import {
   CalendarDays,
   Clock3,
@@ -12,7 +13,6 @@ import {
   Utensils,
   X,
 } from "lucide-react";
-import { useEffect, useState } from "react";
 import {
   getAllowedReservationActions,
   getReservationStatusLabel,
@@ -30,6 +30,16 @@ type Props = {
   onStatus: (status: ReservationStatus, reason?: string) => void;
   reservation: Reservation;
 };
+
+function statusClass(status: ReservationStatus) {
+  if (status === "arrived" || status === "seated")
+    return "bg-[var(--success-soft)] text-[var(--success)]";
+  if (status === "cancelled" || status === "no_show")
+    return "bg-[var(--danger-soft)] text-[var(--danger)]";
+  if (status === "completed")
+    return "bg-[var(--surface-secondary)] text-[var(--muted)]";
+  return "bg-[var(--accent-soft)] text-[var(--accent)]";
+}
 
 export function ReservationDetailPanel(props: Props) {
   const { reservation } = props;
@@ -51,6 +61,7 @@ export function ReservationDetailPanel(props: Props) {
     minute: "2-digit",
   }).format(new Date(reservation.startsAt));
   const timing = reservationTimingLabel(reservation);
+  const needsTable = actions.seat && reservation.tableIds.length === 0;
 
   useEffect(() => {
     const close = (event: KeyboardEvent) => {
@@ -64,221 +75,287 @@ export function ReservationDetailPanel(props: Props) {
 
   return (
     <>
-      <aside
-        aria-label={`Reserva de ${reservation.customerName}`}
-        className="flex w-[min(420px,38vw)] min-w-[350px] flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)] [&_svg]:size-[18px] [&>header]:flex [&>header]:items-start [&>header]:justify-between [&>header]:gap-3 [&>header]:border-b [&>header]:border-[var(--separator)] [&>header]:p-[18px] [&_h2]:mt-[7px] [&_h2]:mb-0 [&_h2]:text-[22px] [&_dl]:m-0 [&_dl]:grid [&_dl]:gap-3 [&_dl>div]:grid [&_dl>div]:grid-cols-[110px_minmax(0,1fr)] [&_dl>div]:gap-3 [&_dt]:flex [&_dt]:items-center [&_dt]:gap-[7px] [&_dt]:font-semibold [&_dt]:text-[var(--muted)] [&_dd]:m-0 [&_dd]:font-extrabold [&_section]:grid [&_section]:gap-2 [&_section]:border-t [&_section]:border-[var(--separator)] [&_section]:pt-4 [&_section_h3]:m-0 [&_section_h3]:text-[13px] [&_section_h3]:uppercase [&_section_p]:m-0 [&_section_p]:leading-6 [&_section_p]:text-[var(--muted)] [&_section_a]:flex [&_section_a]:min-h-[38px] [&_section_a]:items-center [&_section_a]:gap-2 [&_section_a]:font-extrabold [&_section_a]:text-[var(--foreground)] [&_section_a]:no-underline [&>footer]:mt-auto [&>footer]:grid [&>footer]:gap-2.5 [&>footer]:border-t [&>footer]:border-[var(--separator)] [&>footer]:p-4 [&>footer>div]:grid [&>footer>div]:grid-cols-2 [&>footer>div]:gap-2 max-[1000px]:fixed max-[1000px]:z-40 max-[1000px]:inset-[72px_0_0_auto] max-[1000px]:w-[min(440px,100%)] max-[1000px]:min-w-0 max-[1000px]:rounded-[var(--radius)_0_0_0] max-[760px]:inset-[100px_0_0] max-[760px]:w-full max-[760px]:rounded-t-[18px] max-[760px]:rounded-b-none"
-      >
-        <header>
-          <div>
-            <span className="inline-flex w-fit items-center rounded-full bg-[var(--accent-soft)] px-[9px] py-1 text-[11px] font-extrabold">
-              {getReservationStatusLabel(reservation.status)}
-            </span>
-            <h2>{reservation.customerName}</h2>
-          </div>
-          <UiButton
-            aria-label="Cerrar detalle"
-            className="grid size-11 shrink-0 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] [&_svg]:size-[18px]"
-            onClick={props.onClose}
-            type="button"
-          >
-            <X />
-          </UiButton>
-        </header>
-        <div className="grid content-start gap-[18px] overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-[18px]">
-          <dl>
-            <div>
-              <dt>
-                <CalendarDays /> Fecha
-              </dt>
-              <dd>{date}</dd>
+      <div className="contents max-[1000px]:fixed max-[1000px]:inset-0 max-[1000px]:z-40 max-[1000px]:flex max-[1000px]:justify-end">
+        <button
+          aria-label="Cerrar detalle"
+          className="absolute inset-0 hidden border-0 bg-black/40 max-[1000px]:block"
+          onClick={props.onClose}
+          type="button"
+        />
+        <aside
+          aria-label={`Reserva de ${reservation.customerName}`}
+          className="relative z-[1] flex w-[min(390px,36vw)] min-w-[350px] flex-col overflow-hidden rounded-2xl border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)] max-[1000px]:h-full max-[1000px]:w-[min(440px,100%)] max-[1000px]:min-w-0 max-[1000px]:rounded-none max-[760px]:w-full"
+        >
+          <header className="flex items-start justify-between gap-3 border-b border-[var(--separator)] p-5">
+            <div className="min-w-0">
+              <span
+                className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold ${statusClass(reservation.status)}`}
+              >
+                {getReservationStatusLabel(reservation.status)}
+              </span>
+              <h2 className="mb-0 mt-2 truncate text-[22px] font-black">
+                {reservation.customerName}
+              </h2>
+              {timing &&
+              ["confirmed", "arrived"].includes(reservation.status) ? (
+                <p className="mb-0 mt-1 text-xs font-extrabold text-[var(--warning)]">
+                  {timing}
+                </p>
+              ) : null}
             </div>
-            <div>
-              <dt>
-                <Clock3 /> Hora
-              </dt>
-              <dd>
-                {time} · {duration} min
-              </dd>
+            <UiButton
+              aria-label="Cerrar detalle"
+              className="grid size-11 shrink-0 place-items-center rounded-xl border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)]"
+              onClick={props.onClose}
+              type="button"
+            >
+              <X size={18} />
+            </UiButton>
+          </header>
+
+          <div className="grid content-start gap-5 overflow-y-auto overscroll-contain p-5 [-webkit-overflow-scrolling:touch]">
+            <div className="grid grid-cols-2 gap-3 rounded-xl bg-[var(--surface-secondary)] p-3">
+              <div>
+                <span className="block text-[10px] font-black uppercase text-[var(--muted)]">
+                  Personas
+                </span>
+                <strong className="mt-1 flex items-center gap-1.5 text-lg">
+                  <Users size={17} className="text-[var(--accent)]" />
+                  {reservation.partySize}
+                </strong>
+              </div>
+              <div>
+                <span className="block text-[10px] font-black uppercase text-[var(--muted)]">
+                  Duración
+                </span>
+                <strong className="mt-1 flex items-center gap-1.5 text-lg">
+                  <Clock3 size={17} className="text-[var(--accent)]" />
+                  {duration} min
+                </strong>
+              </div>
             </div>
-            <div>
-              <dt>
-                <Users /> Personas
-              </dt>
-              <dd>{reservation.partySize}</dd>
-            </div>
-            <div>
-              <dt>
-                <Utensils /> Mesas
-              </dt>
-              <dd>
-                {reservation.tables.length
-                  ? reservation.tables
-                      .map((table) => `${table.name} · ${table.areaName}`)
-                      .join(", ")
-                  : "Sin mesa asignada"}
-              </dd>
-            </div>
-          </dl>
-          {timing && ["confirmed", "arrived"].includes(reservation.status) ? (
-            <div className="w-fit rounded-full bg-[color-mix(in_srgb,var(--warning)_14%,var(--surface))] px-2.5 py-[7px] text-xs font-extrabold text-[var(--warning)]">
-              {timing}
-            </div>
-          ) : null}
-          <section>
-            <h3>Contacto</h3>
-            <a href={`tel:${reservation.customerPhone}`}>
-              <Phone /> {reservation.customerPhone}
-            </a>
-            {reservation.customerEmail ? (
-              <a href={`mailto:${reservation.customerEmail}`}>
-                <Mail /> {reservation.customerEmail}
+
+            <dl className="m-0 grid gap-3">
+              <div className="grid grid-cols-[94px_minmax(0,1fr)] gap-3">
+                <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
+                  <CalendarDays size={17} />
+                  Fecha
+                </dt>
+                <dd className="m-0 font-extrabold capitalize">{date}</dd>
+              </div>
+              <div className="grid grid-cols-[94px_minmax(0,1fr)] gap-3">
+                <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
+                  <Clock3 size={17} />
+                  Hora
+                </dt>
+                <dd className="m-0 font-extrabold">{time}</dd>
+              </div>
+              <div className="grid grid-cols-[94px_minmax(0,1fr)] gap-3">
+                <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
+                  <Utensils size={17} />
+                  Mesas
+                </dt>
+                <dd
+                  className={`m-0 font-extrabold ${needsTable ? "text-[var(--warning)]" : ""}`}
+                >
+                  {reservation.tables.length
+                    ? reservation.tables
+                        .map((table) => `${table.name} · ${table.areaName}`)
+                        .join(", ")
+                    : "Sin mesa asignada"}
+                </dd>
+              </div>
+            </dl>
+
+            <section className="grid gap-2 border-t border-[var(--separator)] pt-4">
+              <h3 className="m-0 text-[11px] font-black uppercase tracking-wider text-[var(--muted)]">
+                Contacto
+              </h3>
+              <a
+                className="flex min-h-10 items-center gap-2 font-extrabold text-[var(--foreground)] no-underline"
+                href={`tel:${reservation.customerPhone}`}
+              >
+                <Phone size={17} />
+                {reservation.customerPhone}
               </a>
-            ) : null}
-          </section>
-          {reservation.notes ? (
-            <section>
-              <h3>Notas</h3>
-              <p>{reservation.notes}</p>
-            </section>
-          ) : null}
-          {reservation.cancellationReason ? (
-            <section>
-              <h3>Motivo de cancelación</h3>
-              <p>{reservation.cancellationReason}</p>
-            </section>
-          ) : null}
-          {reservation.arrivedAt || reservation.seatedAt ? (
-            <section>
-              <h3>Seguimiento</h3>
-              {reservation.arrivedAt ? (
-                <p>
-                  Llegada:{" "}
-                  {new Intl.DateTimeFormat("es", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  }).format(new Date(reservation.arrivedAt))}
-                </p>
-              ) : null}
-              {reservation.seatedAt ? (
-                <p>
-                  Sentada:{" "}
-                  {new Intl.DateTimeFormat("es", {
-                    hour: "2-digit",
-                    minute: "2-digit",
-                  }).format(new Date(reservation.seatedAt))}
-                </p>
+              {reservation.customerEmail ? (
+                <a
+                  className="flex min-h-10 items-center gap-2 truncate font-extrabold text-[var(--foreground)] no-underline"
+                  href={`mailto:${reservation.customerEmail}`}
+                >
+                  <Mail size={17} />
+                  {reservation.customerEmail}
+                </a>
               ) : null}
             </section>
-          ) : null}
-        </div>
-        <footer>
-          {actions.seat && props.canManage ? (
-            <UiButton
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)] w-full"
-              disabled={props.disabled}
-              onClick={props.onSeat}
-              type="button"
-            >
-              <Utensils /> Sentar
-            </UiButton>
-          ) : null}
-          {actions.openOrder && reservation.orderId ? (
-            <UiButton
-              className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)] w-full"
-              onClick={() => props.onOpenOrder(reservation.orderId!)}
-              type="button"
-            >
-              <Utensils /> Abrir comanda
-            </UiButton>
-          ) : null}
-          <div>
-            {actions.arrive && props.canManage ? (
-              <UiButton
-                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline bg-[var(--surface)] text-[var(--foreground)]"
-                disabled={props.disabled}
-                onClick={() => props.onStatus("arrived")}
-                type="button"
-              >
-                <UserCheck /> Ha llegado
-              </UiButton>
+            {reservation.notes ? (
+              <section className="grid gap-2 border-t border-[var(--separator)] pt-4">
+                <h3 className="m-0 text-[11px] font-black uppercase tracking-wider text-[var(--muted)]">
+                  Notas
+                </h3>
+                <p className="m-0 rounded-xl bg-[var(--accent-soft)]/50 p-3 leading-6 text-[var(--foreground)]">
+                  {reservation.notes}
+                </p>
+              </section>
             ) : null}
-            {actions.edit && props.canManage ? (
-              <UiButton
-                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline bg-[var(--surface)] text-[var(--foreground)]"
-                disabled={props.disabled}
-                onClick={props.onEdit}
-                type="button"
-              >
-                <Edit3 /> Editar
-              </UiButton>
+            {reservation.cancellationReason ? (
+              <section className="grid gap-2 border-t border-[var(--separator)] pt-4">
+                <h3 className="m-0 text-[11px] font-black uppercase tracking-wider text-[var(--muted)]">
+                  Motivo de cancelación
+                </h3>
+                <p className="m-0 text-[var(--muted)]">
+                  {reservation.cancellationReason}
+                </p>
+              </section>
             ) : null}
-            <a
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline bg-[var(--surface)] text-[var(--foreground)]"
-              href={`tel:${reservation.customerPhone}`}
-            >
-              <Phone /> Llamar
-            </a>
-            {actions.noShow && props.canManage ? (
-              <UiButton
-                className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline bg-[var(--surface)] text-[var(--foreground)]"
-                disabled={props.disabled}
-                onClick={() => setConfirmation("no_show")}
-                type="button"
-              >
-                No presentado
-              </UiButton>
+            {reservation.arrivedAt || reservation.seatedAt ? (
+              <section className="grid gap-2 border-t border-[var(--separator)] pt-4">
+                <h3 className="m-0 text-[11px] font-black uppercase tracking-wider text-[var(--muted)]">
+                  Seguimiento
+                </h3>
+                {reservation.arrivedAt ? (
+                  <p className="m-0 text-sm text-[var(--muted)]">
+                    Llegada:{" "}
+                    {new Intl.DateTimeFormat("es", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }).format(new Date(reservation.arrivedAt))}
+                  </p>
+                ) : null}
+                {reservation.seatedAt ? (
+                  <p className="m-0 text-sm text-[var(--muted)]">
+                    Sentada:{" "}
+                    {new Intl.DateTimeFormat("es", {
+                      hour: "2-digit",
+                      minute: "2-digit",
+                    }).format(new Date(reservation.seatedAt))}
+                  </p>
+                ) : null}
+              </section>
             ) : null}
           </div>
-          {actions.cancel && props.canManage ? (
-            <UiButton
-              className="inline-flex min-h-11 w-full items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline bg-[var(--surface)] text-[var(--foreground)] border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]"
-              disabled={props.disabled}
-              onClick={() => setConfirmation("cancelled")}
-              type="button"
-            >
-              Cancelar
-            </UiButton>
-          ) : null}
-        </footer>
-      </aside>
+
+          <footer className="mt-auto grid gap-2.5 border-t border-[var(--separator)] bg-[var(--surface)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))]">
+            {actions.seat && props.canManage ? (
+              <UiButton
+                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45"
+                disabled={props.disabled}
+                onClick={needsTable ? props.onEdit : props.onSeat}
+                type="button"
+              >
+                <Utensils size={18} />
+                {needsTable
+                  ? "Asignar mesa"
+                  : `Sentar${reservation.tables[0] ? ` en ${reservation.tables[0].name}` : ""}`}
+              </UiButton>
+            ) : null}
+            {actions.openOrder && reservation.orderId ? (
+              <UiButton
+                className="inline-flex min-h-12 w-full items-center justify-center gap-2 rounded-xl border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)]"
+                onClick={() => props.onOpenOrder(reservation.orderId!)}
+                type="button"
+              >
+                <Utensils size={18} />
+                Abrir comanda
+              </UiButton>
+            ) : null}
+            <div className="grid grid-cols-3 gap-2 max-[390px]:grid-cols-2">
+              {actions.arrive && props.canManage ? (
+                <UiButton
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm font-extrabold text-[var(--foreground)]"
+                  disabled={props.disabled}
+                  onClick={() => props.onStatus("arrived")}
+                  type="button"
+                >
+                  <UserCheck size={17} />
+                  Llegada
+                </UiButton>
+              ) : null}
+              {actions.edit && props.canManage ? (
+                <UiButton
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm font-extrabold text-[var(--foreground)]"
+                  disabled={props.disabled}
+                  onClick={props.onEdit}
+                  type="button"
+                >
+                  <Edit3 size={17} />
+                  Editar
+                </UiButton>
+              ) : null}
+              <a
+                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm font-extrabold text-[var(--foreground)] no-underline"
+                href={`tel:${reservation.customerPhone}`}
+              >
+                <Phone size={17} />
+                Llamar
+              </a>
+              {actions.noShow && props.canManage ? (
+                <UiButton
+                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm font-extrabold text-[var(--foreground)]"
+                  disabled={props.disabled}
+                  onClick={() => setConfirmation("no_show")}
+                  type="button"
+                >
+                  No presentado
+                </UiButton>
+              ) : null}
+            </div>
+            {actions.cancel && props.canManage ? (
+              <UiButton
+                className="inline-flex min-h-10 w-full items-center justify-center rounded-xl border border-transparent bg-transparent px-4 text-sm font-extrabold text-[var(--danger)] hover:bg-[var(--danger-soft)]"
+                disabled={props.disabled}
+                onClick={() => setConfirmation("cancelled")}
+                type="button"
+              >
+                Cancelar reserva
+              </UiButton>
+            ) : null}
+          </footer>
+        </aside>
+      </div>
+
       {confirmation ? (
         <AppModal
-          containerClassName="!p-4" maxWidth={448}
+          containerClassName="!p-4"
           dismissDisabled={props.disabled}
           label={
             confirmation === "cancelled"
               ? "Cancelar reserva"
               : "Marcar como no presentada"
           }
+          maxWidth={448}
           onClose={() => setConfirmation(null)}
         >
-          <section className="w-[min(440px,100%)] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)]">
-            <h2>
+          <section className="w-full rounded-2xl bg-[var(--surface)] p-6 text-[var(--foreground)]">
+            <h2 className="m-0 text-xl font-black">
               {confirmation === "cancelled"
                 ? "Cancelar reserva"
                 : "Marcar como no presentada"}
             </h2>
-            <p>La reserva seguirá disponible en el historial.</p>
+            <p className="mb-5 mt-2 text-[var(--muted)]">
+              La reserva seguirá disponible en el historial.
+            </p>
             {confirmation === "cancelled" ? (
-              <label>
+              <label className="grid gap-2 text-sm font-extrabold">
                 Motivo opcional
                 <UiInput
                   autoFocus
+                  className="rounded-xl border border-[var(--field-border)] !text-[var(--foreground)]"
                   onChange={(event) => setReason(event.target.value)}
                   value={reason}
                 />
               </label>
             ) : null}
-            <div>
+            <div className="mt-6 flex justify-end gap-2">
               <UiButton
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline bg-[var(--surface)] text-[var(--foreground)]"
+                className="min-h-11 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold"
                 onClick={() => setConfirmation(null)}
                 type="button"
               >
                 Volver
               </UiButton>
               <UiButton
-                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] px-4 font-extrabold no-underline border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]"
+                className="min-h-11 rounded-xl border border-[var(--danger)] bg-[var(--danger)] px-4 font-extrabold text-white"
                 disabled={props.disabled}
                 onClick={() => {
                   props.onStatus(confirmation, reason.trim() || undefined);

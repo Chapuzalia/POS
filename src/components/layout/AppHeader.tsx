@@ -113,9 +113,9 @@ export function AppHeader({
           </Dropdown>
 
           {canOpenReservations ? (
-            <UiButton aria-label="Reservas" className={`min-h-11 items-center gap-0 px-3 text-sm font-semibold sm:gap-3 ${compactMobile ? 'hidden' : 'flex'}`} disabled={isLoading || !isOnline} onClick={onOpenReservations} type="button">
+            <UiButton aria-label="Reservas" className="flex min-h-11 items-center gap-0 px-3 text-sm font-semibold sm:gap-3 " disabled={isLoading || !isOnline} onClick={onOpenReservations} type="button">
               <CalendarDays className="h-4 w-4" />
-              <span className="sr-only sm:not-sr-only">Reservas</span>
+              <span className='not-sr-only pl-2'>Reservas</span>
             </UiButton>
           ) : null}
         </div>
