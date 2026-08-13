@@ -14,7 +14,7 @@ function escapeHtml(value: unknown) {
 export function openFiscalInvoiceDocument(ticket: CrmSalesReportTicket, context: TenantContext) {
   if (!ticket.fiscal) throw new Error('El ticket no tiene factura fiscal')
   const popup = window.open('', '_blank')
-  if (!popup) throw new Error('El navegador ha bloqueado la ventana de impresion')
+  if (!popup) throw new Error('El navegador ha bloqueado la ventana de impresión')
   const qr = fiscalQrDataUrl(ticket.fiscal.qrBase64)
   const rows = ticket.lines.map((line) => `
     <tr>

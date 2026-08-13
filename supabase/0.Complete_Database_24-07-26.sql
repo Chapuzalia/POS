@@ -13072,7 +13072,7 @@ begin
       v_new_unit_id := gen_random_uuid();
 
       select left(
-        u.name || ' Â· ' || trim(to_char(v_definition.content_quantity, 'FM999999999999990.######'))
+        u.name || ' · ' || trim(to_char(v_definition.content_quantity, 'FM999999999999990.######'))
           || ' ' || coalesce(content_unit.symbol, '') || ' [' || left(v_new_unit_id::text, 8) || ']',
         80
       )

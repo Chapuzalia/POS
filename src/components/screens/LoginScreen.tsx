@@ -121,7 +121,7 @@ export function LoginScreen({
           </label>
           <label className="block">
             <span className="text-sm font-semibold text-[var(--muted)]">
-              Contrasena
+              Contraseña
             </span>
             <UiInput
               className="mt-1 h-12 w-full rounded-[var(--radius)] border-1 !bg-[var(--field)] px-3 text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)]"
@@ -191,7 +191,7 @@ export function LoginScreen({
               </span>
               <div>
                 <h2 className="text-xl font-black" id="login-conflict-title">
-                  Esta cuenta ya esta conectada
+                  Esta cuenta ya está conectada
                 </h2>
                 <p
                   className="mt-2 text-sm leading-6 text-[var(--muted)]"
@@ -201,9 +201,9 @@ export function LoginScreen({
                   <strong className="text-[var(--foreground)]">
                     {conflictAccountName}
                   </strong>{" "}
-                  esta abierta en otro dispositivo o pestana. Si fuerzas la
-                  conexion, la sesion anterior se cerrara y podria perder
-                  cambios que aun no haya guardado.
+                  está abierta en otro dispositivo o pestaña. Si fuerzas la
+                  conexión, la sesión anterior se cerrará y podría perder
+                  cambios que aún no haya guardado.
                 </p>
               </div>
             </div>
@@ -230,7 +230,7 @@ export function LoginScreen({
                 type="button"
                 variant="danger"
               >
-                {isBusy ? "Conectando..." : "Forzar conexion"}
+                {isBusy ? "Conectando..." : "Forzar conexión"}
               </Button>
             </div>
           </section>

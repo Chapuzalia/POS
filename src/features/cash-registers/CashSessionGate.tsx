@@ -175,14 +175,14 @@ export function CashSessionGate({
             onClick={onOpenClosingHistory}
             type="button"
           >
-            Historico de cierres
+            Histórico de cierres
           </UiButton>
           <UiButton
             className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)]"
             onClick={onLogout}
             type="button"
           >
-            Cerrar sesion
+            Cerrar sesión
           </UiButton>
         </div>
       </section>

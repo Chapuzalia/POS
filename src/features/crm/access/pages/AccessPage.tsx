@@ -175,7 +175,7 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
 
   async function releaseDeviceLogin(device: CrmDevice) {
     if (!device.account) return
-    if (!window.confirm(`Liberar la sesión de "${device.name}"? El dispositivo se desconectará en menos de 30 segundos.`)) return
+    if (!window.confirm(`¿Liberar la sesión de "${device.name}"? El dispositivo se desconectará en menos de 30 segundos.`)) return
 
     await runAction(async () => {
       await releaseCrmDeviceLogin(tenantContext, device.account!.userId)
@@ -184,7 +184,7 @@ export function AccessManagementCrm({ disabled, runAction, tenantContext }: Acce
   }
 
   async function removeDevice(device: CrmDevice) {
-    if (!window.confirm(`Eliminar definitivamente el dispositivo "${device.name}" y sus credenciales? Su histórico se conservará sin vincularlo al dispositivo.`)) return
+    if (!window.confirm(`¿Eliminar definitivamente el dispositivo "${device.name}" y sus credenciales? Su histórico se conservará sin vincularlo al dispositivo.`)) return
 
     await runAction(async () => {
       await deleteCrmDevice(tenantContext, device.id)

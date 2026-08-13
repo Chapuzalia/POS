@@ -570,7 +570,7 @@ export function SalesReportTicketModal({
   }
 
   async function cancelInvoice() {
-    if (!ticket.fiscal || !window.confirm('Solicitar la anulacion fiscal de esta factura? Esta operacion no edita el documento original.')) return
+    if (!ticket.fiscal || !window.confirm('¿Solicitar la anulación fiscal de esta factura? Esta operación no edita el documento original.')) return
     await runAction(async () => {
       await cancelFiscalInvoice(tenantContext, ticket.fiscal!.id)
       await Promise.all([onUpdated(), refreshEvents()])
@@ -650,7 +650,7 @@ export function SalesReportTicketModal({
               </div>
               <div className="!flex !flex-wrap !gap-2">
                 {!ticket.fiscal.externalUuid && (ticket.fiscal.status === 'pending' || (ticket.fiscal.status === 'error' && (ticket.fiscal.errorCode === 'network_error' || /^http_(429|5\d\d)$/.test(ticket.fiscal.errorCode ?? '')))) ? (
-                  <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-blue)]" disabled={disabled} onClick={() => void submitFiscalInvoice()} type="button"><Send className="!size-3.5" />{ticket.fiscal.status === 'error' ? 'Reintentar envio' : 'Enviar ahora'}</UiButton>
+                  <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-blue)]" disabled={disabled} onClick={() => void submitFiscalInvoice()} type="button"><Send className="!size-3.5" />{ticket.fiscal.status === 'error' ? 'Reintentar envío' : 'Enviar ahora'}</UiButton>
                 ) : null}
                 <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-xs !font-semibold !text-[var(--crm-text)]" disabled={disabled || !ticket.fiscal.externalUuid} onClick={() => void consultFiscalStatus()} type="button"><RefreshCw className="!size-3.5" />Consultar estado</UiButton>
                 <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-xs !font-semibold !text-[var(--crm-text)]" disabled={!ticket.fiscal.qrBase64} onClick={viewQr} type="button"><QrCode className="!size-3.5" />Ver QR</UiButton>
@@ -662,8 +662,8 @@ export function SalesReportTicketModal({
             </div>
 
             <div className="!grid !grid-cols-1 !gap-2 sm:!grid-cols-2">
-              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">UUID</span><code className="!mt-1 !block !break-all !text-xs !text-[var(--crm-text)]">{ticket.fiscal.externalUuid ?? 'Pendiente de asignacion'}</code></div>
-              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Ultimo error</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.fiscal.errorMessage ?? 'Sin errores'}{ticket.fiscal.errorCode ? ` (${ticket.fiscal.errorCode})` : ''}</p></div>
+              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">UUID</span><code className="!mt-1 !block !break-all !text-xs !text-[var(--crm-text)]">{ticket.fiscal.externalUuid ?? 'Pendiente de asignación'}</code></div>
+              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Último error</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.fiscal.errorMessage ?? 'Sin errores'}{ticket.fiscal.errorCode ? ` (${ticket.fiscal.errorCode})` : ''}</p></div>
             </div>
 
             <div>
@@ -676,10 +676,10 @@ export function SalesReportTicketModal({
                     {event.error_message ? <span className="!basis-full !text-[var(--crm-red)]">{event.error_message}</span> : null}
                   </div>
                 ))}
-                {!events.length ? <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">Todavia no hay comunicaciones registradas.</p> : null}
+                {!events.length ? <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">Todavía no hay comunicaciones registradas.</p> : null}
               </div>
             </div>
-            <p className="!m-0 !text-xs !leading-5 !text-[var(--crm-text-muted)]">La factura emitida es inmutable. Cualquier correccion debe tramitarse mediante factura rectificativa, anulacion o subsanacion.</p>
+            <p className="!m-0 !text-xs !leading-5 !text-[var(--crm-text-muted)]">La factura emitida es inmutable. Cualquier corrección debe tramitarse mediante factura rectificativa, anulación o subsanación.</p>
           </section>
         ) : (
           <div className="!mb-5 !rounded-[10px] !bg-[var(--crm-surface-soft)] !px-3.5 !py-3 !text-xs !font-medium !text-[var(--crm-text-muted)]">Este ticket no tiene un registro fiscal asociado.</div>

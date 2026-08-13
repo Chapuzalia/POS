@@ -4,7 +4,7 @@ export function MissingConfigScreen() {
   return (
     <main className="flex h-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] items-center justify-center bg-[var(--background)] p-4 text-[var(--foreground)]">
       <section className="w-full max-w-xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 shadow-[var(--shadow)]">
-        <p className="text-sm font-bold uppercase tracking-normal text-[var(--danger)]">Falta configuracion</p>
+        <p className="text-sm font-bold uppercase tracking-normal text-[var(--danger)]">Falta configuración</p>
         <h1 className="mt-2 text-3xl font-bold">Conecta Supabase</h1>
         <p className="mt-3 text-[var(--muted)]">
           Crea un archivo <code className="rounded bg-[var(--surface-secondary)] px-1.5 py-0.5">.env.local</code> a partir de{' '}

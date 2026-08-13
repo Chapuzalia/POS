@@ -72,7 +72,7 @@ export function createPrintAgentClient(options: ClientOptions) {
   async function request<T>(path: string, requestOptions: RequestOptions = {}): Promise<T> {
     const method = requestOptions.method || 'GET'
     const requiresToken = requestOptions.protected !== false
-    if (requiresToken && !options.token) throw new PrintAgentError({ code: 'UNAUTHORIZED', message: 'Configura el token del servidor de impresion.' })
+    if (requiresToken && !options.token) throw new PrintAgentError({ code: 'UNAUTHORIZED', message: 'Configura el token del servidor de impresión.' })
     const attempts = Math.max(1, (requestOptions.retries || 0) + 1)
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
@@ -121,7 +121,7 @@ export function createPrintAgentClient(options: ClientOptions) {
   }
 
   async function discoverPrintersStream(onEvent: (event: { type: string; printer?: Printer; scanned?: number; total?: number; found?: number }) => void, signal?: AbortSignal) {
-    if (!options.token) throw new PrintAgentError({ code: 'UNAUTHORIZED', message: 'Configura el token del servidor de impresion.' })
+    if (!options.token) throw new PrintAgentError({ code: 'UNAUTHORIZED', message: 'Configura el token del servidor de impresión.' })
     const response = await fetchImpl(`${baseUrl}/api/v1/printers/discover/events`, {
       headers: { ...buildPrintAgentHeaders(options.token), Accept: 'text/event-stream' },
       cache: 'no-store', credentials: 'omit', mode: 'cors', signal,

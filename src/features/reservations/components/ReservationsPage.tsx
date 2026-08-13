@@ -360,6 +360,7 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
 
       {controller.editor ? (
         <ReservationFormModal
+          checkAvailability={controller.checkAvailability}
           conflicts={controller.conflicts}
           date={controller.date}
           disabled={!isOnline || controller.isLoading}

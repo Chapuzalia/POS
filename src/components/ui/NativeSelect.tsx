@@ -67,7 +67,7 @@ export function NativeSelect({
     <>
       {name ? <Input name={name} type="hidden" value={selectedValue} /> : null}
       <HeroSelect
-        aria-label={ariaLabel ?? name ?? 'Seleccionar opcion'}
+        aria-label={ariaLabel ?? name ?? 'Seleccionar opción'}
         className={className}
         fullWidth
         isDisabled={disabled}
@@ -86,7 +86,7 @@ export function NativeSelect({
       >
         <HeroSelect.Trigger className={`flex min-h-12 items-center gap-2 ${triggerClassName ?? ''}`}>
           <HeroSelect.Value className="min-w-0 flex-1 truncate pr-1">
-            {selectedOption?.label ?? 'Seleccionar opcion'}
+            {selectedOption?.label ?? 'Seleccionar opción'}
           </HeroSelect.Value>
           <HeroSelect.Indicator className="!static !inset-auto ml-1 shrink-0" />
         </HeroSelect.Trigger>

@@ -52,7 +52,7 @@ async function getClientId() {
 
 export async function claimLoginLease() {
   if (!supabase) {
-    throw new Error('Supabase no esta configurado.')
+    throw new Error('Supabase no está configurado.')
   }
 
   const clientId = await getClientId()
@@ -67,7 +67,7 @@ export async function claimLoginLease() {
 
 export async function forceClaimLoginLease() {
   if (!supabase) {
-    throw new Error('Supabase no esta configurado.')
+    throw new Error('Supabase no está configurado.')
   }
 
   const clientId = await getClientId()

@@ -476,7 +476,7 @@ export function useRestaurantController(options: Options) {
           setSplitOrderGroup(group)
           const current = group.orders.find((detail) => detail.order.id === currentId && detail.order.status === 'open')
           if (current) draft.replaceOrder(current)
-          options.onError('Las comandas cambiaron en otro dispositivo. Se ha recargado la version mas reciente.')
+          options.onError('Las comandas cambiaron en otro dispositivo. Se ha recargado la versión más reciente.')
         } catch (reloadError) {
           options.onError(getReadableError(reloadError))
         }

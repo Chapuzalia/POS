@@ -262,7 +262,7 @@ export function useCashSession(options: Options) {
     const context = options.context
     const activeSession = session
     if (!context || !activeSession || !options.isOnline) {
-      throw new Error('Los movimientos de caja requieren una caja abierta y conexion.')
+      throw new Error('Los movimientos de caja requieren una caja abierta y conexión.')
     }
     if (!context.canManageCash && !['manager', 'owner'].includes(context.role)) {
       throw new Error('No tienes permiso para gestionar movimientos de caja.')
@@ -330,14 +330,14 @@ export function useCashSession(options: Options) {
     if (!options.context || printingClosingId) return false
     const state = usePrintAgentStore.getState()
     const printerId = state.selectedPrinterId || state.selectedPrinter?.id
-    if (!state.token) { sileo.warning({ title: 'Servidor de impresion no configurado.' }); return false }
+    if (!state.token) { sileo.warning({ title: 'Servidor de impresión no configurado.' }); return false }
     if (!printerId) { sileo.warning({ title: 'No hay una impresora configurada.' }); return false }
     if (!printOptions.isReprint && closing.printStatus === 'printed') {
-      sileo.warning({ title: 'Este cierre ya se imprimio.', description: 'Usa la accion de reimpresion para generar una copia.' })
+      sileo.warning({ title: 'Este cierre ya se imprimió.', description: 'Usa la acción de reimpresión para generar una copia.' })
       return false
     }
     if (closing.printStatus === 'unknown') {
-      sileo.warning({ title: 'No se puede confirmar si el cierre se imprimio.', description: 'Comprueba la impresora antes de volver a imprimir.' })
+      sileo.warning({ title: 'No se puede confirmar si el cierre se imprimió.', description: 'Comprueba la impresora antes de volver a imprimir.' })
       return false
     }
     const copyNumber = printOptions.isReprint ? Math.max(1, printOptions.copyNumber || closing.printCopies + 1) : 0
@@ -349,7 +349,7 @@ export function useCashSession(options: Options) {
         isReprint: Boolean(printOptions.isReprint), copyNumber,
       })
       if (!claimed) {
-        sileo.warning({ title: 'La impresion ya fue solicitada.', description: 'Actualiza el historico antes de crear otra copia.' })
+        sileo.warning({ title: 'La impresión ya fue solicitada.', description: 'Actualiza el histórico antes de crear otra copia.' })
         return false
       }
       const result = await printCashClosing({ closing, context: options.context, isReprint: printOptions.isReprint, copyNumber })
@@ -382,7 +382,7 @@ export function useCashSession(options: Options) {
 
   const openClosingHistory = useCallback(async () => {
     if (!options.context || !options.isOnline) {
-      options.onError('El historico de cierres requiere conexion.')
+      options.onError('El histórico de cierres requiere conexión.')
       return
     }
     options.setBusy(true)

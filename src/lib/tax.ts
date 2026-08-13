@@ -10,7 +10,7 @@ export type TaxBreakdown = {
 
 function assertMoneyCents(value: number, label: string) {
   if (!Number.isSafeInteger(value) || value < 0) {
-    throw new RangeError(`${label} debe ser un importe no negativo en centimos.`)
+    throw new RangeError(`${label} debe ser un importe no negativo en céntimos.`)
   }
 }
 

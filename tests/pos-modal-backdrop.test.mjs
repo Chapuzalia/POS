@@ -6,7 +6,7 @@ test('the shared POS modal delegates dismissal, focus trap and Escape to HeroUI'
   const source = await readFile(new URL('../src/components/ui/AppModal.tsx', import.meta.url), 'utf8')
 
   assert.match(source, /from ["']@heroui\/react["']/)
-  assert.match(source, /<Modal\.Trigger aria-hidden="true" className="hidden" tabIndex=\{-1\} \/>/)
+  assert.match(source, /<Modal\.Trigger[^>]*aria-hidden="true"[^>]*className="(?:hidden|sr-only)"[^>]*tabIndex=\{-1\}[^>]*\/>/)
   assert.match(source, /<Modal\.Backdrop/)
   assert.match(source, /isDismissable=\{!dismissDisabled\}/)
   assert.match(source, /isKeyboardDismissDisabled=\{dismissDisabled\}/)

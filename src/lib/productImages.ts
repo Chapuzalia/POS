@@ -38,7 +38,7 @@ function loadImageWithElement(file: File): Promise<LoadedImage> {
 
 async function loadProductImage(file: File): Promise<LoadedImage> {
   if (!isImageFile(file)) {
-    throw new Error('Selecciona un archivo de imagen valido.')
+    throw new Error('Selecciona un archivo de imagen válido.')
   }
 
   if ('createImageBitmap' in window) {

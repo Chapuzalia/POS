@@ -162,7 +162,7 @@ export function PosPage(props: Props) {
         onIncrement={(lineId) => updateQuantity(lineId, 1)}
         onEdit={(line) => {
           if (line.servedQuantity > 0) {
-            props.onSetError('No se puede editar una linea con productos ya servidos.')
+            props.onSetError('No se puede editar una línea con productos ya servidos.')
             return
           }
           const item = resolvedCatalog?.items.find((candidate) => (
@@ -305,7 +305,7 @@ export function PosPage(props: Props) {
             heading={undefined}
             onOpenDiscount={quickSale.openDiscountModal}
             onPayment={handlePayment}
-            onRemoveDiscount={() => quickSale.setDiscount(null)}
+            onRemoveDiscount={quickSale.removeDiscount}
             subtotalCents={subtotalCents}
             totalCents={totalCents}
           />
@@ -341,7 +341,7 @@ export function PosPage(props: Props) {
             heading={undefined}
             onOpenDiscount={quickSale.openDiscountModal}
             onPayment={handlePayment}
-            onRemoveDiscount={() => quickSale.setDiscount(null)}
+            onRemoveDiscount={quickSale.removeDiscount}
             subtotalCents={subtotalCents}
             totalCents={totalCents}
           />
@@ -428,7 +428,7 @@ export function PosPage(props: Props) {
         manualDiscountEnabled={props.manualDiscountEnabled}
         manualDiscountRequiresPin={props.manualDiscountRequiresPin}
         onCancel={quickSale.closeDiscountModal}
-        onSelect={(discount) => { quickSale.setDiscount(discount); quickSale.closeDiscountModal() }}
+        onSelect={(discount) => { quickSale.applyDiscount(discount); quickSale.closeDiscountModal() }}
         subtotalCents={subtotalCents}
         schedule={props.discountSchedule}
         validatePin={validateConfiguredDiscountPin}

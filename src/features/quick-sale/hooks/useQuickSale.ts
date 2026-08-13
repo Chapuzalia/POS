@@ -61,6 +61,7 @@ type Options = {
 export function useQuickSale(options: Options) {
   const [lines, setLines] = useState<TicketLine[]>([])
   const [discount, setDiscount] = useState<AppliedDiscount | null>(null)
+  const [excludedAutomaticDiscountIds, setExcludedAutomaticDiscountIds] = useState<string[]>([])
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
   const [cashPaymentOpen, setCashPaymentOpen] = useState(false)
   const [discountModalOpen, setDiscountModalOpen] = useState(false)
@@ -70,6 +71,7 @@ export function useQuickSale(options: Options) {
     options.discounts,
     options.context?.venueId ?? '',
     options.discountSchedule,
+    excludedAutomaticDiscountIds,
   )
 
   const activePromotionId = activeDiscount?.ruleKind === 'promotion'
@@ -80,13 +82,35 @@ export function useQuickSale(options: Options) {
   const previousPromotionRef = useRef<{ id: string; name: string } | null>(null)
   useEffect(() => {
     const previous = previousPromotionRef.current
-    if (previous && !activePromotionId) {
+    if (previous && !activePromotionId && !excludedAutomaticDiscountIds.includes(previous.id)) {
       sileo.info({ title: `${previous.name} ha dejado de estar disponible` })
     }
     previousPromotionRef.current = activePromotionId && activePromotionName
       ? { id: activePromotionId, name: activePromotionName }
       : null
-  }, [activePromotionId, activePromotionName])
+  }, [activePromotionId, activePromotionName, excludedAutomaticDiscountIds])
+
+  const resetDiscount = useCallback((nextDiscount: AppliedDiscount | null) => {
+    setExcludedAutomaticDiscountIds((current) => current.length ? [] : current)
+    setDiscount(nextDiscount)
+  }, [])
+
+  const applyDiscount = useCallback((nextDiscount: AppliedDiscount) => {
+    if (nextDiscount.discountId) {
+      setExcludedAutomaticDiscountIds((current) => current.filter((id) => id !== nextDiscount.discountId))
+    }
+    setDiscount(nextDiscount)
+  }, [])
+
+  const removeDiscount = useCallback(() => {
+    const automaticDiscountId = activeDiscount?.automatic ? activeDiscount.discountId : null
+    if (automaticDiscountId) {
+      setExcludedAutomaticDiscountIds((current) => current.includes(automaticDiscountId)
+        ? current
+        : [...current, automaticDiscountId])
+    }
+    setDiscount(null)
+  }, [activeDiscount])
 
 
   const updateLines = useCallback((update: (previous: TicketLine[]) => TicketLine[]) => {
@@ -123,6 +147,7 @@ export function useQuickSale(options: Options) {
     resetUi: (method) => {
       options.setMobileTicketOpen(false)
       setDiscount(null)
+      setExcludedAutomaticDiscountIds([])
       setDiscountModalOpen(false)
       setPaidFeedback(method)
       window.setTimeout(() => setPaidFeedback(null), 500)
@@ -176,6 +201,7 @@ export function useQuickSale(options: Options) {
   const reset = useCallback((nextLines: TicketLine[] = []) => {
     setLines(nextLines)
     setDiscount(null)
+    setExcludedAutomaticDiscountIds([])
     setProductDialog(null)
     setCashPaymentOpen(false)
     setDiscountModalOpen(false)
@@ -184,6 +210,7 @@ export function useQuickSale(options: Options) {
 
   return {
     addLine,
+    applyDiscount,
     cashPaymentOpen,
     changeQuantity: (lineId: string, direction: 1 | -1) => {
       updateLines((previous) => changeQuickSaleTicketLineQuantity(previous, lineId, direction))
@@ -191,6 +218,7 @@ export function useQuickSale(options: Options) {
     clear: () => {
       updateLines(() => [])
       setDiscount(null)
+      setExcludedAutomaticDiscountIds([])
     },
     closeCashPayment: () => setCashPaymentOpen(false),
     closeDiscountModal: () => setDiscountModalOpen(false),
@@ -208,10 +236,11 @@ export function useQuickSale(options: Options) {
     paidFeedback,
     productDialog,
     refreshProductStats,
+    removeDiscount,
     removeLine: (lineId: string) => updateLines((previous) => previous.filter((line) => line.id !== lineId)),
     reset,
     selectProduct,
-    setDiscount,
+    setDiscount: resetDiscount,
     subtotalCents,
     totalCents: discountCalculation.totalCents,
   }

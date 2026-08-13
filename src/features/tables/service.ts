@@ -24,7 +24,7 @@ const orderColumns = 'id, tenant_id, venue_id, cash_session_id, cash_register_id
 const lineColumns = 'id, tenant_id, venue_id, order_id, product_id, variant_id, product_name, variant_name, unit_price_cents, quantity, served_quantity, fully_served_at, modifiers, components, catalog_snapshot, mixer_product_id, mixer, note, created_at, updated_at'
 
 function requireSupabase() {
-  if (!supabase) throw new Error('Supabase no esta configurado.')
+  if (!supabase) throw new Error('Supabase no está configurado.')
   return supabase
 }
 

@@ -3,7 +3,7 @@ import { supabase } from "../../../../lib/supabase";
 
 export function requireSupabase() {
   if (!supabase) {
-    throw new Error("Supabase no esta configurado.");
+    throw new Error("Supabase no está configurado.");
   }
 
   return supabase;

@@ -116,7 +116,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
     const assignmentCount = catalog.selectionAssignments.filter((item) => item.productId === summary.product.id).length
       + catalog.modifierAssignments.filter((item) => item.productId === summary.product.id).length
     const impact = `${summary.variants.length} variantes, ${summary.placementCount} apariciones y ${assignmentCount} asignaciones`
-    if (!window.confirm(`Eliminar definitivamente “${summary.product.name}”? Se eliminarán ${impact}. El histórico de ventas se conserva.`)) return
+    if (!window.confirm(`¿Eliminar definitivamente “${summary.product.name}”? Se eliminarán ${impact}. El histórico de ventas se conserva.`)) return
     const saved = await mutate(() => catalogAdminService.deleteProduct(catalog.venueId, summary.product.id))
     if (saved && editorProductId === summary.product.id) setEditorProductId(null)
   }

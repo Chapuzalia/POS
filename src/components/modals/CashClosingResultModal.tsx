@@ -18,7 +18,7 @@ export function CashClosingResultModal({ closing, isPrinting, onClose, onPrint }
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <CheckCircle2 className="mt-1 h-7 w-7 text-emerald-600" />
-          <div><h2 className="text-2xl font-black">Cierre completado</h2><p className="text-sm text-[var(--muted)]">El cierre se ha guardado. La impresion es independiente.</p></div>
+          <div><h2 className="text-2xl font-black">Cierre completado</h2><p className="text-sm text-[var(--muted)]">El cierre se ha guardado. La impresión es independiente.</p></div>
         </div>
         <Button disabled={isPrinting} onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
       </div>
@@ -40,7 +40,7 @@ export function CashClosingResultModal({ closing, isPrinting, onClose, onPrint }
           value={formatMoney(Math.abs(amounts.cashToWithdrawCents))}
         />
       </div>
-      {unknown ? <p className="mt-4 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-bold text-amber-700">No se puede confirmar si el cierre se imprimio. Comprueba la impresora antes de volver a imprimir.</p> : null}
+      {unknown ? <p className="mt-4 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-bold text-amber-700">No se puede confirmar si el cierre se imprimió. Comprueba la impresora antes de volver a imprimir.</p> : null}
       {closing.printStatus === 'failed' ? <p className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold text-red-700">El cierre se ha guardado, pero no se ha podido imprimir. Puedes reintentar con el mismo identificador.</p> : null}
       <div className="mt-5 flex flex-wrap justify-end gap-2">
         <Button onClick={onClose} type="button" variant="secondary">Cerrar</Button>

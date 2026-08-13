@@ -712,7 +712,7 @@ export function TableMapView(props: Props) {
             type="button"
           >
             {editMode ? <Check size={18} /> : <Pencil size={18} />}
-            {editMode ? "Finalizar edicion" : "Editar mesas"}
+            {editMode ? "Finalizar edición" : "Editar mesas"}
           </UiButton>
           {canQuickSale ? (
             <UiButton
@@ -720,14 +720,14 @@ export function TableMapView(props: Props) {
               onClick={onQuickSale}
               type="button"
             >
-              <ShoppingBag size={18} /> Venta rapida
+              <ShoppingBag size={18} /> Venta rápida
             </UiButton>
           ) : null}
         </div>
       </header> : null}
       {!isOnline ? (
         <div className="rounded-[var(--radius)] border border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_12%,var(--surface))] px-3.5 py-[11px] font-bold text-[var(--warning)]">
-          La gestion de mesas requiere conexion. La venta rapida sigue
+          La gestión de mesas requiere conexión. La venta rápida sigue
           disponible.
         </div>
       ) : null}
@@ -1006,7 +1006,7 @@ export function TableMapView(props: Props) {
             <strong>{groupMenuTable?.name}</strong>
             {groupMenuLocked ? (
               <p>
-                La comanda esta abierta. Cobra o cancela la comanda antes de
+                La comanda está abierta. Cobra o cancela la comanda antes de
                 separar las mesas.
               </p>
             ) : null}
@@ -1064,7 +1064,7 @@ export function TableMapView(props: Props) {
             <p>
               {pendingReservation
                 ? `Esta mesa tiene una reserva a las ${new Intl.DateTimeFormat("es", { hour: "2-digit", minute: "2-digit" }).format(new Date(pendingReservation.startsAt))} para ${pendingReservation.customerName}.`
-                : "La comanda se guardara automaticamente y quedara disponible para los dispositivos del local."}
+                : "La comanda se guardará automáticamente y quedará disponible para los dispositivos del local."}
             </p>
             {pendingReservation?.status === "arrived" ? (
               <UiButton
@@ -1079,7 +1079,7 @@ export function TableMapView(props: Props) {
               </UiButton>
             ) : null}
             <label>
-              Numero de comensales
+              Número de comensales
               <UiInput
                 autoFocus
                 min="1"

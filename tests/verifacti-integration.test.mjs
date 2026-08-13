@@ -366,7 +366,7 @@ test('el borrado remoto solicita la anulacion fiscal antes de poner el ticket en
   ])
   assert.match(fiscalService, /action: 'void-ticket', tenantId, ticketId/)
   assert.match(cashActions, /await voidTicketWithFiscalCancellation\(context\.tenantId, ticket\.payload\.ticket\.id\)/)
-  assert.match(cashActions, /Necesitas conexion para anular un ticket/)
+  assert.match(cashActions, /Necesitas conexión para anular un ticket/)
   assert.match(api, /if \(action === 'void-ticket'\)/)
   assert.match(api, /await queueInvoiceCancellation[\s\S]*admin\.rpc\('finalize_ticket_void'/)
   assert.match(api, /fiscalCancellationQueued: cancellation\?\.status === 'pending'/)

@@ -269,7 +269,7 @@ export function getAvailableVenueDiscounts(
   context: DiscountScheduleContext,
 ) {
   return getActiveVenueDiscounts(discounts, venueId)
-    .filter((discount) => !discount.autoApply && isPromotionActive(discount, context))
+    .filter((discount) => isPromotionActive(discount, context))
 }
 
 export function toAppliedDiscount(discount: Discount, automatic = discount.autoApply): AppliedDiscount {
@@ -297,9 +297,13 @@ export function resolveTicketDiscount(
   discounts: Discount[],
   venueId: string,
   context: DiscountScheduleContext,
+  excludedAutomaticDiscountIds: readonly string[] = [],
 ) {
   const automatic = getActiveVenueDiscounts(discounts, venueId)
-    .find((discount) => discount.ruleKind === 'promotion' && discount.autoApply && isPromotionActive(discount, context))
+    .find((discount) => !excludedAutomaticDiscountIds.includes(discount.id)
+      && discount.ruleKind === 'promotion'
+      && discount.autoApply
+      && isPromotionActive(discount, context))
   if (automatic) return toAppliedDiscount(automatic, true)
   if (!current) return null
   if (!current.discountId) return current

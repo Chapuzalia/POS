@@ -134,7 +134,7 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
     if (!pendingLoginContext) return
     setIsBusy(true); setError(null)
     try {
-      if (!(await forceClaimLoginLease())) throw new Error('No se ha podido sustituir la sesion anterior.')
+      if (!(await forceClaimLoginLease())) throw new Error('No se ha podido sustituir la sesión anterior.')
       await activateAuthenticatedContext(pendingLoginContext)
       setPendingLoginContext(null); setLoginLeaseBlocked(false)
     } catch (error) { setError(getReadableError(error)) } finally { setIsBusy(false) }
@@ -152,8 +152,8 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
     if (!context) return
     setIsBusy(true); setError(null)
     try {
-      if (isBackofficeUser(context)) throw new TenantSessionError('El CRM requiere conexion.')
-      if (!(await hasValidOfflineSession(context))) throw new TenantSessionError('La sesion ha caducado. Conecta el TPV e inicia sesion de nuevo.')
+      if (isBackofficeUser(context)) throw new TenantSessionError('El CRM requiere conexión.')
+      if (!(await hasValidOfflineSession(context))) throw new TenantSessionError('La sesión ha caducado. Conecta el TPV e inicia sesión de nuevo.')
       await applyOfflineState(context)
     } catch (error) { setError(getReadableError(error)) } finally { setIsBusy(false) }
   }, [applyOfflineState, loginLeaseBlocked, setError, setIsBusy])

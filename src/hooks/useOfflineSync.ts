@@ -45,7 +45,7 @@ export function useOfflineSync(isOnline: boolean) {
         syncInFlightRef.current = null
       }
 
-      // Una venta puede haberse encolado justo cuando la sincronizacion
+      // Una venta puede haberse encolado justo cuando la sincronización
       // anterior ya estaba terminando. En ese caso necesita una nueva pasada.
       if (!getOfflineQueue().some((event) => event.attempts === 0)) {
         refreshPendingCount()

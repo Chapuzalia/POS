@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import {
   calculateDiscountForLines,
+  getAvailableVenueDiscounts,
   isLineEligibleForDiscount,
   isPromotionActive,
   resolveTicketDiscount,
@@ -143,6 +144,64 @@ test('aplica, conserva sin duplicar y retira una promoción automática en cada 
     first,
   )
   assert.equal(calculation.discountAmountCents, 100)
+})
+
+test('permite descartar la promoción automática solo para la comanda actual', () => {
+  const automatic = { ...promotion, autoApply: true }
+  const secondAutomatic = { ...automatic, id: 'promo-2', name: 'Segunda', sortOrder: 1 }
+  const activeContext = {
+    dayChangeTime: '05:00',
+    timeZone: 'Europe/Madrid',
+    now: new Date('2026-08-01T20:30:00Z'),
+  }
+
+  const dismissed = resolveTicketDiscount(null, [automatic], 'venue', activeContext, [automatic.id])
+  const nextActivePromotion = resolveTicketDiscount(
+    null,
+    [automatic, secondAutomatic],
+    'venue',
+    activeContext,
+    [automatic.id],
+  )
+  const allDismissed = resolveTicketDiscount(
+    null,
+    [automatic, secondAutomatic],
+    'venue',
+    activeContext,
+    [automatic.id, secondAutomatic.id],
+  )
+  const nextOrder = resolveTicketDiscount(null, [automatic], 'venue', activeContext)
+
+  assert.equal(dismissed, null)
+  assert.equal(nextActivePromotion?.discountId, secondAutomatic.id)
+  assert.equal(allDismissed, null)
+  assert.equal(nextOrder?.discountId, automatic.id)
+  assert.equal(nextOrder?.automatic, true)
+})
+
+test('muestra la promoción automática en el selector solo mientras está activa', () => {
+  const automatic = { ...promotion, autoApply: true }
+  const activeContext = {
+    dayChangeTime: '05:00',
+    timeZone: 'Europe/Madrid',
+    now: new Date('2026-08-01T20:30:00Z'),
+  }
+  const inactiveContext = {
+    ...activeContext,
+    now: new Date('2026-08-02T10:00:00Z'),
+  }
+
+  assert.deepEqual(
+    getAvailableVenueDiscounts([automatic], 'venue', activeContext).map((discount) => discount.id),
+    [automatic.id],
+  )
+  assert.deepEqual(getAvailableVenueDiscounts([automatic], 'venue', inactiveContext), [])
+})
+
+test('el botón de quitar usa la exclusión de la comanda en escritorio y móvil', async () => {
+  const posPage = await readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8')
+  assert.equal(posPage.match(/onRemoveDiscount=\{quickSale\.removeDiscount\}/g)?.length, 2)
+  assert.match(posPage, /quickSale\.applyDiscount\(discount\)/)
 })
 
 test('rechaza configuración automática con PIN y valida los campos de promoción', () => {

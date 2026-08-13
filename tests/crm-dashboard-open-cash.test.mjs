@@ -110,7 +110,7 @@ test('el dashboard muestra primero las cajas y permite filtrar por el local sele
     readFile(new URL('../src/types/domain.ts', import.meta.url), 'utf8'),
   ])
 
-  assert.ok(dashboard.indexOf('<span>Cajas abiertas</span>') < dashboard.indexOf('<span>Resumen del catalogo</span>'))
+  assert.ok(dashboard.indexOf('<span>Cajas abiertas</span>') < dashboard.indexOf('<span>Resumen del catálogo</span>'))
   assert.match(dashboard, /useState\(true\)/)
   assert.match(dashboard, /checked=\{showAllOpenCashSessions\}/)
   assert.match(dashboard, /Todas las cajas del negocio/)

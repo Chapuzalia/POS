@@ -9,6 +9,7 @@ import { isReservationLate } from '../domain/reservationStatus'
 import {
   changeReservationStatus,
   loadReservation,
+  loadReservationConflicts,
   loadReservationsForDate,
   loadReservationVenueSettings,
   ReservationConflictError,
@@ -213,6 +214,18 @@ export function useReservationsController(options: Options) {
     }
   }, [canManage, refresh, setCurrentDetail])
 
+  const checkAvailability = useCallback(async (
+    startsAt: string,
+    endsAt: string,
+    reservationId?: string,
+  ) => {
+    const { context, isOnline } = latestRef.current
+    if (!context || !isOnline) return []
+    setConflicts([])
+    setPendingConflictDraft(null)
+    return loadReservationConflicts(context, startsAt, endsAt, reservationId)
+  }, [])
+
   const updateStatus = useCallback(async (
     reservation: Reservation,
     status: ReservationStatus,
@@ -280,6 +293,7 @@ export function useReservationsController(options: Options) {
 
   return {
     canManage,
+    checkAvailability,
     close: () => {
       setIsOpen(false)
       setEditor(null)

@@ -99,6 +99,7 @@ export type ReservationSummary = {
 
 export type ReservationsController = {
   canManage: boolean
+  checkAvailability: (startsAt: string, endsAt: string, reservationId?: string) => Promise<ReservationConflict[]>
   close: () => void
   conflicts: ReservationConflict[]
   date: string

@@ -6,7 +6,7 @@ export function getInitialCrmTheme(): CrmTheme {
     const storedTheme = window.localStorage.getItem(CRM_THEME_STORAGE_KEY)
     if (storedTheme === 'light' || storedTheme === 'dark') return storedTheme
   } catch {
-    // El almacenamiento puede no estar disponible en navegacion privada.
+    // El almacenamiento puede no estar disponible en navegación privada.
   }
   return document.documentElement.dataset.theme === 'dark' ? 'dark' : 'light'
 }

@@ -611,7 +611,7 @@ export function ProductDialog({
               <Button
                 active={variant.id === selectedVariantId}
                 disabled={hasSubmitted}
-                className={variant.id === selectedVariantId ? "min-h-22" : "min-h-22 bg-(--field)"}
+                className={variant.id === selectedVariantId ? "min-h-22" : "min-h-22 bg-(--field) !border-1"}
                 fullWidth
                 key={variant.id}
                 onClick={(event) =>

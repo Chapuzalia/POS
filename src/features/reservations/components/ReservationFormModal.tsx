@@ -1,6 +1,6 @@
 import { CalendarDateTime } from "@internationalized/date";
-import { Calendar, DateField, DatePicker, Label } from "@heroui/react";
-import { useLayoutEffect, useMemo, useRef, useState } from "react";
+import { Calendar, DatePicker, Label } from "@heroui/react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import type { UIEvent } from "react";
 import { AppModal } from "../../../components/ui/AppModal";
 import { Button as UiButton } from "../../../components/ui/Button";
@@ -9,6 +9,7 @@ import {
   AlertTriangle,
   Check,
   Clock3,
+  LoaderCircle,
   Minus,
   Plus,
   ShieldAlert,
@@ -26,6 +27,11 @@ import type {
 } from "../types";
 
 type Props = {
+  checkAvailability: (
+    startsAt: string,
+    endsAt: string,
+    reservationId?: string,
+  ) => Promise<ReservationConflict[]>;
   conflicts: ReservationConflict[];
   date: string;
   disabled: boolean;
@@ -203,6 +209,7 @@ export function ReservationFormModal(props: Props) {
   const [dateTimeOpen, setDateTimeOpen] = useState(false);
   const [activeMobileSection, setActiveMobileSection] =
     useState<MobileFormSection>("service");
+  const dateTimeTriggerRef = useRef<HTMLButtonElement>(null);
   const calendarPaneRef = useRef<HTMLDivElement>(null);
   const dateTimeLayoutRef = useRef<HTMLDivElement>(null);
   const formScrollRef = useRef<HTMLDivElement>(null);
@@ -212,20 +219,19 @@ export function ReservationFormModal(props: Props) {
   const [pastConfirmation, setPastConfirmation] = useState(false);
   const [discardConfirmation, setDiscardConfirmation] = useState(false);
   const [conflictAcknowledged, setConflictAcknowledged] = useState(false);
+  const [liveConflicts, setLiveConflicts] = useState<ReservationConflict[]>([]);
+  const [isCheckingAvailability, setIsCheckingAvailability] = useState(false);
+  const [availabilityError, setAvailabilityError] = useState<string | null>(
+    null,
+  );
   const [areaId, setAreaId] = useState("all");
   const lockedSchedule = props.reservation?.status === "seated";
+  const checkAvailability = props.checkAvailability;
+  const reservationId = props.reservation?.id;
   const selectedCapacity = totalReservationTableCapacity(
     props.tables,
     tableIds,
   );
-  const conflictTableIds = useMemo(
-    () => new Set(props.conflicts.map((conflict) => conflict.tableId)),
-    [props.conflicts],
-  );
-  const activeConflicts = props.conflicts.filter((conflict) =>
-    tableIds.includes(conflict.tableId),
-  );
-  const hasActiveConflicts = activeConflicts.length > 0;
   const areas = useMemo(
     () => [
       ...new Map(
@@ -256,6 +262,54 @@ export function ReservationFormModal(props: Props) {
     ? minuteOptions
     : [...minuteOptions, minute].sort((a, b) => a - b);
   const dateTimeValue = new CalendarDateTime(year, month, day, hour, minute);
+  const schedule = useMemo(() => {
+    if (!date || !time || duration <= 0) return null;
+    const startsAt = zonedLocalToUtc(date, time, props.timeZone);
+    return {
+      startsAt,
+      endsAt: new Date(
+        new Date(startsAt).getTime() + duration * 60_000,
+      ).toISOString(),
+    };
+  }, [date, duration, props.timeZone, time]);
+  const displayedDateTime = useMemo(
+    () =>
+      schedule
+        ? new Intl.DateTimeFormat("es-ES", {
+            day: "2-digit",
+            hour: "2-digit",
+            hourCycle: "h23",
+            minute: "2-digit",
+            month: "2-digit",
+            timeZone: props.timeZone,
+            year: "numeric",
+          }).format(new Date(schedule.startsAt))
+        : "Selecciona fecha y hora",
+    [props.timeZone, schedule],
+  );
+  const conflicts = useMemo(() => {
+    const merged = new Map<string, ReservationConflict>();
+    for (const conflict of [...liveConflicts, ...props.conflicts]) {
+      if (
+        schedule &&
+        new Date(conflict.startsAt).getTime() <
+          new Date(schedule.endsAt).getTime() &&
+        new Date(conflict.endsAt).getTime() >
+          new Date(schedule.startsAt).getTime()
+      ) {
+        merged.set(`${conflict.reservationId}:${conflict.tableId}`, conflict);
+      }
+    }
+    return [...merged.values()];
+  }, [liveConflicts, props.conflicts, schedule]);
+  const conflictTableIds = useMemo(
+    () => new Set(conflicts.map((conflict) => conflict.tableId)),
+    [conflicts],
+  );
+  const activeConflicts = conflicts.filter((conflict) =>
+    tableIds.includes(conflict.tableId),
+  );
+  const hasActiveConflicts = activeConflicts.length > 0;
   const inputClass =
     "h-12 w-full rounded-xl border border-[var(--field-border)] bg-[var(--background)] px-3 text-base font-semibold text-[var(--foreground)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] outline-none transition focus:border-[var(--accent)] focus:ring-2 focus:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] disabled:bg-[var(--surface-secondary)] disabled:text-[var(--muted)] md:bg-[var(--surface)]";
 
@@ -273,6 +327,35 @@ export function ReservationFormModal(props: Props) {
     observer.observe(calendarPane);
     return () => observer.disconnect();
   }, [dateTimeOpen]);
+
+  useEffect(() => {
+    if (!schedule) return undefined;
+    let active = true;
+    setIsCheckingAvailability(true);
+    setAvailabilityError(null);
+    setConflictAcknowledged(false);
+    const timer = window.setTimeout(() => {
+      void checkAvailability(schedule.startsAt, schedule.endsAt, reservationId)
+        .then((nextConflicts) => {
+          if (active) setLiveConflicts(nextConflicts);
+        })
+        .catch(() => {
+          if (active) {
+            setLiveConflicts([]);
+            setAvailabilityError(
+              "No se pudo actualizar la disponibilidad. Se volverá a validar al guardar.",
+            );
+          }
+        })
+        .finally(() => {
+          if (active) setIsCheckingAvailability(false);
+        });
+    }, 250);
+    return () => {
+      active = false;
+      window.clearTimeout(timer);
+    };
+  }, [checkAvailability, reservationId, schedule]);
 
   function requestClose() {
     if (dirty && !props.disabled) setDiscardConfirmation(true);
@@ -362,7 +445,7 @@ export function ReservationFormModal(props: Props) {
         label={props.reservation ? "Editar reserva" : "Nueva reserva"}
         maxWidth={1200}
         onClose={requestClose}
-        placement="bottom"
+        placement="center"
       >
         <section className="flex h-[calc(100dvh-3.5rem)] w-full flex-col overflow-hidden bg-[var(--surface)] text-[var(--foreground)] md:h-[min(48.75rem,calc(100dvh-3rem))]">
           <div aria-hidden="true" className="flex h-5 shrink-0 items-center justify-center md:hidden">
@@ -459,46 +542,32 @@ export function ReservationFormModal(props: Props) {
                       shouldCloseOnSelect={false}
                       value={dateTimeValue}
                     >
-                      <Label className="text-[13px] font-extrabold">
+                      <Label className="text-[13px] ">
                         Fecha y hora *
                       </Label>
-                      <DateField.Group
-                        className="min-h-12 cursor-pointer rounded-xl border border-[var(--field-border)] bg-[var(--background)] px-3 shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] focus-within:border-[var(--accent)] focus-within:ring-2 focus-within:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] disabled:cursor-not-allowed md:bg-[var(--surface)]"
-                        fullWidth
-                        onClick={(event) => {
-                          if (
-                            !lockedSchedule &&
-                            !(event.target as HTMLElement).closest("button")
-                          )
-                            setDateTimeOpen(true);
-                        }}
-                        variant="secondary"
+                      <DatePicker.Trigger
+                        aria-label="Seleccionar fecha y hora"
+                        className="flex min-h-12 w-full cursor-pointer items-center justify-between gap-3 rounded-xl border border-[var(--field-border)] bg-[var(--background)] px-3 text-left text-base font-semibold text-[var(--foreground)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] outline-none transition hover:border-[var(--accent)] focus-visible:border-[var(--accent)] focus-visible:ring-2 focus-visible:ring-[color-mix(in_srgb,var(--accent)_20%,transparent)] disabled:cursor-not-allowed disabled:bg-[var(--surface-secondary)] disabled:text-[var(--muted)] md:bg-[var(--surface)]"
+                        ref={dateTimeTriggerRef}
                       >
-                        <DateField.Input  className="min-w-0 flex-1 text-base font-semibold">
-                          {(segment) => (
-                            <DateField.Segment
-                              className="rounded px-0.5 text-[var(--foreground)] data-[placeholder]:text-[var(--muted)]"
-                              segment={segment}
-                            />
-                          )}
-                        </DateField.Input>
-                        <DateField.Suffix>
-                          <DatePicker.Trigger
-                            aria-label="Abrir calendario"
-                            className="grid size-10 place-items-center rounded-lg text-[var(--muted)] hover:bg-[var(--surface-secondary)]"
-                          >
-                            <DatePicker.TriggerIndicator />
-                          </DatePicker.Trigger>
-                        </DateField.Suffix>
-                      </DateField.Group>
-                      <DatePicker.Popover className="w-[calc(100vw-1.5rem)] max-w-2xl rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-0 shadow-[var(--shadow)]">
+                        <span className="min-w-0 truncate tabular-nums">
+                          {displayedDateTime}
+                        </span>
+                        <DatePicker.TriggerIndicator className="shrink-0 text-[var(--muted)]" />
+                      </DatePicker.Trigger>
+                      <DatePicker.Popover
+                        className="!z-[90] max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-2xl overflow-hidden rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-0 shadow-[0_28px_72px_rgba(15,23,42,0.42),0_10px_28px_rgba(15,23,42,0.28)] max-sm:!fixed max-sm:!bottom-2 max-sm:!left-2 max-sm:!right-2 max-sm:!top-auto max-sm:!max-h-[calc(100dvh-1rem)] max-sm:!w-auto sm:w-[calc(100vw-1.5rem)]"
+                        offset={8}
+                        placement="bottom start"
+                        triggerRef={dateTimeTriggerRef}
+                      >
                         <div
-                          className="grid grid-cols-1 items-stretch sm:grid-cols-5"
+                          className="grid h-[min(36rem,calc(100dvh-1rem))] grid-cols-1 grid-rows-[auto_minmax(0,1fr)] items-stretch sm:h-auto sm:grid-cols-5 sm:grid-rows-none"
                           ref={dateTimeLayoutRef}
                         >
-                          <div className="p-4 sm:col-span-3 sm:p-5" ref={calendarPaneRef}>
+                          <div className="p-3 sm:col-span-3 sm:p-5" ref={calendarPaneRef}>
                             <Calendar aria-label="Seleccionar fecha de la reserva">
-                              <Calendar.Header>
+                              <Calendar.Header className="pb-2 sm:pb-4">
                                 <Calendar.NavButton slot="previous" />
                                 <Calendar.Heading />
                                 <Calendar.NavButton slot="next" />
@@ -506,7 +575,7 @@ export function ReservationFormModal(props: Props) {
                               <Calendar.Grid>
                                 <Calendar.GridHeader>
                                   {(weekDay) => (
-                                    <Calendar.HeaderCell>
+                                    <Calendar.HeaderCell className="pb-1 sm:pb-2">
                                       {weekDay}
                                     </Calendar.HeaderCell>
                                   )}
@@ -521,10 +590,10 @@ export function ReservationFormModal(props: Props) {
                           </div>
                           <section
                             aria-label="Seleccionar hora de la reserva"
-                            className="relative h-[var(--calendar-pane-height)] min-h-0 border-t border-[var(--separator)] bg-[var(--background)] sm:col-span-2 sm:h-auto sm:border-l sm:border-t-0"
+                            className="relative min-h-0 border-t border-[var(--separator)] bg-[var(--background)] sm:col-span-2 sm:h-[var(--calendar-pane-height)] sm:border-l sm:border-t-0"
                           >
                             <div className="absolute inset-0 flex min-h-0 flex-col">
-                              <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--separator)] px-4 py-3">
+                              <header className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--separator)] px-3 py-2 sm:px-4 sm:py-3">
                                 <span className="flex items-center gap-2 text-sm font-black">
                                   <Clock3 size={17} />
                                   Hora
@@ -535,7 +604,7 @@ export function ReservationFormModal(props: Props) {
                               </header>
                               <div className="grid min-h-0 flex-1 grid-cols-2 divide-x divide-[var(--separator)]">
                                 <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-                                  <span className="block px-4 py-2 text-[10px] font-black uppercase tracking-wider text-[var(--muted)]">
+                                  <span className="block px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-[var(--muted)] sm:px-4 sm:py-2">
                                     Hora
                                   </span>
                                   <InfiniteTimeColumn
@@ -555,7 +624,7 @@ export function ReservationFormModal(props: Props) {
                                   />
                                 </div>
                                 <div className="grid min-h-0 grid-rows-[auto_minmax(0,1fr)]">
-                                  <span className="block px-4 py-2 text-[10px] font-black uppercase tracking-wider text-[var(--muted)]">
+                                  <span className="block px-3 py-1.5 text-[10px] font-black uppercase tracking-wider text-[var(--muted)] sm:px-4 sm:py-2">
                                     Minuto
                                   </span>
                                   <InfiniteTimeColumn
@@ -575,9 +644,9 @@ export function ReservationFormModal(props: Props) {
                                   />
                                 </div>
                               </div>
-                              <div className="shrink-0 border-t border-[var(--separator)] p-3">
+                              <div className="shrink-0 border-t border-[var(--separator)] p-2 sm:p-3">
                                 <button
-                                  className="min-h-11 w-full rounded-xl bg-[var(--accent)] px-4 font-black text-[var(--accent-foreground)]"
+                                  className="min-h-10 w-full rounded-xl bg-[var(--accent)] px-4 font-black text-[var(--accent-foreground)] sm:min-h-11"
                                   onClick={() => setDateTimeOpen(false)}
                                   type="button"
                                 >
@@ -591,7 +660,7 @@ export function ReservationFormModal(props: Props) {
                       <FieldError>{errors.date ?? errors.time}</FieldError>
                     </DatePicker>
 
-                    <label className="grid gap-1.5 text-[13px] font-extrabold">
+                    <label className="grid gap-1.5 text-[13px]">
                       Duración *
                       <UiNativeSelect
                         className="w-full"
@@ -610,7 +679,7 @@ export function ReservationFormModal(props: Props) {
                       </UiNativeSelect>
                       <FieldError>{errors.duration}</FieldError>
                     </label>
-                    <div className="grid gap-1.5 text-[13px] font-extrabold">
+                    <div className="grid gap-1.5 text-[13px] ">
                       <span>Personas *</span>
                       <div className="grid h-12 grid-cols-[3rem_minmax(3rem,1fr)_3rem] overflow-hidden rounded-xl border border-[var(--field-border)] bg-[var(--background)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] md:bg-[var(--surface)]">
                         <UiButton
@@ -663,7 +732,7 @@ export function ReservationFormModal(props: Props) {
                       Datos de contacto y preferencias
                     </h3>
                   </div>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[13px] [&_label]:font-extrabold">
+                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 [&_label]:grid [&_label]:gap-1.5 [&_label]:text-[13px] ">
                     <label className="sm:col-span-full">
                       Nombre *
                       <input
@@ -732,6 +801,22 @@ export function ReservationFormModal(props: Props) {
                     <h3 className="mb-0 mt-1 text-base font-black">
                       Disponibilidad y capacidad
                     </h3>
+                    <p
+                      aria-live="polite"
+                      className={`mb-0 mt-1 flex items-center gap-1.5 text-xs font-semibold ${availabilityError ? "text-[var(--warning)]" : "text-[var(--muted)]"}`}
+                      role="status"
+                    >
+                      {isCheckingAvailability ? (
+                        <>
+                          <LoaderCircle className="animate-spin" size={14} />
+                          Comprobando disponibilidad…
+                        </>
+                      ) : availabilityError ? (
+                        availabilityError
+                      ) : (
+                        `Actualizada para ${displayedDateTime}`
+                      )}
+                    </p>
                   </div>
                   <select
                     aria-label="Filtrar mesas por zona"
@@ -826,7 +911,9 @@ export function ReservationFormModal(props: Props) {
                         <em
                           className={`text-[10px] font-black uppercase not-italic ${conflict ? "text-[var(--warning)]" : insufficient ? "text-[var(--muted)]" : "text-[var(--success)]"}`}
                         >
-                          {!table.isActive
+                          {isCheckingAvailability
+                            ? "Comprobando"
+                            : !table.isActive
                             ? "Inactiva"
                             : conflict
                               ? "Conflicto"
@@ -875,6 +962,7 @@ export function ReservationFormModal(props: Props) {
                     className={`min-h-12 rounded-xl border px-4 font-extrabold md:min-h-11 ${hasActiveConflicts ? "border-[var(--warning)] bg-[var(--surface)] text-[var(--warning)]" : "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]"}`}
                     disabled={
                       props.disabled ||
+                      isCheckingAvailability ||
                       (hasActiveConflicts && !conflictAcknowledged)
                     }
                     onClick={() => void submit(hasActiveConflicts)}

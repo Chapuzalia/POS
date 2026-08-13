@@ -19,7 +19,7 @@ type CashMovementRow = {
 }
 
 function client() {
-  if (!supabase) throw new Error('Supabase no esta configurado.')
+  if (!supabase) throw new Error('Supabase no está configurado.')
   return supabase
 }
 
@@ -46,7 +46,7 @@ export async function openCashRegisterSession(context: TenantContext, cashRegist
   if (error) throw error
   const state = await loadCashRegisterOptions(context)
   const session = state.sessions.find((item) => item.id === String(data))
-  if (!session) throw new Error('La caja se abrio, pero no se pudo recuperar la sesion.')
+  if (!session) throw new Error('La caja se abrió, pero no se pudo recuperar la sesión.')
   return session
 }
 
@@ -111,7 +111,7 @@ export async function createCashMovement(context: TenantContext, input: {
     p_request_id: input.requestId,
   })
   if (error) throw error
-  if (!data) throw new Error('El movimiento se guardo, pero no se pudo recuperar.')
+  if (!data) throw new Error('El movimiento se guardó, pero no se pudo recuperar.')
   return mapCashMovement(data as CashMovementRow)
 }
 

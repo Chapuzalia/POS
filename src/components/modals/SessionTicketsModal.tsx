@@ -8,7 +8,7 @@ import { usePrintAgent } from '../../features/local-printing'
 const paymentLabels: Record<HistoricalPaymentMethod, string> = {
   card: 'Tarjeta',
   cash: 'Efectivo',
-  invitation: 'Invitacion',
+  invitation: 'Invitación',
   other: 'Otros',
 }
 
@@ -41,7 +41,7 @@ export function SessionTicketsModal({
       <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
           <div>
-            <h2 className="text-2xl font-bold">Historico de tickets</h2>
+            <h2 className="text-2xl font-bold">Histórico de tickets</h2>
             <p className="text-sm text-[var(--muted)]">
               {activeTickets.length} activos
             </p>
@@ -75,7 +75,7 @@ export function SessionTicketsModal({
                         }).format(new Date(ticket.createdAt))}
                       </p>
                       <p className="mt-1 text-xs font-bold text-[var(--muted)]">
-                        Impresion: {ticket.printStatus || 'no solicitada'}{ticket.printErrorCode ? ` · ${ticket.printErrorCode}` : ''}
+                        Impresión: {ticket.printStatus || 'no solicitada'}{ticket.printErrorCode ? ` · ${ticket.printErrorCode}` : ''}
                       </p>
                     </div>
 
@@ -141,7 +141,7 @@ export function SessionTicketsModal({
             </div>
           ) : (
             <div className="flex min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">
-              No hay tickets creados en esta sesion.
+              No hay tickets creados en esta sesión.
             </div>
           )}
         </div>

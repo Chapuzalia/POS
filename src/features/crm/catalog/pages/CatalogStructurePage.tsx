@@ -82,7 +82,7 @@ export function CatalogStructureCrm({ catalog, disabled, mutate }: Props) {
       window.alert(`“${name}” se usa en ${impact} apariciones. Muévelas o elimínalas antes de borrar la categoría.`)
       return
     }
-    if (window.confirm(`Eliminar definitivamente la categoría “${name}”?`)) await mutate(() => catalogAdminService.deleteCategory(catalog.venueId, id))
+    if (window.confirm(`¿Eliminar definitivamente la categoría “${name}”?`)) await mutate(() => catalogAdminService.deleteCategory(catalog.venueId, id))
   }
 
   async function removeTab(id: string, label: string) {
@@ -91,7 +91,7 @@ export function CatalogStructureCrm({ catalog, disabled, mutate }: Props) {
       window.alert(`“${label}” contiene ${impact} apariciones. Muévelas o elimínalas antes de borrar la pestaña.`)
       return
     }
-    if (window.confirm(`Eliminar definitivamente la pestaña “${label}”?`)) await mutate(() => catalogAdminService.deleteTab(catalog.venueId, id))
+    if (window.confirm(`¿Eliminar definitivamente la pestaña “${label}”?`)) await mutate(() => catalogAdminService.deleteTab(catalog.venueId, id))
   }
 
   return (

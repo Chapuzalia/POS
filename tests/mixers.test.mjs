@@ -40,7 +40,7 @@ test('el payload de comanda rechaza mixers sinteticos e IDs no UUID', () => {
   ]})), /mixer no puede guardarse/)
   assert.throws(() => buildRestaurantOrderLinesPayload(orderWith({ ...base, modifiers: [
     { id: 'no-es-uuid', groupId: 'g', name: 'Hielo', priceCents: 0 },
-  ]})), /modificador no valido/)
+  ]})), /modificador no válido/)
 })
 
 test('la presentacion muestra modificadores y mixer sin mezclarlos en el modelo', () => {
@@ -73,5 +73,5 @@ test('el payload rechaza mixerProductId que no sea UUID', () => {
   assert.throws(() => buildRestaurantOrderLinesPayload(orderWith({
     id: lineId, productId, variantId: productId, quantity: 1, note: null,
     modifiers: [], mixerProductId: `mixer:${productId}`,
-  })), /mixer no valido/)
+  })), /mixer no válido/)
 })

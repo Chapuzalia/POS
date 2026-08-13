@@ -201,7 +201,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
 
   async function toggleTenant(tenant: PlatformTenant) {
     const nextActive = !tenant.isActive
-    if (!window.confirm(`${nextActive ? 'Activar' : 'Desactivar'} el negocio "${tenant.name}"?`)) return
+    if (!window.confirm(`¿${nextActive ? 'Activar' : 'Desactivar'} el negocio "${tenant.name}"?`)) return
 
     await runAction(async () => {
       await setPlatformTenantActive(tenant.id, nextActive)
@@ -211,7 +211,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   }
 
   async function removeTenant(tenant: PlatformTenant) {
-    if (!window.confirm(`Eliminar "${tenant.name}" de forma permanente? Se borrarán todos sus locales, productos, ventas y usuarios exclusivos. Esta acción no se puede deshacer.`)) return
+    if (!window.confirm(`¿Eliminar "${tenant.name}" de forma permanente? Se borrarán todos sus locales, productos, ventas y usuarios exclusivos. Esta acción no se puede deshacer.`)) return
 
     await runAction(async () => {
       await deletePlatformTenant(tenant.id)

@@ -31,7 +31,7 @@ export async function printTicket({ context, payload, tickets, updateTicketPrint
     })
     if (hardwareAction === 'none') return
     if (!printState.token || !printState.selectedPrinterId) {
-      sileo.warning({ title: 'Venta completada, pero no se ha podido abrir el cajon', description: 'Configura el servidor y la impresora desde Ajustes > Hardware > Impresion.' })
+      sileo.warning({ title: 'Venta completada, pero no se ha podido abrir el cajón', description: 'Configura el servidor y la impresora desde Ajustes > Hardware > Impresión.' })
       return
     }
     try {
@@ -39,15 +39,15 @@ export async function printTicket({ context, payload, tickets, updateTicketPrint
         requestId: `drawer:${payload.sale.id}:payment`,
         printerId: printState.selectedPrinterId,
       })
-      sileo.success({ title: 'Cajon abierto' })
+      sileo.success({ title: 'Cajón abierto' })
     } catch (error) {
-      sileo.warning({ title: 'La venta se ha completado, pero el cajon no se ha podido abrir', description: getPrintAgentErrorMessage(error) })
+      sileo.warning({ title: 'La venta se ha completado, pero el cajón no se ha podido abrir', description: getPrintAgentErrorMessage(error) })
     }
     return
   }
   if (!printState.token || !printState.selectedPrinterId) {
     updateTicketPrintState(payload.sale.id, { printStatus: 'not_requested', printRequestId: requestId })
-    sileo.warning({ title: 'Venta completada sin imprimir', description: 'Configura el servidor y la impresora desde Ajustes > Hardware > Impresion.' })
+    sileo.warning({ title: 'Venta completada sin imprimir', description: 'Configura el servidor y la impresora desde Ajustes > Hardware > Impresión.' })
     return
   }
   updateTicketPrintState(payload.sale.id, {

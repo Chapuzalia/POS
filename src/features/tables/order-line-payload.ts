@@ -4,9 +4,9 @@ import type { RestaurantOrderDetail } from './types'
 export function buildRestaurantOrderLinesPayload(detail: RestaurantOrderDetail) {
   return detail.lines.map((line) => {
     if (line.modifiers.some(isLegacyMixerModifier)) throw new Error('El mixer no puede guardarse como modificador de comanda.')
-    if (line.modifiers.some((modifier) => !isUuid(modifier.id))) throw new Error('La comanda contiene un modificador no valido.')
-    if (line.mixerProductId && !isUuid(line.mixerProductId)) throw new Error('La comanda contiene un mixer no valido.')
-    if ((line.components ?? []).some((component) => !isUuid(component.productId))) throw new Error('La comanda contiene un componente no valido.')
+    if (line.modifiers.some((modifier) => !isUuid(modifier.id))) throw new Error('La comanda contiene un modificador no válido.')
+    if (line.mixerProductId && !isUuid(line.mixerProductId)) throw new Error('La comanda contiene un mixer no válido.')
+    if ((line.components ?? []).some((component) => !isUuid(component.productId))) throw new Error('La comanda contiene un componente no válido.')
     return {
       id: line.id,
       productId: line.productId,

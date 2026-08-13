@@ -13,6 +13,7 @@ export type CrmSelectOption = {
 type Props = {
   ariaLabel?: string
   className?: string
+  compact?: boolean
   defaultValue?: string
   disabled?: boolean
   leadingIcon?: ReactNode
@@ -28,6 +29,7 @@ type Props = {
 export function CrmSelect({
   ariaLabel,
   className = '',
+  compact = false,
   defaultValue = '',
   disabled = false,
   leadingIcon,
@@ -63,7 +65,7 @@ export function CrmSelect({
       >
         <Select.Trigger
           aria-haspopup="listbox"
-          className="!flex !h-11 !min-w-0 !items-center !gap-2.5 !rounded-[10px] !border !border-[var(--crm-input-border)] !bg-[var(--crm-input-bg)] !px-3 !text-[13px] !leading-none !font-medium !text-[var(--crm-text)] focus:!border-[var(--crm-blue)] focus:!shadow-[0_0_0_3px_var(--crm-blue-soft)]"
+          className={`!flex !min-w-0 !items-center !gap-2.5 !border !border-[var(--crm-input-border)] !bg-[var(--crm-input-bg)] !leading-none !font-medium !text-[var(--crm-text)] focus:!border-[var(--crm-blue)] focus:!shadow-[0_0_0_3px_var(--crm-blue-soft)] ${compact ? '!h-9 !rounded-[9px] !px-2.5 !text-[12px]' : '!h-11 !rounded-[10px] !px-3 !text-[13px]'}`}
         >
           {leadingIcon ? <span className="!flex !size-[18px] !shrink-0 !items-center [&_svg]:!size-[18px]">{leadingIcon}</span> : null}
           <span className="!flex !w-0 !min-w-0 !flex-1 !items-center !gap-3">

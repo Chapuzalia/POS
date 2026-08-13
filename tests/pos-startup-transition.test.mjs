@@ -4,7 +4,8 @@ import { readFile } from 'node:fs/promises'
 
 test('la carga del TPV ocupa toda la pantalla y deja de usar una card', async () => {
   const screen = await readFile(new URL('../src/components/screens/StateScreens.tsx', import.meta.url), 'utf8')
-  const loadingScreen = screen.match(/export function LoadingScreen[\s\S]*?\n}\n\ntype PosStartupRevealProps/)?.[0] ?? ''
+  const normalizedScreen = screen.replaceAll('\r\n', '\n')
+  const loadingScreen = normalizedScreen.match(/export function LoadingScreen[\s\S]*?\n}\n\ntype PosStartupRevealProps/)?.[0] ?? ''
 
   assert.match(loadingScreen, /role="status"/)
   assert.match(loadingScreen, /h-full min-h-0 w-full/)

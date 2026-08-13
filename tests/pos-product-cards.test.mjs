@@ -43,7 +43,7 @@ test('POS products use a dedicated card instead of the generic UI button', () =>
 test('POS categories share the product card footprint and responsive grid', () => {
   assert.match(catalogPanel, /<PosCategoryCard/)
   assert.ok(catalogPanel.includes('grid grid-cols-3 gap-3 md:grid-cols-4 2xl:grid-cols-5'))
-  assert.ok(categoryCard.includes('min-h-[88px]'))
+  assert.ok(categoryCard.includes('min-h-[98px]'))
 })
 
 test('mixer choices use the reference three-column horizontal selector', () => {

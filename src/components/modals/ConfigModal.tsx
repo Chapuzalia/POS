@@ -5,7 +5,6 @@ import type { CatalogStartTab, TenantContext, ThemeDefinition } from '../../type
 import { PrintAgentSettings } from '../../features/local-printing'
 import { AppModal, Button, Metric } from '../ui'
 import { Select } from '../ui/Select'
-import * as Sentry from "@sentry/react"
 
 type ConfigModalProps = {
   catalogStartTab: CatalogStartTab
@@ -55,7 +54,7 @@ export function ConfigModal({
       <section className="max-h-[calc(100dvh-24px)] w-full max-w-xl overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[calc(100dvh-48px)]">
         <div className="flex items-start justify-between gap-4">
           <div>
-            <h2 className="text-2xl font-bold">Configuracion</h2>
+            <h2 className="text-2xl font-bold">Configuración</h2>
             <p className="text-sm text-[var(--muted)]">Contexto local de este TPV.</p>
           </div>
           <Button onClick={onClose} size="sm" type="button" variant="tertiary">
@@ -80,13 +79,13 @@ export function ConfigModal({
         </button>
 
         <UiButton className="mt-5 flex min-h-14 w-full items-center justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-left transition hover:border-[var(--accent)]" onClick={() => setSection('printing')} type="button">
-          <span className="flex items-center gap-3"><Printer className="h-5 w-5 text-[var(--accent)]" /><span><strong className="block">Hardware · Impresion</strong><small className="text-[var(--muted)]">Agente local, impresoras, cajon y diagnostico</small></span></span>
+          <span className="flex items-center gap-3"><Printer className="h-5 w-5 text-[var(--accent)]" /><span><strong className="block">Hardware · Impresión</strong><small className="text-[var(--muted)]">Agente local, impresoras, cajón y diagnóstico</small></span></span>
           <span aria-hidden="true">›</span>
         </UiButton>
 
         {lastSyncError ? (
           <div className="mt-4 rounded-[var(--radius)] border border-red-400/45 bg-red-500/10 p-3 text-sm">
-            <p className="font-bold text-red-600 dark:text-red-300">Error de sincronizacion</p>
+            <p className="font-bold text-red-600 dark:text-red-300">Error de sincronización</p>
             <p className="mt-1 break-words text-[var(--foreground)]">{lastSyncError}</p>
             <Button className="mt-3" onClick={onRetrySync} size="sm" type="button" variant="secondary">
               <RefreshCw className="h-4 w-4" />
@@ -112,10 +111,10 @@ export function ConfigModal({
           <div className="mt-5 block">
             <span className="mb-2 flex items-center gap-2 text-sm font-semibold text-[var(--muted)]">
               <LayoutList className="h-4 w-4" />
-              Primera pestana del catalogo
+              Primera pestaña del catálogo
             </span>
             <Select
-              ariaLabel="Primera pestana del catalogo"
+              ariaLabel="Primera pestaña del catálogo"
               onChange={(value) => onCatalogStartTabChange(value as CatalogStartTab)}
               options={[
                 { label: 'Todo', value: 'all' },

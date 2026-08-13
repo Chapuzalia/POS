@@ -202,7 +202,7 @@ function TicketLineRow({
             <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
               <span className="font-mono text-sm tabular-nums text-[var(--muted)] line-through">{formatMoney(discount.grossCents)}</span>
               <strong className="font-mono tabular-nums text-[var(--success)]">{formatMoney(discount.netCents)}</strong>
-              <span className="text-xs font-semibold text-[var(--success)]">?{formatMoney(discount.discountAmountCents)}</span>
+              <span className="text-xs font-semibold text-[var(--success)]">−{formatMoney(discount.discountAmountCents)}</span>
             </div>
           ) : line.quantity > 1 ? (
             <p className="font-mono text-sm font-bold tabular-nums text-[var(--foreground)]">
