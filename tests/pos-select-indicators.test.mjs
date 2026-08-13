@@ -6,6 +6,6 @@ const select = await readFile(new URL('../src/components/ui/Select.tsx', import.
 const nativeSelect = await readFile(new URL('../src/components/ui/NativeSelect.tsx', import.meta.url), 'utf8')
 
 test('TPV selects only render the tick for the selected option', () => {
-  assert.match(select, /option\.value === value \? \(\s*<ListBoxItem\.Indicator>/)
-  assert.match(nativeSelect, /option\.value === selectedValue \? \(\s*<ListBoxItem\.Indicator>/)
+  assert.match(select, /option\.value === value \? \(\s*<ListBoxItem\.Indicator(?:\s+[^>]*)?>/)
+  assert.match(nativeSelect, /option\.value === selectedValue \? \(\s*<ListBoxItem\.Indicator(?:\s+[^>]*)?>/)
 })

@@ -57,7 +57,7 @@ async function invoke<T>(body: Record<string, unknown>, fallback: string) {
 }
 
 export function loadVerifactiConfiguration(context: TenantContext) {
-  return invoke<VerifactiConfiguration>({ action: 'get-config', tenantId: context.tenantId }, 'No se pudo cargar la configuracion de Verifacti.')
+  return invoke<VerifactiConfiguration>({ action: 'get-config', tenantId: context.tenantId }, 'No se pudo cargar la configuración de Verifacti.')
 }
 
 export function saveVerifactiConfiguration(context: TenantContext, input: {
@@ -69,14 +69,14 @@ export function saveVerifactiConfiguration(context: TenantContext, input: {
   automaticSubmission: boolean
   webhooksEnabled: boolean
 }) {
-  return invoke<VerifactiConfiguration>({ action: 'save-config', tenantId: context.tenantId, ...input }, 'No se pudo guardar la configuracion de Verifacti.')
+  return invoke<VerifactiConfiguration>({ action: 'save-config', tenantId: context.tenantId, ...input }, 'No se pudo guardar la configuración de Verifacti.')
 }
 
 export function testVerifactiConnection(context: TenantContext) {
   return invoke<{ ok: true; status: 'connected'; checkedAt: string; nif: string | null; hacienda: string | null }>({
     action: 'test-connection',
     tenantId: context.tenantId,
-  }, 'No se pudo probar la conexion con Verifacti.')
+  }, 'No se pudo probar la conexión con Verifacti.')
 }
 
 export function issueFiscalTicket(context: TenantContext, ticketId: string) {
@@ -102,7 +102,7 @@ export function refreshFiscalInvoiceStatus(context: TenantContext, invoiceId: st
 export function cancelFiscalInvoice(context: TenantContext, invoiceId: string) {
   return invoke<{ status: FiscalStatus; response: Record<string, unknown> }>({
     action: 'cancel', tenantId: context.tenantId, invoiceId,
-  }, 'No se pudo solicitar la anulacion fiscal.')
+  }, 'No se pudo solicitar la anulación fiscal.')
 }
 
 export async function loadFiscalInvoiceEvents(context: TenantContext, invoiceId: string) {

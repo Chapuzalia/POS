@@ -19,7 +19,7 @@ export function PosCategoryCard({
       type="button"
     >
       <span className="flex min-h-[98px] w-full flex-1 flex-col justify-between gap-2 p-3">
-        <span className="line-clamp-2 block text-2xl font-bold leading-snug">
+        <span className="line-clamp-2 block text-2xl max-md:text-lg font-bold leading-snug">
           {label}
         </span>
         <span className="block text-xs font-medium text-[var(--muted)]">

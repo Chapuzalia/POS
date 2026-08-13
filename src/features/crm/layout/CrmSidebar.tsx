@@ -120,7 +120,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
     if (reportSections.has(activeSection)) setIsReportsOpen(true)
   }, [activeSection])
 
-  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id))
+  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features))
   const allowedInventoryItems = allowed(inventoryNavItems)
     .filter((item) => inventoryEnabled || item.id === 'inventory-stock')
   const navigate = (section: CrmSection) => {
@@ -151,7 +151,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
             <p className="!mt-1 !mb-0 !text-[10px] !font-semibold !tracking-[0.16em] !text-[var(--crm-sidebar-muted)] !uppercase">TICKIT CRM</p>
           </div>
           <UiButton
-            aria-label="Cerrar menu de navegacion"
+            aria-label="Cerrar menú de navegación"
             className="!grid !size-10 !min-h-10 !min-w-10 !shrink-0 !place-items-center !rounded-[10px] !border-0 !bg-white/[0.06] !p-0 !text-[var(--crm-sidebar-text)] !shadow-none xl:!hidden"
             onClick={onClose}
             type="button"
@@ -160,7 +160,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
           </UiButton>
         </header>
 
-        <nav aria-label="Navegacion del CRM" className="!flex !min-h-0 !flex-1 !flex-col !overflow-y-auto !px-3 !py-5 [scrollbar-color:rgba(255,255,255,0.14)_transparent] [scrollbar-width:thin]">
+        <nav aria-label="Navegación del CRM" className="!flex !min-h-0 !flex-1 !flex-col !overflow-y-auto !px-3 !py-5 [scrollbar-color:rgba(255,255,255,0.14)_transparent] [scrollbar-width:thin]">
           <section aria-labelledby="crm-nav-primary">
             <p className="!mx-2.5 !mt-0 !mb-2 !text-[10px] !leading-tight !font-bold !tracking-[0.14em] !text-[var(--crm-sidebar-muted)] !uppercase" id="crm-nav-primary">Principal</p>
             <div className="!grid !gap-[3px]">
@@ -171,10 +171,10 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
           </section>
 
           <section aria-labelledby="crm-nav-management" className="!mt-[22px]">
-            <p className="!mx-2.5 !mt-0 !mb-2 !text-[10px] !leading-tight !font-bold !tracking-[0.14em] !text-[var(--crm-sidebar-muted)] !uppercase" id="crm-nav-management">Gestion</p>
+            <p className="!mx-2.5 !mt-0 !mb-2 !text-[10px] !leading-tight !font-bold !tracking-[0.14em] !text-[var(--crm-sidebar-muted)] !uppercase" id="crm-nav-management">Gestión</p>
             <div className="!grid !gap-[3px]">
               <SidebarCollapsible activeSection={activeSection} icon={Boxes} isOpen={isProductsOpen} items={allowed(productNavItems)} label="Productos" onNavigate={navigate} onToggle={() => setIsProductsOpen((value) => !value)} sections={productSections} />
-              <SidebarCollapsible activeSection={activeSection} icon={Package} isOpen={isInventoryOpen} items={allowedInventoryItems} label="Inventario" onNavigate={navigate} onToggle={() => setIsInventoryOpen((value) => !value)} sections={inventorySections} />
+              {allowedInventoryItems.length ? <SidebarCollapsible activeSection={activeSection} icon={Package} isOpen={isInventoryOpen} items={allowedInventoryItems} label="Inventario" onNavigate={navigate} onToggle={() => setIsInventoryOpen((value) => !value)} sections={inventorySections} /> : null}
               {allowed(navItems.slice(2, 3)).map((item) => (
                 <SidebarNavItem activeSection={activeSection} item={item} key={item.id} onNavigate={navigate} />
               ))}

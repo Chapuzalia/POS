@@ -269,7 +269,7 @@ test('la venta rapida espera el QR fiscal online y tambien intenta imprimir offl
   const fiscalIndex = source.indexOf('await loadFiscalReceiptData(')
   const printIndex = source.indexOf('const printTask = options.printSale(printPayload)')
   assert.ok(syncIndex >= 0 && fiscalIndex > syncIndex && printIndex > fiscalIndex)
-  assert.match(source, /if \(options\.isOnline\) \{[\s\S]*await options\.syncPendingEvents\(\)[\s\S]*\}\n    const printTask/)
+  assert.match(source, /if \(options\.isOnline\) \{[\s\S]*await options\.syncPendingEvents\(\)[\s\S]*\}\r?\n    const printTask/)
 })
 
 test('construye el ticket de mesa localmente en cuanto la RPC devuelve sus IDs', () => {

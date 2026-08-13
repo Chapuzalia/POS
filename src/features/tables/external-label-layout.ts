@@ -33,8 +33,10 @@ export function tableVisualRect(
   }
 }
 
-export function externalLabelSize(name: string) {
-  return { width: Math.max(96, Math.min(168, 34 + name.length * 7.2)), height: 48 }
+export function externalLabelSize(name: string, compact = false) {
+  return compact
+    ? { width: Math.max(80, Math.min(140, 28 + name.length * 6.4)), height: 40 }
+    : { width: Math.max(96, Math.min(168, 34 + name.length * 7.2)), height: 48 }
 }
 
 export function tableContentMode(rect: VisualRect, name: string): TableContentMode {

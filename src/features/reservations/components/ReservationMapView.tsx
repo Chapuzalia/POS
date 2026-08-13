@@ -43,9 +43,9 @@ export function ReservationMapView(props: Props) {
           setSelectedTableId(null)
         }} type="button">{candidate.name}</UiButton>)}
       </nav>
-      <div className="flex min-h-[450px] flex-1 gap-3 max-[760px]:flex-col">
+      <div className="flex min-h-112 flex-1 gap-3 max-md:flex-col">
         <section
-          className="relative min-h-[450px] flex-1 touch-none cursor-grab overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] shadow-[var(--shadow)] active:cursor-grabbing max-[760px]:min-h-[420px]"
+          className="relative min-h-105 flex-1 touch-none cursor-grab overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] shadow-[var(--shadow)] active:cursor-grabbing md:min-h-112"
           onPointerDown={viewportApi.startBackgroundPointer}
           onPointerMove={viewportApi.moveBackgroundPointer}
           onPointerUp={viewportApi.endBackgroundPointer}
@@ -53,14 +53,14 @@ export function ReservationMapView(props: Props) {
           onWheel={viewportApi.onWheel}
           ref={canvasRef}
         >
-          <div className="absolute z-[2]" style={{ width: planeSize.width * viewport.zoom, height: planeSize.height * viewport.zoom, left: viewport.panX, top: viewport.panY }}>
+          <div className="map-transform-layer absolute z-[2]" style={{ width: planeSize.width * viewport.zoom, height: planeSize.height * viewport.zoom, left: viewport.panX, top: viewport.panY }}>
             {tables.map((table) => {
               const tableReservations = props.reservations.filter((reservation) => reservation.tableIds.includes(table.id))
               const next = getNextReservationForTable(tableReservations, table.id, new Date(0))
               const operational = table as RestaurantTableMapItem
               const primary = next?.tables[0]?.id === table.id
               return <UiButton
-                className={`absolute flex min-h-[60px] min-w-[70px] flex-col items-center justify-center gap-[3px] overflow-hidden border-2 border-[var(--separator)] bg-[var(--surface)] p-1.5 text-[var(--foreground)] shadow-[0_5px_14px_rgba(17,24,39,0.11)] [&>strong]:truncate [&>span]:truncate [&>small]:truncate [&>em]:truncate [&>small]:flex [&>small]:items-center [&>small]:gap-[3px] [&>small]:text-[var(--muted)] [&>span]:flex [&>span]:items-center [&>span]:gap-1 [&>span]:rounded-[5px] [&>span]:bg-[color-mix(in_srgb,var(--warning)_13%,var(--surface))] [&>span]:px-[5px] [&>span]:py-[3px] [&>span]:text-[10px] [&>span]:font-extrabold [&>em]:text-[9px] [&>em]:not-italic [&>em]:font-extrabold [&>em]:text-[var(--danger)] ${table.shape === 'round' ? 'rounded-full' : table.shape === 'square' ? 'rounded-[10px]' : 'rounded-[7px]'} ${selectedTableId === table.id ? 'outline-[4px] outline-[color-mix(in_srgb,var(--accent)_35%,transparent)]' : ''} ${props.map.operationalMap && operational.status === 'occupied' ? 'border-[var(--danger)]' : ''}`}
+                className={`absolute flex min-h-15 min-w-18 flex-col items-center justify-center gap-1 overflow-hidden border-2 border-[var(--separator)] bg-[var(--surface)] p-1.5 text-[var(--foreground)] shadow-[0_5px_14px_rgba(17,24,39,0.11)] [&>strong]:truncate [&>span]:truncate [&>small]:truncate [&>em]:truncate [&>small]:flex [&>small]:items-center [&>small]:gap-1 [&>small]:text-[var(--muted)] [&>span]:flex [&>span]:items-center [&>span]:gap-1 [&>span]:rounded-md [&>span]:bg-[color-mix(in_srgb,var(--warning)_13%,var(--surface))] [&>span]:px-1.5 [&>span]:py-1 [&>span]:text-[10px] [&>span]:font-extrabold [&>em]:text-[9px] [&>em]:not-italic [&>em]:font-extrabold [&>em]:text-[var(--danger)] ${table.shape === 'round' ? 'rounded-full' : table.shape === 'square' ? 'rounded-xl' : 'rounded-lg'} ${selectedTableId === table.id ? 'outline-4 outline-[color-mix(in_srgb,var(--accent)_35%,transparent)]' : ''} ${props.map.operationalMap && operational.status === 'occupied' ? 'border-[var(--danger)]' : ''}`}
                 key={table.id}
                 onClick={() => setSelectedTableId(table.id)}
                 style={{ left: `${table.positionX}%`, top: `${table.positionY}%`, width: `${table.width}%`, height: `${table.height}%` }}
@@ -82,7 +82,7 @@ export function ReservationMapView(props: Props) {
             zoom={viewport.zoom}
           />
         </section>
-        <aside className="w-[280px] overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 max-[1000px]:w-60 max-[760px]:max-h-[220px] max-[760px]:w-full [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:border-b [&>header]:border-[var(--separator)] [&>header]:pb-2.5 [&_h3]:m-0 [&_p]:m-0 [&_p]:text-xs [&_p]:text-[var(--muted)] [&>header_span]:text-xs [&>header_span]:text-[var(--muted)] [&>button]:grid [&>button]:w-full [&>button]:grid-cols-[56px_1fr] [&>button]:gap-2 [&>button]:border-0 [&>button]:border-b [&>button]:border-[var(--separator)] [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-3 [&>button]:text-left [&>button]:text-[var(--foreground)] [&>button_time]:font-black [&>button_span]:grid [&>button_span]:gap-[3px] [&>button_small]:text-[var(--muted)]">
+        <aside className="w-full max-h-56 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 md:max-h-none md:w-60 lg:w-72 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:border-b [&>header]:border-[var(--separator)] [&>header]:pb-2.5 [&_h3]:m-0 [&_p]:m-0 [&_p]:text-xs [&_p]:text-[var(--muted)] [&>header_span]:text-xs [&>header_span]:text-[var(--muted)] [&>button]:grid [&>button]:w-full [&>button]:grid-cols-[3.5rem_1fr] [&>button]:gap-2 [&>button]:border-0 [&>button]:border-b [&>button]:border-[var(--separator)] [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-3 [&>button]:text-left [&>button]:text-[var(--foreground)] [&>button_time]:font-black [&>button_span]:grid [&>button_span]:gap-1 [&>button_small]:text-[var(--muted)]">
           {selectedTableId ? <>
             <header>
               <div><h3>{tables.find((table) => table.id === selectedTableId)?.name}</h3><span>{selectedReservations.length} reservas</span></div>

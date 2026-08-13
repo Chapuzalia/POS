@@ -19,7 +19,7 @@ type NativeOption = {
   value: string
 }
 
-export type NativeSelectProps = ComponentProps<'select'>
+export type NativeSelectProps = ComponentProps<'select'> & { triggerClassName?: string }
 
 function collectOptions(children: ReactNode): NativeOption[] {
   const options: NativeOption[] = []
@@ -55,6 +55,7 @@ export function NativeSelect({
   name,
   onChange,
   required,
+  triggerClassName,
   value,
 }: NativeSelectProps) {
   const options = collectOptions(children)
@@ -66,7 +67,7 @@ export function NativeSelect({
     <>
       {name ? <Input name={name} type="hidden" value={selectedValue} /> : null}
       <HeroSelect
-        aria-label={ariaLabel ?? name ?? 'Seleccionar opcion'}
+        aria-label={ariaLabel ?? name ?? 'Seleccionar opción'}
         className={className}
         fullWidth
         isDisabled={disabled}
@@ -83,22 +84,24 @@ export function NativeSelect({
         selectedKey={selectedValue || null}
         variant="secondary"
       >
-        <HeroSelect.Trigger className="min-h-12 flex items-center">
-          <HeroSelect.Value>{selectedOption?.label ?? 'Seleccionar opcion'}</HeroSelect.Value>
-          <HeroSelect.Indicator />
+        <HeroSelect.Trigger className={`flex min-h-12 items-center gap-2 ${triggerClassName ?? ''}`}>
+          <HeroSelect.Value className="min-w-0 flex-1 truncate pr-1">
+            {selectedOption?.label ?? 'Seleccionar opción'}
+          </HeroSelect.Value>
+          <HeroSelect.Indicator className="!static !inset-auto ml-1 shrink-0" />
         </HeroSelect.Trigger>
         <HeroSelect.Popover>
           <ListBox items={options}>
             {(option) => (
               <ListBoxItem
-                className="transition-colors hover:bg-foreground/5 data-[hovered]:bg-foreground/5"
+                className="relative pr-10 transition-colors hover:bg-foreground/5 data-[hovered]:bg-foreground/5"
                 id={option.value}
                 isDisabled={option.disabled}
                 textValue={option.textValue}
               >
                 {option.label}
                 {option.value === selectedValue ? (
-                  <ListBoxItem.Indicator>
+                  <ListBoxItem.Indicator className="absolute right-3 top-1/2 -translate-y-1/2">
                     <Check aria-hidden="true" className="size-4" />
                   </ListBoxItem.Indicator>
                 ) : null}

@@ -30,7 +30,7 @@ test('manager data access is scoped by venue while true owner-only sections stay
   const managerRoles = /tm\.role = any \(array\['owner'::text, 'manager'::text\]\)/
   assert.match(schema, managerRoles)
   assert.match(migration, managerRoles)
-  assert.match(shell, /filter\(\(item\) => canAccessCrmSection\(context\.role, item\.id\)\)/)
+  assert.match(shell, /filter\(\(item\) => canAccessCrmSection\(context\.role, item\.id, context\.features\)\)/)
   assert.match(settings, /if \(isOwner\) void runAction\(refreshPlan\)/)
   assert.match(integrations, /const canEdit = tenantContext\.role === 'owner'/)
   assert.match(integrations, /Puedes consultar la integración/)

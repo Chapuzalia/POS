@@ -39,6 +39,7 @@ import {
   type JoinProposal,
 } from "../joined-layout";
 import { layoutFromMap } from "../layout-service";
+import { loadTableMapQuarterTurn, persistTableMapQuarterTurn } from "../map-orientation";
 import { getRestaurantTableVisualStatus } from "../table-visual-status";
 import type {
   RestaurantMap,
@@ -49,10 +50,16 @@ import type {
 import { useMapViewport } from "../useMapViewport";
 import {
   getMapPlaneSize,
+  orientMapRect,
   positionFloatingPanel,
   screenToMap,
 } from "../viewport";
 import { MapViewportControls } from "./MapViewportControls";
+import { MobileTableMapChrome } from "./MobileTableMapChrome";
+import {
+  MobileGroupActionsSheet,
+  MobileTableActionSheet,
+} from "./MobileTableMapSheets";
 import { ReservationTableBadge } from "../../reservations/components/ReservationTableBadge";
 
 type Props = {
@@ -62,6 +69,7 @@ type Props = {
   isBusy: boolean;
   isOnline: boolean;
   map: RestaurantMap;
+  mobileLayout: boolean;
   onAreaChange: (areaId: string) => void;
   onLayoutChange: (
     tables: Record<string, TableLayoutEntry>,
@@ -137,6 +145,7 @@ export function TableMapView(props: Props) {
     isBusy,
     isOnline,
     map,
+    mobileLayout,
     moveOrderId,
     onAreaChange,
     onCancelMove,
@@ -149,7 +158,9 @@ export function TableMapView(props: Props) {
     openCashPanel,
     selectedAreaId,
   } = props;
+  const orientationVenueId = map.areas.find((area) => area.id === selectedAreaId)?.venueId ?? map.areas[0]?.venueId;
   const [editMode, setEditMode] = useState(false);
+  const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [displayTables, setDisplayTables] = useState(map.tables);
   const [pendingIds, setPendingIds] = useState<string[] | null>(null);
   const [guestCount, setGuestCount] = useState(2);
@@ -162,6 +173,7 @@ export function TableMapView(props: Props) {
   });
   const [groupMenu, setGroupMenu] = useState<GroupMenu | null>(null);
   const [savingLayout, setSavingLayout] = useState(false);
+  const [quarterTurn, setQuarterTurn] = useState(() => loadTableMapQuarterTurn(orientationVenueId));
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const canvasRef = useRef<HTMLElement>(null);
   const dragRef = useRef<DragState | null>(null);
@@ -177,6 +189,7 @@ export function TableMapView(props: Props) {
       ? selectedAreaId
       : map.areas[0]?.id;
   const activeArea = map.areas.find((area) => area.id === activeAreaId);
+  const rotatedMap = mobileLayout && quarterTurn;
   const mapElements = useMemo(
     () => activeArea?.mapElements ?? [],
     [activeArea?.mapElements],
@@ -186,14 +199,15 @@ export function TableMapView(props: Props) {
       getMapPlaneSize(
         canvasSize.width,
         canvasSize.height,
-        activeArea?.canvasWidth ?? 1200,
-        activeArea?.canvasHeight ?? 800,
+        rotatedMap ? (activeArea?.canvasHeight ?? 800) : (activeArea?.canvasWidth ?? 1200),
+        rotatedMap ? (activeArea?.canvasWidth ?? 1200) : (activeArea?.canvasHeight ?? 800),
       ),
     [
       activeArea?.canvasHeight,
       activeArea?.canvasWidth,
       canvasSize.height,
       canvasSize.width,
+      rotatedMap,
     ],
   );
   const tables = useMemo(
@@ -215,9 +229,9 @@ export function TableMapView(props: Props) {
     () =>
       tables.map((table) => ({
         table,
-        rect: tableVisualRect(table, planeSize, viewport),
+        rect: tableVisualRect(orientMapRect(table, rotatedMap), planeSize, viewport),
       })),
-    [planeSize, tables, viewport],
+    [planeSize, rotatedMap, tables, viewport],
   );
   const contentModes = useMemo(
     () =>
@@ -235,7 +249,7 @@ export function TableMapView(props: Props) {
       .map(({ table, rect }) => ({
         id: table.id,
         table: rect,
-        label: externalLabelSize(table.name),
+        label: externalLabelSize(table.name, mobileLayout),
       }));
     const reserved =
       canvasSize.width && canvasSize.height
@@ -266,7 +280,7 @@ export function TableMapView(props: Props) {
       previousLabelSidesRef.current,
       Boolean(dragRef.current),
     );
-  }, [canvasSize, contentModes, groupMenu, visualTables]);
+  }, [canvasSize, contentModes, groupMenu, mobileLayout, visualTables]);
   const externalLabelTables = useMemo(
     () => new Map(tables.map((table) => [table.id, table])),
     [tables],
@@ -296,17 +310,26 @@ export function TableMapView(props: Props) {
   }, [externalLabels]);
 
   useEffect(() => {
+    setSelectedTableId(null);
+    setGroupMenu(null);
+  }, [activeAreaId]);
+
+  useEffect(() => {
+    setQuarterTurn(loadTableMapQuarterTurn(orientationVenueId));
+  }, [orientationVenueId]);
+
+  useEffect(() => {
     const canvas = canvasRef.current;
     if (
       !canvas ||
       !activeAreaId ||
       !canvasSize.width ||
       !canvasSize.height ||
-      fittedAreaRef.current === activeAreaId
+      fittedAreaRef.current === `${activeAreaId}:${rotatedMap}`
     )
       return;
-    fittedAreaRef.current = activeAreaId;
-    fitViewport(canvas, [...tables, ...mapElements], planeSize);
+    fittedAreaRef.current = `${activeAreaId}:${rotatedMap}`;
+    fitViewport(canvas, [...tables, ...mapElements].map((item) => orientMapRect(item, rotatedMap)), planeSize);
   }, [
     activeAreaId,
     canvasSize.height,
@@ -314,6 +337,7 @@ export function TableMapView(props: Props) {
     fitViewport,
     mapElements,
     planeSize,
+    rotatedMap,
     tables,
   ]);
 
@@ -341,31 +365,37 @@ export function TableMapView(props: Props) {
     return () => window.removeEventListener("keydown", cancel);
   }, [map.tables]);
 
+  function prepareOpenTable(table: RestaurantTableMapItem) {
+    const ids = table.layoutGroupTableIds?.length
+      ? table.layoutGroupTableIds
+      : [table.id];
+    setPendingIds(ids);
+    setGuestCount(
+      Math.max(
+        1,
+        ids.reduce(
+          (total, id) =>
+            total +
+            (displayTables.find((item) => item.id === id)?.capacity ?? 0),
+          0,
+        ),
+      ),
+    );
+  }
+
   function chooseTable(table: RestaurantTableMapItem) {
     if (!isOnline || isBusy || editMode) return;
     if (moveOrderId) {
       if (table.status === "free") void onMove(table.id);
       return;
     }
+    if (mobileLayout) {
+      setSelectedTableId(table.id);
+      return;
+    }
     if (table.status === "occupied" && table.orderId)
       onOpenOrder(table.orderId);
-    else if (table.status === "free" && canOpen) {
-      const ids = table.layoutGroupTableIds?.length
-        ? table.layoutGroupTableIds
-        : [table.id];
-      setPendingIds(ids);
-      setGuestCount(
-        Math.max(
-          1,
-          ids.reduce(
-            (total, id) =>
-              total +
-              (displayTables.find((item) => item.id === id)?.capacity ?? 0),
-            0,
-          ),
-        ),
-      );
-    }
+    else if (table.status === "free" && canOpen) prepareOpenTable(table);
   }
 
   function startTableDrag(
@@ -381,8 +411,8 @@ export function TableMapView(props: Props) {
     const dragPlane = getMapPlaneSize(
       bounds.width,
       bounds.height,
-      activeArea?.canvasWidth ?? 1200,
-      activeArea?.canvasHeight ?? 800,
+      rotatedMap ? (activeArea?.canvasHeight ?? 800) : (activeArea?.canvasWidth ?? 1200),
+      rotatedMap ? (activeArea?.canvasWidth ?? 1200) : (activeArea?.canvasHeight ?? 800),
     );
     const memberIds = new Set(getJoinedIds(table, displayTables));
     dragRef.current = {
@@ -392,6 +422,7 @@ export function TableMapView(props: Props) {
         { x: event.clientX, y: event.clientY },
         { left: bounds.left, top: bounds.top, ...dragPlane },
         viewport,
+        rotatedMap,
       ),
       initialTables: displayTables,
       currentTables: displayTables,
@@ -411,13 +442,14 @@ export function TableMapView(props: Props) {
     const dragPlane = getMapPlaneSize(
       bounds.width,
       bounds.height,
-      activeArea?.canvasWidth ?? 1200,
-      activeArea?.canvasHeight ?? 800,
+      rotatedMap ? (activeArea?.canvasHeight ?? 800) : (activeArea?.canvasWidth ?? 1200),
+      rotatedMap ? (activeArea?.canvasWidth ?? 1200) : (activeArea?.canvasHeight ?? 800),
     );
     const current = screenToMap(
       { x: event.clientX, y: event.clientY },
       { left: bounds.left, top: bounds.top, ...dragPlane },
       viewport,
+      rotatedMap,
     );
     const dx = current.x - drag.start.x,
       dy = current.y - drag.start.y;
@@ -618,12 +650,29 @@ export function TableMapView(props: Props) {
     setPendingIds(null);
   }
 
+  function toggleEditMode() {
+    setEditMode((value) => !value);
+    setSelectedTableId(null);
+    setGroupMenu(null);
+  }
+
+  function toggleMapOrientation() {
+    setQuarterTurn((current) => {
+      const next = !current;
+      persistTableMapQuarterTurn(orientationVenueId, next);
+      return next;
+    });
+  }
+
   const groupMenuTable = groupMenu
     ? displayTables.find((table) => table.id === groupMenu.tableId)
     : null;
   const groupMenuLocked = groupMenuTable
     ? compositionHasOpenOrder(groupMenuTable, displayTables)
     : false;
+  const selectedTable = selectedTableId
+    ? displayTables.find((table) => table.id === selectedTableId) ?? null
+    : null;
   const pendingReservation =
     pendingIds
       ?.map(
@@ -638,8 +687,8 @@ export function TableMapView(props: Props) {
       ) ?? null;
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col gap-3.5 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-[18px] max-[760px]:p-3">
-      <header className="flex items-center justify-between gap-[18px] max-[760px]:flex-col max-[760px]:items-stretch [&_h1]:m-0 [&_h1]:text-2xl [&_p]:mb-0 [&_p]:mt-1 [&_p]:text-[var(--muted)]">
+    <main className={`flex min-h-0 flex-1 flex-col ${mobileLayout ? 'gap-0 overflow-hidden p-0' : 'gap-3.5 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-[18px]'}`}>
+      {!mobileLayout ? <header className="flex items-center justify-between gap-[18px] [&_h1]:m-0 [&_h1]:text-2xl [&_p]:mb-0 [&_p]:mt-1 [&_p]:text-[var(--muted)]">
         <div>
           <h1>Mapa de mesas</h1>
         </div>
@@ -659,14 +708,11 @@ export function TableMapView(props: Props) {
           <UiButton
             className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border bg-[var(--surface)] px-4 font-extrabold disabled:opacity-45 ${editMode ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--separator)] text-[var(--foreground)]"}`}
             disabled={!isOnline || isBusy || Boolean(moveOrderId)}
-            onClick={() => {
-              setEditMode((value) => !value);
-              setGroupMenu(null);
-            }}
+            onClick={toggleEditMode}
             type="button"
           >
             {editMode ? <Check size={18} /> : <Pencil size={18} />}
-            {editMode ? "Finalizar edicion" : "Editar mesas"}
+            {editMode ? "Finalizar edición" : "Editar mesas"}
           </UiButton>
           {canQuickSale ? (
             <UiButton
@@ -674,14 +720,14 @@ export function TableMapView(props: Props) {
               onClick={onQuickSale}
               type="button"
             >
-              <ShoppingBag size={18} /> Venta rapida
+              <ShoppingBag size={18} /> Venta rápida
             </UiButton>
           ) : null}
         </div>
-      </header>
+      </header> : null}
       {!isOnline ? (
         <div className="rounded-[var(--radius)] border border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_12%,var(--surface))] px-3.5 py-[11px] font-bold text-[var(--warning)]">
-          La gestion de mesas requiere conexion. La venta rapida sigue
+          La gestión de mesas requiere conexión. La venta rápida sigue
           disponible.
         </div>
       ) : null}
@@ -704,7 +750,7 @@ export function TableMapView(props: Props) {
       ) : null}
 
       <section
-        className="relative min-h-[560px] flex-1 touch-none cursor-grab overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] shadow-[var(--shadow)] active:cursor-grabbing max-[760px]:min-h-[500px]"
+        className={`relative flex-1 touch-none cursor-grab overflow-hidden border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] active:cursor-grabbing ${mobileLayout ? 'min-h-0 rounded-none border-x-0 border-b-0 shadow-none' : 'min-h-[560px] rounded-[var(--radius)] shadow-[var(--shadow)]'}`}
         onPointerDown={viewportApi.startBackgroundPointer}
         onPointerMove={(event) => {
           moveTableDrag(event);
@@ -721,6 +767,21 @@ export function TableMapView(props: Props) {
         onWheel={viewportApi.onWheel}
         ref={canvasRef}
       >
+        {mobileLayout ? (
+          <MobileTableMapChrome
+            activeAreaId={activeAreaId}
+            areas={map.areas}
+            canQuickSale={canQuickSale}
+            editDisabled={!isOnline || isBusy || Boolean(moveOrderId)}
+            editMode={editMode}
+            onAreaChange={(areaId) => {
+              setSelectedTableId(null);
+              onAreaChange(areaId);
+            }}
+            onEditToggle={toggleEditMode}
+            onQuickSale={onQuickSale}
+          />
+        ) : null}
         <svg aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1] size-full overflow-hidden [&_line]:stroke-[color-mix(in_srgb,var(--foreground)_52%,transparent)] [&_line]:[stroke-width:1.25] [&_line]:[vector-effect:non-scaling-stroke] [&_circle]:fill-[var(--foreground)] [&_circle]:stroke-[var(--surface)] [&_circle]:[stroke-width:1]">
           {externalLabels.map((label) => {
             const table = externalLabelTables.get(label.id);
@@ -745,7 +806,7 @@ export function TableMapView(props: Props) {
           })}
         </svg>
         <div
-          className="absolute z-[2]"
+          className="map-transform-layer absolute z-[2]"
           style={{
             width: planeSize.width * viewport.zoom,
             height: planeSize.height * viewport.zoom,
@@ -753,37 +814,40 @@ export function TableMapView(props: Props) {
             top: viewport.panY,
           }}
         >
-          {mapElements.map((element) => (
+          {mapElements.map((element) => {
+            const orientedElement = orientMapRect(element, rotatedMap);
+            return (
             <div
               aria-hidden="true"
               className={`pointer-events-none absolute z-0 ${element.kind === "wall" ? "rounded-[3px] bg-[repeating-linear-gradient(90deg,#64748b_0_18px,#94a3b8_18px_20px)] shadow-[inset_0_0_0_1px_rgba(15,23,42,.28)]" : element.kind === "column" ? "box-border rounded-full border-[3px] border-[#64748b] bg-[repeating-linear-gradient(45deg,#cbd5e1_0_5px,#94a3b8_5px_7px)]" : "flex items-center justify-center overflow-hidden text-center font-black tracking-[.04em] text-[var(--muted)] [&>span]:truncate"}`}
               key={element.id}
               style={{
-                left: `${element.positionX}%`,
-                top: `${element.positionY}%`,
-                width: `${element.width}%`,
-                height: `${element.height}%`,
+                left: `${orientedElement.positionX}%`,
+                top: `${orientedElement.positionY}%`,
+                width: `${orientedElement.width}%`,
+                height: `${orientedElement.height}%`,
               }}
             >
               {element.kind === "text" ? <span>{element.text}</span> : null}
             </div>
-          ))}
+            );
+          })}
           {guidelines.x !== null ? (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-y-0 z-20 w-px -translate-x-px bg-[color-mix(in_srgb,var(--accent)_72%,transparent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--surface)_55%,transparent)]"
-              style={{ left: `${guidelines.x}%` }}
+              className={`pointer-events-none absolute z-20 bg-[color-mix(in_srgb,var(--accent)_72%,transparent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--surface)_55%,transparent)] ${rotatedMap ? 'inset-x-0 h-px -translate-y-px' : 'inset-y-0 w-px -translate-x-px'}`}
+              style={rotatedMap ? { top: `${guidelines.x}%` } : { left: `${guidelines.x}%` }}
             />
           ) : null}
           {guidelines.y !== null ? (
             <div
               aria-hidden="true"
-              className="pointer-events-none absolute inset-x-0 z-20 h-px -translate-y-px bg-[color-mix(in_srgb,var(--accent)_72%,transparent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--surface)_55%,transparent)]"
-              style={{ top: `${guidelines.y}%` }}
+              className={`pointer-events-none absolute z-20 bg-[color-mix(in_srgb,var(--accent)_72%,transparent)] shadow-[0_0_0_1px_color-mix(in_srgb,var(--surface)_55%,transparent)] ${rotatedMap ? 'inset-y-0 w-px -translate-x-px' : 'inset-x-0 h-px -translate-y-px'}`}
+              style={rotatedMap ? { left: `${100 - guidelines.y}%` } : { top: `${guidelines.y}%` }}
             />
           ) : null}
           {layoutGroups.map(([groupId, members]) => {
-            const bounds = boundsOf(members);
+            const bounds = boundsOf(members.map((table) => orientMapRect(table, rotatedMap)));
             return (
               <div
                 aria-hidden="true"
@@ -801,21 +865,25 @@ export function TableMapView(props: Props) {
           {joinPreview
             ? joinPreview.tables
                 .filter((table) => dragRef.current?.memberIds.has(table.id))
-                .map((table) => (
+                .map((table) => {
+                  const orientedTable = orientMapRect(table, rotatedMap);
+                  return (
                   <div
                     aria-hidden="true"
                     className="pointer-events-none absolute z-[4] rounded-[9px] border-2 border-[color-mix(in_srgb,var(--accent)_72%,transparent)] bg-[color-mix(in_srgb,var(--accent)_12%,transparent)]"
                     key={`preview-${table.id}`}
                     style={{
-                      left: `${table.positionX}%`,
-                      top: `${table.positionY}%`,
-                      width: `${table.width}%`,
-                      height: `${table.height}%`,
+                      left: `${orientedTable.positionX}%`,
+                      top: `${orientedTable.positionY}%`,
+                      width: `${orientedTable.width}%`,
+                      height: `${orientedTable.height}%`,
                     }}
                   />
-                ))
+                  );
+                })
             : null}
           {tables.map((table) => {
+            const orientedTable = orientMapRect(table, rotatedMap);
             const mode = contentModes.get(table.id) ?? "full";
             const visualStatus = getRestaurantTableVisualStatus(table);
             const isDropTarget = dropTargetId === table.id || Boolean(table.layoutGroupId && displayTables.find((item) => item.id === dropTargetId)?.layoutGroupId === table.layoutGroupId);
@@ -823,23 +891,23 @@ export function TableMapView(props: Props) {
             return (
               <UiButton
                 aria-label={`${table.name}, ${statusLabel(table.status)}${table.layoutGroupId ? ", juntada" : ""}`}
-                className={`absolute z-[2] flex min-h-0 min-w-0 flex-col items-center justify-center gap-[3px] overflow-hidden border-2 p-0 leading-[1.2] text-[var(--foreground)] shadow-[0_8px_18px_rgba(17,24,39,.12)] max-[760px]:p-1.5 ${editMode ? "touch-none cursor-grab active:cursor-grabbing" : ""} ${visualStatus === "free" ? "border-[var(--success)] bg-[var(--success-soft)]" : visualStatus === "occupied" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_15%,var(--surface))]"} ${table.shape === "round" ? "rounded-full" : table.shape === "square" ? "rounded-[10px]" : "rounded-[7px]"} ${isDropTarget ? "border-[var(--accent)] outline-[3px] outline-[color-mix(in_srgb,var(--accent)_38%,transparent)] shadow-[0_0_0_5px_color-mix(in_srgb,var(--accent)_10%,transparent)]" : ""} ${isUnavailable ? "opacity-35" : editMode && joinPreview ? "opacity-70" : ""} ${viewport.zoom < 0.75 ? "gap-px p-1.5" : ""}`}
+                className={`absolute z-[2] flex min-h-0 min-w-0 flex-col items-center justify-center gap-[3px] overflow-hidden border-2 p-0 leading-[1.2] text-[var(--foreground)] shadow-[0_8px_18px_rgba(17,24,39,.12)] ${mobileLayout ? "p-1.5" : ""} ${editMode ? "touch-none cursor-grab active:cursor-grabbing" : ""} ${visualStatus === "free" ? "border-[var(--success)] bg-[var(--success-soft)]" : visualStatus === "occupied" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_15%,var(--surface))]"} ${table.shape === "round" ? "rounded-full" : table.shape === "square" ? "rounded-[10px]" : "rounded-[7px]"} ${isDropTarget ? "border-[var(--accent)] outline-[3px] outline-[color-mix(in_srgb,var(--accent)_38%,transparent)] shadow-[0_0_0_5px_color-mix(in_srgb,var(--accent)_10%,transparent)]" : ""} ${mobileLayout && selectedTableId === table.id ? "ring-4 ring-[color-mix(in_srgb,var(--accent)_48%,transparent)] ring-offset-2 ring-offset-[var(--surface-secondary)]" : ""} ${isUnavailable ? "opacity-35" : editMode && joinPreview ? "opacity-70" : ""} ${viewport.zoom < 0.75 ? "gap-px p-1.5" : ""}`}
                 key={table.id}
                 onClick={() => chooseTable(table)}
                 onPointerDown={(event) => startTableDrag(event, table)}
                 style={{
-                  left: `${table.positionX}%`,
-                  top: `${table.positionY}%`,
-                  width: `${table.width}%`,
-                  height: `${table.height}%`,
+                  left: `${orientedTable.positionX}%`,
+                  top: `${orientedTable.positionY}%`,
+                  width: `${orientedTable.width}%`,
+                  height: `${orientedTable.height}%`,
                 }}
                 type="button"
               >
                 {mode !== "external" ? (
-                  <span className={`pointer-events-none absolute inset-0 box-border flex max-w-none flex-col items-center justify-center gap-[3px] overflow-hidden px-2 py-[9px] whitespace-normal ${mode === "compact" || viewport.zoom < 0.75 ? "p-[5px]" : ""} [&>b]:text-[15px] [&>b]:leading-[1.25] [&>small]:flex [&>small]:max-w-full [&>small]:items-center [&>small]:gap-[3px] [&>small]:text-[11px] [&>small]:leading-[1.25] [&>small]:text-[var(--muted)] max-[760px]:[&>small]:hidden [&>small_svg]:shrink-0 [&>em]:rounded-full [&>em]:bg-[var(--surface)] [&>em]:px-1.5 [&>em]:py-0.5 [&>em]:text-[9px] [&>em]:not-italic [&>em]:font-extrabold max-[760px]:[&>em]:hidden` }>
-                    <span className={`flex w-full max-w-none flex-col items-center whitespace-normal ${mode === "compact" ? "gap-0" : "gap-px"} [&>strong]:w-full [&>strong]:truncate [&>strong]:text-[15px] [&>strong]:font-extrabold [&>strong]:leading-[1.2] max-[760px]:[&>strong]:text-[13px]`}>
+                  <span className={`pointer-events-none absolute inset-0 box-border flex max-w-none flex-col items-center justify-center gap-[3px] overflow-hidden px-2 py-[9px] whitespace-normal ${mode === "compact" || viewport.zoom < 0.75 || mobileLayout ? "p-[5px]" : ""} [&>b]:text-[15px] [&>b]:leading-[1.25] [&>small]:flex [&>small]:max-w-full [&>small]:items-center [&>small]:gap-[3px] [&>small]:text-[11px] [&>small]:leading-[1.25] [&>small]:text-[var(--muted)] ${mobileLayout ? "[&>small]:hidden [&>em]:hidden" : ""} [&>small_svg]:shrink-0 [&>em]:rounded-full [&>em]:bg-[var(--surface)] [&>em]:px-1.5 [&>em]:py-0.5 [&>em]:text-[9px] [&>em]:not-italic [&>em]:font-extrabold` }>
+                    <span className={`flex w-full max-w-none flex-col items-center whitespace-normal ${mode === "compact" ? "gap-0" : "gap-px"} [&>strong]:w-full [&>strong]:truncate [&>strong]:font-extrabold [&>strong]:leading-[1.2] ${mobileLayout ? "[&>strong]:text-[11px]" : "[&>strong]:text-[15px]"}`}>
                       <strong title={table.name}>{table.name}</strong>
-                      <span className={`max-w-full truncate text-[11px] font-bold leading-[1.25] ${mode === "compact" ? "text-[9px]" : ""} ${viewport.zoom < 0.75 ? "text-[10px]" : ""}`}>
+                      <span className={`max-w-full truncate font-bold leading-[1.25] ${mobileLayout ? "text-[10px]" : "text-[11px]"} ${mode === "compact" ? "text-[9px]" : ""} ${viewport.zoom < 0.75 ? "text-[10px]" : ""}`}>
                         {statusLabel(table.status)}
                       </span>
                     </span>
@@ -894,7 +962,7 @@ export function TableMapView(props: Props) {
             if (!table) return null;
             return (
               <div
-                className={`pointer-events-none absolute box-border flex min-w-24 max-w-[168px] flex-col justify-center rounded-lg border border-l-[3px] border-[var(--separator)] bg-[color-mix(in_srgb,var(--surface)_97%,transparent)] px-[9px] py-[5px] leading-[1.2] text-[var(--foreground)] shadow-[0_3px_10px_rgba(0,0,0,.16)] ${getRestaurantTableVisualStatus(table) === "free" ? "border-l-[var(--success)]" : getRestaurantTableVisualStatus(table) === "occupied" ? "border-l-[var(--danger)]" : "border-l-[var(--warning)]"} [&>strong]:block [&>strong]:truncate [&>strong]:text-[13px] [&>strong]:font-extrabold [&>span]:truncate [&>span]:text-[10px] [&>span]:font-bold [&>span]:text-[var(--muted)]`}
+                className={`pointer-events-none absolute box-border flex flex-col justify-center rounded-lg border border-l-[3px] border-[var(--separator)] bg-[color-mix(in_srgb,var(--surface)_97%,transparent)] leading-[1.2] text-[var(--foreground)] shadow-[0_3px_10px_rgba(0,0,0,.16)] ${mobileLayout ? "min-w-20 max-w-[140px] px-2 py-1 [&>strong]:text-xs [&>span]:text-[9px]" : "min-w-24 max-w-[168px] px-[9px] py-[5px] [&>strong]:text-[13px] [&>span]:text-[10px]"} ${getRestaurantTableVisualStatus(table) === "free" ? "border-l-[var(--success)]" : getRestaurantTableVisualStatus(table) === "occupied" ? "border-l-[var(--danger)]" : "border-l-[var(--warning)]"} [&>strong]:block [&>strong]:truncate [&>strong]:font-extrabold [&>span]:truncate [&>span]:font-bold [&>span]:text-[var(--muted)]`}
                 key={label.id}
                 style={{
                   left: label.rect.x,
@@ -910,15 +978,18 @@ export function TableMapView(props: Props) {
           })}
         </div>
         <MapViewportControls
+          mobileLayout={mobileLayout}
+          rotated={rotatedMap}
           zoom={viewport.zoom}
           onFit={() =>
             canvasRef.current &&
             viewportApi.fit(
               canvasRef.current,
-              [...tables, ...mapElements],
+              [...tables, ...mapElements].map((item) => orientMapRect(item, rotatedMap)),
               planeSize,
             )
           }
+          onRotate={toggleMapOrientation}
           onReset={() => viewportApi.setViewport({ zoom: 1, panX: 0, panY: 0 })}
           onZoomIn={() =>
             canvasRef.current && viewportApi.zoomBy(1.2, canvasRef.current)
@@ -927,7 +998,7 @@ export function TableMapView(props: Props) {
             canvasRef.current && viewportApi.zoomBy(1 / 1.2, canvasRef.current)
           }
         />
-        {editMode && groupMenu ? (
+        {editMode && groupMenu && !mobileLayout ? (
           <div
             className="absolute right-auto z-30 grid min-w-[220px] gap-[5px] rounded-[10px] border border-[var(--separator)] bg-[var(--surface)] p-2 shadow-[var(--shadow)] max-[760px]:min-w-[min(230px,calc(100%-16px))] [&>strong]:px-2 [&>strong]:py-1.5 [&>strong]:text-[13px] [&>p]:m-0 [&>p]:max-w-[230px] [&>p]:px-2 [&>p]:pb-[7px] [&>p]:pt-1 [&>p]:text-xs [&>p]:leading-[1.35] [&>p]:text-[var(--muted)] [&>button]:flex [&>button]:min-h-10 [&>button]:items-center [&>button]:gap-2 [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:px-[9px] [&>button]:font-bold [&>button]:text-[var(--foreground)] [&>button]:hover:bg-[var(--accent-soft)] [&>button]:hover:outline-2 [&>button]:hover:outline-[var(--accent)] [&>button]:focus-visible:bg-[var(--accent-soft)] [&>button]:focus-visible:outline-2 [&>button]:focus-visible:outline-[var(--accent)] [&>button]:disabled:cursor-not-allowed [&>button]:disabled:opacity-45"
             style={{ left: groupMenu.left, top: groupMenu.top }}
@@ -935,7 +1006,7 @@ export function TableMapView(props: Props) {
             <strong>{groupMenuTable?.name}</strong>
             {groupMenuLocked ? (
               <p>
-                La comanda esta abierta. Cobra o cancela la comanda antes de
+                La comanda está abierta. Cobra o cancela la comanda antes de
                 separar las mesas.
               </p>
             ) : null}
@@ -956,9 +1027,35 @@ export function TableMapView(props: Props) {
           </div>
         ) : null}
       </section>
+      {mobileLayout && !editMode && selectedTable ? (
+        <MobileTableActionSheet
+          canOpen={canOpen}
+          isBusy={isBusy}
+          isOnline={isOnline}
+          onClose={() => setSelectedTableId(null)}
+          onPrimaryAction={() => {
+            setSelectedTableId(null);
+            if (selectedTable.status === "occupied" && selectedTable.orderId) {
+              onOpenOrder(selectedTable.orderId);
+            } else if (selectedTable.status === "free" && canOpen) {
+              prepareOpenTable(selectedTable);
+            }
+          }}
+          table={selectedTable}
+        />
+      ) : null}
+      {mobileLayout && editMode && groupMenu && groupMenuTable ? (
+        <MobileGroupActionsSheet
+          locked={groupMenuLocked}
+          onClose={() => setGroupMenu(null)}
+          onSeparateAll={() => separate(groupMenu.tableId, true)}
+          onSeparateOne={() => separate(groupMenu.tableId, false)}
+          tableName={groupMenuTable.name}
+        />
+      ) : null}
       {pendingIds ? (
-        <AppModal containerClassName="!p-4" maxWidth={448} dismissDisabled={isBusy} label="Abrir mesa" onClose={() => setPendingIds(null)}>
-          <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">
+        <AppModal containerClassName={mobileLayout ? "!p-0" : "!p-4"} dialogClassName={mobileLayout ? "!rounded-b-none !rounded-t-[20px] !border-x-0 !border-b-0" : ""} maxWidth={448} dismissDisabled={isBusy} label="Abrir mesa" onClose={() => setPendingIds(null)} placement={mobileLayout ? "bottom" : "center"}>
+          <section className={`w-full max-w-[440px] bg-[var(--surface)] text-[var(--foreground)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 ${mobileLayout ? "rounded-t-[20px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5" : "rounded-[var(--radius)] border border-[var(--separator)] p-6 shadow-[var(--shadow)]"}`}>
             <h2>
               {pendingIds.length > 1
                 ? `Abrir ${pendingIds.length} mesas juntas`
@@ -967,7 +1064,7 @@ export function TableMapView(props: Props) {
             <p>
               {pendingReservation
                 ? `Esta mesa tiene una reserva a las ${new Intl.DateTimeFormat("es", { hour: "2-digit", minute: "2-digit" }).format(new Date(pendingReservation.startsAt))} para ${pendingReservation.customerName}.`
-                : "La comanda se guardara automaticamente y quedara disponible para los dispositivos del local."}
+                : "La comanda se guardará automáticamente y quedará disponible para los dispositivos del local."}
             </p>
             {pendingReservation?.status === "arrived" ? (
               <UiButton
@@ -982,7 +1079,7 @@ export function TableMapView(props: Props) {
               </UiButton>
             ) : null}
             <label>
-              Numero de comensales
+              Número de comensales
               <UiInput
                 autoFocus
                 min="1"

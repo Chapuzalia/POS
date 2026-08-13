@@ -120,6 +120,7 @@ export type TenantContext = {
   userId: string
   userName: string
   role: TenantRole
+  features?: string[]
 }
 
 export type LoginInput = {

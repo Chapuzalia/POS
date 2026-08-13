@@ -53,7 +53,7 @@ function ClosingValuesChart({ values }: { values: CashClosingDailyValue[] }) {
   if (!values.length) {
     return (
       <div className="!grid !min-h-64 !place-items-center !rounded-xl !bg-[var(--crm-surface-soft)] !px-6 !text-center !text-sm !font-semibold !text-[var(--crm-text-muted)]">
-        No hay cierres en el periodo seleccionado.
+        No hay cierres en el período seleccionado.
       </div>
     );
   }
@@ -899,7 +899,7 @@ export function CashClosingReportsCrm({
           </UiDataTable>
           {closings && !filteredClosings.length ? (
             <div className="!grid !min-h-44 !place-items-center !px-6 !text-center !text-sm !font-semibold !text-[var(--crm-text-muted)]">
-              No hay cierres de caja para el periodo seleccionado.
+              No hay cierres de caja para el período seleccionado.
             </div>
           ) : null}
         </div>

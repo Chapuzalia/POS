@@ -90,8 +90,8 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
   }, [isOnline, refreshVenues, runAction])
 
   useEffect(() => {
-    if (!canAccessCrmSection(context.role, activeSection)) setActiveSection('dashboard')
-  }, [activeSection, context.role])
+    if (!canAccessCrmSection(context.role, activeSection, context.features)) setActiveSection('dashboard')
+  }, [activeSection, context.features, context.role])
 
   const inventoryEnabled = venues.find((venue) => venue.id === selectedVenueId)?.inventoryEnabled ?? true
 
@@ -189,7 +189,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
 
   return <CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
     const inventorySectionBlocked = !inventoryEnabled && (section === 'inventory-warehouses' || section === 'inventory-settings')
-    if (canAccessCrmSection(context.role, section) && !inventorySectionBlocked) setActiveSection(section)
+    if (canAccessCrmSection(context.role, section, context.features) && !inventorySectionBlocked) setActiveSection(section)
   }} onVenueChange={(venueId) => {
     setStats(null)
     setSelectedVenueId(venueId)

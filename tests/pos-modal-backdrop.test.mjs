@@ -6,6 +6,7 @@ test('the shared POS modal delegates dismissal, focus trap and Escape to HeroUI'
   const source = await readFile(new URL('../src/components/ui/AppModal.tsx', import.meta.url), 'utf8')
 
   assert.match(source, /from ["']@heroui\/react["']/)
+  assert.match(source, /<Modal\.Trigger[^>]*aria-hidden="true"[^>]*className="(?:hidden|sr-only)"[^>]*tabIndex=\{-1\}[^>]*\/>/)
   assert.match(source, /<Modal\.Backdrop/)
   assert.match(source, /isDismissable=\{!dismissDisabled\}/)
   assert.match(source, /isKeyboardDismissDisabled=\{dismissDisabled\}/)
@@ -43,6 +44,12 @@ test('POS modal families use the shared HeroUI modal policy', async () => {
   }
 })
 
+test('the superadmin modal carries its CRM theme variables into the HeroUI portal', async () => {
+  const source = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
+
+  assert.match(source, /backdropClassName=["']crm-shell["']/)
+})
+
 test('the cash movement modal is centered and keeps long actions inside its width', async () => {
   const source = await readFile(new URL('../src/components/modals/CashMovementModal.tsx', import.meta.url), 'utf8')
 
@@ -50,4 +57,19 @@ test('the cash movement modal is centered and keeps long actions inside its widt
   assert.match(source, /containerClassName=["']!p-4["']/)
   assert.match(source, /min-w-0 max-w-full/)
   assert.match(source, /!whitespace-normal/)
+})
+
+test('the ticket history payment selector renders one shared border', async () => {
+  const [modal, nativeSelect] = await Promise.all([
+    readFile(new URL('../src/components/modals/SessionTicketsModal.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/ui/NativeSelect.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(nativeSelect, /triggerClassName\?: string/)
+  assert.match(modal, /triggerClassName="!min-h-8 !border-0 !bg-transparent !px-0 !shadow-none"/)
+  assert.match(modal, /focus-within:border-\[var\(--accent\)\]/)
+  assert.match(nativeSelect, /HeroSelect\.Value className="min-w-0 flex-1 truncate pr-1"/)
+  assert.match(nativeSelect, /HeroSelect\.Indicator className="!static !inset-auto ml-1 shrink-0"/)
+  assert.match(nativeSelect, /className="relative pr-10/)
+  assert.match(nativeSelect, /className="absolute right-3 top-1\/2 -translate-y-1\/2"/)
 })

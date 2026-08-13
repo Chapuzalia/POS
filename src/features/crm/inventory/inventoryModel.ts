@@ -56,16 +56,24 @@ export function calculateStockUnitConsumption(
   formatConsumptionQuantity: number,
   soldQuantity: number,
   contentQuantityPerStockUnit: number,
+  contentQuantityPerFormatUnit = 1,
 ) {
   if (
     !Number.isFinite(formatConsumptionQuantity)
     || !Number.isFinite(soldQuantity)
     || !Number.isFinite(contentQuantityPerStockUnit)
+    || !Number.isFinite(contentQuantityPerFormatUnit)
     || formatConsumptionQuantity <= 0
     || soldQuantity <= 0
     || contentQuantityPerStockUnit <= 0
+    || contentQuantityPerFormatUnit <= 0
   ) {
     throw new Error('Los datos de consumo deben ser mayores que cero.')
   }
-  return Math.round((formatConsumptionQuantity * soldQuantity / contentQuantityPerStockUnit) * 1_000_000) / 1_000_000
+  return Math.round((
+    formatConsumptionQuantity
+    * contentQuantityPerFormatUnit
+    * soldQuantity
+    / contentQuantityPerStockUnit
+  ) * 1_000_000) / 1_000_000
 }

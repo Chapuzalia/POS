@@ -79,5 +79,5 @@ export function nextCashClosingCopyNumber(scope: PrintAgentScope, closingId: str
   return next
 }
 
-// El token permanece en localStorage durante el MVP. Este modulo es el unico
+// El token permanece en localStorage durante el MVP. Este módulo es el único
 // punto de acceso para poder sustituirlo por almacenamiento nativo seguro.

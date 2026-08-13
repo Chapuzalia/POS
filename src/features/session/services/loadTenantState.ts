@@ -8,6 +8,7 @@ import {
 } from '../../../services/posService'
 import type { TenantContext } from '../../../types'
 import { isBackofficeUser } from '../../../app/app-permissions'
+import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 
 const emptyCatalogState = {
   catalog: null,
@@ -36,9 +37,9 @@ export async function loadTenantState(context: TenantContext) {
   return {
     catalog: posCatalog.catalog,
     discountSchedule: posCatalog.discountSchedule,
-    discounts: posCatalog.discounts,
-    manualDiscountEnabled: posCatalog.manualDiscountEnabled,
-    manualDiscountRequiresPin: posCatalog.manualDiscountRequiresPin,
+    discounts: hasTenantFeature(context, 'discounts') ? posCatalog.discounts : [],
+    manualDiscountEnabled: hasTenantFeature(context, 'discounts') && posCatalog.manualDiscountEnabled,
+    manualDiscountRequiresPin: hasTenantFeature(context, 'discounts') && posCatalog.manualDiscountRequiresPin,
     cashSession,
     productSalesStats,
     salesLedger: mergeLedgers(localLedger, remoteLedger),

@@ -14,6 +14,10 @@ const [catalogPanel, productDialog, productCard, mixerCard, categoryCard, catalo
 
 test('catalog tabs keep icon and label inside bordered fixed-height cards', () => {
   assert.match(catalogPanel, /<PosCatalogTab/)
+  assert.ok(catalogPanel.includes('auto-cols-[minmax(4.75rem,1fr)]'))
+  assert.ok(catalogPanel.includes('md:auto-cols-[minmax(5.25rem,1fr)]'))
+  assert.ok(catalogPanel.includes('touch-pan-x'))
+  assert.ok(catalogPanel.includes('overscroll-x-contain'))
   assert.ok(catalogTab.includes('h-14 min-h-14'))
   assert.ok(catalogTab.includes('border-[var(--separator)]'))
   assert.ok(catalogTab.includes('bg-[var(--accent)]'))
@@ -39,7 +43,7 @@ test('POS products use a dedicated card instead of the generic UI button', () =>
 test('POS categories share the product card footprint and responsive grid', () => {
   assert.match(catalogPanel, /<PosCategoryCard/)
   assert.ok(catalogPanel.includes('grid grid-cols-3 gap-3 md:grid-cols-4 2xl:grid-cols-5'))
-  assert.ok(categoryCard.includes('min-h-[88px]'))
+  assert.ok(categoryCard.includes('min-h-[98px]'))
 })
 
 test('mixer choices use the reference three-column horizontal selector', () => {

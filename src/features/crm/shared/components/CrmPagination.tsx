@@ -27,7 +27,7 @@ export function CrmPagination({ currentPage, onPageChange, totalResults }: CrmPa
       </p>
       <nav aria-label="Paginacion de resultados" className="!flex !flex-wrap !items-center !justify-center !gap-1.5">
         <UiButton
-          aria-label="Pagina anterior"
+          aria-label="Página anterior"
           className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-9 !items-center !justify-center !gap-1.5 !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !px-2.5 !text-xs !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150"
           disabled={currentPage === 1}
           onClick={() => onPageChange(currentPage - 1)}
@@ -39,7 +39,7 @@ export function CrmPagination({ currentPage, onPageChange, totalResults }: CrmPa
         {visiblePages.map((page) => (
           <UiButton
             aria-current={page === currentPage ? 'page' : undefined}
-            aria-label={`Pagina ${page}`}
+            aria-label={`Página ${page}`}
             className={page === currentPage
               ? '!inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-blue)] !p-0 !text-xs !font-bold !text-white !shadow-none !transition-[background-color,color,transform] !duration-150'
               : 'inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-xs !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150'}
@@ -51,7 +51,7 @@ export function CrmPagination({ currentPage, onPageChange, totalResults }: CrmPa
           </UiButton>
         ))}
         <UiButton
-          aria-label="Pagina siguiente"
+          aria-label="Página siguiente"
           className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-9 !items-center !justify-center !gap-1.5 !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !px-2.5 !text-xs !font-semibold !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,transform] !duration-150"
           disabled={currentPage === totalPages}
           onClick={() => onPageChange(currentPage + 1)}

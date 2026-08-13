@@ -1,6 +1,6 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
-import { AlertTriangle, Download, FileJson, Upload, X } from 'lucide-react'
+import { AlertTriangle, Download, FileJson, Trash2, Upload, X } from 'lucide-react'
 import { useMemo, useState, type ChangeEvent } from 'react'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
 import { parseRevoItemsCsv, type RevoImportParseResult } from '../../../../lib/revoImport.ts'
@@ -14,10 +14,12 @@ import {
   type CatalogImportSummary,
 } from '../services/catalogTransferDocument.ts'
 import {
+  clearFinalCatalog,
   exportFinalCatalog,
   importOwnCatalog,
   importRevoIntoFinalCatalog,
   type CatalogImportProgress,
+  type CatalogClearResult,
   type FinalCatalogImportResult,
 } from '../services/catalogTransferService.ts'
 
@@ -60,6 +62,11 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
   const [revoResult, setRevoResult] = useState<FinalCatalogImportResult | null>(null)
   const [isRevoImporting, setIsRevoImporting] = useState(false)
   const [revoProgress, setRevoProgress] = useState<CatalogImportProgress | null>(null)
+
+  const [isConfirmingClear, setIsConfirmingClear] = useState(false)
+  const [isClearingCatalog, setIsClearingCatalog] = useState(false)
+  const [clearConfirmation, setClearConfirmation] = useState('')
+  const [clearResult, setClearResult] = useState<CatalogClearResult | null>(null)
 
   const ownSummary = useMemo(() => ownDocument ? getCatalogImportSummary(ownDocument) : null, [ownDocument])
   const warningCount = useMemo(
@@ -129,6 +136,22 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
     if (!imported) setRevoProgress(null)
   }
 
+  async function confirmCatalogClear() {
+    if (clearConfirmation !== `BORRAR ${venueName}`) return
+    setIsClearingCatalog(true)
+    const cleared = await mutate(async () => {
+      const result = await clearFinalCatalog(catalog)
+      setClearResult(result)
+      setOwnResult(null)
+      setRevoResult(null)
+    })
+    setIsClearingCatalog(false)
+    if (cleared) {
+      setClearConfirmation('')
+      setIsConfirmingClear(false)
+    }
+  }
+
   return <>
     <div className="!grid !gap-4 xl:!grid-cols-2">
       <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-5 !shadow-[var(--crm-shadow-card)]">
@@ -167,7 +190,7 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
 
       <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-5 !shadow-[var(--crm-shadow-card)] xl:!col-span-2">
         <h2 className="!text-lg !font-bold">Importar desde REVO</h2>
-        <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La importación REVO añade formatos, categorías, variantes, apariciones y relaciones definitivas en un único batch transaccional.</p>
+        <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La importación conserva los grupos, categorías, formatos, precios e IVA de REVO y los adapta al catálogo actual en lotes transaccionales. Los artículos sin formato explícito usan «Unidad».</p>
         <label className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !mt-4 !inline-flex !cursor-pointer">
           <Upload className="!size-4" /> Seleccionar CSV
           <UiInput accept=".csv,text/csv" className="!sr-only" disabled={disabled} onChange={readRevoFile} type="file" />
@@ -178,9 +201,39 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
           <Upload className="!size-4" /> {isRevoImporting ? 'Importando…' : 'Importar desde REVO'}
         </UiButton>
         {isRevoImporting && revoProgress ? <ImportProgress progress={revoProgress} /> : null}
-        {revoResult ? <p className="!mt-3 !rounded-xl !bg-[var(--crm-green-soft)] !p-3 !text-sm !text-[var(--crm-green)]">{revoResult.products} productos, {revoResult.variants} variantes, {revoResult.formats} formatos, {revoResult.categories} categorías y {revoResult.placements} apariciones creadas.</p> : null}
+        {revoResult ? <p className="!mt-3 !rounded-xl !bg-[var(--crm-green-soft)] !p-3 !text-sm !text-[var(--crm-green)]">
+          {revoResult.products} productos y {revoResult.variants} variantes creados; {revoResult.productsUpdated} productos y {revoResult.variantsUpdated} variantes actualizados; {revoResult.tabs} pestañas, {revoResult.formats} formatos, {revoResult.categories} categorías y {revoResult.placements} apariciones nuevas.
+        </p> : null}
       </section>
     </div>
+
+    <section className="!mt-4 !overflow-hidden !rounded-2xl !border !border-red-500/35 !bg-red-500/[0.045] !p-5 !text-[var(--crm-text)]">
+      <div className="!flex !items-start !gap-3">
+        <span className="!grid !size-10 !shrink-0 !place-items-center !rounded-full !bg-red-500/15 !text-red-500"><AlertTriangle className="!size-5" /></span>
+        <div>
+          <p className="!text-xs !font-bold !uppercase !tracking-[0.16em] !text-red-500">Zona de peligro</p>
+          <h2 className="!mt-1 !text-lg !font-bold">Borrar todo el catálogo del local</h2>
+          <p className="!mt-2 !max-w-4xl !text-sm !text-[var(--crm-text-muted)]">
+            Elimina definitivamente productos, variantes y precios, imágenes, pestañas, categorías, formatos de venta, apariciones, grupos de selección, modificadores y todas sus relaciones en <strong>{venueName}</strong>.
+          </p>
+          <p className="!mt-2 !max-w-4xl !text-sm !font-medium !text-[var(--crm-text)]">
+            No elimina el local, sus usuarios, dispositivos o cajas; tampoco ventas, tickets, registros fiscales históricos ni movimientos de inventario.
+          </p>
+          <p className="!mt-3 !text-sm !text-red-600 dark:!text-red-400">
+            Catálogo actual: {catalog.products.length} productos · {catalog.variants.length} variantes · {catalog.saleFormats.length} formatos · {catalog.categories.length} categorías · {catalog.tabs.length} pestañas.
+          </p>
+        </div>
+      </div>
+      <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-red-600 px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red-700 hover:shadow-[0_8px_20px_rgba(220,38,38,0.22)] !mt-4" disabled={disabled || isClearingCatalog} onClick={() => { setClearConfirmation(''); setIsConfirmingClear(true) }} type="button">
+        <Trash2 className="!size-4" /> Borrar todo el catálogo
+      </UiButton>
+      {clearResult ? <div className="!mt-4 !rounded-xl !bg-[var(--crm-surface)] !p-3 !text-sm" role="status">
+        <strong>Catálogo borrado.</strong> Se eliminaron {clearResult.counts.products} productos, {clearResult.counts.variants} variantes, {clearResult.counts.formats} formatos, {clearResult.counts.categories} categorías, {clearResult.counts.tabs} pestañas y {clearResult.counts.images} imágenes registradas.
+        {clearResult.imageStorageCleanupPending
+          ? <p className="!mt-2 !text-amber-600 dark:!text-amber-400">El catálogo ya está vacío, pero no se pudieron retirar los archivos de imagen del almacenamiento. Han quedado archivos sin uso pendientes de limpieza.</p>
+          : <p className="!mt-2 !text-[var(--crm-text-muted)]">También se retiraron {clearResult.imageFilesRemoved} archivos de imagen del almacenamiento.</p>}
+      </div> : null}
+    </section>
 
     {isConfirmingImport && ownDocument && ownSummary ? <CrmModal label="Confirmar importación de catálogo" onClose={() => { if (!isOwnImporting) setIsConfirmingImport(false) }}>
       <div className="!flex !items-center !justify-between !border-b !border-[var(--crm-border)] !px-5 !py-4">
@@ -199,6 +252,29 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
       <div className="!flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !px-5 !py-4">
         <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || isOwnImporting} onClick={() => setIsConfirmingImport(false)} type="button">Cancelar</UiButton>
         <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)]" disabled={disabled || isOwnImporting} onClick={() => void confirmOwnImport()} type="button"><Upload className="!size-4" /> {isOwnImporting ? 'Importando…' : 'Importar y reemplazar'}</UiButton>
+      </div>
+    </CrmModal> : null}
+
+    {isConfirmingClear ? <CrmModal label="Confirmar borrado completo del catálogo" onClose={() => { if (!isClearingCatalog) setIsConfirmingClear(false) }}>
+      <div className="!flex !items-center !justify-between !border-b !border-red-500/25 !px-5 !py-4">
+        <div className="!flex !items-center !gap-3">
+          <span className="!grid !size-9 !place-items-center !rounded-full !bg-red-500/15 !text-red-500"><Trash2 className="!size-5" /></span>
+          <div><h2 className="!font-bold">Borrar el catálogo de {venueName}</h2><p className="!text-xs !text-red-500">Esta acción no se puede deshacer desde la aplicación.</p></div>
+        </div>
+        <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || isClearingCatalog} onClick={() => setIsConfirmingClear(false)} type="button"><X className="!size-4" /></UiButton>
+      </div>
+      <div className="!overflow-y-auto !p-5">
+        <p className="!text-sm">Se borrará todo el catálogo operativo de este local: productos, variantes y precios, imágenes, pestañas, categorías, formatos, apariciones, selecciones y modificadores.</p>
+        <div className="!mt-4 !rounded-xl !border !border-red-500/25 !bg-red-500/[0.06] !p-3 !text-sm">
+          <strong>Se conservarán:</strong> el local y su configuración, usuarios, dispositivos, cajas, ventas y tickets, registros fiscales históricos y movimientos de inventario.
+        </div>
+        <p className="!mt-4 !text-sm">Si quieres conservar una copia recuperable del catálogo, cancela y usa primero <strong>Exportar JSON</strong>.</p>
+        <label className="!mt-5 !block !text-sm !font-medium" htmlFor="catalog-clear-confirmation">Para confirmar, escribe exactamente <strong>BORRAR {venueName}</strong></label>
+        <UiInput autoComplete="off" className="!mt-2" disabled={disabled || isClearingCatalog} id="catalog-clear-confirmation" onChange={(event) => setClearConfirmation(event.currentTarget.value)} spellCheck={false} value={clearConfirmation} />
+      </div>
+      <div className="!flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !px-5 !py-4">
+        <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || isClearingCatalog} onClick={() => setIsConfirmingClear(false)} type="button">Cancelar</UiButton>
+        <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-red-600 px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red-700" disabled={disabled || isClearingCatalog || clearConfirmation !== `BORRAR ${venueName}`} onClick={() => void confirmCatalogClear()} type="button"><Trash2 className="!size-4" /> {isClearingCatalog ? 'Borrando…' : 'Borrar definitivamente'}</UiButton>
       </div>
     </CrmModal> : null}
   </>

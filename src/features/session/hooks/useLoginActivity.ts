@@ -2,7 +2,7 @@ import { useEffect, useRef } from 'react'
 import type { TenantContext } from '../../../types'
 import { checkLoginLease, heartbeatLoginLease } from '../../../services/loginLeaseService'
 
-const inactivityMs = 30 * 60 * 1000
+const inactivityMs = 4 * 60 * 60 * 1000
 const leaseCheckIntervalMs = 30_000
 
 type UseLoginActivityOptions = {
@@ -48,12 +48,12 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
     const scheduleIdleClose = () => {
       if (idleTimeoutId) window.clearTimeout(idleTimeoutId)
       const remainingMs = Math.max(0, inactivityMs - (Date.now() - activity.lastActivityAt))
-      idleTimeoutId = window.setTimeout(() => void close('La sesion se ha cerrado tras 30 minutos sin actividad.', false), remainingMs)
+      idleTimeoutId = window.setTimeout(() => void close('La sesión se ha cerrado tras 4 horas sin actividad.', false), remainingMs)
     }
     const validateLease = async (forceHeartbeat = false) => {
       if (!active || closing || leaseRequestInFlight) return
       if (Date.now() - activity.lastActivityAt >= inactivityMs) {
-        await close('La sesion se ha cerrado tras 30 minutos sin actividad.', false)
+        await close('La sesión se ha cerrado tras 4 horas sin actividad.', false)
         return
       }
       if (!isOnline) return
@@ -69,7 +69,7 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
           activity.lastSyncedActivityAt = syncedActivityAt
         }
         if (!ownsLease) {
-          await close('La sesion se ha cerrado porque la cuenta se ha liberado o se ha abierto en otro dispositivo.', true)
+          await close('La sesión se ha cerrado porque la cuenta se ha liberado o se ha abierto en otro dispositivo.', true)
         }
       } catch {
         // Network failures must not end a session that can continue offline.

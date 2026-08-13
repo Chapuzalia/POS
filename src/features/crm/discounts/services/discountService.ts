@@ -34,6 +34,7 @@ export type DiscountRow = {
 }
 
 export type DiscountTargetProductOption = {
+  categories: Array<{ id: string; name: string }>
   id: string
   name: string
   variants: Array<{ id: string; name: string }>
@@ -154,19 +155,52 @@ export async function loadDiscountTargetOptions(
   context: TenantContext,
   venueId: string,
 ): Promise<DiscountTargetProductOption[]> {
-  const { data, error } = await requireSupabase()
-    .from('products')
-    .select('id, name, product_variants(id, name)')
-    .eq('tenant_id', context.tenantId)
-    .eq('venue_id', venueId)
-    .eq('is_active', true)
-    .order('name')
-  if (error) throw error
-  return ((data ?? []) as Array<{
+  const supabase = requireSupabase()
+  const [productsResult, categoriesResult, placementsResult] = await Promise.all([
+    supabase.from('products')
+      .select('id, name, product_variants(id, name)')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .order('name'),
+    supabase.from('categories')
+      .select('id, name')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .order('sort_order')
+      .order('name'),
+    supabase.from('catalog_placements')
+      .select('product_id, category_id')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venueId)
+      .eq('is_active', true)
+      .not('category_id', 'is', null),
+  ])
+  if (productsResult.error) throw productsResult.error
+  if (categoriesResult.error) throw categoriesResult.error
+  if (placementsResult.error) throw placementsResult.error
+
+  const categoriesById = new Map(
+    ((categoriesResult.data ?? []) as Array<{ id: string; name: string }>)
+      .map((category) => [category.id, category]),
+  )
+  const categoryIdsByProduct = new Map<string, Set<string>>()
+  for (const placement of (placementsResult.data ?? []) as Array<{ product_id: string; category_id: string | null }>) {
+    if (!placement.category_id || !categoriesById.has(placement.category_id)) continue
+    const categoryIds = categoryIdsByProduct.get(placement.product_id) ?? new Set<string>()
+    categoryIds.add(placement.category_id)
+    categoryIdsByProduct.set(placement.product_id, categoryIds)
+  }
+
+  return ((productsResult.data ?? []) as Array<{
     id: string
     name: string
     product_variants?: Array<{ id: string; name: string }>
   }>).map((product) => ({
+    categories: [...(categoryIdsByProduct.get(product.id) ?? [])]
+      .map((categoryId) => categoriesById.get(categoryId)!)
+      .sort((left, right) => left.name.localeCompare(right.name, 'es')),
     id: product.id,
     name: product.name,
     variants: [...(product.product_variants ?? [])].sort((a, b) => a.name.localeCompare(b.name, 'es')),

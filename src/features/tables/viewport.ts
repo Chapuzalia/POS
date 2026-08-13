@@ -2,6 +2,7 @@ export type Point = { x: number; y: number }
 export type Viewport = { zoom: number; panX: number; panY: number }
 export type MapBounds = { minX: number; minY: number; maxX: number; maxY: number }
 export type MapPlaneSize = { width: number; height: number }
+export type MapRect = { positionX: number; positionY: number; width: number; height: number }
 
 export const MIN_ZOOM = 0.5
 export const MAX_ZOOM = 2
@@ -17,12 +18,19 @@ export function getMapPlaneSize(viewportWidth: number, viewportHeight: number, d
   return { width, height: width / aspectRatio }
 }
 
-export function screenToMap(point: Point, bounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>, viewport: Viewport): Point {
-  return { x: ((point.x - bounds.left - viewport.panX) / viewport.zoom / bounds.width) * 100, y: ((point.y - bounds.top - viewport.panY) / viewport.zoom / bounds.height) * 100 }
+export function orientMapRect<T extends MapRect>(rect: T, quarterTurn = false): T {
+  if (!quarterTurn) return rect
+  return { ...rect, positionX: 100 - rect.positionY - rect.height, positionY: rect.positionX, width: rect.height, height: rect.width }
 }
 
-export function mapToScreen(point: Point, bounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>, viewport: Viewport): Point {
-  return { x: bounds.left + viewport.panX + (point.x / 100) * bounds.width * viewport.zoom, y: bounds.top + viewport.panY + (point.y / 100) * bounds.height * viewport.zoom }
+export function screenToMap(point: Point, bounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>, viewport: Viewport, quarterTurn = false): Point {
+  const oriented = { x: ((point.x - bounds.left - viewport.panX) / viewport.zoom / bounds.width) * 100, y: ((point.y - bounds.top - viewport.panY) / viewport.zoom / bounds.height) * 100 }
+  return quarterTurn ? { x: oriented.y, y: 100 - oriented.x } : oriented
+}
+
+export function mapToScreen(point: Point, bounds: Pick<DOMRect, 'left' | 'top' | 'width' | 'height'>, viewport: Viewport, quarterTurn = false): Point {
+  const oriented = quarterTurn ? { x: 100 - point.y, y: point.x } : point
+  return { x: bounds.left + viewport.panX + (oriented.x / 100) * bounds.width * viewport.zoom, y: bounds.top + viewport.panY + (oriented.y / 100) * bounds.height * viewport.zoom }
 }
 
 export function zoomAtPoint(viewport: Viewport, nextZoom: number, anchor: Point, bounds: Pick<DOMRect, 'left' | 'top'>): Viewport {

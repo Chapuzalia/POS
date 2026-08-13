@@ -18,6 +18,7 @@ import type {
 } from '../../tables/types'
 import type { TenantContext } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
+import { addDiagnosticBreadcrumb } from '../../../lib/diagnostics'
 
 type UseRestaurantRealtimeOptions = {
   activeCashSessionId?: string
@@ -40,6 +41,9 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
   const [map, setMap] = useState<RestaurantMap>({ areas: [], tables: [], layoutRevision: 0 })
   const [configLoaded, setConfigLoaded] = useState(false)
   const latestRef = useRef(options)
+  const loadedContextKeyRef = useRef<string | null>(null)
+  const tablesEnabledRef = useRef(false)
+  const wasOfflineRef = useRef(false)
   latestRef.current = options
 
   const loadCurrentMap = useCallback(async (activeContext: TenantContext, sessionId = options.activeCashSessionId) => {
@@ -59,43 +63,79 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
 
   useEffect(() => {
     const { context, enabled, isOnline } = options
-    if (!context || !isOnline || !enabled) {
+    if (!context || !enabled) {
+      loadedContextKeyRef.current = null
+      tablesEnabledRef.current = false
       setTablesEnabled(false)
       setMap({ areas: [], tables: [], layoutRevision: 0 })
       setConfigLoaded(true)
       return undefined
     }
+    if (!isOnline) {
+      wasOfflineRef.current = true
+      setConfigLoaded(true)
+      return undefined
+    }
 
     let active = true
-    let initialized = false
-    setConfigLoaded(false)
-    const refresh = async () => {
-      const isInitialLoad = !initialized
-      initialized = true
+    const contextKey = `${context.tenantId}:${context.venueId}`
+    const isInitialLoad = loadedContextKeyRef.current !== contextKey
+    const source = isInitialLoad ? 'initial' : wasOfflineRef.current ? 'reconnect' : 'refresh'
+    wasOfflineRef.current = false
+    if (isInitialLoad) setConfigLoaded(false)
+
+    const refresh = async (instrumentConfigLoad = false) => {
+      const shouldInitializeView = loadedContextKeyRef.current !== contextKey
+      const startedBreadcrumb = shouldInitializeView
+        ? 'restaurant_config.initial_load_started'
+        : 'restaurant_config.refresh_started'
+      const finishedBreadcrumb = shouldInitializeView
+        ? 'restaurant_config.initial_load_finished'
+        : 'restaurant_config.refresh_finished'
+      if (instrumentConfigLoad) {
+        addDiagnosticBreadcrumb(startedBreadcrumb, { source, venueId: context.venueId })
+      }
+      let loadedTablesEnabled: boolean | undefined
+      let succeeded = false
       try {
         const enabledForVenue = await loadVenueTablesEnabled(context)
         if (!active) return
+        loadedTablesEnabled = enabledForVenue
+        const tablesWereEnabled = tablesEnabledRef.current
+        tablesEnabledRef.current = enabledForVenue
         setTablesEnabled(enabledForVenue)
         if (!enabledForVenue) {
-          latestRef.current.setPosView({ type: 'quick_sale' })
+          if (shouldInitializeView || tablesWereEnabled) latestRef.current.setPosView({ type: 'quick_sale' })
           setMap({ areas: [], tables: [], layoutRevision: 0 })
+          loadedContextKeyRef.current = contextKey
           setConfigLoaded(true)
+          succeeded = true
           return
         }
         const nextMap = await loadCurrentMap(context, options.activeCashSessionId)
         if (!active) return
         setMap(nextMap)
-        if (isInitialLoad) latestRef.current.setPosView({ type: 'table_map', areaId: nextMap.areas[0]?.id })
+        if (shouldInitializeView) latestRef.current.setPosView({ type: 'table_map', areaId: nextMap.areas[0]?.id })
+        loadedContextKeyRef.current = contextKey
         setConfigLoaded(true)
+        succeeded = true
       } catch (mapError) {
         if (!active) return
-        if (isInitialLoad) initialized = false
         setConfigLoaded(true)
         latestRef.current.onError(getReadableError(mapError))
+      } finally {
+        if (instrumentConfigLoad) {
+          addDiagnosticBreadcrumb(finishedBreadcrumb, {
+            source,
+            succeeded,
+            tablesEnabled: loadedTablesEnabled,
+            venueId: context.venueId,
+          })
+        }
       }
     }
 
-    void refresh()
+    void refresh(true)
     let realtimeTimer: ReturnType<typeof window.setTimeout> | null = null
     let fallbackTimer: ReturnType<typeof window.setInterval> | null = null
     const scheduleRefresh = () => {

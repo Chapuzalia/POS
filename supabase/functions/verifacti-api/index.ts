@@ -27,10 +27,15 @@ function requiredEnvironment() {
   const anonKey = Deno.env.get('SUPABASE_ANON_KEY')
   const serviceRoleKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
   const encryptionKey = Deno.env.get('VERIFACTI_ENCRYPTION_KEY')
-  if (!supabaseUrl || !anonKey || !serviceRoleKey || !encryptionKey) {
-    throw new Error('Falta configurar Supabase o VERIFACTI_ENCRYPTION_KEY')
+  if (!supabaseUrl || !anonKey || !serviceRoleKey) {
+    throw new Error('Falta configurar Supabase')
   }
   return { anonKey, encryptionKey, serviceRoleKey, supabaseUrl }
+}
+
+function requireEncryptionKey(encryptionKey: string | undefined) {
+  if (!encryptionKey) throw new Error('Falta configurar VERIFACTI_ENCRYPTION_KEY')
+  return encryptionKey
 }
 
 function webhookUrl(supabaseUrl: string, tenantId: string) {
@@ -160,7 +165,7 @@ async function applyStatus(
 
 async function issueInvoice(
   admin: ReturnType<typeof createClient>,
-  encryptionKey: string,
+  encryptionKey: string | undefined,
   tenantId: string,
   ticketId: string,
   automatic: boolean,
@@ -172,7 +177,7 @@ async function issueInvoice(
 
   const { invoice, ticket } = await loadInvoiceBundle(admin, tenantId, ticketId)
   if (invoice.external_uuid) return { fiscal: fiscalReceipt(invoice as unknown as Record<string, unknown>), skipped: true, reason: 'already_submitted' }
-  const apiKey = await decryptSecret(settings.api_key_ciphertext, encryptionKey)
+  const apiKey = await decryptSecret(settings.api_key_ciphertext, requireEncryptionKey(encryptionKey))
   const provider = createFiscalProvider(invoice.provider, { apiKey })
 
   try {
@@ -237,7 +242,7 @@ async function issueInvoice(
 
 async function queueInvoiceCancellation(
   admin: ReturnType<typeof createClient>,
-  encryptionKey: string,
+  encryptionKey: string | undefined,
   settings: Record<string, unknown> | null,
   invoice: FiscalInvoiceRow & Record<string, unknown>,
 ) {
@@ -257,7 +262,7 @@ async function queueInvoiceCancellation(
 
   try {
     const provider = createFiscalProvider(invoice.provider, {
-      apiKey: await decryptSecret(settings.api_key_ciphertext, encryptionKey),
+      apiKey: await decryptSecret(settings.api_key_ciphertext, requireEncryptionKey(encryptionKey)),
     })
     const result = await provider.cancel(payload, key)
     const now = new Date().toISOString()
@@ -343,10 +348,10 @@ Deno.serve(async (request) => {
       const rawApiKey = typeof body.apiKey === 'string' ? body.apiKey.trim() : ''
       const rawManagementApiKey = typeof body.managementApiKey === 'string' ? body.managementApiKey.trim() : ''
       const apiKeyCiphertext = rawApiKey
-        ? await encryptSecret(rawApiKey, env.encryptionKey)
+        ? await encryptSecret(rawApiKey, requireEncryptionKey(env.encryptionKey))
         : typeof existing?.api_key_ciphertext === 'string' ? existing.api_key_ciphertext : null
       const managementApiKeyCiphertext = rawManagementApiKey
-        ? await encryptSecret(rawManagementApiKey, env.encryptionKey)
+        ? await encryptSecret(rawManagementApiKey, requireEncryptionKey(env.encryptionKey))
         : typeof existing?.management_api_key_ciphertext === 'string' ? existing.management_api_key_ciphertext : null
       const connectionContextChanged = Boolean(rawApiKey)
         || existing?.provider !== provider
@@ -361,12 +366,13 @@ Deno.serve(async (request) => {
       let webhookSecretCiphertext = typeof existing?.webhook_secret_ciphertext === 'string' ? existing.webhook_secret_ciphertext : null
       let webhookExternalId = typeof existing?.webhook_external_id === 'string' ? existing.webhook_external_id : null
       if (apiKeyCiphertext && managementApiKeyCiphertext && (body.webhooksEnabled === true || webhookExternalId)) {
-        const apiKey = await decryptSecret(apiKeyCiphertext, env.encryptionKey)
-        const managementApiKey = await decryptSecret(managementApiKeyCiphertext, env.encryptionKey)
+        const encryptionKey = requireEncryptionKey(env.encryptionKey)
+        const apiKey = await decryptSecret(apiKeyCiphertext, encryptionKey)
+        const managementApiKey = await decryptSecret(managementApiKeyCiphertext, encryptionKey)
         const secret = webhookSecretCiphertext
-          ? await decryptSecret(webhookSecretCiphertext, env.encryptionKey)
+          ? await decryptSecret(webhookSecretCiphertext, encryptionKey)
           : generateWebhookSecret()
-        if (!webhookSecretCiphertext) webhookSecretCiphertext = await encryptSecret(secret, env.encryptionKey)
+        if (!webhookSecretCiphertext) webhookSecretCiphertext = await encryptSecret(secret, encryptionKey)
         const health = await createFiscalProvider(provider, { apiKey }).health()
         const nif = typeof health.data.nif === 'string' ? health.data.nif : null
         const environmentChanged = existing?.environment !== undefined && existing.environment !== environment
@@ -418,7 +424,7 @@ Deno.serve(async (request) => {
       const settings = await loadSettings(admin, tenantId)
       if (!settings || typeof settings.api_key_ciphertext !== 'string') return json({ error: 'Guarda primero una API key' }, 400)
       try {
-        const apiKey = await decryptSecret(settings.api_key_ciphertext, env.encryptionKey)
+        const apiKey = await decryptSecret(settings.api_key_ciphertext, requireEncryptionKey(env.encryptionKey))
         const result = await createFiscalProvider(settings.provider === 'ticketbai' ? 'ticketbai' : 'verifactu', { apiKey }).health()
         const actualEnvironment = normalizeProviderEnvironment(result.data.entorno)
         if (actualEnvironment !== settings.environment) throw new Error(`La API key pertenece al entorno ${String(result.data.entorno)}`)
@@ -515,7 +521,7 @@ Deno.serve(async (request) => {
       const settings = await loadSettings(admin, tenantId)
       if (!settings || typeof settings.api_key_ciphertext !== 'string') return json({ error: 'Integracion sin API key' }, 400)
       if (!invoice.external_uuid) return json({ error: 'La factura aun no tiene uuid externo' }, 409)
-      const provider = createFiscalProvider(invoice.provider, { apiKey: await decryptSecret(settings.api_key_ciphertext, env.encryptionKey) })
+      const provider = createFiscalProvider(invoice.provider, { apiKey: await decryptSecret(settings.api_key_ciphertext, requireEncryptionKey(env.encryptionKey)) })
       const result = await provider.getStatus(invoice.external_uuid)
       const status = await applyStatus(admin, invoice as FiscalInvoiceRow, result.data, 'status', result.httpStatus)
       return json({ status, response: result.data })
@@ -541,7 +547,7 @@ Deno.serve(async (request) => {
       if (!isAdmin) return json({ error: 'No tienes permiso para listar facturas' }, 403)
       const settings = await loadSettings(admin, tenantId)
       if (!settings || typeof settings.api_key_ciphertext !== 'string') return json({ error: 'Integracion sin API key' }, 400)
-      const provider = createFiscalProvider(settings.provider === 'ticketbai' ? 'ticketbai' : 'verifactu', { apiKey: await decryptSecret(settings.api_key_ciphertext, env.encryptionKey) })
+      const provider = createFiscalProvider(settings.provider === 'ticketbai' ? 'ticketbai' : 'verifactu', { apiKey: await decryptSecret(settings.api_key_ciphertext, requireEncryptionKey(env.encryptionKey)) })
       const result = await provider.list((body.payload && typeof body.payload === 'object' ? body.payload : {}) as Record<string, unknown>)
       return json(result.data)
     }

@@ -13,10 +13,10 @@ export function ManualCashDrawerButton({ canOpenDrawer }: { canOpenDrawer: boole
   async function handleOpenCashDrawer() {
     try {
       await agent.openCashDrawer()
-      sileo.success({ title: 'Cajon abierto' })
+      sileo.success({ title: 'Cajón abierto' })
     } catch (error) {
       sileo.warning({
-        title: 'No se ha podido abrir el cajon',
+        title: 'No se ha podido abrir el cajón',
         description: getPrintAgentErrorMessage(error),
       })
     }
@@ -24,14 +24,14 @@ export function ManualCashDrawerButton({ canOpenDrawer }: { canOpenDrawer: boole
 
   const disabled = !isConfigured || agent.isOpeningCashDrawer || agent.isPrintingTicket
   const title = !isConfigured
-    ? 'Configura el servidor y la impresora para abrir el cajon.'
+    ? 'Configura el servidor y la impresora para abrir el cajón.'
     : agent.isPrintingTicket
-      ? 'Espera a que termine la impresion en curso.'
-      : 'Abrir el cajon de efectivo'
+      ? 'Espera a que termine la impresión en curso.'
+      : 'Abrir el cajón de efectivo'
 
   return (
     <Button
-      aria-label="Abrir el cajon de efectivo"
+      aria-label="Abrir el cajón de efectivo"
       className="min-h-9 whitespace-nowrap"
       disabled={disabled}
       onClick={() => void handleOpenCashDrawer()}
@@ -43,7 +43,7 @@ export function ManualCashDrawerButton({ canOpenDrawer }: { canOpenDrawer: boole
       {agent.isOpeningCashDrawer
         ? <LoaderCircle className="h-4 w-4 animate-spin" />
         : <WalletCards className="h-4 w-4" />}
-      {agent.isOpeningCashDrawer ? 'Abriendo cajon' : 'Abrir cajon'}
+      {agent.isOpeningCashDrawer ? 'Abriendo cajón' : 'Abrir cajón'}
     </Button>
   )
 }

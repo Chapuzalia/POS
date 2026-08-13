@@ -32,7 +32,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
     try {
       window.localStorage.setItem(CRM_THEME_STORAGE_KEY, nextTheme)
     } catch {
-      // El cambio sigue activo durante la sesion aunque no pueda persistirse.
+      // El cambio sigue activo durante la sesión aunque no pueda persistirse.
     }
   }
 
@@ -54,7 +54,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
           <UiButton
             aria-controls="crm-sidebar"
             aria-expanded={isSidebarOpen}
-            aria-label="Abrir menu de navegacion"
+            aria-label="Abrir menú de navegación"
             className="!inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface)] !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 xl:!hidden"
             onClick={() => setIsSidebarOpen(true)}
             type="button"
@@ -96,7 +96,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
         ) : null}
         {!isOnline ? (
           <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">
-            El CRM requiere conexion para guardar cambios en Supabase.
+            El CRM requiere conexión para guardar cambios en Supabase.
           </div>
         ) : null}
 

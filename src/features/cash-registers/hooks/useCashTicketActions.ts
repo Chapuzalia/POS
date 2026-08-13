@@ -30,7 +30,7 @@ export function useCashTicketActions(options: Options) {
   const openHistory = useCallback(async () => {
     const { context, cashSession, isOnline } = options
     if (!context || !cashSession) return
-    if (!isOnline) { options.setError('El historico de tickets requiere conexion para consultar los datos de Supabase.'); return }
+    if (!isOnline) { options.setError('El histórico de tickets requiere conexión para consultar los datos de Supabase.'); return }
     options.setBusy(true); options.setError(null)
     try {
       await options.syncPendingEvents()
@@ -47,9 +47,9 @@ export function useCashTicketActions(options: Options) {
     }
     const currentJob = usePrintAgentStore.getState().currentJob
     if (currentJob?.status === 'unknown' && currentJob.requestId?.startsWith(`print:${ticket.id}:`)
-      && !window.confirm('La impresion anterior tiene estado desconocido y podria haber salido. Comprueba la impresora. ¿Quieres crear una nueva copia igualmente?')) return
+      && !window.confirm('La impresión anterior tiene estado desconocido y podría haber salido. Comprueba la impresora. ¿Quieres crear una nueva copia igualmente?')) return
     const scope = usePrintAgentStore.getState().scope
-    if (!scope) { options.setError('No se ha inicializado la configuracion de impresion de esta terminal.'); return }
+    if (!scope) { options.setError('No se ha inicializado la configuración de impresión de esta terminal.'); return }
     await options.printTicket(ticket.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, ticket.id) })
   }, [options])
 
@@ -78,7 +78,7 @@ export function useCashTicketActions(options: Options) {
     const pendingSale = getOfflineQueue().find((event) =>
       event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
     if (pendingSale) {
-      if (!window.confirm('Eliminar este ticket de la sesion? Todavia no se ha enviado a Verifacti.')) return
+      if (!window.confirm('¿Eliminar este ticket de la sesión? Todavía no se ha enviado a Verifacti.')) return
       forgetOfflineEvent(pendingSale.id)
       options.persistTickets(options.tickets.map((item) => item.id === ticket.id ? { ...item, status: 'voided' } : item))
       options.persistLedger(options.ledger.filter((sale) => sale.id !== ticket.id))
@@ -88,10 +88,10 @@ export function useCashTicketActions(options: Options) {
     }
 
     if (!options.isOnline) {
-      options.setError('Necesitas conexion para anular un ticket que ya puede haberse enviado a Verifacti.')
+      options.setError('Necesitas conexión para anular un ticket que ya puede haberse enviado a Verifacti.')
       return
     }
-    if (!window.confirm('Eliminar este ticket? Si tiene una factura enviada, se solicitara su anulacion fiscal en Verifacti.')) return
+    if (!window.confirm('¿Eliminar este ticket? Si tiene una factura enviada, se solicitará su anulación fiscal en Verifacti.')) return
 
     options.setBusy(true)
     options.setError(null)

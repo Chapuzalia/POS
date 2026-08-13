@@ -4,13 +4,13 @@ import { getReadableError } from '../../utils/errors'
 import { compactJoinedCompositions } from './joined-layout'
 import type { RestaurantMap, SessionTableLayout, TableLayoutEntry } from './types'
 
-function client() { if (!supabase) throw new Error('Supabase no esta configurado.'); return supabase }
+function client() { if (!supabase) throw new Error('Supabase no está configurado.'); return supabase }
 
 export async function loadSessionTableLayout(_context: TenantContext, cashSessionId: string): Promise<SessionTableLayout> {
   const { data, error } = await client().rpc('get_cash_session_table_layout', { p_cash_session_id: cashSessionId })
   if (error) throw error
   const value = data as SessionTableLayout
-  if (!value || value.cashSessionId !== cashSessionId) throw new Error('No se pudo cargar la distribucion temporal de mesas.')
+  if (!value || value.cashSessionId !== cashSessionId) throw new Error('No se pudo cargar la distribución temporal de mesas.')
   return value
 }
 

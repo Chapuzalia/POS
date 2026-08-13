@@ -19,6 +19,20 @@ test('CRM permissions allow managers without exposing owner-only sections', () =
   assert.equal(canAccessCrmSection('manager', 'plan'), false)
 })
 
+test('CRM permissions hide optional modules that are not assigned to the tenant', () => {
+  assert.equal(canAccessCrmSection('owner', 'dashboard', []), true)
+  assert.equal(canAccessCrmSection('owner', 'discounts', []), false)
+  assert.equal(canAccessCrmSection('owner', 'tables', []), false)
+  assert.equal(canAccessCrmSection('owner', 'inventory-stock', []), false)
+  assert.equal(canAccessCrmSection('owner', 'inventory-warehouses', []), false)
+  assert.equal(canAccessCrmSection('owner', 'inventory-settings', []), false)
+  assert.equal(canAccessCrmSection('owner', 'access', []), false)
+  assert.equal(canAccessCrmSection('owner', 'discounts', ['discounts']), true)
+  assert.equal(canAccessCrmSection('owner', 'tables', ['restaurant']), true)
+  assert.equal(canAccessCrmSection('owner', 'inventory-stock', ['inventory']), true)
+  assert.equal(canAccessCrmSection('owner', 'access', ['multi_device']), true)
+})
+
 test('venue selection keeps an active venue and falls back deterministically', () => {
   const venues = [
     { id: 'closed', isActive: false },

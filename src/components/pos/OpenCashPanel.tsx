@@ -22,7 +22,7 @@ export function OpenCashPanel({ disabled, isBusy, onOpen }: OpenCashPanelProps) 
           </div>
           <div>
             <h2 className="text-2xl font-bold text-[var(--foreground)]">Apertura de caja</h2>
-            <p className="text-sm text-[var(--muted)]">La venta queda bloqueada hasta abrir una sesion.</p>
+            <p className="text-sm text-[var(--muted)]">La venta queda bloqueada hasta abrir una sesión.</p>
           </div>
         </div>
         <label className="block">

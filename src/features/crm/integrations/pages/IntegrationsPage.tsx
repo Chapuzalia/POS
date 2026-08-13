@@ -64,7 +64,7 @@ export function IntegrationsCrm({ disabled, runAction, tenantContext }: Props) {
         ...(managementApiKey.trim() ? { managementApiKey: managementApiKey.trim() } : {}),
       })
       applyConfiguration(saved)
-      sileo.success({ title: 'Integracion guardada', description: 'La API key se ha cifrado y solo se usara desde el backend.' })
+      sileo.success({ title: 'Integración guardada', description: 'La API key se ha cifrado y solo se usará desde el backend.' })
     })
   }
 
@@ -73,7 +73,7 @@ export function IntegrationsCrm({ disabled, runAction, tenantContext }: Props) {
     await runAction(async () => {
       const result = await testVerifactiConnection(tenantContext)
       await refresh()
-      sileo.success({ title: 'Conexion correcta', description: result.nif ? `API activa para ${result.nif}.` : 'La API de Verifacti esta disponible.' })
+      sileo.success({ title: 'Conexión correcta', description: result.nif ? `API activa para ${result.nif}.` : 'La API de Verifacti está disponible.' })
     })
   }
 
@@ -99,7 +99,7 @@ export function IntegrationsCrm({ disabled, runAction, tenantContext }: Props) {
           <div className="!flex !flex-wrap !items-center !gap-2">
             <h2 className="!m-0 !text-base !font-bold">Verifacti</h2>
             <span className={`!inline-flex !min-h-6 !items-center !rounded-full !px-2.5 !text-[11px] !font-semibold ${connectionTone}`}>
-              {configuration?.connectionStatus === 'connected' ? 'Conectado' : configuration?.connectionStatus === 'error' ? 'Error de conexion' : 'Sin probar'}
+              {configuration?.connectionStatus === 'connected' ? 'Conectado' : configuration?.connectionStatus === 'error' ? 'Error de conexión' : 'Sin probar'}
             </span>
           </div>
           <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Cumplimiento fiscal por empresa mediante VeriFactu o TicketBAI.</p>
@@ -110,7 +110,7 @@ export function IntegrationsCrm({ disabled, runAction, tenantContext }: Props) {
         {!canEdit ? <p className="!m-0 !rounded-xl !bg-[var(--crm-blue-soft)] !px-4 !py-3 !text-xs !font-semibold !text-[var(--crm-blue)]">Puedes consultar la integración. Solo el owner puede modificar las claves y la configuración.</p> : null}
         <div className="!grid !grid-cols-1 !gap-4 lg:!grid-cols-2">
           <div className="!grid !content-start !gap-4 !rounded-xl !bg-[var(--crm-surface-soft)] !p-4">
-            <UiCheckbox checked={enabled} disabled={formDisabled} onChange={setEnabled}>Activar integracion</UiCheckbox>
+            <UiCheckbox checked={enabled} disabled={formDisabled} onChange={setEnabled}>Activar integración</UiCheckbox>
             <div className="!grid !grid-cols-1 !gap-3 sm:!grid-cols-2">
               <Field label="Sistema">
                 <CrmSelect disabled={formDisabled} onChange={(value) => setProvider(value as FiscalProvider)} options={[{ label: 'VeriFactu', value: 'verifactu' }, { label: 'TicketBAI', value: 'ticketbai' }]} value={provider} />
@@ -125,18 +125,18 @@ export function IntegrationsCrm({ disabled, runAction, tenantContext }: Props) {
                 <UiInput autoComplete="new-password" className={`${inputClass} !pl-10`} disabled={formDisabled} onChange={(event) => setApiKey(event.target.value)} placeholder={configuration?.hasApiKey ? 'Clave guardada (escribe para sustituirla)' : 'Pega tu API key'} type="password" value={apiKey} />
               </div>
             </Field>
-            <Field label="API key de gestion (webhooks)">
+            <Field label="API key de gestión (webhooks)">
               <div className="!relative">
                 <KeyRound className="!pointer-events-none !absolute !top-1/2 !left-3 !size-4 !-translate-y-1/2 !text-[var(--crm-text-muted)]" />
-                <UiInput autoComplete="new-password" className={`${inputClass} !pl-10`} disabled={formDisabled} onChange={(event) => setManagementApiKey(event.target.value)} placeholder={configuration?.hasManagementApiKey ? 'Clave de gestion guardada (escribe para sustituirla)' : 'Necesaria para registrar webhooks'} type="password" value={managementApiKey} />
+                <UiInput autoComplete="new-password" className={`${inputClass} !pl-10`} disabled={formDisabled} onChange={(event) => setManagementApiKey(event.target.value)} placeholder={configuration?.hasManagementApiKey ? 'Clave de gestión guardada (escribe para sustituirla)' : 'Necesaria para registrar webhooks'} type="password" value={managementApiKey} />
               </div>
             </Field>
-            <p className="!m-0 !flex !items-start !gap-2 !text-xs !leading-5 !text-[var(--crm-text-muted)]"><ShieldCheck className="!mt-0.5 !size-4 !shrink-0" />La clave se envia una sola vez al backend, se cifra con AES-GCM y nunca vuelve al navegador.</p>
+            <p className="!m-0 !flex !items-start !gap-2 !text-xs !leading-5 !text-[var(--crm-text-muted)]"><ShieldCheck className="!mt-0.5 !size-4 !shrink-0" />La clave se envía una sola vez al backend, se cifra con AES-GCM y nunca vuelve al navegador.</p>
           </div>
 
           <div className="!grid !content-start !gap-4 !rounded-xl !bg-[var(--crm-surface-soft)] !p-4">
-            <UiCheckbox checked={automaticSubmission} disabled={formDisabled} onChange={setAutomaticSubmission}>Enviar automaticamente al emitir facturas</UiCheckbox>
-            <UiCheckbox checked={webhooksEnabled} disabled={formDisabled} onChange={setWebhooksEnabled}>Activar webhooks de confirmacion</UiCheckbox>
+            <UiCheckbox checked={automaticSubmission} disabled={formDisabled} onChange={setAutomaticSubmission}>Enviar automáticamente al emitir facturas</UiCheckbox>
+            <UiCheckbox checked={webhooksEnabled} disabled={formDisabled} onChange={setWebhooksEnabled}>Activar webhooks de confirmación</UiCheckbox>
             <Field label="URL del webhook">
               <div className="!flex !gap-2">
                 <UiInput className={`${inputClass} !font-mono !text-xs`} readOnly value={configuration?.webhookUrl ?? ''} />
@@ -144,12 +144,12 @@ export function IntegrationsCrm({ disabled, runAction, tenantContext }: Props) {
               </div>
             </Field>
             {configuration?.connectionError ? <p className="!m-0 !rounded-lg !bg-[var(--crm-red-soft)] !px-3 !py-2.5 !text-xs !font-medium !text-[var(--crm-red)]">{configuration.connectionError}</p> : null}
-            {configuration?.connectionStatus === 'connected' ? <p className="!m-0 !flex !items-center !gap-2 !text-xs !font-semibold !text-[var(--crm-green)]"><CheckCircle2 className="!size-4" />Conexion verificada correctamente.</p> : null}
+            {configuration?.connectionStatus === 'connected' ? <p className="!m-0 !flex !items-center !gap-2 !text-xs !font-semibold !text-[var(--crm-green)]"><CheckCircle2 className="!size-4" />Conexión verificada correctamente.</p> : null}
           </div>
         </div>
 
         {canEdit ? <footer className="!flex !flex-wrap !justify-end !gap-2">
-          <UiButton className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled || !configuration?.hasApiKey} onClick={() => void testConnection()} type="button"><RefreshCw className="!size-4" />Probar conexion</UiButton>
+          <UiButton className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled || !configuration?.hasApiKey} onClick={() => void testConnection()} type="button"><RefreshCw className="!size-4" />Probar conexión</UiButton>
           <UiButton className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} type="submit"><Save className="!size-4" />Guardar</UiButton>
         </footer> : null}
       </form>

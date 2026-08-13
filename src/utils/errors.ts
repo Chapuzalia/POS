@@ -23,7 +23,7 @@ export function getReadableError(error: unknown) {
       supabaseError.error_description,
       supabaseError.details,
       supabaseError.hint,
-      supabaseError.code ? `Codigo: ${String(supabaseError.code)}` : null,
+      supabaseError.code ? `Código: ${String(supabaseError.code)}` : null,
       supabaseError.status ? `Estado: ${String(supabaseError.status)}` : null,
       supabaseError.error,
       supabaseError.name,

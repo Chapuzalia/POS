@@ -11,7 +11,7 @@ export const crmReportDateTimeFormatter = new Intl.DateTimeFormat('es-ES', {
 export const paymentLabels: Record<HistoricalPaymentMethod, string> = {
   card: 'Tarjeta',
   cash: 'Efectivo',
-  invitation: 'Invitacion',
+  invitation: 'Invitación',
   other: 'Otros',
 }
 
@@ -136,7 +136,7 @@ export function buildSalesReportAggregates(
         : view === 'categories'
           ? line.categoryName
           : view === 'tabs'
-            ? line.catalogTabName || 'Sin pestana historica'
+            ? line.catalogTabName || 'Sin pestaña histórica'
             : line.saleFormatName || line.variantName || 'Sin formato'
       const current = report.get(id) ?? {
         id,
@@ -173,10 +173,10 @@ export const salesReportTabs: Array<{ id: SalesReportView; label: string }> = [
   { id: 'tickets', label: 'Todos los tickets' },
   { id: 'products', label: 'Por producto' },
   { id: 'variants', label: 'Por variante' },
-  { id: 'categories', label: 'Por categorÃ­a' },
+  { id: 'categories', label: 'Por categoría' },
   { id: 'formats', label: 'Por formato' },
-  { id: 'tabs', label: 'Por pestana' },
+  { id: 'tabs', label: 'Por pestaña' },
   { id: 'mixers', label: 'Por mixer' },
-  { id: 'menu-components', label: 'Componentes de menu' },
+  { id: 'menu-components', label: 'Componentes de menú' },
   { id: 'modifiers', label: 'Modificadores' },
 ]

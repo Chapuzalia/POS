@@ -17,7 +17,7 @@
 -- INICIO: schema.sql
 -- ============================================================================
 -- Club POS / TPV discotecas
--- Ejecutar en Supabase SQL Editor con un rol con permisos de administraciÃ³n.
+-- Ejecutar en Supabase SQL Editor con un rol con permisos de administración.
 
 create extension if not exists pgcrypto;
 
@@ -971,7 +971,7 @@ begin
   end loop;
 end $$;
 
--- Datos de ejemplo para una discoteca. Ajusta el slug y aÃ±ade un usuario a tenant_memberships.
+-- Datos de ejemplo para una discoteca. Ajusta el slug y añade un usuario a tenant_memberships.
 insert into public.tenants (id, name, slug)
 values ('11111111-1111-1111-1111-111111111111', 'Demo Club', 'demo-club')
 on conflict (slug) do nothing;

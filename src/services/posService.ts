@@ -28,6 +28,7 @@ import type {
   VenueRow,
 } from '../types/supabase'
 import { getReadableError } from '../utils/errors'
+import { normalizeTenantFeatures } from '../features/platform/tenantFeatureAccess'
 import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
 async function requireExclusiveLogin(context: TenantContext) {
   if (await claimLoginLease()) {
@@ -35,7 +36,7 @@ async function requireExclusiveLogin(context: TenantContext) {
   }
 
   releaseLocalLoginLock()
-  throw new LoginLeaseConflictError('Esta cuenta ya esta abierta en otro dispositivo o pestana.', context)
+  throw new LoginLeaseConflictError('Esta cuenta ya está abierta en otro dispositivo o pestaña.', context)
 }
 
 function mapFiscalSnapshot(row: {
@@ -56,9 +57,20 @@ function mapFiscalSnapshot(row: {
   }
 }
 
+export async function loadTenantFeatures(tenantId: string) {
+  if (!supabase) return undefined
+  const { data, error } = await supabase.rpc('get_current_tenant_features', { p_tenant_id: tenantId })
+  if (error) {
+    // Keep deployments compatible while the feature migration and PostgREST schema cache propagate.
+    if (['42883', 'PGRST202'].includes(error.code ?? '')) return undefined
+    throw new Error(`No se pudieron cargar las features del negocio: ${getReadableError(error)}`)
+  }
+  return normalizeTenantFeatures(data)
+}
+
 export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   if (!supabase) {
-    throw new Error('Supabase no esta configurado.')
+    throw new Error('Supabase no está configurado.')
   }
 
   const { data: authData, error: authError } = await supabase.auth.signInWithPassword({
@@ -115,11 +127,11 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   const activeMemberships = (memberships ?? []) as UserMembershipRow[]
 
   if (activeMemberships.length === 0) {
-    throw new Error(`El usuario ${user.email ?? user.id} no tiene acceso activo a ningun negocio.`)
+    throw new Error(`El usuario ${user.email ?? user.id} no tiene acceso activo a ningún negocio.`)
   }
 
   if (activeMemberships.length > 1) {
-    throw new Error('Este usuario pertenece a mas de un negocio. Usa una cuenta diferente para cada negocio.')
+    throw new Error('Este usuario pertenece a más de un negocio. Usa una cuenta diferente para cada negocio.')
   }
 
   const membership = activeMemberships[0]
@@ -133,6 +145,8 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw new Error(`No se pudo cargar el negocio asignado: ${getReadableError(tenantError)}`)
   }
 
+  const features = await loadTenantFeatures(tenant.id)
+
   if (membership.role === 'owner' || membership.role === 'manager') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
@@ -145,6 +159,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
       userId: user.id,
       userName: user.user_metadata.full_name ?? user.email ?? 'Usuario CRM',
       role: membership.role,
+      features,
     })
   }
 
@@ -161,11 +176,11 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     .maybeSingle<DeviceAssignmentRow>()
 
   if (assignmentError) {
-    throw new Error(`No se pudo cargar la asignacion del TPV: ${getReadableError(assignmentError)}`)
+    throw new Error(`No se pudo cargar la asignación del TPV: ${getReadableError(assignmentError)}`)
   }
 
   if (!assignment) {
-    throw new Error('Este usuario no tiene ningun dispositivo activo asignado. Contacta con el propietario.')
+    throw new Error('Este usuario no tiene ningún dispositivo activo asignado. Contacta con el propietario.')
   }
 
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
@@ -195,7 +210,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   }
 
   if (!venue || !device) {
-    throw new Error('El local o dispositivo asignado esta desactivado o ya no existe.')
+    throw new Error('El local o dispositivo asignado está desactivado o ya no existe.')
   }
 
   return requireExclusiveLogin({
@@ -220,6 +235,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
+    features,
   })
 }
 
@@ -242,7 +258,7 @@ export class LoginLeaseConflictError extends TenantSessionError {
 
 export async function restoreTenantContext(cachedContext: TenantContext): Promise<TenantContext> {
   if (!supabase) {
-    throw new Error('Supabase no esta configurado.')
+    throw new Error('Supabase no está configurado.')
   }
 
   const { data: authData, error: authError } = await supabase.auth.getUser()
@@ -250,7 +266,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   if (authError) {
     const authStatus = (authError as { status?: number }).status
     if (authError.name === 'AuthSessionMissingError' || authStatus === 401 || authStatus === 403) {
-      throw new TenantSessionError('La sesion ha caducado. Inicia sesion de nuevo.')
+      throw new TenantSessionError('La sesión ha caducado. Inicia sesión de nuevo.')
     }
 
     throw authError
@@ -259,7 +275,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   const user = authData.user
 
   if (!user || user.id !== cachedContext.userId) {
-    throw new TenantSessionError('La sesion guardada no pertenece al usuario de este TPV.')
+    throw new TenantSessionError('La sesión guardada no pertenece al usuario de este TPV.')
   }
 
   const { data: profile, error: profileError } = await supabase
@@ -310,6 +326,8 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new TenantSessionError('El usuario ya no tiene acceso activo a este negocio.')
   }
 
+  const features = await loadTenantFeatures(tenant.id)
+
   if (membership.role === 'owner' || membership.role === 'manager') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
@@ -322,6 +340,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
       userId: user.id,
       userName: user.user_metadata.full_name ?? user.email ?? 'Usuario CRM',
       role: membership.role,
+      features,
     })
   }
 
@@ -364,7 +383,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   }
 
   if (!venue || !device) {
-    throw new TenantSessionError('El local o dispositivo asignado esta desactivado.')
+    throw new TenantSessionError('El local o dispositivo asignado está desactivado.')
   }
 
   return requireExclusiveLogin({
@@ -389,6 +408,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
+    features,
   })
 }
 
@@ -436,13 +456,12 @@ export async function loadOpenCashSession(context: TenantContext) {
 
   const { data, error } = await supabase
     .from('cash_sessions')
-    .select('id, tenant_id, venue_id, opened_by_device_id, opened_by, opened_at, opening_float_cents, cash_register_id, cash_registers(name)')
+    .select('id, tenant_id, venue_id, opened_by_device_id, opened_by, opened_at, opening_float_cents, cash_register_id, cash_registers(name), selected_by:devices!devices_active_cash_session_id_fkey!inner(id, is_active)')
     .eq('tenant_id', context.tenantId)
     .eq('venue_id', context.venueId)
-    .eq('opened_by_device_id', context.deviceId)
+    .eq('selected_by.id', context.deviceId)
+    .eq('selected_by.is_active', true)
     .eq('status', 'open')
-    .order('opened_at', { ascending: false })
-    .limit(1)
     .maybeSingle()
 
   if (error) {
@@ -584,7 +603,7 @@ export async function loadSessionTicketsFromSupabase(
   cashSessionId: string,
 ): Promise<SessionTicketRecord[]> {
   if (!supabase) {
-    throw new Error('Supabase no esta configurado.')
+    throw new Error('Supabase no está configurado.')
   }
 
   const [{ data: ticketData, error: ticketsError }, { data: eventData, error: eventsError }] = await Promise.all([
@@ -863,7 +882,7 @@ export function mergeLedgers(localRecords: SaleRecord[], remoteRecords: SaleReco
 
 export async function syncEvent(event: OfflineEvent) {
   if (!supabase) {
-    throw new Error('Supabase no esta configurado.')
+    throw new Error('Supabase no está configurado.')
   }
 
   if (event.kind === 'cash_opened') {

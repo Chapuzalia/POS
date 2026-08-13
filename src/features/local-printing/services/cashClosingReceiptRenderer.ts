@@ -42,7 +42,7 @@ function getCashClosingReceiptSections(document: CashClosingPrintDocument, money
           row('Datafono esperado', money(document.operationalSummary.cardTerminalExpectedCents)),
           document.operationalSummary.cashToWithdrawCents >= 0
             ? row('RETIRAR DE CAJA', money(document.operationalSummary.cashToWithdrawCents))
-            : row('ANADIR A CAJA', money(-document.operationalSummary.cashToWithdrawCents)),
+            : row('AÑADIR A CAJA', money(-document.operationalSummary.cashToWithdrawCents)),
         ])
       : []),
     ...section('Fondo de caja', [

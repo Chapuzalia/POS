@@ -1,12 +1,13 @@
 import { loadSalesLedgerFromSupabase, loadSessionTicketsFromSupabase } from '../../../services/posService'
 import type { CashClosedPayload, CashSession, TenantContext } from '../../../types'
-import { closeCashRegisterSession, openCashRegisterSession } from '../service'
+import { closeCashRegisterSession, openCashRegisterSession, selectCashRegisterSession } from '../service'
 
 export async function openCashSession(context: TenantContext, registerId: string, openingFloatCents: number) {
   return openCashRegisterSession(context, registerId, openingFloatCents)
 }
 
 export async function joinCashSession(context: TenantContext, session: CashSession) {
+  await selectCashRegisterSession(context, session.id)
   const [ledger, tickets] = await Promise.all([
     loadSalesLedgerFromSupabase(context, session.id),
     loadSessionTicketsFromSupabase(context, session.id),

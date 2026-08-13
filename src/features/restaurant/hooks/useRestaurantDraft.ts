@@ -50,7 +50,7 @@ export function useRestaurantDraft({ context, isOnline, onError }: UseRestaurant
     const currentDraft = orderRef.current
     if (currentDraft && saveStateRef.current === 'saved') return currentDraft
     if (!isOnline) {
-      onError('La gestion de mesas requiere conexion para guardar la comanda.')
+      onError('La gestión de mesas requiere conexión para guardar la comanda.')
       return null
     }
 
@@ -90,7 +90,7 @@ export function useRestaurantDraft({ context, isOnline, onError }: UseRestaurant
           try {
             const remoteOrder = await loadRestaurantOrder(context, draft.order.id)
             replaceOrder(remoteOrder)
-            onError('La comanda cambio en otro dispositivo. Se ha recargado la version mas reciente.')
+            onError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
           } catch (reloadError) {
             updateSaveState('error')
             onError(getReadableError(reloadError))

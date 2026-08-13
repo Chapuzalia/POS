@@ -170,6 +170,50 @@ export async function loadReservationTables(context: TenantContext): Promise<Res
   })
 }
 
+export async function loadReservationConflicts(
+  context: TenantContext,
+  startsAt: string,
+  endsAt: string,
+  reservationId?: string,
+): Promise<ReservationConflict[]> {
+  let query = requireSupabase().from('reservations')
+    .select(`
+      id, customer_name, starts_at, ends_at,
+      reservation_tables(table_id, restaurant_tables(name))
+    `)
+    .eq('tenant_id', context.tenantId)
+    .eq('venue_id', context.venueId)
+    .in('status', ['confirmed', 'arrived', 'seated'])
+    .lt('starts_at', endsAt)
+    .gt('ends_at', startsAt)
+    .order('starts_at')
+
+  if (reservationId) query = query.neq('id', reservationId)
+  const { data, error } = await query
+  if (error) throw error
+
+  return (data ?? []).flatMap((value) => {
+    const row = value as unknown as {
+      id: string
+      customer_name: string
+      starts_at: string
+      ends_at: string
+      reservation_tables?: Array<{
+        table_id: string
+        restaurant_tables?: { name: string } | null
+      }>
+    }
+    return (row.reservation_tables ?? []).map((assignment) => ({
+      reservationId: row.id,
+      customerName: row.customer_name,
+      startsAt: row.starts_at,
+      endsAt: row.ends_at,
+      tableId: assignment.table_id,
+      tableName: assignment.restaurant_tables?.name ?? 'Mesa',
+    }))
+  })
+}
+
 export class ReservationConflictError extends Error {
   conflicts: ReservationConflict[]
 

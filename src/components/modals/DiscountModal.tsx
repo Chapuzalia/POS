@@ -90,7 +90,7 @@ export function DiscountModal({
       }
       onSelect(toAppliedDiscount(pinDiscount, false));
     } catch {
-      setPinError("No se ha podido validar el PIN. Int?ntalo de nuevo.");
+      setPinError("No se ha podido validar el PIN. Inténtalo de nuevo.");
     } finally {
       setPinBusy(false);
     }
@@ -242,7 +242,7 @@ export function DiscountModal({
                 label={discount.name}
                 onSelect={() => applyConfigured(discount)}
                 roundingLabel={[
-                  discount.ruleKind === "promotion" ? "Promoci?n activa" : null,
+                  discount.ruleKind === "promotion" ? "Promoción activa" : null,
                   discount.scope === "specific"
                     ? "Productos específicos"
                     : "General",
@@ -252,7 +252,7 @@ export function DiscountModal({
                     : null,
                 ]
                   .filter(Boolean)
-                  .join(" ? ")}
+                  .join(" · ")}
                 valueLabel={formatDiscountValue(discount.type, discount.value)}
               />
             ))}

@@ -11,7 +11,7 @@ export type FiscalReceiptData = {
 }
 
 export async function invokeFiscalBackend<T>(body: Record<string, unknown>, fallback: string): Promise<T> {
-  if (!supabase) throw new Error('Supabase no esta configurado.')
+  if (!supabase) throw new Error('Supabase no está configurado.')
   const { data, error } = await supabase.functions.invoke<T & { error?: string }>('verifacti-api', { body })
   if (data?.error) throw new Error(data.error)
   if (error) {
@@ -31,7 +31,7 @@ export async function invokeFiscalBackend<T>(body: Record<string, unknown>, fall
 export function autoIssueFiscalTicket(tenantId: string, ticketId: string) {
   return invokeFiscalBackend<{ skipped: boolean; reason?: string; fiscal?: FiscalReceiptData }>({
     action: 'auto-issue-ticket', tenantId, ticketId,
-  }, 'La venta se guardo, pero no se pudo enviar automaticamente a Verifacti.')
+  }, 'La venta se guardó, pero no se pudo enviar automáticamente a Verifacti.')
 }
 
 export function voidTicketWithFiscalCancellation(tenantId: string, ticketId: string) {
@@ -46,7 +46,7 @@ export function voidTicketWithFiscalCancellation(tenantId: string, ticketId: str
 }
 
 export async function loadFiscalReceiptData(tenantId: string, ticketId: string): Promise<FiscalReceiptData | null> {
-  if (!supabase) throw new Error('Supabase no esta configurado.')
+  if (!supabase) throw new Error('Supabase no está configurado.')
   const { data, error } = await supabase.from('fiscal_invoices')
     .select('id, provider, status, external_uuid, external_code, qr_base64, verification_url')
     .eq('tenant_id', tenantId)

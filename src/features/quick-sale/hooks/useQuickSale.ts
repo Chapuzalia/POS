@@ -20,6 +20,7 @@ import type {
 } from '../../../types'
 import { addProductSalesStats } from '../services/productSalesStats'
 import { addQuickSaleTicketLine, changeQuickSaleTicketLineQuantity } from '../services/ticketLines'
+import { applyQuickSaleLinesUpdate } from '../services/lineUpdates'
 import { useQuickSalePayment } from './useQuickSalePayment'
 
 export type AddCatalogLine = (
@@ -60,6 +61,7 @@ type Options = {
 export function useQuickSale(options: Options) {
   const [lines, setLines] = useState<TicketLine[]>([])
   const [discount, setDiscount] = useState<AppliedDiscount | null>(null)
+  const [excludedAutomaticDiscountIds, setExcludedAutomaticDiscountIds] = useState<string[]>([])
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
   const [cashPaymentOpen, setCashPaymentOpen] = useState(false)
   const [discountModalOpen, setDiscountModalOpen] = useState(false)
@@ -69,6 +71,7 @@ export function useQuickSale(options: Options) {
     options.discounts,
     options.context?.venueId ?? '',
     options.discountSchedule,
+    excludedAutomaticDiscountIds,
   )
 
   const activePromotionId = activeDiscount?.ruleKind === 'promotion'
@@ -79,19 +82,48 @@ export function useQuickSale(options: Options) {
   const previousPromotionRef = useRef<{ id: string; name: string } | null>(null)
   useEffect(() => {
     const previous = previousPromotionRef.current
-    if (previous && !activePromotionId) {
+    if (previous && !activePromotionId && !excludedAutomaticDiscountIds.includes(previous.id)) {
       sileo.info({ title: `${previous.name} ha dejado de estar disponible` })
     }
     previousPromotionRef.current = activePromotionId && activePromotionName
       ? { id: activePromotionId, name: activePromotionName }
       : null
-  }, [activePromotionId, activePromotionName])
+  }, [activePromotionId, activePromotionName, excludedAutomaticDiscountIds])
 
+  const resetDiscount = useCallback((nextDiscount: AppliedDiscount | null) => {
+    setExcludedAutomaticDiscountIds((current) => current.length ? [] : current)
+    setDiscount(nextDiscount)
+  }, [])
+
+  const applyDiscount = useCallback((nextDiscount: AppliedDiscount) => {
+    if (nextDiscount.discountId) {
+      setExcludedAutomaticDiscountIds((current) => current.filter((id) => id !== nextDiscount.discountId))
+    }
+    setDiscount(nextDiscount)
+  }, [])
+
+  const removeDiscount = useCallback(() => {
+    const automaticDiscountId = activeDiscount?.automatic ? activeDiscount.discountId : null
+    if (automaticDiscountId) {
+      setExcludedAutomaticDiscountIds((current) => current.includes(automaticDiscountId)
+        ? current
+        : [...current, automaticDiscountId])
+    }
+    setDiscount(null)
+  }, [activeDiscount])
+
+
+  const updateLines = useCallback((update: (previous: TicketLine[]) => TicketLine[]) => {
+    setLines((previous) => applyQuickSaleLinesUpdate(
+      previous,
+      update,
+      (next) => { if (options.context) saveCachedTicket(options.context, next) },
+    ))
+  }, [options.context])
 
   const persistLines = useCallback((nextLines: TicketLine[]) => {
-    setLines(nextLines)
-    if (options.context) saveCachedTicket(options.context, nextLines)
-  }, [options.context])
+    updateLines(() => nextLines)
+  }, [updateLines])
 
   const mergeProductStats = useCallback((soldLines: TicketLine[]) => {
     options.persistProductSalesStats(addProductSalesStats(options.productSalesStats, soldLines))
@@ -115,6 +147,7 @@ export function useQuickSale(options: Options) {
     resetUi: (method) => {
       options.setMobileTicketOpen(false)
       setDiscount(null)
+      setExcludedAutomaticDiscountIds([])
       setDiscountModalOpen(false)
       setPaidFeedback(method)
       window.setTimeout(() => setPaidFeedback(null), 500)
@@ -122,11 +155,12 @@ export function useQuickSale(options: Options) {
   })
 
   const addLine = useCallback<AddCatalogLine>((sellable, selection, item, sourceElement) => {
-    if (!options.catalog) return false
-    persistLines(addQuickSaleTicketLine(lines, options.catalog, sellable, selection, item))
+    const catalog = options.catalog
+    if (!catalog) return false
+    updateLines((previous) => addQuickSaleTicketLine(previous, catalog, sellable, selection, item))
     options.onAddFeedback({ feedbackType: 'added', productName: sellable.product.name, sourceElement })
     return true
-  }, [lines, options, persistLines])
+  }, [options, updateLines])
 
   const selectProduct = useCallback((
     item: ResolvedCatalogItem,
@@ -167,6 +201,7 @@ export function useQuickSale(options: Options) {
   const reset = useCallback((nextLines: TicketLine[] = []) => {
     setLines(nextLines)
     setDiscount(null)
+    setExcludedAutomaticDiscountIds([])
     setProductDialog(null)
     setCashPaymentOpen(false)
     setDiscountModalOpen(false)
@@ -175,13 +210,15 @@ export function useQuickSale(options: Options) {
 
   return {
     addLine,
+    applyDiscount,
     cashPaymentOpen,
     changeQuantity: (lineId: string, direction: 1 | -1) => {
-      persistLines(changeQuickSaleTicketLineQuantity(lines, lineId, direction))
+      updateLines((previous) => changeQuickSaleTicketLineQuantity(previous, lineId, direction))
     },
     clear: () => {
-      persistLines([])
+      updateLines(() => [])
       setDiscount(null)
+      setExcludedAutomaticDiscountIds([])
     },
     closeCashPayment: () => setCashPaymentOpen(false),
     closeDiscountModal: () => setDiscountModalOpen(false),
@@ -199,10 +236,11 @@ export function useQuickSale(options: Options) {
     paidFeedback,
     productDialog,
     refreshProductStats,
-    removeLine: (lineId: string) => persistLines(lines.filter((line) => line.id !== lineId)),
+    removeDiscount,
+    removeLine: (lineId: string) => updateLines((previous) => previous.filter((line) => line.id !== lineId)),
     reset,
     selectProduct,
-    setDiscount,
+    setDiscount: resetDiscount,
     subtotalCents,
     totalCents: discountCalculation.totalCents,
   }

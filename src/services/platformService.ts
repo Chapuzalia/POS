@@ -1,6 +1,17 @@
 import { supabase } from '../lib/supabase'
 import { getFunctionInvokeErrorMessage } from '../features/crm/shared/services/crmServiceSupport'
 
+export type PlatformTenantFeature = string
+
+export type PlatformFeature = {
+  key: string
+  name: string
+  description: string
+  isCore: boolean
+  enabledByDefault: boolean
+  sortOrder: number
+}
+
 export type PlatformTenant = {
   id: string
   name: string
@@ -10,6 +21,7 @@ export type PlatformTenant = {
   isActive: boolean
   memberCount: number
   venueCount: number
+  features: PlatformTenantFeature[]
   venues: Array<{
     id: string
     isActive: boolean
@@ -43,11 +55,12 @@ export type UpdatePlatformTenantInput = {
   tenantSlug: string
   maxDevices: number
   maxVenues: number
+  features: PlatformTenantFeature[]
 }
 
 function requireSupabase() {
   if (!supabase) {
-    throw new Error('Supabase no esta configurado.')
+    throw new Error('Supabase no está configurado.')
   }
   return supabase
 }
@@ -59,9 +72,9 @@ function getFunctionError(data: unknown) {
   return null
 }
 
-export async function loadPlatformTenants(): Promise<PlatformTenant[]> {
+export async function loadPlatformTenants(): Promise<{ features: PlatformFeature[]; tenants: PlatformTenant[] }> {
   const client = requireSupabase()
-  const { data, error } = await client.functions.invoke<{ tenants?: PlatformTenant[]; error?: string }>(
+  const { data, error } = await client.functions.invoke<{ features?: PlatformFeature[]; tenants?: PlatformTenant[]; error?: string }>(
     'manage-pos-users',
     { body: { action: 'platform-list' } },
   )
@@ -69,7 +82,12 @@ export async function loadPlatformTenants(): Promise<PlatformTenant[]> {
   if (error || functionError) {
     throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron cargar los negocios.'))
   }
-  return data?.tenants ?? []
+  const features = data?.features ?? []
+  const tenants = (data?.tenants ?? []).map((tenant) => ({
+    ...tenant,
+    features: Array.isArray(tenant.features) ? tenant.features : [],
+  }))
+  return { features, tenants }
 }
 
 export async function createPlatformTenant(input: CreatePlatformTenantInput) {

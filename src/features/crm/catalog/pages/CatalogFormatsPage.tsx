@@ -15,10 +15,11 @@ import { moveCatalogItem, toReorderItems } from '../services/catalogAdminModel.t
 type Props = {
   catalog: CatalogData
   disabled: boolean
+  inventoryFeatureEnabled: boolean
   mutate: (action: () => Promise<unknown>) => Promise<boolean>
 }
 
-export function CatalogFormatsCrm({ catalog, disabled, mutate }: Props) {
+export function CatalogFormatsCrm({ catalog, disabled, inventoryFeatureEnabled, mutate }: Props) {
   const [name, setName] = useState('')
   const [inventoryUnits, setInventoryUnits] = useState<InventoryUnit[]>([])
   const [consumptionDrafts, setConsumptionDrafts] = useState<Record<string, { quantity: string; unitId: string }>>({})
@@ -41,6 +42,10 @@ export function CatalogFormatsCrm({ catalog, disabled, mutate }: Props) {
   }, [catalog.saleFormats])
 
   useEffect(() => {
+    if (!inventoryFeatureEnabled) {
+      setInventoryUnits([])
+      return
+    }
     let active = true
     void loadInventoryUnits({ tenantId: catalog.tenantId }, catalog.venueId)
       .then((units) => {
@@ -54,7 +59,7 @@ export function CatalogFormatsCrm({ catalog, disabled, mutate }: Props) {
       })
       .catch(() => { if (active) setInventoryUnits([]) })
     return () => { active = false }
-  }, [catalog.tenantId, catalog.venueId])
+  }, [catalog.tenantId, catalog.venueId, inventoryFeatureEnabled])
 
   async function createFormat() {
     const nextName = name.trim()
@@ -122,7 +127,7 @@ export function CatalogFormatsCrm({ catalog, disabled, mutate }: Props) {
   return (
     <CatalogPanel>
       <CatalogPanelHeader
-        description="Define los formatos reutilizables y cuánto inventario consume cada venta."
+        description={inventoryFeatureEnabled ? 'Define los formatos reutilizables y cuánto inventario consume cada venta.' : 'Define los formatos reutilizables para las variantes de producto.'}
         title="Formatos de venta"
       >
         <div className="!flex !max-w-xl !gap-2">
@@ -140,7 +145,7 @@ export function CatalogFormatsCrm({ catalog, disabled, mutate }: Props) {
         </div>
       </CatalogPanelHeader>
 
-      {!inventoryUnits.length ? (
+      {inventoryFeatureEnabled && !inventoryUnits.length ? (
         <div className="!mx-[18px] !mt-[18px] !rounded-xl !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !font-semibold !text-[var(--crm-yellow)] md:!mx-[22px]">
           Crea primero las unidades de consumo en Inventario → Configuración para poder definir las recetas.
         </div>
@@ -151,10 +156,10 @@ export function CatalogFormatsCrm({ catalog, disabled, mutate }: Props) {
           const draft = consumptionDrafts[format.id] ?? { quantity: '', unitId: '' }
           const selectedUnit = inventoryUnits.find((unit) => unit.id === draft.unitId)
           return (
-          <div className="!grid !min-h-[72px] !min-w-[980px] !grid-cols-[minmax(160px,1fr)_110px_minmax(330px,1.4fr)_110px_auto] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !py-3 !text-sm" key={format.id}>
+          <div className={`!grid !min-h-[72px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !py-3 !text-sm ${inventoryFeatureEnabled ? '!min-w-[980px] !grid-cols-[minmax(160px,1fr)_110px_minmax(330px,1.4fr)_110px_auto]' : '!min-w-[620px] !grid-cols-[minmax(160px,1fr)_110px_110px_auto]'}`} key={format.id}>
             <strong className="!text-[var(--crm-text)]">{format.name}</strong>
             <span className="!text-[var(--crm-text-secondary)]">{usageByFormat.get(format.id) ?? 0} variantes</span>
-            <div className="!grid !grid-cols-[110px_minmax(150px,1fr)_40px] !items-center !gap-2">
+            {inventoryFeatureEnabled ? <div className="!grid !grid-cols-[110px_minmax(150px,1fr)_40px] !items-center !gap-2">
               <UiInput
                 aria-label={`Cantidad consumida por ${format.name}`}
                 className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !font-mono"
@@ -182,14 +187,14 @@ export function CatalogFormatsCrm({ catalog, disabled, mutate }: Props) {
                 value={draft.unitId}
               />
               <UiButton aria-label={`Guardar consumo de ${format.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !text-[var(--crm-blue)]" disabled={disabled || (!draft.quantity.trim() && !draft.unitId)} onClick={() => void saveConsumption(format.id)} type="button"><Save className="!size-4" /></UiButton>
-            </div>
+            </div> : null}
             <CatalogStatus active={format.active} />
             <div className="flex min-w-0 items-center justify-end gap-[7px]">
               <UiButton aria-label="Subir formato" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || index === 0} onClick={() => void moveFormat(format.id, -1)} type="button"><ArrowUp className="!size-4" /></UiButton>
               <UiButton aria-label="Bajar formato" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || index === catalog.saleFormats.length - 1} onClick={() => void moveFormat(format.id, 1)} type="button"><ArrowDown className="!size-4" /></UiButton>
               <UiButton aria-label={`Editar ${format.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void renameFormat(format.id, format.name)} type="button"><Pencil className="!size-4" /></UiButton>
               <UiButton aria-label={format.active ? `Desactivar ${format.name}` : `Activar ${format.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.saveSaleFormat(catalog.venueId, { ...format, active: !format.active }))} type="button">{format.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</UiButton>
-              <UiButton aria-label={`Quitar consumo de ${format.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || (!format.inventoryConsumptionUnitId && format.inventoryConsumptionQuantity === null)} onClick={() => { setConsumptionDrafts((current) => ({ ...current, [format.id]: { quantity: '', unitId: '' } })); void mutate(() => catalogAdminService.saveSaleFormat(catalog.venueId, { ...format, inventoryConsumptionQuantity: null, inventoryConsumptionUnitId: null })) }} type="button"><X className="!size-4" /></UiButton>
+              {inventoryFeatureEnabled ? <UiButton aria-label={`Quitar consumo de ${format.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || (!format.inventoryConsumptionUnitId && format.inventoryConsumptionQuantity === null)} onClick={() => { setConsumptionDrafts((current) => ({ ...current, [format.id]: { quantity: '', unitId: '' } })); void mutate(() => catalogAdminService.saveSaleFormat(catalog.venueId, { ...format, inventoryConsumptionQuantity: null, inventoryConsumptionUnitId: null })) }} type="button"><X className="!size-4" /></UiButton> : null}
               <UiButton aria-label={`Eliminar ${format.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95" disabled={disabled} onClick={() => void deleteFormat(format.id, format.name)} type="button"><Trash2 className="!size-4" /></UiButton>
             </div>
           </div>

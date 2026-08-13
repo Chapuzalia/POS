@@ -8,7 +8,6 @@ type Options = {
   currentSession: CashSession | null
   isOnline: boolean
   onClosedRemotely: () => void
-  onSessionSelected: (session: CashSession) => void
 }
 
 export function useCashRegisterOptions(options: Options) {
@@ -30,9 +29,6 @@ export function useCashRegisterOptions(options: Options) {
     if (currentSession && !current) {
       latestRef.current.onClosedRemotely()
       return
-    }
-    if (!currentSession && state.sessions.length === 1) {
-      latestRef.current.onSessionSelected(state.sessions[0])
     }
   }, [context, isOnline])
 

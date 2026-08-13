@@ -18,7 +18,7 @@ export function CashClosingsHistoryModal({ canReprint, closings, printingClosing
   return <AppModal containerClassName="!p-4" maxWidth={896} dismissDisabled={Boolean(printingClosingId)} label="Histórico de cierres" onClose={onClose}>
     <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
       <div className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
-        <div><h2 className="text-2xl font-black">Historico de cierres</h2><p className="text-sm text-[var(--muted)]">Las copias se generan desde la instantanea guardada al cerrar.</p></div>
+        <div><h2 className="text-2xl font-black">Histórico de cierres</h2><p className="text-sm text-[var(--muted)]">Las copias se generan desde la instantánea guardada al cerrar.</p></div>
         <Button onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-5">
@@ -31,7 +31,7 @@ export function CashClosingsHistoryModal({ canReprint, closings, printingClosing
                   <p className="font-black">{closing.printSnapshot.reportTitle} · {closing.printSnapshot.registerName}</p>
                   <p className="text-sm text-[var(--muted)]">{formatReceiptDate(closing.closedAt, closing.printSnapshot.timezone)}</p>
                   <p className="mt-1 font-mono text-xl font-black">{formatMoney(closing.printSnapshot.summary.totalSalesCents)}</p>
-                  <p className="text-xs font-bold text-[var(--muted)]">{closing.printSnapshot.summary.salesCount} ventas · Impresion: {statusLabels[closing.printStatus]} · {closing.printCopies} copias</p>
+                  <p className="text-xs font-bold text-[var(--muted)]">{closing.printSnapshot.summary.salesCount} ventas · Impresión: {statusLabels[closing.printStatus]} · {closing.printCopies} copias</p>
                 </div>
                 <Button disabled={!canReprint || Boolean(printingClosingId) || closing.printStatus === 'unknown'} onClick={() => onReprint(closing)} type="button" variant="secondary">
                   {printing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}

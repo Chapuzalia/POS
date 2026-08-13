@@ -232,7 +232,7 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
       addSalesReportLine(byCategory, categoryId ?? 'uncategorized', categoryName ?? 'Sin categoría', ticket.id, line)
       addSalesReportLine(byFormat, line.sale_format_id ?? (normalizeText(formatName) || 'sin-formato'), formatName, ticket.id, line)
       addSalesReportLine(byVariant, line.variant_id ?? `deleted:${normalizeText(line.variant_name)}`, line.variant_name || 'Sin variante', ticket.id, line)
-      addSalesReportLine(byCatalogTab, line.catalog_tab_id_snapshot ?? 'sin-pestana', line.catalog_tab_name_snapshot ?? 'Sin pestana historica', ticket.id, line)
+      addSalesReportLine(byCatalogTab, line.catalog_tab_id_snapshot ?? 'sin-pestana', line.catalog_tab_name_snapshot ?? 'Sin pestaña histórica', ticket.id, line)
       for (const component of line.ticket_line_components ?? []) {
         const target = component.component_type === 'mixer' ? byMixer : byMenuComponent
         addNamedAggregate(target, component.product_id ?? component.id, component.product_name_snapshot, ticket.id, component.quantity * Number(line.allocated_quantity ?? line.quantity), component.price_delta_cents * component.quantity)

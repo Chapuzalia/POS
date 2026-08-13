@@ -1,4 +1,4 @@
-import { useCallback, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import { createId, getLineSignature } from '../../../lib/format'
 import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
@@ -117,6 +117,18 @@ export function useRestaurantController(options: Options) {
     isOnline: options.isOnline,
     onError: (message) => options.onError(message),
   })
+  const replaceDraftOrder = draft.replaceOrder
+  useEffect(() => {
+    if (options.enabled) return
+    setPosView({ type: 'quick_sale' })
+    setMoveOrderId(null)
+    setPendingPayment(null)
+    setPendingLineRemoval(null)
+    setSplitOrderGroup(null)
+    setEqualSplitOpen(false)
+    setEqualSplit(null)
+    replaceDraftOrder(null)
+  }, [options.enabled, replaceDraftOrder])
   const realtime = useRestaurantRealtime({
     activeCashSessionId: options.cashSession?.id,
     context: options.context,
@@ -464,7 +476,7 @@ export function useRestaurantController(options: Options) {
           setSplitOrderGroup(group)
           const current = group.orders.find((detail) => detail.order.id === currentId && detail.order.status === 'open')
           if (current) draft.replaceOrder(current)
-          options.onError('Las comandas cambiaron en otro dispositivo. Se ha recargado la version mas reciente.')
+          options.onError('Las comandas cambiaron en otro dispositivo. Se ha recargado la versión más reciente.')
         } catch (reloadError) {
           options.onError(getReadableError(reloadError))
         }

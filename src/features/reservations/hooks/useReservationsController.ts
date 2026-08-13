@@ -9,6 +9,7 @@ import { isReservationLate } from '../domain/reservationStatus'
 import {
   changeReservationStatus,
   loadReservation,
+  loadReservationConflicts,
   loadReservationsForDate,
   loadReservationVenueSettings,
   ReservationConflictError,
@@ -165,11 +166,19 @@ export function useReservationsController(options: Options) {
     onRefresh: refresh,
   })
 
-  const openCreate = useCallback((tableIds: string[] = []) => {
+  useEffect(() => {
+    if (options.enabled) return
+    setIsOpen(false)
+    setEditor(null)
+    setCurrentDetail(null)
+    setQuery('')
+  }, [options.enabled, setCurrentDetail])
+
+  const openCreate = useCallback((tableIds: string[] = [], startsAt?: string) => {
     setSelectedTableIds(tableIds)
     setConflicts([])
     setPendingConflictDraft(null)
-    setEditor({ reservation: null, preselectedTableIds: tableIds })
+    setEditor({ reservation: null, preselectedTableIds: tableIds, preselectedStartsAt: startsAt })
   }, [])
 
   const openEdit = useCallback((reservation: Reservation) => {
@@ -204,6 +213,18 @@ export function useReservationsController(options: Options) {
       setIsLoading(false)
     }
   }, [canManage, refresh, setCurrentDetail])
+
+  const checkAvailability = useCallback(async (
+    startsAt: string,
+    endsAt: string,
+    reservationId?: string,
+  ) => {
+    const { context, isOnline } = latestRef.current
+    if (!context || !isOnline) return []
+    setConflicts([])
+    setPendingConflictDraft(null)
+    return loadReservationConflicts(context, startsAt, endsAt, reservationId)
+  }, [])
 
   const updateStatus = useCallback(async (
     reservation: Reservation,
@@ -272,6 +293,7 @@ export function useReservationsController(options: Options) {
 
   return {
     canManage,
+    checkAvailability,
     close: () => {
       setIsOpen(false)
       setEditor(null)

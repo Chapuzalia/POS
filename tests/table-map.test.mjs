@@ -2,13 +2,19 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { snapTableAlignment, snapTableCenter } from '../src/features/tables/alignment.ts'
-import { placeExternalLabels, rectsOverlap, tableContentMode, tableVisualRect } from '../src/features/tables/external-label-layout.ts'
+import { externalLabelSize, placeExternalLabels, rectsOverlap, tableContentMode, tableVisualRect } from '../src/features/tables/external-label-layout.ts'
 import { compactJoinedCompositions, compositionHasOpenOrder, findJoinProposal, isCompactComposition, separateFromComposition, translateComposition } from '../src/features/tables/joined-layout.ts'
-import { fitBounds, getMapPlaneSize, intersectionRatio, mapToScreen, positionFloatingPanel, screenToMap, zoomAtPoint } from '../src/features/tables/viewport.ts'
+import { fitBounds, getMapPlaneSize, intersectionRatio, mapToScreen, orientMapRect, positionFloatingPanel, screenToMap, zoomAtPoint } from '../src/features/tables/viewport.ts'
 import { getRestaurantTableVisualStatus } from '../src/features/tables/table-visual-status.ts'
+import { loadTableMapQuarterTurn, persistTableMapQuarterTurn, tableMapOrientationStorageKey } from '../src/features/tables/map-orientation.ts'
 import { getReadableError } from '../src/utils/errors.ts'
 
 const tableMapViewSource = await readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8')
+const mobileChromeSource = await readFile(new URL('../src/features/tables/components/MobileTableMapChrome.tsx', import.meta.url), 'utf8')
+const mobileSheetsSource = await readFile(new URL('../src/features/tables/components/MobileTableMapSheets.tsx', import.meta.url), 'utf8')
+const mobileLayoutSource = await readFile(new URL('../src/features/tables/useMobileTableMapLayout.ts', import.meta.url), 'utf8')
+const viewportControlsSource = await readFile(new URL('../src/features/tables/components/MapViewportControls.tsx', import.meta.url), 'utf8')
+const tableManagementSource = await readFile(new URL('../src/features/table-management/TableManagementPage.tsx', import.meta.url), 'utf8')
 
 const bounds = { left: 100, top: 50, width: 1000, height: 600 }
 
@@ -277,7 +283,7 @@ test('mantiene etiquetas dentro del canvas y evita la zona reservada de controle
 
 test('los errores de Supabase conservan mensaje, detalle y codigo al guardar el mapa', () => {
   const message = getReadableError({ message: 'La distribucion no es valida', details: 'Mesa 2', code: '23514' })
-  assert.equal(message, 'La distribucion no es valida - Mesa 2 - Codigo: 23514')
+  assert.equal(message, 'La distribucion no es valida - Mesa 2 - Código: 23514')
 })
 
 test('las mesas ocupadas usan naranja con pendientes y rojo cuando todo esta servido', () => {
@@ -287,8 +293,8 @@ test('las mesas ocupadas usan naranja con pendientes y rojo cuando todo esta ser
   assert.equal(getRestaurantTableVisualStatus({ status: 'reserved', pendingUnits: 0 }), 'reserved')
 })
 test('cada zona se abre una vez con la vista ajustada', () => {
-  assert.match(tableMapViewSource, /fittedAreaRef\.current === activeAreaId/)
-  assert.match(tableMapViewSource, /fitViewport\(canvas, \[\.\.\.tables, \.\.\.mapElements\], planeSize\)/)
+  assert.match(tableMapViewSource, /fittedAreaRef\.current === `\$\{activeAreaId\}:\$\{rotatedMap\}`/)
+  assert.match(tableMapViewSource, /fitViewport\(canvas, \[\.\.\.tables, \.\.\.mapElements\]\.map\(\(item\) => orientMapRect\(item, rotatedMap\)\), planeSize\)/)
 })
 
 test('el zoom escala la geometria sin rasterizar ni escalar inversamente el texto', () => {
@@ -296,4 +302,82 @@ test('el zoom escala la geometria sin rasterizar ni escalar inversamente el text
   assert.match(tableMapViewSource, /height: planeSize\.height \* viewport\.zoom/)
   assert.doesNotMatch(tableMapViewSource, /scale\(\$\{viewport\.zoom\}\)/)
   assert.doesNotMatch(tableMapViewSource, /scale\(\$\{1 \/ viewport\.zoom\}\)/)
+})
+
+test('el giro de 90 grados conserva el plano y la conversion de puntero', () => {
+  const item = { positionX: 12, positionY: 24, width: 16, height: 10 }
+  assert.deepEqual(orientMapRect(item, true), { positionX: 66, positionY: 12, width: 10, height: 16 })
+  const viewport = { zoom: 1.35, panX: -18, panY: 27 }
+  const point = { x: 31, y: 72 }
+  const result = screenToMap(mapToScreen(point, bounds, viewport, true), bounds, viewport, true)
+  assert.ok(Math.abs(result.x - point.x) < 1e-9)
+  assert.ok(Math.abs(result.y - point.y) < 1e-9)
+})
+
+test('la orientacion mobile persiste por local al desmontar y volver al mapa', () => {
+  const values = new Map()
+  const storage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) }
+  assert.equal(loadTableMapQuarterTurn('venue-a', storage), false)
+  persistTableMapQuarterTurn('venue-a', true, storage)
+  assert.equal(values.get(tableMapOrientationStorageKey('venue-a')), 'quarter-turn')
+  assert.equal(loadTableMapQuarterTurn('venue-a', storage), true)
+  assert.equal(loadTableMapQuarterTurn('venue-b', storage), false)
+  persistTableMapQuarterTurn('venue-a', false, storage)
+  assert.equal(loadTableMapQuarterTurn('venue-a', storage), false)
+})
+
+test('crear zona envia el formulario mediante el boton HeroUI', () => {
+  assert.match(tableManagementSource, /type="submit"><Plus size=\{16\} \/> Crear zona<\/UiButton>/)
+  assert.match(tableManagementSource, /onSubmit=\{\(event\) => \{ event\.preventDefault\(\); void addArea\(\) \}\}/)
+})
+
+test('las etiquetas externas mobile son mas compactas sin cambiar la medida de tablet', () => {
+  const desktop = externalLabelSize('Mesa principal')
+  const mobile = externalLabelSize('Mesa principal', true)
+  assert.equal(desktop.height, 48)
+  assert.equal(mobile.height, 40)
+  assert.ok(mobile.width < desktop.width)
+})
+
+test('mobile usa una composicion propia y tablet conserva el encabezado de escritorio', () => {
+  assert.match(tableMapViewSource, /!mobileLayout \? <header/)
+  assert.match(tableMapViewSource, /<h1>Mapa de mesas<\/h1>/)
+  assert.match(tableMapViewSource, /<MobileTableMapChrome/)
+  assert.match(tableMapViewSource, /mobileLayout \? 'gap-0 overflow-hidden p-0'/)
+  assert.match(tableMapViewSource, /mobileLayout \? 'min-h-0 rounded-none border-x-0 border-b-0 shadow-none'/)
+  assert.match(mobileLayoutSource, /max-width: 767px/)
+  assert.match(mobileLayoutSource, /max-width: 950px/)
+  assert.match(mobileLayoutSource, /max-height: 500px/)
+})
+
+test('mobile presenta sala, edicion, seleccion y acciones sin persistir la proyeccion visual', () => {
+  assert.match(mobileChromeSource, /Cambiar sala/)
+  assert.match(mobileChromeSource, /min-h-11/)
+  assert.match(mobileChromeSource, /Editando mesas/)
+  assert.match(mobileChromeSource, /Guardado automático/)
+  assert.match(tableMapViewSource, /selectedTableId === table\.id/)
+  assert.match(tableMapViewSource, /<MobileTableActionSheet/)
+  assert.match(tableMapViewSource, /<MobileGroupActionsSheet/)
+  assert.match(mobileSheetsSource, /placement="bottom"/)
+  assert.match(mobileSheetsSource, /safe-area-inset-bottom/)
+  assert.match(tableMapViewSource, /const orientedTable = orientMapRect\(table, rotatedMap\)/)
+  assert.match(tableMapViewSource, /layoutFromMap\(nextMap\)/)
+  assert.doesNotMatch(tableMapViewSource, /layoutFromMap\([^)]*orientMapRect/)
+})
+
+test('los controles mobile son compactos, tactiles y respetan el safe area', () => {
+  assert.match(viewportControlsSource, /mobileLayout/)
+  assert.match(viewportControlsSource, /safe-area-inset-bottom/)
+  assert.match(viewportControlsSource, /\[&>button\]:min-h-11/)
+  assert.match(viewportControlsSource, /<ZoomOut/)
+  assert.match(viewportControlsSource, /Math\.round\(zoom \* 100\)/)
+  assert.match(viewportControlsSource, /<ZoomIn/)
+  assert.match(viewportControlsSource, /<Maximize2/)
+  assert.match(viewportControlsSource, /Girar mapa 90 grados/)
+  assert.match(viewportControlsSource, /<RotateCw/)
+  assert.match(tableMapViewSource, /orientMapRect\(table, rotatedMap\)/)
+})
+
+test('el espacio entre mesas conserva pan y pinch sobre la capa transformada', () => {
+  assert.match(tableMapViewSource, /className="map-transform-layer absolute z-\[2\]"/)
 })

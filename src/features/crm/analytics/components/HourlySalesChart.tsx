@@ -52,7 +52,7 @@ export function HourlySalesChart({ points }: { points: HourlySalesPoint[] }) {
     return (
       <div className="!px-[18px] !pb-[18px] md:!px-[22px] md:!pb-[22px]">
         <div className="!grid !min-h-64 !place-items-center !rounded-xl !bg-[var(--crm-surface-soft)] !px-6 !text-center !text-sm !font-semibold !text-[var(--crm-text-muted)]">
-          No hay tickets pagados en el periodo actual.
+          No hay tickets pagados en el período actual.
         </div>
       </div>
     )

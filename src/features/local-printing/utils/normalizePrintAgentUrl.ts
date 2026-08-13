@@ -21,7 +21,7 @@ function isValidIpv6(hostname: string) {
 export function normalizePrintAgentUrl(value: string, options: NormalizeOptions = {}) {
   const input = value.trim()
   if (!input || /[\s@?#]/.test(input)) {
-    throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'Introduce una direccion valida del agente.' })
+    throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'Introduce una dirección válida del agente.' })
   }
 
   const hasProtocol = /^[a-z][a-z\d+.-]*:\/\//i.test(input)
@@ -31,7 +31,7 @@ export function normalizePrintAgentUrl(value: string, options: NormalizeOptions 
   try {
     url = new URL(candidate)
   } catch (cause) {
-    throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'La direccion del agente no es valida.', cause })
+    throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'La dirección del agente no es válida.', cause })
   }
 
   const allowHttp = options.allowHttpInDevelopment === true && options.isDevelopment === true
@@ -45,13 +45,13 @@ export function normalizePrintAgentUrl(value: string, options: NormalizeOptions 
   const hostname = url.hostname.replace(/^\[|\]$/g, '')
   const resemblesIpv4 = /^\d+(?:\.\d+){3}$/.test(hostname)
   if ((resemblesIpv4 && !isValidIpv4(hostname)) || (!isValidIpv4(hostname) && !isValidIpv6(hostname) && !isValidHostname(hostname))) {
-    throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'El hostname o la direccion IP no son validos.' })
+    throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'El hostname o la dirección IP no son válidos.' })
   }
 
   if (!url.port) url.port = options.defaultPort || DEFAULT_PRINT_AGENT_PORT
   const port = Number(url.port)
   if (!Number.isInteger(port) || port < 1 || port > 65_535) {
-    throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'El puerto del agente no es valido.' })
+    throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'El puerto del agente no es válido.' })
   }
   return url.origin
 }

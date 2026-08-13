@@ -12,7 +12,7 @@ export async function printCashClosing(input: {
 }) {
   const state = usePrintAgentStore.getState()
   const printerId = state.selectedPrinterId || state.selectedPrinter?.id
-  if (!state.token) throw new Error('Servidor de impresion no configurado.')
+  if (!state.token) throw new Error('Servidor de impresión no configurado.')
   if (!printerId) throw new Error('No hay una impresora configurada.')
   const payload = mapCashClosingToPrintRequest({
     closing: input.closing,

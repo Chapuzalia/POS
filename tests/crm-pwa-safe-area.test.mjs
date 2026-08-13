@@ -34,6 +34,6 @@ test('the iPhone CRM drawer keeps active submenu labels visible', () => {
 
 test('the mobile CRM drawer can be closed from its header or backdrop', () => {
   assert.match(sidebar, /<div[\s\S]*aria-hidden="true"[\s\S]*onClick=\{onClose\}/)
-  assert.ok(sidebar.includes('aria-label="Cerrar menu de navegacion"'))
+  assert.ok(sidebar.includes('aria-label="Cerrar menú de navegación"'))
   assert.ok(sidebar.includes('<X className="!size-5" />'))
 })
