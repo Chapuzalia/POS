@@ -235,6 +235,11 @@ test('rechaza configuración automática con PIN y valida los campos de promoci�
   }), /día|franja/i)
 })
 
+test('el selector de programación aclara que utiliza el horario operativo del local', async () => {
+  const crmPage = await readFile(new URL('../src/features/crm/discounts/pages/DiscountsPage.tsx', import.meta.url), 'utf8')
+  assert.match(crmPage, /Utilizando horario operativo del local/)
+})
+
 test('el modal exige validar antes de seleccionar y nunca persiste el PIN', async () => {
   const modal = await readFile(new URL('../src/components/modals/DiscountModal.tsx', import.meta.url), 'utf8')
   const domain = await readFile(new URL('../src/types/domain.ts', import.meta.url), 'utf8')

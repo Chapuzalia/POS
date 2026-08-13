@@ -676,6 +676,9 @@ export function DiscountEditor({
               <Sparkles className="size-4 text-[var(--crm-blue)]" />{" "}
               Programación
             </div>
+            <p className="-mt-1 text-xs text-[var(--crm-text-muted)]">
+              Utilizando horario operativo del local
+            </p>
             <Field label="Días activos">
               <div className="grid grid-cols-7 gap-1 w-full">
                 {weekdays.map((day) => (
