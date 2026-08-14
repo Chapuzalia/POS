@@ -31,6 +31,23 @@ test('reservas ofrece una tercera vista temporal operativa', () => {
   assert.match(timeline, /scrollWidth <= scroller\.clientWidth/)
   assert.match(timeline, /scrollTo\(\{\s*left:/)
   assert.match(timeline, /Desplazar horario de reservas/)
+  assert.match(page, /min-w-0 w-full max-w-full flex-1 flex-col[\s\S]*overflow-x-hidden overflow-y-auto/)
+  assert.match(page, /flex min-h-0 min-w-0 w-full max-w-full flex-none gap-3/)
+  assert.match(timeline, /max-h-\[min\(68dvh,40rem\)\][\s\S]*flex-none overflow-hidden/)
+  assert.match(timeline, /max-h-\[inherit\] w-full max-w-full touch-auto overflow-auto/)
+  assert.doesNotMatch(timeline, /h-\[min\(68dvh,40rem\)\] min-h-110/)
+})
+
+test('la timeline se adapta al ancho disponible y conserva el scroll interno', () => {
+  assert.match(timeline, /new ResizeObserver\(updateAvailableWidth\)/)
+  assert.match(timeline, /scroller\.clientWidth - LABEL_WIDTH/)
+  assert.match(timeline, /Math\.max\(schedule\.width, availableTrackWidth\)/)
+  assert.match(timeline, /timelineWidth \/ \(schedule\.end - schedule\.start\)/)
+  assert.match(timeline, /minWidth: LABEL_WIDTH \+ timelineWidth/)
+  assert.match(timeline, /width: timelineWidth/)
+  assert.match(timeline, /30 \* pixelsPerMinute/)
+  assert.match(timeline, /tables\.map\(\(table, tableIndex\)/)
+  assert.match(timeline, /tableIndex % 2 === 1/)
 })
 
 test('reservas convierte excepciones y zonas en filtros operativos', () => {

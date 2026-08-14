@@ -3,7 +3,6 @@ import { Button as UiButton } from "../../../components/ui/Button";
 import { Input as UiInput } from "../../../components/ui/Input";
 import {
   ArrowLeft,
-  CalendarDays,
   CalendarPlus,
   ChevronLeft,
   ChevronRight,
@@ -113,7 +112,7 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
   ];
 
   return (
-    <main className="flex min-h-0 flex-1 flex-col gap-0 overflow-y-auto overscroll-contain bg-[var(--background)] p-0 [-webkit-overflow-scrolling:touch] md:gap-3 md:p-4">
+    <main className="flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col gap-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-[var(--background)] p-0 [-webkit-overflow-scrolling:touch] md:gap-3 md:p-4">
       <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--separator)] bg-[var(--surface)] p-3 md:gap-3 md:rounded-2xl md:border md:shadow-sm">
         <div className="flex min-w-0 flex-1 items-center gap-2 md:flex-none">
           <UiButton
@@ -126,7 +125,7 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
             <span className="max-sm:sr-only">Volver</span>
           </UiButton>
           <div className="min-w-0">
-            <h1 className="m-0 text-xl font-black sm:text-2xl">Reservas</h1>
+            <h1 className="m-0 text-xl font-semibold sm:text-2xl">Reservas</h1>
             <p className="m-0 truncate text-xs font-semibold capitalize text-[var(--muted)]">
               {controller.date === controller.today
                 ? `Hoy · ${formattedDate}`
@@ -146,8 +145,7 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
           >
             <ChevronLeft size={18} />
           </UiButton>
-          <label className="flex min-h-11 flex-1 items-center justify-center gap-2 border-x border-[var(--separator)] bg-[var(--surface)] px-3 text-sm font-bold text-[var(--foreground)] md:flex-none">
-            <CalendarDays aria-hidden="true" size={17} />
+          <label className="flex  min-h-11 flex-1 items-center justify-center gap-2 border-x border-[var(--separator)] bg-[var(--surface)] px-3 text-sm font-bold text-[var(--foreground)] md:flex-none">
             <span className="sr-only">Ir a una fecha</span>
             <input
               aria-label="Fecha de las reservas"
@@ -311,7 +309,7 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
         </UiButton>
       </section>
 
-      <section className="flex min-h-0 flex-none gap-3 p-3 md:min-h-105 md:flex-1 md:p-0">
+      <section className="flex min-h-0 min-w-0 w-full max-w-full flex-none gap-3 p-3 md:min-h-105 md:flex-1 md:p-0">
         {controller.view === "list" ? (
           <ReservationList
             onSelect={controller.openDetail}

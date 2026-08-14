@@ -1,7 +1,10 @@
 import { DEFAULT_PRINT_AGENT_TIMEOUT_MS, PRINT_AGENT_HEALTH_TIMEOUT_MS } from '../constants/config.ts'
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl.ts'
 import { PrintAgentError, type PrintAgentErrorCode } from './PrintAgentError.ts'
-import type { DiscoveryProgress, PrintJob, Printer } from '../types.ts'
+import type {
+  CashlogyBackofficePreset, CashlogyBackofficeResponse, CashlogyChargeRequest, CashlogyDenominations,
+  CashlogyHealth, CashlogyTotal, CashlogyTransaction, DiscoveryProgress, PrintJob, Printer,
+} from '../types.ts'
 
 type ClientOptions = { baseUrl: string; token?: string | null; defaultTimeoutMs?: number; fetchImpl?: typeof fetch }
 type RequestOptions = {
@@ -18,6 +21,8 @@ const errorCodes = new Set<PrintAgentErrorCode>([
   'PRINTER_CONNECTION_TIMEOUT', 'PRINTER_CONNECTION_REFUSED', 'PRINT_FAILED', 'PRINT_STATUS_UNKNOWN',
   'DISCOVERY_FAILED', 'TLS_CONFIGURATION_ERROR', 'CERTIFICATE_EXPIRED', 'CASH_DRAWER_FAILED', 'DUPLICATE_REQUEST',
 ])
+
+const CASHLOGY_BACKOFFICE_TIMEOUT_MS = 910_000
 
 export function buildPrintAgentHeaders(token?: string | null, hasBody = false) {
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -160,6 +165,23 @@ export function createPrintAgentClient(options: ClientOptions) {
     testPrinter: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/printers/test', { body: payload, method: 'POST', signal }),
     printTicket: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/print', { body: payload, method: 'POST', signal }),
     openCashDrawer: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/cash-drawer/open', { body: payload, method: 'POST', signal }),
+    getCashlogyHealth: (signal?: AbortSignal) => request<CashlogyHealth>('/api/v1/cashlogy/health', { retries: 1, signal }),
+    getCashlogyTotal: (signal?: AbortSignal) => request<CashlogyTotal>('/api/v1/cashlogy/accounting/total', { retries: 1, signal }),
+    getCashlogyDenominations: (signal?: AbortSignal) => request<CashlogyDenominations>('/api/v1/cashlogy/accounting/denominations', { retries: 1, signal }),
+    openCashlogyBackoffice: (
+      preset: CashlogyBackofficePreset,
+      confirmDangerousOperations = false,
+      signal?: AbortSignal,
+    ) => request<CashlogyBackofficeResponse>('/api/v1/cashlogy/backoffice/open', {
+      body: { preset, confirmDangerousOperations },
+      method: 'POST',
+      signal,
+      timeoutMs: CASHLOGY_BACKOFFICE_TIMEOUT_MS,
+    }),
+    chargeCashlogy: (payload: CashlogyChargeRequest, signal?: AbortSignal) => request<{ ok: true; duplicate: boolean; transaction: CashlogyTransaction }>('/api/v1/cashlogy/transactions/charge', { body: payload, method: 'POST', signal }),
+    getCashlogyTransaction: (transactionId: string, signal?: AbortSignal) => request<{ transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}`, { retries: 1, signal }),
+    getCashlogyTransactionByRequest: (requestId: string, signal?: AbortSignal) => request<{ transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/by-request/${encodeURIComponent(requestId)}`, { retries: 1, signal }),
+    cancelCashlogyTransaction: (transactionId: string, signal?: AbortSignal) => request<{ ok: true; duplicate: boolean; transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}/cancel`, { body: {}, method: 'POST', signal }),
     getJobs: (signal?: AbortSignal) => request<{ jobs?: PrintJob[] } | PrintJob[]>('/api/v1/jobs', { retries: 1, signal }),
     getJob: (jobId: string, signal?: AbortSignal) => request<PrintJob>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, { retries: 1, signal }),
     findJobByRequestId: async (requestId: string, signal?: AbortSignal) => {

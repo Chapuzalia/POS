@@ -39,6 +39,7 @@ type BuildRestaurantPrintPayloadInput = {
   paymentId: string | null
   paymentMethod: PaymentMethod | null
   receivedCents: number | null
+  changeCents?: number | null
   saleId: string
   subtotalCents: number
   ticketId: string
@@ -116,7 +117,7 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       method: input.paymentMethod,
       amountCents: input.totalCents,
       receivedCents: input.receivedCents,
-      changeCents: Math.max(0, (input.receivedCents ?? input.totalCents) - input.totalCents),
+      changeCents: input.changeCents ?? Math.max(0, (input.receivedCents ?? input.totalCents) - input.totalCents),
     } : null,
     ...(input.fiscal ? { fiscal: input.fiscal } : {}),
   }

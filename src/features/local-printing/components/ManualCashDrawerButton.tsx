@@ -8,7 +8,7 @@ export function ManualCashDrawerButton({ canOpenDrawer }: { canOpenDrawer: boole
   const agent = usePrintAgent()
   const isConfigured = agent.hasToken && Boolean(agent.selectedPrinterId)
 
-  if (!canOpenDrawer) return null
+  if (!canOpenDrawer || agent.cashlogyConfigured) return null
 
   async function handleOpenCashDrawer() {
     try {

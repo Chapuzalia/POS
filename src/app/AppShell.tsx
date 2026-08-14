@@ -166,6 +166,7 @@ export function AppShell() {
     persistProductSalesStats,
     persistTickets: cash.persistTickets,
     printSale: cash.printSale,
+    onError: setSaleError,
     productSalesStats,
     refreshPendingCount: offline.refreshPendingCount,
     setMobileTicketOpen,

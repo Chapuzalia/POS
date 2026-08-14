@@ -5,11 +5,15 @@ import { usePrintAgentStore } from '../store/usePrintAgentStore'
 
 /** Configures the local print agent whenever the terminal identity changes. */
 export function usePrintAgentScope(context: TenantContext | null) {
+  const tenantId = context?.tenantId ?? null
+  const establishmentId = context?.venueId ?? null
+  const terminalId = context?.deviceId ?? null
+  const disabled = !context || isBackofficeUser(context)
   useEffect(() => {
-    if (!context || isBackofficeUser(context) || !context.venueId || !context.deviceId) return undefined
+    if (disabled || !tenantId || !establishmentId || !terminalId) return undefined
     const abortController = new AbortController()
     const store = usePrintAgentStore.getState()
-    store.configureScope({ tenantId: context.tenantId, establishmentId: context.venueId, terminalId: context.deviceId })
+    store.configureScope({ tenantId, establishmentId, terminalId })
     void (async () => {
       if (await usePrintAgentStore.getState().checkConnection(abortController.signal)) {
         const configured = usePrintAgentStore.getState()
@@ -20,5 +24,5 @@ export function usePrintAgentScope(context: TenantContext | null) {
       }
     })()
     return () => abortController.abort()
-  }, [context])
+  }, [disabled, establishmentId, tenantId, terminalId])
 }

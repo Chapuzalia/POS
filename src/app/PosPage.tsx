@@ -34,6 +34,8 @@ import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
 import { ReservationsPage, type useReservationsController } from '../features/reservations'
+import { CashlogyMachineModal, CashlogyPaymentModal } from '../features/local-printing'
+import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
 import type {
   CatalogStartTab,
   Discount,
@@ -96,10 +98,17 @@ type Props = {
 
 export function PosPage(props: Props) {
   const [configOpen, setConfigOpen] = useState(false)
+  const [cashlogyMachineOpen, setCashlogyMachineOpen] = useState(false)
   const mobileTableMapLayout = useMobileTableMapLayout()
   const restaurant = props.restaurant
   const quickSale = props.quickSale
   const cash = props.cash
+  const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured)
+  const cashlogyConnected = usePrintAgentStore((state) => Boolean(
+    state.cashlogyConfigured
+      && state.cashlogyHealth?.enabled
+      && state.cashlogyHealth.connector?.connected,
+  ))
   const discountsEnabled = hasTenantFeature(props.context, 'discounts')
   const restaurantEnabled = hasTenantFeature(props.context, 'restaurant')
   const reservationsEnabled = restaurantEnabled && hasTenantFeature(props.context, 'reservations')
@@ -208,6 +217,11 @@ export function PosPage(props: Props) {
 
   const handlePayment = (method: PaymentMethod | null) => {
     if (method === 'cash') {
+      if (cashlogyConfigured) {
+        if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', null)
+        else void quickSale.completePayment('cash', null)
+        return
+      }
       quickSale.openCashPayment()
       return
     }
@@ -224,6 +238,7 @@ export function PosPage(props: Props) {
         canManageCash={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
+        cashlogyConnected={cashlogyConnected}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
@@ -233,6 +248,7 @@ export function PosPage(props: Props) {
         onOpenConfig={() => setConfigOpen(true)}
         onOpenReservations={props.reservations.open}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
+        onOpenCashlogyMachine={() => setCashlogyMachineOpen(true)}
         onOpenCashMovements={() => cash.setMovementModalOpen(true)}
         onOpenTicketHistory={() => void cash.ticketActions.openHistory()}
         onRefreshCatalog={() => void props.onRefreshCatalog()}
@@ -283,6 +299,7 @@ export function PosPage(props: Props) {
           }
         }}
         onMove={restaurant.moveOrder}
+        onCreateVirtual={restaurant.createVirtualTable}
         onOpen={restaurant.openTableOrder}
         onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)}
         onOpenReservation={(reservationId) => void props.reservations.openReservation(reservationId)}
@@ -408,6 +425,17 @@ export function PosPage(props: Props) {
           else void quickSale.completePayment('cash', receivedCents)
         }}
         totalCents={totalCents}
+      /> : null}
+      <CashlogyPaymentModal
+        finalizeDisabled={props.isBusy}
+        onFinalizeRecovered={() => {
+          if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', null)
+          else void quickSale.completePayment('cash', null)
+        }}
+      />
+      {cashlogyMachineOpen ? <CashlogyMachineModal
+        canWithdraw={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
+        onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
       {quickSale.productDialog && props.catalog ? <ProductDialog
         allowVariantSelection={quickSale.productDialog.allowVariantSelection}

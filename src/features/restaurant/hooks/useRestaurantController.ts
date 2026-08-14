@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { createId, getLineSignature } from '../../../lib/format'
+import { calculateDiscountForLines } from '../../../lib/discounts'
 import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
 import type {
@@ -23,6 +24,7 @@ import {
   cancelEmptyRestaurantOrder,
   closeRestaurantOrder,
   configureRestaurantEqualSplit,
+  createVirtualRestaurantTable,
   loadRestaurantEqualSplit,
   loadRestaurantOrder,
   loadRestaurantOrderGroup,
@@ -48,11 +50,17 @@ import type {
   RestaurantOrderDetail,
   RestaurantOrderGroupDetail,
   RestaurantOrderLineMove,
+  RestaurantTableShape,
 } from '../../tables/types'
 import { useRestaurantDraft } from './useRestaurantDraft'
 import { isRestaurantRevisionConflict, requiresConfirmedRestaurantLineRemoval, shouldSaveBeforeLeavingOrder } from '../draft-policy'
 import { getRestaurantCashClosureError } from '../services/validateCashClosure'
 import { useRestaurantRealtime } from './useRestaurantRealtime'
+import {
+  finishCashlogyPayment,
+  getCashlogyPaymentAmounts,
+  settleCashlogyPaymentIfConfigured,
+} from '../../local-printing/cashlogy/useCashlogyStore'
 
 async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string) {
   try {
@@ -117,6 +125,21 @@ export function useRestaurantController(options: Options) {
     isOnline: options.isOnline,
     onError: (message) => options.onError(message),
   })
+
+  const settlePayment = useCallback(async (
+    method: PaymentMethod | null,
+    amountCents: number,
+    receivedCents: number | null,
+  ) => {
+    if (method !== 'cash') return { transaction: null, receivedCents, changeCents: null }
+    const transaction = await settleCashlogyPaymentIfConfigured(amountCents)
+    const amounts = getCashlogyPaymentAmounts(transaction, amountCents)
+    return {
+      transaction,
+      receivedCents: transaction ? amounts.receivedCents : receivedCents,
+      changeCents: amounts.changeCents,
+    }
+  }, [])
   const replaceDraftOrder = draft.replaceOrder
   useEffect(() => {
     if (options.enabled) return
@@ -181,6 +204,30 @@ export function useRestaurantController(options: Options) {
     options.setAppliedDiscount(null)
     setPosView({ type: 'table_order', orderId })
   }), [options, refreshState, runBusy])
+
+  const createVirtualTable = useCallback(async (input: { areaId: string | null; name: string; capacity: number; shape: RestaurantTableShape }) => {
+    if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline || options.isBusy) return false
+    options.setBusy(true)
+    options.onError(null)
+    try {
+      await createVirtualRestaurantTable({
+        ...input,
+        cashSessionId: options.cashSession.id,
+        deviceId: options.context.deviceId,
+      })
+      await realtime.refreshMap()
+      setPosView({
+        type: 'table_map',
+        areaId: input.areaId ?? `virtual:${options.cashSession.id}`,
+      })
+      return true
+    } catch (error) {
+      options.onError(getReadableError(error))
+      return false
+    } finally {
+      options.setBusy(false)
+    }
+  }, [options, realtime])
 
   const openExistingOrder = useCallback((orderId: string) => runBusy(async () => {
     if (!options.context || !options.isOnline) return
@@ -332,9 +379,22 @@ export function useRestaurantController(options: Options) {
     options.onError(null)
     try {
       const paymentLines = getEqualSplitPrintLines(current.lines, equalSplit)
-      const result = await payRestaurantEqualPart(equalSplit.id, method, receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount)
+      if (method === 'cash' && !allowPending) {
+        const pending = await loadRestaurantOrderPendingUnits(options.context, current.order.id)
+        draft.replaceOrder(pending.detail)
+        if (pending.pendingUnits > 0) return { requiresConfirmation: true, pendingUnits: pending.pendingUnits, split: equalSplit }
+      }
+      const effectiveDiscount = useDefaultDiscount ? equalSplit.nextDefaultDiscount : discount
+      const amountCents = useDefaultDiscount
+        ? equalSplit.nextDefaultTotalCents
+        : calculateDiscountForLines(paymentLines.map((line) => ({
+            productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity,
+          })), effectiveDiscount).totalCents
+      const cashlogy = await settlePayment(method, amountCents, receivedCents)
+      const result = await payRestaurantEqualPart(equalSplit.id, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount)
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
+        finishCashlogyPayment(cashlogy.transaction)
         const printLines = paymentLines
         const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
         void options.printSale(buildRestaurantPrintPayload({
@@ -345,7 +405,8 @@ export function useRestaurantController(options: Options) {
           lines: printLines,
           paymentId: result.paymentId,
           paymentMethod: method,
-          receivedCents,
+          receivedCents: cashlogy.receivedCents,
+          changeCents: cashlogy.changeCents,
           saleId: result.saleId,
           subtotalCents: getRestaurantPrintSubtotal(printLines),
           ticketId: result.ticketId,
@@ -372,7 +433,7 @@ export function useRestaurantController(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [draft, equalSplit, options, realtime, refreshSales])
+  }, [draft, equalSplit, options, realtime, refreshSales, settlePayment])
 
   const paySelectedOrderItems = useCallback(async (
     moves: RestaurantOrderLineMove[],
@@ -389,8 +450,18 @@ export function useRestaurantController(options: Options) {
       const saved = await draft.flush()
       if (!saved) throw new Error('No se pudo guardar la comanda antes del cobro.')
       const paymentLines = getMovedRestaurantPrintLines(saved.lines, moves)
-      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, receivedCents, allowPending, withCalculationLines(discount, paymentLines))
+      if (method === 'cash' && !allowPending) {
+        const pending = await loadRestaurantOrderPendingUnits(options.context, saved.order.id)
+        draft.replaceOrder(pending.detail)
+        if (pending.pendingUnits > 0) return { requiresConfirmation: true, pendingUnits: pending.pendingUnits }
+      }
+      const amountCents = calculateDiscountForLines(paymentLines.map((line) => ({
+        productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity,
+      })), discount).totalCents
+      const cashlogy = await settlePayment(method, amountCents, receivedCents)
+      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines))
       if (!result.requiresConfirmation) {
+        finishCashlogyPayment(cashlogy.transaction)
         const printLines = paymentLines
         const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
         void options.printSale(buildRestaurantPrintPayload({
@@ -401,7 +472,8 @@ export function useRestaurantController(options: Options) {
           lines: printLines,
           paymentId: result.paymentId,
           paymentMethod: method,
-          receivedCents,
+          receivedCents: cashlogy.receivedCents,
+          changeCents: cashlogy.changeCents,
           saleId: result.saleId,
           subtotalCents: result.subtotalCents,
           ticketId: result.ticketId,
@@ -436,7 +508,7 @@ export function useRestaurantController(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [draft, options, realtime, refreshSales])
+  }, [draft, options, realtime, refreshSales, settlePayment])
   const splitOrder = useCallback(async (
     sourceOrderId: string,
     targetOrderId: string | null,
@@ -516,11 +588,16 @@ export function useRestaurantController(options: Options) {
         setPendingPayment({ method, receivedCents, pendingUnits: pendingCheck.pendingUnits })
         return
       }
-      const result = await closeRestaurantOrder(saved.order.id, method, receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines))
+      const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
+        productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity,
+      })), options.appliedDiscount).totalCents
+      const cashlogy = await settlePayment(method, amountCents, receivedCents)
+      const result = await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines))
       if (result.requiresConfirmation) {
-        setPendingPayment({ method, receivedCents, pendingUnits: result.pendingUnits })
+        setPendingPayment({ method, receivedCents: cashlogy.receivedCents, pendingUnits: result.pendingUnits })
         return
       }
+      finishCashlogyPayment(cashlogy.transaction)
       const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
       void options.printSale(buildRestaurantPrintPayload({
         cashSession: options.cashSession,
@@ -530,7 +607,8 @@ export function useRestaurantController(options: Options) {
         lines: saved.lines,
         paymentId: result.paymentId,
         paymentMethod: method,
-        receivedCents,
+        receivedCents: cashlogy.receivedCents,
+        changeCents: cashlogy.changeCents,
         saleId: result.saleId,
         subtotalCents: getRestaurantPrintSubtotal(saved.lines),
         ticketId: result.ticketId,
@@ -555,7 +633,7 @@ export function useRestaurantController(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [draft, options, realtime, refreshSales])
+  }, [draft, options, realtime, refreshSales, settlePayment])
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false
@@ -693,6 +771,7 @@ export function useRestaurantController(options: Options) {
     clearTicket: () => draft.updateDraft((detail) => ({ ...detail, lines: [] })),
     completePayment,
     configureEqualSplit,
+    createVirtualTable,
     confirmLineRemoval,
     equalSplit,
     equalSplitOpen,

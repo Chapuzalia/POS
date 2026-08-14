@@ -8,9 +8,11 @@ import {
   totalReservationTableCapacity,
 } from '../src/features/reservations/domain/reservationAvailability.ts'
 import {
+  formatReservationTimeDistance,
   isBlockingReservationStatus,
   isReservationLate,
   RESERVATION_GRACE_MINUTES,
+  reservationTimingLabel,
 } from '../src/features/reservations/domain/reservationStatus.ts'
 
 const base = {
@@ -55,4 +57,22 @@ test('un refresco antiguo no sustituye la reserva seleccionada', () => {
   const refreshedSecond = { ...second, customerName: 'Segunda actualizada' }
   assert.equal(reconcileReservationDetail(second, first.id, refreshedFirst), second)
   assert.equal(reconcileReservationDetail(second, second.id, refreshedSecond), refreshedSecond)
+})
+
+test('muestra días, horas y minutos omitiendo las unidades que no hacen falta', () => {
+  assert.equal(formatReservationTimeDistance(0), '0 min')
+  assert.equal(formatReservationTimeDistance(35), '35 min')
+  assert.equal(formatReservationTimeDistance(60), '1 h')
+  assert.equal(formatReservationTimeDistance(251), '4 h 11 min')
+  assert.equal(formatReservationTimeDistance(1_440), '1 d')
+  assert.equal(formatReservationTimeDistance(3_011), '2 d 2 h 11 min')
+
+  assert.equal(
+    reservationTimingLabel(base, new Date('2026-07-25T14:49:00.000Z')),
+    'En 1 d 4 h 11 min',
+  )
+  assert.equal(
+    reservationTimingLabel(base, new Date('2026-07-26T20:16:00.000Z')),
+    '1 h 16 min tarde',
+  )
 })

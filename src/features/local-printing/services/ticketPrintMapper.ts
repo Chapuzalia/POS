@@ -12,6 +12,7 @@ type MapperOptions = {
   isReprint?: boolean
   copyNumber?: number
   autoOpenCashDrawer?: boolean
+  cashlogyConfigured?: boolean
   cut?: boolean
 }
 
@@ -103,7 +104,7 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     },
     options: {
       cut: options.cut !== false,
-      openCashDrawer: shouldOpenCashDrawer({ payments, isReprint, settings: { autoOpenCashDrawer: options.autoOpenCashDrawer } }),
+      openCashDrawer: shouldOpenCashDrawer({ payments, isReprint, settings: { autoOpenCashDrawer: options.autoOpenCashDrawer, cashlogyConfigured: options.cashlogyConfigured } }),
       copies: 1,
     },
   }
@@ -124,6 +125,7 @@ export function mapRestaurantSaleToPrintRequest(input: {
   printerId: string
   footer?: string
   autoOpenCashDrawer?: boolean
+  cashlogyConfigured?: boolean
 }) : PrintRequest {
   const items = input.lines.map((line) => {
     const additions = [
@@ -155,6 +157,6 @@ export function mapRestaurantSaleToPrintRequest(input: {
       ...(input.receivedCents === null ? {} : { amountReceivedCents: input.receivedCents, changeCents: Math.max(0, input.receivedCents - input.totalCents) }),
       ...(input.footer ? { footer: input.footer } : {}),
     },
-    options: { cut: true, openCashDrawer: shouldOpenCashDrawer({ payments, settings: { autoOpenCashDrawer: input.autoOpenCashDrawer } }), copies: 1 },
+    options: { cut: true, openCashDrawer: shouldOpenCashDrawer({ payments, settings: { autoOpenCashDrawer: input.autoOpenCashDrawer, cashlogyConfigured: input.cashlogyConfigured } }), copies: 1 },
   }
 }

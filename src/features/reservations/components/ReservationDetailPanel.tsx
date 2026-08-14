@@ -98,7 +98,7 @@ export function ReservationDetailPanel(props: Props) {
               </h2>
               {timing &&
               ["confirmed", "arrived"].includes(reservation.status) ? (
-                <p className="mb-0 mt-1 text-xs font-extrabold text-[var(--warning)]">
+                <p className="mb-0 mt-1 text-xs font-semibold text-[var(--warning)]">
                   {timing}
                 </p>
               ) : null}
@@ -119,44 +119,44 @@ export function ReservationDetailPanel(props: Props) {
                 <span className="block text-[10px] font-black uppercase text-[var(--muted)]">
                   Personas
                 </span>
-                <strong className="mt-1 flex items-center gap-1.5 text-lg">
+                <div className="mt-1 flex items-center gap-1.5 text-lg ">
                   <Users size={17} className="text-[var(--accent)]" />
                   {reservation.partySize}
-                </strong>
+                </div>
               </div>
               <div>
                 <span className="block text-[10px] font-black uppercase text-[var(--muted)]">
                   Duración
                 </span>
-                <strong className="mt-1 flex items-center gap-1.5 text-lg">
+                <div className="mt-1 flex items-center gap-1.5 text-lg">
                   <Clock3 size={17} className="text-[var(--accent)]" />
                   {duration} min
-                </strong>
+                </div>
               </div>
             </div>
 
             <dl className="m-0 grid gap-3">
               <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3">
-                <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
+                <dt className="flex items-center gap-2 font-bold text-[var(--muted)]">
                   <CalendarDays size={17} />
                   Fecha
                 </dt>
-                <dd className="m-0 font-extrabold capitalize">{date}</dd>
+                <dd className="m-0  capitalize">{date}</dd>
               </div>
               <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3">
-                <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
+                <dt className="flex items-center gap-2 font-bold text-[var(--muted)]">
                   <Clock3 size={17} />
                   Hora
                 </dt>
-                <dd className="m-0 font-extrabold">{time}</dd>
+                <dd className="m-0">{time}</dd>
               </div>
               <div className="grid grid-cols-[6rem_minmax(0,1fr)] gap-3">
-                <dt className="flex items-center gap-2 font-semibold text-[var(--muted)]">
+                <dt className="flex items-center gap-2 font-bold text-[var(--muted)]">
                   <Utensils size={17} />
                   Mesas
                 </dt>
                 <dd
-                  className={`m-0 font-extrabold ${needsTable ? "text-[var(--warning)]" : ""}`}
+                  className={`m-0  ${needsTable ? "text-[var(--warning)]" : ""}`}
                 >
                   {reservation.tables.length
                     ? reservation.tables
@@ -172,7 +172,7 @@ export function ReservationDetailPanel(props: Props) {
                 Contacto
               </h3>
               <a
-                className="flex min-h-10 items-center gap-2 font-extrabold text-[var(--foreground)] no-underline"
+                className="flex min-h-10 items-center gap-2  text-[var(--foreground)] no-underline"
                 href={`tel:${reservation.customerPhone}`}
               >
                 <Phone size={17} />
@@ -180,7 +180,7 @@ export function ReservationDetailPanel(props: Props) {
               </a>
               {reservation.customerEmail ? (
                 <a
-                  className="flex min-h-10 items-center gap-2 truncate font-extrabold text-[var(--foreground)] no-underline"
+                  className="flex min-h-10 items-center gap-2 truncate  text-[var(--foreground)] no-underline"
                   href={`mailto:${reservation.customerEmail}`}
                 >
                   <Mail size={17} />
@@ -273,7 +273,7 @@ export function ReservationDetailPanel(props: Props) {
               ) : null}
               {actions.edit && props.canManage ? (
                 <UiButton
-                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm font-extrabold text-[var(--foreground)]"
+                  className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm  text-[var(--foreground)]"
                   disabled={props.disabled}
                   onClick={props.onEdit}
                   type="button"
@@ -283,7 +283,7 @@ export function ReservationDetailPanel(props: Props) {
                 </UiButton>
               ) : null}
               <a
-                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm font-extrabold text-[var(--foreground)] no-underline"
+                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm  text-[var(--foreground)]"
                 href={`tel:${reservation.customerPhone}`}
               >
                 <Phone size={17} />
@@ -291,7 +291,7 @@ export function ReservationDetailPanel(props: Props) {
               </a>
               {actions.noShow && props.canManage ? (
                 <UiButton
-                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm font-extrabold text-[var(--foreground)]"
+                  className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm  text-[var(--foreground)]"
                   disabled={props.disabled}
                   onClick={() => setConfirmation("no_show")}
                   type="button"

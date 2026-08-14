@@ -9,6 +9,7 @@ import {
   ReceiptText,
   RefreshCw,
   Settings,
+  Vault,
   WalletCards,
   Wifi,
   WifiOff,
@@ -28,6 +29,7 @@ type AppHeaderProps = {
   canManageCash: boolean;
   canOpenCashDrawer: boolean;
   canOpenReservations: boolean;
+  cashlogyConnected: boolean;
   isLoading: boolean;
   isOnline: boolean;
   onCloseCash: () => void;
@@ -36,6 +38,7 @@ type AppHeaderProps = {
   onOpenTicketHistory: () => void;
   onOpenCashMovements: () => void;
   onOpenCashClosingHistory: () => void;
+  onOpenCashlogyMachine: () => void;
   onRefreshCatalog: () => void;
   onLogout: () => void;
   pendingCount: number;
@@ -49,6 +52,7 @@ export function AppHeader({
   canManageCash,
   canOpenCashDrawer,
   canOpenReservations,
+  cashlogyConnected,
   isLoading,
   isOnline,
   onCloseCash,
@@ -57,6 +61,7 @@ export function AppHeader({
   onOpenTicketHistory,
   onOpenCashMovements,
   onOpenCashClosingHistory,
+  onOpenCashlogyMachine,
   onRefreshCatalog,
   onLogout,
   pendingCount,
@@ -80,6 +85,7 @@ export function AppHeader({
     menuItems.push({ action: onCloseCash, icon: Euro, id: 'close-cash', label: 'Cerrar caja' })
   }
   if (canCloseCash) menuItems.push({ action: onOpenCashClosingHistory, icon: WalletCards, id: 'closings', label: 'Histórico de cierres' })
+  if (cashlogyConnected) menuItems.push({ action: onOpenCashlogyMachine, icon: Vault, id: 'cashlogy-machine', label: 'Máquina de efectivo' })
   menuItems.push(
     { action: onOpenConfig, icon: Settings, id: 'settings', label: 'Ajustes' },
     { action: onLogout, danger: true, icon: LogOut, id: 'logout', label: 'Cerrar sesión' },

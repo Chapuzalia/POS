@@ -1,5 +1,5 @@
 import { AlertTriangle, Clock3, Users } from "lucide-react";
-import { useEffect, useMemo, useRef, type MouseEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type MouseEvent } from "react";
 import {
   localDateKey,
   shiftDateKey,
@@ -102,12 +102,14 @@ function ReservationBar({
   item,
   onSelect,
   selected,
+  pixelsPerMinute,
   timeZone,
   timelineStart,
 }: {
   item: PositionedReservation;
   onSelect: (reservation: Reservation) => void;
   selected: boolean;
+  pixelsPerMinute: number;
   timeZone: string;
   timelineStart: number;
 }) {
@@ -117,7 +119,7 @@ function ReservationBar({
     minute: "2-digit",
     timeZone,
   }).format(new Date(item.reservation.startsAt));
-  const width = Math.max(44, (item.end - item.start) * PIXELS_PER_MINUTE - 4);
+  const width = Math.max(44, (item.end - item.start) * pixelsPerMinute - 4);
 
   return (
     <button
@@ -129,7 +131,7 @@ function ReservationBar({
         onSelect(item.reservation);
       }}
       style={{
-        left: (item.start - timelineStart) * PIXELS_PER_MINUTE + 2,
+        left: (item.start - timelineStart) * pixelsPerMinute + 2,
         top: 7 + item.lane * LANE_HEIGHT,
         width,
       }}
@@ -151,6 +153,7 @@ function ReservationBar({
 
 export function ReservationTimelineView(props: Props) {
   const scrollRef = useRef<HTMLDivElement>(null);
+  const [availableTrackWidth, setAvailableTrackWidth] = useState(0);
   const schedule = useMemo(() => {
     const bounds = props.reservations.map((reservation) =>
       reservationMinutes(reservation, props.timeZone),
@@ -171,6 +174,8 @@ export function ReservationTimelineView(props: Props) {
     );
     return { start, end, width: (end - start) * PIXELS_PER_MINUTE };
   }, [props.reservations, props.timeZone]);
+  const timelineWidth = Math.max(schedule.width, availableTrackWidth);
+  const pixelsPerMinute = timelineWidth / (schedule.end - schedule.start);
 
   const areas = useMemo(
     () =>
@@ -221,19 +226,35 @@ export function ReservationTimelineView(props: Props) {
     nowMinutes <= schedule.end;
 
   useEffect(() => {
+    const scroller = scrollRef.current;
+    if (!scroller) return;
+
+    const updateAvailableWidth = () => {
+      const nextWidth = Math.max(0, Math.round(scroller.clientWidth - LABEL_WIDTH));
+      setAvailableTrackWidth((current) => current === nextWidth ? current : nextWidth);
+    };
+
+    updateAvailableWidth();
+    if (typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(updateAvailableWidth);
+    observer.observe(scroller);
+    return () => observer.disconnect();
+  }, []);
+
+  useEffect(() => {
     if (!showNow) return;
     const frame = window.requestAnimationFrame(() => {
       const scroller = scrollRef.current;
       if (!scroller || scroller.scrollWidth <= scroller.clientWidth) return;
       const currentTimeOffset =
-        (nowMinutes - schedule.start) * PIXELS_PER_MINUTE;
+        (nowMinutes - schedule.start) * pixelsPerMinute;
       scroller.scrollTo({
         left: Math.max(0, currentTimeOffset - 28),
         behavior: "instant",
       });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [nowMinutes, schedule.start, showNow]);
+  }, [nowMinutes, pixelsPerMinute, schedule.start, showNow]);
 
   const createAt = (
     event: MouseEvent<HTMLDivElement>,
@@ -241,7 +262,7 @@ export function ReservationTimelineView(props: Props) {
   ) => {
     const bounds = event.currentTarget.getBoundingClientRect();
     const rawMinutes =
-      schedule.start + (event.clientX - bounds.left) / PIXELS_PER_MINUTE;
+      schedule.start + (event.clientX - bounds.left) / pixelsPerMinute;
     const snappedMinutes = Math.max(
       schedule.start,
       Math.min(schedule.end - 15, Math.round(rawMinutes / 15) * 15),
@@ -266,9 +287,13 @@ export function ReservationTimelineView(props: Props) {
     return (
       <div
         aria-label={emptyLabel}
-        className="relative cursor-crosshair border-b border-[var(--separator)] bg-[repeating-linear-gradient(to_right,var(--separator)_0_1px,transparent_1px_60px)] hover:bg-[color-mix(in_srgb,var(--accent)_3%,var(--surface))]"
+        className="relative cursor-crosshair border-b border-[var(--separator)] hover:bg-[color-mix(in_srgb,var(--accent)_3%,var(--surface))]"
         onClick={(event) => createAt(event, tableIds)}
-        style={{ height, width: schedule.width }}
+        style={{
+          backgroundImage: `repeating-linear-gradient(to right, var(--separator) 0 1px, transparent 1px ${30 * pixelsPerMinute}px)`,
+          height,
+          width: timelineWidth,
+        }}
       >
         {!layout.positioned.length ? (
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-[var(--muted)] opacity-65">
@@ -280,6 +305,7 @@ export function ReservationTimelineView(props: Props) {
             item={item}
             key={item.reservation.id}
             onSelect={props.onSelect}
+            pixelsPerMinute={pixelsPerMinute}
             selected={props.selectedId === item.reservation.id}
             timeZone={props.timeZone}
             timelineStart={schedule.start}
@@ -289,7 +315,7 @@ export function ReservationTimelineView(props: Props) {
           <div
             aria-label="Hora actual"
             className="pointer-events-none absolute inset-y-0 z-[3] w-0.5 bg-[var(--danger)]"
-            style={{ left: (nowMinutes - schedule.start) * PIXELS_PER_MINUTE }}
+            style={{ left: (nowMinutes - schedule.start) * pixelsPerMinute }}
           />
         ) : null}
       </div>
@@ -299,16 +325,16 @@ export function ReservationTimelineView(props: Props) {
   return (
     <section
       aria-label="Horario de reservas"
-      className="h-[min(68dvh,40rem)] min-h-110 min-w-0 flex-none flex-1 overflow-hidden rounded-xl border border-[var(--separator)] bg-[var(--surface)] shadow-sm md:h-auto md:min-h-0 md:rounded-2xl"
+      className="max-h-[min(68dvh,40rem)] min-h-0 min-w-0 max-w-full flex-none overflow-hidden rounded-xl border border-[var(--separator)] bg-[var(--surface)] shadow-sm md:max-h-full md:rounded-2xl"
     >
       <div
         aria-label="Desplazar horario de reservas"
-        className="h-full min-h-105 touch-auto overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
+        className="max-h-[inherit] w-full max-w-full touch-auto overflow-auto overscroll-contain [-webkit-overflow-scrolling:touch]"
         ref={scrollRef}
         role="region"
         tabIndex={0}
       >
-        <div style={{ minWidth: LABEL_WIDTH + schedule.width }}>
+        <div style={{ minWidth: LABEL_WIDTH + timelineWidth }}>
           <header className="sticky top-0 z-30 flex h-12 border-b border-[var(--separator)] bg-[var(--surface)] shadow-sm">
             <div
               className="sticky left-0 z-20 flex shrink-0 items-center gap-2 border-r border-[var(--separator)] bg-[var(--surface)] px-3 text-xs font-black uppercase tracking-wider text-[var(--muted)]"
@@ -318,15 +344,15 @@ export function ReservationTimelineView(props: Props) {
             </div>
             <div
               className="relative shrink-0 bg-[var(--surface-secondary)]"
-              style={{ width: schedule.width }}
+              style={{ width: timelineWidth }}
             >
               {hourMarks.map((minute) => (
                 <time
-                  className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-xs font-black tabular-nums text-[var(--foreground)] first:translate-x-2"
+                  className="absolute top-1/2 -translate-x-1/2 -translate-y-1/2 text-xs font-black tabular-nums text-[var(--foreground)] first:translate-x-2 last:-ml-2 last:-translate-x-full"
                   dateTime={timeLabel(minute)}
                   key={minute}
                   style={{
-                    left: (minute - schedule.start) * PIXELS_PER_MINUTE,
+                    left: (minute - schedule.start) * pixelsPerMinute,
                   }}
                 >
                   {timeLabel(minute)}
@@ -336,7 +362,7 @@ export function ReservationTimelineView(props: Props) {
                 <span
                   className="absolute bottom-0 z-10 -translate-x-1/2 rounded-t bg-[var(--danger)] px-1.5 py-0.5 text-[9px] font-black uppercase text-white"
                   style={{
-                    left: (nowMinutes - schedule.start) * PIXELS_PER_MINUTE,
+                    left: (nowMinutes - schedule.start) * pixelsPerMinute,
                   }}
                 >
                   Ahora
@@ -383,13 +409,13 @@ export function ReservationTimelineView(props: Props) {
                 <h3
                   className="sticky left-0 z-20 m-0 flex h-9 items-center border-b border-[var(--separator)] bg-[var(--surface-secondary)] px-3 text-xs font-black uppercase tracking-wider text-[var(--foreground)]"
                   id={`timeline-area-${area.id}`}
-                  style={{ width: LABEL_WIDTH + schedule.width }}
+                  style={{ width: LABEL_WIDTH + timelineWidth }}
                 >
                   <span className="sticky left-3">
                     {area.name} · {tables.length} mesas
                   </span>
                 </h3>
-                {tables.map((table) => {
+                {tables.map((table, tableIndex) => {
                   const layout = layoutsByTable.get(table.id) ?? {
                     positioned: [],
                     laneCount: 1,
@@ -399,9 +425,12 @@ export function ReservationTimelineView(props: Props) {
                     14 + layout.laneCount * LANE_HEIGHT,
                   );
                   return (
-                    <div className="flex" key={table.id}>
+                    <div
+                      className={`group/row flex ${tableIndex % 2 === 1 ? "bg-[color-mix(in_srgb,var(--surface-secondary)_35%,var(--surface))]" : "bg-[var(--surface)]"}`}
+                      key={table.id}
+                    >
                       <div
-                        className="sticky left-0 z-20 flex shrink-0 items-center justify-between gap-2 border-b border-r border-[var(--separator)] bg-[var(--surface)] px-3"
+                        className="sticky left-0 z-20 flex shrink-0 items-center justify-between gap-2 border-b border-r border-[var(--separator)] bg-[inherit] px-3"
                         style={{ height: rowHeight, width: LABEL_WIDTH }}
                       >
                         <span className="min-w-0">

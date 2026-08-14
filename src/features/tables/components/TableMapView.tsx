@@ -1,10 +1,12 @@
 import { Input as UiInput } from '../../../components/ui/Input'
+import { NativeSelect as UiNativeSelect } from '../../../components/ui/NativeSelect'
 import { Button as UiButton } from '../../../components/ui/Button'
 import { AppModal } from '../../../components/ui/AppModal'
 import {
   ArrowRightLeft,
   Check,
   Pencil,
+  Plus,
   ShoppingBag,
   Unlink,
   Users,
@@ -44,6 +46,7 @@ import { getRestaurantTableVisualStatus } from "../table-visual-status";
 import type {
   RestaurantMap,
   RestaurantTableMapItem,
+  RestaurantTableShape,
   SessionTableLayout,
   TableLayoutEntry,
 } from "../types";
@@ -77,6 +80,7 @@ type Props = {
   ) => Promise<SessionTableLayout>;
   onError: (message: string) => void;
   onMove: (tableId: string) => Promise<void>;
+  onCreateVirtual: (input: { areaId: string | null; name: string; capacity: number; shape: RestaurantTableShape }) => Promise<boolean>;
   onOpen: (tableIds: string[], guestCount: number) => Promise<void>;
   onOpenOrder: (orderId: string) => void;
   onOpenReservation: (reservationId: string) => void;
@@ -150,6 +154,7 @@ export function TableMapView(props: Props) {
     onAreaChange,
     onCancelMove,
     onError,
+    onCreateVirtual,
     onLayoutChange,
     onMove,
     onOpen,
@@ -173,6 +178,11 @@ export function TableMapView(props: Props) {
   });
   const [groupMenu, setGroupMenu] = useState<GroupMenu | null>(null);
   const [savingLayout, setSavingLayout] = useState(false);
+  const [virtualModalOpen, setVirtualModalOpen] = useState(false);
+  const [virtualName, setVirtualName] = useState("");
+  const [virtualCapacity, setVirtualCapacity] = useState(2);
+  const [virtualShape, setVirtualShape] = useState<RestaurantTableShape>("square");
+  const [virtualAreaId, setVirtualAreaId] = useState("");
   const [quarterTurn, setQuarterTurn] = useState(() => loadTableMapQuarterTurn(orientationVenueId));
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const canvasRef = useRef<HTMLElement>(null);
@@ -656,6 +666,27 @@ export function TableMapView(props: Props) {
     setGroupMenu(null);
   }
 
+  function openVirtualTableModal() {
+    const nextNumber = map.tables.filter((table) => table.isVirtual).length + 1;
+    setVirtualName(`Mesa extra ${nextNumber}`);
+    setVirtualCapacity(2);
+    setVirtualShape("square");
+    setVirtualAreaId(activeAreaId?.startsWith("virtual:") ? "" : (activeAreaId ?? ""));
+    setVirtualModalOpen(true);
+  }
+
+  async function submitVirtualTable() {
+    const name = virtualName.trim();
+    if (!name || virtualCapacity < 1 || virtualCapacity > 99) return;
+    const created = await onCreateVirtual({
+      areaId: virtualAreaId || null,
+      name,
+      capacity: virtualCapacity,
+      shape: virtualShape,
+    });
+    if (created) setVirtualModalOpen(false);
+  }
+
   function toggleMapOrientation() {
     setQuarterTurn((current) => {
       const next = !current;
@@ -705,6 +736,14 @@ export function TableMapView(props: Props) {
           ))}
         </nav>
         <div className="flex gap-2.5 max-[760px]:grid max-[760px]:grid-cols-2">
+          <UiButton
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45"
+            disabled={!isOnline || isBusy || !canOpen || Boolean(moveOrderId)}
+            onClick={openVirtualTableModal}
+            type="button"
+          >
+            <Plus size={18} /> Mesa virtual
+          </UiButton>
           <UiButton
             className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border bg-[var(--surface)] px-4 font-extrabold disabled:opacity-45 ${editMode ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--separator)] text-[var(--foreground)]"}`}
             disabled={!isOnline || isBusy || Boolean(moveOrderId)}
@@ -772,6 +811,7 @@ export function TableMapView(props: Props) {
             activeAreaId={activeAreaId}
             areas={map.areas}
             canQuickSale={canQuickSale}
+            canCreateVirtual={canOpen && isOnline && !isBusy && !moveOrderId}
             editDisabled={!isOnline || isBusy || Boolean(moveOrderId)}
             editMode={editMode}
             onAreaChange={(areaId) => {
@@ -779,6 +819,7 @@ export function TableMapView(props: Props) {
               onAreaChange(areaId);
             }}
             onEditToggle={toggleEditMode}
+            onCreateVirtual={openVirtualTableModal}
             onQuickSale={onQuickSale}
           />
         ) : null}
@@ -891,7 +932,7 @@ export function TableMapView(props: Props) {
             return (
               <UiButton
                 aria-label={`${table.name}, ${statusLabel(table.status)}${table.layoutGroupId ? ", juntada" : ""}`}
-                className={`absolute z-[2] flex min-h-0 min-w-0 flex-col items-center justify-center gap-[3px] overflow-hidden border-2 p-0 leading-[1.2] text-[var(--foreground)] shadow-[0_8px_18px_rgba(17,24,39,.12)] ${mobileLayout ? "p-1.5" : ""} ${editMode ? "touch-none cursor-grab active:cursor-grabbing" : ""} ${visualStatus === "free" ? "border-[var(--success)] bg-[var(--success-soft)]" : visualStatus === "occupied" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_15%,var(--surface))]"} ${table.shape === "round" ? "rounded-full" : table.shape === "square" ? "rounded-[10px]" : "rounded-[7px]"} ${isDropTarget ? "border-[var(--accent)] outline-[3px] outline-[color-mix(in_srgb,var(--accent)_38%,transparent)] shadow-[0_0_0_5px_color-mix(in_srgb,var(--accent)_10%,transparent)]" : ""} ${mobileLayout && selectedTableId === table.id ? "ring-4 ring-[color-mix(in_srgb,var(--accent)_48%,transparent)] ring-offset-2 ring-offset-[var(--surface-secondary)]" : ""} ${isUnavailable ? "opacity-35" : editMode && joinPreview ? "opacity-70" : ""} ${viewport.zoom < 0.75 ? "gap-px p-1.5" : ""}`}
+                className={`absolute z-[2] flex min-h-0 min-w-0 flex-col items-center justify-center gap-[3px] overflow-visible border-2 p-0 leading-[1.2] text-[var(--foreground)] shadow-[0_8px_18px_rgba(17,24,39,.12)] ${mobileLayout ? "p-1.5" : ""} ${editMode ? "touch-none cursor-grab active:cursor-grabbing" : ""} ${visualStatus === "free" ? "border-[var(--success)] bg-[var(--success-soft)]" : visualStatus === "occupied" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_15%,var(--surface))]"} ${table.shape === "round" ? "rounded-full" : table.shape === "square" ? "rounded-[10px]" : "rounded-[7px]"} ${isDropTarget ? "border-[var(--accent)] outline-[3px] outline-[color-mix(in_srgb,var(--accent)_38%,transparent)] shadow-[0_0_0_5px_color-mix(in_srgb,var(--accent)_10%,transparent)]" : ""} ${mobileLayout && selectedTableId === table.id ? "ring-4 ring-[color-mix(in_srgb,var(--accent)_48%,transparent)] ring-offset-2 ring-offset-[var(--surface-secondary)]" : ""} ${isUnavailable ? "opacity-35" : editMode && joinPreview ? "opacity-70" : ""} ${viewport.zoom < 0.75 ? "gap-px p-1.5" : ""}`}
                 key={table.id}
                 onClick={() => chooseTable(table)}
                 onPointerDown={(event) => startTableDrag(event, table)}
@@ -907,6 +948,7 @@ export function TableMapView(props: Props) {
                   <span className={`pointer-events-none absolute inset-0 box-border flex max-w-none flex-col items-center justify-center gap-[3px] overflow-hidden px-2 py-[9px] whitespace-normal ${mode === "compact" || viewport.zoom < 0.75 || mobileLayout ? "p-[5px]" : ""} [&>b]:text-[15px] [&>b]:leading-[1.25] [&>small]:flex [&>small]:max-w-full [&>small]:items-center [&>small]:gap-[3px] [&>small]:text-[11px] [&>small]:leading-[1.25] [&>small]:text-[var(--muted)] ${mobileLayout ? "[&>small]:hidden [&>em]:hidden" : ""} [&>small_svg]:shrink-0 [&>em]:rounded-full [&>em]:bg-[var(--surface)] [&>em]:px-1.5 [&>em]:py-0.5 [&>em]:text-[9px] [&>em]:not-italic [&>em]:font-extrabold` }>
                     <span className={`flex w-full max-w-none flex-col items-center whitespace-normal ${mode === "compact" ? "gap-0" : "gap-px"} [&>strong]:w-full [&>strong]:truncate [&>strong]:font-extrabold [&>strong]:leading-[1.2] ${mobileLayout ? "[&>strong]:text-[11px]" : "[&>strong]:text-[15px]"}`}>
                       <strong title={table.name}>{table.name}</strong>
+                      {table.isVirtual && mode === "full" ? <em className="text-[9px] not-italic font-extrabold uppercase tracking-wide text-[var(--accent)]">Temporal</em> : null}
                       <span className={`max-w-full truncate font-bold leading-[1.25] ${mobileLayout ? "text-[10px]" : "text-[11px]"} ${mode === "compact" ? "text-[9px]" : ""} ${viewport.zoom < 0.75 ? "text-[10px]" : ""}`}>
                         {statusLabel(table.status)}
                       </span>
@@ -1108,6 +1150,62 @@ export function TableMapView(props: Props) {
               </UiButton>
             </div>
           </section>
+        </AppModal>
+      ) : null}
+      {virtualModalOpen ? (
+        <AppModal
+          containerClassName={mobileLayout ? "!p-0" : "!p-4"}
+          dialogClassName={mobileLayout ? "!rounded-b-none !rounded-t-[20px] !border-x-0 !border-b-0" : ""}
+          dismissDisabled={isBusy}
+          label="Crear mesa virtual"
+          maxWidth={480}
+          onClose={() => setVirtualModalOpen(false)}
+          placement={mobileLayout ? "bottom" : "center"}
+        >
+          <form
+            className={`grid w-full gap-4 bg-[var(--surface)] text-[var(--foreground)] [&_h1]:m-0 [&_p]:m-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-1.5 ${mobileLayout ? "rounded-t-[20px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5" : "rounded-[var(--radius)] p-6"}`}
+            onSubmit={(event) => { event.preventDefault(); void submitVirtualTable(); }}
+          >
+            <div>
+              <h1 className="text-lg font-bold">Crear mesa virtual</h1>
+              <p>Solo estará disponible durante la sesión de caja actual.</p>
+            </div>
+            <label>
+              <h2 className="text-base font-semibold">Nombre</h2>
+              <UiInput autoFocus maxLength={80} onChange={(event) => setVirtualName(event.target.value)} value={virtualName} />
+            </label>
+            <label>
+              <h2 className="text-base font-semibold">Zona</h2>
+              <UiNativeSelect aria-label="Zona de la mesa virtual" onChange={(event) => setVirtualAreaId(event.target.value)} value={virtualAreaId}>
+                <option value="">Virtual</option>
+                {map.areas.filter((area) => !area.id.startsWith("virtual:")).map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
+              </UiNativeSelect>
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label>
+                <h2 className="text-base font-semibold">Capacidad</h2>
+                <UiInput min="1" max="99" onChange={(event) => setVirtualCapacity(Number(event.target.value))} type="number" value={virtualCapacity} />
+              </label>
+              <label>
+                <h2 className="text-base font-semibold">Forma</h2>
+                <UiNativeSelect aria-label="Forma de la mesa virtual" onChange={(event) => setVirtualShape(event.target.value as RestaurantTableShape)} value={virtualShape}>
+                  <option value="square">Cuadrada</option>
+                  <option value="rectangle">Rectangular</option>
+                  <option value="round">Redonda</option>
+                </UiNativeSelect>
+              </label>
+            </div>
+            <div className="mt-1 flex justify-end gap-2.5">
+              <UiButton className="border-1" disabled={isBusy} onClick={() => setVirtualModalOpen(false)} type="button">Cancelar</UiButton>
+              <UiButton
+                className="border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]"
+                disabled={isBusy || !isOnline || !virtualName.trim() || virtualCapacity < 1 || virtualCapacity > 99}
+                type="submit"
+              >
+                <Plus size={17} /> Crear mesa
+              </UiButton>
+            </div>
+          </form>
         </AppModal>
       ) : null}
     </main>

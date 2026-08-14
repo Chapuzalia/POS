@@ -25,6 +25,7 @@ import type {
 } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
 import { usePrintAgentScope } from '../../local-printing/hooks/usePrintAgentScope'
+import { useCashlogyScope } from '../../local-printing/cashlogy/useCashlogyScope'
 import { cashClosingRequestId } from '../../local-printing/services/cashClosingPrintMapper'
 import { printCashClosing } from '../../local-printing/services/printCashClosing'
 import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
@@ -78,6 +79,7 @@ export function useCashSession(options: Options) {
   const isOnline = options.isOnline
   const reportError = options.onError
   usePrintAgentScope(cashContext)
+  useCashlogyScope(cashContext)
 
   useEffect(() => {
     if (!cashContext || !session) {

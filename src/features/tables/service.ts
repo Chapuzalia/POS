@@ -2,7 +2,7 @@ import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import { normalizeCatalogSnapshot } from '../catalog/services/catalogSnapshots'
 import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TenantContext, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
-import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult } from './types'
+import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult, VirtualRestaurantTableCreateInput } from './types'
 import { getOrderPendingUnits } from './service-status'
 import { buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
@@ -11,7 +11,7 @@ import { getDateRange, localDateKey } from '../reservations/domain/reservationAv
 export { buildRestaurantOrderLinesPayload } from './order-line-payload'
 
 type AreaRow = { id: string; tenant_id: string; venue_id: string; name: string; sort_order: number; is_active: boolean; canvas_width: number; canvas_height: number; map_elements: unknown; created_at: string; updated_at: string }
-type TableRow = { id: string; tenant_id: string; venue_id: string; area_id: string; name: string; capacity: number; shape: RestaurantTable['shape']; position_x: number; position_y: number; width: number; height: number; is_active: boolean; sort_order: number; reserved_until: string | null; reservation_note: string | null; created_at: string; updated_at: string }
+type TableRow = { id: string; tenant_id: string; venue_id: string; area_id: string | null; cash_session_id: string | null; name: string; capacity: number; shape: RestaurantTable['shape']; position_x: number; position_y: number; width: number; height: number; is_active: boolean; sort_order: number; reserved_until: string | null; reservation_note: string | null; created_at: string; updated_at: string }
 type OrderRow = { id: string; tenant_id: string; venue_id: string; cash_session_id: string; cash_register_id: string; opened_by_user_id: string; opened_by_device_id: string; guest_count: number; status: RestaurantOrder['status']; revision: number; order_group_id: string; split_sequence: number; opened_at: string; updated_at: string; closed_at: string | null }
 type OrderTableRow = { order_id: string; order_group_id: string; table_id: string; joined_at: string; released_at: string | null }
 type ReservationMapValue = { id: string; customer_name: string; customer_phone: string; party_size: number; starts_at: string; ends_at: string; status: RestaurantTableReservation['status'] }
@@ -19,7 +19,7 @@ type ReservationMapRow = { table_id: string; reservations: ReservationMapValue |
 type OrderLineRow = { id: string; tenant_id: string; venue_id: string; order_id: string; product_id: string | null; variant_id: string | null; product_name: string; variant_name: string; unit_price_cents: number; quantity: number; served_quantity: number; fully_served_at: string | null; modifiers: TicketLineModifier[]; components: TicketLineComponent[] | null; catalog_snapshot: Partial<SaleLineCatalogSnapshot> | null; mixer_product_id: string | null; mixer: TicketLineMixer | null; note: string | null; created_at: string; updated_at: string }
 
 const areaColumns = 'id, tenant_id, venue_id, name, sort_order, is_active, canvas_width, canvas_height, map_elements, created_at, updated_at'
-const tableColumns = 'id, tenant_id, venue_id, area_id, name, capacity, shape, position_x, position_y, width, height, is_active, sort_order, reserved_until, reservation_note, created_at, updated_at'
+const tableColumns = 'id, tenant_id, venue_id, area_id, cash_session_id, name, capacity, shape, position_x, position_y, width, height, is_active, sort_order, reserved_until, reservation_note, created_at, updated_at'
 const orderColumns = 'id, tenant_id, venue_id, cash_session_id, cash_register_id, opened_by_user_id, opened_by_device_id, guest_count, status, revision, order_group_id, split_sequence, opened_at, updated_at, closed_at'
 const lineColumns = 'id, tenant_id, venue_id, order_id, product_id, variant_id, product_name, variant_name, unit_price_cents, quantity, served_quantity, fully_served_at, modifiers, components, catalog_snapshot, mixer_product_id, mixer, note, created_at, updated_at'
 
@@ -29,7 +29,7 @@ function requireSupabase() {
 }
 
 const mapArea = (row: AreaRow): DiningArea => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, sortOrder: row.sort_order, isActive: row.is_active, canvasWidth: row.canvas_width, canvasHeight: row.canvas_height, mapElements: normalizeMapElements(row.map_elements), createdAt: row.created_at, updatedAt: row.updated_at })
-const mapTable = (row: TableRow): RestaurantTable => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, areaId: row.area_id, name: row.name, capacity: row.capacity, shape: row.shape, positionX: Number(row.position_x), positionY: Number(row.position_y), width: Number(row.width), height: Number(row.height), isActive: row.is_active, sortOrder: row.sort_order, reservedUntil: row.reserved_until, reservationNote: row.reservation_note, createdAt: row.created_at, updatedAt: row.updated_at })
+const mapTable = (row: TableRow): RestaurantTable => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, areaId: row.area_id ?? `virtual:${row.cash_session_id}`, cashSessionId: row.cash_session_id, isVirtual: row.cash_session_id !== null, name: row.name, capacity: row.capacity, shape: row.shape, positionX: Number(row.position_x), positionY: Number(row.position_y), width: Number(row.width), height: Number(row.height), isActive: row.is_active, sortOrder: row.sort_order, reservedUntil: row.reserved_until, reservationNote: row.reservation_note, createdAt: row.created_at, updatedAt: row.updated_at })
 const mapOrder = (row: OrderRow): RestaurantOrder => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, cashSessionId: row.cash_session_id, cashRegisterId: row.cash_register_id, openedByUserId: row.opened_by_user_id, openedByDeviceId: row.opened_by_device_id, guestCount: row.guest_count, status: row.status, revision: row.revision, orderGroupId: row.order_group_id, splitSequence: row.split_sequence, openedAt: row.opened_at, updatedAt: row.updated_at, closedAt: row.closed_at })
 const mapLine = (row: OrderLineRow): RestaurantOrderLine => {
   const selection = splitLegacyMixerModifiers(row.modifiers, row.mixer_product_id, row.mixer)
@@ -57,29 +57,42 @@ export async function loadDiningAreas(context: TenantContext, venueId = context.
 }
 
 export async function loadRestaurantTables(context: TenantContext, venueId = context.venueId, includeInactive = false): Promise<RestaurantTable[]> {
-  let query = requireSupabase().from('restaurant_tables').select(tableColumns).eq('tenant_id', context.tenantId).eq('venue_id', venueId).order('sort_order')
+  let query = requireSupabase().from('restaurant_tables').select(tableColumns).eq('tenant_id', context.tenantId).eq('venue_id', venueId).is('cash_session_id', null).order('sort_order')
   if (!includeInactive) query = query.eq('is_active', true)
   const { data, error } = await query
   if (error) throw error
   return ((data ?? []) as TableRow[]).map(mapTable)
 }
 
-export async function loadRestaurantMap(context: TenantContext): Promise<RestaurantMap> {
+export async function loadRestaurantMap(context: TenantContext, cashSessionId?: string): Promise<RestaurantMap> {
   const client = requireSupabase()
   const { data: venue, error: venueError } = await client.from('venues').select('timezone').eq('tenant_id', context.tenantId).eq('id', context.venueId).single<{ timezone: string }>()
   if (venueError) throw venueError
   const reservationRange = getDateRange(localDateKey(new Date(), venue.timezone), venue.timezone)
-  const [areas, tables, linksResult, ordersResult, equalSplitsResult, reservationsResult] = await Promise.all([
-    loadDiningAreas(context), loadRestaurantTables(context),
+  let tablesQuery = client.from('restaurant_tables').select(tableColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('is_active', true).order('sort_order')
+  tablesQuery = cashSessionId
+    ? tablesQuery.or(`cash_session_id.is.null,cash_session_id.eq.${cashSessionId}`)
+    : tablesQuery.is('cash_session_id', null)
+  const [loadedAreas, tablesResult, linksResult, ordersResult, equalSplitsResult, reservationsResult] = await Promise.all([
+    loadDiningAreas(context), tablesQuery,
     client.from('order_tables').select('order_id, order_group_id, table_id, joined_at, released_at').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).is('released_at', null),
     client.from('orders').select(orderColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'open'),
     client.from('restaurant_order_equal_splits').select('order_group_id, paid_cents').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'open'),
     client.from('reservation_tables').select('table_id, reservations!inner(id, customer_name, customer_phone, party_size, starts_at, ends_at, status)').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).in('reservations.status', ['confirmed', 'arrived', 'seated']).gte('reservations.starts_at', reservationRange.from).lt('reservations.starts_at', reservationRange.to).gt('reservations.ends_at', new Date().toISOString()),
   ])
+  if (tablesResult.error) throw tablesResult.error
   if (linksResult.error) throw linksResult.error
   if (ordersResult.error) throw ordersResult.error
   if (equalSplitsResult.error) throw equalSplitsResult.error
   if (reservationsResult.error) throw reservationsResult.error
+  const tables = ((tablesResult.data ?? []) as TableRow[]).map(mapTable)
+  const hasVirtualArea = Boolean(cashSessionId && tables.some((table) => table.areaId === `virtual:${cashSessionId}`))
+  const virtualArea: DiningArea | null = hasVirtualArea ? {
+    id: `virtual:${cashSessionId}`, tenantId: context.tenantId, venueId: context.venueId, name: 'Virtual',
+    sortOrder: Number.MAX_SAFE_INTEGER, isActive: true, canvasWidth: 1200, canvasHeight: 800,
+    mapElements: [], createdAt: '', updatedAt: '',
+  } : null
+  const areas = virtualArea ? [...loadedAreas, virtualArea] : loadedAreas
   const links = (linksResult.data ?? []) as OrderTableRow[]
   const orders = ((ordersResult.data ?? []) as OrderRow[]).map(mapOrder)
   let lines: RestaurantOrderLine[] = []
@@ -159,6 +172,18 @@ export async function createRestaurantTable(context: TenantContext, input: Resta
   const { data, error } = await requireSupabase().from('restaurant_tables').insert({ tenant_id: context.tenantId, venue_id: input.venueId, area_id: input.areaId, name: input.name.trim(), capacity: input.capacity, shape: input.shape, position_x: input.positionX, position_y: input.positionY, width: input.width, height: input.height, sort_order: input.sortOrder }).select(tableColumns).single<TableRow>()
   if (error) throw error
   return mapTable(data)
+}
+export async function createVirtualRestaurantTable(input: VirtualRestaurantTableCreateInput) {
+  const { data, error } = await requireSupabase().rpc('create_virtual_restaurant_table', {
+    p_cash_session_id: input.cashSessionId,
+    p_device_id: input.deviceId,
+    p_area_id: input.areaId,
+    p_name: input.name.trim(),
+    p_capacity: input.capacity,
+    p_shape: input.shape,
+  })
+  if (error) throw error
+  return String(data)
 }
 export async function updateRestaurantTable(context: TenantContext, tableId: string, input: RestaurantTableUpdateInput) {
   const { error } = await requireSupabase().from('restaurant_tables').update({ name: input.name?.trim(), capacity: input.capacity, shape: input.shape, position_x: input.positionX, position_y: input.positionY, width: input.width, height: input.height, is_active: input.isActive, sort_order: input.sortOrder }).eq('tenant_id', context.tenantId).eq('id', tableId)
@@ -362,7 +387,7 @@ export function subscribeToRestaurantMap(
 ) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`restaurant-map:${context.tenantId}:${context.venueId}`)
-  ;(['order_groups', 'orders', 'order_tables', 'order_lines', 'restaurant_order_equal_splits', 'restaurant_order_equal_split_payments', 'reservations', 'reservation_tables'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
+  ;(['order_groups', 'orders', 'order_tables', 'order_lines', 'restaurant_tables', 'restaurant_order_equal_splits', 'restaurant_order_equal_split_payments', 'reservations', 'reservation_tables'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
   channel.subscribe((status, error) => onStatus?.(status, error))
   return () => { void supabase?.removeChannel(channel) }
 }

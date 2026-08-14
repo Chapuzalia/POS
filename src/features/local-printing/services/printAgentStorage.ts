@@ -29,6 +29,8 @@ export function getDefaultPrintAgentConfig(): PrintAgentPersistedConfig {
     baseUrl: DEFAULT_PRINT_AGENT_URL,
     token: null,
     selectedPrinterId: null,
+    cashlogyConfigured: false,
+    cashlogyTerminalCode: 'POS_MAIN',
     lastSuccessfulConnectionAt: null,
     preferences: { ...defaultPrintAgentPreferences },
   }
@@ -45,6 +47,10 @@ export function loadPrintAgentConfig(scope: PrintAgentScope): PrintAgentPersiste
       ...parsed,
       preferences: { ...defaultPrintAgentPreferences, ...parsed.preferences },
       token: typeof parsed.token === 'string' && parsed.token ? parsed.token : null,
+      cashlogyConfigured: parsed.cashlogyConfigured === true,
+      cashlogyTerminalCode: typeof parsed.cashlogyTerminalCode === 'string' && parsed.cashlogyTerminalCode.trim()
+        ? parsed.cashlogyTerminalCode.trim().toUpperCase()
+        : 'POS_MAIN',
     }
   } catch { return getDefaultPrintAgentConfig() }
 }

@@ -17,6 +17,7 @@ export async function printCompletedSale(input: {
     printerId,
     footer: state.preferences.footer,
     autoOpenCashDrawer: state.preferences.autoOpenCashDrawer,
+    cashlogyConfigured: state.cashlogyConfigured,
     cut: state.preferences.cut,
   })
   return state.printTicket(printRequestSchema.parse(payload))
