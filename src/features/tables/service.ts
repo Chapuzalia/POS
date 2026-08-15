@@ -223,6 +223,7 @@ function mapEqualSplit(value: unknown): RestaurantEqualSplit {
         type: storedDefault.type as AppliedDiscount['type'],
         calculationType,
         value: calculationType === 'fixed' ? allocatedDefaultCents : Number(storedDefault.value),
+        fixedApplication: (storedDefault.fixedApplication as AppliedDiscount['fixedApplication']) ?? 'ticket',
         roundingIncrementCents: (storedDefault.roundingIncrementCents as AppliedDiscount['roundingIncrementCents']) ?? null,
         color: storedDefault.color ? String(storedDefault.color) : null,
       }

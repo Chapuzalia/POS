@@ -108,6 +108,7 @@ export function DiscountModal({
       type: "manual",
       calculationType: manualType,
       value,
+      fixedApplication: "ticket",
       roundingIncrementCents: null,
       color: null,
       ruleKind: "discount",
@@ -246,6 +247,11 @@ export function DiscountModal({
                   discount.scope === "specific"
                     ? "Productos específicos"
                     : "General",
+                  discount.type === "fixed"
+                    ? discount.fixedApplication === "line"
+                      ? "Por producto"
+                      : "Por ticket"
+                    : null,
                   discount.requiresPin ? "Requiere PIN" : null,
                   discount.roundingIncrementCents
                     ? formatDiscountRounding(discount.roundingIncrementCents)

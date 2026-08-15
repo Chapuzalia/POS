@@ -31,6 +31,7 @@ import {
   type Discount,
   type DiscountCalculationType,
   type DiscountCreateInput,
+  type DiscountFixedApplication,
   type DiscountRoundingIncrementCents,
   type DiscountRuleKind,
   type DiscountScope,
@@ -215,6 +216,13 @@ export function DiscountsCrm({
                     ? `${discount.value} %`
                     : formatMoney(discount.value)}
                 </strong>
+                {discount.type === "fixed" ? (
+                  <span className="rounded-full bg-[var(--crm-input-bg)] px-2.5 py-1 text-[11px] font-semibold">
+                    {discount.fixedApplication === "line"
+                      ? "Por producto"
+                      : "Por ticket"}
+                  </span>
+                ) : null}
                 {discount.autoApply ? (
                   <span className="rounded-full bg-[var(--crm-blue-soft)] px-2.5 py-1 text-[11px] font-semibold text-[var(--crm-blue)]">
                     Automática
@@ -377,6 +385,10 @@ export function DiscountEditor({
   const [type, setType] = useState<DiscountCalculationType>(
     discount?.type ?? "percentage",
   );
+  const [fixedApplication, setFixedApplication] =
+    useState<DiscountFixedApplication>(
+      discount?.fixedApplication ?? "ticket",
+    );
   const [value, setValue] = useState(
     discount
       ? discount.type === "fixed"
@@ -468,6 +480,7 @@ export function DiscountEditor({
       name: name.trim(),
       type,
       value: parsedValue,
+      fixedApplication: type === "fixed" ? fixedApplication : "ticket",
       roundingIncrementCents,
       color: color || null,
       isActive,
@@ -556,7 +569,9 @@ export function DiscountEditor({
           <Field label="Cálculo">
             <CrmSelect
               onChange={(next) => {
-                setType(next as DiscountCalculationType);
+                const nextType = next as DiscountCalculationType;
+                setType(nextType);
+                if (nextType === "percentage") setFixedApplication("ticket");
                 setValue("");
               }}
               options={[
@@ -578,6 +593,25 @@ export function DiscountEditor({
             />
           </Field>
         </div>
+        {type === "fixed" ? (
+          <Field label="Aplicación del importe">
+            <CrmSelect
+              onChange={(next) =>
+                setFixedApplication(next as DiscountFixedApplication)
+              }
+              options={[
+                { label: "Por ticket", value: "ticket" },
+                { label: "Por producto", value: "line" },
+              ]}
+              value={fixedApplication}
+            />
+            <small className="mt-1.5 block text-xs text-[var(--crm-text-muted)]">
+              {fixedApplication === "line"
+                ? "Se descuenta una vez en cada línea que cumpla el ámbito."
+                : "Se descuenta una sola vez sobre el conjunto aplicable del ticket."}
+            </small>
+          </Field>
+        ) : null}
         <Field label="Ámbito">
           <CrmSelect
             onChange={(next) => setScope(next as DiscountScope)}

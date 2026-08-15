@@ -101,6 +101,15 @@ export function allocateNetTotalToLines(grossLineCents: number[], netTotalCents:
   })
 }
 
+function allocateAdjustedNetToLines(baseNetCents: number[], grossLineCents: number[], netTotalCents: number) {
+  const baseNetTotal = baseNetCents.reduce((total, value) => total + value, 0)
+  if (netTotalCents <= baseNetTotal) return allocateNetTotalToLines(baseNetCents, netTotalCents)
+  const extraNet = netTotalCents - baseNetTotal
+  const headroom = grossLineCents.map((grossCents, index) => grossCents - baseNetCents[index])
+  const allocatedExtra = allocateNetTotalToLines(headroom, extraNet)
+  return baseNetCents.map((baseNet, index) => baseNet + allocatedExtra[index])
+}
+
 export function assertValidTicketPayment(totalCents: number, paymentMethod: PaymentMethod | null) {
   if (!Number.isInteger(totalCents) || totalCents < 0) {
     throw new Error('El total debe expresarse en céntimos enteros.')
@@ -211,6 +220,59 @@ export function calculateDiscountForLines(
   })
   const subtotalCents = lines.reduce((total, line) => total + line.grossCents, 0)
   const eligibleSubtotalCents = eligibleGross.reduce((total, value) => total + value, 0)
+  const fixedPerLine = discount?.calculationType === 'fixed'
+    && (discount.fixedApplication ?? 'ticket') === 'line'
+  if (fixedPerLine) {
+    const fixedValueCents = discount.value
+    if (!Number.isInteger(fixedValueCents) || fixedValueCents <= 0) {
+      throw new Error('El importe fijo debe ser mayor que 0 y expresarse en céntimos.')
+    }
+    const baseEligibleNet = eligibleGross.map((grossCents) => Math.max(0, grossCents - fixedValueCents))
+    const baseEligibleNetTotal = baseEligibleNet.reduce((total, value) => total + value, 0)
+    const requestedAmountCents = eligibleSubtotalCents - baseEligibleNetTotal
+    if (requestedAmountCents === 0) {
+      return {
+        eligibleSubtotalCents,
+        lineAllocations: lines.map((line, index) => ({
+          eligible: eligibleIndexes.includes(index),
+          grossCents: line.grossCents,
+          discountAmountCents: 0,
+          netCents: line.grossCents,
+        })),
+        discountAmountCents: 0,
+        totalCents: subtotalCents,
+      }
+    }
+    const roundedCalculation = calculateDiscount(
+      eligibleSubtotalCents,
+      'fixed',
+      requestedAmountCents,
+      discount.roundingIncrementCents,
+    )
+    const eligibleNet = discount.roundingIncrementCents == null
+      ? baseEligibleNet
+      : allocateAdjustedNetToLines(baseEligibleNet, eligibleGross, roundedCalculation.totalCents)
+    const eligiblePositions = new Map(eligibleIndexes.map((lineIndex, position) => [lineIndex, position]))
+    const lineAllocations = lines.map((line, index) => {
+      const position = eligiblePositions.get(index)
+      if (position === undefined) {
+        return { eligible: false, grossCents: line.grossCents, discountAmountCents: 0, netCents: line.grossCents }
+      }
+      const netCents = eligibleNet[position]
+      return {
+        eligible: true,
+        grossCents: line.grossCents,
+        discountAmountCents: line.grossCents - netCents,
+        netCents,
+      }
+    })
+    return {
+      eligibleSubtotalCents,
+      lineAllocations,
+      discountAmountCents: roundedCalculation.discountAmountCents,
+      totalCents: subtotalCents - roundedCalculation.discountAmountCents,
+    }
+  }
   const eligibleCalculation = calculateDiscount(
     eligibleSubtotalCents,
     discount?.calculationType,
@@ -279,6 +341,7 @@ export function toAppliedDiscount(discount: Discount, automatic = discount.autoA
     type: discount.type,
     calculationType: discount.type,
     value: discount.value,
+    fixedApplication: discount.fixedApplication,
     roundingIncrementCents: discount.roundingIncrementCents,
     color: discount.color,
     ruleKind: discount.ruleKind,
@@ -314,9 +377,12 @@ export function resolveTicketDiscount(
 }
 
 export function validateDiscountRule(input: Pick<DiscountCreateInput,
-  'name' | 'type' | 'value' | 'ruleKind' | 'scope' | 'targets' | 'requiresPin' | 'pin' | 'activeWeekdays' | 'startsAt' | 'endsAt' | 'autoApply'
+  'name' | 'type' | 'value' | 'fixedApplication' | 'ruleKind' | 'scope' | 'targets' | 'requiresPin' | 'pin' | 'activeWeekdays' | 'startsAt' | 'endsAt' | 'autoApply'
 >) {
   const name = validateDiscountDefinition(input.name, input.type, input.value)
+  if (input.type === 'fixed' && input.fixedApplication !== 'ticket' && input.fixedApplication !== 'line') {
+    throw new Error('Selecciona si el importe fijo se aplica por ticket o por producto.')
+  }
   if (input.scope === 'specific' && !input.targets.length) throw new Error('Selecciona al menos un producto o variante.')
   if (input.autoApply && input.requiresPin) throw new Error('Una promoción automática no puede requerir PIN.')
   if (input.requiresPin && input.pin !== null && !/^\d{4,8}$/.test(input.pin)) {

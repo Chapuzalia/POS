@@ -8,6 +8,7 @@ export type PaymentMethod = 'cash' | 'card'
 export type HistoricalPaymentMethod = PaymentMethod | 'invitation' | 'other'
 
 export type DiscountCalculationType = 'percentage' | 'fixed'
+export type DiscountFixedApplication = 'ticket' | 'line'
 export type DiscountRuleKind = 'discount' | 'promotion'
 export type DiscountScope = 'general' | 'specific'
 
@@ -25,6 +26,7 @@ export type Discount = {
   name: string
   type: DiscountCalculationType
   value: number
+  fixedApplication: DiscountFixedApplication
   roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
   isActive: boolean
@@ -44,6 +46,7 @@ export type DiscountCreateInput = {
   name: string
   type: DiscountCalculationType
   value: number
+  fixedApplication: DiscountFixedApplication
   roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
   isActive: boolean
@@ -64,6 +67,7 @@ export type AppliedDiscount = {
   type: DiscountSnapshotType
   calculationType: DiscountCalculationType
   value: number
+  fixedApplication?: DiscountFixedApplication
   roundingIncrementCents: DiscountRoundingIncrementCents | null
   color: string | null
 
