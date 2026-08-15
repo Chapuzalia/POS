@@ -39,6 +39,7 @@ type BuildRestaurantPrintPayloadInput = {
   paymentId: string | null
   paymentMethod: PaymentMethod | null
   receivedCents: number | null
+  changeCents?: number | null
   saleId: string
   subtotalCents: number
   ticketId: string
@@ -50,7 +51,7 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
   const discountAmountCents = Math.max(0, input.subtotalCents - input.totalCents)
   const grossLineTotals = input.lines.map((line) => line.lineTotalCents ?? line.unitPriceCents * line.quantity)
   const calculated = calculateDiscountForLines(
-    input.lines.map((line, index) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: grossLineTotals[index] })),
+    input.lines.map((line, index) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: grossLineTotals[index], quantity: line.quantity })),
     input.discount,
   )
   const lineAllocations = calculated.totalCents === input.totalCents ? calculated.lineAllocations : null
@@ -116,7 +117,7 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       method: input.paymentMethod,
       amountCents: input.totalCents,
       receivedCents: input.receivedCents,
-      changeCents: Math.max(0, (input.receivedCents ?? input.totalCents) - input.totalCents),
+      changeCents: input.changeCents ?? Math.max(0, (input.receivedCents ?? input.totalCents) - input.totalCents),
     } : null,
     ...(input.fiscal ? { fiscal: input.fiscal } : {}),
   }

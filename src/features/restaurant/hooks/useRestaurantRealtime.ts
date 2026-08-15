@@ -47,7 +47,7 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
   latestRef.current = options
 
   const loadCurrentMap = useCallback(async (activeContext: TenantContext, sessionId = options.activeCashSessionId) => {
-    const permanentMap = await loadRestaurantMap(activeContext)
+    const permanentMap = await loadRestaurantMap(activeContext, sessionId)
     if (!sessionId) return { ...permanentMap, layoutRevision: 0 }
     const layout = await loadSessionTableLayout(activeContext, sessionId)
     return applySessionLayout(permanentMap, layout)

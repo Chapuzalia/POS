@@ -4,6 +4,7 @@ import { readFileSync } from 'node:fs'
 
 const migration = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const roundingMigration = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+const frozenSaleMigration = readFileSync(new URL('../supabase/migrations/20260815130000_freeze_offline_sale_economics.sql', import.meta.url), 'utf8')
 const posService = readFileSync(new URL('../src/services/posService.ts', import.meta.url), 'utf8')
 const crmAnalyticsService = readFileSync(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8')
 const crmDiscountService = readFileSync(new URL('../src/features/crm/discounts/services/discountService.ts', import.meta.url), 'utf8')
@@ -21,14 +22,19 @@ test('el esquema final conserva snapshots y permite pago nulo sin reescribir el 
   assert.doesNotMatch(migration, /update\s+public\.sales[\s\S]+payment_method\s*=\s*null/i)
 })
 
-test('el servidor recalcula descuentos y rechaza alcance, inactivos y manual deshabilitado', () => {
+test('los tickets abiertos conservan reglas dinámicas y el sync cerrado usa el snapshot del TPV', () => {
   assert.match(migration, /resolve_ticket_discount/)
   assert.match(migration, /d\.tenant_id = p_tenant_id/)
   assert.match(migration, /d\.venue_id = p_venue_id/)
   assert.match(migration, /and d\.is_active/)
   assert.match(migration, /El descuento manual esta deshabilitado/)
-  assert.match(migration, /Los totales enviados no coinciden con el calculo del servidor/)
-  assert.match(migration, /user_has_device_access/)
+  const closedSaleSync = frozenSaleMigration.slice(
+    frozenSaleMigration.indexOf('create or replace function public.sync_sale_created_v2'),
+    frozenSaleMigration.indexOf('revoke all on function public.sync_sale_created_v2'),
+  )
+  assert.doesNotMatch(closedSaleSync, /resolve_ticket_discount/)
+  assert.match(closedSaleSync, /Los importes enviados no son internamente coherentes/)
+  assert.match(closedSaleSync, /user_has_device_access/)
 })
 
 test('los flujos rapido y de mesas usan los RPC nuevos y mantienen eventos offline antiguos', () => {

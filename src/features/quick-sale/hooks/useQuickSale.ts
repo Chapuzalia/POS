@@ -51,6 +51,7 @@ type Options = {
   persistProductSalesStats: (stats: ProductSalesStat[]) => void
   persistTickets: (tickets: SessionTicketRecord[]) => void
   printSale: (payload: SessionTicketRecord['payload']) => Promise<void>
+  onError: (message: string | null) => void
   productSalesStats: ProductSalesStat[]
   refreshPendingCount: () => void
   setMobileTicketOpen: (open: boolean) => void
@@ -144,6 +145,7 @@ export function useQuickSale(options: Options) {
     refreshPendingCount: options.refreshPendingCount,
     syncPendingEvents: options.syncPendingEvents,
     printSale: options.printSale,
+    onError: options.onError,
     resetUi: (method) => {
       options.setMobileTicketOpen(false)
       setDiscount(null)

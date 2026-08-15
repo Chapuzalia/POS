@@ -23,7 +23,7 @@ export async function printTicket({ context, payload, tickets, updateTicketPrint
   const hardwareAction = getAutomaticSaleHardwareAction({
     payments,
     isReprint: options.isReprint,
-    settings: printState.preferences,
+    settings: { ...printState.preferences, cashlogyConfigured: printState.cashlogyConfigured },
   })
   if (hardwareAction !== 'print') {
     updateTicketPrintState(payload.sale.id, {

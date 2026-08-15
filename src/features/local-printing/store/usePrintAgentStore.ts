@@ -11,7 +11,7 @@ import {
   savePrintAgentConfig,
 } from '../services/printAgentStorage'
 import type {
-  ConnectionStatus, DiscoveryProgress, DiscoveryStatus, PrintAgentPreferences, PrintAgentScope,
+  CashlogyHealth, ConnectionStatus, DiscoveryProgress, DiscoveryStatus, PrintAgentPreferences, PrintAgentScope,
   PrintAgentServerInfo, PrintJob, PrintRequest, Printer,
 } from '../types'
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl'
@@ -30,6 +30,9 @@ type StoreState = {
   printers: Printer[]
   selectedPrinter: Printer | null
   selectedPrinterId: string | null
+  cashlogyConfigured: boolean
+  cashlogyTerminalCode: string
+  cashlogyHealth: CashlogyHealth | null
   discoveryStatus: DiscoveryStatus
   discoveryProgress: DiscoveryProgress | null
   jobs: PrintJob[]
@@ -46,10 +49,13 @@ type StoreState = {
   isPrintingTicket: boolean
   isOpeningCashDrawer: boolean
   isLoadingJobs: boolean
+  isCheckingCashlogy: boolean
   configureScope: (scope: PrintAgentScope) => void
   setBaseUrl: (baseUrl: string) => string
   setToken: (token: string | null) => void
   updatePreferences: (preferences: Partial<PrintAgentPreferences>) => void
+  updateCashlogyConfiguration: (input: { configured?: boolean; terminalCode?: string }) => void
+  checkCashlogyHealth: (signal?: AbortSignal) => Promise<CashlogyHealth>
   checkConnection: (signal?: AbortSignal) => Promise<boolean>
   loadServerInfo: (signal?: AbortSignal) => Promise<PrintAgentServerInfo>
   loadPrinters: (signal?: AbortSignal) => Promise<Printer[]>
@@ -74,6 +80,8 @@ function persist(state: StoreState) {
     baseUrl: state.baseUrl,
     token: state.token,
     selectedPrinterId: state.selectedPrinterId,
+    cashlogyConfigured: state.cashlogyConfigured,
+    cashlogyTerminalCode: state.cashlogyTerminalCode,
     lastSuccessfulConnectionAt: state.lastSuccessfulConnectionAt,
     preferences: state.preferences,
   })
@@ -102,6 +110,9 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     printers: [],
     selectedPrinter: null,
     selectedPrinterId: null,
+    cashlogyConfigured: false,
+    cashlogyTerminalCode: 'POS_MAIN',
+    cashlogyHealth: null,
     discoveryStatus: 'idle',
     discoveryProgress: null,
     jobs: [],
@@ -118,11 +129,14 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     isPrintingTicket: false,
     isOpeningCashDrawer: false,
     isLoadingJobs: false,
+    isCheckingCashlogy: false,
 
     configureScope(scope) {
       const config = loadPrintAgentConfig(scope)
       set({
         scope, baseUrl: config.baseUrl, token: config.token, selectedPrinterId: config.selectedPrinterId,
+        cashlogyConfigured: config.cashlogyConfigured, cashlogyTerminalCode: config.cashlogyTerminalCode,
+        cashlogyHealth: null,
         selectedPrinter: null, printers: [], serverInfo: null, jobs: [], currentJob: null,
         lastSuccessfulConnectionAt: config.lastSuccessfulConnectionAt, preferences: config.preferences,
         connectionStatus: 'unknown', lastConnectionError: null, settingsLoaded: true,
@@ -144,6 +158,28 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     updatePreferences(value) {
       set((state) => ({ preferences: { ...state.preferences, ...value } }))
       persist(get())
+    },
+
+    updateCashlogyConfiguration(value) {
+      const terminalCode = value.terminalCode === undefined
+        ? get().cashlogyTerminalCode
+        : value.terminalCode.trim().toUpperCase().replace(/[^A-Z0-9_.:-]/g, '_').slice(0, 64) || 'POS_MAIN'
+      set({
+        cashlogyConfigured: value.configured ?? get().cashlogyConfigured,
+        cashlogyTerminalCode: terminalCode,
+      })
+      persist(get())
+    },
+
+    async checkCashlogyHealth(signal) {
+      set({ isCheckingCashlogy: true })
+      try {
+        const health = await client().getCashlogyHealth(signal)
+        set({ cashlogyHealth: health })
+        return health
+      } finally {
+        set({ isCheckingCashlogy: false })
+      }
     },
 
     async checkConnection(signal) {
@@ -281,6 +317,12 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     },
 
     async openCashDrawer(input = {}, signal) {
+      if (get().cashlogyConfigured) {
+        throw new PrintAgentError({
+          code: 'CONFIGURATION_ERROR',
+          message: 'El cajón de la impresora está deshabilitado porque este establecimiento usa Cashlogy.',
+        })
+      }
       const payload = printerActionSchema.parse({
         requestId: input.requestId || `drawer:${get().scope?.terminalId || 'terminal'}:${Date.now()}`,
         printerId: input.printerId || get().selectedPrinterId || '',
@@ -305,6 +347,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
       if (scope) clearPrintAgentConfig(scope)
       set({
         baseUrl: DEFAULT_PRINT_AGENT_URL, token: null, selectedPrinterId: null, selectedPrinter: null,
+        cashlogyConfigured: false, cashlogyTerminalCode: 'POS_MAIN', cashlogyHealth: null,
         printers: [], serverInfo: null, jobs: [], currentJob: null, connectionStatus: 'unknown',
         lastConnectionError: null, lastConnectionCheckAt: null, lastSuccessfulConnectionAt: null,
         lastResponseTimeMs: null, lastPrintAt: null, preferences: { ...defaultPrintAgentPreferences },
@@ -316,7 +359,9 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
       return sanitizePrintDiagnostics({
         connectionStatus: state.connectionStatus, url: state.baseUrl, lastConnectionCheckAt: state.lastConnectionCheckAt,
         lastSuccessfulConnectionAt: state.lastSuccessfulConnectionAt, responseTimeMs: state.lastResponseTimeMs,
-        serverInfo: state.serverInfo, selectedPrinter: state.selectedPrinter, lastError: state.lastConnectionError ? {
+        serverInfo: state.serverInfo, selectedPrinter: state.selectedPrinter,
+        cashlogy: { configured: state.cashlogyConfigured, terminalCode: state.cashlogyTerminalCode, health: state.cashlogyHealth },
+        lastError: state.lastConnectionError ? {
           code: state.lastConnectionError.code, message: state.lastConnectionError.message, status: state.lastConnectionError.status,
         } : null,
         lastJob: state.currentJob, frontendOrigin: typeof window === 'undefined' ? null : window.location.origin,

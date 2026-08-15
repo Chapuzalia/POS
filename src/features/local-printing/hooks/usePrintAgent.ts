@@ -9,6 +9,13 @@ export function usePrintAgent() {
     printers: state.printers,
     selectedPrinter: state.selectedPrinter,
     selectedPrinterId: state.selectedPrinterId,
+    cashlogyConfigured: state.cashlogyConfigured,
+    cashlogyTerminalCode: state.cashlogyTerminalCode,
+    cashlogyHealth: state.cashlogyHealth,
+    cashlogyReady: state.cashlogyConfigured
+      && state.cashlogyHealth?.enabled === true
+      && state.cashlogyHealth.ok === true
+      && state.cashlogyHealth.sessionState === 'ready',
     isDiscovering: state.isDiscoveringPrinters,
     discoveryProgress: state.discoveryProgress,
     currentJob: state.currentJob,
@@ -27,6 +34,7 @@ export function usePrintAgent() {
     isPrintingTicket: state.isPrintingTicket,
     isOpeningCashDrawer: state.isOpeningCashDrawer,
     isLoadingJobs: state.isLoadingJobs,
+    isCheckingCashlogy: state.isCheckingCashlogy,
     baseUrl: state.baseUrl,
     hasToken: Boolean(state.token),
     checkConnection: state.checkConnection,
@@ -41,6 +49,8 @@ export function usePrintAgent() {
     setBaseUrl: state.setBaseUrl,
     setToken: state.setToken,
     updatePreferences: state.updatePreferences,
+    updateCashlogyConfiguration: state.updateCashlogyConfiguration,
+    checkCashlogyHealth: state.checkCashlogyHealth,
     clearError: state.clearError,
     resetConfiguration: state.resetConfiguration,
     getDiagnosticReport: state.getDiagnosticReport,

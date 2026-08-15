@@ -20,6 +20,7 @@ export type DiscountRow = {
   type: 'percentage' | 'fixed'
   value: number | string
   rounding_increment_cents: 5 | 10 | 50 | 100 | null
+  fixed_application?: 'ticket' | 'unit' | 'line'
   color: string | null
   is_active: boolean
   sort_order: number
@@ -41,7 +42,7 @@ export type DiscountTargetProductOption = {
 }
 
 const discountColumns = `
-  id, tenant_id, venue_id, name, type, value, rounding_increment_cents, color,
+  id, tenant_id, venue_id, name, type, value, rounding_increment_cents, fixed_application, color,
   is_active, sort_order, rule_kind, scope, requires_pin, active_weekdays,
   starts_at, ends_at, auto_apply, discount_targets(product_id, variant_id)
 `
@@ -54,6 +55,7 @@ export function mapDiscount(row: DiscountRow): Discount {
     name: row.name,
     type: row.type,
     value: row.type === 'fixed' ? Math.round(Number(row.value) * 100) : Number(row.value),
+    fixedApplication: row.fixed_application === 'unit' || row.fixed_application === 'line' ? 'unit' : 'ticket',
     roundingIncrementCents: row.rounding_increment_cents,
     color: row.color,
     isActive: row.is_active,
@@ -106,6 +108,7 @@ async function saveDiscountRule(
       rounding_increment_cents: input.roundingIncrementCents,
       type: input.type,
       value: serializeDiscountValue(input.type, input.value),
+      fixedApplication: input.type === 'fixed' ? input.fixedApplication : 'ticket',
       roundingIncrementCents: input.roundingIncrementCents,
       color: input.color || null,
       isActive: input.isActive,

@@ -11,6 +11,7 @@ type DiscountRow = {
   type: 'percentage' | 'fixed'
   value: number | string
   rounding_increment_cents: 5 | 10 | 50 | 100 | null
+  fixed_application?: 'ticket' | 'unit' | 'line'
   color: string | null
   is_active: boolean
   sort_order: number
@@ -52,7 +53,7 @@ export async function loadPosCatalog(context: TenantContext, force = false): Pro
     catalogRepository.getCatalog(context.venueId, 'pos', force),
     supabase.from('discounts')
       .select(`
-        id, tenant_id, venue_id, name, type, value, rounding_increment_cents, color,
+        id, tenant_id, venue_id, name, type, value, rounding_increment_cents, fixed_application, color,
         is_active, sort_order, rule_kind, scope, requires_pin, active_weekdays,
         starts_at, ends_at, auto_apply, discount_targets(product_id, variant_id)
       `)
@@ -75,6 +76,7 @@ export async function loadPosCatalog(context: TenantContext, force = false): Pro
     name: row.name,
     type: row.type,
     value: row.type === 'fixed' ? decimalEurosToCents(row.value) : Number(row.value),
+    fixedApplication: row.fixed_application === 'unit' || row.fixed_application === 'line' ? 'unit' : 'ticket',
     roundingIncrementCents: row.rounding_increment_cents,
     color: row.color,
     isActive: row.is_active,

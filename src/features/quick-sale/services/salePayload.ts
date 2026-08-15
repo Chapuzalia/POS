@@ -62,6 +62,30 @@ export function buildSalePayload(
       fiscalSnapshot,
     }
   })
+  const discountSnapshot: AppliedDiscount | null = discount ? {
+    ...discount,
+    economicSource: 'pos_closed_sale',
+    economicSnapshotVersion: 1,
+    storedValue: discount.calculationType === 'fixed' ? discount.value / 100 : discount.value,
+    calculationLines: lines.map((line, index) => ({
+      productId: line.productId,
+      variantId: line.variantId || null,
+      grossCents: grossLineTotals[index],
+      quantity: line.quantity,
+    })),
+    eligibleSubtotalCents: calculation.eligibleSubtotalCents,
+    discountAmountCents,
+    amountCents: discountAmountCents,
+    totalCents,
+    lineAllocations: calculation.lineAllocations.map((allocation, index) => ({
+      index,
+      lineId: saleLines[index].id,
+      productId: lines[index].productId,
+      variantId: lines[index].variantId || null,
+      quantity: lines[index].quantity,
+      ...allocation,
+    })),
+  } : null
 
   return {
     ticket: {
@@ -73,14 +97,7 @@ export function buildSalePayload(
       deviceId: context.deviceId,
       userId: context.userId,
       subtotalCents,
-      discount: discount ? {
-        ...discount,
-        calculationLines: lines.map((line, index) => ({
-          productId: line.productId,
-          variantId: line.variantId || null,
-          grossCents: grossLineTotals[index],
-        })),
-      } : null,
+      discount: discountSnapshot,
       discountAmountCents,
       totalCents,
       createdAt,

@@ -18,6 +18,7 @@ const baseRule = {
   name: 'Regla',
   type: 'percentage',
   value: 10,
+  fixedApplication: 'ticket',
   roundingIncrementCents: null,
   color: null,
   isActive: true,
@@ -32,7 +33,7 @@ const baseRule = {
   autoApply: false,
 }
 
-const line = (productId, variantId, grossCents) => ({ productId, variantId, grossCents })
+const line = (productId, variantId, grossCents, quantity = 1) => ({ productId, variantId, grossCents, quantity })
 
 test('calcula un descuento general y conserva la suma exacta por línea', () => {
   const result = calculateDiscountForLines(
@@ -43,6 +44,20 @@ test('calcula un descuento general y conserva la suma exacta por línea', () => 
   assert.equal(result.discountAmountCents, 300)
   assert.equal(result.totalCents, 2700)
   assert.deepEqual(result.lineAllocations.map((item) => item.discountAmountCents), [100, 200])
+})
+
+test('redondea un descuento porcentual de forma independiente en cada linea', () => {
+  const rule = { ...baseRule, value: 20, roundingIncrementCents: 50 }
+  const result = calculateDiscountForLines(
+    [line('absolut', null, 800), line('brugal', null, 1400, 2)],
+    toAppliedDiscount(rule),
+  )
+
+  assert.equal(result.eligibleSubtotalCents, 2200)
+  assert.deepEqual(result.lineAllocations.map((item) => item.discountAmountCents), [150, 300])
+  assert.deepEqual(result.lineAllocations.map((item) => item.netCents), [650, 1100])
+  assert.equal(result.discountAmountCents, 450)
+  assert.equal(result.totalCents, 1750)
 })
 
 test('solo descuenta el producto específico en un ticket mixto', () => {
@@ -56,6 +71,54 @@ test('solo descuenta el producto específico en un ticket mixto', () => {
     { eligible: false, grossCents: 2000, discountAmountCents: 0, netCents: 2000 },
   ])
   assert.equal(result.totalCents, 2900)
+})
+
+test('el importe fijo puede aplicarse una vez por ticket o una vez por cada unidad elegible', () => {
+  const fixedRule = { ...baseRule, type: 'fixed', value: 200 }
+  const lines = [line('a', null, 1000, 2), line('a', null, 150), line('b', null, 900)]
+  const perTicket = calculateDiscountForLines(lines, toAppliedDiscount(fixedRule))
+  const perUnit = calculateDiscountForLines(
+    lines,
+    toAppliedDiscount({ ...fixedRule, fixedApplication: 'unit' }),
+  )
+
+  assert.equal(perTicket.discountAmountCents, 200)
+  assert.equal(perUnit.discountAmountCents, 750)
+  assert.deepEqual(perUnit.lineAllocations.map((item) => item.discountAmountCents), [400, 150, 200])
+  assert.equal(perUnit.totalCents, 1300)
+})
+
+test('el importe fijo por unidad respeta el ámbito y el redondeo final', () => {
+  const rule = {
+    ...baseRule,
+    type: 'fixed',
+    value: 100,
+    fixedApplication: 'unit',
+    roundingIncrementCents: 50,
+    scope: 'specific',
+    targets: [{ productId: 'a', variantId: null }],
+  }
+  const result = calculateDiscountForLines(
+    [line('a', null, 333), line('a', null, 666), line('b', null, 1000)],
+    toAppliedDiscount(rule),
+  )
+
+  assert.equal(result.eligibleSubtotalCents, 999)
+  assert.equal(result.discountAmountCents, 199)
+  assert.equal(result.lineAllocations[2].discountAmountCents, 0)
+  assert.equal(result.lineAllocations.reduce((sum, item) => sum + item.discountAmountCents, 0), 199)
+})
+
+test('el redondeo de un importe por unidad mantiene cada línea entre cero y su bruto', () => {
+  const rule = { ...baseRule, type: 'fixed', value: 1, fixedApplication: 'unit', roundingIncrementCents: 100 }
+  const result = calculateDiscountForLines(
+    [line('a', null, 50), line('b', null, 50)],
+    toAppliedDiscount(rule),
+  )
+
+  assert.equal(result.discountAmountCents, 0)
+  assert.deepEqual(result.lineAllocations.map((item) => item.netCents), [50, 50])
+  assert.ok(result.lineAllocations.every((item) => item.netCents >= 0 && item.netCents <= item.grossCents))
 })
 
 test('distingue variantes del mismo producto y productos completos', () => {
@@ -238,6 +301,35 @@ test('rechaza configuración automática con PIN y valida los campos de promoci�
 test('el selector de programación aclara que utiliza el horario operativo del local', async () => {
   const crmPage = await readFile(new URL('../src/features/crm/discounts/pages/DiscountsPage.tsx', import.meta.url), 'utf8')
   assert.match(crmPage, /Utilizando horario operativo del local/)
+})
+
+test('el editor y el TPV exponen la aplicación por ticket o por unidad para importes fijos', async () => {
+  const [crmPage, modal, crmService, catalogLoader, migration, consolidated] = await Promise.all([
+    readFile(new URL('../src/features/crm/discounts/pages/DiscountsPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/components/modals/DiscountModal.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/discounts/services/discountService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/catalog/data/load-pos-catalog.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260815140000_apply_fixed_discounts_per_unit.sql', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(crmPage, /Aplicación del importe/)
+  assert.match(crmPage, /Por ticket/)
+  assert.match(crmPage, /Por unidad/)
+  assert.doesNotMatch(crmPage, /Por producto/)
+  assert.match(crmPage, /fixedApplication: type === "fixed" \? fixedApplication : "ticket"/)
+  assert.match(modal, /discount\.fixedApplication === "unit"/)
+  assert.doesNotMatch(modal, /Por producto/)
+  assert.match(crmService, /fixed_application/)
+  assert.match(catalogLoader, /fixed_application/)
+  assert.match(migration, /fixed_application in \('ticket', 'unit'\)/)
+  assert.match(migration, /fixed_value_cents::bigint \* line_quantity/)
+  assert.match(migration, /fixed_value_cents::bigint \* tl\.quantity/)
+  assert.match(migration, /calculation_type = 'percentage' and rounding_increment is not null/)
+  assert.match(migration, /requested_amount := requested_amount \+ line_gross - line_net/)
+  assert.match(migration, /eligible and percentage_per_line/)
+  assert.match(migration, /'fixedApplication', fixed_application/)
+  assert.match(consolidated, /Migration: 20260815140000_apply_fixed_discounts_per_unit\.sql/)
 })
 
 test('el modal exige validar antes de seleccionar y nunca persiste el PIN', async () => {

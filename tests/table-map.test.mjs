@@ -15,6 +15,8 @@ const mobileSheetsSource = await readFile(new URL('../src/features/tables/compon
 const mobileLayoutSource = await readFile(new URL('../src/features/tables/useMobileTableMapLayout.ts', import.meta.url), 'utf8')
 const viewportControlsSource = await readFile(new URL('../src/features/tables/components/MapViewportControls.tsx', import.meta.url), 'utf8')
 const tableManagementSource = await readFile(new URL('../src/features/table-management/TableManagementPage.tsx', import.meta.url), 'utf8')
+const reservationBadgeSource = await readFile(new URL('../src/features/reservations/components/ReservationTableBadge.tsx', import.meta.url), 'utf8')
+const tableServiceSource = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 
 const bounds = { left: 100, top: 50, width: 1000, height: 600 }
 
@@ -302,6 +304,20 @@ test('el zoom escala la geometria sin rasterizar ni escalar inversamente el text
   assert.match(tableMapViewSource, /height: planeSize\.height \* viewport\.zoom/)
   assert.doesNotMatch(tableMapViewSource, /scale\(\$\{viewport\.zoom\}\)/)
   assert.doesNotMatch(tableMapViewSource, /scale\(\$\{1 \/ viewport\.zoom\}\)/)
+})
+
+test('la próxima reserva flota bajo la mesa sin sustituir su estado operativo', () => {
+  assert.match(reservationBadgeSource, /absolute bottom-0 left-1\/2/)
+  assert.match(reservationBadgeSource, /-translate-x-1\/2 translate-y-1\/2/)
+  assert.match(reservationBadgeSource, /min-w-max/)
+  assert.match(reservationBadgeSource, /rounded-full/)
+  assert.match(reservationBadgeSource, /bg-\[var\(--accent-soft\)\]/)
+  assert.match(reservationBadgeSource, /text-\[var\(--accent\)\]/)
+  assert.doesNotMatch(reservationBadgeSource, /--warning|customerName\.split|minutesUntilReservation|isReservationLate/)
+  assert.match(tableMapViewSource, /overflow-visible border-2/)
+  assert.match(tableMapViewSource, /absolute inset-0[\s\S]*overflow-hidden/)
+  assert.match(tableServiceSource, /reservationsByTable\.forEach\(\(items\) => items\.sort/)
+  assert.match(tableServiceSource, /nextReservation: tableReservations\[0\] \?\? null/)
 })
 
 test('el giro de 90 grados conserva el plano y la conversion de puntero', () => {

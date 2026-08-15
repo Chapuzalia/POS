@@ -29,8 +29,132 @@ export type PrintAgentPersistedConfig = {
   baseUrl: string
   token: string | null
   selectedPrinterId: string | null
+  cashlogyConfigured: boolean
+  cashlogyTerminalCode: string
   lastSuccessfulConnectionAt: string | null
   preferences: PrintAgentPreferences
+}
+
+export type CashlogySessionState =
+  | 'disabled' | 'disconnected' | 'connecting' | 'connected' | 'initializing'
+  | 'ready' | 'busy' | 'error' | 'reconnecting'
+
+export type CashlogyActiveStatus =
+  | 'queued' | 'connecting' | 'initializing' | 'starting_acceptance'
+  | 'waiting_for_cash' | 'finalizing_acceptance' | 'dispensing_change' | 'processing'
+
+export type CashlogyTerminalStatus = 'completed' | 'cancelled' | 'failed' | 'unknown' | 'needs_attention'
+export type CashlogyTransactionStatus = CashlogyActiveStatus | CashlogyTerminalStatus
+
+export type CashlogyHealth = {
+  ok: boolean
+  enabled: boolean
+  adapter: 'legacy-v2.5' | 'legacy-v2.5-headless' | 'mock'
+  sessionState: CashlogySessionState
+  processRunning: boolean
+  connector: {
+    id: string
+    host: string
+    port: number
+    reachable: boolean
+    connected: boolean
+    initialized: boolean
+    protocolVersion: string | null
+    lastConnectedAt: string | null
+  } | null
+  device: { model: string | null; serialNumber: string | null; ready: boolean } | null
+  activeTransaction: { id: string; requestId: string; status: string } | null
+  lastError: { code: string; message: string; at: string } | null
+}
+
+export type CashlogyTotal = {
+  resultCode: string
+  recyclerTotalCents: number
+  stackerTotalCents: number
+  totalCents: number
+  queriedAt: string
+}
+
+export type CashlogyDenomination = {
+  valueCents: number
+  recyclerCount: number
+  stackerCount: number
+}
+
+export type CashlogyDenominations = {
+  resultCode: string
+  coins: CashlogyDenomination[]
+  notes: CashlogyDenomination[]
+  queriedAt: string
+}
+
+export type CashlogyBackofficePreset = {
+  status: boolean
+  addChange: boolean
+  manualOneCent: boolean
+  withdrawCash: boolean
+  removeStacker: boolean
+  completeEmptying: boolean
+  giveChange: boolean
+  cashClosing: boolean
+  viewLogs: boolean
+  resetCoins: boolean
+  statistics: boolean
+  showOnTop: boolean
+  maintenance: boolean
+}
+
+export type CashlogyBackofficeResponse = {
+  resultCode: string
+  amountAtEntry: number | null
+  amountAtExit: number | null
+  amountIntroduced: number | null
+  amountWithdrawn: number | null
+  pendingRefund: number | null
+  accountingAdjustment: number | null
+}
+
+export type CashlogyTransaction = {
+  id: string
+  requestId: string
+  saleId: string | null
+  connectorId: string
+  status: CashlogyTransactionStatus
+  operationNumber: string
+  terminalCode: string
+  requestedAmountCents: number
+  automaticAcceptedCents: number | null
+  manualAcceptedCents: number | null
+  returnedCents: number | null
+  changeAddedCents: number | null
+  netPaidCents: number | null
+  connectorResultCode: string | null
+  normalizedErrorCode: string | null
+  error: { code: string; message: string | null } | null
+  warning: { code: string; message: string } | null
+  test: boolean
+  cancelRequestedAt: string | null
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type CashlogyChargeRequest = {
+  requestId: string
+  saleId: string | null
+  amountCents: number
+  terminalCode: string
+  test?: false
+}
+
+export type CashlogyIntent = {
+  requestId: string
+  saleId: string | null
+  amountCents: number
+  terminalCode: string
+  transactionId: string | null
+  createdAt: string
 }
 
 export type PrintAgentServerInfo = {
