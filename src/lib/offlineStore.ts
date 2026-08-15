@@ -1,4 +1,5 @@
 import type { PosCatalogState } from '../features/catalog/data/load-pos-catalog.ts'
+import { appendFrozenQueueEvent, recordQueueEventFailure } from '../features/offline/services/offlineQueueState.ts'
 import { getAppRoute, type AppRoute } from '../app/app-routes'
 
 import type {
@@ -204,7 +205,7 @@ export function saveOfflineQueue(events: OfflineEvent[]) {
 }
 
 export function enqueueOfflineEvent(event: OfflineEvent) {
-  saveOfflineQueue([...getOfflineQueue(), event])
+  saveOfflineQueue(appendFrozenQueueEvent(getOfflineQueue(), event))
 }
 
 export function forgetOfflineEvent(eventId: string) {
@@ -212,15 +213,5 @@ export function forgetOfflineEvent(eventId: string) {
 }
 
 export function markOfflineEventFailed(eventId: string, error: string) {
-  saveOfflineQueue(
-    getOfflineQueue().map((event) =>
-      event.id === eventId
-        ? {
-            ...event,
-            attempts: event.attempts + 1,
-            lastError: error,
-          }
-        : event,
-    ),
-  )
+  saveOfflineQueue(recordQueueEventFailure(getOfflineQueue(), eventId, error))
 }

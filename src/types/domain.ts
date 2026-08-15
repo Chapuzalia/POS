@@ -84,6 +84,24 @@ export type AppliedDiscount = {
     variantId: string | null
     grossCents: number
   }>
+  /** Definitive economic snapshot fields, populated once the ticket is paid. */
+  economicSource?: 'pos_closed_sale'
+  economicSnapshotVersion?: 1
+  storedValue?: number
+  eligibleSubtotalCents?: number
+  discountAmountCents?: number
+  amountCents?: number
+  totalCents?: number
+  lineAllocations?: Array<{
+    index: number
+    lineId: string
+    productId: string
+    variantId: string | null
+    eligible: boolean
+    grossCents: number
+    discountAmountCents: number
+    netCents: number
+  }>
 }
 
 export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'cashier'
