@@ -8,7 +8,7 @@ export type PaymentMethod = 'cash' | 'card'
 export type HistoricalPaymentMethod = PaymentMethod | 'invitation' | 'other'
 
 export type DiscountCalculationType = 'percentage' | 'fixed'
-export type DiscountFixedApplication = 'ticket' | 'line'
+export type DiscountFixedApplication = 'ticket' | 'unit'
 export type DiscountRuleKind = 'discount' | 'promotion'
 export type DiscountScope = 'general' | 'specific'
 
@@ -83,6 +83,7 @@ export type AppliedDiscount = {
     productId: string
     variantId: string | null
     grossCents: number
+    quantity: number
   }>
   /** Definitive economic snapshot fields, populated once the ticket is paid. */
   economicSource?: 'pos_closed_sale'
@@ -97,6 +98,7 @@ export type AppliedDiscount = {
     lineId: string
     productId: string
     variantId: string | null
+    quantity: number
     eligible: boolean
     grossCents: number
     discountAmountCents: number

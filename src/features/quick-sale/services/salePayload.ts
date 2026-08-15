@@ -71,6 +71,7 @@ export function buildSalePayload(
       productId: line.productId,
       variantId: line.variantId || null,
       grossCents: grossLineTotals[index],
+      quantity: line.quantity,
     })),
     eligibleSubtotalCents: calculation.eligibleSubtotalCents,
     discountAmountCents,
@@ -81,6 +82,7 @@ export function buildSalePayload(
       lineId: saleLines[index].id,
       productId: lines[index].productId,
       variantId: lines[index].variantId || null,
+      quantity: lines[index].quantity,
       ...allocation,
     })),
   } : null

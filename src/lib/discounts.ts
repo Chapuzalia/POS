@@ -166,6 +166,7 @@ export type DiscountScheduleContext = {
 
 export type DiscountableLine = Pick<TicketLine, 'productId' | 'variantId'> & {
   grossCents: number
+  quantity?: number
 }
 
 export type LineDiscountAllocation = {
@@ -220,14 +221,20 @@ export function calculateDiscountForLines(
   })
   const subtotalCents = lines.reduce((total, line) => total + line.grossCents, 0)
   const eligibleSubtotalCents = eligibleGross.reduce((total, value) => total + value, 0)
-  const fixedPerLine = discount?.calculationType === 'fixed'
-    && (discount.fixedApplication ?? 'ticket') === 'line'
-  if (fixedPerLine) {
+  const fixedPerUnit = discount?.calculationType === 'fixed'
+    && (discount.fixedApplication ?? 'ticket') === 'unit'
+  if (fixedPerUnit) {
     const fixedValueCents = discount.value
     if (!Number.isInteger(fixedValueCents) || fixedValueCents <= 0) {
       throw new Error('El importe fijo debe ser mayor que 0 y expresarse en céntimos.')
     }
-    const baseEligibleNet = eligibleGross.map((grossCents) => Math.max(0, grossCents - fixedValueCents))
+    const baseEligibleNet = eligibleIndexes.map((lineIndex, position) => {
+      const quantity = lines[lineIndex].quantity ?? 1
+      if (!Number.isInteger(quantity) || quantity <= 0) {
+        throw new Error('La cantidad debe ser un número entero mayor que 0.')
+      }
+      return Math.max(0, eligibleGross[position] - fixedValueCents * quantity)
+    })
     const baseEligibleNetTotal = baseEligibleNet.reduce((total, value) => total + value, 0)
     const requestedAmountCents = eligibleSubtotalCents - baseEligibleNetTotal
     if (requestedAmountCents === 0) {
@@ -380,8 +387,8 @@ export function validateDiscountRule(input: Pick<DiscountCreateInput,
   'name' | 'type' | 'value' | 'fixedApplication' | 'ruleKind' | 'scope' | 'targets' | 'requiresPin' | 'pin' | 'activeWeekdays' | 'startsAt' | 'endsAt' | 'autoApply'
 >) {
   const name = validateDiscountDefinition(input.name, input.type, input.value)
-  if (input.type === 'fixed' && input.fixedApplication !== 'ticket' && input.fixedApplication !== 'line') {
-    throw new Error('Selecciona si el importe fijo se aplica por ticket o por producto.')
+  if (input.type === 'fixed' && input.fixedApplication !== 'ticket' && input.fixedApplication !== 'unit') {
+    throw new Error('Selecciona si el importe fijo se aplica por ticket o por unidad.')
   }
   if (input.scope === 'specific' && !input.targets.length) throw new Error('Selecciona al menos un producto o variante.')
   if (input.autoApply && input.requiresPin) throw new Error('Una promoción automática no puede requerir PIN.')

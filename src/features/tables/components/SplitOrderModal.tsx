@@ -91,7 +91,7 @@ export function SplitOrderModal({
   )
   const paymentTotals = calculateDiscountForLines(
     order.lines.filter((line) => (quantities[line.id] ?? 0) > 0)
-      .map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: (quantities[line.id] ?? 0) * line.unitPriceCents })),
+      .map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: (quantities[line.id] ?? 0) * line.unitPriceCents, quantity: quantities[line.id] ?? 0 })),
     currentDiscount,
   )
   const normalizedSearchQuery = normalizeText(deferredSearchQuery.trim())

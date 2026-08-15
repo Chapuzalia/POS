@@ -108,6 +108,7 @@ function withCalculationLines(
       productId: line.productId ?? '',
       variantId: line.variantId,
       grossCents: line.unitPriceCents * line.quantity,
+      quantity: line.quantity,
     })),
   } : null
 }
@@ -388,7 +389,7 @@ export function useRestaurantController(options: Options) {
       const amountCents = useDefaultDiscount
         ? equalSplit.nextDefaultTotalCents
         : calculateDiscountForLines(paymentLines.map((line) => ({
-            productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity,
+            productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
           })), effectiveDiscount).totalCents
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
       const result = await payRestaurantEqualPart(equalSplit.id, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount)
@@ -456,7 +457,7 @@ export function useRestaurantController(options: Options) {
         if (pending.pendingUnits > 0) return { requiresConfirmation: true, pendingUnits: pending.pendingUnits }
       }
       const amountCents = calculateDiscountForLines(paymentLines.map((line) => ({
-        productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity,
+        productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), discount).totalCents
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
       const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines))
@@ -589,7 +590,7 @@ export function useRestaurantController(options: Options) {
         return
       }
       const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
-        productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity,
+        productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), options.appliedDiscount).totalCents
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
       const result = await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines))

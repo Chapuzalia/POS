@@ -56,7 +56,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSched
   const totalCents = split?.totalCents ?? order.totalCents
   const nextPartCents = split?.nextPartCents ?? Math.floor(totalCents / partCount) + (totalCents % partCount > 0 ? 1 : 0)
   const setupDiscount = calculateDiscountForLines(
-    order.lines.map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.quantity * line.unitPriceCents })),
+    order.lines.map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.quantity * line.unitPriceCents, quantity: line.quantity })),
     defaultDiscount,
   )
   const inheritedSetupDiscountAmount = Math.floor(setupDiscount.discountAmountCents / partCount) + (setupDiscount.discountAmountCents % partCount > 0 ? 1 : 0)

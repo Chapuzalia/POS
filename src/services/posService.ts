@@ -534,7 +534,7 @@ type SessionTicketQueryRow = {
   discount_scope: 'general' | 'specific' | null
   discount_automatic: boolean
   discount_snapshot: {
-    fixedApplication?: 'ticket' | 'line'
+    fixedApplication?: 'ticket' | 'unit' | 'line'
     targets?: Array<{ productId: string; variantId: string | null }>
     activeWeekdays?: number[]
     startsAt?: string | null
@@ -766,7 +766,10 @@ export async function loadSessionTicketsFromSupabase(
               value: ticket.discount_value_type === 'fixed'
                 ? Math.round(Number(ticket.discount_value) * 100)
                 : Number(ticket.discount_value),
-              fixedApplication: ticket.discount_snapshot?.fixedApplication ?? 'ticket',
+              fixedApplication: ticket.discount_snapshot?.fixedApplication === 'unit'
+                || ticket.discount_snapshot?.fixedApplication === 'line'
+                ? 'unit'
+                : 'ticket',
               roundingIncrementCents: ticket.discount_rounding_increment_cents,
               color: null,
               ruleKind: ticket.discount_rule_kind ?? 'discount',

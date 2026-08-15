@@ -11,7 +11,7 @@ type DiscountRow = {
   type: 'percentage' | 'fixed'
   value: number | string
   rounding_increment_cents: 5 | 10 | 50 | 100 | null
-  fixed_application?: 'ticket' | 'line'
+  fixed_application?: 'ticket' | 'unit' | 'line'
   color: string | null
   is_active: boolean
   sort_order: number
@@ -76,7 +76,7 @@ export async function loadPosCatalog(context: TenantContext, force = false): Pro
     name: row.name,
     type: row.type,
     value: row.type === 'fixed' ? decimalEurosToCents(row.value) : Number(row.value),
-    fixedApplication: row.fixed_application ?? 'ticket',
+    fixedApplication: row.fixed_application === 'unit' || row.fixed_application === 'line' ? 'unit' : 'ticket',
     roundingIncrementCents: row.rounding_increment_cents,
     color: row.color,
     isActive: row.is_active,

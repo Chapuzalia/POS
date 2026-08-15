@@ -218,8 +218,8 @@ export function DiscountsCrm({
                 </strong>
                 {discount.type === "fixed" ? (
                   <span className="rounded-full bg-[var(--crm-input-bg)] px-2.5 py-1 text-[11px] font-semibold">
-                    {discount.fixedApplication === "line"
-                      ? "Por producto"
+                    {discount.fixedApplication === "unit"
+                      ? "Por unidad"
                       : "Por ticket"}
                   </span>
                 ) : null}
@@ -601,13 +601,13 @@ export function DiscountEditor({
               }
               options={[
                 { label: "Por ticket", value: "ticket" },
-                { label: "Por producto", value: "line" },
+                { label: "Por unidad", value: "unit" },
               ]}
               value={fixedApplication}
             />
             <small className="mt-1.5 block text-xs text-[var(--crm-text-muted)]">
-              {fixedApplication === "line"
-                ? "Se descuenta una vez en cada línea que cumpla el ámbito."
+              {fixedApplication === "unit"
+                ? "Se descuenta una vez por cada unidad que cumpla el ámbito."
                 : "Se descuenta una sola vez sobre el conjunto aplicable del ticket."}
             </small>
           </Field>

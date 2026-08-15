@@ -248,8 +248,8 @@ export function DiscountModal({
                     ? "Productos específicos"
                     : "General",
                   discount.type === "fixed"
-                    ? discount.fixedApplication === "line"
-                      ? "Por producto"
+                    ? discount.fixedApplication === "unit"
+                      ? "Por unidad"
                       : "Por ticket"
                     : null,
                   discount.requiresPin ? "Requiere PIN" : null,
