@@ -100,12 +100,16 @@ function resolveSelectionGroups(product: CatalogProduct, variant: CatalogVariant
     .flatMap((assignment) => {
       const group = indexes.selectionGroups.get(assignment.groupId)
       if (!group || !group.active) return []
+      if ((product.type === 'menu') !== (group.type === 'menu_component')) return []
       assertVenue(catalog, group, 'El grupo de selección')
       const options = (indexes.selectionOptionsByGroup.get(group.id) ?? [])
         .filter((option) => option.active)
         .sort(byOrder)
         .flatMap((option) => {
-          try { return [resolveSelectionOption(option.id, catalog, indexes)] }
+          try {
+            const resolved = resolveSelectionOption(option.id, catalog, indexes)
+            return group.type === 'menu_component' && resolved.product.type !== 'standard' ? [] : [resolved]
+          }
           catch (error) {
             if (error instanceof CatalogDomainError && error.code === 'CATALOG_GROUP_INVALID') return []
             throw error

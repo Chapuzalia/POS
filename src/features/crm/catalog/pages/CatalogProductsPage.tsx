@@ -19,6 +19,7 @@ import {
 } from '../services/catalogAdminModel.ts'
 import { catalogAdminService } from '../services/catalogAdminService.ts'
 import { CatalogProductEditor } from '../forms/CatalogProductEditor.tsx'
+import { CatalogMenuEditor } from '../forms/CatalogMenuEditor.tsx'
 
 type Props = {
   catalog: CatalogData
@@ -52,7 +53,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
   const [sortKey, setSortKey] = useState<CatalogProductSortKey>('product')
   const [sortDirection, setSortDirection] = useState<CatalogProductSortDirection>('asc')
   const [page, setPage] = useState(1)
-  const [editorProductId, setEditorProductId] = useState<string | 'create' | null>(null)
+  const [editorProductId, setEditorProductId] = useState<string | 'create' | 'create-menu' | null>(null)
   const deferredQuery = useDeferredValue(filters.query)
   const summaries = useMemo(() => getCatalogProductSummaries(catalog), [catalog])
   const filtered = useMemo(() => {
@@ -94,7 +95,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
   const pages = Math.max(1, Math.ceil(filtered.length / CRM_PAGE_SIZE))
   const visiblePage = Math.min(page, pages)
   const visibleProducts = filtered.slice((visiblePage - 1) * CRM_PAGE_SIZE, visiblePage * CRM_PAGE_SIZE)
-  const selectedProduct = editorProductId && editorProductId !== 'create'
+  const selectedProduct = editorProductId && editorProductId !== 'create' && editorProductId !== 'create-menu'
     ? catalog.products.find((product) => product.id === editorProductId) ?? null
     : null
 
@@ -133,9 +134,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
       <CatalogPanel>
         <CatalogPanelHeader
           actions={
-            <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)]" disabled={disabled} onClick={() => setEditorProductId('create')} type="button">
-              <Plus className="!size-4" /> Añadir producto
-            </UiButton>
+            <div className="flex flex-wrap gap-2"><UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold text-[var(--crm-text-secondary)]" disabled={disabled} onClick={() => setEditorProductId('create')} type="button"><Plus className="!size-4" /> Añadir producto</UiButton><UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)]" disabled={disabled} onClick={() => setEditorProductId('create-menu')} type="button"><Plus className="!size-4" /> Añadir menú</UiButton></div>
           }
           description={`${filtered.length} de ${catalog.products.length} productos · una única carga para todo el local`}
           title="Productos"
@@ -201,8 +200,8 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
         <CrmPagination currentPage={visiblePage} onPageChange={setPage} totalResults={filtered.length} />
       </CatalogPanel>
 
-      {editorProductId ? (
-        <CatalogProductEditor
+      {editorProductId ? (editorProductId === 'create-menu' || selectedProduct?.type === 'menu' ? (
+        <CatalogMenuEditor
           catalog={catalog}
           defaultTaxRate={defaultTaxRate}
           disabled={disabled}
@@ -211,7 +210,15 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
           onClose={() => setEditorProductId(null)}
           product={selectedProduct}
         />
-      ) : null}
+      ) : <CatalogProductEditor
+          catalog={catalog}
+          defaultTaxRate={defaultTaxRate}
+          disabled={disabled}
+          key={editorProductId}
+          mutate={mutate}
+          onClose={() => setEditorProductId(null)}
+          product={selectedProduct}
+        />) : null}
     </div>
   )
 }

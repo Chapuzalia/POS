@@ -234,17 +234,20 @@ export function buildProductDuplicationPlan(
       name: source.name,
       description: source.description,
       vatRate: source.vatRate,
-      active: source.active,
+      active: source.type === 'menu' ? false : source.active,
       sortOrder: catalog.products.length * 10,
       variants,
     },
   }]
 
+  const duplicatedPlacements: Array<{ id: string; placement: CatalogData['placements'][number] }> = []
   for (const placement of catalog.placements.filter((item) => item.productId === sourceProductId)) {
+    const placementId = createId()
+    duplicatedPlacements.push({ id: placementId, placement })
     batch.push({
       command: 'create_placement',
       payload: {
-        id: createId(),
+        id: placementId,
         productId,
         tabId: placement.tabId,
         categoryId: placement.categoryId,
@@ -252,7 +255,7 @@ export function buildProductDuplicationPlan(
           ? variantIdBySourceId.get(placement.pinnedVariantId) ?? null
           : null,
         featured: placement.featured,
-        active: placement.active,
+        active: source.type === 'menu' ? false : placement.active,
         sortOrder: placement.sortOrder,
       },
     })
@@ -266,14 +269,37 @@ export function buildProductDuplicationPlan(
       .filter((assignment) => assignment.productId === sourceProductId)
       .map((assignment) => ({ assignment, domain: 'modifier' as const })),
   ]
+  const localMenuGroupIdBySourceId = new Map<string, string>()
   for (const { assignment, domain } of assignments) {
+    let groupId = assignment.groupId
+    if (source.type === 'menu' && domain === 'selection') {
+      const sourceGroup = catalog.selectionGroups.find((group) => group.id === assignment.groupId)
+      if (sourceGroup?.type === 'menu_component') {
+        let localGroupId = localMenuGroupIdBySourceId.get(sourceGroup.id)
+        if (!localGroupId) {
+          localGroupId = createId()
+          localMenuGroupIdBySourceId.set(sourceGroup.id, localGroupId)
+          batch.push({
+            command: 'save_selection_group',
+            payload: { id: localGroupId, name: sourceGroup.name, type: sourceGroup.type, active: sourceGroup.active, sortOrder: catalog.selectionGroups.length * 10 + localMenuGroupIdBySourceId.size * 10 },
+          })
+          for (const option of catalog.selectionOptions.filter((candidate) => candidate.groupId === sourceGroup.id)) {
+            batch.push({
+              command: 'save_selection_option',
+              payload: { ...option, id: createId(), groupId: localGroupId, defaultQuantity: 0 },
+            })
+          }
+        }
+        groupId = localGroupId
+      }
+    }
     batch.push({
       command: 'save_assignment',
       payload: {
         id: createId(),
         domain,
         productId,
-        groupId: assignment.groupId,
+        groupId,
         displayName: assignment.displayName,
         minSelection: assignment.minSelection,
         maxSelection: assignment.maxSelection,
@@ -283,6 +309,12 @@ export function buildProductDuplicationPlan(
         sortOrder: assignment.sortOrder,
       },
     })
+  }
+  if (source.type === 'menu' && source.active) {
+    batch.push({ command: 'set_product_active', payload: { id: productId, active: true } })
+    for (const { id, placement } of duplicatedPlacements) {
+      batch.push({ command: 'update_placement', payload: { id, productId, tabId: placement.tabId, categoryId: placement.categoryId, pinnedVariantId: placement.pinnedVariantId ? variantIdBySourceId.get(placement.pinnedVariantId) ?? null : null, featured: placement.featured, active: placement.active, sortOrder: placement.sortOrder } })
+    }
   }
 
   return {
@@ -361,7 +393,7 @@ export function buildCrossVenueProductDuplicationPlan(
       name: source.name,
       description: source.description,
       vatRate: source.vatRate,
-      active: source.active,
+      active: source.type === 'menu' ? false : source.active,
       sortOrder: targetCatalog.products.length * 10,
       variants,
     },
@@ -377,6 +409,7 @@ export function buildCrossVenueProductDuplicationPlan(
   const relationCountByTabId = new Map(targetCatalog.tabs.map((tab) => [tab.id, targetCatalog.tabCategories.filter((item) => item.tabId === tab.id).length]))
   let nextTabSortOrder = targetCatalog.tabs.length * 10
   let nextCategorySortOrder = targetCatalog.categories.length * 10
+  const duplicatedTargetPlacements: Array<{ id: string; payload: Record<string, unknown>; active: boolean }> = []
   for (const placement of sourceCatalog.placements.filter((item) => item.productId === sourceProductId)) {
     const sourceTab = sourceCatalog.tabs.find((tab) => tab.id === placement.tabId)
     const sourceCategory = sourceCatalog.categories.find((category) => category.id === placement.categoryId)
@@ -411,23 +444,28 @@ export function buildCrossVenueProductDuplicationPlan(
       targetTabCategoryKeys.add(`${targetTabId}:${targetCategoryId}`)
       relationCountByTabId.set(targetTabId, (relationCountByTabId.get(targetTabId) ?? 0) + 1)
     }
+    const targetPlacementId = createId()
+    const targetPlacementPayload = {
+      id: targetPlacementId,
+      productId,
+      tabId: targetTabId,
+      categoryId: targetCategoryId ?? null,
+      pinnedVariantId: placement.pinnedVariantId ? variantIdBySourceId.get(placement.pinnedVariantId) ?? null : null,
+      featured: placement.featured,
+      active: source.type === 'menu' ? false : placement.active,
+      sortOrder: placement.sortOrder,
+    }
+    duplicatedTargetPlacements.push({ id: targetPlacementId, payload: targetPlacementPayload, active: placement.active })
     batch.push({
       command: 'create_placement',
-      payload: {
-        id: createId(),
-        productId,
-        tabId: targetTabId,
-        categoryId: targetCategoryId ?? null,
-        pinnedVariantId: placement.pinnedVariantId ? variantIdBySourceId.get(placement.pinnedVariantId) ?? null : null,
-        featured: placement.featured,
-        active: placement.active,
-        sortOrder: placement.sortOrder,
-      },
+      payload: targetPlacementPayload,
     })
   }
 
   const targetSelectionGroupByName = new Map(targetCatalog.selectionGroups.map((group) => [`${normalizedCatalogName(group.name)}:${group.type}`, group]))
   const targetModifierGroupByName = new Map(targetCatalog.modifierGroups.map((group) => [normalizedCatalogName(group.name), group]))
+  const targetStandardProductByName = new Map(targetCatalog.products.filter((item) => item.type === 'standard').map((item) => [normalizedCatalogName(item.name), item]))
+  const createdGroupIdBySourceId = new Map<string, string>()
   const assignments = [
     ...sourceCatalog.selectionAssignments.filter((item) => item.productId === sourceProductId).map((assignment) => ({ assignment, domain: 'selection' as const })),
     ...sourceCatalog.modifierAssignments.filter((item) => item.productId === sourceProductId).map((assignment) => ({ assignment, domain: 'modifier' as const })),
@@ -436,17 +474,42 @@ export function buildCrossVenueProductDuplicationPlan(
     const sourceGroup = domain === 'selection'
       ? sourceCatalog.selectionGroups.find((group) => group.id === assignment.groupId)
       : sourceCatalog.modifierGroups.find((group) => group.id === assignment.groupId)
-    const targetGroup = domain === 'selection' && sourceGroup && 'type' in sourceGroup
+    const requiresLocalMenuGroup = source.type === 'menu' && domain === 'selection'
+      && sourceGroup && 'type' in sourceGroup && sourceGroup.type === 'menu_component'
+    let targetGroup = !requiresLocalMenuGroup && domain === 'selection' && sourceGroup && 'type' in sourceGroup
       ? targetSelectionGroupByName.get(`${normalizedCatalogName(sourceGroup.name)}:${sourceGroup.type}`)
-      : sourceGroup ? targetModifierGroupByName.get(normalizedCatalogName(sourceGroup.name)) : null
-    if (!targetGroup) continue
+      : !requiresLocalMenuGroup && sourceGroup ? targetModifierGroupByName.get(normalizedCatalogName(sourceGroup.name)) : null
+    let targetGroupId = targetGroup?.id ?? (sourceGroup ? createdGroupIdBySourceId.get(sourceGroup.id) : undefined)
+    if (!targetGroupId && sourceGroup && domain === 'selection' && 'type' in sourceGroup) {
+      targetGroupId = createId()
+      createdGroupIdBySourceId.set(sourceGroup.id, targetGroupId)
+      batch.push({ command: 'save_selection_group', payload: { id: targetGroupId, name: sourceGroup.name, type: sourceGroup.type, active: sourceGroup.active, sortOrder: targetCatalog.selectionGroups.length * 10 + createdGroupIdBySourceId.size * 10 } })
+      for (const option of sourceCatalog.selectionOptions.filter((item) => item.groupId === sourceGroup.id)) {
+        const sourceOptionProduct = sourceCatalog.products.find((item) => item.id === option.productId)
+        const targetOptionProduct = sourceOptionProduct ? targetStandardProductByName.get(normalizedCatalogName(sourceOptionProduct.name)) : null
+        if (!targetOptionProduct) throw new Error(`No se puede duplicar el menú: falta el producto “${sourceOptionProduct?.name ?? 'desconocido'}” en el local destino.`)
+        const sourceOptionVariant = sourceCatalog.variants.find((item) => item.id === option.variantId)
+        const targetOptionVariant = sourceOptionVariant
+          ? targetCatalog.variants.find((item) => item.productId === targetOptionProduct.id && normalizedCatalogName(item.name) === normalizedCatalogName(sourceOptionVariant.name))
+          : null
+        batch.push({ command: 'save_selection_option', payload: { id: createId(), groupId: targetGroupId, productId: targetOptionProduct.id, variantId: targetOptionVariant?.id ?? null, supplementCents: option.supplementCents, defaultQuantity: sourceGroup.type === 'menu_component' ? 0 : option.defaultQuantity, maxQuantity: option.maxQuantity, active: option.active, sortOrder: option.sortOrder } })
+      }
+    } else if (!targetGroupId && sourceGroup && domain === 'modifier') {
+      targetGroupId = createId()
+      createdGroupIdBySourceId.set(sourceGroup.id, targetGroupId)
+      batch.push({ command: 'save_modifier_group', payload: { id: targetGroupId, name: sourceGroup.name, active: sourceGroup.active, sortOrder: targetCatalog.modifierGroups.length * 10 + createdGroupIdBySourceId.size * 10 } })
+      for (const modifier of sourceCatalog.modifiers.filter((item) => item.groupId === sourceGroup.id)) {
+        batch.push({ command: 'save_modifier', payload: { id: createId(), groupId: targetGroupId, name: modifier.name, supplementCents: modifier.supplementCents, isDefault: modifier.isDefault, active: modifier.active, sortOrder: modifier.sortOrder } })
+      }
+    }
+    if (!targetGroupId) throw new Error('No se pudo resolver una dependencia del producto en el local destino.')
     batch.push({
       command: 'save_assignment',
       payload: {
         id: createId(),
         domain,
         productId,
-        groupId: targetGroup.id,
+        groupId: targetGroupId,
         displayName: assignment.displayName,
         minSelection: assignment.minSelection,
         maxSelection: assignment.maxSelection,
@@ -456,6 +519,12 @@ export function buildCrossVenueProductDuplicationPlan(
         sortOrder: assignment.sortOrder,
       },
     })
+  }
+  if (source.type === 'menu' && source.active) {
+    batch.push({ command: 'set_product_active', payload: { id: productId, active: true } })
+    for (const placement of duplicatedTargetPlacements) {
+      batch.push({ command: 'update_placement', payload: { ...placement.payload, id: placement.id, active: placement.active } })
+    }
   }
 
   return {

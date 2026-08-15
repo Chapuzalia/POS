@@ -16,12 +16,32 @@ type MapperOptions = {
   cut?: boolean
 }
 
+type PrintableComponent = {
+  type?: 'mixer' | 'menu_component'
+  selectionGroupName?: string
+  productName: string
+  variantName?: string
+  quantity?: number
+  priceDeltaCents?: number
+  modifiers?: Array<{ name: string }>
+}
+
+function componentAdditions(component: PrintableComponent) {
+  const quantity = component.quantity ?? 1
+  const variant = component.variantName?.trim()
+  const supplement = component.priceDeltaCents
+    ? ` ${component.priceDeltaCents > 0 ? '+' : ''}${(component.priceDeltaCents * quantity / 100).toLocaleString('es-ES', { style: 'currency', currency: 'EUR' })}`
+    : ''
+  const groupLabel = component.type === 'menu_component' && component.selectionGroupName
+    ? `${component.selectionGroupName} · `
+    : ''
+  const heading = `${groupLabel}${quantity > 1 ? `${quantity} × ` : ''}${component.productName}${variant ? ` (${variant})` : ''}${supplement}`
+  return [heading, ...(component.modifiers ?? []).map((modifier) => `  · ${modifier.name}`)]
+}
+
 function lineAdditions(line: SaleCreatedPayload['lines'][number]) {
   return [
-    ...(line.components ?? []).flatMap((component) => [
-      component.productName,
-      ...(component.modifiers ?? []).map((modifier) => `${component.productName} · ${modifier.name}`),
-    ]),
+    ...(line.components ?? []).flatMap(componentAdditions),
     ...line.modifiers.map((modifier) => modifier.name),
   ].filter(Boolean)
 }
@@ -114,7 +134,7 @@ export function mapRestaurantSaleToPrintRequest(input: {
   saleId: string
   ticketId: string
   createdAt: string
-  lines: Array<{ productName: string; variantName?: string; quantity: number; unitPriceCents: number; modifiers?: Array<{ name: string }>; components?: Array<{ productName: string; modifiers?: Array<{ name: string }> }>; mixer?: { name: string } | null; note?: string | null }>
+  lines: Array<{ productName: string; variantName?: string; quantity: number; unitPriceCents: number; modifiers?: Array<{ name: string }>; components?: PrintableComponent[]; mixer?: { name: string } | null; note?: string | null }>
   totalCents: number
   paymentMethod: string | null
   receivedCents: number | null
@@ -129,7 +149,7 @@ export function mapRestaurantSaleToPrintRequest(input: {
 }) : PrintRequest {
   const items = input.lines.map((line) => {
     const additions = [
-      ...(line.components || []).flatMap((component) => [component.productName, ...(component.modifiers ?? []).map((modifier) => `${component.productName} · ${modifier.name}`)]),
+      ...(line.components || []).flatMap(componentAdditions),
       ...(line.modifiers || []).map((modifier) => modifier.name),
       ...(!line.components?.length && line.mixer ? [line.mixer.name] : []),
     ]

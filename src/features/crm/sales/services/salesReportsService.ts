@@ -235,7 +235,8 @@ export async function loadCrmSalesReports(context: TenantContext, venueId?: stri
       addSalesReportLine(byCatalogTab, line.catalog_tab_id_snapshot ?? 'sin-pestana', line.catalog_tab_name_snapshot ?? 'Sin pestaña histórica', ticket.id, line)
       for (const component of line.ticket_line_components ?? []) {
         const target = component.component_type === 'mixer' ? byMixer : byMenuComponent
-        addNamedAggregate(target, component.product_id ?? component.id, component.product_name_snapshot, ticket.id, component.quantity * Number(line.allocated_quantity ?? line.quantity), component.price_delta_cents * component.quantity)
+        const lineQuantity = Number(line.allocated_quantity ?? line.quantity)
+        addNamedAggregate(target, component.product_id ?? component.id, component.product_name_snapshot, ticket.id, component.quantity * lineQuantity, component.price_delta_cents * component.quantity * lineQuantity)
         for (const modifier of component.metadata?.modifiers ?? []) {
           const name = modifier.name?.trim() || 'Modificador'
           addNamedAggregate(byModifier, normalizeText(name), name, ticket.id, component.quantity * Number(line.allocated_quantity ?? line.quantity), modifier.priceCents * component.quantity * Number(line.allocated_quantity ?? line.quantity))

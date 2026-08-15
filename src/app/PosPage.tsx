@@ -170,10 +170,6 @@ export function PosPage(props: Props) {
         onDecrement={(lineId) => updateQuantity(lineId, -1)}
         onIncrement={(lineId) => updateQuantity(lineId, 1)}
         onEdit={(line) => {
-          if (line.servedQuantity > 0) {
-            props.onSetError('No se puede editar una línea con productos ya servidos.')
-            return
-          }
           const item = resolvedCatalog?.items.find((candidate) => (
             candidate.product.id === line.productId
             && (line.variantId ? candidate.variant.id === line.variantId : true)
@@ -210,6 +206,29 @@ export function PosPage(props: Props) {
         lines={activeLines}
         onClear={quickSale.clear}
         onDecrement={(lineId) => updateQuantity(lineId, -1)}
+        onEdit={(line) => {
+          const item = resolvedCatalog?.items.find((candidate) => (
+            candidate.product.id === line.productId
+            && candidate.variant.id === line.variantId
+          )) ?? null
+          if (!item) {
+            props.onSetError('El producto de esta línea ya no está disponible.')
+            return
+          }
+          quickSale.openProductDialog({
+            allowVariantSelection: false,
+            initialSelection: {
+              modifiers: line.modifiers,
+              components: line.components,
+              catalogSnapshot: line.catalogSnapshot,
+              mixerProductId: line.mixerProductId ?? null,
+              mixer: line.mixer ?? null,
+            },
+            initialVariantId: line.variantId,
+            lineId: line.id,
+            item,
+          })
+        }}
         lineDiscounts={discountCalculation.lineAllocations}
         onIncrement={(lineId) => updateQuantity(lineId, 1)}
         onRemove={quickSale.removeLine}
@@ -447,7 +466,9 @@ export function PosPage(props: Props) {
         key={`${quickSale.productDialog.item.placement.id}-${quickSale.productDialog.initialVariantId ?? quickSale.productDialog.item.variant.id}-${quickSale.productDialog.lineId ?? 'new'}`}
         onAdd={(sellable, selection, item, sourceElement) => restaurant.posView.type === 'table_order'
           ? restaurant.addLine(sellable, selection, item, quickSale.productDialog?.lineId, sourceElement)
-          : quickSale.addLine(sellable, selection, item, sourceElement)}
+          : quickSale.productDialog?.lineId
+            ? quickSale.editLine(quickSale.productDialog.lineId, sellable, selection, item, sourceElement)
+            : quickSale.addLine(sellable, selection, item, sourceElement)}
         onCancel={quickSale.closeProductDialog}
       /> : null}
       {discountsEnabled && quickSale.discountModalOpen ? <DiscountModal

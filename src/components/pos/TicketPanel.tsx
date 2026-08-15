@@ -1,4 +1,4 @@
-import { Minus, Plus, Trash2 } from "lucide-react";
+import { Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
 import { formatMoney, getLineTotal } from "../../lib/format";
 import type { LineDiscountAllocation } from "../../lib/discounts";
@@ -6,6 +6,7 @@ import { getLineAdditionNames } from "../../lib/mixers";
 import type { TicketLine } from "../../types";
 import { cx } from "../../utils/cx";
 import { Button } from "../ui";
+import { MenuComponentDetails } from "./MenuComponentDetails";
 
 type TicketPanelProps = {
   isBusy: boolean;
@@ -13,6 +14,7 @@ type TicketPanelProps = {
   lines: TicketLine[];
   onClear: () => void;
   onDecrement: (lineId: string) => void;
+  onEdit: (line: TicketLine) => void;
   onIncrement: (lineId: string) => void;
   onRemove: (lineId: string) => void;
 };
@@ -33,6 +35,7 @@ export function TicketPanel({
   isBusy,
   lines,
   onDecrement,
+  onEdit,
   onIncrement,
   onRemove,
 }: TicketPanelProps) {
@@ -51,6 +54,7 @@ export function TicketPanel({
                 key={line.id}
                 line={line}
                 onDecrement={onDecrement}
+                onEdit={onEdit}
                 onIncrement={onIncrement}
                 discount={lineDiscounts[index]}
                 onRemove={onRemove}
@@ -67,6 +71,7 @@ type TicketLineRowProps = {
   isBusy: boolean;
   line: TicketLine;
   onDecrement: (lineId: string) => void;
+  onEdit: (line: TicketLine) => void;
   onIncrement: (lineId: string) => void;
   onRemove: (lineId: string) => void;
   discount?: LineDiscountAllocation;
@@ -77,6 +82,7 @@ function TicketLineRow({
   isBusy,
   line,
   onDecrement,
+  onEdit,
   onIncrement,
   onRemove,
 }: TicketLineRowProps) {
@@ -195,6 +201,7 @@ function TicketLineRow({
           <p className="text-sm text-[var(--muted)]">
             {additionNames.length ? ` + ${additionNames.join(", ")}` : ""}
           </p>
+          <MenuComponentDetails compact components={line.components} />
           <p className="mt-1 font-mono text-sm tabular-nums text-[var(--muted)]">
             {formatMoney(line.unitPriceCents)}/u
           </p>
@@ -218,6 +225,19 @@ function TicketLineRow({
           onPointerMove={(event) => event.stopPropagation()}
           onPointerUp={(event) => event.stopPropagation()}
         >
+          {line.components.some((component) => component.type === "menu_component") ? (
+            <Button
+              aria-label={`Editar selección de ${line.productName}`}
+              disabled={isBusy}
+              onClick={(event) => { event.stopPropagation(); onEdit(line); }}
+              size="lg"
+              title="Editar selección"
+              type="button"
+              variant="tertiary"
+            >
+              <Pencil className="h-4 w-4" />
+            </Button>
+          ) : null}
           <Button
             disabled={isBusy}
             onClick={(event) => handleQuantityClick(event, "decrement")}

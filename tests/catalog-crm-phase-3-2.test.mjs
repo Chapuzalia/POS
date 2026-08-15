@@ -112,7 +112,11 @@ test('product duplication preserves catalog values and remaps every product-owne
   }
   let nextId = 0
   const plan = buildProductDuplicationPlan(duplicationCatalog, source.id, () => `copy-${++nextId}`)
-  const [createProduct, placement, selectionAssignment, modifierAssignment] = plan.batch
+  const createProduct = plan.batch.find((command) => command.command === 'create_product')
+  const placement = plan.batch.find((command) => command.command === 'create_placement')
+  const selectionGroup = plan.batch.find((command) => command.command === 'save_selection_group')
+  const selectionAssignment = plan.batch.find((command) => command.command === 'save_assignment' && command.payload.domain === 'selection')
+  const modifierAssignment = plan.batch.find((command) => command.command === 'save_assignment' && command.payload.domain === 'modifier')
 
   assert.equal(createProduct.command, 'create_product')
   assert.deepEqual({
@@ -126,14 +130,20 @@ test('product duplication preserves catalog values and remaps every product-owne
     name: source.name,
     description: source.description,
     vatRate: source.vatRate,
-    active: source.active,
+    active: false,
   })
   assert.equal(createProduct.payload.variants[0].priceCents, 1500)
   assert.equal(placement.payload.productId, plan.productId)
   assert.equal(placement.payload.pinnedVariantId, createProduct.payload.variants[0].id)
+  assert.notEqual(selectionGroup.payload.id, 'sg')
   assert.equal(selectionAssignment.payload.domain, 'selection')
+  assert.equal(selectionAssignment.payload.groupId, selectionGroup.payload.id)
   assert.equal(modifierAssignment.payload.domain, 'modifier')
   assert.deepEqual(modifierAssignment.payload.variantIds, [createProduct.payload.variants[0].id])
+  assert.equal(plan.batch.at(-2).command, 'set_product_active')
+  assert.equal(plan.batch.at(-2).payload.active, true)
+  assert.equal(plan.batch.at(-1).command, 'update_placement')
+  assert.equal(plan.batch.at(-1).payload.active, true)
   assert.equal(plan.image.storagePath, source.image.storagePath)
 })
 

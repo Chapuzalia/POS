@@ -23,3 +23,17 @@ export function changeQuickSaleTicketLineQuantity(lines: TicketLine[], lineId: s
     .map((line) => line.id === lineId ? { ...line, quantity: line.quantity + direction } : line)
     .filter((line) => line.quantity > 0)
 }
+
+export function replaceQuickSaleTicketLine(
+  lines: TicketLine[],
+  lineId: string,
+  catalog: CatalogData,
+  sellable: ResolvedSellableProduct,
+  selection: ProductLineSelection,
+  item: ResolvedCatalogItem | null,
+) {
+  const current = lines.find((line) => line.id === lineId)
+  if (!current) return lines
+  const replacement = buildSaleLine(lineId, catalog, sellable, selection, item)
+  return lines.map((line) => line.id === lineId ? { ...replacement, quantity: current.quantity } : line)
+}

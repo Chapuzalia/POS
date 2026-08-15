@@ -132,7 +132,7 @@ export function getDefaultProductLineSelection(
   sellable: ResolvedSellableProduct,
 ): ProductLineSelection | null {
   const components: TicketLineComponent[] = sellable.selectionGroups.flatMap((resolvedGroup) => resolvedGroup.options
-    .filter((option) => option.defaultQuantity > 0)
+    .filter((option) => resolvedGroup.group.type !== 'menu_component' && option.defaultQuantity > 0)
     .map((option) => {
       const componentSellable = resolveSellableProduct(catalog, option.product.id, option.variant.id)
       return {

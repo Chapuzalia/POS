@@ -22,6 +22,8 @@ import type {
   RestaurantOrderDetail,
   RestaurantOrderLineMove,
 } from '../types'
+import { MenuComponentDetails } from '../../../components/pos/MenuComponentDetails'
+import { getMenuComponentSearchText } from '../../../components/pos/menuComponentSearch'
 
 type PendingPayment = {
   method: PaymentMethod | null
@@ -103,6 +105,7 @@ export function SplitOrderModal({
       line.productName,
       line.variantName,
       ...line.modifiers.map((modifier) => modifier.name),
+      getMenuComponentSearchText(line.components),
       line.mixer?.name,
       line.note,
     ].filter(Boolean).join(' ')).includes(normalizedSearchQuery))
@@ -268,6 +271,7 @@ export function SplitOrderModal({
                             line.note,
                           ].filter(Boolean).join(' · ')}
                         </span>
+                        <MenuComponentDetails compact components={line.components} />
                         <span className="mt-1 block font-mono text-sm">
                           {formatMoney(line.unitPriceCents * line.quantity)}
                         </span>

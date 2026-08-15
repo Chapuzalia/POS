@@ -9,7 +9,7 @@ import type {
   ResolvedCatalogSelectionOption,
   ResolvedSellableProduct,
 } from "../../features/catalog/domain/types";
-import { canonicalizeProductLineSelection } from "../../features/catalog/services/saleLineBuilder";
+import { calculateSaleLineTotals, canonicalizeProductLineSelection } from "../../features/catalog/services/saleLineBuilder";
 import type { AddCatalogLine } from "../../features/quick-sale/hooks/useQuickSale";
 import { formatMoney } from "../../lib/format";
 import type { ProductLineSelection, TicketLineModifier } from "../../types";
@@ -40,7 +40,7 @@ function defaultQuantities(
       resolvedGroup.group.id,
       Object.fromEntries(
         resolvedGroup.options
-          .filter((option) => option.defaultQuantity > 0)
+          .filter((option) => resolvedGroup.group.type !== "menu_component" && option.defaultQuantity > 0)
           .map((option) => [option.id, option.defaultQuantity]),
       ),
     ]),
@@ -333,6 +333,22 @@ export function ProductDialog({
       return false;
     }
   }, [catalog, selectedSellable, selection]);
+  const groupProgress = useMemo(() => menuAssignments.map((group) => {
+    const selected = Object.values(selectedQuantities[group.group.id] ?? {}).reduce((total, quantity) => total + quantity, 0);
+    return {
+      id: group.group.id,
+      label: group.assignment.displayName ?? group.group.name,
+      selected,
+      complete: selected >= group.assignment.minSelection && selected <= group.assignment.maxSelection,
+      minimum: group.assignment.minSelection,
+      maximum: group.assignment.maxSelection,
+    };
+  }), [menuAssignments, selectedQuantities]);
+  const selectionTotals = useMemo(
+    () => calculateSaleLineTotals(selectedSellable.variant, selection.components, selection.modifiers),
+    [selectedSellable.variant, selection.components, selection.modifiers],
+  );
+  const missingSelections = groupProgress.filter((group) => !group.complete);
 
   useEffect(() => {
     if (!isClosing) return;
@@ -571,7 +587,7 @@ export function ProductDialog({
   return (
     <AppModal
       containerClassName={isChoosingMixer ? "!w-[calc(100vw-32px)] !p-0" : "!p-4"}
-      maxWidth={isChoosingMixer ? 1024 : 576}
+      maxWidth={isChoosingMixer || menuAssignments.length ? 1024 : 576}
       dialogClassName={cx(
         isChoosingMixer && "!w-full",
         isClosing &&
@@ -585,14 +601,14 @@ export function ProductDialog({
         ref={dialogRef}
         className={cx(
           "max-h-[calc(100svh-32px)] w-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]",
-          isChoosingMixer ? "max-w-none" : "max-w-xl",
+          isChoosingMixer || menuAssignments.length ? "max-w-none" : "max-w-xl",
           isClosing &&
             "pointer-events-none animate-[product-dialog-close_170ms_ease-out_forwards] motion-reduce:animate-none",
         )}
       >
         <div className="flex items-start justify-between gap-4">
           <h2 className="text-2xl font-bold">
-            {isChoosingVariant ? "Variante" : `${item.product.name} con`}
+            {isChoosingVariant ? "Variante" : item.product.type === "menu" ? item.product.name : `${item.product.name} con`}
           </h2>
           <Button
             disabled={isBusy || hasSubmitted}
@@ -714,14 +730,21 @@ export function ProductDialog({
         ) : null}
 
         {!isChoosingVariant && menuAssignments.length ? (
-          <div className="mt-5 space-y-4">
-            {menuAssignments.map((group) => (
+          <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
+            <div className="space-y-4">
+              <div className="flex flex-wrap gap-2" aria-label="Progreso del menú">
+                {groupProgress.map((group, index) => (
+                  <span className={cx("rounded-full px-3 py-1 text-xs font-bold", group.complete ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--warning-soft)] text-[var(--warning)]")} key={group.id}>
+                    {index + 1}. {group.label} · {group.selected}/{group.maximum}
+                  </span>
+                ))}
+              </div>
+              {menuAssignments.map((group) => (
               <div key={group.group.id}>
-                <p className="mb-2 text-sm font-semibold text-[var(--muted)]">
-                  {group.assignment.displayName ?? group.group.name} -
-                  selecciona entre {group.assignment.minSelection} y{" "}
-                  {group.assignment.maxSelection}
-                </p>
+                <div className="mb-2 flex items-center justify-between gap-3">
+                  <p className="text-base font-bold text-[var(--foreground)]">{group.assignment.displayName ?? group.group.name}</p>
+                  <span className="text-xs font-semibold text-[var(--muted)]">Elige {group.assignment.minSelection === group.assignment.maxSelection ? group.assignment.minSelection : `${group.assignment.minSelection}–${group.assignment.maxSelection}`}</span>
+                </div>
                 <div className="grid gap-2 sm:grid-cols-2">
                   {group.options.map((option) => {
                     const quantity =
@@ -740,12 +763,13 @@ export function ProductDialog({
                           active={selected}
                           disabled={hasSubmitted}
                           fullWidth
+                          className={selected ? "min-h-12" : "min-h-12 bg-(--field) !border-1"}
                           onClick={() => toggleOption(group, option)}
                           type="button"
                           variant="tertiary"
                         >
-                          <span className="flex w-full items-center justify-between gap-3">
-                            <span>{option.product.name}</span>
+                          <span className="flex w-full items-center  justify-between gap-3">
+                            <span className="text-left">{option.product.name}{option.variant.name ? <small className="mt-0.5 block text-[var(--muted)]">{option.variant.name}</small> : null}</span>
                             <span>
                               {option.supplementCents
                                 ? `+${formatMoney(option.supplementCents)}`
@@ -837,7 +861,25 @@ export function ProductDialog({
                   })}
                 </div>
               </div>
-            ))}
+              ))}
+            </div>
+            <aside className="h-fit rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4 lg:sticky lg:top-0">
+              <h3 className="text-base font-bold">Resumen del menú</h3>
+              <div className="mt-3 space-y-3">
+                {groupProgress.map((group) => (
+                  <div className="flex items-center justify-between gap-2 text-sm" key={group.id}>
+                    <span className="truncate">{group.label}</span>
+                    <strong className={group.complete ? "text-[var(--success)]" : "text-[var(--warning)]"}>{group.complete ? "Completo" : `Falta ${Math.max(0, group.minimum - group.selected)}`}</strong>
+                  </div>
+                ))}
+              </div>
+              <div className="mt-4 border-t border-[var(--separator)] pt-4">
+                <span className="text-sm text-[var(--muted)]">Total</span>
+                <strong className="mt-1 block font-mono text-2xl tabular-nums">{formatMoney(selectionTotals.grossBeforeDiscountCents)}</strong>
+                {selectionTotals.componentDeltaCents + selectionTotals.modifierDeltaCents !== 0 ? <span className="text-xs text-[var(--muted)]">Base {formatMoney(selectionTotals.basePriceCents)} · suplementos {formatMoney(selectionTotals.componentDeltaCents + selectionTotals.modifierDeltaCents)}</span> : null}
+              </div>
+              {missingSelections.length ? <p className="mt-4 rounded-[var(--radius)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">Completa {missingSelections.map((group) => group.label).join(', ')} para continuar.</p> : null}
+            </aside>
           </div>
         ) : null}
 
@@ -864,9 +906,10 @@ export function ProductDialog({
                       key={modifier.id}
                       onClick={() => toggleModifier(group, modifier.id)}
                       type="button"
+                      className="min-h-14 border-1"
                       variant="tertiary"
                     >
-                      <span className="flex w-full items-center justify-between gap-3">
+                      <span className="flex  w-full items-center justify-between gap-3">
                         <span>{modifier.name}</span>
                         <span className="font-mono tabular-nums">
                           {modifier.supplementCents
@@ -895,8 +938,9 @@ export function ProductDialog({
               type="button"
               variant="primary"
             >
-              {initialSelection ? "Guardar cambios" : "Añadir producto"}
+              {initialSelection ? "Guardar cambios" : item.product.type === "menu" ? "Añadir menú" : "Añadir producto"}
             </Button>
+            {!isSelectionValid && menuAssignments.length ? <p className="mt-2 text-center text-sm font-semibold text-[var(--warning)]">Revisa las elecciones pendientes antes de añadir el menú.</p> : null}
           </div>
         ) : null}
       </section>
