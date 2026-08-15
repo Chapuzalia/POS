@@ -46,6 +46,20 @@ test('calcula un descuento general y conserva la suma exacta por línea', () => 
   assert.deepEqual(result.lineAllocations.map((item) => item.discountAmountCents), [100, 200])
 })
 
+test('redondea un descuento porcentual de forma independiente en cada linea', () => {
+  const rule = { ...baseRule, value: 20, roundingIncrementCents: 50 }
+  const result = calculateDiscountForLines(
+    [line('absolut', null, 800), line('brugal', null, 1400, 2)],
+    toAppliedDiscount(rule),
+  )
+
+  assert.equal(result.eligibleSubtotalCents, 2200)
+  assert.deepEqual(result.lineAllocations.map((item) => item.discountAmountCents), [150, 300])
+  assert.deepEqual(result.lineAllocations.map((item) => item.netCents), [650, 1100])
+  assert.equal(result.discountAmountCents, 450)
+  assert.equal(result.totalCents, 1750)
+})
+
 test('solo descuenta el producto específico en un ticket mixto', () => {
   const rule = { ...baseRule, scope: 'specific', targets: [{ productId: 'a', variantId: null }] }
   const result = calculateDiscountForLines(
@@ -311,6 +325,9 @@ test('el editor y el TPV exponen la aplicación por ticket o por unidad para imp
   assert.match(migration, /fixed_application in \('ticket', 'unit'\)/)
   assert.match(migration, /fixed_value_cents::bigint \* line_quantity/)
   assert.match(migration, /fixed_value_cents::bigint \* tl\.quantity/)
+  assert.match(migration, /calculation_type = 'percentage' and rounding_increment is not null/)
+  assert.match(migration, /requested_amount := requested_amount \+ line_gross - line_net/)
+  assert.match(migration, /eligible and percentage_per_line/)
   assert.match(migration, /'fixedApplication', fixed_application/)
   assert.match(consolidated, /Migration: 20260815140000_apply_fixed_discounts_per_unit\.sql/)
 })

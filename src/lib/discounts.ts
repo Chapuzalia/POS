@@ -280,6 +280,40 @@ export function calculateDiscountForLines(
       totalCents: subtotalCents - roundedCalculation.discountAmountCents,
     }
   }
+  const roundedPercentagePerLine = discount?.calculationType === 'percentage'
+    && discount.roundingIncrementCents != null
+  if (roundedPercentagePerLine) {
+    const eligibleNet = eligibleGross.map((grossCents) => calculateDiscount(
+      grossCents,
+      'percentage',
+      discount.value,
+      discount.roundingIncrementCents,
+    ).totalCents)
+    const eligiblePositions = new Map(eligibleIndexes.map((lineIndex, position) => [lineIndex, position]))
+    const lineAllocations = lines.map((line, index) => {
+      const position = eligiblePositions.get(index)
+      if (position === undefined) {
+        return { eligible: false, grossCents: line.grossCents, discountAmountCents: 0, netCents: line.grossCents }
+      }
+      const netCents = eligibleNet[position]
+      return {
+        eligible: true,
+        grossCents: line.grossCents,
+        discountAmountCents: line.grossCents - netCents,
+        netCents,
+      }
+    })
+    const discountAmountCents = lineAllocations.reduce(
+      (total, allocation) => total + allocation.discountAmountCents,
+      0,
+    )
+    return {
+      eligibleSubtotalCents,
+      lineAllocations,
+      discountAmountCents,
+      totalCents: subtotalCents - discountAmountCents,
+    }
+  }
   const eligibleCalculation = calculateDiscount(
     eligibleSubtotalCents,
     discount?.calculationType,

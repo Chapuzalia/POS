@@ -247,6 +247,11 @@ begin
     else snapshot_value := (p_discount ->> 'value')::numeric; end if;
   end if;
 
+  if snapshot_type is not null and calculation_type = 'percentage'
+    and (snapshot_value <= 0 or snapshot_value > 100) then
+    raise exception 'Porcentaje no válido';
+  end if;
+
   for line_record in select value, ordinality from jsonb_array_elements(p_lines) with ordinality
   loop
     line_gross := (line_record.value ->> 'grossCents')::integer;
@@ -264,7 +269,15 @@ begin
       );
     if snapshot_type is not null and line_eligible then
       eligible_subtotal := eligible_subtotal + line_gross;
-      if calculation_type = 'fixed' and fixed_application = 'unit' then
+      if calculation_type = 'percentage' and rounding_increment is not null then
+        line_net := least(line_gross, greatest(0,
+          round(
+            (line_gross - round(line_gross * snapshot_value / 100)::integer)::numeric
+            / rounding_increment
+          )::integer * rounding_increment
+        ));
+        requested_amount := requested_amount + line_gross - line_net;
+      elsif calculation_type = 'fixed' and fixed_application = 'unit' then
         requested_amount := requested_amount + least(
           line_gross::bigint,
           fixed_value_cents::bigint * line_quantity
@@ -275,15 +288,16 @@ begin
 
   if snapshot_type is not null then
     if calculation_type = 'percentage' then
-      if snapshot_value <= 0 or snapshot_value > 100 then raise exception 'Porcentaje no válido'; end if;
-      requested_amount := round(eligible_subtotal * snapshot_value / 100)::integer;
+      if rounding_increment is null then
+        requested_amount := round(eligible_subtotal * snapshot_value / 100)::integer;
+      end if;
     else
       if fixed_value_cents <= 0 then raise exception 'Importe fijo no válido'; end if;
       if fixed_application = 'ticket' then requested_amount := fixed_value_cents; end if;
     end if;
     amount_cents := least(eligible_subtotal, requested_amount);
     eligible_net := eligible_subtotal - amount_cents;
-    if rounding_increment is not null then
+    if rounding_increment is not null and calculation_type <> 'percentage' then
       eligible_net := least(eligible_subtotal, greatest(0,
         round(eligible_net::numeric / rounding_increment)::integer * rounding_increment));
       amount_cents := eligible_subtotal - eligible_net;
@@ -318,7 +332,14 @@ begin
           and (t.variant_id is null or t.variant_id = nullif(line_record.value ->> 'variantId', '')::uuid)
       )
     );
-    if line_eligible and calculation_type = 'fixed' and fixed_application = 'unit' then
+    if line_eligible and calculation_type = 'percentage' and rounding_increment is not null then
+      line_net := least(line_gross, greatest(0,
+        round(
+          (line_gross - round(line_gross * snapshot_value / 100)::integer)::numeric
+          / rounding_increment
+        )::integer * rounding_increment
+      ));
+    elsif line_eligible and calculation_type = 'fixed' and fixed_application = 'unit' then
       line_base_net := greatest(
         0,
         line_gross::bigint - fixed_value_cents::bigint * line_quantity
@@ -392,6 +413,8 @@ declare
   line_net integer;
   eligible boolean;
   fixed_per_unit boolean;
+  percentage_per_line boolean;
+  percentage_value numeric;
   persisted_discount_total bigint;
   persisted_net_total bigint;
 begin
@@ -432,6 +455,11 @@ begin
     end if;
     fixed_per_unit := ticket_row.discount_value_type = 'fixed'
       and coalesce(ticket_row.discount_snapshot ->> 'fixedApplication', 'ticket') = 'unit';
+    percentage_per_line := ticket_row.discount_value_type = 'percentage'
+      and ticket_row.discount_rounding_increment_cents is not null;
+    if percentage_per_line then
+      percentage_value := (ticket_row.discount_snapshot ->> 'storedValue')::numeric;
+    end if;
     remaining_gross := eligible_total;
     remaining_net := eligible_total - ticket_row.discount_amount_cents;
     if fixed_per_unit then
@@ -467,7 +495,14 @@ begin
           where target ->> 'productId' = line_row.product_id::text
             and (target ->> 'variantId' is null or target ->> 'variantId' = line_row.variant_id::text)
         );
-      if eligible and fixed_per_unit then
+      if eligible and percentage_per_line then
+        line_net := least(line_row.line_total_cents, greatest(0,
+          round(
+            (line_row.line_total_cents - round(line_row.line_total_cents * percentage_value / 100)::integer)::numeric
+            / ticket_row.discount_rounding_increment_cents
+          )::integer * ticket_row.discount_rounding_increment_cents
+        ));
+      elsif eligible and fixed_per_unit then
         line_base_net := greatest(
           0,
           line_row.line_total_cents::bigint - fixed_value_cents::bigint * line_row.quantity
@@ -491,6 +526,13 @@ begin
           discount_amount_cents = line_total_cents - line_net
       where id = line_row.id;
     end loop;
+    select coalesce(sum(tl.discount_amount_cents), 0), coalesce(sum(tl.net_total_cents), 0)
+    into persisted_discount_total, persisted_net_total
+    from public.ticket_lines tl where tl.ticket_id = ticket_id_value;
+    if persisted_discount_total <> coalesce(ticket_row.discount_amount_cents, 0)
+      or persisted_net_total <> ticket_row.total_cents then
+      raise exception 'Las asignaciones por linea no coinciden con el ticket';
+    end if;
   end loop;
   return null;
 end;
