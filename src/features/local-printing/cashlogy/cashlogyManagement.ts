@@ -1,14 +1,11 @@
 import type {
   CashlogyAccounting,
+  CashlogyAvailableDenomination,
   CashlogyCashManagementOperation,
   CashlogyRequestedDenomination,
 } from '../types'
 
-export type CashlogyDenominationOption = {
-  valueCents: number
-  availableQuantity: number
-  kind: 'coin' | 'note'
-}
+export type CashlogyDenominationOption = CashlogyAvailableDenomination
 
 export function denominationTotalCents(denominations: CashlogyRequestedDenomination[]) {
   return denominations.reduce((total, denomination) => (
@@ -38,6 +35,30 @@ export function getDispensableDenominations(accounting: CashlogyAccounting | nul
     .filter((item) => item.recyclerCount > 0 && (!hasSpecificCapabilities || capabilities.get(item.valueCents)?.dispensable === true))
     .map((item) => ({ valueCents: item.valueCents, availableQuantity: item.recyclerCount, kind: item.kind }))
     .sort((left, right) => right.valueCents - left.valueCents)
+}
+
+export function suggestCashlogyDenominations(
+  options: CashlogyDenominationOption[],
+  targetCents: number,
+): CashlogyRequestedDenomination[] {
+  if (!Number.isInteger(targetCents) || targetCents <= 0) return []
+  let combinations = new Map<number, CashlogyRequestedDenomination[]>([[0, []]])
+  for (const option of [...options].sort((left, right) => right.valueCents - left.valueCents)) {
+    if (!Number.isInteger(option.valueCents) || option.valueCents <= 0 || option.availableQuantity <= 0) continue
+    const previous = [...combinations.entries()]
+    const next = new Map(combinations)
+    for (const [subtotal, denominations] of previous) {
+      const maximum = Math.min(option.availableQuantity, Math.floor((targetCents - subtotal) / option.valueCents))
+      for (let quantity = 1; quantity <= maximum; quantity += 1) {
+        const total = subtotal + option.valueCents * quantity
+        if (!next.has(total)) next.set(total, [...denominations, { valueCents: option.valueCents, quantity }])
+      }
+    }
+    combinations = next
+    const exact = combinations.get(targetCents)
+    if (exact) return exact
+  }
+  return []
 }
 
 export function cashlogyOperationResultCents(operation: CashlogyCashManagementOperation) {

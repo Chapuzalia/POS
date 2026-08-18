@@ -58,7 +58,7 @@ export function CashlogyOperationStatus({
               ? 'Retira el stacker de Cashlogy y vuelve a colocarlo para continuar.'
               : operation?.status === 'accepting'
                 ? 'Cashlogy está contando el efectivo introducido.'
-                : 'Mantén esta pantalla abierta hasta conocer el resultado real.'}
+                : 'Puedes volver al TPV; la operación seguirá controlada y podrás abrirla de nuevo para consultar su estado.'}
         </p>
       </div>
     </div>

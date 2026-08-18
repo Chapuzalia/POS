@@ -19,6 +19,7 @@ import {
   denominationTotalCents,
   getDispensableDenominations,
   selectedDenominations,
+  suggestCashlogyDenominations,
 } from '../cashlogy/cashlogyManagement'
 import { cashlogyManagementActiveStatuses } from '../cashlogy/cashlogyPolling'
 import { useCashlogyManagementStore, type CashlogyManagementState } from '../cashlogy/useCashlogyManagementStore'
@@ -88,11 +89,11 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
 
   const operationActive = Boolean(management.operation && cashlogyManagementActiveStatuses.has(management.operation.status))
   const operationBusy = management.isStarting || management.isMutating || operationActive
-  const critical = management.operation?.status === 'unknown'
-    || management.operation?.status === 'needs_attention'
-    || Boolean(management.intent && !management.operation && management.error)
   const ready = health?.enabled === true && health.ok === true && health.sessionState === 'ready'
-  const denominationOptions = useMemo(() => getDispensableDenominations(accounting), [accounting])
+  const denominationOptions = useMemo(() => {
+    const live = getDispensableDenominations(accounting)
+    return live.length ? live : management.intent?.denominationOptions ?? []
+  }, [accounting, management.intent?.denominationOptions])
   const chosenDenominations = useMemo(() => selectedDenominations(quantities), [quantities])
   const selectedTotalCents = useMemo(() => denominationTotalCents(chosenDenominations), [chosenDenominations])
 
@@ -151,13 +152,17 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     resetToOverview()
   }
 
+  const changeDenominationQuantity = useCallback((valueCents: number, quantity: number) => {
+    setQuantities((current) => ({ ...current, [valueCents]: quantity }))
+  }, [])
+
   const title = management.intent ? 'Operación Cashlogy' : view === 'withdraw'
     ? 'Retirar efectivo'
     : view === 'confirm_empty'
       ? 'Vaciar Cashlogy'
       : view === 'confirm_stacker' ? 'Retirar stacker' : 'Máquina de efectivo'
 
-  return <AppModal dismissDisabled={operationBusy || critical} label={title} maxWidth={980} onClose={closeModal}>
+  return <AppModal label={title} maxWidth={980} onClose={closeModal}>
     <section className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col overflow-hidden">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
         <div className="min-w-0">
@@ -172,7 +177,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
             {health?.device?.serialNumber ? ` · ${health.device.serialNumber}` : ''}
           </p>
         </div>
-        <Button aria-label="Cerrar" disabled={operationBusy} onClick={closeModal} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
+        <Button aria-label="Cerrar" onClick={closeModal} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
@@ -183,7 +188,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
           management={management}
           onCloseReviewed={closeModal}
           onCloseResolved={closeResolvedOperation}
-          onQuantitiesChange={(valueCents, quantity) => setQuantities((current) => ({ ...current, [valueCents]: quantity }))}
+          onQuantitiesChange={changeDenominationQuantity}
           quantities={quantities}
           selectedTotalCents={selectedTotalCents}
         /> : <>
@@ -193,6 +198,9 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
             : health?.activeCashManagementOperation
               ? 'Cashlogy informa de otra operación de efectivo activa.'
               : 'Cashlogy no está preparada para iniciar movimientos de efectivo.'}</Notice> : null}
+          {ready && !loadingDashboard && denominationOptions.length === 0 ? <Notice tone="warning">
+            Cashlogy no ha devuelto denominaciones dispensables. «Dar cambio» permanecerá deshabilitado para evitar iniciar una operación que no pueda completarse.
+          </Notice> : null}
 
           {view === 'overview' ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-5">
             {actions.map((action) => {
@@ -202,11 +210,11 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
                 <h3 className="mt-3 font-black">{action.title}</h3>
                 <p className="mt-1 min-h-16 flex-1 text-sm text-[var(--muted)]">{action.description}</p>
                 <Button
-                  disabled={!canManage || !ready || operationBusy || loadingDashboard}
+                  disabled={!canManage || !ready || operationBusy || loadingDashboard || (action.id === 'give_change' && denominationOptions.length === 0)}
                   fullWidth
                   onClick={() => {
                     if (action.id === 'refill') run(management.startRefill)
-                    else if (action.id === 'give_change') run(management.startGiveChange)
+                    else if (action.id === 'give_change') run(() => management.startGiveChange(denominationOptions))
                     else if (action.id === 'withdraw') setView('withdraw')
                     else if (action.id === 'empty') setView('confirm_empty')
                     else setView('confirm_stacker')
@@ -222,7 +230,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
             <p className="text-sm text-[var(--muted)]">Selecciona unidades del reciclador. Nunca se solicitarán más unidades que las indicadas como disponibles.</p>
             <CashlogyDenominationSelector
               disabled={operationBusy}
-              onChange={(valueCents, quantity) => setQuantities((current) => ({ ...current, [valueCents]: quantity }))}
+              onChange={changeDenominationQuantity}
               options={denominationOptions}
               quantities={quantities}
             />
@@ -279,7 +287,7 @@ type OperationViewProps = {
 }
 
 function OperationView(props: OperationViewProps) {
-  const { management } = props
+  const { denominationOptions, management, onQuantitiesChange, quantities } = props
   const operation = management.operation
   const type = management.intent!.type
   const active = Boolean(operation && cashlogyManagementActiveStatuses.has(operation.status))
@@ -287,18 +295,29 @@ function OperationView(props: OperationViewProps) {
   const busy = management.isStarting || management.isMutating
   const acceptedCents = operation?.acceptedCents ?? 0
 
+  useEffect(() => {
+    if (operation?.type !== 'give_change' || operation.status !== 'awaiting_dispense' || acceptedCents <= 0) return
+    if (Object.values(quantities).some((quantity) => quantity > 0)) return
+    const suggestion = suggestCashlogyDenominations(denominationOptions, acceptedCents)
+    for (const denomination of suggestion) {
+      onQuantitiesChange(denomination.valueCents, denomination.quantity)
+    }
+  }, [acceptedCents, denominationOptions, onQuantitiesChange, operation?.id, operation?.status, operation?.type, quantities])
+
   return <section className="grid gap-5">
     <CashlogyOperationStatus error={management.error} isPending={busy || management.isPolling} operation={operation} type={type} />
 
-    {type === 'refill' && operation?.status === 'accepting' ? <div className="flex justify-end">
+    {type === 'refill' && operation?.status === 'accepting' ? <div className="flex flex-wrap justify-end gap-2">
+      <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
       <Button disabled={busy} onClick={() => void management.finalizeRefill().catch(() => undefined)} size="lg" variant="primary">
-        {management.isMutating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null} Finalizar reposición
+        {management.isMutating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null} Detener y finalizar reposición
       </Button>
     </div> : null}
 
-    {type === 'give_change' && operation?.status === 'accepting' ? <div className="flex justify-end">
+    {type === 'give_change' && operation?.status === 'accepting' ? <div className="flex flex-wrap justify-end gap-2">
+      <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
       <Button disabled={busy || acceptedCents <= 0} onClick={() => void management.finalizeGiveChangeAdmission().catch(() => undefined)} size="lg" variant="primary">
-        {management.isMutating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null} Finalizar entrada
+        {management.isMutating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null} Cerrar entrada y elegir cambio
       </Button>
     </div> : null}
 
@@ -321,6 +340,11 @@ function OperationView(props: OperationViewProps) {
         size="lg"
         variant="primary"
       >Entregar cambio</Button>
+      <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
+    </div> : null}
+
+    {active && !critical && !['accepting', 'awaiting_dispense'].includes(operation?.status ?? '') ? <div className="flex justify-end">
+      <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
     </div> : null}
 
     {critical ? <div className="flex flex-wrap justify-end gap-2">

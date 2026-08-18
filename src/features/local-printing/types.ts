@@ -224,6 +224,12 @@ export type CashlogyRequestedDenomination = {
   quantity: number
 }
 
+export type CashlogyAvailableDenomination = {
+  valueCents: number
+  availableQuantity: number
+  kind: 'coin' | 'note'
+}
+
 export type CashlogyCashManagementOperation = {
   id: string
   requestId: string
@@ -257,6 +263,7 @@ export type CashlogyManagementIntent = {
   requestId: string
   type: CashlogyCashManagementType
   operationId: string | null
+  denominationOptions?: CashlogyAvailableDenomination[]
   createdAt: string
 }
 
