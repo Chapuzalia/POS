@@ -182,6 +182,28 @@ test('el selector usa céntimos, capacidades y límites fiables del reciclador',
   ], 700), [])
 })
 
+test('dar cambio propone denominaciones menores y admite capacidades parciales', () => {
+  const partialCapabilities = {
+    ...accounting,
+    denominations: {
+      ...accounting.denominations,
+      coins: [
+        ...accounting.denominations.coins,
+        { valueCents: 100, recyclerCount: 10, stackerCount: 0 },
+      ],
+    },
+  }
+  assert.deepEqual(getDispensableDenominations(partialCapabilities), [
+    { valueCents: 200, availableQuantity: 4, kind: 'coin' },
+    { valueCents: 100, availableQuantity: 10, kind: 'coin' },
+  ])
+  assert.deepEqual(suggestCashlogyDenominations([
+    { valueCents: 2000, availableQuantity: 1, kind: 'note' },
+    { valueCents: 1000, availableQuantity: 2, kind: 'note' },
+    { valueCents: 500, availableQuantity: 4, kind: 'note' },
+  ], 2000), [{ valueCents: 1000, quantity: 2 }])
+})
+
 test('los pollings terminan solo en estados terminales y permiten la fase awaiting_dispense', async () => {
   const transactionSequence = ['processing', 'dispensing_change', 'completed']
   let transactionCalls = 0
@@ -306,11 +328,13 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
   assert.match(modal, /finalizeGiveChangeAdmission/)
   assert.match(modal, /Volver al TPV/)
   assert.match(modal, /suggestCashlogyDenominations/)
+  assert.match(modal, /suggestedOperationId/)
   assert.match(managementStore, /persistIntent\(intent\)[\s\S]*createRequest/)
   assert.match(managementStore, /denominationOptions/)
   assert.match(managementStore, /if \(!startPromise\)/)
   assert.match(selector, /availableQuantity/)
   assert.match(selector, /targetCents/)
+  assert.match(selector, /Cambiar denominaciones/)
 })
 
 test('los ajustes permiten buscar, seleccionar e inicializar Cashlogy sin usar el dashboard', async () => {

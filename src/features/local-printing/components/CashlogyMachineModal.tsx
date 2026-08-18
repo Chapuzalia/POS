@@ -10,7 +10,7 @@ import {
   Vault,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AppModal, Button, Metric } from '../../../components/ui'
 import { formatMoney } from '../../../lib/format'
@@ -155,6 +155,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
   const changeDenominationQuantity = useCallback((valueCents: number, quantity: number) => {
     setQuantities((current) => ({ ...current, [valueCents]: quantity }))
   }, [])
+  const clearDenominationSelection = useCallback(() => setQuantities({}), [])
 
   const title = management.intent ? 'Operación Cashlogy' : view === 'withdraw'
     ? 'Retirar efectivo'
@@ -188,6 +189,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
           management={management}
           onCloseReviewed={closeModal}
           onCloseResolved={closeResolvedOperation}
+          onClearQuantities={clearDenominationSelection}
           onQuantitiesChange={changeDenominationQuantity}
           quantities={quantities}
           selectedTotalCents={selectedTotalCents}
@@ -281,6 +283,7 @@ type OperationViewProps = {
     | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'recover'>
   onCloseReviewed: () => void
   onCloseResolved: () => void
+  onClearQuantities: () => void
   onQuantitiesChange: (valueCents: number, quantity: number) => void
   quantities: Record<number, number>
   selectedTotalCents: number
@@ -294,9 +297,12 @@ function OperationView(props: OperationViewProps) {
   const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || (!operation && Boolean(management.error))
   const busy = management.isStarting || management.isMutating
   const acceptedCents = operation?.acceptedCents ?? 0
+  const suggestedOperationId = useRef<string | null>(null)
 
   useEffect(() => {
     if (operation?.type !== 'give_change' || operation.status !== 'awaiting_dispense' || acceptedCents <= 0) return
+    if (suggestedOperationId.current === operation.id) return
+    suggestedOperationId.current = operation.id
     if (Object.values(quantities).some((quantity) => quantity > 0)) return
     const suggestion = suggestCashlogyDenominations(denominationOptions, acceptedCents)
     for (const denomination of suggestion) {
@@ -329,6 +335,7 @@ function OperationView(props: OperationViewProps) {
       <CashlogyDenominationSelector
         disabled={busy}
         onChange={props.onQuantitiesChange}
+        onClear={props.onClearQuantities}
         options={props.denominationOptions}
         quantities={props.quantities}
         targetCents={acceptedCents}
