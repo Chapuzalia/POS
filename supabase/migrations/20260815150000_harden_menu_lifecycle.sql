@@ -84,6 +84,11 @@ declare
 begin
   select pg_get_functiondef('public.persist_catalog_order_line_draft(uuid,integer,jsonb)'::regprocedure)
     into definition;
+  -- Dollar-quoted function bodies preserve the line endings used when they
+  -- were created. Production may therefore contain CRLF even though this
+  -- migration is checked out with LF, which would make the guarded literal
+  -- replacement fail despite the function body being otherwise identical.
+  definition := replace(definition, chr(13), '');
   if position('CATALOG_SERVED_QUANTITY_EXCEEDED' in definition) = 0 then
     if position(old_served_guard in definition) = 0 then
       raise exception 'MENU_MIGRATION_SERVED_EDIT_SIGNATURE_NOT_FOUND';

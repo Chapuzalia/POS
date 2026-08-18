@@ -82,6 +82,7 @@ test('el ciclo queda protegido en POS, pagos, publicación, realtime, ticket det
   assert.match(posPage, /quickSale\.editLine/)
   assert.match(printing, /component\.type === 'menu_component'/)
   assert.match(migration, /source_order_line_id/)
+  assert.match(migration, /definition := replace\(definition, chr\(13\), ''\)/)
   assert.match(migration, /new\.default_quantity := 0/)
   assert.match(migration, /NESTED_MENU_NOT_ALLOWED/)
   assert.match(migration, /CATALOG_SELECTION_GROUP_SCOPE_INVALID/)
