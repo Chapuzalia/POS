@@ -8,7 +8,7 @@ export const productNavItems: CrmNavItem[] = [
   { id: 'products', label: 'Productos', icon: Boxes },
   { id: 'formats', label: 'Formatos', icon: Ruler },
   { id: 'categories', label: 'Categorías y pestañas', icon: LayoutGrid },
-  { id: 'selection-groups', label: 'Grupos de selección', icon: ListChecks },
+  { id: 'selection-groups', label: 'Mixers', icon: ListChecks },
   { id: 'modifiers', label: 'Modificadores', icon: Puzzle },
   { id: 'discounts', label: 'Descuentos', icon: Tags },
 ]
@@ -46,7 +46,7 @@ export function getSectionTitle(section: CrmSection) {
     products: 'Productos del catálogo',
     formats: 'Formatos de venta',
     categories: 'Categorías y pestañas del TPV',
-    'selection-groups': 'Grupos de selección reutilizables',
+    'selection-groups': 'Mixers y acompañamientos reutilizables',
     modifiers: 'Modificadores reutilizables',
     import: 'Importar y exportar catálogo',
     tables: 'Mesas y zonas del local',

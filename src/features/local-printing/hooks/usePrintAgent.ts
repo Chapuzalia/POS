@@ -12,6 +12,8 @@ export function usePrintAgent() {
     cashlogyConfigured: state.cashlogyConfigured,
     cashlogyTerminalCode: state.cashlogyTerminalCode,
     cashlogyHealth: state.cashlogyHealth,
+    cashlogyConnectors: state.cashlogyConnectors,
+    cashlogyConnectorsLoaded: state.cashlogyConnectorsLoaded,
     cashlogyReady: state.cashlogyConfigured
       && state.cashlogyHealth?.enabled === true
       && state.cashlogyHealth.ok === true
@@ -35,6 +37,9 @@ export function usePrintAgent() {
     isOpeningCashDrawer: state.isOpeningCashDrawer,
     isLoadingJobs: state.isLoadingJobs,
     isCheckingCashlogy: state.isCheckingCashlogy,
+    isLoadingCashlogyConnectors: state.isLoadingCashlogyConnectors,
+    isDiscoveringCashlogyConnectors: state.isDiscoveringCashlogyConnectors,
+    cashlogyConnectorAction: state.cashlogyConnectorAction,
     baseUrl: state.baseUrl,
     hasToken: Boolean(state.token),
     checkConnection: state.checkConnection,
@@ -51,6 +56,10 @@ export function usePrintAgent() {
     updatePreferences: state.updatePreferences,
     updateCashlogyConfiguration: state.updateCashlogyConfiguration,
     checkCashlogyHealth: state.checkCashlogyHealth,
+    loadCashlogyConnectors: state.loadCashlogyConnectors,
+    discoverCashlogyConnectors: state.discoverCashlogyConnectors,
+    selectCashlogyConnector: state.selectCashlogyConnector,
+    initializeCashlogyConnector: state.initializeCashlogyConnector,
     clearError: state.clearError,
     resetConfiguration: state.resetConfiguration,
     getDiagnosticReport: state.getDiagnosticReport,

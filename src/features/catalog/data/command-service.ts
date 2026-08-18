@@ -30,7 +30,7 @@ export class CatalogCommandService {
   }
 
   setProductActive(venueId: string, productId: string, active: boolean) {
-    return this.repository.executeCommand(venueId, 'set_product_active', { id: productId, active })
+    return this.repository.setProductPublished(venueId, productId, active)
   }
 
   deleteProduct(venueId: string, productId: string) {

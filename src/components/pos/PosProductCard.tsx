@@ -17,6 +17,8 @@ export function PosProductCard({
   item,
   onSelect,
 }: PosProductCardProps) {
+  const isMenu = item.product.type === "menu";
+  const menuCourseCount = item.selectionGroups.filter((group) => group.group.type === "menu_component").length;
   return (
     <button
       className="group flex min-h-[228px] w-full min-w-0 appearance-none flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-0 text-left text-[var(--foreground)] shadow-sm transition-[border-color,background-color,box-shadow,transform] hover:-translate-y-0.5 hover:border-[var(--accent)] hover:bg-[var(--accent-soft)] hover:shadow-md focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:pointer-events-none disabled:opacity-45"
@@ -25,6 +27,7 @@ export function PosProductCard({
       type="button"
     >
       <span className="relative grid aspect-square w-full shrink-0 place-items-center overflow-hidden bg-[var(--surface-secondary)] text-[var(--accent)]">
+        {isMenu ? <span className="absolute left-2 top-2 z-[1] rounded-full bg-[var(--foreground)] px-2.5 py-1 text-[11px] font-black uppercase tracking-wide text-[var(--background)]">Menú</span> : null}
         {item.image?.publicUrl ? (
           <img
             alt={item.product.name}
@@ -44,13 +47,13 @@ export function PosProductCard({
           </span>
           {formatCount > 1 ? (
             <span className="mt-1 block text-xs font-medium text-[var(--muted)]">
-              {formatCount} formatos
+              {formatCount} formatos{isMenu && menuCourseCount ? ` · ${menuCourseCount} elecciones` : ""}
             </span>
-          ) : null}
+          ) : isMenu && menuCourseCount ? <span className="mt-1 block text-xs font-medium text-[var(--muted)]">{menuCourseCount} elecciones</span> : null}
         </span>
         {formatCount === 1 ? (
           <span className="block font-mono text-lg font-black tabular-nums">
-            {formatMoney(item.basePriceCents)}
+            {isMenu ? "Desde " : ""}{formatMoney(item.basePriceCents)}
           </span>
         ) : null}
       </span>

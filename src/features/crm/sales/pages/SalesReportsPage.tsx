@@ -342,7 +342,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
         ) : (
           <SalesReportAggregateTable
             items={visibleAggregates}
-            labelHeading={activeView === 'products' ? 'Producto' : activeView === 'variants' ? 'Variante' : activeView === 'categories' ? 'Categoría' : activeView === 'tabs' ? 'Pestaña' : activeView === 'mixers' ? 'Mixer' : activeView === 'menu-components' ? 'Componente' : activeView === 'modifiers' ? 'Modificador' : 'Formato'}
+            labelHeading={activeView === 'products' ? 'Producto' : activeView === 'variants' ? 'Variante' : activeView === 'categories' ? 'Categoría' : activeView === 'tabs' ? 'Pestaña' : activeView === 'mixers' ? 'Mixer' : activeView === 'menu-components' ? 'Selección' : activeView === 'modifiers' ? 'Modificador' : 'Formato'}
             loading={!reports}
             onSort={handleSort}
             sortDirection={sortDirection}
@@ -699,9 +699,15 @@ export function SalesReportTicketModal({
                 <strong>{line.productName}</strong>
                 {line.modifiers.length ? (
                   <span>{line.modifiers.map((modifier) => `+ ${modifier.name}${modifier.priceCents ? ` (${formatMoney(modifier.priceCents)})` : ''}`).join(' · ')}</span>
-                ) : (
+                ) : !line.components.length ? (
                   <span>Sin modificadores</span>
-                )}
+                ) : null}
+                {line.components.length ? <div className="!mt-1.5 !grid !gap-1 !border-l-2 !border-[var(--crm-border)] !pl-2.5">
+                  {line.components.toSorted((left, right) => left.sortOrder - right.sortOrder).map((component) => <span className="!whitespace-normal" key={component.id}>
+                    <strong>{component.selectionGroupName || 'Elección'}</strong> · {component.quantity > 1 ? `${component.quantity} × ` : ''}{component.productName}{component.variantName ? ` (${component.variantName})` : ''}{component.priceDeltaCents ? ` · ${component.priceDeltaCents > 0 ? '+' : ''}${formatMoney(component.priceDeltaCents * component.quantity)}` : ''}
+                    {component.modifiers?.length ? ` · ${component.modifiers.map((modifier) => modifier.name).join(', ')}` : ''}
+                  </span>)}
+                </div> : null}
               </div>
               <span>{line.variantName || 'Sin formato'}</span>
               <span>{line.quantity}</span>

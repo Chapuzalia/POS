@@ -37,7 +37,7 @@ export function useQuickSalePayment(options: Options) {
     let cashlogyTransaction = null
     if (paymentMethod === 'cash') {
       try {
-        cashlogyTransaction = await settleCashlogyPaymentIfConfigured(preview.sale.totalCents)
+        cashlogyTransaction = await settleCashlogyPaymentIfConfigured(preview.sale.totalCents, preview.sale.id)
       } catch (error) {
         options.onError(error instanceof Error ? error.message : 'No se pudo completar el cobro con Cashlogy.')
         return

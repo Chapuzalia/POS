@@ -1,3 +1,14 @@
+# TICKIT CRM — Menu editor context
+
+The menu editor is part of the CRM, not the touch-first POS reservation workspace. For menu-editor drafts, this section takes precedence over the reservations section below.
+
+- Preserve the current React/HeroUI/Tailwind CRM language and Inter font.
+- Use CRM tokens: canvas `#f3f5f7`, surface `#ffffff`, soft surface `#f1f4f7`, input `#f8fafc`, primary text `#15171a`, secondary `#5d6269`, muted `#858b93`, border `#d4dae2`, subtle border `#e1e5ea`, blue action `#1478ed`, green `#16b865`, red `#e73567`.
+- Controls use 10px radii, cards 14–20px, restrained borders, and the existing CRM shadow only for elevated panels/popovers.
+- Product selectors must remain compact and operational. Search and category filtering belong inside the open selector panel, above its scrollable options. A selected product may receive a euro supplement before being added.
+- Never preselect a menu option. Supplements are explicit and default to `0,00 €`.
+- Use Lucide outline icons, visible focus, 44px touch targets where practical, and no gradients, illustrations, decorative fonts, or new colors.
+
 # TICKIT POS — Reservations design system
 
 ## Product and task context

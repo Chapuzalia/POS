@@ -5,6 +5,7 @@ import { resolveCatalogItem } from '../src/features/catalog/domain/resolver.ts'
 import {
   buildSaleLine,
   calculateSaleLineTotals,
+  getDefaultProductLineSelection,
   getSaleLineConsumption,
   validateProductLineSelection,
   wouldCreateMenuCycle,
@@ -82,6 +83,8 @@ test('el suplemento del mixer es contextual, usa pricing único y crea snapshot 
 test('menús validan mínimos, calculan una vez y proyectan consumo sin doble decremento', () => {
   const catalog = catalogFixture('menu_component')
   const item = resolveCatalogItem(catalog, 'placement')
+  catalog.selectionOptions[0].defaultQuantity = 1
+  assert.equal(getDefaultProductLineSelection(catalog, item), null)
   assert.throws(() => validateProductLineSelection(catalog, item, { modifiers: [], components: [], mixerProductId: null, mixer: null }), /Primer plato/)
   const component = selectedComponent('menu_component', 400)
   const selection = { modifiers: [], components: [component], mixerProductId: null, mixer: null }

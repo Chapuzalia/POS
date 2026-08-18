@@ -39,6 +39,45 @@ export type CashlogySessionState =
   | 'disabled' | 'disconnected' | 'connecting' | 'connected' | 'initializing'
   | 'ready' | 'busy' | 'error' | 'reconnecting'
 
+export type CashlogyConnector = {
+  id: string
+  host: string
+  port: number
+  reachable: boolean
+  processRunning?: boolean
+  connected?: boolean
+  initialized: boolean
+  selected?: boolean
+  protocolVersion: string | null
+  lastConnectedAt: string | null
+  lastError?: CashlogyRemoteError | null
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CashlogyDevice = {
+  id?: string
+  connectorId?: string
+  model: string | null
+  serialNumber: string | null
+  versionInfoJson?: unknown
+  versionInfoRaw?: string | null
+  versionInfoParsed?: boolean
+  currency?: string
+  ready: boolean
+  lastInspectedAt?: string
+  createdAt?: string
+  updatedAt?: string
+}
+
+export type CashlogyRemoteError = {
+  code: string
+  message?: string | null
+  originalCode?: string | null
+  details?: unknown
+  at?: string
+}
+
 export type CashlogyActiveStatus =
   | 'queued' | 'connecting' | 'initializing' | 'starting_acceptance'
   | 'waiting_for_cash' | 'finalizing_acceptance' | 'dispensing_change' | 'processing'
@@ -49,26 +88,19 @@ export type CashlogyTransactionStatus = CashlogyActiveStatus | CashlogyTerminalS
 export type CashlogyHealth = {
   ok: boolean
   enabled: boolean
-  adapter: 'legacy-v2.5' | 'legacy-v2.5-headless' | 'mock'
+  adapter: string
   sessionState: CashlogySessionState
+  processDetectionAvailable: boolean
   processRunning: boolean
-  connector: {
-    id: string
-    host: string
-    port: number
-    reachable: boolean
-    connected: boolean
-    initialized: boolean
-    protocolVersion: string | null
-    lastConnectedAt: string | null
-  } | null
-  device: { model: string | null; serialNumber: string | null; ready: boolean } | null
+  connector: CashlogyConnector | null
+  device: CashlogyDevice | null
   activeTransaction: { id: string; requestId: string; status: string } | null
-  lastError: { code: string; message: string; at: string } | null
+  activeCashManagementOperation: { id: string; requestId: string; type: string; status: string } | null
+  busyReason: string | null
+  lastError: CashlogyRemoteError | null
 }
 
 export type CashlogyTotal = {
-  resultCode: string
   recyclerTotalCents: number
   stackerTotalCents: number
   totalCents: number
@@ -82,36 +114,59 @@ export type CashlogyDenomination = {
 }
 
 export type CashlogyDenominations = {
-  resultCode: string
   coins: CashlogyDenomination[]
   notes: CashlogyDenomination[]
   queriedAt: string
 }
 
-export type CashlogyBackofficePreset = {
-  status: boolean
-  addChange: boolean
-  manualOneCent: boolean
-  withdrawCash: boolean
-  removeStacker: boolean
-  completeEmptying: boolean
-  giveChange: boolean
-  cashClosing: boolean
-  viewLogs: boolean
-  resetCoins: boolean
-  statistics: boolean
-  showOnTop: boolean
-  maintenance: boolean
+export type CashlogyLevelState = 'ok' | 'empty' | 'near_empty' | 'full' | 'near_full' | 'unknown'
+
+export type CashlogyLevel = {
+  index: number
+  valueCents: number
+  stateCode: number
+  state: CashlogyLevelState
+  percentage: number | null
 }
 
-export type CashlogyBackofficeResponse = {
-  resultCode: string
-  amountAtEntry: number | null
-  amountAtExit: number | null
-  amountIntroduced: number | null
-  amountWithdrawn: number | null
-  pendingRefund: number | null
-  accountingAdjustment: number | null
+export type CashlogyLevels = {
+  levels: CashlogyLevel[]
+  queriedAt: string
+}
+
+export type CashlogyCapability = {
+  valueCents: number | null
+  capabilityCode: number
+  depositable: boolean
+  dispensable: boolean
+}
+
+export type CashlogyCapabilities = {
+  currency: string
+  capabilities: CashlogyCapability[]
+  queriedAt: string
+}
+
+export type CashlogyAccounting = {
+  total: CashlogyTotal
+  denominations: CashlogyDenominations
+  levels: CashlogyLevels
+  capabilities: CashlogyCapabilities
+  queriedAt: string
+}
+
+export type CashlogyDeviceErrorType =
+  | 'warning' | 'user_recoverable' | 'technical_recoverable' | 'fatal' | 'unknown'
+
+export type CashlogyDeviceError = {
+  code: string
+  type: CashlogyDeviceErrorType
+  title: string | null
+  mainMessage: string | null
+  additionalMessage: string | null
+  videoPath: string | null
+  imagePath: string | null
+  requiresTechnicalIntervention: boolean
 }
 
 export type CashlogyTransaction = {
@@ -142,10 +197,67 @@ export type CashlogyTransaction = {
 
 export type CashlogyChargeRequest = {
   requestId: string
-  saleId: string | null
+  saleId?: string | null
   amountCents: number
   terminalCode: string
-  test?: false
+  options?: {
+    showSecondScreen?: boolean
+    secondScreenX?: number
+    secondScreenY?: number
+    showAcceptButton?: boolean
+    allowPartialPayment?: boolean
+    showScreenOnTop?: boolean
+    allowManualCents?: boolean
+    showManualPaymentButton?: boolean
+  }
+  test?: boolean
+  confirmRealCash?: boolean
+}
+
+export type CashlogyCashManagementType = 'refill' | 'give_change' | 'withdraw' | 'empty' | 'remove_stacker'
+export type CashlogyCashManagementActiveStatus =
+  | 'starting' | 'accepting' | 'finalizing_acceptance' | 'awaiting_dispense' | 'dispensing' | 'processing'
+export type CashlogyCashManagementStatus = CashlogyCashManagementActiveStatus | CashlogyTerminalStatus
+
+export type CashlogyRequestedDenomination = {
+  valueCents: number
+  quantity: number
+}
+
+export type CashlogyCashManagementOperation = {
+  id: string
+  requestId: string
+  connectorId: string
+  type: CashlogyCashManagementType
+  status: CashlogyCashManagementStatus
+  requestedAmountCents: number | null
+  acceptedCents: number | null
+  dispensedCents: number | null
+  denominationsRequested: CashlogyRequestedDenomination[] | null
+  denominationsDispensed: CashlogyRequestedDenomination[] | null
+  changeAddedCents: number | null
+  stackerCollectionRequired?: boolean
+  resultCode: string | null
+  normalizedErrorCode: string | null
+  error: CashlogyRemoteError | null
+  warning?: CashlogyRemoteError | null
+  startedAt: string | null
+  completedAt: string | null
+  createdAt: string
+  updatedAt: string
+}
+
+export type CashlogyOperationResponse = {
+  ok: boolean
+  duplicate: boolean
+  operation: CashlogyCashManagementOperation
+}
+
+export type CashlogyManagementIntent = {
+  requestId: string
+  type: CashlogyCashManagementType
+  operationId: string | null
+  createdAt: string
 }
 
 export type CashlogyIntent = {
@@ -154,6 +266,18 @@ export type CashlogyIntent = {
   amountCents: number
   terminalCode: string
   transactionId: string | null
+  createdAt: string
+}
+
+export type CashlogyDiagnosticLog = {
+  id: string
+  connectorId: string
+  commandName: string
+  durationMs: number
+  resultCode: string | null
+  outcome: string
+  requestFrameSanitized: string | null
+  responseFrameSanitized: string | null
   createdAt: string
 }
 

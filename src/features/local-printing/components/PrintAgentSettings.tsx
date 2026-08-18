@@ -11,22 +11,23 @@ import { PrintAgentStatusBadge } from './PrintAgentStatusBadge'
 import { PrintErrorAlert } from './PrintErrorAlert'
 import { PrintJobsTable } from './PrintJobsTable'
 import { PrinterList } from './PrinterList'
+import { CashlogyConnectorList } from './CashlogyConnectorList'
 
 export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigure: boolean; canOpenDrawer: boolean }) {
   const agent = usePrintAgent()
   const [wizardOpen, setWizardOpen] = useState(false)
   const [certificateHelpOpen, setCertificateHelpOpen] = useState(false)
   const [feedback, setFeedback] = useState<string | null>(null)
-  const { checkCashlogyHealth, connectionStatus, hasToken, loadJobs, loadPrinters, loadServerInfo } = agent
+  const { checkCashlogyHealth, connectionStatus, hasToken, loadCashlogyConnectors, loadJobs, loadPrinters, loadServerInfo } = agent
 
   useEffect(() => {
     if (connectionStatus === 'connected' && hasToken) {
       void Promise.allSettled([
         loadServerInfo(), loadPrinters(), loadJobs(),
-        ...(agent.cashlogyConfigured ? [checkCashlogyHealth()] : []),
+        ...(agent.cashlogyConfigured ? [checkCashlogyHealth(), loadCashlogyConnectors()] : []),
       ])
     }
-  }, [agent.cashlogyConfigured, checkCashlogyHealth, connectionStatus, hasToken, loadJobs, loadPrinters, loadServerInfo])
+  }, [agent.cashlogyConfigured, checkCashlogyHealth, connectionStatus, hasToken, loadCashlogyConnectors, loadJobs, loadPrinters, loadServerInfo])
 
   async function run(action: () => Promise<unknown>, message: string) {
     setFeedback(null)
@@ -38,7 +39,9 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
     setFeedback('Informe técnico copiado sin token ni contenido de tickets.')
   }
 
-  const busy = agent.isCheckingConnection || agent.isCheckingCashlogy || agent.isDiscovering || agent.isSelectingPrinter || agent.isTestingPrinter || agent.isOpeningCashDrawer
+  const cashlogyOperationActive = Boolean(agent.cashlogyHealth?.activeTransaction || agent.cashlogyHealth?.activeCashManagementOperation)
+  const cashlogySetupBusy = agent.isCheckingCashlogy || agent.isLoadingCashlogyConnectors || agent.isDiscoveringCashlogyConnectors || Boolean(agent.cashlogyConnectorAction)
+  const busy = agent.isCheckingConnection || cashlogySetupBusy || agent.isDiscovering || agent.isSelectingPrinter || agent.isTestingPrinter || agent.isOpeningCashDrawer
   return <div className="grid gap-5">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-[var(--accent)]">Ajustes · Hardware</p><h2 className="text-2xl font-black">Impresión local</h2><p className="text-sm text-[var(--muted)]">Agente HTTPS de esta terminal.</p></div><PrintAgentStatusBadge /></div>
     {agent.lastError ? <PrintErrorAlert error={agent.lastError} onClose={agent.clearError} /> : null}
@@ -52,7 +55,10 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="flex items-center gap-3"><Coins className="h-5 w-5" /><div><h3 className="font-black">Cashlogy</h3><p className="text-sm text-[var(--muted)]">Cobro automático de pagos en efectivo.</p></div></div>
-        <Button disabled={busy || !agent.cashlogyConfigured || !agent.hasToken} onClick={() => void run(agent.checkCashlogyHealth, 'Estado de Cashlogy actualizado.')} size="sm"><RefreshCw className={`h-4 w-4 ${agent.isCheckingCashlogy ? 'animate-spin' : ''}`} />Consultar estado</Button>
+        <div className="flex flex-wrap gap-2">
+          <Button disabled={busy || !agent.cashlogyConfigured || !agent.hasToken} onClick={() => void run(async () => { await Promise.all([agent.checkCashlogyHealth(), agent.loadCashlogyConnectors()]) }, 'Estado de Cashlogy actualizado.')} size="sm"><RefreshCw className={`h-4 w-4 ${agent.isCheckingCashlogy || agent.isLoadingCashlogyConnectors ? 'animate-spin' : ''}`} />Actualizar</Button>
+          <Button disabled={busy || !canConfigure || !agent.cashlogyConfigured || !agent.hasToken || cashlogyOperationActive} onClick={() => void run(agent.discoverCashlogyConnectors, 'Búsqueda de máquinas Cashlogy completada.')} size="sm" variant="primary"><Network className={`h-4 w-4 ${agent.isDiscoveringCashlogyConnectors ? 'animate-pulse' : ''}`} />Buscar máquinas</Button>
+        </div>
       </div>
       <UiCheckbox checked={agent.cashlogyConfigured} className="mt-4 min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} onChange={(checked) => agent.updateCashlogyConfiguration({ configured: checked })}>
         <span><strong className="block">Este establecimiento usa Cashlogy</strong><small className="text-[var(--muted)]">Oculta y bloquea el cajón de la impresora incluso si Cashlogy se desconecta.</small></span>
@@ -65,6 +71,18 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
         <Metric label="Conexión" value={agent.cashlogyHealth?.connector?.connected ? 'Conectado' : 'Desconectado'} />
         <Metric label="Inicialización" value={agent.cashlogyHealth?.connector?.initialized ? 'Inicializado' : 'No inicializado'} />
         <Metric label="Accesible" value={agent.cashlogyHealth?.connector?.reachable ? 'Sí' : 'No'} />
+      </div> : null}
+      {agent.cashlogyConfigured ? <div className="mt-4 grid gap-3">
+        {agent.cashlogyHealth?.enabled === false ? <div className="rounded-[var(--radius)] border border-amber-500/35 bg-amber-500/10 p-3 text-sm font-semibold text-amber-800 dark:text-amber-200">El módulo Cashlogy está deshabilitado en el agente de impresión. Debe habilitarse allí antes de buscar la máquina.</div> : null}
+        {cashlogyOperationActive ? <div className="rounded-[var(--radius)] border border-amber-500/35 bg-amber-500/10 p-3 text-sm font-semibold text-amber-800 dark:text-amber-200">Hay un cobro u operación de efectivo en curso. Termínalo antes de cambiar la máquina Cashlogy.</div> : null}
+        <CashlogyConnectorList
+          action={agent.cashlogyConnectorAction}
+          connectors={agent.cashlogyConnectors}
+          disabled={cashlogySetupBusy || !canConfigure || !agent.hasToken || cashlogyOperationActive}
+          loaded={agent.cashlogyConnectorsLoaded}
+          onInitialize={(connectorId) => void run(() => agent.initializeCashlogyConnector(connectorId), 'Cashlogy inicializada y lista para usar.')}
+          onSelect={(connectorId) => void run(() => agent.selectCashlogyConnector(connectorId), 'Máquina Cashlogy seleccionada.')}
+        />
       </div> : null}
     </section>
 

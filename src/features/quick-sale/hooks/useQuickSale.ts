@@ -19,7 +19,7 @@ import type {
   TicketLine,
 } from '../../../types'
 import { addProductSalesStats } from '../services/productSalesStats'
-import { addQuickSaleTicketLine, changeQuickSaleTicketLineQuantity } from '../services/ticketLines'
+import { addQuickSaleTicketLine, changeQuickSaleTicketLineQuantity, replaceQuickSaleTicketLine } from '../services/ticketLines'
 import { applyQuickSaleLinesUpdate } from '../services/lineUpdates'
 import { useQuickSalePayment } from './useQuickSalePayment'
 
@@ -164,6 +164,20 @@ export function useQuickSale(options: Options) {
     return true
   }, [options, updateLines])
 
+  const editLine = useCallback((
+    lineId: string,
+    sellable: ResolvedSellableProduct,
+    selection: ProductLineSelection,
+    item: ResolvedCatalogItem | null,
+    sourceElement?: HTMLElement | null,
+  ) => {
+    const catalog = options.catalog
+    if (!catalog) return false
+    updateLines((previous) => replaceQuickSaleTicketLine(previous, lineId, catalog, sellable, selection, item))
+    options.onAddFeedback({ feedbackType: 'updated', productName: sellable.product.name, sourceElement })
+    return true
+  }, [options, updateLines])
+
   const selectProduct = useCallback((
     item: ResolvedCatalogItem,
     allowVariantSelection: boolean,
@@ -172,11 +186,13 @@ export function useQuickSale(options: Options) {
   ) => {
     if (!options.catalog) return
     const hasConfiguredSelections = item.selectionGroups.length > 0 || item.modifierGroups.length > 0
-    const defaultSelection = !allowVariantSelection && hasConfiguredSelections
+    const isMenu = item.product.type === 'menu'
+    const defaultSelection = !isMenu && !allowVariantSelection && hasConfiguredSelections
       ? getDefaultProductLineSelection(options.catalog, item)
       : null
     const variantCount = options.catalog.variants.filter((variant) => variant.productId === item.product.id && variant.active).length
-    const needsDialog = (hasConfiguredSelections && !defaultSelection)
+    const needsDialog = isMenu
+      || (hasConfiguredSelections && !defaultSelection)
       || (allowVariantSelection && variantCount > 1)
     if (!needsDialog) {
       onImmediateAdd(
@@ -229,6 +245,7 @@ export function useQuickSale(options: Options) {
     discount: activeDiscount,
     discountAmountCents: discountCalculation.discountAmountCents,
     discountModalOpen,
+    editLine,
     hydrate: (nextLines: TicketLine[]) => setLines(nextLines),
     lineDiscounts: discountCalculation.lineAllocations,
     lines,

@@ -177,6 +177,6 @@ export const salesReportTabs: Array<{ id: SalesReportView; label: string }> = [
   { id: 'formats', label: 'Por formato' },
   { id: 'tabs', label: 'Por pestaña' },
   { id: 'mixers', label: 'Por mixer' },
-  { id: 'menu-components', label: 'Componentes de menú' },
+  { id: 'menu-components', label: 'Selecciones de menú' },
   { id: 'modifiers', label: 'Modificadores' },
 ]

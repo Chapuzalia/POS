@@ -124,6 +124,20 @@ export class CatalogRepository {
     }
   }
 
+  async setProductPublished(venueId: string, productId: string, active: boolean) {
+    try {
+      const { error } = await this.client.rpc('set_catalog_product_published', {
+        p_venue_id: venueId,
+        p_product_id: productId,
+        p_active: active,
+      })
+      if (error) throw error
+      this.invalidate(venueId)
+    } catch (error) {
+      throw toCatalogDomainError(error)
+    }
+  }
+
   async executeBatch(venueId: string, commands: readonly CatalogBatchCommand[]) {
     try {
       const { data, error } = await this.client.rpc('catalog_command_batch', {

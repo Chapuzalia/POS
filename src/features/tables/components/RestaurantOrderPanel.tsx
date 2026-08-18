@@ -1,10 +1,11 @@
-import { Check, CheckCheck, Minus, Plus, Trash2 } from 'lucide-react'
+import { Check, CheckCheck, Minus, Pencil, Plus, Trash2 } from 'lucide-react'
 import { formatMoney } from '../../../lib/format'
 import { getLineAdditionNames } from '../../../lib/mixers'
 import type { LineDiscountAllocation } from '../../../lib/discounts'
 import { Button } from '../../../components/ui'
 import { canDecreaseLineQuantity, getOrderPendingUnits, getPendingQuantity } from '../service-status'
 import type { RestaurantOrderDetail, RestaurantOrderLine } from '../types'
+import { MenuComponentDetails } from '../../../components/pos/MenuComponentDetails'
 
 type Props = {
   isBusy: boolean
@@ -19,7 +20,7 @@ type Props = {
   onServeOne: (lineId: string) => void
 }
 
-function OrderLineRow({ discount, isBusy, line, onDecrement, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder' | 'lineDiscounts'> & { discount?: LineDiscountAllocation; line: RestaurantOrderLine }) {
+function OrderLineRow({ discount, isBusy, line, onDecrement, onEdit, onIncrement, onRemove, onServeAll, onServeOne }: Omit<Props, 'order' | 'onServeAllOrder' | 'lineDiscounts'> & { discount?: LineDiscountAllocation; line: RestaurantOrderLine }) {
   const pending = getPendingQuantity(line)
   const additionNames = getLineAdditionNames(line.modifiers, line.mixer)
   return (
@@ -28,6 +29,7 @@ function OrderLineRow({ discount, isBusy, line, onDecrement, onIncrement, onRemo
         <div className="min-w-0">
           <p className="truncate font-bold">{line.quantity}x - {line.productName}</p>
           {additionNames.length ? <p className="text-sm text-[var(--muted)]">+ {additionNames.join(', ')}</p> : null}
+          <MenuComponentDetails compact components={line.components} />
           <p className="mt-1 text-sm font-semibold text-[var(--muted)]">
             {pending === 0 ? 'Todo servido' : `${line.servedQuantity} servidas - ${pending} ${pending === 1 ? 'pendiente' : 'pendientes'}`}
           </p>
@@ -38,6 +40,7 @@ function OrderLineRow({ discount, isBusy, line, onDecrement, onIncrement, onRemo
           </p> : <p className="mt-1 font-mono text-sm">{formatMoney(line.unitPriceCents * line.quantity)}</p>}
         </div>
         <div className="flex items-center gap-1">
+          {line.components.some((component) => component.type === 'menu_component') ? <Button aria-label="Editar selección del menú" disabled={isBusy} onClick={() => onEdit(line)} size="sm" title="Editar selección" type="button" variant="tertiary"><Pencil className="h-4 w-4" /></Button> : null}
           <Button aria-label="Reducir cantidad" disabled={isBusy || !canDecreaseLineQuantity(line)} onClick={() => onDecrement(line.id)} size="sm" type="button" variant="tertiary"><Minus className="h-4 w-4" /></Button>
           <span className="w-7 text-center font-mono font-bold">{line.quantity}</span>
           <Button aria-label="Aumentar cantidad" disabled={isBusy} onClick={() => onIncrement(line.id)} size="sm" type="button" variant="tertiary"><Plus className="h-4 w-4" /></Button>
