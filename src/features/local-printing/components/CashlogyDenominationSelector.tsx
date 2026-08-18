@@ -5,19 +5,24 @@ import type { CashlogyDenominationOption } from '../cashlogy/cashlogyManagement'
 
 type Props = {
   disabled?: boolean
+  onClear?: () => void
   options: CashlogyDenominationOption[]
   quantities: Record<number, number>
   targetCents?: number
   onChange: (valueCents: number, quantity: number) => void
 }
 
-export function CashlogyDenominationSelector({ disabled, onChange, options, quantities, targetCents }: Props) {
+export function CashlogyDenominationSelector({ disabled, onChange, onClear, options, quantities, targetCents }: Props) {
   const selectedTotalCents = options.reduce((total, option) => (
     total + option.valueCents * (quantities[option.valueCents] ?? 0)
   ), 0)
   const remainingCents = targetCents === undefined ? null : targetCents - selectedTotalCents
 
   return <section aria-label="Selector de denominaciones" className="grid gap-3">
+    {onClear && selectedTotalCents > 0 ? <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3">
+      <p className="text-sm text-[var(--muted)]">Puedes borrar la propuesta y formar cualquier combinación que sume el importe.</p>
+      <Button disabled={disabled} onClick={onClear} type="button" variant="tertiary">Cambiar denominaciones</Button>
+    </div> : null}
     <div className="grid gap-2 sm:grid-cols-2">
       {options.map((option) => {
         const quantity = quantities[option.valueCents] ?? 0
