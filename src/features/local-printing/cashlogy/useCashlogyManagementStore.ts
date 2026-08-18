@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { createPrintAgentClient } from '../api/printAgentClient'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
 import type {
+  CashlogyAvailableDenomination,
   CashlogyCashManagementOperation,
   CashlogyCashManagementType,
   CashlogyManagementIntent,
@@ -27,7 +28,7 @@ export type CashlogyManagementState = {
   open: () => void
   hide: () => void
   startRefill: () => Promise<CashlogyCashManagementOperation>
-  startGiveChange: () => Promise<CashlogyCashManagementOperation>
+  startGiveChange: (denominationOptions: CashlogyAvailableDenomination[]) => Promise<CashlogyCashManagementOperation>
   withdraw: (denominations: CashlogyRequestedDenomination[]) => Promise<CashlogyCashManagementOperation>
   empty: () => Promise<CashlogyCashManagementOperation>
   collectStacker: () => Promise<CashlogyCashManagementOperation>
@@ -88,7 +89,6 @@ function identifyOperation(operation: CashlogyCashManagementOperation) {
     intent,
     operation,
     error: operationError(operation),
-    modalOpen: true,
   })
 }
 
@@ -156,6 +156,7 @@ async function recoverAfterUncertainResult(requestId: string, originalError: unk
 async function createOperation(
   type: CashlogyCashManagementType,
   createRequest: (requestId: string) => Promise<CashlogyOperationResponse>,
+  denominationOptions?: CashlogyAvailableDenomination[],
 ) {
   const state = useCashlogyManagementStore.getState()
   if (state.intent || state.isStarting || state.isMutating) throw new CashlogyError({ code: 'CASHLOGY_BUSY' })
@@ -167,6 +168,7 @@ async function createOperation(
     requestId: createCashlogyRequestId(type),
     type,
     operationId: null,
+    ...(denominationOptions?.length ? { denominationOptions } : {}),
     createdAt: new Date().toISOString(),
   }
   persistIntent(intent)
@@ -243,8 +245,6 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
   open() { set({ modalOpen: true }) },
 
   hide() {
-    const operation = get().operation
-    if (get().isStarting || get().isMutating || (operation && cashlogyManagementActiveStatuses.has(operation.status))) return
     set({ modalOpen: false })
   },
 
@@ -253,8 +253,18 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     return startPromise
   },
 
-  async startGiveChange() {
-    if (!startPromise) startPromise = createOperation('give_change', (requestId) => client().startCashlogyGiveChange(requestId)).finally(() => { startPromise = null })
+  async startGiveChange(denominationOptions) {
+    if (!denominationOptions.length) {
+      throw new CashlogyError({
+        code: 'CASHLOGY_INVALID_STATE',
+        message: 'No se han podido cargar las denominaciones dispensables antes de iniciar la operación.',
+      })
+    }
+    if (!startPromise) startPromise = createOperation(
+      'give_change',
+      (requestId) => client().startCashlogyGiveChange(requestId),
+      denominationOptions,
+    ).finally(() => { startPromise = null })
     return startPromise
   },
 

@@ -44,7 +44,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
   const critical = status === 'unknown' || status === 'needs_attention'
   const canCancel = Boolean(status && cashlogyCancellableStatuses.has(status) && !state.isCancelling)
 
-  return <AppModal dismissDisabled={active || critical || status === 'completed'} label="Cobro Cashlogy" maxWidth={520} onClose={state.hide}>
+  return <AppModal dismissDisabled={status === 'completed'} label="Cobro Cashlogy" maxWidth={520} onClose={state.hide}>
     <section className="w-full p-6">
       <div className={`flex items-start gap-3 rounded-[var(--radius)] border p-4 ${critical ? 'border-red-500 bg-red-500/10' : 'border-[var(--separator)] bg-[var(--background)]'}`}>
         {critical ? <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
@@ -57,8 +57,8 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
             {critical
               ? 'No repitas el cobro. Comprueba físicamente la máquina y revisa la operación con el responsable de caja.'
               : status === 'waiting_for_cash'
-                ? 'Introduce billetes y monedas en Cashlogy.'
-                : 'Mantén esta pantalla abierta hasta conocer el resultado.'}
+                ? 'Introduce billetes y monedas en Cashlogy. Puedes cancelar el cobro o volver al TPV.'
+                : 'Puedes volver al TPV; el cobro seguirá controlado y podrás consultar su estado de nuevo.'}
           </p>
         </div>
       </div>
@@ -80,6 +80,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
       </div> : null}
 
       <div className="mt-5 flex flex-wrap justify-end gap-2">
+        {active ? <Button onClick={state.hide} variant="tertiary">Volver al TPV</Button> : null}
         {canCancel ? <Button disabled={state.isCancelling} onClick={() => void state.cancel().catch(() => undefined)} variant="danger">
           {state.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
           Cancelar cobro

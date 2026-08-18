@@ -286,7 +286,6 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
   },
 
   hide() {
-    if (get().transaction && cashlogyActiveStatuses.has(get().transaction!.status)) return
     set({ modalOpen: false })
   },
 

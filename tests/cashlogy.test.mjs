@@ -8,6 +8,7 @@ import {
   denominationTotalCents,
   getDispensableDenominations,
   selectedDenominations,
+  suggestCashlogyDenominations,
 } from '../src/features/local-printing/cashlogy/cashlogyManagement.ts'
 import {
   cashlogyActiveStatuses,
@@ -171,6 +172,14 @@ test('el selector usa céntimos, capacidades y límites fiables del reciclador',
   const selected = selectedDenominations({ 200: 3, 500: 0, 1000: -1, 2000: 1 })
   assert.deepEqual(selected, [{ valueCents: 2000, quantity: 1 }, { valueCents: 200, quantity: 3 }])
   assert.equal(denominationTotalCents(selected), 2600)
+  assert.deepEqual(suggestCashlogyDenominations([
+    { valueCents: 500, availableQuantity: 1, kind: 'note' },
+    { valueCents: 200, availableQuantity: 4, kind: 'coin' },
+    { valueCents: 100, availableQuantity: 2, kind: 'coin' },
+  ], 700), [{ valueCents: 500, quantity: 1 }, { valueCents: 200, quantity: 1 }])
+  assert.deepEqual(suggestCashlogyDenominations([
+    { valueCents: 500, availableQuantity: 1, kind: 'note' },
+  ], 700), [])
 })
 
 test('los pollings terminan solo en estados terminales y permiten la fase awaiting_dispense', async () => {
@@ -269,9 +278,12 @@ test('unknown y needs_attention nunca completan una venta y solo se consultan po
   assert.match(paymentStore, /terminal\.status !== 'completed'/)
   assert.match(paymentStore, /transaction\.status === 'unknown'/)
   assert.match(paymentStore, /transaction\.status === 'needs_attention'/)
+  assert.match(paymentStore, /hide\(\)\s*{\s*set\(\{ modalOpen: false \}\)/)
   assert.match(managementStore, /getCashlogyCashManagementOperationByRequestId/)
   assert.match(managementStore, /if \(operation\.status === 'unknown' \|\| operation\.status === 'needs_attention'\) return/)
+  assert.match(managementStore, /hide\(\)\s*{\s*set\(\{ modalOpen: false \}\)/)
   assert.match(paymentModal, /Consultar estado de nuevo/)
+  assert.match(paymentModal, /Volver al TPV/)
   assert.match(operationStatus, /No repitas la operación/)
 })
 
@@ -292,7 +304,10 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
   assert.match(modal, /Vaciar Cashlogy/)
   assert.match(modal, /Retirar stacker/)
   assert.match(modal, /finalizeGiveChangeAdmission/)
+  assert.match(modal, /Volver al TPV/)
+  assert.match(modal, /suggestCashlogyDenominations/)
   assert.match(managementStore, /persistIntent\(intent\)[\s\S]*createRequest/)
+  assert.match(managementStore, /denominationOptions/)
   assert.match(managementStore, /if \(!startPromise\)/)
   assert.match(selector, /availableQuantity/)
   assert.match(selector, /targetCents/)
