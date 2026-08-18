@@ -2,6 +2,8 @@ import { useEffect } from 'react'
 import type { TenantContext } from '../../../types'
 import { isBackofficeUser } from '../../../app/app-permissions'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
+import { cashlogyActiveStatuses, cashlogyManagementActiveStatuses } from './cashlogyPolling'
+import { useCashlogyManagementStore } from './useCashlogyManagementStore'
 import { useCashlogyStore } from './useCashlogyStore'
 
 export function useCashlogyScope(context: TenantContext | null) {
@@ -15,12 +17,30 @@ export function useCashlogyScope(context: TenantContext | null) {
     const abortController = new AbortController()
     const store = useCashlogyStore.getState()
     store.configureScope(scope)
+    useCashlogyManagementStore.getState().configureScope(scope)
     const refresh = async () => {
       const print = usePrintAgentStore.getState()
       if (!print.cashlogyConfigured || !print.token) return
       try { await useCashlogyStore.getState().checkHealth(abortController.signal) } catch { /* se muestra en el estado */ }
-      if (useCashlogyStore.getState().intent && !useCashlogyStore.getState().isPolling) {
+      const payment = useCashlogyStore.getState()
+      const paymentNeedsRecovery = payment.intent
+        && !payment.isPolling
+        && !payment.isStarting
+        && !payment.isCancelling
+        && (!payment.transaction || cashlogyActiveStatuses.has(payment.transaction.status))
+      if (paymentNeedsRecovery) {
         try { await useCashlogyStore.getState().recover(abortController.signal) } catch { /* permanece recuperable */ }
+      }
+      const management = useCashlogyManagementStore.getState()
+      const managementNeedsRecovery = management.intent
+        && !management.isPolling
+        && !management.isStarting
+        && !management.isMutating
+        && (!management.operation
+          || (cashlogyManagementActiveStatuses.has(management.operation.status)
+            && management.operation.status !== 'awaiting_dispense'))
+      if (managementNeedsRecovery) {
+        try { await management.recover(abortController.signal) } catch { /* permanece recuperable por requestId */ }
       }
     }
     void refresh()

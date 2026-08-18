@@ -2,17 +2,17 @@ import { create } from 'zustand'
 import { createPrintAgentClient } from '../api/printAgentClient'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
 import type { CashlogyHealth, CashlogyIntent, CashlogyTransaction, PrintAgentScope } from '../types'
-import { CashlogyError, toCashlogyError } from './cashlogyError'
+import { CashlogyError, isUncertainCashlogyError, toCashlogyError } from './cashlogyError'
+import { createCashlogyRequestId } from './cashlogyRequestId'
 import {
   cashlogyActiveStatuses,
   cashlogyCancellableStatuses,
   pollCashlogyTransaction,
 } from './cashlogyPolling'
-import { loadCashlogyIntent, saveCashlogyIntent } from './cashlogyStorage'
+import { loadCashlogyIntent, loadCashlogyManagementIntent, saveCashlogyIntent } from './cashlogyStorage'
 
 type CashlogyState = {
   scope: PrintAgentScope | null
-  health: CashlogyHealth | null
   intent: CashlogyIntent | null
   transaction: CashlogyTransaction | null
   error: CashlogyError | null
@@ -28,24 +28,40 @@ type CashlogyState = {
   cancel: (signal?: AbortSignal) => Promise<CashlogyTransaction>
   finish: (requestId: string) => void
   discardForRetry: () => void
+  hide: () => void
   clearError: () => void
 }
 
 let settlementPromise: Promise<CashlogyTransaction> | null = null
+let recoveryPromise: Promise<CashlogyTransaction | null> | null = null
+let transactionPollingPromise: Promise<CashlogyTransaction> | null = null
+let transactionPollingController: AbortController | null = null
 
 function client() {
   const print = usePrintAgentStore.getState()
   return createPrintAgentClient({ baseUrl: print.baseUrl, token: print.token })
 }
 
-function createRequestId() {
-  const random = globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(16).slice(2)}`
-  return `cashlogy:payment:${random}`.replace(/[^A-Za-z0-9_.:-]/g, '-')
-}
-
 function persistIntent(intent: CashlogyIntent | null) {
   const scope = useCashlogyStore.getState().scope
   if (scope) saveCashlogyIntent(scope, intent)
+}
+
+function pollTransaction(transaction: CashlogyTransaction, signal?: AbortSignal) {
+  if (!cashlogyActiveStatuses.has(transaction.status)) return Promise.resolve(transaction)
+  if (transactionPollingPromise) return transactionPollingPromise
+  transactionPollingController = new AbortController()
+  const pollingSignal = signal
+    ? AbortSignal.any([signal, transactionPollingController.signal])
+    : transactionPollingController.signal
+  transactionPollingPromise = pollCashlogyTransaction(client().getCashlogyTransaction, transaction, {
+    signal: pollingSignal,
+    onUpdate: (next) => useCashlogyStore.setState({ transaction: next }),
+  }).finally(() => {
+    transactionPollingPromise = null
+    transactionPollingController = null
+  })
+  return transactionPollingPromise
 }
 
 function terminalError(transaction: CashlogyTransaction) {
@@ -71,12 +87,7 @@ function terminalError(transaction: CashlogyTransaction) {
 async function resolveTransaction(transaction: CashlogyTransaction, signal?: AbortSignal) {
   useCashlogyStore.setState({ transaction, isPolling: cashlogyActiveStatuses.has(transaction.status), modalOpen: true })
   try {
-    const terminal = cashlogyActiveStatuses.has(transaction.status)
-      ? await pollCashlogyTransaction(client().getCashlogyTransaction, transaction, {
-          signal,
-          onUpdate: (next) => useCashlogyStore.setState({ transaction: next }),
-        })
-      : transaction
+    const terminal = await pollTransaction(transaction, signal)
     useCashlogyStore.setState({ transaction: terminal, isPolling: false })
     if (terminal.status !== 'completed') {
       const error = terminalError(terminal)
@@ -93,7 +104,6 @@ async function resolveTransaction(transaction: CashlogyTransaction, signal?: Abo
 
 export const useCashlogyStore = create<CashlogyState>((set, get) => ({
   scope: null,
-  health: null,
   intent: null,
   transaction: null,
   error: null,
@@ -104,16 +114,18 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
   isCancelling: false,
 
   configureScope(scope) {
+    transactionPollingController?.abort()
     settlementPromise = null
+    recoveryPromise = null
+    transactionPollingPromise = null
     const intent = loadCashlogyIntent(scope)
-    set({ scope, intent, transaction: null, error: null, health: null, modalOpen: Boolean(intent), isPolling: false })
+    set({ scope, intent, transaction: null, error: null, modalOpen: Boolean(intent), isPolling: false })
   },
 
   async checkHealth(signal) {
     set({ isCheckingHealth: true, error: null })
     try {
       const health = await usePrintAgentStore.getState().checkCashlogyHealth(signal)
-      set({ health })
       return health
     } catch (error) {
       const mapped = toCashlogyError(error)
@@ -131,6 +143,9 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
     const print = usePrintAgentStore.getState()
     if (!print.cashlogyConfigured) {
       throw new CashlogyError({ code: 'CASHLOGY_NOT_CONFIGURED' })
+    }
+    if (get().scope && loadCashlogyManagementIntent(get().scope!)) {
+      throw new CashlogyError({ code: 'CASHLOGY_INVALID_STATE', message: 'Hay una operación de efectivo Cashlogy pendiente de resolución.' })
     }
     const existing = get().intent
     if (existing) {
@@ -164,7 +179,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
     }
 
     const intent: CashlogyIntent = {
-      requestId: createRequestId(),
+      requestId: createCashlogyRequestId('payment'),
       saleId,
       amountCents,
       terminalCode: print.cashlogyTerminalCode,
@@ -177,7 +192,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
       try {
         let transaction: CashlogyTransaction
         try {
-          transaction = (await client().chargeCashlogy({
+          transaction = (await client().createCashlogyCharge({
             requestId: intent.requestId,
             saleId: intent.saleId,
             amountCents: intent.amountCents,
@@ -185,8 +200,13 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
             test: false,
           }, signal)).transaction
         } catch (chargeError) {
+          if (!isUncertainCashlogyError(chargeError)) {
+            persistIntent(null)
+            set({ intent: null, modalOpen: false })
+            throw chargeError
+          }
           try {
-            transaction = (await client().getCashlogyTransactionByRequest(intent.requestId, signal)).transaction
+            transaction = (await client().getCashlogyTransactionByRequestId(intent.requestId, signal)).transaction
           } catch {
             throw chargeError
           }
@@ -207,25 +227,30 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
   },
 
   async recover(signal) {
+    if (recoveryPromise) return recoveryPromise
     const intent = get().intent
     if (!intent) return null
     set({ modalOpen: true, error: null })
-    try {
-      const transaction = (await client().getCashlogyTransactionByRequest(intent.requestId, signal)).transaction
-      if (intent.transactionId !== transaction.id) {
-        const identified = { ...intent, transactionId: transaction.id }
-        persistIntent(identified)
-        set({ intent: identified })
+    recoveryPromise = (async () => {
+      try {
+        const transaction = (await client().getCashlogyTransactionByRequestId(intent.requestId, signal)).transaction
+        if (intent.transactionId !== transaction.id) {
+          const identified = { ...intent, transactionId: transaction.id }
+          persistIntent(identified)
+          set({ intent: identified })
+        }
+        return await resolveTransaction(transaction, signal)
+      } catch (error) {
+        const mapped = toCashlogyError(error)
+        set({ error: mapped, modalOpen: true })
+        throw mapped
       }
-      return await resolveTransaction(transaction, signal)
-    } catch (error) {
-      const mapped = toCashlogyError(error)
-      set({ error: mapped, modalOpen: true })
-      throw mapped
-    }
+    })().finally(() => { recoveryPromise = null })
+    return recoveryPromise
   },
 
   async cancel(signal) {
+    if (get().isCancelling) throw new CashlogyError({ code: 'CASHLOGY_BUSY' })
     const transaction = get().transaction
     if (!transaction || !cashlogyCancellableStatuses.has(transaction.status)) {
       throw new CashlogyError({ code: 'CASHLOGY_INVALID_STATE', message: 'Cashlogy ya no admite cancelar esta fase del cobro.' })
@@ -233,12 +258,8 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
     set({ isCancelling: true, error: null })
     try {
       const next = (await client().cancelCashlogyTransaction(transaction.id, signal)).transaction
-      const terminal = cashlogyActiveStatuses.has(next.status)
-        ? await pollCashlogyTransaction(client().getCashlogyTransaction, next, {
-            signal,
-            onUpdate: (updated) => set({ transaction: updated }),
-          })
-        : next
+      set({ transaction: next, isPolling: cashlogyActiveStatuses.has(next.status) })
+      const terminal = await pollTransaction(next, signal)
       set({ transaction: terminal, isPolling: false })
       if (terminal.status !== 'cancelled') throw terminalError(terminal)
       return terminal
@@ -262,6 +283,11 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
     if (status !== 'cancelled' && status !== 'failed') return
     persistIntent(null)
     set({ intent: null, transaction: null, error: null, modalOpen: false, isPolling: false })
+  },
+
+  hide() {
+    if (get().transaction && cashlogyActiveStatuses.has(get().transaction!.status)) return
+    set({ modalOpen: false })
   },
 
   clearError() { set({ error: null }) },

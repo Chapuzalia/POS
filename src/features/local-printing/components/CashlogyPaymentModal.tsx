@@ -32,6 +32,8 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
     isPolling: value.isPolling,
     isCancelling: value.isCancelling,
     cancel: value.cancel,
+    recover: value.recover,
+    hide: value.hide,
     discardForRetry: value.discardForRetry,
   })))
   if (!state.modalOpen || !state.intent) return null
@@ -42,7 +44,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
   const critical = status === 'unknown' || status === 'needs_attention'
   const canCancel = Boolean(status && cashlogyCancellableStatuses.has(status) && !state.isCancelling)
 
-  return <AppModal dismissDisabled={active || critical} label="Cobro Cashlogy" maxWidth={520} onClose={() => undefined}>
+  return <AppModal dismissDisabled={active || critical || status === 'completed'} label="Cobro Cashlogy" maxWidth={520} onClose={state.hide}>
     <section className="w-full p-6">
       <div className={`flex items-start gap-3 rounded-[var(--radius)] border p-4 ${critical ? 'border-red-500 bg-red-500/10' : 'border-[var(--separator)] bg-[var(--background)]'}`}>
         {critical ? <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
@@ -50,7 +52,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
             : status === 'cancelled' || status === 'failed' ? <Ban className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
               : <LoaderCircle className="mt-0.5 h-6 w-6 shrink-0 animate-spin text-[var(--accent)]" />}
         <div>
-          <h2 className="text-xl font-black">{status ? statusLabels[status] : 'Recuperando operación'}</h2>
+          <h2 className="text-xl font-black">{state.isCancelling ? 'Cancelando cobro…' : status ? statusLabels[status] : 'Recuperando operación'}</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
             {critical
               ? 'No repitas el cobro. Comprueba físicamente la máquina y revisa la operación con el responsable de caja.'
@@ -85,6 +87,13 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
         {status === 'completed' ? <Button disabled={finalizeDisabled} onClick={onFinalizeRecovered} variant="primary">Finalizar venta</Button> : null}
         {status === 'cancelled' ? <Button onClick={state.discardForRetry}>Volver al pago</Button> : null}
         {status === 'failed' ? <Button onClick={state.discardForRetry} variant="primary">Iniciar un nuevo intento</Button> : null}
+        {critical ? <>
+          <Button disabled={state.isPolling} onClick={() => void state.recover().catch(() => undefined)} variant="primary">
+            {state.isPolling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+            Consultar estado de nuevo
+          </Button>
+          <Button onClick={state.hide} variant="tertiary">Cerrar y revisar Cashlogy</Button>
+        </> : null}
       </div>
     </section>
   </AppModal>

@@ -35,6 +35,7 @@ import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
 import { ReservationsPage, type useReservationsController } from '../features/reservations'
 import { CashlogyMachineModal, CashlogyPaymentModal } from '../features/local-printing'
+import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
 import type {
   CatalogStartTab,
@@ -104,11 +105,8 @@ export function PosPage(props: Props) {
   const quickSale = props.quickSale
   const cash = props.cash
   const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured)
-  const cashlogyConnected = usePrintAgentStore((state) => Boolean(
-    state.cashlogyConfigured
-      && state.cashlogyHealth?.enabled
-      && state.cashlogyHealth.connector?.connected,
-  ))
+  const cashlogyManagementOpen = useCashlogyManagementStore((state) => state.modalOpen)
+  const canManageCash = Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))
   const discountsEnabled = hasTenantFeature(props.context, 'discounts')
   const restaurantEnabled = hasTenantFeature(props.context, 'restaurant')
   const reservationsEnabled = restaurantEnabled && hasTenantFeature(props.context, 'reservations')
@@ -254,10 +252,10 @@ export function PosPage(props: Props) {
       <AppHeader
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true}
-        canManageCash={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
-        canOpenCashDrawer={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
+        canManageCash={canManageCash}
+        canOpenCashDrawer={canManageCash}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
-        cashlogyConnected={cashlogyConnected}
+        cashlogyConnected={cashlogyConfigured && canManageCash}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
@@ -452,8 +450,8 @@ export function PosPage(props: Props) {
           else void quickSale.completePayment('cash', null)
         }}
       />
-      {cashlogyMachineOpen ? <CashlogyMachineModal
-        canWithdraw={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
+      {cashlogyMachineOpen || cashlogyManagementOpen ? <CashlogyMachineModal
+        canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
       {quickSale.productDialog && props.catalog ? <ProductDialog

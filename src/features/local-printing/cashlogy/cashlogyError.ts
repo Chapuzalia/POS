@@ -1,14 +1,15 @@
 import { PrintAgentError } from '../api/PrintAgentError.ts'
 
 export type CashlogyErrorCode =
-  | 'CASHLOGY_DISABLED' | 'CASHLOGY_NOT_CONFIGURED' | 'CASHLOGY_CONNECTOR_UNREACHABLE'
+  | 'CASHLOGY_BAD_DATA' | 'CASHLOGY_DISABLED' | 'CASHLOGY_NOT_CONFIGURED' | 'CASHLOGY_CONNECTOR_UNREACHABLE'
   | 'CASHLOGY_CONNECTION_TIMEOUT' | 'CASHLOGY_INITIALIZATION_TIMEOUT' | 'CASHLOGY_NOT_INITIALIZED'
   | 'CASHLOGY_BUSY' | 'CASHLOGY_OPERATION_CANCELLED' | 'CASHLOGY_CONNECTION_LOST'
   | 'CASHLOGY_STATUS_UNKNOWN' | 'CASHLOGY_RECONCILIATION_MISMATCH'
   | 'CASHLOGY_CANCEL_ON_CONNECTOR_SCREEN' | 'CASHLOGY_NOT_READY' | 'CASHLOGY_INVALID_STATE'
-  | 'CASHLOGY_NETWORK_ERROR'
+  | 'CASHLOGY_NETWORK_ERROR' | 'CASHLOGY_CASH_MANAGEMENT_NOT_FOUND' | 'CASHLOGY_OPERATION_FAILED'
 
 const messages: Record<CashlogyErrorCode, string> = {
+  CASHLOGY_BAD_DATA: 'Los datos enviados a Cashlogy no son válidos.',
   CASHLOGY_DISABLED: 'Cashlogy está deshabilitado en el servidor local.',
   CASHLOGY_NOT_CONFIGURED: 'Cashlogy no está configurado en el servidor local.',
   CASHLOGY_CONNECTOR_UNREACHABLE: 'No se puede acceder a CashlogyConnector.',
@@ -24,6 +25,8 @@ const messages: Record<CashlogyErrorCode, string> = {
   CASHLOGY_NOT_READY: 'Cashlogy está configurado, pero no está listo para iniciar un cobro.',
   CASHLOGY_INVALID_STATE: 'La operación de Cashlogy debe resolverse antes de iniciar otro cobro.',
   CASHLOGY_NETWORK_ERROR: 'No se ha podido comunicar con Cashlogy. La operación queda guardada para recuperarla.',
+  CASHLOGY_CASH_MANAGEMENT_NOT_FOUND: 'No se ha encontrado la operación de efectivo guardada.',
+  CASHLOGY_OPERATION_FAILED: 'Cashlogy ha confirmado que la operación ha fallado.',
 }
 
 export class CashlogyError extends Error {
@@ -51,8 +54,14 @@ export function toCashlogyError(error: unknown, fallback: CashlogyErrorCode = 'C
     : fallback
   return new CashlogyError({
     code,
-    message: typeof remote?.message === 'string' ? remote.message : undefined,
-    originalCode: typeof remote?.originalCode === 'string' ? remote.originalCode : null,
+    originalCode: typeof remote?.originalCode === 'string'
+      ? remote.originalCode
+      : typeof remote?.code === 'string' && !(remote.code in messages) ? remote.code : null,
     details,
   })
+}
+
+export function isUncertainCashlogyError(error: unknown) {
+  return error instanceof PrintAgentError
+    && (['NETWORK_ERROR', 'TIMEOUT', 'ABORTED'].includes(error.code) || error.status === 502)
 }

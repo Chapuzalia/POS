@@ -20,4 +20,8 @@ export { ManualCashDrawerButton } from './components/ManualCashDrawerButton'
 export { CashlogyPaymentModal } from './components/CashlogyPaymentModal'
 export { CashlogyMachineModal } from './components/CashlogyMachineModal'
 export { useCashlogyStore, settleCashlogyPaymentIfConfigured, finishCashlogyPayment, getCashlogyPaymentAmounts } from './cashlogy/useCashlogyStore'
-export type { PrintRequest, PrintJob, Printer, PrintAgentScope, CashlogyHealth, CashlogyTransaction } from './types'
+export { useCashlogyManagementStore } from './cashlogy/useCashlogyManagementStore'
+export type {
+  PrintRequest, PrintJob, Printer, PrintAgentScope, CashlogyHealth, CashlogyTransaction,
+  CashlogyAccounting, CashlogyCashManagementOperation, CashlogyRequestedDenomination,
+} from './types'

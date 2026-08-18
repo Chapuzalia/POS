@@ -3,21 +3,29 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { createPrintAgentClient } from '../src/features/local-printing/api/printAgentClient.ts'
 import { PrintAgentError } from '../src/features/local-printing/api/PrintAgentError.ts'
-import { CashlogyError, toCashlogyError } from '../src/features/local-printing/cashlogy/cashlogyError.ts'
+import { CashlogyError, isUncertainCashlogyError, toCashlogyError } from '../src/features/local-printing/cashlogy/cashlogyError.ts'
 import {
-  cashlogyDangerousManagementActions,
-  cashlogyManagementPresets,
+  denominationTotalCents,
+  getDispensableDenominations,
+  selectedDenominations,
 } from '../src/features/local-printing/cashlogy/cashlogyManagement.ts'
 import {
   cashlogyActiveStatuses,
   cashlogyCancellableStatuses,
+  cashlogyManagementActiveStatuses,
+  cashlogyManagementTerminalStatuses,
   cashlogyTerminalStatuses,
+  pollCashlogyOperation,
   pollCashlogyTransaction,
 } from '../src/features/local-printing/cashlogy/cashlogyPolling.ts'
+import { createCashlogyRequestId } from '../src/features/local-printing/cashlogy/cashlogyRequestId.ts'
 import {
   getCashlogyIntentStorageKey,
+  getCashlogyManagementIntentStorageKey,
   loadCashlogyIntent,
+  loadCashlogyManagementIntent,
   saveCashlogyIntent,
+  saveCashlogyManagementIntent,
 } from '../src/features/local-printing/cashlogy/cashlogyStorage.ts'
 import { getDefaultPrintAgentConfig } from '../src/features/local-printing/services/printAgentStorage.ts'
 import { getAutomaticSaleHardwareAction, shouldOpenCashDrawer } from '../src/features/local-printing/services/cashDrawerRules.ts'
@@ -27,184 +35,282 @@ const root = new URL('../', import.meta.url)
 
 function transaction(status, patch = {}) {
   return {
-    id: 'cashlogy-transaction-1', requestId: 'cashlogy:payment:intent-1', saleId: null,
+    id: 'cltx-1', requestId: 'cashlogy:sale:intent-1', saleId: 'sale-1',
     connectorId: 'connector', status, operationNumber: '1', terminalCode: 'POS_MAIN',
     requestedAmountCents: 1250, automaticAcceptedCents: null, manualAcceptedCents: null,
     returnedCents: null, changeAddedCents: null, netPaidCents: null,
     connectorResultCode: null, normalizedErrorCode: null, error: null, warning: null,
     test: false, cancelRequestedAt: null, startedAt: null, completedAt: null,
-    createdAt: '2026-08-14T10:00:00Z', updatedAt: '2026-08-14T10:00:00Z',
+    createdAt: '2026-08-18T10:00:00Z', updatedAt: '2026-08-18T10:00:00Z',
     ...patch,
   }
 }
 
-test('la configuracion predeterminada conserva el modo de solo impresora', () => {
+function operation(type, status, patch = {}) {
+  return {
+    id: `clcm-${type}`, requestId: `cashlogy:${type}:intent-1`, connectorId: 'connector', type, status,
+    requestedAmountCents: null, acceptedCents: null, dispensedCents: null,
+    denominationsRequested: null, denominationsDispensed: null, changeAddedCents: null,
+    resultCode: null, normalizedErrorCode: null, error: null,
+    startedAt: null, completedAt: null, createdAt: '2026-08-18T10:00:00Z', updatedAt: '2026-08-18T10:00:00Z',
+    ...patch,
+  }
+}
+
+const accounting = {
+  total: { recyclerTotalCents: 5000, stackerTotalCents: 12000, totalCents: 17000, queriedAt: '2026-08-18T10:00:00Z' },
+  denominations: {
+    coins: [{ valueCents: 200, recyclerCount: 4, stackerCount: 1 }],
+    notes: [{ valueCents: 2000, recyclerCount: 2, stackerCount: 3 }],
+    queriedAt: '2026-08-18T10:00:00Z',
+  },
+  levels: { levels: [], queriedAt: '2026-08-18T10:00:00Z' },
+  capabilities: {
+    currency: 'EUR',
+    capabilities: [
+      { valueCents: 200, capabilityCode: 3, depositable: true, dispensable: true },
+      { valueCents: 2000, capabilityCode: 1, depositable: true, dispensable: false },
+    ],
+    queriedAt: '2026-08-18T10:00:00Z',
+  },
+  queriedAt: '2026-08-18T10:00:00Z',
+}
+
+test('la configuración predeterminada conserva el modo de solo impresora', () => {
   const config = getDefaultPrintAgentConfig()
   assert.equal(config.cashlogyConfigured, false)
   assert.equal(config.cashlogyTerminalCode, 'POS_MAIN')
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { autoOpenCashDrawer: true, cashlogyConfigured: false } }), true)
 })
 
-test('Cashlogy configurado bloquea el cajon aunque este desconectado y fuerza la impresion', () => {
+test('Cashlogy configurado bloquea siempre el cajón y no bloquea la impresión', () => {
   const settings = { alwaysPrintTicket: false, autoOpenCashDrawer: true, cashlogyConfigured: true }
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), false)
   assert.equal(getAutomaticSaleHardwareAction({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), 'print')
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { ...settings, healthOk: false } }), false)
 })
 
-test('el cliente usa las rutas Cashlogy, Bearer y acepta respuestas duplicadas', async () => {
+test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () => {
   const calls = []
-  const duplicate = transaction('waiting_for_cash')
+  const tx = transaction('waiting_for_cash')
+  const refill = operation('refill', 'accepting', { acceptedCents: 500 })
+  const giveChange = operation('give_change', 'awaiting_dispense', { acceptedCents: 2000 })
+  const generic = operation('withdraw', 'completed', { dispensedCents: 2000 })
+  const connector = { id: 'cashlogy-127.0.0.1-8092', host: '127.0.0.1', port: 8092, reachable: true, processRunning: true, initialized: false, selected: false, protocolVersion: null, lastConnectedAt: null }
   const client = createPrintAgentClient({
     baseUrl: 'https://pos-local.test:8443', token: 'secret',
     fetchImpl: async (url, init) => {
-      calls.push({ url: String(url), init })
-      return new Response(JSON.stringify({ ok: true, duplicate: true, transaction: duplicate }), { status: 200 })
-    },
-  })
-  const result = await client.chargeCashlogy({ requestId: duplicate.requestId, saleId: null, amountCents: 1250, terminalCode: 'POS_MAIN', test: false })
-  assert.equal(result.duplicate, true)
-  assert.match(calls[0].url, /\/api\/v1\/cashlogy\/transactions\/charge$/)
-  assert.equal(calls[0].init.headers.Authorization, 'Bearer secret')
-  assert.equal(calls[0].init.headers['Content-Type'], 'application/json')
-
-  await client.getCashlogyTransactionByRequest(duplicate.requestId)
-  assert.match(calls[1].url, /\/transactions\/by-request\/cashlogy%3Apayment%3Aintent-1$/)
-  await client.cancelCashlogyTransaction(duplicate.id)
-  assert.equal(calls[2].init.method, 'POST')
-  assert.match(calls[2].url, /\/cashlogy-transaction-1\/cancel$/)
-})
-
-test('la gestión de efectivo usa contabilidad y perfiles de backoffice acotados', async () => {
-  const calls = []
-  const client = createPrintAgentClient({
-    baseUrl: 'https://pos-local.test:8443', token: 'secret',
-    fetchImpl: async (url, init) => {
-      calls.push({ url: String(url), init })
-      if (String(url).endsWith('/accounting/total')) return new Response(JSON.stringify({ resultCode: '0', recyclerTotalCents: 5000, stackerTotalCents: 12000, totalCents: 17000, queriedAt: '2026-08-14T10:00:00Z' }))
-      if (String(url).endsWith('/accounting/denominations')) return new Response(JSON.stringify({ resultCode: '0', coins: [], notes: [], queriedAt: '2026-08-14T10:00:00Z' }))
-      return new Response(JSON.stringify({ resultCode: '0', amountAtEntry: 17000, amountAtExit: 16000, amountIntroduced: 0, amountWithdrawn: 1000, pendingRefund: 0, accountingAdjustment: 0 }))
+      const path = new URL(String(url)).pathname
+      calls.push({ path, init, body: init?.body ? JSON.parse(init.body) : null })
+      if (path.endsWith('/health')) return Response.json({ ok: true, enabled: true })
+      if (path.endsWith('/connectors/discover') || path.endsWith('/connectors')) return Response.json({ connectors: [connector] })
+      if (path.endsWith(`/${connector.id}/select`)) return Response.json({ ok: true, connector: { ...connector, selected: true }, device: null })
+      if (path.endsWith(`/${connector.id}/initialize`)) return Response.json({ ok: true, connector: { ...connector, selected: true, initialized: true }, device: { model: 'Cashlogy', serialNumber: 'CL-1', ready: true } })
+      if (path.endsWith('/device/errors')) return Response.json({ response: {}, errors: [] })
+      if (path.endsWith('/device')) return Response.json({ device: null })
+      if (path.endsWith('/accounting')) return Response.json(accounting)
+      if (path.endsWith('/accounting/total')) return Response.json(accounting.total)
+      if (path.endsWith('/accounting/denominations')) return Response.json(accounting.denominations)
+      if (path.endsWith('/accounting/levels')) return Response.json(accounting.levels)
+      if (path.endsWith('/accounting/capabilities')) return Response.json(accounting.capabilities)
+      if (path.endsWith('/transactions/charge') || path.endsWith('/cancel')) return Response.json({ ok: true, duplicate: false, transaction: tx }, { status: 202 })
+      if (path.includes('/transactions/')) return Response.json({ transaction: tx })
+      if (path.includes('/refill/')) return Response.json(path.endsWith('/finalize') ? { ok: true, duplicate: false, operation: { ...refill, status: 'completed' } } : { operation: refill })
+      if (path.endsWith('/refill/start')) return Response.json({ ok: true, duplicate: false, operation: refill }, { status: 202 })
+      if (path.includes('/give-change/') && !path.endsWith('/start')) return Response.json(path.endsWith(`/give-change/${giveChange.id}`) ? { operation: giveChange } : { ok: true, duplicate: false, operation: giveChange })
+      if (path.endsWith('/give-change/start')) return Response.json({ ok: true, duplicate: false, operation: giveChange }, { status: 202 })
+      return Response.json({ ok: true, duplicate: false, operation: generic }, { status: 202 })
     },
   })
 
-  const [total, denominations] = await Promise.all([
-    client.getCashlogyTotal(),
-    client.getCashlogyDenominations(),
-  ])
-  assert.equal(total.recyclerTotalCents, 5000)
-  assert.deepEqual(denominations.coins, [])
-  await client.openCashlogyBackoffice(cashlogyManagementPresets.withdraw, true)
+  await client.getCashlogyHealth()
+  await client.discoverCashlogyConnectors()
+  await client.getCashlogyConnectors()
+  await client.selectCashlogyConnector(connector.id)
+  await client.initializeCashlogyConnector(connector.id)
+  await client.getCashlogyDevice()
+  await client.getCashlogyErrors()
+  await client.getCashlogyAccounting()
+  await client.getCashlogyTotal()
+  await client.getCashlogyDenominations()
+  await client.getCashlogyLevels()
+  await client.getCashlogyCapabilities()
+  await client.createCashlogyCharge({ requestId: tx.requestId, saleId: tx.saleId, amountCents: 1250, terminalCode: 'POS_MAIN' })
+  await client.getCashlogyTransaction(tx.id)
+  await client.getCashlogyTransactionByRequestId(tx.requestId)
+  await client.cancelCashlogyTransaction(tx.id)
+  await client.startCashlogyRefill(refill.requestId)
+  await client.getCashlogyRefill(refill.id)
+  await client.finalizeCashlogyRefill(refill.id)
+  await client.startCashlogyGiveChange(giveChange.requestId)
+  await client.getCashlogyGiveChange(giveChange.id)
+  await client.finalizeCashlogyGiveChangeAdmission(giveChange.id)
+  await client.dispenseCashlogyGiveChange(giveChange.id, [{ valueCents: 2000, quantity: 1 }])
+  await client.withdrawCashlogyCash(generic.requestId, [{ valueCents: 2000, quantity: 1 }])
+  await client.emptyCashlogy('cashlogy:empty:intent-1')
+  await client.collectCashlogyStacker('cashlogy:stacker:intent-1')
+  await client.getCashlogyCashManagementOperationByRequestId(generic.requestId)
 
-  assert.match(calls[0].url, /\/api\/v1\/cashlogy\/accounting\/total$/)
-  assert.match(calls[1].url, /\/api\/v1\/cashlogy\/accounting\/denominations$/)
-  assert.match(calls[2].url, /\/api\/v1\/cashlogy\/backoffice\/open$/)
-  const body = JSON.parse(calls[2].init.body)
-  assert.equal(body.preset.withdrawCash, true)
-  assert.equal(body.preset.completeEmptying, false)
-  assert.equal(body.preset.resetCoins, false)
-  assert.equal(body.confirmDangerousOperations, true)
-  assert.equal(cashlogyDangerousManagementActions.has('withdraw'), true)
+  assert.equal(calls.every((call) => call.init.headers.Authorization === 'Bearer secret'), true)
+  assert.ok(calls.some((call) => call.path === '/api/v1/cashlogy/accounting'))
+  assert.ok(calls.some((call) => call.path === '/api/v1/cashlogy/connectors/discover' && call.init.method === 'POST'))
+  assert.ok(calls.some((call) => call.path.endsWith(`/${connector.id}/select`) && call.init.method === 'POST'))
+  assert.ok(calls.some((call) => call.path.endsWith(`/${connector.id}/initialize`) && call.init.method === 'POST'))
+  assert.ok(calls.some((call) => call.path.endsWith('/cash-management/refill/start')))
+  assert.ok(calls.some((call) => call.path.endsWith('/cash-management/give-change/clcm-give_change/dispense')))
+  assert.ok(calls.some((call) => call.path.endsWith('/cash-management/withdraw')))
+  assert.ok(calls.some((call) => call.path.endsWith('/cash-management/empty')))
+  assert.ok(calls.some((call) => call.path.endsWith('/cash-management/stacker/collect')))
+  assert.ok(calls.some((call) => call.path.includes('/cash-management/operations/by-request/')))
+  assert.deepEqual(calls.find((call) => call.path.endsWith('/cash-management/withdraw')).body.denominations, [{ valueCents: 2000, quantity: 1 }])
 })
 
-test('el menú de máquina depende de una conexión Cashlogy real', async () => {
-  const [page, header, modal] = await Promise.all([
-    readFile(new URL('src/app/PosPage.tsx', root), 'utf8'),
-    readFile(new URL('src/components/layout/AppHeader.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyMachineModal.tsx', root), 'utf8'),
-  ])
-  assert.match(page, /cashlogyHealth\.connector\?\.connected/)
-  assert.match(header, /if \(cashlogyConnected\).*cashlogy-machine/)
-  assert.match(modal, /Cajón de recaudación/)
-  assert.match(modal, /Reciclador · cambio disponible/)
-  assert.match(modal, /Promise\.all/)
+test('el selector usa céntimos, capacidades y límites fiables del reciclador', () => {
+  const options = getDispensableDenominations(accounting)
+  assert.deepEqual(options, [{ valueCents: 200, availableQuantity: 4, kind: 'coin' }])
+  const selected = selectedDenominations({ 200: 3, 500: 0, 1000: -1, 2000: 1 })
+  assert.deepEqual(selected, [{ valueCents: 2000, quantity: 1 }, { valueCents: 200, quantity: 3 }])
+  assert.equal(denominationTotalCents(selected), 2600)
 })
 
-test('el polling acepta cualquier secuencia activa y termina solo en un estado terminal', async () => {
-  const sequence = ['processing', 'connecting', 'dispensing_change', 'completed']
-  let calls = 0
-  const result = await pollCashlogyTransaction(
-    async () => ({ transaction: transaction(sequence[calls++]) }),
+test('los pollings terminan solo en estados terminales y permiten la fase awaiting_dispense', async () => {
+  const transactionSequence = ['processing', 'dispensing_change', 'completed']
+  let transactionCalls = 0
+  const tx = await pollCashlogyTransaction(
+    async () => ({ transaction: transaction(transactionSequence[transactionCalls++]) }),
     transaction('queued'),
     { intervalMs: 1 },
   )
+  assert.equal(tx.status, 'completed')
+
+  const operationSequence = ['accepting', 'processing', 'completed']
+  let operationCalls = 0
+  const result = await pollCashlogyOperation(
+    async () => ({ operation: operation('refill', operationSequence[operationCalls++]) }),
+    operation('refill', 'starting'),
+    { intervalMs: 1 },
+  )
   assert.equal(result.status, 'completed')
-  assert.equal(calls, 4)
   assert.ok(cashlogyActiveStatuses.has('waiting_for_cash'))
   assert.ok(cashlogyTerminalStatuses.has('unknown'))
-  assert.ok(cashlogyTerminalStatuses.has('needs_attention'))
   assert.ok(cashlogyCancellableStatuses.has('waiting_for_cash'))
-  assert.equal(cashlogyCancellableStatuses.has('dispensing_change'), false)
+  assert.ok(cashlogyManagementActiveStatuses.has('awaiting_dispense'))
+  assert.ok(cashlogyManagementTerminalStatuses.has('needs_attention'))
 })
 
-test('la intencion se persiste por terminal y conserva requestId para recuperar tras recarga', () => {
+test('requestId e intenciones de venta y gestión sobreviven a una recarga por terminal', () => {
   const values = new Map()
   const originalWindow = globalThis.window
   globalThis.window = { localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) } }
   const scope = { tenantId: 'tenant', establishmentId: 'venue', terminalId: 'terminal' }
-  const intent = { requestId: 'cashlogy:payment:stable', saleId: null, amountCents: 1250, terminalCode: 'POS_MAIN', transactionId: null, createdAt: '2026-08-14T10:00:00Z' }
-  saveCashlogyIntent(scope, intent)
-  assert.deepEqual(loadCashlogyIntent(scope), intent)
+  const paymentIntent = { requestId: 'cashlogy:sale:stable', saleId: 'sale', amountCents: 1250, terminalCode: 'POS_MAIN', transactionId: null, createdAt: '2026-08-18T10:00:00Z' }
+  const managementIntent = { requestId: 'cashlogy:refill:stable', type: 'refill', operationId: null, createdAt: '2026-08-18T10:00:00Z' }
+  saveCashlogyIntent(scope, paymentIntent)
+  saveCashlogyManagementIntent(scope, managementIntent)
+  assert.deepEqual(loadCashlogyIntent(scope), paymentIntent)
+  assert.deepEqual(loadCashlogyManagementIntent(scope), managementIntent)
   assert.match(getCashlogyIntentStorageKey(scope), /cashlogy-intent$/)
+  assert.match(getCashlogyManagementIntentStorageKey(scope), /cashlogy-management-intent$/)
+  assert.match(createCashlogyRequestId('give_change'), /^cashlogy:give-change:[A-Za-z0-9_.:-]+$/)
   saveCashlogyIntent(scope, null)
-  assert.equal(loadCashlogyIntent(scope), null)
+  saveCashlogyManagementIntent(scope, null)
   if (originalWindow === undefined) delete globalThis.window
   else globalThis.window = originalWindow
 })
 
-test('los errores remotos se traducen a mensajes comprensibles conservando el codigo tecnico', () => {
-  const mapped = toCashlogyError({})
-  assert.ok(mapped instanceof CashlogyError)
+test('los errores se traducen y los resultados HTTP inciertos se distinguen', () => {
   const remote = toCashlogyError(new PrintAgentError({
-    code: 'HTTP_ERROR',
-    details: { error: { code: 'CASHLOGY_CANCEL_ON_CONNECTOR_SCREEN', message: 'Cancel on connector', originalCode: 'LEGACY_42' } },
+    code: 'HTTP_ERROR', status: 409,
+    details: { error: { code: 'CASHLOGY_BUSY', message: 'technical text', originalCode: 'LEGACY_42' } },
   }))
-  assert.equal(remote.code, 'CASHLOGY_CANCEL_ON_CONNECTOR_SCREEN')
-  assert.equal(remote.message, 'Cancel on connector')
+  assert.ok(remote instanceof CashlogyError)
+  assert.equal(remote.code, 'CASHLOGY_BUSY')
+  assert.match(remote.message, /otra operación/)
   assert.equal(remote.originalCode, 'LEGACY_42')
+  assert.equal(isUncertainCashlogyError(new PrintAgentError({ code: 'TIMEOUT' })), true)
+  assert.equal(isUncertainCashlogyError(new PrintAgentError({ code: 'HTTP_ERROR', status: 502 })), true)
+  assert.equal(isUncertainCashlogyError(new PrintAgentError({ code: 'HTTP_ERROR', status: 409 })), false)
 })
 
-test('el ticket Cashlogy nunca abre el cajon de la impresora', () => {
+test('el ticket Cashlogy nunca abre el cajón de la impresora', () => {
   const sale = {
-    ticket: { id: 'ticket', tenantId: 'tenant', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue', deviceId: 'device', userId: 'user', subtotalCents: 1250, discount: null, discountAmountCents: 0, totalCents: 1250, createdAt: '2026-08-14T10:00:00Z' },
+    ticket: { id: 'ticket', tenantId: 'tenant', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue', deviceId: 'device', userId: 'user', subtotalCents: 1250, discount: null, discountAmountCents: 0, totalCents: 1250, createdAt: '2026-08-18T10:00:00Z' },
     lines: [],
-    sale: { id: 'sale', tenantId: 'tenant', ticketId: 'ticket', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue', deviceId: 'device', userId: 'user', totalCents: 1250, paymentMethod: 'cash', createdAt: '2026-08-14T10:00:00Z' },
+    sale: { id: 'sale', tenantId: 'tenant', ticketId: 'ticket', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue', deviceId: 'device', userId: 'user', totalCents: 1250, paymentMethod: 'cash', createdAt: '2026-08-18T10:00:00Z' },
     payment: { id: 'payment', tenantId: 'tenant', saleId: 'sale', method: 'cash', amountCents: 1250, receivedCents: 1250, changeCents: 0 },
   }
   const request = mapSaleToPrintRequest({ sale, establishment: { name: 'Venue' }, printerId: 'printer', autoOpenCashDrawer: true, cashlogyConfigured: true })
   assert.equal(request.options.openCashDrawer, false)
-  assert.equal(request.requestId, 'print:sale:original')
 })
 
-test('los flujos solo invocan Cashlogy para efectivo y consumen el cobro antes de imprimir', async () => {
-  const [quickSale, restaurant, printTicket, drawerButton, settings, wizard] = await Promise.all([
+test('el POS usa cobro headless antes de persistir e imprimir, también sin impresora', async () => {
+  const [quickSale, restaurant, printTicket, drawerButton, page] = await Promise.all([
     readFile(new URL('src/features/quick-sale/hooks/useQuickSalePayment.ts', root), 'utf8'),
     readFile(new URL('src/features/restaurant/hooks/useRestaurantController.ts', root), 'utf8'),
     readFile(new URL('src/features/local-printing/services/printTicket.ts', root), 'utf8'),
     readFile(new URL('src/features/local-printing/components/ManualCashDrawerButton.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/PrintAgentSettings.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/PrintAgentSetupWizard.tsx', root), 'utf8'),
+    readFile(new URL('src/app/PosPage.tsx', root), 'utf8'),
   ])
-  assert.match(quickSale, /if \(paymentMethod === 'cash'\)[\s\S]*settleCashlogyPaymentIfConfigured/)
+  assert.match(quickSale, /settleCashlogyPaymentIfConfigured\(preview\.sale\.totalCents, preview\.sale\.id\)/)
   assert.match(restaurant, /if \(method !== 'cash'\) return/)
   assert.match(quickSale, /finishCashlogyPayment\(cashlogyTransaction\)[\s\S]*options\.printSale/)
   assert.match(printTicket, /cashlogyConfigured/)
   assert.match(drawerButton, /agent\.cashlogyConfigured/)
-  assert.match(settings, /!agent\.cashlogyConfigured \? <Button[\s\S]*Abrir cajón/)
-  assert.match(wizard, /step === 8 && canOpenDrawer/)
+  assert.match(page, /if \(cashlogyConfigured\)[\s\S]*completePayment\('cash', null\)/)
 })
 
-test('cancelled, unknown y needs_attention no pueden confirmar ni imprimir una venta', async () => {
-  const store = await readFile(new URL('src/features/local-printing/cashlogy/useCashlogyStore.ts', root), 'utf8')
-  assert.match(store, /terminal\.status !== 'completed'/)
-  assert.match(store, /transaction\.status === 'cancelled'/)
-  assert.match(store, /transaction\.status === 'unknown'/)
-  assert.match(store, /transaction\.status === 'needs_attention'/)
-  assert.match(store, /status !== 'cancelled' && status !== 'failed'/)
+test('unknown y needs_attention nunca completan una venta y solo se consultan por requestId', async () => {
+  const [paymentStore, managementStore, paymentModal, operationStatus] = await Promise.all([
+    readFile(new URL('src/features/local-printing/cashlogy/useCashlogyStore.ts', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/cashlogy/useCashlogyManagementStore.ts', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/components/CashlogyPaymentModal.tsx', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/components/CashlogyOperationStatus.tsx', root), 'utf8'),
+  ])
+  assert.match(paymentStore, /terminal\.status !== 'completed'/)
+  assert.match(paymentStore, /transaction\.status === 'unknown'/)
+  assert.match(paymentStore, /transaction\.status === 'needs_attention'/)
+  assert.match(managementStore, /getCashlogyCashManagementOperationByRequestId/)
+  assert.match(managementStore, /if \(operation\.status === 'unknown' \|\| operation\.status === 'needs_attention'\) return/)
+  assert.match(paymentModal, /Consultar estado de nuevo/)
+  assert.match(operationStatus, /No repitas la operación/)
 })
 
-test('el coordinador impide iniciar dos cobros simultaneos', async () => {
-  const store = await readFile(new URL('src/features/local-printing/cashlogy/useCashlogyStore.ts', root), 'utf8')
-  assert.match(store, /if \(get\(\)\.isStarting \|\| get\(\)\.isPolling\) throw new CashlogyError\(\{ code: 'CASHLOGY_BUSY' \}\)/)
-  assert.match(store, /if \(settlementPromise\) return settlementPromise/)
-  assert.match(store, /persistIntent\(intent\)[\s\S]*chargeCashlogy/)
+test('la gestión es headless, cubre los cinco flujos y no contiene fallback externo', async () => {
+  const [client, modal, managementStore, selector] = await Promise.all([
+    readFile(new URL('src/features/local-printing/api/printAgentClient.ts', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/components/CashlogyMachineModal.tsx', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/cashlogy/useCashlogyManagementStore.ts', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/components/CashlogyDenominationSelector.tsx', root), 'utf8'),
+  ])
+  for (const source of [client, modal, managementStore]) {
+    assert.doesNotMatch(source, /cashlogy\/backoffice\/open/i)
+    assert.doesNotMatch(source, /openCashlogyBackoffice/)
+  }
+  assert.match(modal, /Rellenar/)
+  assert.match(modal, /Dar cambio/)
+  assert.match(modal, /Retirar efectivo/)
+  assert.match(modal, /Vaciar Cashlogy/)
+  assert.match(modal, /Retirar stacker/)
+  assert.match(modal, /finalizeGiveChangeAdmission/)
+  assert.match(managementStore, /persistIntent\(intent\)[\s\S]*createRequest/)
+  assert.match(managementStore, /if \(!startPromise\)/)
+  assert.match(selector, /availableQuantity/)
+  assert.match(selector, /targetCents/)
+})
+
+test('los ajustes permiten buscar, seleccionar e inicializar Cashlogy sin usar el dashboard', async () => {
+  const [settings, connectorList, store] = await Promise.all([
+    readFile(new URL('src/features/local-printing/components/PrintAgentSettings.tsx', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/components/CashlogyConnectorList.tsx', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/store/usePrintAgentStore.ts', root), 'utf8'),
+  ])
+  assert.match(settings, /Buscar máquinas/)
+  assert.match(settings, /discoverCashlogyConnectors/)
+  assert.match(settings, /selectCashlogyConnector/)
+  assert.match(settings, /initializeCashlogyConnector/)
+  assert.match(connectorList, /Seleccionar/)
+  assert.match(connectorList, /Inicializar/)
+  assert.match(connectorList, /Lista para usar/)
+  assert.match(store, /activeClient\.selectCashlogyConnector/)
+  assert.match(store, /activeClient\.initializeCashlogyConnector/)
 })

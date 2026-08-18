@@ -11,7 +11,7 @@ import {
   savePrintAgentConfig,
 } from '../services/printAgentStorage'
 import type {
-  CashlogyHealth, ConnectionStatus, DiscoveryProgress, DiscoveryStatus, PrintAgentPreferences, PrintAgentScope,
+  CashlogyConnector, CashlogyHealth, ConnectionStatus, DiscoveryProgress, DiscoveryStatus, PrintAgentPreferences, PrintAgentScope,
   PrintAgentServerInfo, PrintJob, PrintRequest, Printer,
 } from '../types'
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl'
@@ -33,6 +33,8 @@ type StoreState = {
   cashlogyConfigured: boolean
   cashlogyTerminalCode: string
   cashlogyHealth: CashlogyHealth | null
+  cashlogyConnectors: CashlogyConnector[]
+  cashlogyConnectorsLoaded: boolean
   discoveryStatus: DiscoveryStatus
   discoveryProgress: DiscoveryProgress | null
   jobs: PrintJob[]
@@ -50,12 +52,19 @@ type StoreState = {
   isOpeningCashDrawer: boolean
   isLoadingJobs: boolean
   isCheckingCashlogy: boolean
+  isLoadingCashlogyConnectors: boolean
+  isDiscoveringCashlogyConnectors: boolean
+  cashlogyConnectorAction: { connectorId: string; type: 'select' | 'initialize' } | null
   configureScope: (scope: PrintAgentScope) => void
   setBaseUrl: (baseUrl: string) => string
   setToken: (token: string | null) => void
   updatePreferences: (preferences: Partial<PrintAgentPreferences>) => void
   updateCashlogyConfiguration: (input: { configured?: boolean; terminalCode?: string }) => void
   checkCashlogyHealth: (signal?: AbortSignal) => Promise<CashlogyHealth>
+  loadCashlogyConnectors: (signal?: AbortSignal) => Promise<CashlogyConnector[]>
+  discoverCashlogyConnectors: (signal?: AbortSignal) => Promise<CashlogyConnector[]>
+  selectCashlogyConnector: (connectorId: string, signal?: AbortSignal) => Promise<CashlogyConnector>
+  initializeCashlogyConnector: (connectorId: string, signal?: AbortSignal) => Promise<CashlogyConnector>
   checkConnection: (signal?: AbortSignal) => Promise<boolean>
   loadServerInfo: (signal?: AbortSignal) => Promise<PrintAgentServerInfo>
   loadPrinters: (signal?: AbortSignal) => Promise<Printer[]>
@@ -113,6 +122,8 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     cashlogyConfigured: false,
     cashlogyTerminalCode: 'POS_MAIN',
     cashlogyHealth: null,
+    cashlogyConnectors: [],
+    cashlogyConnectorsLoaded: false,
     discoveryStatus: 'idle',
     discoveryProgress: null,
     jobs: [],
@@ -130,13 +141,17 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     isOpeningCashDrawer: false,
     isLoadingJobs: false,
     isCheckingCashlogy: false,
+    isLoadingCashlogyConnectors: false,
+    isDiscoveringCashlogyConnectors: false,
+    cashlogyConnectorAction: null,
 
     configureScope(scope) {
       const config = loadPrintAgentConfig(scope)
       set({
         scope, baseUrl: config.baseUrl, token: config.token, selectedPrinterId: config.selectedPrinterId,
         cashlogyConfigured: config.cashlogyConfigured, cashlogyTerminalCode: config.cashlogyTerminalCode,
-        cashlogyHealth: null,
+        cashlogyHealth: null, cashlogyConnectors: [], cashlogyConnectorsLoaded: false,
+        isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, cashlogyConnectorAction: null,
         selectedPrinter: null, printers: [], serverInfo: null, jobs: [], currentJob: null,
         lastSuccessfulConnectionAt: config.lastSuccessfulConnectionAt, preferences: config.preferences,
         connectionStatus: 'unknown', lastConnectionError: null, settingsLoaded: true,
@@ -145,13 +160,13 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
 
     setBaseUrl(value) {
       const baseUrl = normalizePrintAgentUrl(value, { allowHttpInDevelopment: true, isDevelopment: import.meta.env?.DEV })
-      set({ baseUrl, connectionStatus: 'unknown', lastConnectionError: null, serverInfo: null, printers: [], selectedPrinter: null })
+      set({ baseUrl, connectionStatus: 'unknown', lastConnectionError: null, serverInfo: null, printers: [], selectedPrinter: null, cashlogyHealth: null, cashlogyConnectors: [], cashlogyConnectorsLoaded: false })
       persist(get())
       return baseUrl
     },
 
     setToken(value) {
-      set({ token: value?.trim() || null, connectionStatus: 'unknown', lastConnectionError: null, serverInfo: null })
+      set({ token: value?.trim() || null, connectionStatus: 'unknown', lastConnectionError: null, serverInfo: null, cashlogyHealth: null, cashlogyConnectors: [], cashlogyConnectorsLoaded: false })
       persist(get())
     },
 
@@ -172,14 +187,86 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     },
 
     async checkCashlogyHealth(signal) {
-      set({ isCheckingCashlogy: true })
+      set({ isCheckingCashlogy: true, lastConnectionError: null })
       try {
         const health = await client().getCashlogyHealth(signal)
         set({ cashlogyHealth: health })
         return health
+      } catch (error) {
+        const mapped = toPrintAgentError(error)
+        set({ lastConnectionError: mapped })
+        throw mapped
       } finally {
         set({ isCheckingCashlogy: false })
       }
+    },
+
+    async loadCashlogyConnectors(signal) {
+      set({ isLoadingCashlogyConnectors: true, lastConnectionError: null })
+      try {
+        const result = await client().getCashlogyConnectors(signal)
+        const connectors = result.connectors || []
+        set({ cashlogyConnectors: connectors, cashlogyConnectorsLoaded: true })
+        return connectors
+      } catch (error) {
+        const mapped = toPrintAgentError(error)
+        set({ lastConnectionError: mapped })
+        throw mapped
+      } finally { set({ isLoadingCashlogyConnectors: false }) }
+    },
+
+    async discoverCashlogyConnectors(signal) {
+      set({ isDiscoveringCashlogyConnectors: true, lastConnectionError: null })
+      try {
+        const result = await client().discoverCashlogyConnectors(signal)
+        const connectors = result.connectors || []
+        set({ cashlogyConnectors: connectors, cashlogyConnectorsLoaded: true })
+        return connectors
+      } catch (error) {
+        const mapped = toPrintAgentError(error, 'DISCOVERY_FAILED')
+        set({ lastConnectionError: mapped })
+        throw mapped
+      } finally { set({ isDiscoveringCashlogyConnectors: false }) }
+    },
+
+    async selectCashlogyConnector(connectorId, signal) {
+      if (!connectorId || connectorId.length > 300) throw new PrintAgentError({ code: 'INVALID_REQUEST' })
+      set({ cashlogyConnectorAction: { connectorId, type: 'select' }, lastConnectionError: null })
+      try {
+        const activeClient = client()
+        const result = await activeClient.selectCashlogyConnector(connectorId, signal)
+        set((state) => ({
+          cashlogyConnectors: state.cashlogyConnectors.map((connector) => connector.id === connectorId
+            ? { ...connector, ...result.connector, selected: true }
+            : { ...connector, selected: false }),
+        }))
+        try { set({ cashlogyHealth: await activeClient.getCashlogyHealth(signal) }) } catch { /* la selección ya se completó; el estado se podrá refrescar */ }
+        return result.connector
+      } catch (error) {
+        const mapped = toPrintAgentError(error)
+        set({ lastConnectionError: mapped })
+        throw mapped
+      } finally { set({ cashlogyConnectorAction: null }) }
+    },
+
+    async initializeCashlogyConnector(connectorId, signal) {
+      if (!connectorId || connectorId.length > 300) throw new PrintAgentError({ code: 'INVALID_REQUEST' })
+      set({ cashlogyConnectorAction: { connectorId, type: 'initialize' }, lastConnectionError: null })
+      try {
+        const activeClient = client()
+        const result = await activeClient.initializeCashlogyConnector(connectorId, signal)
+        set((state) => ({
+          cashlogyConnectors: state.cashlogyConnectors.map((connector) => connector.id === connectorId
+            ? { ...connector, ...result.connector }
+            : connector),
+        }))
+        try { set({ cashlogyHealth: await activeClient.getCashlogyHealth(signal) }) } catch { /* la inicialización ya se completó; el estado se podrá refrescar */ }
+        return result.connector
+      } catch (error) {
+        const mapped = toPrintAgentError(error)
+        set({ lastConnectionError: mapped })
+        throw mapped
+      } finally { set({ cashlogyConnectorAction: null }) }
     },
 
     async checkConnection(signal) {
@@ -348,6 +435,8 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
       set({
         baseUrl: DEFAULT_PRINT_AGENT_URL, token: null, selectedPrinterId: null, selectedPrinter: null,
         cashlogyConfigured: false, cashlogyTerminalCode: 'POS_MAIN', cashlogyHealth: null,
+        cashlogyConnectors: [], cashlogyConnectorsLoaded: false,
+        isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, cashlogyConnectorAction: null,
         printers: [], serverInfo: null, jobs: [], currentJob: null, connectionStatus: 'unknown',
         lastConnectionError: null, lastConnectionCheckAt: null, lastSuccessfulConnectionAt: null,
         lastResponseTimeMs: null, lastPrintAt: null, preferences: { ...defaultPrintAgentPreferences },
@@ -360,7 +449,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
         connectionStatus: state.connectionStatus, url: state.baseUrl, lastConnectionCheckAt: state.lastConnectionCheckAt,
         lastSuccessfulConnectionAt: state.lastSuccessfulConnectionAt, responseTimeMs: state.lastResponseTimeMs,
         serverInfo: state.serverInfo, selectedPrinter: state.selectedPrinter,
-        cashlogy: { configured: state.cashlogyConfigured, terminalCode: state.cashlogyTerminalCode, health: state.cashlogyHealth },
+        cashlogy: { configured: state.cashlogyConfigured, terminalCode: state.cashlogyTerminalCode, health: state.cashlogyHealth, connectors: state.cashlogyConnectors },
         lastError: state.lastConnectionError ? {
           code: state.lastConnectionError.code, message: state.lastConnectionError.message, status: state.lastConnectionError.status,
         } : null,
