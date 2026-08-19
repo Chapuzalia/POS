@@ -92,6 +92,7 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       lineTotalCents: grossLineTotals[index],
       discountAmountCents: lineAllocations?.[index].discountAmountCents,
       netTotalCents: lineAllocations?.[index].netCents,
+      note: line.note,
       modifiers: line.modifiers,
       components,
       catalogSnapshot: normalizeCatalogSnapshot(line.catalogSnapshot, { productId: line.productId, productName: line.productName, variantId: line.variantId, variantName: line.variantName, basePriceCents: line.unitPriceCents }),

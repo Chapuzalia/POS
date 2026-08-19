@@ -9,6 +9,7 @@ import { NumericKeypadModal } from "../ui/NumericKeypadModal";
 
 type CloseCashModalProps = {
   cashSession: CashSession;
+  cashlogyCashCents: number | null;
   isBusy: boolean;
   onCancel: () => void;
   onConfirm: (payload: CashClosedPayload) => void;
@@ -18,6 +19,7 @@ type CloseCashModalProps = {
 
 export function CloseCashModal({
   cashSession,
+  cashlogyCashCents,
   isBusy,
   onCancel,
   onConfirm,
@@ -25,13 +27,10 @@ export function CloseCashModal({
   userId,
 }: CloseCashModalProps) {
   const [countedCash, setCountedCash] = useState(
-    centsToInput(summary.cashCents),
+    centsToInput(cashlogyCashCents ?? summary.cashCents),
   );
   const [countedCard, setCountedCard] = useState(
     centsToInput(summary.cardCents),
-  );
-  const [finalCashFund] = useState(
-    centsToInput(cashSession.openingFloatCents),
   );
   const [countedAmountKeypad, setCountedAmountKeypad] = useState<
     "cash" | "card" | null
@@ -39,7 +38,7 @@ export function CloseCashModal({
   const [notes, setNotes] = useState("");
   const countedCashCents = parseMoneyToCents(countedCash);
   const countedCardCents = parseMoneyToCents(countedCard);
-  const finalCashFundCents = parseMoneyToCents(finalCashFund);
+  const finalCashFundCents = cashlogyCashCents ?? cashSession.openingFloatCents;
   const expectedTotal = summary.cashCents + summary.cardCents;
   const countedTotal = countedCashCents + countedCardCents;
   const discrepancy = countedTotal - expectedTotal;
@@ -115,6 +114,14 @@ export function CloseCashModal({
             />
           </div>
 
+          {cashlogyCashCents !== null ? (
+            <p className="mt-4 rounded-[var(--radius)] border border-emerald-500/35 bg-emerald-500/10 p-3 text-sm font-semibold text-emerald-800 dark:text-emerald-200">
+              El efectivo contado y el fondo final se han consultado
+              automáticamente en Cashlogy. El importe permanece oculto para
+              proteger el contenido del stacker.
+            </p>
+          ) : null}
+
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             {[
               {
@@ -133,9 +140,16 @@ export function CloseCashModal({
                   {label}
                 </span>
                 <button
-                  aria-label={`Introducir ${label.toLowerCase()}`}
+                  aria-label={
+                    field === "cash" && cashlogyCashCents !== null
+                      ? "Efectivo consultado en Cashlogy"
+                      : `Introducir ${label.toLowerCase()}`
+                  }
                   className="mt-1 flex h-12 w-full items-center rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] text-left text-[var(--field-foreground)] outline-none focus:ring-2 focus:ring-[var(--accent)] disabled:cursor-not-allowed disabled:opacity-60"
-                  disabled={isBusy}
+                  disabled={
+                    isBusy ||
+                    (field === "cash" && cashlogyCashCents !== null)
+                  }
                   onClick={() => setCountedAmountKeypad(field)}
                   type="button"
                 >
@@ -143,7 +157,9 @@ export function CloseCashModal({
                     EUR
                   </span>
                   <span className="min-w-0 flex-1 px-2 font-mono">
-                    {value}
+                    {field === "cash" && cashlogyCashCents !== null
+                      ? "••••"
+                      : value}
                   </span>
                 </button>
               </div>
@@ -159,13 +175,16 @@ export function CloseCashModal({
               onChange={(event) => setNotes(event.target.value)}
               value={notes}
             />
+            {notesRequired ? (
+              <span className="mt-2 block text-sm font-semibold text-[var(--danger)]">
+                Indica el motivo del descuadre para poder cerrar la caja.
+              </span>
+            ) : null}
           </label>
 
           <Button
             className="mt-4"
-            disabled={
-              isBusy || notesRequired || parseMoneyToCents(finalCashFund) < 0
-            }
+            disabled={isBusy || notesRequired || finalCashFundCents < 0}
             fullWidth
             onClick={handleConfirm}
             size="lg"

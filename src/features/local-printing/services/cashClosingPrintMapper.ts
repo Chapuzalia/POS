@@ -1,12 +1,13 @@
 import type { CashClosingRecord } from '../../../types/index.ts'
-import { getCashClosingAmounts } from '../../cash-registers/services/cashClosingAmounts.ts'
-import type { CashClosingPrintDocument, PrintAgentPreferences, PrintRequest } from '../types.ts'
 import { printRequestSchema } from '../schemas/printSchemas.ts'
-import { getCashClosingReceiptDetails } from './cashClosingReceiptRenderer.ts'
+import type { PrintAgentPreferences, PrinterLayout, PrintRequest } from '../types.ts'
+import { buildClosingReportLines, type PrintEstablishment } from './documentLineBuilders.ts'
 
 type MapperOptions = {
   closing: CashClosingRecord
+  establishment: PrintEstablishment
   printerId: string
+  printerLayout: PrinterLayout
   settings: PrintAgentPreferences
   isReprint?: boolean
   copyNumber?: number
@@ -18,59 +19,32 @@ export function cashClosingRequestId(closingId: string, isReprint = false, copyN
     : `cash-closing:${closingId}:original`
 }
 
-export function mapCashClosingToPrintRequest({ closing, printerId, settings, isReprint = false, copyNumber = 0 }: MapperOptions): PrintRequest {
-  const snapshot = closing.printSnapshot
-  const payments = settings.includeZeroPaymentMethods
-    ? snapshot.payments
-    : snapshot.payments.filter((payment) => payment.amountCents !== 0)
-  const document: CashClosingPrintDocument = {
-    reportTitle: snapshot.reportTitle,
-    companyName: snapshot.companyName,
-    registerName: snapshot.registerName,
-    shiftLabel: snapshot.shiftLabel,
-    closedAt: snapshot.closedAt,
-    timezone: snapshot.timezone,
-    currency: snapshot.currency,
-    locale: snapshot.locale,
-    ...(isReprint ? { copyLabel: 'COPIA' } : {}),
-    summary: snapshot.summary,
-    payments,
-    cashMovements: snapshot.cashMovements,
-    cashFund: snapshot.cashFund,
-    operationalSummary: getCashClosingAmounts(snapshot),
-    differences: snapshot.differences,
-    ...(settings.includeExpectedAndCountedAmounts ? { expectedAndCounted: snapshot.expectedAndCounted } : {}),
-    ...(settings.includeUserNames ? { users: { openedBy: snapshot.openedBy, closedBy: snapshot.closedBy } } : {}),
-    ...(settings.includeOpeningAndClosingTimes ? { times: { openedAt: snapshot.openedAt, closedAt: snapshot.closedAt } } : {}),
-    includeTotalPayments: settings.includeTotalPayments,
-    paperWidth: settings.cashClosingPaperWidth,
-  }
-  const totalSalesCents = Math.max(0, snapshot.summary.totalSalesCents)
-  const request: PrintRequest = {
+export function mapCashClosingToPrintRequest({
+  closing,
+  establishment,
+  printerId,
+  printerLayout,
+  settings,
+  isReprint = false,
+  copyNumber = 0,
+}: MapperOptions): PrintRequest {
+  return printRequestSchema.parse({
     requestId: cashClosingRequestId(closing.id, isReprint, copyNumber),
     printerId,
-    ticket: {
-      establishmentName: snapshot.companyName,
-      ticketNumber: snapshot.reportTitle,
-      date: snapshot.closedAt,
-      items: [{
-        name: `Cierre · ${snapshot.registerName}`.slice(0, 200),
-        quantity: 1,
-        unitPriceCents: totalSalesCents,
-        totalCents: totalSalesCents,
-        additions: getCashClosingReceiptDetails(document, settings.moneySymbol),
-      }],
-      subtotalCents: totalSalesCents,
-      totalCents: totalSalesCents,
-      deferredLabel: 'CIERRE DE CAJA',
-      footer: 'CIERRE COMPLETADO',
-      ...(isReprint ? { copyLabel: 'COPIA' } : {}),
-    },
+    force: isReprint,
+    lines: buildClosingReportLines(closing, establishment, printerLayout, {
+      ...(isReprint ? { copyLabel: 'COPIA' as const } : {}),
+      includeExpectedAndCountedAmounts: settings.includeExpectedAndCountedAmounts,
+      includeOpeningAndClosingTimes: settings.includeOpeningAndClosingTimes,
+      includeTotalPayments: settings.includeTotalPayments,
+      includeUserNames: settings.includeUserNames,
+      includeZeroPaymentMethods: settings.includeZeroPaymentMethods,
+      moneySymbol: settings.moneySymbol,
+    }),
     options: {
       cut: settings.cut,
       openCashDrawer: false,
       copies: Math.max(1, Math.min(5, settings.cashClosingCopies)),
     },
-  }
-  return printRequestSchema.parse(request)
+  })
 }

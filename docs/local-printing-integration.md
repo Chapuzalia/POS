@@ -34,10 +34,11 @@ MESS, LOFT y terminales distintas conservan configuraciones independientes. Para
 1. El TPV valida el cobro y guarda el evento local.
 2. En venta rapida envia inmediatamente la impresion y sincroniza con Supabase en segundo plano, sin usar la conectividad a Internet como condicion de impresion local.
 3. En mesas espera el resultado exitoso de la RPC porque esta genera los IDs definitivos, construye el ticket con el estado local de la comanda y lo imprime antes de refrescar caja y estadisticas.
-4. El mapper crea un contrato minimo, con importes enteros en centimos y sin objetos internos completos.
-5. Zod valida el payload.
-6. Se envia `POST /api/v1/print` con un `requestId` estable.
-7. Si el agente devuelve un trabajo pendiente, el frontend consulta `/api/v1/jobs/:id` hasta un estado final o hasta agotar el tiempo de interfaz.
+4. El TPV consulta `GET /api/v1/printers/selected` y convierte `paperWidth` en 32 columnas para 58 mm o 48 columnas para 80 mm.
+5. Los maquetadores puros componen cada documento como `string[]`, adaptan el texto al `characterSet` y garantizan que ninguna linea supera el ancho fisico.
+6. Zod valida que el payload solo contiene `requestId`, `printerId`, `force`, `lines` y las opciones fisicas.
+7. Se envia `POST /api/v1/print` con un `requestId` estable.
+8. Si el agente devuelve un trabajo pendiente, el frontend consulta `/api/v1/jobs/:id` hasta un estado final o hasta agotar el tiempo de interfaz.
 
 El fallo de impresion nunca revierte, repite ni elimina la venta. Un timeout despues de enviar se trata como `PRINT_STATUS_UNKNOWN`; primero se consulta el trabajo por `requestId` y no se reenvia automaticamente.
 
@@ -49,7 +50,16 @@ print:{saleId}:copy:{copyNumber}
 drawer:{terminalId}:{timestamp}
 ```
 
-Las reimpresiones muestran `COPIA`, no abren el cajon y requieren una decision explicita si el intento anterior tiene estado desconocido.
+Las reimpresiones muestran `COPIA`, envian `force:true`, no abren el cajon y nacen siempre de una accion humana. Un reintento tecnico conserva el mismo ID y `force:false`.
+
+## Maquetacion de documentos
+
+`documentLineBuilders.ts` expone los dos formatos deterministas:
+
+- `buildSaleTicketLines`: cabecera fiscal/comercial, datos del ticket, productos, modificadores, notas, bases e impuestos disponibles, pago, entregado/cambio y pie.
+- `buildClosingReportLines`: identidad del turno, ventas, metodos de pago, movimientos, arqueo y datos de auditoria del snapshot persistido.
+
+`receiptFormatters.ts` contiene el wrapping, centrado, columnas, separadores, fecha en la zona del local, dinero desde centimos enteros y adaptacion a la codificacion. Los caracteres de control se eliminan antes de validar el request. El frontend no envia HTML, saltos embebidos ni comandos ESC/POS.
 
 ## Cajon
 
@@ -73,8 +83,20 @@ El proyecto actual expone roles y capacidades de dispositivo, no permisos granul
 
 No existe aun un servicio generico de auditoria en el TPV. Las acciones estan encapsuladas y listas para conectar dicho servicio sin incluir el token. No debe registrarse `Authorization`, el token, datos de cliente ni el contenido completo de tickets.
 
-## Contrato esperado del agente
+## Contrato HTTP del agente
 
 El cliente implementa `/health`, servidor, descubrimiento normal y streaming, impresoras, seleccion, prueba, impresion, cajon, trabajos y configuracion. El streaming usa `fetch` para poder enviar Bearer; no usa `EventSource` ni query params con token. Si no esta disponible, usa el endpoint normal.
 
-La impresion del cierre de caja reutiliza este mismo endpoint y el mismo contrato `ticket` de una venta. Los datos del cierre se adaptan a lineas del ticket sin exigir soporte adicional al agente. Su snapshot, idempotencia y tabla de fuentes reales se documentan en [cash-closing-printing.md](./cash-closing-printing.md).
+Ventas, pre-tickets y cierres reutilizan `POST /api/v1/print` con este unico contrato:
+
+```json
+{
+  "requestId": "print:sale_123:original",
+  "printerId": "main-bar",
+  "force": false,
+  "lines": ["MESS", "", "TOTAL                         12,50 EUR"],
+  "options": { "cut": true, "openCashDrawer": false, "copies": 1 }
+}
+```
+
+No se envian `ticket`, `items`, productos, precios, subtotales, pagos ni otros objetos semanticos. El agente conserva la idempotencia y solo ejecuta codificacion, LF por elemento, copias, corte y pulso de cajon. El cierre y sus fuentes reales se documentan en [cash-closing-printing.md](./cash-closing-printing.md).

@@ -1,5 +1,5 @@
 import { sileo } from 'sileo'
-import type { SessionTicketRecord, TenantContext } from '../../../types'
+import type { CashSession, SessionTicketRecord, TenantContext } from '../../../types'
 import { getPrintAgentErrorMessage } from '../api/PrintAgentError'
 import { nextPrintCopyNumber } from './printAgentStorage'
 import { printCompletedSale } from './printCompletedSale'
@@ -9,6 +9,7 @@ import { getPrintFailurePatch } from './printFailure'
 
 type PrintTicketOptions = {
   context: TenantContext
+  cashSession: CashSession | null
   payload: SessionTicketRecord['payload']
   tickets: SessionTicketRecord[]
   updateTicketPrintState: (saleId: string, patch: Partial<Pick<SessionTicketRecord,
@@ -16,7 +17,7 @@ type PrintTicketOptions = {
   options?: { isReprint?: boolean; copyNumber?: number }
 }
 
-export async function printTicket({ context, payload, tickets, updateTicketPrintState, options = {} }: PrintTicketOptions) {
+export async function printTicket({ cashSession, context, payload, tickets, updateTicketPrintState, options = {} }: PrintTicketOptions) {
   const printState = usePrintAgentStore.getState()
   const requestId = options.isReprint ? `print:${payload.sale.id}:copy:${options.copyNumber || 1}` : `print:${payload.sale.id}:original`
   const payments = payload.payment ? [{ method: payload.payment.method, amountCents: payload.payment.amountCents }] : []
@@ -60,6 +61,9 @@ export async function printTicket({ context, payload, tickets, updateTicketPrint
       establishment: {
         name: context.venueName, address: context.venueAddress,
         legalName: context.venueLegalName, taxId: context.venueTaxId,
+        timezone: context.venueTimeZone,
+        cashRegisterName: cashSession?.cashRegisterName,
+        employeeName: context.userName,
       },
       isReprint: options.isReprint, copyNumber: options.copyNumber,
     })

@@ -4,13 +4,13 @@ export { usePrintAgentStore } from './store/usePrintAgentStore'
 export { usePrintAgent } from './hooks/usePrintAgent'
 export { normalizePrintAgentUrl } from './utils/normalizePrintAgentUrl'
 export { printRequestSchema } from './schemas/printSchemas'
-export { mapSaleToPrintRequest, mapRestaurantSaleToPrintRequest } from './services/ticketPrintMapper'
+export { mapSaleToPrintRequest } from './services/ticketPrintMapper'
 export { printCompletedSale } from './services/printCompletedSale'
 export { printPreTicket } from './services/printPreTicket'
 export { printCashClosing } from './services/printCashClosing'
 export { mapCashClosingToPrintRequest, cashClosingRequestId } from './services/cashClosingPrintMapper'
-export { getCashClosingReceiptDetails, renderCashClosingReceipt } from './services/cashClosingReceiptRenderer'
-export { formatMoneyForReceipt, formatReceiptRow, createSeparator } from './services/receiptFormatters'
+export { buildSaleTicketLines, buildClosingReportLines } from './services/documentLineBuilders'
+export { formatMoneyForReceipt, formatReceiptRow, createSeparator, wrapReceiptText, centerReceiptText, adaptTextToCharacterSet } from './services/receiptFormatters'
 export { shouldOpenCashDrawer } from './services/cashDrawerRules'
 export { sanitizePrintDiagnostics } from './utils/sanitizePrintDiagnostics'
 export { nextPrintCopyNumber, nextCashClosingCopyNumber } from './services/printAgentStorage'
@@ -26,5 +26,5 @@ export { useCashlogyManagementStore } from './cashlogy/useCashlogyManagementStor
 export type {
   PrintRequest, PrintJob, Printer, PrintAgentScope, CashlogyHealth, CashlogyTransaction,
   CashlogyAccounting, CashlogyCancelResponse, CashlogyCashManagementOperation, CashlogyRecoveryResult,
-  CashlogyRequestedDenomination,
+  CashlogyRequestedDenomination, PrinterLayout,
 } from './types'

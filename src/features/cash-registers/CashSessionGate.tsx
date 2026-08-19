@@ -2,6 +2,7 @@ import { Button as UiButton } from "../../components/ui/Button";
 import { NativeSelect as UiNativeSelect } from "../../components/ui/NativeSelect";
 import { NumericKeypadModal } from "../../components/ui/NumericKeypadModal";
 import { useState } from "react";
+import { Vault } from "lucide-react";
 import type {
   CashClosingRecord,
   CashRegister,
@@ -13,6 +14,7 @@ import {
   CashClosingResultModal,
   CashClosingsHistoryModal,
 } from "../../components/modals";
+import { usePrintAgentStore } from "../local-printing/store/usePrintAgentStore";
 
 type Props = {
   canOpenReservations: boolean;
@@ -29,6 +31,7 @@ type Props = {
   cashClosings: CashClosingRecord[];
   closingHistoryOpen: boolean;
   completedClosing: CashClosingRecord | null;
+  error: string | null;
   printingClosingId: string | null;
   onOpenClosingHistory: () => void;
   onCloseClosingHistory: () => void;
@@ -42,6 +45,7 @@ export function CashSessionGate({
   closingHistoryOpen,
   completedClosing,
   context,
+  error,
   isBusy,
   isOnline,
   onCloseClosingHistory,
@@ -57,6 +61,7 @@ export function CashSessionGate({
   registers,
   sessions,
 }: Props) {
+  const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured);
   const openRegisterIds = new Set(
     sessions.map((session) => session.cashRegisterId),
   );
@@ -103,7 +108,10 @@ export function CashSessionGate({
                     hour: "2-digit",
                     minute: "2-digit",
                   })}{" "}
-                  - Fondo {formatMoney(session.openingFloatCents)}
+                  -{" "}
+                  {cashlogyConfigured
+                    ? "Fondo gestionado por Cashlogy"
+                    : `Fondo ${formatMoney(session.openingFloatCents)}`}
                 </span>
               </UiButton>
             ))}
@@ -130,17 +138,32 @@ export function CashSessionGate({
                 </option>
               ))}
             </UiNativeSelect>
-            <UiButton
-              aria-haspopup="dialog"
-              className="min-h-12 w-full !justify-between rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-4 font-mono text-[var(--field-foreground)]"
-              disabled={isBusy}
-              onClick={() => setOpeningFloatKeypadOpen(true)}
-              type="button"
-              variant="tertiary"
-            >
-              <span className="tabular-nums">{openingFloat}</span>
-              <span className="text-sm font-bold text-[var(--muted)]">EUR</span>
-            </UiButton>
+            {cashlogyConfigured ? (
+              <div className="flex min-h-14 items-center gap-3 rounded-[var(--radius)] border border-emerald-500/35 bg-emerald-500/10 p-3 text-sm text-emerald-800 dark:text-emerald-200">
+                <Vault className="h-5 w-5 shrink-0" />
+                <span>
+                  <strong className="block">
+                    Fondo automático desde Cashlogy
+                  </strong>
+                  Se consultará el efectivo total de la máquina al confirmar la
+                  apertura.
+                </span>
+              </div>
+            ) : (
+              <UiButton
+                aria-haspopup="dialog"
+                className="min-h-12 w-full !justify-between rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-4 font-mono text-[var(--field-foreground)]"
+                disabled={isBusy}
+                onClick={() => setOpeningFloatKeypadOpen(true)}
+                type="button"
+                variant="tertiary"
+              >
+                <span className="tabular-nums">{openingFloat}</span>
+                <span className="text-sm font-bold text-[var(--muted)]">
+                  EUR
+                </span>
+              </UiButton>
+            )}
             <UiButton
               className="min-h-12 w-full rounded-[var(--radius)] bg-[var(--accent)] font-bold text-[var(--accent-foreground)] disabled:opacity-45"
               disabled={!isOnline || isBusy || !registerId || !available.length}
@@ -151,6 +174,11 @@ export function CashSessionGate({
                 : "Todos los puntos de caja ya estan abiertos"}
             </UiButton>
           </form>
+        ) : null}
+        {error ? (
+          <p className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
+            {error}
+          </p>
         ) : null}
         <div className="grid gap-3 sm:grid-cols-2">
           {canOpenReservations ? <UiButton

@@ -289,7 +289,7 @@ export function PosPage(props: Props) {
         isLoading={props.isLoading}
         isOnline={props.isOnline}
         onCloseCash={() => void (async () => {
-          if (await restaurant.requestCloseCash()) cash.openCloseModal()
+          if (await restaurant.requestCloseCash()) await cash.openCloseModal()
         })()}
         onOpenConfig={() => setConfigOpen(true)}
         onOpenReservations={props.reservations.open}
@@ -555,6 +555,7 @@ export function PosPage(props: Props) {
       /> : null}
       {cash.closeModalOpen && cash.session ? <CloseCashModal
         cashSession={cash.session}
+        cashlogyCashCents={cash.cashlogyClosingCashCents}
         isBusy={props.isBusy}
         onCancel={() => cash.setCloseModalOpen(false)}
         onConfirm={async (payload) => {

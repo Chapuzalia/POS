@@ -18,6 +18,8 @@ import {
   getRestaurantPrintSubtotal,
 } from '../src/features/restaurant/services/restaurantPrintPayload.ts'
 
+const layout80 = { columns: 48, paperWidth: 80, characterSet: 'CP858' }
+
 const sale = {
   ticket: {
     id: 'ticket_123', tenantId: 'tenant', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'mess',
@@ -129,22 +131,23 @@ test('permite cancelar una consulta mediante AbortSignal', async () => {
 test('mapea cubatas, extras, efectivo e importes enteros con idempotencia estable', () => {
   const payload = mapSaleToPrintRequest({
     sale, establishment: { name: 'MESS', address: 'Carrer Exemple 1, Igualada', legalName: 'MESS EVENTS SL', taxId: 'B12345678' },
-    printerId: 'main-bar', footer: 'Gracias', autoOpenCashDrawer: true,
+    printerId: 'main-bar', printerLayout: layout80, footer: 'Gracias', autoOpenCashDrawer: true,
   })
   assert.equal(payload.requestId, 'print:sale_123:original')
-  assert.equal(payload.ticket.address, 'Carrer Exemple 1, Igualada')
-  assert.equal(payload.ticket.legalName, 'MESS EVENTS SL')
-  assert.equal(payload.ticket.taxId, 'B12345678')
-  assert.deepEqual(payload.ticket.items[0].additions, ['Coca-Cola', 'Limon'])
-  assert.equal(payload.ticket.items[0].totalCents, 1800)
-  assert.equal(payload.ticket.items[0].taxCents, 278)
-  assert.equal(payload.ticket.subtotalCents, 1322)
-  assert.equal(payload.ticket.taxCents, 278)
-  assert.equal(payload.ticket.discountCents, 200)
-  assert.equal(payload.ticket.amountReceivedCents, 2000)
-  assert.equal(payload.ticket.changeCents, 400)
+  const text = payload.lines.join('\n')
+  assert.match(text, /Carrer Exemple 1, Igualada/)
+  assert.match(text, /MESS EVENTS SL/)
+  assert.match(text, /B12345678/)
+  assert.match(text, /Coca-Cola/)
+  assert.match(text, /Limon/)
+  assert.match(text, /Subtotal[ ]+18,00 €/)
+  assert.match(text, /Base imponible[ ]+13,22 €/)
+  assert.match(text, /IVA 21 %[ ]+2,78 €/)
+  assert.match(text, /Descuento[ ]+-2,00 €/)
+  assert.match(text, /Entregado[ ]+20,00 €/)
+  assert.match(text, /Cambio[ ]+4,00 €/)
   assert.equal(payload.options.openCashDrawer, true)
-  assert.equal(printRequestSchema.parse(payload).ticket.totalCents, 1600)
+  assert.deepEqual(Object.keys(printRequestSchema.parse(payload)).sort(), ['force', 'lines', 'options', 'printerId', 'requestId'])
 })
 
 test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipos', () => {
@@ -162,11 +165,13 @@ test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipo
     { taxRate: 10, grossTotalCents: 1100, taxableBaseCents: 1000, taxAmountCents: 100 },
   ])
 
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main' })
-  assert.equal(request.ticket.subtotalCents, 2000)
-  assert.equal(request.ticket.discountCents, 0)
-  assert.equal(request.ticket.taxCents, 310)
-  assert.equal(request.ticket.totalCents, 2310)
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80 })
+  const text = request.lines.join('\n')
+  assert.match(text, /Subtotal[ ]+23,10 €/)
+  assert.match(text, /Base imponible[ ]+20,00 €/)
+  assert.match(text, /IVA 10 %[ ]+1,00 €/)
+  assert.match(text, /IVA 21 %[ ]+2,10 €/)
+  assert.match(text, /TOTAL[ ]+23,10 €/)
 })
 
 test('la venta rapida reparte el descuento y recalcula el IVA final de cada tipo', () => {
@@ -187,12 +192,14 @@ test('la venta rapida reparte el descuento y recalcula el IVA final de cada tipo
     { taxRate: 10, grossTotalCents: 880, taxableBaseCents: 800, taxAmountCents: 80 },
   ])
 
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main' })
-  assert.deepEqual(request.ticket.items.map((item) => item.taxCents), [168, 80])
-  assert.equal(request.ticket.subtotalCents, 1600)
-  assert.equal(request.ticket.discountCents, 462)
-  assert.equal(request.ticket.taxCents, 248)
-  assert.equal(request.ticket.totalCents, 1848)
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80 })
+  const text = request.lines.join('\n')
+  assert.match(text, /Subtotal[ ]+23,10 €/)
+  assert.match(text, /Base imponible[ ]+16,00 €/)
+  assert.match(text, /Descuento[ ]+-4,62 €/)
+  assert.match(text, /IVA 10 %[ ]+0,80 €/)
+  assert.match(text, /IVA 21 %[ ]+1,68 €/)
+  assert.match(text, /TOTAL[ ]+18,48 €/)
 })
 
 test('omite todo el desglose fiscal si alguna linea de venta rapida no tiene IVA', () => {
@@ -207,12 +214,12 @@ test('omite todo el desglose fiscal si alguna linea de venta rapida no tiene IVA
   assert.ok(payload.lines[0].fiscalSnapshot)
   assert.equal(payload.lines[1].fiscalSnapshot, null)
 
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main' })
-  assert.equal(request.ticket.subtotalCents, 1710)
-  assert.equal(request.ticket.discountCents, 342)
-  assert.equal(request.ticket.totalCents, 1368)
-  assert.equal(request.ticket.taxCents, undefined)
-  assert.deepEqual(request.ticket.items.map((item) => item.taxCents), [undefined, undefined])
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80 })
+  const text = request.lines.join('\n')
+  assert.match(text, /Subtotal[ ]+17,10 €/)
+  assert.match(text, /Descuento[ ]+-3,42 €/)
+  assert.match(text, /TOTAL[ ]+13,68 €/)
+  assert.doesNotMatch(text, /\nIVA \d/u)
 })
 
 test('la venta rapida aplica el IVA predeterminado del local a productos que lo heredan', () => {
@@ -231,17 +238,19 @@ test('la venta rapida aplica el IVA predeterminado del local a productos que lo 
     taxAmountCents: 1736,
   })
 
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main' })
-  assert.equal(request.ticket.subtotalCents, 8264)
-  assert.equal(request.ticket.taxCents, 1736)
-  assert.equal(request.ticket.totalCents, 10000)
-  assert.equal(request.ticket.subtotalCents + request.ticket.taxCents, request.ticket.totalCents)
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80 })
+  const text = request.lines.join('\n')
+  assert.match(text, /Subtotal[ ]+100,00 €/)
+  assert.match(text, /Base imponible[ ]+82,64 €/)
+  assert.match(text, /IVA 21 %[ ]+17,36 €/)
+  assert.match(text, /TOTAL[ ]+100,00 €/)
 })
 
 test('la reimpresion usa COPIA, un ID de copia y nunca abre el cajon', () => {
-  const payload = mapSaleToPrintRequest({ sale, establishment: { name: 'MESS' }, printerId: 'main', isReprint: true, copyNumber: 2, autoOpenCashDrawer: true })
+  const payload = mapSaleToPrintRequest({ sale, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint: true, copyNumber: 2, autoOpenCashDrawer: true })
   assert.equal(payload.requestId, 'print:sale_123:copy:2')
-  assert.equal(payload.ticket.copyLabel, 'COPIA')
+  assert.equal(payload.force, true)
+  assert.ok(payload.lines.includes('                     COPIA'))
   assert.equal(payload.options.openCashDrawer, false)
 })
 
@@ -287,11 +296,11 @@ test('construye el ticket de mesa localmente en cuanto la RPC devuelve sus IDs',
     paymentId: 'payment', paymentMethod: 'cash', receivedCents: 1000, saleId: 'sale-table', subtotalCents: 900,
     ticketId: 'ticket-table', totalCents: 900,
   })
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', autoOpenCashDrawer: true })
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true })
   assert.equal(request.requestId, 'print:sale-table:original')
-  assert.equal(request.ticket.items[0].quantity, 1)
-  assert.deepEqual(request.ticket.items[0].additions, ['Coca-Cola'])
-  assert.equal(request.ticket.taxCents, undefined)
+  assert.match(request.lines.join('\n'), /1 x Brugal Cubata/)
+  assert.match(request.lines.join('\n'), /Coca-Cola/)
+  assert.doesNotMatch(request.lines.join('\n'), /IVA /)
   assert.equal(request.options.openCashDrawer, true)
 })
 

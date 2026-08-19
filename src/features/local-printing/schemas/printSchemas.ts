@@ -1,56 +1,25 @@
 import { z } from 'zod'
+import { hasPrintControlCharacters } from '../services/receiptFormatters.ts'
 
 const cents = z.number().int().nonnegative()
 
-export const printTicketItemSchema = z.object({
-  name: z.string().trim().min(1).max(200),
-  quantity: z.number().positive(),
-  unitPriceCents: z.number().int(),
-  totalCents: z.number().int(),
-  additions: z.array(z.string().trim().min(1).max(160)).optional(),
-  notes: z.array(z.string().trim().min(1).max(240)).optional(),
-  discountCents: cents.optional(),
-  taxCents: cents.optional(),
-})
-
 export const printRequestSchema = z.object({
-  requestId: z.string().trim().min(1).max(200),
+  requestId: z.string().trim().min(3).max(200),
   printerId: z.string().trim().min(1).max(200),
-  ticket: z.object({
-    establishmentName: z.string().trim().min(1).max(200),
-    address: z.string().trim().max(300).optional(),
-    legalName: z.string().trim().max(80).optional(),
-    taxId: z.string().trim().max(80).optional(),
-    ticketNumber: z.string().trim().min(1).max(100),
-    date: z.string().datetime({ offset: true }),
-    items: z.array(printTicketItemSchema).min(1),
-    subtotalCents: cents,
-    discountCents: cents.optional(),
-    taxCents: cents.optional(),
-    tipCents: cents.optional(),
-    totalCents: cents,
-    paymentMethod: z.string().trim().max(80).optional(),
-    payments: z.array(z.object({ method: z.string().trim().min(1), amountCents: cents })).optional(),
-    amountReceivedCents: cents.optional(),
-    changeCents: cents.optional(),
-    footer: z.string().trim().max(500).optional(),
-    copyLabel: z.string().trim().max(80).optional(),
-    deferredLabel: z.string().trim().max(80).optional(),
-    fiscal: z.object({
-      provider: z.enum(['verifactu', 'ticketbai']),
-      status: z.string().trim().min(1).max(40),
-      uuid: z.string().trim().max(100).optional(),
-      externalCode: z.string().trim().max(200).optional(),
-      verificationUrl: z.string().url().max(2000).optional(),
-      qrBase64: z.string().trim().max(250000).optional(),
-    }).optional(),
-  }),
+  force: z.boolean(),
+  lines: z.array(z.string().max(1000).refine(
+    (line) => !hasPrintControlCharacters(line),
+    'Cada elemento debe ser una sola línea sin caracteres de control.',
+  )).min(1).max(1000).refine(
+    (lines) => lines.reduce((total, line) => total + line.length, 0) <= 100000,
+    'El documento supera los 100.000 caracteres.',
+  ),
   options: z.object({
     cut: z.boolean(),
     openCashDrawer: z.boolean(),
     copies: z.number().int().min(1).max(5),
-  }),
-})
+  }).strict(),
+}).strict()
 
 const signedCents = z.number().int()
 

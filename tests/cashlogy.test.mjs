@@ -293,7 +293,7 @@ test('el ticket Cashlogy nunca abre el cajón de la impresora', () => {
     sale: { id: 'sale', tenantId: 'tenant', ticketId: 'ticket', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue', deviceId: 'device', userId: 'user', totalCents: 1250, paymentMethod: 'cash', createdAt: '2026-08-18T10:00:00Z' },
     payment: { id: 'payment', tenantId: 'tenant', saleId: 'sale', method: 'cash', amountCents: 1250, receivedCents: 1250, changeCents: 0 },
   }
-  const request = mapSaleToPrintRequest({ sale, establishment: { name: 'Venue' }, printerId: 'printer', autoOpenCashDrawer: true, cashlogyConfigured: true })
+  const request = mapSaleToPrintRequest({ sale, establishment: { name: 'Venue' }, printerId: 'printer', printerLayout: { columns: 48, paperWidth: 80, characterSet: 'CP858' }, autoOpenCashDrawer: true, cashlogyConfigured: true })
   assert.equal(request.options.openCashDrawer, false)
 })
 

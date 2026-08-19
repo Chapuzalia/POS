@@ -7,6 +7,8 @@ import { mapSaleToPrintRequest } from '../src/features/local-printing/services/t
 import { printRequestSchema } from '../src/features/local-printing/schemas/printSchemas.ts'
 import { buildCatalogOrderLinesPayload } from '../src/features/tables/order-line-payload.ts'
 
+const printerLayout = { columns: 48, paperWidth: 80, characterSet: 'CP858' }
+
 const context = {
   tenantId: '11111111-1111-4111-8111-111111111111',
   tenantName: 'Tenant',
@@ -88,25 +90,24 @@ function buildPreview(activeDiscount) {
 test('el pre-ticket reutiliza cálculos, variantes, extras, promoción e IVA sin datos de pago', () => {
   const original = structuredClone(lines)
   const preview = buildPreview(discount)
-  const request = mapSaleToPrintRequest({ sale: preview, establishment: { name: context.venueName }, printerId: 'printer', isPreTicket: true })
+  const request = mapSaleToPrintRequest({ sale: preview, establishment: { name: context.venueName }, printerId: 'printer', printerLayout, isPreTicket: true })
 
-  assert.equal(request.ticket.copyLabel, 'PRE-TICKET')
-  assert.equal(request.ticket.paymentMethod, undefined)
-  assert.equal(request.ticket.payments, undefined)
-  assert.equal(request.ticket.amountReceivedCents, undefined)
-  assert.equal(request.ticket.changeCents, undefined)
+  const text = request.lines.join('\n')
+  assert.match(text, /PRE-TICKET/)
+  assert.doesNotMatch(text, /PAGO|Entregado|Cambio/)
   assert.equal(request.options.openCashDrawer, false)
-  assert.equal(request.ticket.discountCents, 230)
-  assert.ok(request.ticket.taxCents > 0)
-  assert.equal(request.ticket.items[0].name, 'Combinado Grande')
-  assert.deepEqual(request.ticket.items[0].additions, ['Tónica +1,00 €', 'Extra hielo'])
+  assert.match(text, /Descuento[ ]+-2,30 €/)
+  assert.match(text, /IVA 21 %/)
+  assert.match(text, /Combinado Grande/)
+  assert.match(text, /Tónica/)
+  assert.match(text, /Extra hielo/)
   assert.deepEqual(lines, original)
-  assert.equal(printRequestSchema.parse(request).ticket.totalCents, 2070)
+  assert.match(printRequestSchema.parse(request).lines.join('\n'), /TOTAL[ ]+20,70 €/)
 })
 
 test('imprimir varias veces genera solicitudes independientes sin mutar ni crear una venta persistida', () => {
-  const first = mapSaleToPrintRequest({ sale: buildPreview(null), establishment: { name: 'Local' }, printerId: 'printer', isPreTicket: true })
-  const second = mapSaleToPrintRequest({ sale: buildPreview(null), establishment: { name: 'Local' }, printerId: 'printer', isPreTicket: true })
+  const first = mapSaleToPrintRequest({ sale: buildPreview(null), establishment: { name: 'Local' }, printerId: 'printer', printerLayout, isPreTicket: true })
+  const second = mapSaleToPrintRequest({ sale: buildPreview(null), establishment: { name: 'Local' }, printerId: 'printer', printerLayout, isPreTicket: true })
   assert.match(first.requestId, /^pre-ticket:/)
   assert.match(second.requestId, /^pre-ticket:/)
   assert.notEqual(first.requestId, second.requestId)
@@ -137,9 +138,10 @@ test('el botón de pre-ticket respeta configuración, vacío, loading y feedback
   assert.match(button, /isPrintingTicket/)
   assert.match(button, /sileo\.success/)
   assert.match(button, /sileo\.warning/)
-  assert.match(printer, /state\.printTicket\(printRequestSchema\.parse\(request\)\)/)
+  assert.match(printer, /state\.printTicket\(request\)/)
+  assert.match(printer, /if \(activePreTicketPrint\) return activePreTicketPrint/)
   assert.doesNotMatch(printer, /persist|completePayment|enqueueOfflineEvent|syncPendingEvents/)
-  assert.match(mapper, /isPreTicket \? false/)
+  assert.match(mapper, /openCashDrawer: isPreTicket \? false/)
 })
 
 test('Venta rápida solo ofrece guardar cuando hay mesas y productos, reutilizando el mismo modal', async () => {

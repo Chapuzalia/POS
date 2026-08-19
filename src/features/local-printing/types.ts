@@ -21,7 +21,6 @@ export type PrintAgentPreferences = {
   includeZeroPaymentMethods: boolean
   includeTotalPayments: boolean
   cashClosingCopies: number
-  cashClosingPaperWidth: 32 | 42 | 48
   moneySymbol: 'currency' | 'code'
 }
 
@@ -356,6 +355,9 @@ export type Printer = {
   ip?: string
   mac?: string
   port?: number
+  paperWidth?: 58 | 80
+  characterSet?: string
+  cashDrawerPin?: 0 | 1
   confidence?: number | string
   status?: 'available' | 'unavailable' | 'selected' | 'unknown' | string
   lastSeenAt?: string
@@ -375,90 +377,18 @@ export type PrintJob = {
   [key: string]: unknown
 }
 
-export type PrintTicketItem = {
-  name: string
-  quantity: number
-  unitPriceCents: number
-  totalCents: number
-  additions?: string[]
-  notes?: string[]
-  discountCents?: number
-  taxCents?: number
-}
-
-export type PrintTicket = {
-  establishmentName: string
-  address?: string
-  legalName?: string
-  taxId?: string
-  ticketNumber: string
-  date: string
-  items: PrintTicketItem[]
-  subtotalCents: number
-  discountCents?: number
-  taxCents?: number
-  tipCents?: number
-  totalCents: number
-  paymentMethod?: string
-  payments?: Array<{ method: string; amountCents: number }>
-  amountReceivedCents?: number
-  changeCents?: number
-  footer?: string
-  copyLabel?: string
-  deferredLabel?: string
-  fiscal?: {
-    provider: 'verifactu' | 'ticketbai'
-    status: string
-    uuid?: string
-    externalCode?: string
-    verificationUrl?: string
-    qrBase64?: string
-  }
-}
-
 export type PrintRequest = {
   requestId: string
   printerId: string
-  ticket: PrintTicket
+  force: boolean
+  lines: string[]
   options: { cut: boolean; openCashDrawer: boolean; copies: number }
 }
 
-export type CashClosingPrintDocument = {
-  reportTitle: string
-  companyName: string
-  registerName: string
-  shiftLabel: string
-  closedAt: string
-  timezone: string
-  currency: string
-  locale: string
-  copyLabel?: string
-  summary: { totalSalesCents: number; salesCount: number; averageSaleCents: number }
-  payments: Array<{ code: string; label: string; amountCents: number }>
-  cashMovements: {
-    cashEntriesCents: number
-    cashExitsCents: number
-    cardCashbackCents: number
-  }
-  cashFund: { openingCashFundCents: number; finalCashFundCents: number }
-  operationalSummary?: {
-    billedCardCents: number
-    billedCashCents: number
-    cardTerminalExpectedCents: number
-    cashOverOpeningFundCents: number
-    cashToWithdrawCents: number
-  }
-  differences: { cashDifferenceCents: number; cardDifferenceCents: number }
-  expectedAndCounted?: {
-    expectedCashCents: number
-    countedCashCents: number
-    expectedCardCents: number
-    countedCardCents: number
-  }
-  users?: { openedBy?: string; closedBy?: string }
-  times?: { openedAt: string; closedAt: string }
-  includeTotalPayments?: boolean
-  paperWidth: 32 | 42 | 48
+export type PrinterLayout = {
+  columns: 32 | 48
+  paperWidth: 58 | 80
+  characterSet: string
 }
 
 export type DiscoveryProgress = { scanned?: number; total?: number; found?: number; message?: string }

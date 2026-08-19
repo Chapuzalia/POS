@@ -136,12 +136,7 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
         ].map(([key, label]) => <UiCheckbox checked={Boolean(agent.preferences[key as keyof typeof agent.preferences])} className="min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} key={key} onChange={(checked) => agent.updatePreferences({ [key]: checked })}>
           <span className="font-semibold">{label}</span>
         </UiCheckbox>)}
-        <label><span className="mb-2 block text-sm font-bold">Ancho de papel</span><UiNativeSelect
-          className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3"
-          disabled={!canConfigure}
-          onChange={(event) => agent.updatePreferences({ cashClosingPaperWidth: Number(event.target.value) as 32 | 42 | 48 })}
-          value={agent.preferences.cashClosingPaperWidth}
-        ><option value={32}>58 mm · 32 caracteres</option><option value={42}>80 mm · 42 caracteres</option><option value={48}>80 mm · 48 caracteres</option></UiNativeSelect></label>
+        <div><span className="mb-2 block text-sm font-bold">Formato físico</span><div className="flex min-h-12 items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface-secondary)] px-3 text-sm font-semibold text-[var(--muted)]">Automático según la impresora seleccionada (58 u 80 mm)</div></div>
         <label><span className="mb-2 block text-sm font-bold">Copias por trabajo</span><UiNativeSelect
           className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3"
           disabled={!canConfigure}

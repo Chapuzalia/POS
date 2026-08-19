@@ -66,7 +66,7 @@ test('el ciclo queda protegido en POS, pagos, publicación, realtime, ticket det
     readFile(new URL('../src/components/modals/ProductDialog.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/quick-sale/hooks/useQuickSale.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/local-printing/services/ticketPrintMapper.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/local-printing/services/documentLineBuilders.ts', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/migrations/20260815150000_harden_menu_lifecycle.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/catalog/data/catalog-realtime.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/catalog/pages/CatalogGroupsPage.tsx', import.meta.url), 'utf8'),
