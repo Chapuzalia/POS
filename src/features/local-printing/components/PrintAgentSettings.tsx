@@ -119,7 +119,7 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
     <section className={'rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4'}>
       <h3 className={'font-black'}>Ticket automático</h3>
       <UiCheckbox checked={agent.preferences.alwaysPrintTicket} className="mt-3 min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} onChange={(checked) => agent.updatePreferences({ alwaysPrintTicket: checked })}>
-        <span><strong className="block">Imprimir ticket siempre</strong><small className="text-[var(--muted)]">Si se desactiva, los cobros en efectivo solo abrirán el cajón.</small></span>
+        <span><strong className="block">Imprimir ticket siempre</strong><small className="text-[var(--muted)]">Si se desactiva, no se imprimirá automáticamente. El cajón convencional solo se abrirá en cobros en efectivo si está habilitado.</small></span>
       </UiCheckbox>
     </section>
 

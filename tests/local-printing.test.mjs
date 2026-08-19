@@ -269,6 +269,7 @@ test('la preferencia de ticket decide entre imprimir, abrir cajon o no actuar', 
   assert.equal(getAutomaticSaleHardwareAction({ payments: cash, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true } }), 'open_drawer')
   assert.equal(getAutomaticSaleHardwareAction({ payments: card, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true } }), 'none')
   assert.equal(getAutomaticSaleHardwareAction({ payments: cash, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: false } }), 'none')
+  assert.equal(getAutomaticSaleHardwareAction({ payments: cash, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true, cashlogyConfigured: true } }), 'none')
   assert.equal(getAutomaticSaleHardwareAction({ payments: card, isReprint: true, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true } }), 'print')
 })
 

@@ -85,10 +85,11 @@ test('la configuración predeterminada conserva el modo de solo impresora', () =
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { autoOpenCashDrawer: true, cashlogyConfigured: false } }), true)
 })
 
-test('Cashlogy configurado bloquea siempre el cajón y no bloquea la impresión', () => {
+test('Cashlogy bloquea el cajón convencional y respeta la preferencia de impresión', () => {
   const settings = { alwaysPrintTicket: false, autoOpenCashDrawer: true, cashlogyConfigured: true }
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), false)
-  assert.equal(getAutomaticSaleHardwareAction({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), 'print')
+  assert.equal(getAutomaticSaleHardwareAction({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), 'none')
+  assert.equal(getAutomaticSaleHardwareAction({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { ...settings, alwaysPrintTicket: true } }), 'print')
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { ...settings, healthOk: false } }), false)
 })
 
