@@ -29,6 +29,7 @@ export type VenueRow = {
   address: string | null
   legal_name: string | null
   tax_id: string | null
+  timezone: string
   default_tax_rate: number
   catalog_profile: CatalogProfile
 }

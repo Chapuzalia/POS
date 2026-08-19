@@ -335,20 +335,20 @@ test('el webhook valida firma e idempotencia y el backend nunca devuelve las API
   assert.doesNotMatch(integrationPage, /api_key_ciphertext|management_api_key_ciphertext/)
 })
 
-test('el flujo automatico espera la fiscalizacion e incluye el QR en POS, restaurante y reimpresion', async () => {
-  const [posService, quickSale, restaurant, mapper, schema, salesPage] = await Promise.all([
+test('el flujo automático espera la fiscalización e incluye la verificación imprimible en POS, restaurante y reimpresión', async () => {
+  const [posService, quickSale, restaurant, documentBuilder, schema, salesPage] = await Promise.all([
     readFile(new URL('../src/services/posService.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/quick-sale/hooks/useQuickSalePayment.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/local-printing/services/ticketPrintMapper.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/local-printing/services/documentLineBuilders.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/local-printing/schemas/printSchemas.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/sales/pages/SalesReportsPage.tsx', import.meta.url), 'utf8'),
   ])
   assert.match(posService, /await autoIssueFiscalTicket\(event\.tenantId, event\.payload\.ticket\.id\)/)
   assert.match(quickSale, /await options\.syncPendingEvents\(\)[\s\S]*loadFiscalReceiptData[\s\S]*printPayload = \{ \.\.\.payload, fiscal \}/)
   assert.equal((restaurant.match(/await fiscalizeTicketForPrint\(options\.context, result\.ticketId\)/g) ?? []).length, 3)
-  assert.match(mapper, /qrBase64: sale\.fiscal\.qrBase64/)
-  assert.match(schema, /qrBase64: z\.string\(\)\.trim\(\)\.max\(250000\)/)
+  assert.match(documentBuilder, /sale\.fiscal\.verificationUrl/)
+  assert.doesNotMatch(schema, /qrBase64/)
   assert.match(salesPage, /Consultar estado/)
   assert.match(salesPage, /Ver QR/)
   assert.match(salesPage, /Anular/)

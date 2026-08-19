@@ -1,24 +1,25 @@
 import type { SaleCreatedPayload } from '../../../types'
-import { printRequestSchema } from '../schemas/printSchemas'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
+import type { PrintEstablishment } from './documentLineBuilders'
+import { loadSelectedPrinterLayout } from './selectedPrinterLayout'
 import { mapSaleToPrintRequest } from './ticketPrintMapper'
 
 export async function printCompletedSale(input: {
   sale: SaleCreatedPayload
-  establishment: { name: string; address?: string; legalName?: string; taxId?: string }
+  establishment: PrintEstablishment
   isReprint?: boolean
   copyNumber?: number
 }) {
   const state = usePrintAgentStore.getState()
-  const printerId = state.selectedPrinterId || state.selectedPrinter?.id
-  if (!printerId) throw new Error('No hay ninguna impresora seleccionada.')
+  const { printer, layout } = await loadSelectedPrinterLayout()
   const payload = mapSaleToPrintRequest({
     ...input,
-    printerId,
+    printerId: printer.id,
+    printerLayout: layout,
     footer: state.preferences.footer,
     autoOpenCashDrawer: state.preferences.autoOpenCashDrawer,
     cashlogyConfigured: state.cashlogyConfigured,
     cut: state.preferences.cut,
   })
-  return state.printTicket(printRequestSchema.parse(payload))
+  return state.printTicket(payload)
 }

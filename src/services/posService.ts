@@ -186,7 +186,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name, address, legal_name, tax_id, default_tax_rate')
+      .select('id, name, address, legal_name, tax_id, timezone, default_tax_rate')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
@@ -222,6 +222,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     venueAddress: venue.address ?? undefined,
     venueLegalName: venue.legal_name ?? undefined,
     venueTaxId: venue.tax_id ?? undefined,
+    venueTimeZone: venue.timezone,
     venueDefaultTaxRate: Number(venue.default_tax_rate),
     deviceId: device.id,
     deviceName: device.name,
@@ -363,7 +364,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
     supabase
       .from('venues')
-      .select('id, name, address, legal_name, tax_id, default_tax_rate')
+      .select('id, name, address, legal_name, tax_id, timezone, default_tax_rate')
       .eq('tenant_id', tenant.id)
       .eq('id', assignment.venue_id)
       .eq('is_active', true)
@@ -395,6 +396,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     venueAddress: venue.address ?? undefined,
     venueLegalName: venue.legal_name ?? undefined,
     venueTaxId: venue.tax_id ?? undefined,
+    venueTimeZone: venue.timezone,
     venueDefaultTaxRate: Number(venue.default_tax_rate),
     deviceId: device.id,
     deviceName: device.name,
@@ -735,6 +737,7 @@ export async function loadSessionTicketsFromSupabase(
         fiscalSnapshot: mapFiscalSnapshot(line),
         discountAmountCents: line.discount_amount_cents,
         netTotalCents: line.net_total_cents,
+        note: loggedLine?.note ?? null,
         modifiers: line.modifiers ?? [],
         components: loggedLine?.components ?? (line.ticket_line_components ?? []).map((component) => ({
           id: component.id, type: component.component_type, selectionGroupId: component.selection_group_id,

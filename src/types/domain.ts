@@ -131,6 +131,7 @@ export type TenantContext = {
   venueAddress?: string
   venueLegalName?: string
   venueTaxId?: string
+  venueTimeZone?: string
   venueDefaultTaxRate?: number
   deviceId: string
   deviceName: string
@@ -371,6 +372,7 @@ export type SaleLinePayload = {
   fiscalSnapshot: TicketLineFiscalSnapshot | null
   discountAmountCents?: number
   netTotalCents?: number
+  note?: string | null
 }
 
 export type SaleCreatedPayload = {

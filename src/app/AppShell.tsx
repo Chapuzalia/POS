@@ -411,6 +411,7 @@ export function AppShell() {
       closingHistoryOpen={cash.closingHistoryOpen}
       completedClosing={cash.completedClosing}
       context={context}
+      error={error}
       isBusy={isBusy}
       isOnline={isOnline}
       onJoin={(nextSession) => void cash.join(nextSession)}

@@ -16,7 +16,6 @@ export const defaultPrintAgentPreferences = {
   includeZeroPaymentMethods: false,
   includeTotalPayments: false,
   cashClosingCopies: 1,
-  cashClosingPaperWidth: 42 as const,
   moneySymbol: 'currency' as const,
 }
 

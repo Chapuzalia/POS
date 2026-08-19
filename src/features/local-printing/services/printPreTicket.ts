@@ -1,19 +1,24 @@
 import type { AppliedDiscount, CashSession, TenantContext, TicketLine } from '../../../types'
+import type { PrintJob } from '../types'
 import { buildPreTicketPayload } from '../../quick-sale/services/salePayload'
-import { printRequestSchema } from '../schemas/printSchemas'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
+import { loadSelectedPrinterLayout } from './selectedPrinterLayout'
 import { mapSaleToPrintRequest } from './ticketPrintMapper'
 
-export async function printPreTicket(input: {
+type PreTicketInput = {
   cashSession: CashSession
   context: TenantContext
   discount: AppliedDiscount | null
   lines: TicketLine[]
-}) {
+}
+
+let activePreTicketPrint: Promise<PrintJob> | null = null
+
+async function executePreTicketPrint(input: PreTicketInput) {
   if (input.lines.length === 0) throw new Error('Añade productos antes de imprimir el pre-ticket.')
   const state = usePrintAgentStore.getState()
-  const printerId = state.selectedPrinterId || state.selectedPrinter?.id
-  if (!state.token || !printerId) throw new Error('No hay ninguna impresora configurada.')
+  if (!state.token) throw new Error('No hay ninguna impresora configurada.')
+  const { printer, layout } = await loadSelectedPrinterLayout()
   const preview = buildPreTicketPayload(input.context, input.cashSession, input.lines, input.discount)
   const request = mapSaleToPrintRequest({
     sale: preview,
@@ -22,11 +27,26 @@ export async function printPreTicket(input: {
       address: input.context.venueAddress,
       legalName: input.context.venueLegalName,
       taxId: input.context.venueTaxId,
+      timezone: input.context.venueTimeZone,
+      cashRegisterName: input.cashSession.cashRegisterName,
+      employeeName: input.context.userName,
     },
-    printerId,
+    printerId: printer.id,
+    printerLayout: layout,
     footer: state.preferences.footer,
     cut: state.preferences.cut,
     isPreTicket: true,
   })
-  return state.printTicket(printRequestSchema.parse(request))
+  return state.printTicket(request)
+}
+
+export async function printPreTicket(input: PreTicketInput) {
+  if (activePreTicketPrint) return activePreTicketPrint
+  const task = executePreTicketPrint(input)
+  activePreTicketPrint = task
+  try {
+    return await task
+  } finally {
+    if (activePreTicketPrint === task) activePreTicketPrint = null
+  }
 }
