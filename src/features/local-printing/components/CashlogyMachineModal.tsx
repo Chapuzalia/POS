@@ -5,6 +5,7 @@ import {
   HandCoins,
   Layers,
   LoaderCircle,
+  LockKeyhole,
   RefreshCw,
   ShieldAlert,
   Trash2,
@@ -14,6 +15,7 @@ import {
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AppModal, Button, Metric } from '../../../components/ui'
+import { NumericKeypadModal } from '../../../components/ui/NumericKeypadModal'
 import { formatMoney } from '../../../lib/format'
 import { createPrintAgentClient } from '../api/printAgentClient'
 import {
@@ -23,6 +25,7 @@ import {
   suggestCashlogyDenominations,
 } from '../cashlogy/cashlogyManagement'
 import { cashlogyManagementActiveStatuses, cashlogyManagementCancellableStatuses } from '../cashlogy/cashlogyPolling'
+import { validateCashlogyManagementPin } from '../cashlogy/cashlogyManagementPin'
 import { useCashlogyManagementStore, type CashlogyManagementState } from '../cashlogy/useCashlogyManagementStore'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
 import type {
@@ -40,6 +43,7 @@ type Props = {
 }
 
 type View = 'overview' | 'withdraw' | 'confirm_empty' | 'confirm_stacker'
+type ProtectedAction = 'withdraw' | 'empty' | 'view_stacker'
 
 const actions = [
   { id: 'refill', title: 'Rellenar', description: 'Introduce efectivo y deja que Cashlogy determine el importe final.', icon: ArrowDownToLine },
@@ -89,6 +93,9 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
   const [dashboardError, setDashboardError] = useState<string | null>(null)
   const [view, setView] = useState<View>('overview')
   const [quantities, setQuantities] = useState<Record<number, number>>({})
+  const [protectedAction, setProtectedAction] = useState<ProtectedAction | null>(null)
+  const [sensitiveAccessGranted, setSensitiveAccessGranted] = useState(false)
+  const [pinError, setPinError] = useState<string | null>(null)
 
   const operationActive = Boolean(management.operation && cashlogyManagementActiveStatuses.has(management.operation.status))
   const operationBusy = management.isStarting || management.isMutating || management.isCancelling || operationActive
@@ -150,6 +157,32 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     setView('overview')
   }
 
+  function continueProtectedAction(action: ProtectedAction) {
+    if (action === 'withdraw') setView('withdraw')
+    else if (action === 'empty') setView('confirm_empty')
+  }
+
+  function requestProtectedAction(action: ProtectedAction) {
+    if (sensitiveAccessGranted) {
+      continueProtectedAction(action)
+      return
+    }
+    setPinError(null)
+    setProtectedAction(action)
+  }
+
+  function confirmManagementPin(pin: string) {
+    if (!validateCashlogyManagementPin(pin)) {
+      setPinError('PIN incorrecto.')
+      return
+    }
+    const action = protectedAction
+    setSensitiveAccessGranted(true)
+    setPinError(null)
+    setProtectedAction(null)
+    if (action) continueProtectedAction(action)
+  }
+
   function closeResolvedOperation() {
     management.clearResolved()
     resetToOverview()
@@ -166,7 +199,8 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
       ? 'Vaciar Cashlogy'
       : view === 'confirm_stacker' ? 'Retirar stacker' : 'Máquina de efectivo'
 
-  return <AppModal label={title} maxWidth={980} onClose={closeModal}>
+  return <>
+    <AppModal label={title} maxWidth={980} onClose={closeModal}>
     <section className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col overflow-hidden">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
         <div className="min-w-0">
@@ -220,8 +254,8 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
                   onClick={() => {
                     if (action.id === 'refill') run(management.startRefill)
                     else if (action.id === 'give_change') run(() => management.startGiveChange(denominationOptions))
-                    else if (action.id === 'withdraw') setView('withdraw')
-                    else if (action.id === 'empty') setView('confirm_empty')
+                    else if (action.id === 'withdraw') requestProtectedAction('withdraw')
+                    else if (action.id === 'empty') requestProtectedAction('empty')
                     else setView('confirm_stacker')
                   }}
                   type="button"
@@ -270,11 +304,27 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
             disabled={operationBusy || !ready}
             loading={loadingDashboard}
             onRefresh={() => void loadDashboard()}
+            onRequestStackerAccess={() => requestProtectedAction('view_stacker')}
+            showStacker={sensitiveAccessGranted}
           />
         </>}
       </div>
     </section>
-  </AppModal>
+    </AppModal>
+    {protectedAction ? <NumericKeypadModal
+      allowDecimal={false}
+      confirmLabel="Desbloquear"
+      error={pinError}
+      initialValue=""
+      maxDigits={4}
+      onCancel={() => { setProtectedAction(null); setPinError(null) }}
+      onChange={() => setPinError(null)}
+      onConfirm={confirmManagementPin}
+      password
+      subtitle="Introduce el PIN para acceder a operaciones y datos sensibles de efectivo."
+      title="PIN de gestión Cashlogy"
+    /> : null}
+  </>
 }
 
 type OperationViewProps = {
@@ -402,41 +452,46 @@ function Notice({ children, tone }: { children: React.ReactNode; tone: 'warning'
   </div>
 }
 
-function AccountingPanel({ accounting, deviceErrors, disabled, loading, onRefresh }: {
+function AccountingPanel({ accounting, deviceErrors, disabled, loading, onRefresh, onRequestStackerAccess, showStacker }: {
   accounting: CashlogyAccounting | null
   deviceErrors: CashlogyDeviceError[]
   disabled: boolean
   loading: boolean
   onRefresh: () => void
+  onRequestStackerAccess: () => void
+  showStacker: boolean
 }) {
   return <section aria-labelledby="cashlogy-accounting-title" className="mt-5 rounded-[var(--radius)] border border-[var(--separator)]">
     <div className="flex flex-wrap items-center justify-between gap-3 border-b border-[var(--separator)] p-4">
       <div><h3 className="font-black" id="cashlogy-accounting-title">Efectivo y estado</h3><p className="mt-0.5 text-xs text-[var(--muted)]">Contabilidad confirmada por Cashlogy.</p></div>
-      <Button disabled={disabled || loading} onClick={onRefresh} size="sm" variant="tertiary"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Actualizar</Button>
+      <div className="flex flex-wrap gap-2">
+        {!showStacker ? <Button onClick={onRequestStackerAccess} size="sm" variant="secondary"><LockKeyhole className="h-4 w-4" />Mostrar stacker</Button> : null}
+        <Button disabled={disabled || loading} onClick={onRefresh} size="sm" variant="tertiary"><RefreshCw className={`h-4 w-4 ${loading ? 'animate-spin' : ''}`} />Actualizar</Button>
+      </div>
     </div>
     <div className="grid gap-3 p-4 sm:grid-cols-3">
       <Metric label="Reciclador · disponible" value={loading && !accounting ? '…' : formatMoney(accounting?.total.recyclerTotalCents ?? 0)} />
-      <Metric label="Stacker · recaudación" value={loading && !accounting ? '…' : formatMoney(accounting?.total.stackerTotalCents ?? 0)} />
-      <Metric label="Total en Cashlogy" value={loading && !accounting ? '…' : formatMoney(accounting?.total.totalCents ?? 0)} />
+      <Metric label="Stacker · recaudación" value={showStacker ? (loading && !accounting ? '…' : formatMoney(accounting?.total.stackerTotalCents ?? 0)) : 'Protegido por PIN'} />
+      <Metric label="Total en Cashlogy" value={showStacker ? (loading && !accounting ? '…' : formatMoney(accounting?.total.totalCents ?? 0)) : 'Protegido por PIN'} />
     </div>
-    <DenominationTable denominations={accounting?.denominations ?? null} loading={loading} />
+    <DenominationTable denominations={accounting?.denominations ?? null} loading={loading} showStacker={showStacker} />
     {accounting?.levels.levels.length ? <LevelList levels={accounting.levels.levels} /> : null}
     {deviceErrors.length ? <div className="border-t border-[var(--separator)] p-4"><h4 className="font-black">Avisos de Cashlogy</h4><div className="mt-2 grid gap-2">{deviceErrors.map((error) => <div className="rounded-[var(--radius)] border border-amber-500/30 bg-amber-500/10 p-3 text-sm" key={`${error.code}-${error.mainMessage}`}><p className="font-bold">{error.title || error.mainMessage || error.code}</p>{error.additionalMessage ? <p className="mt-1 text-[var(--muted)]">{error.additionalMessage}</p> : null}{error.requiresTechnicalIntervention ? <p className="mt-1 font-semibold">Requiere intervención técnica.</p> : null}</div>)}</div></div> : null}
   </section>
 }
 
-function DenominationTable({ denominations, loading }: { denominations: CashlogyAccounting['denominations'] | null; loading: boolean }) {
+function DenominationTable({ denominations, loading, showStacker }: { denominations: CashlogyAccounting['denominations'] | null; loading: boolean; showStacker: boolean }) {
   const rows = [
     ...(denominations?.notes ?? []).map((item) => ({ ...item, kind: 'Billete' })),
     ...(denominations?.coins ?? []).map((item) => ({ ...item, kind: 'Moneda' })),
   ].sort((left, right) => right.valueCents - left.valueCents)
   if (loading && rows.length === 0) return <div className="flex items-center justify-center gap-2 border-t border-[var(--separator)] p-8 text-sm text-[var(--muted)]"><LoaderCircle className="h-4 w-4 animate-spin" />Consultando Cashlogy…</div>
   if (rows.length === 0) return <div className="border-t border-[var(--separator)] p-6 text-center text-sm text-[var(--muted)]">Sin desglose por denominación.</div>
-  return <div className="overflow-x-auto border-t border-[var(--separator)]"><table className="w-full min-w-[600px] text-sm"><thead className="bg-[var(--background)] text-left text-xs uppercase text-[var(--muted)]"><tr><th className="px-4 py-3">Tipo</th><th className="px-4 py-3 text-right">Valor</th><th className="px-4 py-3 text-right">Reciclador</th><th className="px-4 py-3 text-right">Stacker</th><th className="px-4 py-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-[var(--separator)]">{rows.map((row) => <DenominationRow key={`${row.kind}-${row.valueCents}`} row={row} />)}</tbody></table></div>
+  return <div className="overflow-x-auto border-t border-[var(--separator)]"><table className="w-full min-w-[600px] text-sm"><thead className="bg-[var(--background)] text-left text-xs uppercase text-[var(--muted)]"><tr><th className="px-4 py-3">Tipo</th><th className="px-4 py-3 text-right">Valor</th><th className="px-4 py-3 text-right">Reciclador</th><th className="px-4 py-3 text-right">Stacker</th><th className="px-4 py-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-[var(--separator)]">{rows.map((row) => <DenominationRow key={`${row.kind}-${row.valueCents}`} row={row} showStacker={showStacker} />)}</tbody></table></div>
 }
 
-function DenominationRow({ row }: { row: CashlogyDenomination & { kind: string } }) {
-  return <tr><td className="px-4 py-3 text-[var(--muted)]">{row.kind}</td><td className="px-4 py-3 text-right font-mono font-bold">{formatMoney(row.valueCents)}</td><td className="px-4 py-3 text-right font-mono">{row.recyclerCount}</td><td className="px-4 py-3 text-right font-mono">{row.stackerCount}</td><td className="px-4 py-3 text-right font-mono">{formatMoney(row.valueCents * (row.recyclerCount + row.stackerCount))}</td></tr>
+function DenominationRow({ row, showStacker }: { row: CashlogyDenomination & { kind: string }; showStacker: boolean }) {
+  return <tr><td className="px-4 py-3 text-[var(--muted)]">{row.kind}</td><td className="px-4 py-3 text-right font-mono font-bold">{formatMoney(row.valueCents)}</td><td className="px-4 py-3 text-right font-mono">{row.recyclerCount}</td><td className="px-4 py-3 text-right font-mono">{showStacker ? row.stackerCount : '••••'}</td><td className="px-4 py-3 text-right font-mono">{showStacker ? formatMoney(row.valueCents * (row.recyclerCount + row.stackerCount)) : '••••'}</td></tr>
 }
 
 function LevelList({ levels }: { levels: CashlogyLevel[] }) {
