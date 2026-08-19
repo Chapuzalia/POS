@@ -1,5 +1,4 @@
 import { Input as UiInput } from '../../../components/ui/Input'
-import { NativeSelect as UiNativeSelect } from '../../../components/ui/NativeSelect'
 import { Button as UiButton } from '../../../components/ui/Button'
 import { AppModal } from '../../../components/ui/AppModal'
 import {
@@ -59,6 +58,7 @@ import {
 } from "../viewport";
 import { MapViewportControls } from "./MapViewportControls";
 import { MobileTableMapChrome } from "./MobileTableMapChrome";
+import { VirtualTableModal } from './VirtualTableModal'
 import {
   MobileGroupActionsSheet,
   MobileTableActionSheet,
@@ -179,10 +179,6 @@ export function TableMapView(props: Props) {
   const [groupMenu, setGroupMenu] = useState<GroupMenu | null>(null);
   const [savingLayout, setSavingLayout] = useState(false);
   const [virtualModalOpen, setVirtualModalOpen] = useState(false);
-  const [virtualName, setVirtualName] = useState("");
-  const [virtualCapacity, setVirtualCapacity] = useState(2);
-  const [virtualShape, setVirtualShape] = useState<RestaurantTableShape>("square");
-  const [virtualAreaId, setVirtualAreaId] = useState("");
   const [quarterTurn, setQuarterTurn] = useState(() => loadTableMapQuarterTurn(orientationVenueId));
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const canvasRef = useRef<HTMLElement>(null);
@@ -667,24 +663,7 @@ export function TableMapView(props: Props) {
   }
 
   function openVirtualTableModal() {
-    const nextNumber = map.tables.filter((table) => table.isVirtual).length + 1;
-    setVirtualName(`Mesa extra ${nextNumber}`);
-    setVirtualCapacity(2);
-    setVirtualShape("square");
-    setVirtualAreaId(activeAreaId?.startsWith("virtual:") ? "" : (activeAreaId ?? ""));
     setVirtualModalOpen(true);
-  }
-
-  async function submitVirtualTable() {
-    const name = virtualName.trim();
-    if (!name || virtualCapacity < 1 || virtualCapacity > 99) return;
-    const created = await onCreateVirtual({
-      areaId: virtualAreaId || null,
-      name,
-      capacity: virtualCapacity,
-      shape: virtualShape,
-    });
-    if (created) setVirtualModalOpen(false);
   }
 
   function toggleMapOrientation() {
@@ -1152,62 +1131,16 @@ export function TableMapView(props: Props) {
           </section>
         </AppModal>
       ) : null}
-      {virtualModalOpen ? (
-        <AppModal
-          containerClassName={mobileLayout ? "!p-0" : "!p-4"}
-          dialogClassName={mobileLayout ? "!rounded-b-none !rounded-t-[20px] !border-x-0 !border-b-0" : ""}
-          dismissDisabled={isBusy}
-          label="Crear mesa virtual"
-          maxWidth={480}
-          onClose={() => setVirtualModalOpen(false)}
-          placement={mobileLayout ? "bottom" : "center"}
-        >
-          <form
-            className={`grid w-full gap-4 bg-[var(--surface)] text-[var(--foreground)] [&_h1]:m-0 [&_p]:m-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-1.5 ${mobileLayout ? "rounded-t-[20px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5" : "rounded-[var(--radius)] p-6"}`}
-            onSubmit={(event) => { event.preventDefault(); void submitVirtualTable(); }}
-          >
-            <div>
-              <h1 className="text-lg font-bold">Crear mesa virtual</h1>
-              <p>Solo estará disponible durante la sesión de caja actual.</p>
-            </div>
-            <label>
-              <h2 className="text-base font-semibold">Nombre</h2>
-              <UiInput autoFocus maxLength={80} onChange={(event) => setVirtualName(event.target.value)} value={virtualName} />
-            </label>
-            <label>
-              <h2 className="text-base font-semibold">Zona</h2>
-              <UiNativeSelect aria-label="Zona de la mesa virtual" onChange={(event) => setVirtualAreaId(event.target.value)} value={virtualAreaId}>
-                <option value="">Virtual</option>
-                {map.areas.filter((area) => !area.id.startsWith("virtual:")).map((area) => <option key={area.id} value={area.id}>{area.name}</option>)}
-              </UiNativeSelect>
-            </label>
-            <div className="grid grid-cols-2 gap-3">
-              <label>
-                <h2 className="text-base font-semibold">Capacidad</h2>
-                <UiInput min="1" max="99" onChange={(event) => setVirtualCapacity(Number(event.target.value))} type="number" value={virtualCapacity} />
-              </label>
-              <label>
-                <h2 className="text-base font-semibold">Forma</h2>
-                <UiNativeSelect aria-label="Forma de la mesa virtual" onChange={(event) => setVirtualShape(event.target.value as RestaurantTableShape)} value={virtualShape}>
-                  <option value="square">Cuadrada</option>
-                  <option value="rectangle">Rectangular</option>
-                  <option value="round">Redonda</option>
-                </UiNativeSelect>
-              </label>
-            </div>
-            <div className="mt-1 flex justify-end gap-2.5">
-              <UiButton className="border-1" disabled={isBusy} onClick={() => setVirtualModalOpen(false)} type="button">Cancelar</UiButton>
-              <UiButton
-                className="border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]"
-                disabled={isBusy || !isOnline || !virtualName.trim() || virtualCapacity < 1 || virtualCapacity > 99}
-                type="submit"
-              >
-                <Plus size={17} /> Crear mesa
-              </UiButton>
-            </div>
-          </form>
-        </AppModal>
-      ) : null}
+      {virtualModalOpen ? <VirtualTableModal
+        areas={map.areas}
+        defaultAreaId={activeAreaId?.startsWith('virtual:') ? undefined : activeAreaId}
+        defaultName={`Mesa extra ${map.tables.filter((table) => table.isVirtual).length + 1}`}
+        isBusy={isBusy}
+        isOnline={isOnline}
+        mobileLayout={mobileLayout}
+        onClose={() => setVirtualModalOpen(false)}
+        onSubmit={onCreateVirtual}
+      /> : null}
     </main>
   );
 }

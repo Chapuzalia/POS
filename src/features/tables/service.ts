@@ -2,9 +2,9 @@ import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import { normalizeCatalogSnapshot } from '../catalog/services/catalogSnapshots'
 import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TenantContext, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
-import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult, VirtualRestaurantTableCreateInput } from './types'
+import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, QuickSaleVirtualTableCreateInput, QuickSaleVirtualTableCreateResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult, VirtualRestaurantTableCreateInput } from './types'
 import { getOrderPendingUnits } from './service-status'
-import { buildRestaurantOrderLinesPayload } from './order-line-payload'
+import { buildCatalogOrderLinesPayload, buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
 import { getDateRange, localDateKey } from '../reservations/domain/reservationAvailability'
 
@@ -12,7 +12,7 @@ export { buildRestaurantOrderLinesPayload } from './order-line-payload'
 
 type AreaRow = { id: string; tenant_id: string; venue_id: string; name: string; sort_order: number; is_active: boolean; canvas_width: number; canvas_height: number; map_elements: unknown; created_at: string; updated_at: string }
 type TableRow = { id: string; tenant_id: string; venue_id: string; area_id: string | null; cash_session_id: string | null; name: string; capacity: number; shape: RestaurantTable['shape']; position_x: number; position_y: number; width: number; height: number; is_active: boolean; sort_order: number; reserved_until: string | null; reservation_note: string | null; created_at: string; updated_at: string }
-type OrderRow = { id: string; tenant_id: string; venue_id: string; cash_session_id: string; cash_register_id: string; opened_by_user_id: string; opened_by_device_id: string; guest_count: number; status: RestaurantOrder['status']; revision: number; order_group_id: string; split_sequence: number; opened_at: string; updated_at: string; closed_at: string | null }
+type OrderRow = { id: string; tenant_id: string; venue_id: string; cash_session_id: string; cash_register_id: string; opened_by_user_id: string; opened_by_device_id: string; guest_count: number; status: RestaurantOrder['status']; revision: number; order_group_id: string; split_sequence: number; draft_discount: AppliedDiscount | null; opened_at: string; updated_at: string; closed_at: string | null }
 type OrderTableRow = { order_id: string; order_group_id: string; table_id: string; joined_at: string; released_at: string | null }
 type ReservationMapValue = { id: string; customer_name: string; customer_phone: string; party_size: number; starts_at: string; ends_at: string; status: RestaurantTableReservation['status'] }
 type ReservationMapRow = { table_id: string; reservations: ReservationMapValue | ReservationMapValue[] }
@@ -20,7 +20,7 @@ type OrderLineRow = { id: string; tenant_id: string; venue_id: string; order_id:
 
 const areaColumns = 'id, tenant_id, venue_id, name, sort_order, is_active, canvas_width, canvas_height, map_elements, created_at, updated_at'
 const tableColumns = 'id, tenant_id, venue_id, area_id, cash_session_id, name, capacity, shape, position_x, position_y, width, height, is_active, sort_order, reserved_until, reservation_note, created_at, updated_at'
-const orderColumns = 'id, tenant_id, venue_id, cash_session_id, cash_register_id, opened_by_user_id, opened_by_device_id, guest_count, status, revision, order_group_id, split_sequence, opened_at, updated_at, closed_at'
+const orderColumns = 'id, tenant_id, venue_id, cash_session_id, cash_register_id, opened_by_user_id, opened_by_device_id, guest_count, status, revision, order_group_id, split_sequence, draft_discount, opened_at, updated_at, closed_at'
 const lineColumns = 'id, tenant_id, venue_id, order_id, product_id, variant_id, product_name, variant_name, unit_price_cents, quantity, served_quantity, fully_served_at, modifiers, components, catalog_snapshot, mixer_product_id, mixer, note, created_at, updated_at'
 
 function requireSupabase() {
@@ -30,7 +30,7 @@ function requireSupabase() {
 
 const mapArea = (row: AreaRow): DiningArea => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, sortOrder: row.sort_order, isActive: row.is_active, canvasWidth: row.canvas_width, canvasHeight: row.canvas_height, mapElements: normalizeMapElements(row.map_elements), createdAt: row.created_at, updatedAt: row.updated_at })
 const mapTable = (row: TableRow): RestaurantTable => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, areaId: row.area_id ?? `virtual:${row.cash_session_id}`, cashSessionId: row.cash_session_id, isVirtual: row.cash_session_id !== null, name: row.name, capacity: row.capacity, shape: row.shape, positionX: Number(row.position_x), positionY: Number(row.position_y), width: Number(row.width), height: Number(row.height), isActive: row.is_active, sortOrder: row.sort_order, reservedUntil: row.reserved_until, reservationNote: row.reservation_note, createdAt: row.created_at, updatedAt: row.updated_at })
-const mapOrder = (row: OrderRow): RestaurantOrder => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, cashSessionId: row.cash_session_id, cashRegisterId: row.cash_register_id, openedByUserId: row.opened_by_user_id, openedByDeviceId: row.opened_by_device_id, guestCount: row.guest_count, status: row.status, revision: row.revision, orderGroupId: row.order_group_id, splitSequence: row.split_sequence, openedAt: row.opened_at, updatedAt: row.updated_at, closedAt: row.closed_at })
+const mapOrder = (row: OrderRow): RestaurantOrder => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, cashSessionId: row.cash_session_id, cashRegisterId: row.cash_register_id, openedByUserId: row.opened_by_user_id, openedByDeviceId: row.opened_by_device_id, guestCount: row.guest_count, status: row.status, revision: row.revision, orderGroupId: row.order_group_id, splitSequence: row.split_sequence, draftDiscount: row.draft_discount, openedAt: row.opened_at, updatedAt: row.updated_at, closedAt: row.closed_at })
 const mapLine = (row: OrderLineRow): RestaurantOrderLine => {
   const selection = splitLegacyMixerModifiers(row.modifiers, row.mixer_product_id, row.mixer)
   return { id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, orderId: row.order_id, productId: row.product_id, variantId: row.variant_id, productName: row.product_name, variantName: row.variant_name, unitPriceCents: row.unit_price_cents, quantity: row.quantity, servedQuantity: Number(row.served_quantity), fullyServedAt: row.fully_served_at, modifiers: selection.modifiers, components: row.components?.length ? row.components : selection.components, catalogSnapshot: normalizeCatalogSnapshot(row.catalog_snapshot, { productId: row.product_id, productName: row.product_name, variantId: row.variant_id, variantName: row.variant_name, basePriceCents: row.unit_price_cents }), mixerProductId: selection.mixerProductId, mixer: selection.mixer, note: row.note, createdAt: row.created_at, updatedAt: row.updated_at }
@@ -184,6 +184,21 @@ export async function createVirtualRestaurantTable(input: VirtualRestaurantTable
   })
   if (error) throw error
   return String(data)
+}
+export async function saveQuickSaleAsVirtualTable(input: QuickSaleVirtualTableCreateInput): Promise<QuickSaleVirtualTableCreateResult> {
+  const { data, error } = await requireSupabase().rpc('save_quick_sale_as_virtual_table', {
+    p_cash_session_id: input.cashSessionId,
+    p_device_id: input.deviceId,
+    p_area_id: input.areaId,
+    p_name: input.name.trim(),
+    p_capacity: input.capacity,
+    p_shape: input.shape,
+    p_lines: buildCatalogOrderLinesPayload(input.lines),
+    p_discount: input.discount,
+  })
+  if (error) throw error
+  const result = data as Record<string, unknown>
+  return { tableId: String(result.tableId), orderId: String(result.orderId), revision: Number(result.revision) }
 }
 export async function updateRestaurantTable(context: TenantContext, tableId: string, input: RestaurantTableUpdateInput) {
   const { error } = await requireSupabase().from('restaurant_tables').update({ name: input.name?.trim(), capacity: input.capacity, shape: input.shape, position_x: input.positionX, position_y: input.positionY, width: input.width, height: input.height, is_active: input.isActive, sort_order: input.sortOrder }).eq('tenant_id', context.tenantId).eq('id', tableId)

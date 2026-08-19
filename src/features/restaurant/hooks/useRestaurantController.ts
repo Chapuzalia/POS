@@ -10,6 +10,7 @@ import type {
   ProductLineSelection,
   SaleCreatedPayload,
   TenantContext,
+  TicketLine,
 } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
@@ -38,6 +39,7 @@ import {
   payRestaurantEqualPart,
   payRestaurantOrderItems,
   removeRestaurantOrderLineConfirmed,
+  saveQuickSaleAsVirtualTable,
   saveRestaurantOrderLines,
 } from '../../tables/service'
 import { canDecreaseLineQuantity } from '../../tables/service-status'
@@ -230,6 +232,42 @@ export function useRestaurantController(options: Options) {
     }
   }, [options, realtime])
 
+  const createVirtualTableFromQuickSale = useCallback(async (
+    input: { areaId: string | null; name: string; capacity: number; shape: RestaurantTableShape },
+    lines: TicketLine[],
+    discount: AppliedDiscount | null,
+  ) => {
+    if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline || options.isBusy || lines.length === 0) return false
+    options.setBusy(true)
+    options.onError(null)
+    try {
+      await saveQuickSaleAsVirtualTable({
+        ...input,
+        cashSessionId: options.cashSession.id,
+        deviceId: options.context.deviceId,
+        lines,
+        discount,
+      })
+    } catch (error) {
+      options.onError(getReadableError(error))
+      options.setBusy(false)
+      return false
+    }
+
+    options.setAppliedDiscount(null)
+    draft.clearOrder()
+    setPosView({ type: 'table_map', areaId: input.areaId ?? undefined })
+    try {
+      const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
+      realtime.setMap(nextMap)
+    } catch (error) {
+      options.onError(`La mesa se ha guardado, pero el mapa no se ha podido actualizar: ${getReadableError(error)}`)
+    } finally {
+      options.setBusy(false)
+    }
+    return true
+  }, [draft, options, realtime])
+
   const openExistingOrder = useCallback((orderId: string) => runBusy(async () => {
     if (!options.context || !options.isOnline) return
     const [detail, activeSplit] = await Promise.all([
@@ -237,7 +275,7 @@ export function useRestaurantController(options: Options) {
       loadRestaurantEqualSplit(options.context, orderId),
     ])
     draft.replaceOrder(detail)
-    options.setAppliedDiscount(null)
+    options.setAppliedDiscount(detail.order.draftDiscount)
     setPosView({ type: 'table_order', orderId })
     if (activeSplit?.paidParts) {
       setEqualSplit(activeSplit)
@@ -773,6 +811,7 @@ export function useRestaurantController(options: Options) {
     completePayment,
     configureEqualSplit,
     createVirtualTable,
+    createVirtualTableFromQuickSale,
     confirmLineRemoval,
     equalSplit,
     equalSplitOpen,

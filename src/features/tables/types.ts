@@ -1,4 +1,4 @@
-import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
+import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TicketLine, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
 import type { ReservationStatus } from '../reservations/types'
 
 export type RestaurantTableShape = 'square' | 'rectangle' | 'round'
@@ -8,7 +8,7 @@ export type RestaurantTableStatus = 'free' | 'occupied' | 'reserved'
 export type ServiceStatus = 'pending' | 'partial' | 'served'
 export type DiningArea = { id: string; tenantId: string; venueId: string; name: string; sortOrder: number; isActive: boolean; canvasWidth: number; canvasHeight: number; mapElements: RestaurantMapElement[]; createdAt: string; updatedAt: string }
 export type RestaurantTable = { id: string; tenantId: string; venueId: string; areaId: string; cashSessionId: string | null; isVirtual: boolean; name: string; capacity: number; shape: RestaurantTableShape; positionX: number; positionY: number; width: number; height: number; isActive: boolean; sortOrder: number; reservedUntil: string | null; reservationNote: string | null; createdAt: string; updatedAt: string }
-export type RestaurantOrder = { id: string; tenantId: string; venueId: string; cashSessionId: string; cashRegisterId: string; openedByUserId: string; openedByDeviceId: string; guestCount: number; status: 'open' | 'paid' | 'cancelled'; revision: number; orderGroupId: string; splitSequence: number; openedAt: string; updatedAt: string; closedAt: string | null }
+export type RestaurantOrder = { id: string; tenantId: string; venueId: string; cashSessionId: string; cashRegisterId: string; openedByUserId: string; openedByDeviceId: string; guestCount: number; status: 'open' | 'paid' | 'cancelled'; revision: number; orderGroupId: string; splitSequence: number; draftDiscount: AppliedDiscount | null; openedAt: string; updatedAt: string; closedAt: string | null }
 export type OrderTable = { orderId: string; orderGroupId: string; tableId: string; joinedAt: string; releasedAt: string | null }
 export type RestaurantOrderLine = { id: string; tenantId: string; venueId: string; orderId: string; productId: string | null; variantId: string | null; productName: string; variantName: string; unitPriceCents: number; quantity: number; servedQuantity: number; fullyServedAt: string | null; modifiers: TicketLineModifier[]; components: TicketLineComponent[]; catalogSnapshot: SaleLineCatalogSnapshot; mixerProductId: string | null; mixer: TicketLineMixer | null; note: string | null; createdAt: string; updatedAt: string }
 export type TableLayoutEntry = { positionX: number; positionY: number; groupId: string | null }
@@ -27,6 +27,8 @@ export type DiningAreaCreateInput = { venueId: string; name: string; sortOrder: 
 export type DiningAreaUpdateInput = Partial<Pick<DiningArea, 'name' | 'sortOrder' | 'isActive' | 'canvasWidth' | 'canvasHeight' | 'mapElements'>>
 export type RestaurantTableCreateInput = { venueId: string; areaId: string; name: string; capacity: number; shape: RestaurantTableShape; positionX: number; positionY: number; width: number; height: number; sortOrder: number }
 export type VirtualRestaurantTableCreateInput = { cashSessionId: string; deviceId: string; areaId: string | null; name: string; capacity: number; shape: RestaurantTableShape }
+export type QuickSaleVirtualTableCreateInput = VirtualRestaurantTableCreateInput & { lines: TicketLine[]; discount: AppliedDiscount | null }
+export type QuickSaleVirtualTableCreateResult = { tableId: string; orderId: string; revision: number }
 export type RestaurantTableUpdateInput = Partial<Pick<RestaurantTable, 'name' | 'capacity' | 'shape' | 'positionX' | 'positionY' | 'width' | 'height' | 'isActive' | 'sortOrder'>>
 export type OpenRestaurantOrderInput = { tableIds: string[]; guestCount: number; cashSessionId: string; deviceId: string }
 export type CloseRestaurantOrderInput = { orderId: string; paymentMethod: PaymentMethod; receivedCents: number | null }
