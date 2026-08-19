@@ -6,7 +6,8 @@ export type CashlogyErrorCode =
   | 'CASHLOGY_BUSY' | 'CASHLOGY_OPERATION_CANCELLED' | 'CASHLOGY_CONNECTION_LOST'
   | 'CASHLOGY_STATUS_UNKNOWN' | 'CASHLOGY_RECONCILIATION_MISMATCH'
   | 'CASHLOGY_CANCEL_ON_CONNECTOR_SCREEN' | 'CASHLOGY_NOT_READY' | 'CASHLOGY_INVALID_STATE'
-  | 'CASHLOGY_NETWORK_ERROR' | 'CASHLOGY_CASH_MANAGEMENT_NOT_FOUND' | 'CASHLOGY_OPERATION_FAILED'
+  | 'CASHLOGY_NETWORK_ERROR' | 'CASHLOGY_CASH_MANAGEMENT_NOT_FOUND' | 'CASHLOGY_CASH_MANAGEMENT_NOT_ACTIVE'
+  | 'CASHLOGY_OPERATION_FAILED'
 
 const messages: Record<CashlogyErrorCode, string> = {
   CASHLOGY_BAD_DATA: 'Los datos enviados a Cashlogy no son válidos.',
@@ -17,7 +18,7 @@ const messages: Record<CashlogyErrorCode, string> = {
   CASHLOGY_INITIALIZATION_TIMEOUT: 'Cashlogy no ha terminado de inicializarse.',
   CASHLOGY_NOT_INITIALIZED: 'Cashlogy todavía no está inicializado.',
   CASHLOGY_BUSY: 'Cashlogy ya está procesando otra operación.',
-  CASHLOGY_OPERATION_CANCELLED: 'El cobro de Cashlogy se ha cancelado.',
+  CASHLOGY_OPERATION_CANCELLED: 'La operación de Cashlogy se ha cancelado.',
   CASHLOGY_CONNECTION_LOST: 'Se ha perdido la conexión con Cashlogy durante el cobro.',
   CASHLOGY_STATUS_UNKNOWN: 'Cashlogy pudo mover efectivo, pero no se puede confirmar el resultado. Revisa la máquina y la contabilidad.',
   CASHLOGY_RECONCILIATION_MISMATCH: 'Los importes de Cashlogy no cuadran. Es necesaria una revisión manual.',
@@ -26,6 +27,7 @@ const messages: Record<CashlogyErrorCode, string> = {
   CASHLOGY_INVALID_STATE: 'La operación de Cashlogy debe resolverse antes de iniciar otro cobro.',
   CASHLOGY_NETWORK_ERROR: 'No se ha podido comunicar con Cashlogy. La operación queda guardada para recuperarla.',
   CASHLOGY_CASH_MANAGEMENT_NOT_FOUND: 'No se ha encontrado la operación de efectivo guardada.',
+  CASHLOGY_CASH_MANAGEMENT_NOT_ACTIVE: 'Cashlogy no tiene una admisión de efectivo que pueda cancelarse ahora.',
   CASHLOGY_OPERATION_FAILED: 'Cashlogy ha confirmado que la operación ha fallado.',
 }
 

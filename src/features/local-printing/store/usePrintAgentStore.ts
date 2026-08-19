@@ -11,7 +11,7 @@ import {
   savePrintAgentConfig,
 } from '../services/printAgentStorage'
 import type {
-  CashlogyConnector, CashlogyHealth, ConnectionStatus, DiscoveryProgress, DiscoveryStatus, PrintAgentPreferences, PrintAgentScope,
+  CashlogyConnector, CashlogyHealth, CashlogyRecoveryResult, ConnectionStatus, DiscoveryProgress, DiscoveryStatus, PrintAgentPreferences, PrintAgentScope,
   PrintAgentServerInfo, PrintJob, PrintRequest, Printer,
 } from '../types'
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl'
@@ -54,6 +54,7 @@ type StoreState = {
   isCheckingCashlogy: boolean
   isLoadingCashlogyConnectors: boolean
   isDiscoveringCashlogyConnectors: boolean
+  isRecoveringCashlogy: boolean
   cashlogyConnectorAction: { connectorId: string; type: 'select' | 'initialize' } | null
   configureScope: (scope: PrintAgentScope) => void
   setBaseUrl: (baseUrl: string) => string
@@ -65,6 +66,7 @@ type StoreState = {
   discoverCashlogyConnectors: (signal?: AbortSignal) => Promise<CashlogyConnector[]>
   selectCashlogyConnector: (connectorId: string, signal?: AbortSignal) => Promise<CashlogyConnector>
   initializeCashlogyConnector: (connectorId: string, signal?: AbortSignal) => Promise<CashlogyConnector>
+  recoverCashlogy: (signal?: AbortSignal) => Promise<CashlogyRecoveryResult>
   checkConnection: (signal?: AbortSignal) => Promise<boolean>
   loadServerInfo: (signal?: AbortSignal) => Promise<PrintAgentServerInfo>
   loadPrinters: (signal?: AbortSignal) => Promise<Printer[]>
@@ -143,6 +145,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     isCheckingCashlogy: false,
     isLoadingCashlogyConnectors: false,
     isDiscoveringCashlogyConnectors: false,
+    isRecoveringCashlogy: false,
     cashlogyConnectorAction: null,
 
     configureScope(scope) {
@@ -151,7 +154,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
         scope, baseUrl: config.baseUrl, token: config.token, selectedPrinterId: config.selectedPrinterId,
         cashlogyConfigured: config.cashlogyConfigured, cashlogyTerminalCode: config.cashlogyTerminalCode,
         cashlogyHealth: null, cashlogyConnectors: [], cashlogyConnectorsLoaded: false,
-        isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, cashlogyConnectorAction: null,
+        isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, isRecoveringCashlogy: false, cashlogyConnectorAction: null,
         selectedPrinter: null, printers: [], serverInfo: null, jobs: [], currentJob: null,
         lastSuccessfulConnectionAt: config.lastSuccessfulConnectionAt, preferences: config.preferences,
         connectionStatus: 'unknown', lastConnectionError: null, settingsLoaded: true,
@@ -267,6 +270,34 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
         set({ lastConnectionError: mapped })
         throw mapped
       } finally { set({ cashlogyConnectorAction: null }) }
+    },
+
+    async recoverCashlogy(signal) {
+      if (get().isRecoveringCashlogy) throw new PrintAgentError({ code: 'DUPLICATE_REQUEST' })
+      set({ isRecoveringCashlogy: true, lastConnectionError: null })
+      try {
+        const activeClient = client()
+        const result = await activeClient.recoverCashlogy(signal)
+        if (!result.ok || !result.ready) {
+          throw new PrintAgentError({
+            code: 'INVALID_RESPONSE',
+            message: 'La recuperación forzada terminó, pero Cashlogy no ha quedado preparada. Revisa el diagnóstico del agente.',
+            details: result,
+          })
+        }
+        try {
+          const [health, connectorResult] = await Promise.all([
+            activeClient.getCashlogyHealth(signal),
+            activeClient.getCashlogyConnectors(signal),
+          ])
+          set({ cashlogyHealth: health, cashlogyConnectors: connectorResult.connectors || [], cashlogyConnectorsLoaded: true })
+        } catch { /* la recuperación ya está confirmada; el estado puede refrescarse manualmente */ }
+        return result
+      } catch (error) {
+        const mapped = toPrintAgentError(error)
+        set({ lastConnectionError: mapped })
+        throw mapped
+      } finally { set({ isRecoveringCashlogy: false }) }
     },
 
     async checkConnection(signal) {
@@ -436,7 +467,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
         baseUrl: DEFAULT_PRINT_AGENT_URL, token: null, selectedPrinterId: null, selectedPrinter: null,
         cashlogyConfigured: false, cashlogyTerminalCode: 'POS_MAIN', cashlogyHealth: null,
         cashlogyConnectors: [], cashlogyConnectorsLoaded: false,
-        isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, cashlogyConnectorAction: null,
+        isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, isRecoveringCashlogy: false, cashlogyConnectorAction: null,
         printers: [], serverInfo: null, jobs: [], currentJob: null, connectionStatus: 'unknown',
         lastConnectionError: null, lastConnectionCheckAt: null, lastSuccessfulConnectionAt: null,
         lastResponseTimeMs: null, lastPrintAt: null, preferences: { ...defaultPrintAgentPreferences },

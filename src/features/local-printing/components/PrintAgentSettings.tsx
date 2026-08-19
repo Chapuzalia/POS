@@ -1,7 +1,7 @@
 import { NativeSelect as UiNativeSelect } from '../../../components/ui/NativeSelect'
 import { Input as UiInput } from '../../../components/ui/Input'
 import { Checkbox as UiCheckbox } from '../../../components/ui/Checkbox'
-import { Clipboard, Coins, ExternalLink, LoaderCircle, Network, Printer, RefreshCw, RotateCcw, Server, Settings2, TestTube2, WalletCards } from 'lucide-react'
+import { Clipboard, Coins, ExternalLink, LoaderCircle, Network, Printer, RefreshCw, RotateCcw, Server, Settings2, ShieldAlert, TestTube2, WalletCards } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import { Button, Metric } from '../../../components/ui'
 import { usePrintAgent } from '../hooks/usePrintAgent'
@@ -17,7 +17,7 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
   const agent = usePrintAgent()
   const [wizardOpen, setWizardOpen] = useState(false)
   const [certificateHelpOpen, setCertificateHelpOpen] = useState(false)
-  const [feedback, setFeedback] = useState<string | null>(null)
+  const [feedback, setFeedback] = useState<{ message: string; tone: 'success' | 'warning' } | null>(null)
   const { checkCashlogyHealth, connectionStatus, hasToken, loadCashlogyConnectors, loadJobs, loadPrinters, loadServerInfo } = agent
 
   useEffect(() => {
@@ -31,21 +31,38 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
 
   async function run(action: () => Promise<unknown>, message: string) {
     setFeedback(null)
-    try { await action(); setFeedback(message) } catch { /* el store muestra el error seguro */ }
+    try { await action(); setFeedback({ message, tone: 'success' }) } catch { /* el store muestra el error seguro */ }
   }
 
   async function copyDiagnostics() {
     await navigator.clipboard.writeText(JSON.stringify(agent.getDiagnosticReport(), null, 2))
-    setFeedback('Informe técnico copiado sin token ni contenido de tickets.')
+    setFeedback({ message: 'Informe técnico copiado sin token ni contenido de tickets.', tone: 'success' })
+  }
+
+  async function runForcedCashlogyRecovery() {
+    const confirmed = window.confirm(
+      'La recuperación forzada reiniciará y volverá a inicializar Cashlogy. Si existe una operación monetaria activa, su resultado quedará como desconocido y tendrás que revisar físicamente el efectivo y la contabilidad. ¿Quieres continuar?',
+    )
+    if (!confirmed) return
+    setFeedback(null)
+    try {
+      const result = await agent.recoverCashlogy()
+      setFeedback(result.affectedOperation
+        ? {
+            message: 'Cashlogy vuelve a estar preparada, pero la operación interrumpida tiene resultado desconocido. Revisa el efectivo y la contabilidad antes de continuar.',
+            tone: 'warning',
+          }
+        : { message: 'Recuperación forzada completada. Cashlogy está preparada.', tone: 'success' })
+    } catch { /* el store muestra el error seguro */ }
   }
 
   const cashlogyOperationActive = Boolean(agent.cashlogyHealth?.activeTransaction || agent.cashlogyHealth?.activeCashManagementOperation)
-  const cashlogySetupBusy = agent.isCheckingCashlogy || agent.isLoadingCashlogyConnectors || agent.isDiscoveringCashlogyConnectors || Boolean(agent.cashlogyConnectorAction)
+  const cashlogySetupBusy = agent.isCheckingCashlogy || agent.isLoadingCashlogyConnectors || agent.isDiscoveringCashlogyConnectors || agent.isRecoveringCashlogy || Boolean(agent.cashlogyConnectorAction)
   const busy = agent.isCheckingConnection || cashlogySetupBusy || agent.isDiscovering || agent.isSelectingPrinter || agent.isTestingPrinter || agent.isOpeningCashDrawer
   return <div className="grid gap-5">
     <div className="flex flex-wrap items-start justify-between gap-3"><div><p className="text-xs font-black uppercase text-[var(--accent)]">Ajustes · Hardware</p><h2 className="text-2xl font-black">Impresión local</h2><p className="text-sm text-[var(--muted)]">Agente HTTPS de esta terminal.</p></div><PrintAgentStatusBadge /></div>
     {agent.lastError ? <PrintErrorAlert error={agent.lastError} onClose={agent.clearError} /> : null}
-    {feedback ? <div className="rounded-[var(--radius)] border border-emerald-500/35 bg-emerald-500/10 p-3 text-sm font-bold text-emerald-700 dark:text-emerald-300">{feedback}</div> : null}
+    {feedback ? <div className={`rounded-[var(--radius)] border p-3 text-sm font-bold ${feedback.tone === 'warning' ? 'border-amber-500/35 bg-amber-500/10 text-amber-800 dark:text-amber-200' : 'border-emerald-500/35 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300'}`}>{feedback.message}</div> : null}
 
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><Server className="h-5 w-5" /><div><h3 className="font-black">Servidor de impresión</h3><p className="break-all font-mono text-xs text-[var(--muted)]">{agent.baseUrl}</p></div></div><div className="flex flex-wrap gap-2"><Button disabled={busy} onClick={() => void run(agent.checkConnection, 'Servidor de impresión conectado.')} size="sm"><RefreshCw className={`h-4 w-4 ${agent.isCheckingConnection ? 'animate-spin' : ''}`} />Probar conexión</Button><Button disabled={!canConfigure} onClick={() => setWizardOpen(true)} size="sm" variant="primary"><Settings2 className="h-4 w-4" />{agent.hasToken ? 'Cambiar servidor' : 'Configurar'}</Button></div></div>
       <div className="mt-4 grid gap-3 sm:grid-cols-3"><Metric label="Hostname" value={String(agent.serverInfo?.hostname || '-')} /><Metric label="IP del agente" value={String(agent.serverInfo?.ip || '-')} /><Metric label="Versión" value={String(agent.serverInfo?.version || '-')} /><Metric label="Sistema" value={String(agent.serverInfo?.operatingSystem || agent.serverInfo?.platform || '-')} /><Metric label="HTTPS" value={agent.serverInfo?.https === false ? 'No' : 'Sí / navegador'} /><Metric label="Respuesta" value={agent.lastResponseTimeMs === null ? '-' : `${agent.lastResponseTimeMs} ms`} /></div>
@@ -83,6 +100,19 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
           onInitialize={(connectorId) => void run(() => agent.initializeCashlogyConnector(connectorId), 'Cashlogy inicializada y lista para usar.')}
           onSelect={(connectorId) => void run(() => agent.selectCashlogyConnector(connectorId), 'Máquina Cashlogy seleccionada.')}
         />
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-red-500/35 bg-red-500/10 p-4">
+          <div className="flex min-w-0 items-start gap-3">
+            <ShieldAlert className="mt-0.5 h-5 w-5 shrink-0 text-red-600" />
+            <div>
+              <h4 className="font-black text-red-800 dark:text-red-200">Recuperación forzada</h4>
+              <p className="mt-1 text-sm text-[var(--muted)]">Úsala únicamente si Cashlogy ha quedado bloqueada. Reinicia la sesión y no resuelve automáticamente movimientos de efectivo con resultado incierto.</p>
+            </div>
+          </div>
+          <Button disabled={busy || !canConfigure || !agent.hasToken} onClick={() => void runForcedCashlogyRecovery()} variant="danger">
+            {agent.isRecoveringCashlogy ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RotateCcw className="h-4 w-4" />}
+            {agent.isRecoveringCashlogy ? 'Recuperando Cashlogy…' : 'Ejecutar recuperación forzada'}
+          </Button>
+        </div>
       </div> : null}
     </section>
 
@@ -131,7 +161,7 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
 
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><div className="flex items-center justify-between gap-3"><h3 className="font-black">Trabajos recientes</h3><Button disabled={agent.isLoadingJobs} onClick={() => void run(agent.loadJobs, 'Trabajos actualizados.')} size="sm">{agent.isLoadingJobs ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Ver trabajos</Button></div><div className="mt-3"><PrintJobsTable jobs={agent.jobs} /></div></section>
 
-    {canConfigure ? <Button onClick={() => { if (window.confirm('¿Borrar URL, token e impresora de esta terminal?')) { agent.resetConfiguration(); setFeedback('Configuración local borrada.') } }} variant="danger"><RotateCcw className="h-4 w-4" />Borrar configuración</Button> : null}
+    {canConfigure ? <Button onClick={() => { if (window.confirm('¿Borrar URL, token e impresora de esta terminal?')) { agent.resetConfiguration(); setFeedback({ message: 'Configuración local borrada.', tone: 'success' }) } }} variant="danger"><RotateCcw className="h-4 w-4" />Borrar configuración</Button> : null}
     {wizardOpen ? <PrintAgentSetupWizard canOpenDrawer={canOpenDrawer && !agent.cashlogyConfigured} onClose={() => setWizardOpen(false)} /> : null}
     {certificateHelpOpen ? <CertificateHelpDialog baseUrl={agent.baseUrl} onClose={() => setCertificateHelpOpen(false)} /> : null}
   </div>

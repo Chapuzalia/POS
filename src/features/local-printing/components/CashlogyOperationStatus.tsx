@@ -28,11 +28,13 @@ const typeLabels: Record<CashlogyCashManagementType, string> = {
 
 export function CashlogyOperationStatus({
   error,
+  isCancelling,
   isPending,
   operation,
   type,
 }: {
   error: CashlogyError | null
+  isCancelling?: boolean
   isPending: boolean
   operation: CashlogyCashManagementOperation | null
   type: CashlogyCashManagementType
@@ -40,7 +42,7 @@ export function CashlogyOperationStatus({
   const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || (!operation && Boolean(error))
   const completed = operation?.status === 'completed'
   const stopped = operation?.status === 'cancelled' || operation?.status === 'failed'
-  const title = operation ? statusLabels[operation.status] : isPending ? 'Iniciando operación…' : 'Recuperando operación'
+  const title = isCancelling ? 'Cancelando operación…' : operation ? statusLabels[operation.status] : isPending ? 'Iniciando operación…' : 'Recuperando operación'
 
   return <div className="grid gap-4">
     <div className={`flex items-start gap-3 rounded-[var(--radius)] border p-4 ${critical ? 'border-red-500/50 bg-red-500/10' : 'border-[var(--separator)] bg-[var(--background)]'}`}>
@@ -52,7 +54,9 @@ export function CashlogyOperationStatus({
         <p className="text-xs font-black uppercase text-[var(--accent)]">{typeLabels[type]}</p>
         <h3 className="text-xl font-black">{title}</h3>
         <p className="mt-1 text-sm text-[var(--muted)]">
-          {critical
+          {isCancelling
+            ? 'Espera a que Cashlogy confirme la cancelación antes de iniciar otra operación.'
+            : critical
             ? 'No repitas la operación. Comprueba físicamente el efectivo y consulta de nuevo con el mismo requestId.'
             : type === 'remove_stacker' && !completed
               ? 'Retira el stacker de Cashlogy y vuelve a colocarlo para continuar.'

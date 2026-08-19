@@ -259,6 +259,54 @@ export type CashlogyOperationResponse = {
   operation: CashlogyCashManagementOperation
 }
 
+export type CashlogyCancelTarget = {
+  kind: 'cash_management' | 'transaction'
+  id: string
+}
+
+export type CashlogyCancelResponse = {
+  ok: boolean
+  cancelled: boolean
+  pending: boolean
+  duplicate: boolean
+  target: CashlogyCancelTarget | null
+  operation?: {
+    status: CashlogyCashManagementStatus
+    resultCode?: string | null
+  }
+  transaction?: CashlogyTransaction
+}
+
+export type CashlogyRecoveryStep = {
+  ok: boolean
+  resultCode: string | null
+  error: CashlogyRemoteError | null
+}
+
+export type CashlogyRecoveryResult = {
+  ok: boolean
+  ready: boolean
+  previousErrors: CashlogyRecoveryStep & { errors?: CashlogyDeviceError[] }
+  cancelResult: CashlogyRecoveryStep | null
+  resetResult: CashlogyRecoveryStep
+  initializationResult: CashlogyRecoveryStep & { protocolVersion?: string | null }
+  currentErrors: CashlogyRecoveryStep & { errors?: CashlogyDeviceError[] }
+  accountingCheck: {
+    ok: boolean
+    total: CashlogyRecoveryStep & { totalCents?: number }
+    denominations: CashlogyRecoveryStep & {
+      coinDenominationCount?: number
+      noteDenominationCount?: number
+    }
+  }
+  affectedOperation: {
+    id?: string
+    requestId?: string
+    type?: CashlogyCashManagementType
+    status: 'unknown'
+  } | null
+}
+
 export type CashlogyManagementIntent = {
   requestId: string
   type: CashlogyCashManagementType

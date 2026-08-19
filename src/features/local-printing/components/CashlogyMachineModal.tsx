@@ -1,5 +1,6 @@
 import {
   ArrowDownToLine,
+  Ban,
   Coins,
   HandCoins,
   Layers,
@@ -21,7 +22,7 @@ import {
   selectedDenominations,
   suggestCashlogyDenominations,
 } from '../cashlogy/cashlogyManagement'
-import { cashlogyManagementActiveStatuses } from '../cashlogy/cashlogyPolling'
+import { cashlogyManagementActiveStatuses, cashlogyManagementCancellableStatuses } from '../cashlogy/cashlogyPolling'
 import { useCashlogyManagementStore, type CashlogyManagementState } from '../cashlogy/useCashlogyManagementStore'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
 import type {
@@ -60,6 +61,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     isStarting: state.isStarting,
     isPolling: state.isPolling,
     isMutating: state.isMutating,
+    isCancelling: state.isCancelling,
     open: state.open,
     hide: state.hide,
     startRefill: state.startRefill,
@@ -70,6 +72,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     finalizeRefill: state.finalizeRefill,
     finalizeGiveChangeAdmission: state.finalizeGiveChangeAdmission,
     dispenseGiveChange: state.dispenseGiveChange,
+    cancel: state.cancel,
     recover: state.recover,
     clearResolved: state.clearResolved,
   })))
@@ -88,7 +91,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
   const [quantities, setQuantities] = useState<Record<number, number>>({})
 
   const operationActive = Boolean(management.operation && cashlogyManagementActiveStatuses.has(management.operation.status))
-  const operationBusy = management.isStarting || management.isMutating || operationActive
+  const operationBusy = management.isStarting || management.isMutating || management.isCancelling || operationActive
   const ready = health?.enabled === true && health.ok === true && health.sessionState === 'ready'
   const denominationOptions = useMemo(() => {
     const live = getDispensableDenominations(accounting)
@@ -279,8 +282,8 @@ type OperationViewProps = {
   chosenDenominations: ReturnType<typeof selectedDenominations>
   denominationOptions: ReturnType<typeof getDispensableDenominations>
   management: Pick<CashlogyManagementState,
-    | 'intent' | 'operation' | 'error' | 'isStarting' | 'isPolling' | 'isMutating'
-    | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'recover'>
+    | 'intent' | 'operation' | 'error' | 'isStarting' | 'isPolling' | 'isMutating' | 'isCancelling'
+    | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'cancel' | 'recover'>
   onCloseReviewed: () => void
   onCloseResolved: () => void
   onClearQuantities: () => void
@@ -294,8 +297,9 @@ function OperationView(props: OperationViewProps) {
   const operation = management.operation
   const type = management.intent!.type
   const active = Boolean(operation && cashlogyManagementActiveStatuses.has(operation.status))
+  const canCancel = Boolean(operation && cashlogyManagementCancellableStatuses.has(operation.status))
   const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || (!operation && Boolean(management.error))
-  const busy = management.isStarting || management.isMutating
+  const busy = management.isStarting || management.isMutating || management.isCancelling
   const acceptedCents = operation?.acceptedCents ?? 0
   const suggestedOperationId = useRef<string | null>(null)
 
@@ -311,10 +315,13 @@ function OperationView(props: OperationViewProps) {
   }, [acceptedCents, denominationOptions, onQuantitiesChange, operation?.id, operation?.status, operation?.type, quantities])
 
   return <section className="grid gap-5">
-    <CashlogyOperationStatus error={management.error} isPending={busy || management.isPolling} operation={operation} type={type} />
+    <CashlogyOperationStatus error={management.error} isCancelling={management.isCancelling} isPending={busy || management.isPolling} operation={operation} type={type} />
 
     {type === 'refill' && operation?.status === 'accepting' ? <div className="flex flex-wrap justify-end gap-2">
       <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
+      {canCancel ? <Button disabled={busy} onClick={() => void management.cancel().catch(() => undefined)} size="lg" variant="danger">
+        {management.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Cancelar operación
+      </Button> : null}
       <Button disabled={busy} onClick={() => void management.finalizeRefill().catch(() => undefined)} size="lg" variant="primary">
         {management.isMutating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null} Detener y finalizar reposición
       </Button>
@@ -322,6 +329,9 @@ function OperationView(props: OperationViewProps) {
 
     {type === 'give_change' && operation?.status === 'accepting' ? <div className="flex flex-wrap justify-end gap-2">
       <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
+      {canCancel ? <Button disabled={busy} onClick={() => void management.cancel().catch(() => undefined)} size="lg" variant="danger">
+        {management.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Cancelar operación
+      </Button> : null}
       <Button disabled={busy || acceptedCents <= 0} onClick={() => void management.finalizeGiveChangeAdmission().catch(() => undefined)} size="lg" variant="primary">
         {management.isMutating ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null} Cerrar entrada y elegir cambio
       </Button>
@@ -350,7 +360,10 @@ function OperationView(props: OperationViewProps) {
       <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
     </div> : null}
 
-    {active && !critical && !['accepting', 'awaiting_dispense'].includes(operation?.status ?? '') ? <div className="flex justify-end">
+    {active && !critical && !['accepting', 'awaiting_dispense'].includes(operation?.status ?? '') ? <div className="flex flex-wrap justify-end gap-2">
+      {canCancel ? <Button disabled={busy} onClick={() => void management.cancel().catch(() => undefined)} variant="danger">
+        {management.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Cancelar operación
+      </Button> : null}
       <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
     </div> : null}
 

@@ -36,6 +36,7 @@ export function useCashlogyScope(context: TenantContext | null) {
         && !management.isPolling
         && !management.isStarting
         && !management.isMutating
+        && !management.isCancelling
         && (!management.operation
           || (cashlogyManagementActiveStatuses.has(management.operation.status)
             && management.operation.status !== 'awaiting_dispense'))

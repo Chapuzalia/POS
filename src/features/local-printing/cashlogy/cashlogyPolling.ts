@@ -22,6 +22,10 @@ export const cashlogyManagementActiveStatuses = new Set<CashlogyCashManagementSt
   'starting', 'accepting', 'finalizing_acceptance', 'awaiting_dispense', 'dispensing', 'processing',
 ])
 
+export const cashlogyManagementCancellableStatuses = new Set<CashlogyCashManagementStatus>([
+  'starting', 'accepting',
+])
+
 export const cashlogyManagementTerminalStatuses = new Set<CashlogyCashManagementStatus>([
   'completed', 'cancelled', 'failed', 'unknown', 'needs_attention',
 ])

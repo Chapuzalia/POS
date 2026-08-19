@@ -14,6 +14,7 @@ import {
   cashlogyActiveStatuses,
   cashlogyCancellableStatuses,
   cashlogyManagementActiveStatuses,
+  cashlogyManagementCancellableStatuses,
   cashlogyManagementTerminalStatuses,
   cashlogyTerminalStatuses,
   pollCashlogyOperation,
@@ -97,6 +98,20 @@ test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () =
   const refill = operation('refill', 'accepting', { acceptedCents: 500 })
   const giveChange = operation('give_change', 'awaiting_dispense', { acceptedCents: 2000 })
   const generic = operation('withdraw', 'completed', { dispensedCents: 2000 })
+  const recovery = {
+    ok: true, ready: true,
+    previousErrors: { ok: true, resultCode: '0', errors: [], error: null },
+    cancelResult: null,
+    resetResult: { ok: true, resultCode: '0', error: null },
+    initializationResult: { ok: true, resultCode: '0', protocolVersion: '2.01', error: null },
+    currentErrors: { ok: true, resultCode: '0', errors: [], error: null },
+    accountingCheck: {
+      ok: true,
+      total: { ok: true, resultCode: '0', totalCents: 17000, error: null },
+      denominations: { ok: true, resultCode: '0', coinDenominationCount: 1, noteDenominationCount: 1, error: null },
+    },
+    affectedOperation: null,
+  }
   const connector = { id: 'cashlogy-127.0.0.1-8092', host: '127.0.0.1', port: 8092, reachable: true, processRunning: true, initialized: false, selected: false, protocolVersion: null, lastConnectedAt: null }
   const client = createPrintAgentClient({
     baseUrl: 'https://pos-local.test:8443', token: 'secret',
@@ -114,6 +129,8 @@ test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () =
       if (path.endsWith('/accounting/denominations')) return Response.json(accounting.denominations)
       if (path.endsWith('/accounting/levels')) return Response.json(accounting.levels)
       if (path.endsWith('/accounting/capabilities')) return Response.json(accounting.capabilities)
+      if (path === '/api/v1/cashlogy/cancel') return Response.json({ ok: true, cancelled: true, pending: false, duplicate: false, target: { kind: 'cash_management', id: refill.id }, operation: { status: 'cancelled', resultCode: '0' } })
+      if (path === '/api/v1/cashlogy/admin/recover') return Response.json(recovery)
       if (path.endsWith('/transactions/charge') || path.endsWith('/cancel')) return Response.json({ ok: true, duplicate: false, transaction: tx }, { status: 202 })
       if (path.includes('/transactions/')) return Response.json({ transaction: tx })
       if (path.includes('/refill/')) return Response.json(path.endsWith('/finalize') ? { ok: true, duplicate: false, operation: { ...refill, status: 'completed' } } : { operation: refill })
@@ -140,6 +157,7 @@ test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () =
   await client.getCashlogyTransaction(tx.id)
   await client.getCashlogyTransactionByRequestId(tx.requestId)
   await client.cancelCashlogyTransaction(tx.id)
+  await client.cancelActiveCashlogyOperation()
   await client.startCashlogyRefill(refill.requestId)
   await client.getCashlogyRefill(refill.id)
   await client.finalizeCashlogyRefill(refill.id)
@@ -151,6 +169,7 @@ test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () =
   await client.emptyCashlogy('cashlogy:empty:intent-1')
   await client.collectCashlogyStacker('cashlogy:stacker:intent-1')
   await client.getCashlogyCashManagementOperationByRequestId(generic.requestId)
+  await client.recoverCashlogy()
 
   assert.equal(calls.every((call) => call.init.headers.Authorization === 'Bearer secret'), true)
   assert.ok(calls.some((call) => call.path === '/api/v1/cashlogy/accounting'))
@@ -163,6 +182,8 @@ test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () =
   assert.ok(calls.some((call) => call.path.endsWith('/cash-management/empty')))
   assert.ok(calls.some((call) => call.path.endsWith('/cash-management/stacker/collect')))
   assert.ok(calls.some((call) => call.path.includes('/cash-management/operations/by-request/')))
+  assert.ok(calls.some((call) => call.path === '/api/v1/cashlogy/cancel' && call.init.method === 'POST'))
+  assert.ok(calls.some((call) => call.path === '/api/v1/cashlogy/admin/recover' && call.init.method === 'POST'))
   assert.deepEqual(calls.find((call) => call.path.endsWith('/cash-management/withdraw')).body.denominations, [{ valueCents: 2000, quantity: 1 }])
 })
 
@@ -226,6 +247,8 @@ test('los pollings terminan solo en estados terminales y permiten la fase awaiti
   assert.ok(cashlogyTerminalStatuses.has('unknown'))
   assert.ok(cashlogyCancellableStatuses.has('waiting_for_cash'))
   assert.ok(cashlogyManagementActiveStatuses.has('awaiting_dispense'))
+  assert.ok(cashlogyManagementCancellableStatuses.has('accepting'))
+  assert.equal(cashlogyManagementCancellableStatuses.has('awaiting_dispense'), false)
   assert.ok(cashlogyManagementTerminalStatuses.has('needs_attention'))
 })
 
@@ -326,18 +349,22 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
   assert.match(modal, /Vaciar Cashlogy/)
   assert.match(modal, /Retirar stacker/)
   assert.match(modal, /finalizeGiveChangeAdmission/)
+  assert.match(modal, /Cancelar operación/)
+  assert.match(modal, /management\.cancel\(\)/)
   assert.match(modal, /Volver al TPV/)
   assert.match(modal, /suggestCashlogyDenominations/)
   assert.match(modal, /suggestedOperationId/)
   assert.match(managementStore, /persistIntent\(intent\)[\s\S]*createRequest/)
   assert.match(managementStore, /denominationOptions/)
   assert.match(managementStore, /if \(!startPromise\)/)
+  assert.match(managementStore, /cancelActiveCashlogyOperation/)
+  assert.match(managementStore, /cashlogyManagementCancellableStatuses/)
   assert.match(selector, /availableQuantity/)
   assert.match(selector, /targetCents/)
   assert.match(selector, /Cambiar denominaciones/)
 })
 
-test('los ajustes permiten buscar, seleccionar e inicializar Cashlogy sin usar el dashboard', async () => {
+test('los ajustes permiten configurar y ejecutar la recuperación forzada de Cashlogy', async () => {
   const [settings, connectorList, store] = await Promise.all([
     readFile(new URL('src/features/local-printing/components/PrintAgentSettings.tsx', root), 'utf8'),
     readFile(new URL('src/features/local-printing/components/CashlogyConnectorList.tsx', root), 'utf8'),
@@ -347,9 +374,13 @@ test('los ajustes permiten buscar, seleccionar e inicializar Cashlogy sin usar e
   assert.match(settings, /discoverCashlogyConnectors/)
   assert.match(settings, /selectCashlogyConnector/)
   assert.match(settings, /initializeCashlogyConnector/)
+  assert.match(settings, /Ejecutar recuperación forzada/)
+  assert.match(settings, /recoverCashlogy/)
+  assert.match(settings, /resultado quedará como desconocido/)
   assert.match(connectorList, /Seleccionar/)
   assert.match(connectorList, /Inicializar/)
   assert.match(connectorList, /Lista para usar/)
   assert.match(store, /activeClient\.selectCashlogyConnector/)
   assert.match(store, /activeClient\.initializeCashlogyConnector/)
+  assert.match(store, /activeClient\.recoverCashlogy/)
 })
