@@ -2,9 +2,9 @@ import { DEFAULT_PRINT_AGENT_TIMEOUT_MS, PRINT_AGENT_HEALTH_TIMEOUT_MS } from '.
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl.ts'
 import { PrintAgentError, type PrintAgentErrorCode } from './PrintAgentError.ts'
 import type {
-  CashlogyAccounting, CashlogyCapabilities, CashlogyCashManagementOperation, CashlogyChargeRequest,
+  CashlogyAccounting, CashlogyCancelResponse, CashlogyCapabilities, CashlogyCashManagementOperation, CashlogyChargeRequest,
   CashlogyConnector, CashlogyDenominations, CashlogyDevice, CashlogyDeviceError, CashlogyDiagnosticLog,
-  CashlogyHealth, CashlogyLevels, CashlogyOperationResponse, CashlogyRequestedDenomination,
+  CashlogyHealth, CashlogyLevels, CashlogyOperationResponse, CashlogyRecoveryResult, CashlogyRequestedDenomination,
   CashlogyTotal, CashlogyTransaction, DiscoveryProgress, PrintJob, Printer,
 } from '../types.ts'
 
@@ -25,6 +25,7 @@ const errorCodes = new Set<PrintAgentErrorCode>([
 ])
 
 const CASHLOGY_STACKER_TIMEOUT_MS = 910_000
+const CASHLOGY_RECOVERY_TIMEOUT_MS = 240_000
 
 export function buildPrintAgentHeaders(token?: string | null, hasBody = false) {
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -186,6 +187,7 @@ export function createPrintAgentClient(options: ClientOptions) {
     getCashlogyTransaction: (transactionId: string, signal?: AbortSignal) => request<{ transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}`, { retries: 1, signal }),
     getCashlogyTransactionByRequestId: (requestId: string, signal?: AbortSignal) => request<{ transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/by-request/${encodeURIComponent(requestId)}`, { retries: 1, signal }),
     cancelCashlogyTransaction: (transactionId: string, signal?: AbortSignal) => request<{ ok: true; duplicate: boolean; transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}/cancel`, { body: {}, method: 'POST', signal }),
+    cancelActiveCashlogyOperation: (signal?: AbortSignal) => request<CashlogyCancelResponse>('/api/v1/cashlogy/cancel', { body: {}, method: 'POST', signal }),
     startCashlogyRefill: (requestId: string, signal?: AbortSignal) => request<CashlogyOperationResponse>('/api/v1/cashlogy/cash-management/refill/start', { body: { requestId }, method: 'POST', signal }),
     getCashlogyRefill: (operationId: string, signal?: AbortSignal) => request<{ operation: CashlogyCashManagementOperation }>(`/api/v1/cashlogy/cash-management/refill/${encodeURIComponent(operationId)}`, { retries: 1, signal }),
     finalizeCashlogyRefill: (operationId: string, signal?: AbortSignal) => request<CashlogyOperationResponse>(`/api/v1/cashlogy/cash-management/refill/${encodeURIComponent(operationId)}/finalize`, { body: {}, method: 'POST', signal }),
@@ -198,6 +200,7 @@ export function createPrintAgentClient(options: ClientOptions) {
     collectCashlogyStacker: (requestId: string, signal?: AbortSignal) => request<CashlogyOperationResponse>('/api/v1/cashlogy/cash-management/stacker/collect', { body: { requestId }, method: 'POST', signal, timeoutMs: CASHLOGY_STACKER_TIMEOUT_MS }),
     getCashlogyCashManagementOperationByRequestId: (requestId: string, signal?: AbortSignal) => request<{ operation: CashlogyCashManagementOperation }>(`/api/v1/cashlogy/cash-management/operations/by-request/${encodeURIComponent(requestId)}`, { retries: 1, signal }),
     resetCashlogy: (signal?: AbortSignal) => request<{ ok: true; resultCode: string }>('/api/v1/cashlogy/admin/reset', { body: { confirmation: 'RESET_CASHLOGY' }, method: 'POST', signal }),
+    recoverCashlogy: (signal?: AbortSignal) => request<CashlogyRecoveryResult>('/api/v1/cashlogy/admin/recover', { body: {}, method: 'POST', signal, timeoutMs: CASHLOGY_RECOVERY_TIMEOUT_MS }),
     getCashlogyDiagnosticLogs: (limit = 100, signal?: AbortSignal) => request<{ logs: CashlogyDiagnosticLog[] }>(`/api/v1/cashlogy/diagnostics/logs?limit=${encodeURIComponent(String(limit))}`, { retries: 1, signal }),
     getJobs: (signal?: AbortSignal) => request<{ jobs?: PrintJob[] } | PrintJob[]>('/api/v1/jobs', { retries: 1, signal }),
     getJob: (jobId: string, signal?: AbortSignal) => request<PrintJob>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, { retries: 1, signal }),

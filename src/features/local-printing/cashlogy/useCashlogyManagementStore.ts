@@ -12,7 +12,11 @@ import type {
 } from '../types'
 import { CashlogyError, isUncertainCashlogyError, toCashlogyError } from './cashlogyError'
 import { createCashlogyRequestId } from './cashlogyRequestId'
-import { cashlogyManagementActiveStatuses, pollCashlogyOperation } from './cashlogyPolling'
+import {
+  cashlogyManagementActiveStatuses,
+  cashlogyManagementCancellableStatuses,
+  pollCashlogyOperation,
+} from './cashlogyPolling'
 import { loadCashlogyIntent, loadCashlogyManagementIntent, saveCashlogyManagementIntent } from './cashlogyStorage'
 
 export type CashlogyManagementState = {
@@ -24,6 +28,7 @@ export type CashlogyManagementState = {
   isStarting: boolean
   isPolling: boolean
   isMutating: boolean
+  isCancelling: boolean
   configureScope: (scope: PrintAgentScope) => void
   open: () => void
   hide: () => void
@@ -35,6 +40,7 @@ export type CashlogyManagementState = {
   finalizeRefill: () => Promise<CashlogyCashManagementOperation>
   finalizeGiveChangeAdmission: () => Promise<CashlogyCashManagementOperation>
   dispenseGiveChange: (denominations: CashlogyRequestedDenomination[]) => Promise<CashlogyCashManagementOperation>
+  cancel: (signal?: AbortSignal) => Promise<CashlogyCashManagementOperation>
   recover: (signal?: AbortSignal) => Promise<CashlogyCashManagementOperation | null>
   clearResolved: () => void
   clearError: () => void
@@ -71,11 +77,7 @@ function operationError(operation: CashlogyCashManagementOperation) {
     originalCode: operation.normalizedErrorCode ?? operation.error?.code,
     details: operation,
   })
-  if (operation.status === 'cancelled') return new CashlogyError({
-    code: 'CASHLOGY_OPERATION_CANCELLED',
-    originalCode: operation.normalizedErrorCode ?? operation.error?.code,
-    details: operation,
-  })
+  if (operation.status === 'cancelled') return null
   return null
 }
 
@@ -233,13 +235,14 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
   isStarting: false,
   isPolling: false,
   isMutating: false,
+  isCancelling: false,
 
   configureScope(scope) {
     stopPolling()
     startPromise = null
     recoveryPromise = null
     const intent = loadCashlogyManagementIntent(scope)
-    set({ scope, intent, operation: null, error: null, modalOpen: Boolean(intent), isStarting: false, isPolling: false, isMutating: false })
+    set({ scope, intent, operation: null, error: null, modalOpen: Boolean(intent), isStarting: false, isPolling: false, isMutating: false, isCancelling: false })
   },
 
   open() { set({ modalOpen: true }) },
@@ -295,6 +298,52 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     return mutateOperation((operation) => client().dispenseCashlogyGiveChange(operation.id, denominations))
   },
 
+  async cancel(signal) {
+    const state = get()
+    const current = state.operation
+    if (state.isCancelling || state.isStarting || state.isMutating) {
+      throw new CashlogyError({ code: 'CASHLOGY_BUSY' })
+    }
+    if (!current || !cashlogyManagementCancellableStatuses.has(current.status)) {
+      throw new CashlogyError({
+        code: 'CASHLOGY_CASH_MANAGEMENT_NOT_ACTIVE',
+        message: 'Cashlogy ya no admite cancelar esta fase de la operación.',
+      })
+    }
+
+    stopPolling()
+    set({ isCancelling: true, error: null })
+    try {
+      const response = await client().cancelActiveCashlogyOperation(signal)
+      if (response.target && (response.target.kind !== 'cash_management' || response.target.id !== current.id)) {
+        throw new CashlogyError({
+          code: 'CASHLOGY_INVALID_STATE',
+          message: 'El backend ha identificado otra operación monetaria activa. Revisa su estado antes de continuar.',
+          details: response,
+        })
+      }
+      const operation = (await client().getCashlogyCashManagementOperationByRequestId(current.requestId, signal)).operation
+      identifyOperation(operation)
+      if (!response.cancelled && cashlogyManagementActiveStatuses.has(operation.status)) {
+        throw new CashlogyError({
+          code: 'CASHLOGY_CASH_MANAGEMENT_NOT_ACTIVE',
+          message: 'La máquina no ha confirmado la cancelación de esta operación.',
+          details: response,
+        })
+      }
+      startPolling(operation)
+      return operation
+    } catch (error) {
+      const mapped = toCashlogyError(error)
+      set({ error: mapped })
+      const operation = get().operation
+      if (operation) startPolling(operation)
+      throw mapped
+    } finally {
+      set({ isCancelling: false })
+    }
+  },
+
   async recover(signal) {
     if (recoveryPromise) return recoveryPromise
     const intent = get().intent
@@ -321,7 +370,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     if (operation.status === 'unknown' || operation.status === 'needs_attention') return
     stopPolling()
     persistIntent(null)
-    set({ intent: null, operation: null, error: null, modalOpen: false })
+    set({ intent: null, operation: null, error: null, modalOpen: false, isCancelling: false })
   },
 
   clearError() { set({ error: null }) },

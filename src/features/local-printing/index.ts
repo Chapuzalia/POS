@@ -23,5 +23,6 @@ export { useCashlogyStore, settleCashlogyPaymentIfConfigured, finishCashlogyPaym
 export { useCashlogyManagementStore } from './cashlogy/useCashlogyManagementStore'
 export type {
   PrintRequest, PrintJob, Printer, PrintAgentScope, CashlogyHealth, CashlogyTransaction,
-  CashlogyAccounting, CashlogyCashManagementOperation, CashlogyRequestedDenomination,
+  CashlogyAccounting, CashlogyCancelResponse, CashlogyCashManagementOperation, CashlogyRecoveryResult,
+  CashlogyRequestedDenomination,
 } from './types'
