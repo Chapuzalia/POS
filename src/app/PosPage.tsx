@@ -22,6 +22,7 @@ import { RestaurantOrderPanel } from '../features/tables/components/RestaurantOr
 import { SplitOrderModal } from '../features/tables/components/SplitOrderModal'
 import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
+import { VirtualTableModal } from '../features/tables/components/VirtualTableModal'
 import { useMobileTableMapLayout } from '../features/tables/useMobileTableMapLayout'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
@@ -34,7 +35,7 @@ import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
 import { ReservationsPage, type useReservationsController } from '../features/reservations'
-import { CashlogyMachineModal, CashlogyPaymentModal } from '../features/local-printing'
+import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
 import type {
@@ -100,6 +101,7 @@ type Props = {
 export function PosPage(props: Props) {
   const [configOpen, setConfigOpen] = useState(false)
   const [cashlogyMachineOpen, setCashlogyMachineOpen] = useState(false)
+  const [quickSaleVirtualModalOpen, setQuickSaleVirtualModalOpen] = useState(false)
   const mobileTableMapLayout = useMobileTableMapLayout()
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -271,6 +273,13 @@ export function PosPage(props: Props) {
         onRefreshCatalog={() => void props.onRefreshCatalog()}
         onLogout={() => void props.onLogout()}
         pendingCount={props.offline.pendingCount}
+        preTicketAction={restaurant.posView.type !== 'table_map' && cash.session ? <PreTicketButton
+          cashSession={cash.session}
+          context={props.context}
+          disabled={props.isBusy}
+          discount={appliedDiscount}
+          lines={activeLines}
+        /> : null}
         themeMode={props.themes.find((theme) => theme.id === props.selectedThemeId)?.mode ?? 'light'}
       />
       {props.error ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
@@ -284,9 +293,11 @@ export function PosPage(props: Props) {
       {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
         isBusy={props.isBusy}
         isOnline={props.isOnline}
+        canSaveQuickSale={Boolean(props.context.canTakeOrders && quickSale.lines.length > 0)}
         onBack={() => void restaurant.returnToMap()}
         onCancelEmpty={() => void restaurant.cancelEmptyOrder()}
         onMove={() => void restaurant.prepareMove()}
+        onSaveQuickSale={() => setQuickSaleVirtualModalOpen(true)}
         onSplitItems={() => void restaurant.openSplitOrder()}
         onSplitEqual={() => void restaurant.openEqualSplitOrder()}
         order={restaurant.posView.type === 'table_order' ? restaurant.order : null}
@@ -453,6 +464,23 @@ export function PosPage(props: Props) {
       {cashlogyMachineOpen || cashlogyManagementOpen ? <CashlogyMachineModal
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
+      /> : null}
+      {restaurantEnabled && restaurant.tablesEnabled && quickSaleVirtualModalOpen ? <VirtualTableModal
+        areas={restaurant.map.areas}
+        defaultName="Virtual"
+        isBusy={props.isBusy}
+        isOnline={props.isOnline}
+        mobileLayout={mobileTableMapLayout}
+        onClose={() => setQuickSaleVirtualModalOpen(false)}
+        onSubmit={async (value) => {
+          const created = await restaurant.createVirtualTableFromQuickSale(value, quickSale.lines, quickSale.discount)
+          if (created) {
+            quickSale.clear()
+            props.onSetMobileTicketOpen(false)
+          }
+          return created
+        }}
+        requirePhysicalArea
       /> : null}
       {quickSale.productDialog && props.catalog ? <ProductDialog
         allowVariantSelection={quickSale.productDialog.allowVariantSelection}

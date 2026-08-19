@@ -5,6 +5,7 @@ import test from 'node:test'
 const migration = await readFile(new URL('../supabase/migrations/20260814120000_add_session_virtual_restaurant_tables.sql', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 const mapView = await readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8')
+const virtualModal = await readFile(new URL('../src/features/tables/components/VirtualTableModal.tsx', import.meta.url), 'utf8')
 const mobileChrome = await readFile(new URL('../src/features/tables/components/MobileTableMapChrome.tsx', import.meta.url), 'utf8')
 
 test('las mesas virtuales quedan vinculadas a una sesión y conservan el historial al cerrar', () => {
@@ -29,9 +30,10 @@ test('la distribución solo incluye mesas permanentes y virtuales de la sesión 
 
 test('el mapa permite crear la mesa en Virtual o en una zona existente también en móvil', () => {
   assert.match(mapView, /Mesa virtual/)
-  assert.match(mapView, /<option value="">Virtual<\/option>/)
-  assert.match(mapView, /map\.areas\.filter\(\(area\) => !area\.id\.startsWith\("virtual:"\)\)/)
-  assert.match(mapView, /Solo estará disponible durante la sesión de caja actual/)
+  assert.match(mapView, /<VirtualTableModal/)
+  assert.match(virtualModal, /<option value="">Virtual<\/option>/)
+  assert.match(virtualModal, /areas\.filter\(\(area\) => !area\.id\.startsWith\('virtual:'\)\)/)
+  assert.match(virtualModal, /Solo estará disponible durante la sesión de caja actual/)
   assert.match(mobileChrome, /aria-label="Crear mesa virtual"/)
   assert.match(mobileChrome, /className="flex items-center justify-end gap-2"[\s\S]*onClick=\{onCreateVirtual\}[\s\S]*onClick=\{onEditToggle\}/)
 })

@@ -1,5 +1,6 @@
 import { Button as UiButton } from '../ui/Button'
 import { Dropdown, Label } from '@heroui/react'
+import type { ReactNode } from 'react'
 import {
   ArrowLeftRight,
   CalendarDays,
@@ -42,6 +43,7 @@ type AppHeaderProps = {
   onRefreshCatalog: () => void;
   onLogout: () => void;
   pendingCount: number;
+  preTicketAction?: ReactNode;
   themeMode: "light" | "dark";
   compactMobile?: boolean;
 };
@@ -65,6 +67,7 @@ export function AppHeader({
   onRefreshCatalog,
   onLogout,
   pendingCount,
+  preTicketAction,
   themeMode,
   compactMobile = false,
 }: AppHeaderProps) {
@@ -128,8 +131,9 @@ export function AppHeader({
 
         <div className={`flex items-center justify-end ${compactMobile ? 'flex-nowrap gap-1' : 'flex-wrap gap-2'}`}>
           {cashSession ? <Chip>{`Caja: ${cashSession.cashRegisterName}`}</Chip> : null}
-          <div className={compactMobile ? 'hidden' : 'contents'}>
-            <ManualCashDrawerButton canOpenDrawer={canOpenCashDrawer} />
+          <div className="flex items-center gap-2">
+            <div className={compactMobile ? 'hidden' : 'contents'}><ManualCashDrawerButton canOpenDrawer={canOpenCashDrawer} /></div>
+            {preTicketAction}
           </div>
           <div className={compactMobile ? 'hidden' : 'hidden sm:block'}>
             <PrintAgentStatusBadge />

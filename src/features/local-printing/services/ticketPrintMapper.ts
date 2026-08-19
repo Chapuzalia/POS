@@ -11,6 +11,7 @@ type MapperOptions = {
   footer?: string
   isReprint?: boolean
   copyNumber?: number
+  isPreTicket?: boolean
   autoOpenCashDrawer?: boolean
   cashlogyConfigured?: boolean
   cut?: boolean
@@ -68,8 +69,9 @@ export function mapSaleLineToPrintItem(line: SaleCreatedPayload['lines'][number]
 export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
   const { sale } = options
   const isReprint = options.isReprint === true
+  const isPreTicket = options.isPreTicket === true
   const copyNumber = options.copyNumber || 0
-  const payments = sale.payment ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }] : []
+  const payments = sale.payment && !isPreTicket ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }] : []
   const hasCompleteFiscalSnapshot = sale.lines.length > 0 && sale.lines.every(
     (line) => line.fiscalSnapshot && isValidTaxRate(line.fiscalSnapshot.taxRate),
   )
@@ -89,7 +91,9 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     return itemWithoutTax
   })
   return {
-    requestId: isReprint ? `print:${sale.sale.id}:copy:${copyNumber}` : `print:${sale.sale.id}:original`,
+    requestId: isPreTicket
+      ? `pre-ticket:${sale.sale.id}`
+      : isReprint ? `print:${sale.sale.id}:copy:${copyNumber}` : `print:${sale.sale.id}:original`,
     printerId: options.printerId,
     ticket: {
       establishmentName: options.establishment.name,
@@ -103,15 +107,15 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
       discountCents: sale.ticket.discountAmountCents,
       ...(taxCents === undefined ? {} : { taxCents }),
       totalCents: sale.sale.totalCents,
-      ...(sale.payment ? {
+      ...(sale.payment && !isPreTicket ? {
         paymentMethod: sale.payment.method,
         payments,
         ...(sale.payment.receivedCents === null ? {} : { amountReceivedCents: sale.payment.receivedCents }),
         changeCents: sale.payment.changeCents,
       } : {}),
       ...(options.footer ? { footer: options.footer } : {}),
-      ...(isReprint ? { copyLabel: 'COPIA' } : {}),
-      ...(sale.fiscal ? {
+      ...(isPreTicket ? { copyLabel: 'PRE-TICKET' } : isReprint ? { copyLabel: 'COPIA' } : {}),
+      ...(sale.fiscal && !isPreTicket ? {
         fiscal: {
           provider: sale.fiscal.provider,
           status: sale.fiscal.status,
@@ -124,7 +128,7 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     },
     options: {
       cut: options.cut !== false,
-      openCashDrawer: shouldOpenCashDrawer({ payments, isReprint, settings: { autoOpenCashDrawer: options.autoOpenCashDrawer, cashlogyConfigured: options.cashlogyConfigured } }),
+      openCashDrawer: isPreTicket ? false : shouldOpenCashDrawer({ payments, isReprint, settings: { autoOpenCashDrawer: options.autoOpenCashDrawer, cashlogyConfigured: options.cashlogyConfigured } }),
       copies: 1,
     },
   }

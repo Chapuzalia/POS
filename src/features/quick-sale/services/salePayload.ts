@@ -12,13 +12,14 @@ import type {
 } from '../../../types/index.ts'
 import { nowIso } from '../../../utils/dates.ts'
 
-export function buildSalePayload(
+function buildTicketPayload(
   context: TenantContext,
   cashSession: CashSession,
   lines: TicketLine[],
   paymentMethod: PaymentMethod | null,
   receivedCents: number | null,
   discount: AppliedDiscount | null,
+  validatePayment: boolean,
 ): SaleCreatedPayload {
   const createdAt = nowIso()
   const ticketId = createId()
@@ -30,7 +31,7 @@ export function buildSalePayload(
     discount,
   )
   const { discountAmountCents, totalCents } = calculation
-  assertValidTicketPayment(totalCents, paymentMethod)
+  if (validatePayment) assertValidTicketPayment(totalCents, paymentMethod)
   const saleLines: SaleLinePayload[] = lines.map((line, index) => {
     const taxRate = line.fiscalSnapshot?.taxRate
       ?? line.catalogSnapshot.vatRate
@@ -126,4 +127,24 @@ export function buildSalePayload(
       changeCents: Math.max(0, (receivedCents ?? totalCents) - totalCents),
     } : null,
   }
+}
+
+export function buildSalePayload(
+  context: TenantContext,
+  cashSession: CashSession,
+  lines: TicketLine[],
+  paymentMethod: PaymentMethod | null,
+  receivedCents: number | null,
+  discount: AppliedDiscount | null,
+) {
+  return buildTicketPayload(context, cashSession, lines, paymentMethod, receivedCents, discount, true)
+}
+
+export function buildPreTicketPayload(
+  context: TenantContext,
+  cashSession: CashSession,
+  lines: TicketLine[],
+  discount: AppliedDiscount | null,
+) {
+  return buildTicketPayload(context, cashSession, lines, null, null, discount, false)
 }
