@@ -157,8 +157,8 @@ export function buildSaleTicketLines(
   }
 
   lines.push('', createSeparator(printerLayout.columns))
-  lines.push(...row('Subtotal', money(sale.ticket.subtotalCents), printerLayout))
   if (sale.ticket.discountAmountCents > 0) {
+    lines.push(...row('Subtotal', money(sale.ticket.subtotalCents), printerLayout))
     lines.push(...row('Descuento', money(-sale.ticket.discountAmountCents), printerLayout))
   }
   if (taxableBaseCents !== undefined) {
