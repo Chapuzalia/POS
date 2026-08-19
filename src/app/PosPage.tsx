@@ -13,6 +13,7 @@ import {
   DiscountModal,
   ProductDialog,
   SessionTicketsModal,
+  ShiftSummaryModal,
 } from '../components/modals'
 import { CatalogPanel, MobileTicketModal, PaymentPanel, TicketPanel } from '../components/pos'
 import { AddProductFlyAnimation } from '../components/feedback/AddProductFlyAnimation'
@@ -102,6 +103,9 @@ export function PosPage(props: Props) {
   const [configOpen, setConfigOpen] = useState(false)
   const [cashlogyMachineOpen, setCashlogyMachineOpen] = useState(false)
   const [quickSaleVirtualModalOpen, setQuickSaleVirtualModalOpen] = useState(false)
+  const [shiftSummaryOpen, setShiftSummaryOpen] = useState(false)
+  const [shiftSummaryLoading, setShiftSummaryLoading] = useState(false)
+  const [shiftSummaryError, setShiftSummaryError] = useState<string | null>(null)
   const mobileTableMapLayout = useMobileTableMapLayout()
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -117,6 +121,11 @@ export function PosPage(props: Props) {
     addDiagnosticBreadcrumb('pos.mount', { venueId: props.context.venueId })
     return () => addDiagnosticBreadcrumb('pos.unmount', { venueId: props.context.venueId })
   }, [props.context.venueId])
+  useEffect(() => {
+    if (cash.session) return
+    setShiftSummaryOpen(false)
+    setShiftSummaryError(null)
+  }, [cash.session])
   const resolvedCatalog = useMemo(() => props.catalog ? resolveSellableCatalog(props.catalog) : null, [props.catalog])
   const activeLines: TicketLine[] = restaurant.posView.type === 'table_order' && restaurant.order
     ? restaurant.order.lines.map((line) => ({
@@ -159,6 +168,24 @@ export function PosPage(props: Props) {
   const updateQuantity = (lineId: string, direction: 1 | -1) => {
     if (restaurant.posView.type === 'table_order') restaurant.changeLineQuantity(lineId, direction)
     else quickSale.changeQuantity(lineId, direction)
+  }
+
+  const refreshShiftSummary = async () => {
+    if (!cash.session || shiftSummaryLoading) return
+    setShiftSummaryLoading(true)
+    setShiftSummaryError(null)
+    try {
+      await cash.refreshLedger()
+    } catch (error) {
+      setShiftSummaryError(error instanceof Error ? error.message : 'No se ha podido actualizar el resumen del turno.')
+    } finally {
+      setShiftSummaryLoading(false)
+    }
+  }
+
+  const openShiftSummary = () => {
+    setShiftSummaryOpen(true)
+    void refreshShiftSummary()
   }
 
   const activeTicketPanel: ReactNode = restaurant.posView.type === 'table_order' && restaurant.order
@@ -268,6 +295,7 @@ export function PosPage(props: Props) {
         onOpenReservations={props.reservations.open}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
         onOpenCashlogyMachine={() => setCashlogyMachineOpen(true)}
+        onOpenShiftSummary={openShiftSummary}
         onOpenCashMovements={() => cash.setMovementModalOpen(true)}
         onOpenTicketHistory={() => void cash.ticketActions.openHistory()}
         onRefreshCatalog={() => void props.onRefreshCatalog()}
@@ -515,6 +543,15 @@ export function PosPage(props: Props) {
         isSaving={cash.movementSaving}
         onCancel={() => cash.setMovementModalOpen(false)}
         onConfirm={cash.registerMovement}
+      /> : null}
+      {shiftSummaryOpen && cash.session ? <ShiftSummaryModal
+        cashSession={cash.session}
+        error={shiftSummaryError}
+        isLoading={shiftSummaryLoading}
+        isOnline={props.isOnline}
+        onClose={() => setShiftSummaryOpen(false)}
+        onRefresh={() => void refreshShiftSummary()}
+        sales={cash.ledger}
       /> : null}
       {cash.closeModalOpen && cash.session ? <CloseCashModal
         cashSession={cash.session}

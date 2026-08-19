@@ -78,6 +78,7 @@ export function useCashSession(options: Options) {
   const cashContext = options.context
   const isOnline = options.isOnline
   const reportError = options.onError
+  const syncPendingEvents = options.syncPendingEvents
   usePrintAgentScope(cashContext)
   useCashlogyScope(cashContext)
 
@@ -237,6 +238,14 @@ export function useCashSession(options: Options) {
     if (confirmedTicket && shouldPrint) void printSale(confirmedTicket.payload)
     else if (!confirmedTicket) sileo.warning({ title: missingTicketTitle, description: 'No se ha podido recuperar el ticket confirmado.' })
   }, [mergeRemotePrintStates, options.context, persistLedger, persistTickets, printSale, session])
+
+  const refreshLedger = useCallback(async () => {
+    if (!cashContext || !session || !isOnline) return ledger
+    await syncPendingEvents()
+    const nextLedger = await loadSalesLedgerFromSupabase(cashContext, session.id)
+    persistLedger(nextLedger)
+    return nextLedger
+  }, [cashContext, isOnline, ledger, persistLedger, session, syncPendingEvents])
   const ticketActions = useCashTicketActions({
     context: options.context,
     cashSession: session,
@@ -487,6 +496,7 @@ export function useCashSession(options: Options) {
     printClosing,
     printingClosingId,
     refreshConfirmedSale,
+    refreshLedger,
     registerMovement,
     reset,
     session,

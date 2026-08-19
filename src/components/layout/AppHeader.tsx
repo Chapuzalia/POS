@@ -4,6 +4,7 @@ import type { ReactNode } from 'react'
 import {
   ArrowLeftRight,
   CalendarDays,
+  ChartPie,
   ChevronDown,
   Euro,
   LogOut,
@@ -40,6 +41,7 @@ type AppHeaderProps = {
   onOpenCashMovements: () => void;
   onOpenCashClosingHistory: () => void;
   onOpenCashlogyMachine: () => void;
+  onOpenShiftSummary: () => void;
   onRefreshCatalog: () => void;
   onLogout: () => void;
   pendingCount: number;
@@ -64,6 +66,7 @@ export function AppHeader({
   onOpenCashMovements,
   onOpenCashClosingHistory,
   onOpenCashlogyMachine,
+  onOpenShiftSummary,
   onRefreshCatalog,
   onLogout,
   pendingCount,
@@ -86,6 +89,7 @@ export function AppHeader({
     if (canCloseCash) menuItems.push({ action: onOpenTicketHistory, icon: ReceiptText, id: 'tickets', label: 'Histórico de tickets' })
     if (canManageCash) menuItems.push({ action: onOpenCashMovements, disabled: isLoading || !isOnline, icon: ArrowLeftRight, id: 'movements', label: 'Entradas / salidas' })
     menuItems.push({ action: onCloseCash, icon: Euro, id: 'close-cash', label: 'Cerrar caja' })
+    menuItems.push({ action: onOpenShiftSummary, icon: ChartPie, id: 'shift-summary', label: 'Resumen de turno' })
   }
   if (canCloseCash) menuItems.push({ action: onOpenCashClosingHistory, icon: WalletCards, id: 'closings', label: 'Histórico de cierres' })
   if (cashlogyConnected) menuItems.push({ action: onOpenCashlogyMachine, icon: Vault, id: 'cashlogy-machine', label: 'Máquina de efectivo' })
