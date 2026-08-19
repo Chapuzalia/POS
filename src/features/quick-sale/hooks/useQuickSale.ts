@@ -19,6 +19,7 @@ import type {
   TicketLine,
 } from '../../../types'
 import { addProductSalesStats } from '../services/productSalesStats'
+import { shouldOpenProductSelectionDialog } from '../services/productSelectionDialog'
 import { addQuickSaleTicketLine, changeQuickSaleTicketLineQuantity, replaceQuickSaleTicketLine } from '../services/ticketLines'
 import { applyQuickSaleLinesUpdate } from '../services/lineUpdates'
 import { useQuickSalePayment } from './useQuickSalePayment'
@@ -191,9 +192,12 @@ export function useQuickSale(options: Options) {
       ? getDefaultProductLineSelection(options.catalog, item)
       : null
     const variantCount = options.catalog.variants.filter((variant) => variant.productId === item.product.id && variant.active).length
-    const needsDialog = isMenu
-      || (hasConfiguredSelections && !defaultSelection)
-      || (allowVariantSelection && variantCount > 1)
+    const needsDialog = shouldOpenProductSelectionDialog({
+      allowVariantSelection,
+      defaultSelection,
+      item,
+      variantCount,
+    })
     if (!needsDialog) {
       onImmediateAdd(
         item,
