@@ -11,10 +11,10 @@ export function Metric({ label, tone = 'default', value }: MetricProps) {
     <Card
       className={
         tone === 'success'
-          ? 'border-success/35 bg-success-soft'
+          ? 'border-success/35 bg-success-soft border-1'
           : tone === 'danger'
-            ? 'border-danger/35 bg-danger-soft'
-            : undefined
+            ? 'border-danger/35 bg-danger-soft border-1'
+            : 'border-1'
       }
       variant="secondary"
     >
