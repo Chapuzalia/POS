@@ -105,7 +105,7 @@ export function CashPaymentModal({
             <Button
               onClick={selectExactAmount}
               type="button"
-              className="!text-xl !rounded-lg w-full min-h-12"
+              className="!text-xl !rounded-lg w-full border-1 min-h-12"
               variant="primary"
               size="lg"
             >
@@ -114,7 +114,7 @@ export function CashPaymentModal({
             {cashDenominationsCents.map((amount) => (
               <Button
                 key={amount}
-                className="bg-(--field) !text-xl !rounded-lg w-full min-h-12"
+                className="bg-(--field) !text-xl !rounded-lg border-1 w-full min-h-12"
                 onClick={() => addDenomination(amount)}
                 type="button"
                 variant="tertiary"

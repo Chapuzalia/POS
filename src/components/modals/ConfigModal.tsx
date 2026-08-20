@@ -62,7 +62,7 @@ export function ConfigModal({
           </Button>
         </div>
 
-        <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <div className="mt-5 grid gap-3 sm:grid-cols-2 shadow-none">
           <Metric label="Negocio" value={context.tenantName} />
           <Metric label="Local" value={context.venueName} />
           <Metric label="Dispositivo" value={context.deviceName} />
