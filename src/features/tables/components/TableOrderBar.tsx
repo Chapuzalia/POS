@@ -19,6 +19,7 @@ type Props = {
   onSaveQuickSale: () => void
   saveState: RestaurantOrderSaveState
   canSell: boolean
+  invoiceSelected?: boolean
 }
 
 const saveLabels: Record<RestaurantOrderSaveState, string> = {
@@ -28,7 +29,7 @@ const saveLabels: Record<RestaurantOrderSaveState, string> = {
   saving: 'Guardando...',
 }
 
-export function TableOrderBar({ isBusy, isOnline, onBack, onCancelEmpty, onMove, onSaveQuickSale, onSplitItems, onSplitEqual, order, quickSale, saveState, canSell, canSaveQuickSale }: Props) {
+export function TableOrderBar({ isBusy, isOnline, invoiceSelected = false, onBack, onCancelEmpty, onMove, onSaveQuickSale, onSplitItems, onSplitEqual, order, quickSale, saveState, canSell, canSaveQuickSale }: Props) {
   return (
     <div className="mx-auto flex w-full max-w-[1600px] items-center justify-between gap-3 px-4 pt-3">
       <div className="flex items-center gap-2">
@@ -36,9 +37,9 @@ export function TableOrderBar({ isBusy, isOnline, onBack, onCancelEmpty, onMove,
         {quickSale ? <UiButton
           aria-label="Guardar como mesa virtual"
           className="inline-flex size-11 min-h-11 min-w-11 items-center justify-center px-0 font-bold"
-          disabled={!isOnline || isBusy || !canSaveQuickSale}
+          disabled={!isOnline || isBusy || !canSaveQuickSale || invoiceSelected}
           onClick={onSaveQuickSale}
-          title="Guardar como mesa virtual"
+          title={invoiceSelected ? 'Quita el cliente de factura antes de guardar la venta en una mesa.' : 'Guardar como mesa virtual'}
           type="button"
         ><Plus size={18} /></UiButton> : null}
         {order?.lines.length === 0 ? <UiButton aria-label="Cerrar mesa vacía" className="inline-flex min-h-9 items-center gap-2 px-3 text-sm font-bold text-[var(--danger)]" disabled={!isOnline || isBusy} onClick={onCancelEmpty} title="Cerrar mesa vacía" type="button" variant="dangerSoft"><CircleX size={16} /><span className="max-lg:hidden">Cerrar mesa</span></UiButton> : null}
@@ -49,7 +50,7 @@ export function TableOrderBar({ isBusy, isOnline, onBack, onCancelEmpty, onMove,
           <UiButton className="inline-flex min-h-11 items-center gap-2 px-4 font-bold" disabled={!isOnline || isBusy} onClick={onMove} type="button"><ArrowRightLeft size={17} /><p className="truncate max-lg:hidden">Mover comanda</p></UiButton>
           {canSell ? (
             <Dropdown>
-              <Dropdown.Trigger className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius)] bg-[var(--surface-muted)] px-4 font-bold text-[var(--foreground)] transition-colors hover:bg-[var(--separator)] disabled:cursor-not-allowed disabled:opacity-50" isDisabled={!isOnline || isBusy}>
+              <Dropdown.Trigger aria-label={invoiceSelected ? 'Quita el cliente de factura antes de dividir la comanda' : 'Dividir comanda'} className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius)] bg-[var(--surface-muted)] px-4 font-bold text-[var(--foreground)] transition-colors hover:bg-[var(--separator)] disabled:cursor-not-allowed disabled:opacity-50" isDisabled={!isOnline || isBusy || invoiceSelected}>
                   <Scissors size={17} /><p className="truncate max-lg:hidden">Dividir comanda</p><ChevronDown size={16} />
                 </Dropdown.Trigger>
               <Dropdown.Popover className="!w-72" placement="bottom end">

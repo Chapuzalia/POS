@@ -37,11 +37,13 @@ import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
 import { ReservationsPage, type useReservationsController } from '../features/reservations'
 import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
+import { CustomerInvoiceModal } from '../features/customers'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { finishCashlogyPayment } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
 import type {
   CatalogStartTab,
+  Customer,
   Discount,
   PaymentMethod,
   ProductSalesStat,
@@ -107,6 +109,7 @@ export function PosPage(props: Props) {
   const [shiftSummaryOpen, setShiftSummaryOpen] = useState(false)
   const [shiftSummaryLoading, setShiftSummaryLoading] = useState(false)
   const [shiftSummaryError, setShiftSummaryError] = useState<string | null>(null)
+  const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const mobileTableMapLayout = useMobileTableMapLayout()
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -161,6 +164,18 @@ export function PosPage(props: Props) {
   )
   const totalCents = discountCalculation.totalCents
   const itemCount = activeLines.reduce((total, line) => total + line.quantity, 0)
+  const invoiceCustomer = restaurant.posView.type === 'table_order'
+    ? restaurant.invoiceCustomer
+    : quickSale.invoiceCustomer
+  const selectInvoiceCustomer = (customer: Customer) => {
+    if (restaurant.posView.type === 'table_order') restaurant.setInvoiceCustomer(customer)
+    else quickSale.setInvoiceCustomer(customer)
+    setCustomerModalOpen(false)
+  }
+  const removeInvoiceCustomer = () => {
+    if (restaurant.posView.type === 'table_order') restaurant.removeInvoiceCustomer()
+    else quickSale.removeInvoiceCustomer()
+  }
   const paidFeedback = restaurant.posView.type === 'table_order'
     ? props.restaurantPaidFeedback
     : quickSale.paidFeedback
@@ -191,11 +206,13 @@ export function PosPage(props: Props) {
 
   const activeTicketPanel: ReactNode = restaurant.posView.type === 'table_order' && restaurant.order
     ? <RestaurantOrderPanel
+        invoiceCustomerName={invoiceCustomer?.legalName}
         isBusy={props.isBusy || !props.isOnline}
         lineDiscounts={Object.fromEntries(
           activeLines.map((line, index) => [line.id, discountCalculation.lineAllocations[index]]),
         )}
         onDecrement={(lineId) => updateQuantity(lineId, -1)}
+        onChangeInvoiceCustomer={() => setCustomerModalOpen(true)}
         onIncrement={(lineId) => updateQuantity(lineId, 1)}
         onEdit={(line) => {
           const item = resolvedCatalog?.items.find((candidate) => (
@@ -224,16 +241,19 @@ export function PosPage(props: Props) {
           const line = restaurant.order?.lines.find((candidate) => candidate.id === lineId)
           if (line) restaurant.setPendingLineRemoval(line)
         }}
+        onRemoveInvoiceCustomer={removeInvoiceCustomer}
         onServeAll={restaurant.serveLineFully}
         onServeAllOrder={restaurant.serveOrderFully}
         onServeOne={restaurant.serveLineUnit}
         order={restaurant.order}
       />
     : <TicketPanel
+        invoiceCustomerName={invoiceCustomer?.legalName}
         isBusy={props.isBusy}
         lines={activeLines}
         onClear={quickSale.clear}
         onDecrement={(lineId) => updateQuantity(lineId, -1)}
+        onChangeInvoiceCustomer={() => setCustomerModalOpen(true)}
         onEdit={(line) => {
           const item = resolvedCatalog?.items.find((candidate) => (
             candidate.product.id === line.productId
@@ -260,9 +280,14 @@ export function PosPage(props: Props) {
         lineDiscounts={discountCalculation.lineAllocations}
         onIncrement={(lineId) => updateQuantity(lineId, 1)}
         onRemove={quickSale.removeLine}
+        onRemoveInvoiceCustomer={removeInvoiceCustomer}
       />
 
   const handlePayment = (method: PaymentMethod | null) => {
+    if (invoiceCustomer && !props.isOnline) {
+      props.onSetError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
+      return
+    }
     if (method === 'cash') {
       if (cashlogyConfigured) {
         if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', null)
@@ -308,6 +333,7 @@ export function PosPage(props: Props) {
       <AppHeader
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true}
+        canGenerateInvoice={Boolean(cash.session && activeLines.length > 0 && props.context.canTakePayments)}
         canManageCash={canManageCash}
         canOpenCashDrawer={canManageCash}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
@@ -318,6 +344,7 @@ export function PosPage(props: Props) {
         onCloseCash={() => void (async () => {
           if (await restaurant.requestCloseCash()) await cash.openCloseModal()
         })()}
+        onGenerateInvoice={() => setCustomerModalOpen(true)}
         onOpenConfig={() => setConfigOpen(true)}
         onOpenReservations={props.reservations.open}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
@@ -333,6 +360,7 @@ export function PosPage(props: Props) {
           context={props.context}
           disabled={props.isBusy}
           discount={appliedDiscount}
+          invoiceCustomer={invoiceCustomer}
           lines={activeLines}
         /> : null}
         themeMode={props.themes.find((theme) => theme.id === props.selectedThemeId)?.mode ?? 'light'}
@@ -346,6 +374,7 @@ export function PosPage(props: Props) {
       {reservationsEnabled && props.reservations.isOpen ? <ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /> : null}
 
       {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
+        invoiceSelected={Boolean(invoiceCustomer)}
         isBusy={props.isBusy}
         isOnline={props.isOnline}
         canSaveQuickSale={Boolean(props.context.canTakeOrders && quickSale.lines.length > 0)}
@@ -448,6 +477,13 @@ export function PosPage(props: Props) {
           />
         </div>
       </MobileTicketModal>}
+
+      {customerModalOpen ? <CustomerInvoiceModal
+        isBusy={props.isBusy}
+        onClose={() => setCustomerModalOpen(false)}
+        onSelect={selectInvoiceCustomer}
+        tenantId={props.context.tenantId}
+      /> : null}
 
       {restaurantEnabled && restaurant.pendingPayment ? <AppModal containerClassName="!p-4" maxWidth={448} dismissDisabled={props.isBusy} label="Productos pendientes" onClose={() => restaurant.setPendingPayment(null)}>
         <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">

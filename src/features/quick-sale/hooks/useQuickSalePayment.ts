@@ -3,18 +3,20 @@ import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
 import { buildSalePayload } from '../services/salePayload'
 import { loadFiscalReceiptData } from '../../fiscal/service'
+import { loadTicketInvoice } from '../../customers/service'
 import {
   finishCashlogyPayment,
   getCashlogyPaymentAmounts,
   settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
-import type { AppliedDiscount, CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
+import type { AppliedDiscount, CashSession, Customer, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
 
 type Options = {
   context: TenantContext | null
   cashSession: CashSession | null
   lines: TicketLine[]
   discount: AppliedDiscount | null
+  invoiceCustomer: Customer | null
   ledger: SaleRecord[]
   tickets: SessionTicketRecord[]
   isOnline: boolean
@@ -33,7 +35,11 @@ export function useQuickSalePayment(options: Options) {
   return useCallback(async (paymentMethod: PaymentMethod | null, receivedCents: number | null) => {
     const { context, cashSession, lines } = options
     if (!context || !cashSession || lines.length === 0) return
-    const preview = buildSalePayload(context, cashSession, lines, paymentMethod, receivedCents, options.discount)
+    if (options.invoiceCustomer && !options.isOnline) {
+      options.onError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
+      return
+    }
+    const preview = buildSalePayload(context, cashSession, lines, paymentMethod, receivedCents, options.discount, options.invoiceCustomer)
     let cashlogyTransaction = null
     if (paymentMethod === 'cash') {
       try {
@@ -69,12 +75,26 @@ export function useQuickSalePayment(options: Options) {
       await options.syncPendingEvents()
       try {
         const fiscal = await loadFiscalReceiptData(context.tenantId, payload.ticket.id)
-        if (fiscal) {
-          printPayload = { ...payload, fiscal }
+        if (fiscal) printPayload = { ...payload, fiscal }
+        const invoice = options.invoiceCustomer
+          ? await loadTicketInvoice(context.tenantId, payload.ticket.id)
+          : null
+        if (options.invoiceCustomer && !invoice) {
+          options.onError('La venta ha quedado pendiente de sincronizar. No se imprimirá una factura sin número definitivo.')
+          return
+        }
+        if (invoice) {
+          printPayload = { ...printPayload, ticket: { ...printPayload.ticket, invoice } }
+        }
+        if (fiscal || invoice) {
           options.persistTickets([{ ...ticketRecord, payload: printPayload }, ...options.tickets])
         }
       } catch (fiscalError) {
         console.error('Could not load fiscal QR before printing', fiscalError)
+        if (options.invoiceCustomer) {
+          options.onError('No se ha podido confirmar el número de factura. Revisa la sincronización antes de imprimir.')
+          return
+        }
       }
     }
     const printTask = options.printSale(printPayload)

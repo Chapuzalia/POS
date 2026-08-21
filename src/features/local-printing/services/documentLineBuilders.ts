@@ -2,7 +2,7 @@ import { allocateNetTotalToLines } from '../../../lib/discounts.ts'
 import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import type { CashClosingRecord, SaleCreatedPayload } from '../../../types/index.ts'
 import { getCashClosingAmounts } from '../../cash-registers/services/cashClosingAmounts.ts'
-import type { PrinterLayout } from '../types.ts'
+import type { PrintElement, PrinterLayout } from '../types.ts'
 import {
   centerReceiptText,
   createSeparator,
@@ -127,20 +127,36 @@ export function buildSaleTicketLines(
   const money = (amountCents: number) => formatMoneyForReceipt(amountCents, { currency, locale })
   const fiscal = fiscalBreakdown(sale)
   const taxableBaseCents = fiscal?.reduce((total, item) => total + item.baseCents, 0)
+  const invoice = sale.ticket.invoice
+  const invoiceLabel = invoice?.series && invoice.number ? `${invoice.series}-${invoice.number}` : null
+  const isInvoicePreview = Boolean(invoice && options.label === 'PRE-TICKET')
   const lines: string[] = [
     ...centeredWrapped(establishment.name, printerLayout),
     ...(establishment.legalName ? centeredWrapped(establishment.legalName, printerLayout) : []),
     ...(establishment.taxId ? centeredWrapped(`NIF/CIF ${establishment.taxId}`, printerLayout) : []),
     ...(establishment.address ? centeredWrapped(establishment.address, printerLayout) : []),
+    ...(invoice ? ['', ...centeredWrapped(isInvoicePreview ? 'FACTURA (BORRADOR)' : 'FACTURA', printerLayout)] : []),
     ...(options.label ? ['', ...centeredWrapped(options.label, printerLayout)] : []),
     '',
-    ...row('Ticket', sale.ticket.id, printerLayout),
-    ...row('Fecha', formatReceiptDate(sale.sale.createdAt, timezone), printerLayout),
+    ...row(invoice ? 'Factura' : 'Ticket', invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.id), printerLayout),
+    ...row(invoice ? 'Fecha expedición' : 'Fecha', formatReceiptDate(invoice?.issuedAt ?? sale.sale.createdAt, timezone), printerLayout),
     ...(establishment.cashRegisterName ? row('Caja', establishment.cashRegisterName, printerLayout) : []),
     ...(establishment.employeeName ? row('Empleado', establishment.employeeName, printerLayout) : []),
-    '',
-    ...section('Productos', printerLayout),
   ]
+
+  if (invoice) {
+    lines.push('', ...section('Cliente', printerLayout))
+    lines.push(...wrapReceiptText(invoice.customer.legalName, printerLayout.columns, printerLayout.characterSet))
+    lines.push(...wrapReceiptText(invoice.customer.taxId, printerLayout.columns, printerLayout.characterSet))
+    lines.push(...wrapReceiptText(invoice.customer.address, printerLayout.columns, printerLayout.characterSet))
+    lines.push(...wrapReceiptText(`${invoice.customer.postalCode} ${invoice.customer.city}`, printerLayout.columns, printerLayout.characterSet))
+    lines.push(...wrapReceiptText(invoice.customer.province, printerLayout.columns, printerLayout.characterSet))
+    if (invoice.customer.country.toLocaleLowerCase('es-ES') !== 'españa') {
+      lines.push(...wrapReceiptText(invoice.customer.country, printerLayout.columns, printerLayout.characterSet))
+    }
+  }
+
+  lines.push('', ...section('Productos', printerLayout))
 
   for (const item of sale.lines) {
     lines.push(...row(
@@ -157,6 +173,7 @@ export function buildSaleTicketLines(
   }
 
   lines.push('', createSeparator(printerLayout.columns))
+
   if (sale.ticket.discountAmountCents > 0) {
     lines.push(...row('Subtotal', money(sale.ticket.subtotalCents), printerLayout))
     lines.push(...row('Descuento', money(-sale.ticket.discountAmountCents), printerLayout))
@@ -180,7 +197,6 @@ export function buildSaleTicketLines(
 
   if (sale.fiscal && options.label !== 'PRE-TICKET') {
     lines.push('', ...section(sale.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu', printerLayout))
-    lines.push(...row('Estado', sale.fiscal.status, printerLayout))
     if (sale.fiscal.externalCode) lines.push(...wrapReceiptText(`Código: ${sale.fiscal.externalCode}`, printerLayout.columns, printerLayout.characterSet))
     if (sale.fiscal.verificationUrl) lines.push(...wrapReceiptText(sale.fiscal.verificationUrl, printerLayout.columns, printerLayout.characterSet))
   }
@@ -190,6 +206,46 @@ export function buildSaleTicketLines(
   }
   lines.push('', '')
   return finalizeReceiptLines(lines, printerLayout)
+}
+
+export function buildSaleTicketElements(
+  sale: SaleCreatedPayload,
+  printerLayout: PrinterLayout,
+  lines: string[],
+  options: SaleTicketLineOptions = {},
+): PrintElement[] | undefined {
+  const verificationUrl = sale.fiscal?.verificationUrl
+  if (
+    options.label === 'PRE-TICKET' ||
+    sale.fiscal?.provider !== 'verifactu' ||
+    !verificationUrl
+  ) return undefined
+
+  const verificationLines = wrapReceiptText(
+    verificationUrl,
+    printerLayout.columns,
+    printerLayout.characterSet,
+  )
+  const fiscalSectionStart = lines.lastIndexOf('VERIFACTU')
+  let verificationStart = -1
+  for (
+    let index = Math.max(0, fiscalSectionStart + 1);
+    index <= lines.length - verificationLines.length;
+    index += 1
+  ) {
+    if (verificationLines.every((line, offset) => lines[index + offset] === line)) {
+      verificationStart = index
+      break
+    }
+  }
+  if (verificationStart < 0) return undefined
+
+  return [
+    ...lines.slice(0, verificationStart).map((value): PrintElement => ({ type: 'text', value })),
+    { type: 'qr', data: verificationUrl, size: 6, errorCorrection: 'M' },
+    ...lines.slice(verificationStart + verificationLines.length)
+      .map((value): PrintElement => ({ type: 'text', value })),
+  ]
 }
 
 export function buildClosingReportLines(

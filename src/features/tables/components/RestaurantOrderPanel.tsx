@@ -6,15 +6,19 @@ import { Button } from '../../../components/ui'
 import { canDecreaseLineQuantity, getOrderPendingUnits, getPendingQuantity } from '../service-status'
 import type { RestaurantOrderDetail, RestaurantOrderLine } from '../types'
 import { MenuComponentDetails } from '../../../components/pos/MenuComponentDetails'
+import { InvoiceTicketNotice } from '../../../components/pos/InvoiceTicketNotice'
 
 type Props = {
   isBusy: boolean
   lineDiscounts: Record<string, LineDiscountAllocation>
   order: RestaurantOrderDetail
+  invoiceCustomerName?: string | null
+  onChangeInvoiceCustomer?: () => void
   onDecrement: (lineId: string) => void
   onEdit: (line: RestaurantOrderLine) => void
   onIncrement: (lineId: string) => void
   onRemove: (lineId: string) => void
+  onRemoveInvoiceCustomer?: () => void
   onServeAll: (lineId: string) => void
   onServeAllOrder: () => void
   onServeOne: (lineId: string) => void
@@ -56,12 +60,22 @@ function OrderLineRow({ discount, isBusy, line, onDecrement, onEdit, onIncrement
 }
 
 export function RestaurantOrderPanel(props: Props) {
-  const { isBusy, lineDiscounts, order, onServeAllOrder, ...lineProps } = props
+  const {
+    invoiceCustomerName,
+    isBusy,
+    lineDiscounts,
+    onChangeInvoiceCustomer,
+    onRemoveInvoiceCustomer,
+    order,
+    onServeAllOrder,
+    ...lineProps
+  } = props
   const pendingLines = order.lines.filter((line) => getPendingQuantity(line) > 0)
   const servedLines = order.lines.filter((line) => getPendingQuantity(line) === 0)
   const pendingUnits = getOrderPendingUnits(order.lines)
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
+      {invoiceCustomerName && onChangeInvoiceCustomer && onRemoveInvoiceCustomer ? <InvoiceTicketNotice customerName={invoiceCustomerName} disabled={isBusy} onChange={onChangeInvoiceCustomer} onRemove={onRemoveInvoiceCustomer} /> : null}
       <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
         {order.lines.length === 0 ? <div className="flex min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">Pulsa un producto para añadirlo a la comanda.</div> : null}
         {pendingLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Por servir</h2><div className="space-y-2">{pendingLines.map((line) => <OrderLineRow {...lineProps} discount={lineDiscounts[line.id]} isBusy={isBusy} key={line.id} line={line} />)}</div></section> : null}

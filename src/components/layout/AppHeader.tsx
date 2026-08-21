@@ -7,6 +7,7 @@ import {
   ChartPie,
   ChevronDown,
   Euro,
+  FileText,
   LogOut,
   ReceiptText,
   RefreshCw,
@@ -29,6 +30,7 @@ type AppHeaderProps = {
   cashSession: CashSession | null;
   canCloseCash: boolean;
   canManageCash: boolean;
+  canGenerateInvoice: boolean;
   canOpenCashDrawer: boolean;
   canOpenReservations: boolean;
   cashlogyConnected: boolean;
@@ -36,6 +38,7 @@ type AppHeaderProps = {
   isOnline: boolean;
   onCloseCash: () => void;
   onOpenConfig: () => void;
+  onGenerateInvoice: () => void;
   onOpenReservations: () => void;
   onOpenTicketHistory: () => void;
   onOpenCashMovements: () => void;
@@ -54,6 +57,7 @@ export function AppHeader({
   cashSession,
   canCloseCash,
   canManageCash,
+  canGenerateInvoice,
   canOpenCashDrawer,
   canOpenReservations,
   cashlogyConnected,
@@ -61,6 +65,7 @@ export function AppHeader({
   isOnline,
   onCloseCash,
   onOpenConfig,
+  onGenerateInvoice,
   onOpenReservations,
   onOpenTicketHistory,
   onOpenCashMovements,
@@ -86,6 +91,7 @@ export function AppHeader({
   ]
 
   if (cashSession) {
+    if (canGenerateInvoice) menuItems.push({ action: onGenerateInvoice, disabled: !isOnline || isLoading, icon: FileText, id: 'invoice', label: 'Generar factura' })
     if (canCloseCash) menuItems.push({ action: onOpenTicketHistory, icon: ReceiptText, id: 'tickets', label: 'Histórico de tickets' })
     if (canManageCash) menuItems.push({ action: onOpenCashMovements, disabled: isLoading || !isOnline, icon: ArrowLeftRight, id: 'movements', label: 'Entradas / salidas' })
     menuItems.push({ action: onCloseCash, icon: Euro, id: 'close-cash', label: 'Cerrar caja' })

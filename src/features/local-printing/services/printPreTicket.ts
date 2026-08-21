@@ -1,4 +1,4 @@
-import type { AppliedDiscount, CashSession, TenantContext, TicketLine } from '../../../types'
+import type { AppliedDiscount, CashSession, Customer, TenantContext, TicketLine } from '../../../types'
 import type { PrintJob } from '../types'
 import { buildPreTicketPayload } from '../../quick-sale/services/salePayload'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
@@ -9,6 +9,7 @@ type PreTicketInput = {
   cashSession: CashSession
   context: TenantContext
   discount: AppliedDiscount | null
+  invoiceCustomer?: Customer | null
   lines: TicketLine[]
 }
 
@@ -19,7 +20,7 @@ async function executePreTicketPrint(input: PreTicketInput) {
   const state = usePrintAgentStore.getState()
   if (!state.token) throw new Error('No hay ninguna impresora configurada.')
   const { printer, layout } = await loadSelectedPrinterLayout()
-  const preview = buildPreTicketPayload(input.context, input.cashSession, input.lines, input.discount)
+  const preview = buildPreTicketPayload(input.context, input.cashSession, input.lines, input.discount, input.invoiceCustomer)
   const request = mapSaleToPrintRequest({
     sale: preview,
     establishment: {
