@@ -12,7 +12,7 @@ import {
   Vault,
   X,
 } from 'lucide-react'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AppModal, Button, Metric } from '../../../components/ui'
 import { NumericKeypadModal } from '../../../components/ui/NumericKeypadModal'
@@ -22,7 +22,6 @@ import {
   denominationTotalCents,
   getDispensableDenominations,
   selectedDenominations,
-  suggestCashlogyDenominations,
 } from '../cashlogy/cashlogyManagement'
 import { cashlogyManagementActiveStatuses, cashlogyManagementCancellableStatuses } from '../cashlogy/cashlogyPolling'
 import { validateCashlogyManagementPin } from '../cashlogy/cashlogyManagementPin'
@@ -343,7 +342,7 @@ type OperationViewProps = {
 }
 
 function OperationView(props: OperationViewProps) {
-  const { denominationOptions, management, onQuantitiesChange, quantities } = props
+  const { management } = props
   const operation = management.operation
   const type = management.intent!.type
   const active = Boolean(operation && cashlogyManagementActiveStatuses.has(operation.status))
@@ -351,18 +350,6 @@ function OperationView(props: OperationViewProps) {
   const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || (!operation && Boolean(management.error))
   const busy = management.isStarting || management.isMutating || management.isCancelling
   const acceptedCents = operation?.acceptedCents ?? 0
-  const suggestedOperationId = useRef<string | null>(null)
-
-  useEffect(() => {
-    if (operation?.type !== 'give_change' || operation.status !== 'awaiting_dispense' || acceptedCents <= 0) return
-    if (suggestedOperationId.current === operation.id) return
-    suggestedOperationId.current = operation.id
-    if (Object.values(quantities).some((quantity) => quantity > 0)) return
-    const suggestion = suggestCashlogyDenominations(denominationOptions, acceptedCents)
-    for (const denomination of suggestion) {
-      onQuantitiesChange(denomination.valueCents, denomination.quantity)
-    }
-  }, [acceptedCents, denominationOptions, onQuantitiesChange, operation?.id, operation?.status, operation?.type, quantities])
 
   return <section className="grid gap-5">
     <CashlogyOperationStatus error={management.error} isCancelling={management.isCancelling} isPending={busy || management.isPolling} operation={operation} type={type} />

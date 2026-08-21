@@ -192,3 +192,21 @@ test('la mesa resultante usa carga, realtime, cobro y ciclo de vida estándar', 
   assert.match(realtime, /subscribeToSessionTableLayout/)
   assert.match(migration, /deactivate_closed_session_virtual_tables/)
 })
+
+test('volver desde Venta rápida la guarda automáticamente en una mesa temporal', async () => {
+  const [page, controller, migration] = await Promise.all([
+    readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260821150000_auto_save_quick_sales_and_delete_virtual_tables.sql', import.meta.url), 'utf8'),
+  ])
+  assert.match(page, /const returnFromQuickSale = async/)
+  assert.match(page, /quickSale\.lines\.length === 0[\s\S]*restaurant\.returnToMap\(\)/)
+  assert.match(page, /createVirtualTableFromQuickSale\(\{[\s\S]*areaId: null/)
+  assert.doesNotMatch(page, /const areaId = sourceAreaId/)
+  assert.match(page, /name: `Venta rápida \$\{sequence\}`[\s\S]*quickSale\.lines, quickSale\.discount/)
+  assert.match(page, /onBack=\{\(\) => void returnFromQuickSale\(\)\}/)
+  assert.match(page, /restaurant\.reset\(areaId\)/)
+  assert.match(controller, /setPosView\(\{ type: 'table_map', areaId: input\.areaId \?\? `virtual:\$\{options\.cashSession\.id\}` \}\)/)
+  assert.doesNotMatch(migration, /if p_area_id is null/)
+  assert.match(migration, /public\.create_virtual_restaurant_table[\s\S]*public\.open_restaurant_order[\s\S]*public\.save_catalog_order_lines/)
+})

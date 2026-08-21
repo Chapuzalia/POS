@@ -31,7 +31,9 @@ type ReservationRow = {
   created_at: string
   updated_at: string
   reservation_tables?: Array<{
-    table_id: string
+    id: string
+    table_id: string | null
+    table_name: string
     restaurant_tables?: {
       id: string
       name: string
@@ -49,7 +51,7 @@ const reservationColumns = `
   starts_at, ends_at, status, notes, cancellation_reason, order_id, arrived_at, seated_at,
   completed_at, cancelled_at, created_at, updated_at,
   reservation_tables(
-    table_id,
+    id, table_id, table_name,
     restaurant_tables(id, name, capacity, area_id, sort_order, is_active, dining_areas(name))
   )
 `
@@ -71,12 +73,23 @@ function mapTable(row: NonNullable<NonNullable<ReservationRow['reservation_table
   }
 }
 
+function mapAssignedTable(assignment: NonNullable<ReservationRow['reservation_tables']>[number]): ReservationTable {
+  if (assignment.restaurant_tables) return mapTable(assignment.restaurant_tables)
+  return {
+    id: assignment.table_id ?? `deleted:${assignment.id}`,
+    name: assignment.table_name,
+    capacity: 0,
+    areaId: 'deleted',
+    areaName: 'Mesa eliminada',
+    sortOrder: Number.MAX_SAFE_INTEGER,
+    isActive: false,
+  }
+}
+
 export function mapReservation(value: unknown): Reservation {
   const row = value as ReservationRow
   const tables = (row.reservation_tables ?? [])
-    .map((assignment) => assignment.restaurant_tables)
-    .filter((table): table is NonNullable<typeof table> => Boolean(table))
-    .map(mapTable)
+    .map(mapAssignedTable)
     .sort((first, second) => first.sortOrder - second.sortOrder)
   return {
     id: row.id,
@@ -179,7 +192,7 @@ export async function loadReservationConflicts(
   let query = requireSupabase().from('reservations')
     .select(`
       id, customer_name, starts_at, ends_at,
-      reservation_tables(table_id, restaurant_tables(name))
+      reservation_tables(table_id, table_name, restaurant_tables(name))
     `)
     .eq('tenant_id', context.tenantId)
     .eq('venue_id', context.venueId)
@@ -199,18 +212,19 @@ export async function loadReservationConflicts(
       starts_at: string
       ends_at: string
       reservation_tables?: Array<{
-        table_id: string
+        table_id: string | null
+        table_name: string
         restaurant_tables?: { name: string } | null
       }>
     }
-    return (row.reservation_tables ?? []).map((assignment) => ({
+    return (row.reservation_tables ?? []).flatMap((assignment) => assignment.table_id ? [{
       reservationId: row.id,
       customerName: row.customer_name,
       startsAt: row.starts_at,
       endsAt: row.ends_at,
       tableId: assignment.table_id,
-      tableName: assignment.restaurant_tables?.name ?? 'Mesa',
-    }))
+      tableName: assignment.restaurant_tables?.name ?? assignment.table_name,
+    }] : [])
   })
 }
 

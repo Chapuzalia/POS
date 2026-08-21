@@ -18,6 +18,18 @@ const tableManagementSource = await readFile(new URL('../src/features/table-mana
 const reservationBadgeSource = await readFile(new URL('../src/features/reservations/components/ReservationTableBadge.tsx', import.meta.url), 'utf8')
 const tableServiceSource = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 
+test('el editor permite eliminar definitivamente mesas y zonas sin borrar su historico', () => {
+  assert.match(tableManagementSource, /deleteRestaurantTable\(context, selectedTable\.id\)/)
+  assert.match(tableManagementSource, /deleteDiningArea\(context, selectedArea\.id\)/)
+  assert.match(tableManagementSource, /¿Eliminar definitivamente la mesa/)
+  assert.match(tableManagementSource, /¿Eliminar definitivamente la zona/)
+  assert.match(tableManagementSource, /areaTables\.length/)
+  assert.match(tableServiceSource, /rpc\('delete_restaurant_table'/)
+  assert.match(tableServiceSource, /from\('dining_areas'\)\.delete\(\)/)
+  assert.match(tableServiceSource, /TABLE_HAS_OPEN_ORDER/)
+  assert.match(tableServiceSource, /TABLE_HAS_ACTIVE_RESERVATION/)
+})
+
 const bounds = { left: 100, top: 50, width: 1000, height: 600 }
 
 test('el plano conserva su proporcion en viewports panoramicos y moviles', () => {

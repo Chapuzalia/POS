@@ -7,6 +7,7 @@ const service = await readFile(new URL('../src/features/tables/service.ts', impo
 const mapView = await readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8')
 const virtualModal = await readFile(new URL('../src/features/tables/components/VirtualTableModal.tsx', import.meta.url), 'utf8')
 const mobileChrome = await readFile(new URL('../src/features/tables/components/MobileTableMapChrome.tsx', import.meta.url), 'utf8')
+const deletionMigration = await readFile(new URL('../supabase/migrations/20260821150000_auto_save_quick_sales_and_delete_virtual_tables.sql', import.meta.url), 'utf8')
 
 test('las mesas virtuales quedan vinculadas a una sesión y conservan el historial al cerrar', () => {
   assert.match(migration, /add column if not exists cash_session_id uuid references public\.cash_sessions\(id\) on delete restrict/i)
@@ -36,4 +37,17 @@ test('el mapa permite crear la mesa en Virtual o en una zona existente también 
   assert.match(virtualModal, /Solo estará disponible durante la sesión de caja actual/)
   assert.match(mobileChrome, /aria-label="Crear mesa virtual"/)
   assert.match(mobileChrome, /className="flex items-center justify-end gap-2"[\s\S]*onClick=\{onCreateVirtual\}[\s\S]*onClick=\{onEditToggle\}/)
+})
+
+test('el editor permite eliminar mesas temporales del turno y cancela solo comandas sin cobros', () => {
+  assert.match(mapView, /if \(table\?\.isVirtual\)[\s\S]*setSelectedTableId\(table\.id\)/)
+  assert.match(mapView, /Eliminar mesa temporal/)
+  assert.match(mapView, /await onDeleteVirtual\(selectedTable\.id\)/)
+  assert.match(service, /rpc\('delete_session_virtual_restaurant_table'/)
+  assert.match(deletionMigration, /create or replace function public\.delete_session_virtual_restaurant_table/)
+  assert.match(deletionMigration, /selected_table\.cash_session_id is distinct from session_row\.id/)
+  assert.match(deletionMigration, /VIRTUAL_TABLE_HAS_PAYMENTS/)
+  assert.match(deletionMigration, /set status = 'cancelled'/)
+  assert.match(deletionMigration, /tables = \([\s\S]*layout\.tables - selected_table\.id::text/)
+  assert.match(deletionMigration, /delete from public\.restaurant_tables/)
 })

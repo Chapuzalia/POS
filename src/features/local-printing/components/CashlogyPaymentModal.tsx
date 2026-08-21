@@ -4,7 +4,7 @@ import { AppModal, Button, Metric } from '../../../components/ui'
 import { formatMoney } from '../../../lib/format'
 import { cashlogyActiveStatuses, cashlogyCancellableStatuses } from '../cashlogy/cashlogyPolling'
 import { useCashlogyStore } from '../cashlogy/useCashlogyStore'
-import type { CashlogyTransactionStatus } from '../types'
+import type { CashlogyTransaction, CashlogyTransactionStatus } from '../types'
 
 const statusLabels: Record<CashlogyTransactionStatus, string> = {
   queued: 'Preparando Cashlogy',
@@ -22,7 +22,7 @@ const statusLabels: Record<CashlogyTransactionStatus, string> = {
   needs_attention: 'Revisión manual necesaria',
 }
 
-export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: { finalizeDisabled?: boolean; onFinalizeRecovered: () => void }) {
+export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: { finalizeDisabled?: boolean; onFinalizeRecovered: (transaction: CashlogyTransaction) => void }) {
   const state = useCashlogyStore(useShallow((value) => ({
     modalOpen: value.modalOpen,
     intent: value.intent,
@@ -85,7 +85,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
           {state.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
           Cancelar cobro
         </Button> : null}
-        {status === 'completed' ? <Button disabled={finalizeDisabled} onClick={onFinalizeRecovered} variant="primary">Finalizar venta</Button> : null}
+        {status === 'completed' && state.transaction ? <Button disabled={finalizeDisabled} onClick={() => onFinalizeRecovered(state.transaction!)} variant="primary">Aplicar cobro confirmado</Button> : null}
         {status === 'cancelled' ? <Button onClick={state.discardForRetry}>Volver al pago</Button> : null}
         {status === 'failed' ? <Button onClick={state.discardForRetry} variant="primary">Iniciar un nuevo intento</Button> : null}
         {critical ? <>

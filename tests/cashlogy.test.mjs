@@ -204,7 +204,7 @@ test('el selector usa céntimos, capacidades y límites fiables del reciclador',
   ], 700), [])
 })
 
-test('dar cambio propone denominaciones menores y admite capacidades parciales', () => {
+test('el cálculo auxiliar de combinaciones admite denominaciones menores y capacidades parciales', () => {
   const partialCapabilities = {
     ...accounting,
     denominations: {
@@ -224,6 +224,21 @@ test('dar cambio propone denominaciones menores y admite capacidades parciales',
     { valueCents: 1000, availableQuantity: 2, kind: 'note' },
     { valueCents: 500, availableQuantity: 4, kind: 'note' },
   ], 2000), [{ valueCents: 1000, quantity: 2 }])
+})
+
+test('dar cambio Cashlogy empieza a 0 y exige elegir las denominaciones manualmente', async () => {
+  const [modal, selector] = await Promise.all([
+    readFile(new URL('src/features/local-printing/components/CashlogyMachineModal.tsx', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/components/CashlogyDenominationSelector.tsx', root), 'utf8'),
+  ])
+
+  assert.match(modal, /useState<Record<number, number>>\(\{\}\)/)
+  assert.match(modal, /setQuantities\(\{\}\)[\s\S]*managementRequestId/)
+  assert.doesNotMatch(modal, /suggestCashlogyDenominations/)
+  assert.doesNotMatch(modal, /suggestedOperationId/)
+  assert.match(selector, /quantities\[option\.valueCents\] \?\? 0/)
+  assert.match(selector, /Elige manualmente la combinación/)
+  assert.match(selector, /Poner todo a 0/)
 })
 
 test('los pollings terminan solo en estados terminales y permiten la fase awaiting_dispense', async () => {
@@ -314,6 +329,30 @@ test('el POS usa cobro headless antes de persistir e imprimir, también sin impr
   assert.match(page, /if \(cashlogyConfigured\)[\s\S]*completePayment\('cash', null\)/)
 })
 
+test('el histórico confirma en Cashlogy antes de cambiar un ticket de tarjeta a efectivo', async () => {
+  const [ticketActions, ticketHistory, paymentModal, page] = await Promise.all([
+    readFile(new URL('src/features/cash-registers/hooks/useCashTicketActions.ts', root), 'utf8'),
+    readFile(new URL('src/components/modals/SessionTicketsModal.tsx', root), 'utf8'),
+    readFile(new URL('src/features/local-printing/components/CashlogyPaymentModal.tsx', root), 'utf8'),
+    readFile(new URL('src/app/PosPage.tsx', root), 'utf8'),
+  ])
+
+  assert.match(ticketActions, /ticket\.paymentMethod === 'card' && paymentMethod === 'cash'/)
+  assert.match(ticketActions, /await settleCashlogyPaymentIfConfigured\(ticket\.totalCents, ticket\.payload\.sale\.id\)/)
+  assert.ok(
+    ticketActions.indexOf('await settleCashlogyPaymentIfConfigured') < ticketActions.indexOf('options.persistTickets(nextTickets)'),
+    'Cashlogy debe confirmar el cobro antes de persistir el cambio de método',
+  )
+  assert.match(ticketActions, /getCashlogyPaymentAmounts\(cashlogyTransaction, ticket\.totalCents\)/)
+  assert.match(ticketActions, /finishCashlogyPayment\(cashlogyTransaction\)/)
+  assert.match(ticketActions, /El ticket continúa pagado con tarjeta/)
+  assert.match(ticketActions, /El cobro está confirmado en Cashlogy, pero no se pudo guardar el cambio del ticket/)
+  assert.match(ticketHistory, /value=\{ticket\.paymentMethod \?\? ''\}/)
+  assert.match(ticketHistory, /void onChangePayment\(ticket, event\.target\.value as PaymentMethod\)/)
+  assert.match(paymentModal, /onFinalizeRecovered\(state\.transaction!\)/)
+  assert.match(page, /cash\.tickets\.find[\s\S]*ticket\.payload\.sale\.id === transaction\.saleId[\s\S]*ticketActions\.changePayment\(historicalTicket, 'cash'\)/)
+})
+
 test('unknown y needs_attention nunca completan una venta y solo se consultan por requestId', async () => {
   const [paymentStore, managementStore, paymentModal, operationStatus] = await Promise.all([
     readFile(new URL('src/features/local-printing/cashlogy/useCashlogyStore.ts', root), 'utf8'),
@@ -353,8 +392,8 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
   assert.match(modal, /Cancelar operación/)
   assert.match(modal, /management\.cancel\(\)/)
   assert.match(modal, /Volver al TPV/)
-  assert.match(modal, /suggestCashlogyDenominations/)
-  assert.match(modal, /suggestedOperationId/)
+  assert.doesNotMatch(modal, /suggestCashlogyDenominations/)
+  assert.doesNotMatch(modal, /suggestedOperationId/)
   assert.match(managementStore, /persistIntent\(intent\)[\s\S]*createRequest/)
   assert.match(managementStore, /denominationOptions/)
   assert.match(managementStore, /if \(!startPromise\)/)
@@ -362,7 +401,8 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
   assert.match(managementStore, /cashlogyManagementCancellableStatuses/)
   assert.match(selector, /availableQuantity/)
   assert.match(selector, /targetCents/)
-  assert.match(selector, /Cambiar denominaciones/)
+  assert.match(selector, /quantities\[option\.valueCents\] \?\? 0/)
+  assert.match(selector, /Poner todo a 0/)
 })
 
 test('los ajustes permiten configurar y ejecutar la recuperación forzada de Cashlogy', async () => {

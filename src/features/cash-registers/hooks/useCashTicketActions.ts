@@ -7,6 +7,11 @@ import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
 import { voidTicketWithFiscalCancellation } from '../../fiscal/service'
 import { nextPrintCopyNumber, usePrintAgentStore } from '../../local-printing'
+import {
+  finishCashlogyPayment,
+  getCashlogyPaymentAmounts,
+  settleCashlogyPaymentIfConfigured,
+} from '../../local-printing/cashlogy/useCashlogyStore'
 
 type Options = {
   context: TenantContext | null
@@ -53,23 +58,51 @@ export function useCashTicketActions(options: Options) {
     await options.printTicket(ticket.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, ticket.id) })
   }, [options])
 
-  const changePayment = useCallback((ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => {
+  const changePayment = useCallback(async (ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => {
     const { context } = options
     const currentPayment = ticket.payload.payment
     if (!context || !currentPayment || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod) return
-    const receivedCents = paymentMethod === 'cash' ? ticket.totalCents : null
-    const nextTickets = options.tickets.map((item) => item.id === ticket.id ? { ...item, paymentMethod, payload: { ...item.payload, sale: { ...item.payload.sale, paymentMethod }, payment: { ...currentPayment, method: paymentMethod, receivedCents, changeCents: 0 } } } : item)
-    options.persistTickets(nextTickets)
-    options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod } : sale))
-    const pendingSale = getOfflineQueue().find((event) =>
-      event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
-    if (pendingSale) {
-      forgetOfflineEvent(pendingSale.id)
+    const requiresCashlogyConfirmation = ticket.paymentMethod === 'card' && paymentMethod === 'cash'
+    options.setBusy(true)
+    options.setError(null)
+    let cashlogyTransaction = null
+    let cashlogyConfirmationFinished = !requiresCashlogyConfirmation
+    try {
+      if (requiresCashlogyConfirmation) {
+        cashlogyTransaction = await settleCashlogyPaymentIfConfigured(ticket.totalCents, ticket.payload.sale.id)
+        cashlogyConfirmationFinished = true
+      }
+      const cashlogyAmounts = getCashlogyPaymentAmounts(cashlogyTransaction, ticket.totalCents)
+      const receivedCents = paymentMethod === 'cash'
+        ? cashlogyAmounts.receivedCents ?? ticket.totalCents
+        : null
+      const changeCents = paymentMethod === 'cash' ? cashlogyAmounts.changeCents ?? 0 : 0
+      const nextTickets = options.tickets.map((item) => item.id === ticket.id ? { ...item, paymentMethod, payload: { ...item.payload, sale: { ...item.payload.sale, paymentMethod }, payment: { ...currentPayment, method: paymentMethod, receivedCents, changeCents } } } : item)
+      options.persistTickets(nextTickets)
+      options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod } : sale))
+      const pendingSale = getOfflineQueue().find((event) =>
+        event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
+      if (pendingSale) {
+        forgetOfflineEvent(pendingSale.id)
+        options.refreshPendingCount()
+        finishCashlogyPayment(cashlogyTransaction)
+        return
+      }
+      enqueueOfflineEvent({ id: createId(), kind: 'sale_payment_changed', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: { saleId: ticket.payload.sale.id, paymentId: currentPayment.id, paymentMethod, receivedCents, changeCents } })
       options.refreshPendingCount()
-      return
+      finishCashlogyPayment(cashlogyTransaction)
+      void options.syncPendingEvents()
+    } catch (error) {
+      if (requiresCashlogyConfirmation && !cashlogyConfirmationFinished) {
+        options.setError(`${getReadableError(error)} El ticket continúa pagado con tarjeta.`)
+      } else if (cashlogyTransaction) {
+        options.setError(`${getReadableError(error)} El cobro está confirmado en Cashlogy, pero no se pudo guardar el cambio del ticket. Revisa el histórico antes de repetir la operación.`)
+      } else {
+        options.setError(getReadableError(error))
+      }
+    } finally {
+      options.setBusy(false)
     }
-    enqueueOfflineEvent({ id: createId(), kind: 'sale_payment_changed', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: { saleId: ticket.payload.sale.id, paymentId: currentPayment.id, paymentMethod, receivedCents, changeCents: 0 } })
-    options.refreshPendingCount(); void options.syncPendingEvents()
   }, [options])
 
   const voidTicket = useCallback(async (ticket: SessionTicketRecord) => {

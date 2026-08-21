@@ -20,8 +20,8 @@ export function CashlogyDenominationSelector({ disabled, onChange, onClear, opti
 
   return <section aria-label="Selector de denominaciones" className="grid gap-3">
     {onClear && selectedTotalCents > 0 ? <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3">
-      <p className="text-sm text-[var(--muted)]">Puedes borrar la propuesta y formar cualquier combinación que sume el importe.</p>
-      <Button disabled={disabled} onClick={onClear} type="button" variant="tertiary">Cambiar denominaciones</Button>
+      <p className="text-sm text-[var(--muted)]">Elige manualmente la combinación que quieres recibir.</p>
+      <Button disabled={disabled} onClick={onClear} type="button" variant="tertiary">Poner todo a 0</Button>
     </div> : null}
     <div className="grid gap-2 sm:grid-cols-2">
       {options.map((option) => {
