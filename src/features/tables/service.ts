@@ -2,7 +2,7 @@ import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import { normalizeCatalogSnapshot } from '../catalog/services/catalogSnapshots'
 import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TenantContext, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
-import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, QuickSaleVirtualTableCreateInput, QuickSaleVirtualTableCreateResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult, VirtualRestaurantTableCreateInput } from './types'
+import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, QuickSaleVirtualTableCreateInput, QuickSaleVirtualTableCreateResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult, VirtualRestaurantTableCreateInput, VirtualRestaurantTableDeleteInput } from './types'
 import { getOrderPendingUnits } from './service-status'
 import { buildCatalogOrderLinesPayload, buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
@@ -168,6 +168,11 @@ export async function updateDiningArea(context: TenantContext, areaId: string, i
   const { error } = await requireSupabase().from('dining_areas').update({ name: input.name?.trim(), sort_order: input.sortOrder, is_active: input.isActive, canvas_width: input.canvasWidth, canvas_height: input.canvasHeight, map_elements: input.mapElements }).eq('tenant_id', context.tenantId).eq('id', areaId)
   if (error) throw error
 }
+export async function deleteDiningArea(context: TenantContext, areaId: string) {
+  const { error } = await requireSupabase().from('dining_areas').delete().eq('tenant_id', context.tenantId).eq('id', areaId)
+  if (error?.code === '23503') throw new Error('No se puede eliminar la zona porque todavía contiene mesas. Elimina sus mesas primero.')
+  if (error) throw error
+}
 export async function createRestaurantTable(context: TenantContext, input: RestaurantTableCreateInput) {
   const { data, error } = await requireSupabase().from('restaurant_tables').insert({ tenant_id: context.tenantId, venue_id: input.venueId, area_id: input.areaId, name: input.name.trim(), capacity: input.capacity, shape: input.shape, position_x: input.positionX, position_y: input.positionY, width: input.width, height: input.height, sort_order: input.sortOrder }).select(tableColumns).single<TableRow>()
   if (error) throw error
@@ -200,9 +205,29 @@ export async function saveQuickSaleAsVirtualTable(input: QuickSaleVirtualTableCr
   const result = data as Record<string, unknown>
   return { tableId: String(result.tableId), orderId: String(result.orderId), revision: Number(result.revision) }
 }
+export async function deleteVirtualRestaurantTable(input: VirtualRestaurantTableDeleteInput) {
+  const { error } = await requireSupabase().rpc('delete_session_virtual_restaurant_table', {
+    p_cash_session_id: input.cashSessionId,
+    p_device_id: input.deviceId,
+    p_table_id: input.tableId,
+  })
+  if (!error) return
+  if (error.message.includes('VIRTUAL_TABLE_HAS_PAYMENTS')) throw new Error('No se puede eliminar esta mesa temporal porque su comanda ya tiene cobros.')
+  if (error.message.includes('VIRTUAL_TABLE_JOINED')) throw new Error('Separa la mesa temporal antes de eliminarla.')
+  if (error.message.includes('VIRTUAL_TABLE_HAS_ACTIVE_RESERVATION')) throw new Error('No se puede eliminar esta mesa temporal porque tiene una reserva vigente.')
+  if (error.message.includes('VIRTUAL_TABLE_SESSION_MISMATCH')) throw new Error('La mesa temporal pertenece a otro turno.')
+  throw error
+}
 export async function updateRestaurantTable(context: TenantContext, tableId: string, input: RestaurantTableUpdateInput) {
   const { error } = await requireSupabase().from('restaurant_tables').update({ name: input.name?.trim(), capacity: input.capacity, shape: input.shape, position_x: input.positionX, position_y: input.positionY, width: input.width, height: input.height, is_active: input.isActive, sort_order: input.sortOrder }).eq('tenant_id', context.tenantId).eq('id', tableId)
   if (error) throw error
+}
+export async function deleteRestaurantTable(_context: TenantContext, tableId: string) {
+  const { error } = await requireSupabase().rpc('delete_restaurant_table', { p_table_id: tableId })
+  if (!error) return
+  if (error.message.includes('TABLE_HAS_OPEN_ORDER')) throw new Error('No se puede eliminar la mesa mientras tenga una comanda abierta.')
+  if (error.message.includes('TABLE_HAS_ACTIVE_RESERVATION')) throw new Error('No se puede eliminar la mesa mientras tenga una reserva vigente.')
+  throw error
 }
 
 export async function openRestaurantOrder(input: OpenRestaurantOrderInput) { const { data, error } = await requireSupabase().rpc('open_restaurant_order', { p_table_ids: input.tableIds, p_guest_count: input.guestCount, p_cash_session_id: input.cashSessionId, p_device_id: input.deviceId }); if (error) throw error; return String(data) }

@@ -26,6 +26,7 @@ import {
   closeRestaurantOrder,
   configureRestaurantEqualSplit,
   createVirtualRestaurantTable,
+  deleteVirtualRestaurantTable,
   loadRestaurantEqualSplit,
   loadRestaurantOrder,
   loadRestaurantOrderGroup,
@@ -256,7 +257,7 @@ export function useRestaurantController(options: Options) {
 
     options.setAppliedDiscount(null)
     draft.clearOrder()
-    setPosView({ type: 'table_map', areaId: input.areaId ?? undefined })
+    setPosView({ type: 'table_map', areaId: input.areaId ?? `virtual:${options.cashSession.id}` })
     try {
       const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
       realtime.setMap(nextMap)
@@ -267,6 +268,27 @@ export function useRestaurantController(options: Options) {
     }
     return true
   }, [draft, options, realtime])
+
+  const deleteVirtualTable = useCallback(async (tableId: string) => {
+    if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline || options.isBusy) return false
+    options.setBusy(true)
+    options.onError(null)
+    try {
+      await deleteVirtualRestaurantTable({
+        cashSessionId: options.cashSession.id,
+        deviceId: options.context.deviceId,
+        tableId,
+      })
+      const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
+      realtime.setMap(nextMap)
+      return true
+    } catch (error) {
+      options.onError(getReadableError(error))
+      return false
+    } finally {
+      options.setBusy(false)
+    }
+  }, [options, realtime])
 
   const openExistingOrder = useCallback((orderId: string) => runBusy(async () => {
     if (!options.context || !options.isOnline) return
@@ -792,9 +814,9 @@ export function useRestaurantController(options: Options) {
     }
   }), [draft, options, runBusy])
 
-  const reset = useCallback(() => {
+  const reset = useCallback((areaId?: string) => {
     draft.clearOrder()
-    setPosView({ type: 'quick_sale' })
+    setPosView({ type: 'quick_sale', areaId })
     setMoveOrderId(null)
     setPendingPayment(null)
     setPendingLineRemoval(null)
@@ -812,6 +834,7 @@ export function useRestaurantController(options: Options) {
     configureEqualSplit,
     createVirtualTable,
     createVirtualTableFromQuickSale,
+    deleteVirtualTable,
     confirmLineRemoval,
     equalSplit,
     equalSplitOpen,

@@ -7,6 +7,7 @@ import {
   Pencil,
   Plus,
   ShoppingBag,
+  Trash2,
   Unlink,
   Users,
   X,
@@ -81,10 +82,11 @@ type Props = {
   onError: (message: string) => void;
   onMove: (tableId: string) => Promise<void>;
   onCreateVirtual: (input: { areaId: string | null; name: string; capacity: number; shape: RestaurantTableShape }) => Promise<boolean>;
+  onDeleteVirtual: (tableId: string) => Promise<boolean>;
   onOpen: (tableIds: string[], guestCount: number) => Promise<void>;
   onOpenOrder: (orderId: string) => void;
   onOpenReservation: (reservationId: string) => void;
-  onQuickSale: () => void;
+  onQuickSale: (areaId?: string) => void;
   selectedAreaId?: string;
   moveOrderId: string | null;
   onCancelMove: () => void;
@@ -155,6 +157,7 @@ export function TableMapView(props: Props) {
     onCancelMove,
     onError,
     onCreateVirtual,
+    onDeleteVirtual,
     onLayoutChange,
     onMove,
     onOpen,
@@ -566,6 +569,10 @@ export function TableMapView(props: Props) {
     setGuidelines({ x: null, y: null });
     if (!drag.moved) {
       const table = displayTables.find((item) => item.id === drag.tableId);
+      if (table?.isVirtual) {
+        setSelectedTableId(table.id);
+        return;
+      }
       const canvas = canvasRef.current;
       if (table?.layoutGroupId && canvas) {
         const bounds = canvas.getBoundingClientRect();
@@ -656,6 +663,12 @@ export function TableMapView(props: Props) {
     setPendingIds(null);
   }
 
+  async function confirmDeleteVirtual() {
+    if (!selectedTable?.isVirtual) return;
+    const deleted = await onDeleteVirtual(selectedTable.id);
+    if (deleted) setSelectedTableId(null);
+  }
+
   function toggleEditMode() {
     setEditMode((value) => !value);
     setSelectedTableId(null);
@@ -735,7 +748,7 @@ export function TableMapView(props: Props) {
           {canQuickSale ? (
             <UiButton
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45"
-              onClick={onQuickSale}
+              onClick={() => onQuickSale(activeAreaId)}
               type="button"
             >
               <ShoppingBag size={18} /> Venta rápida
@@ -799,7 +812,7 @@ export function TableMapView(props: Props) {
             }}
             onEditToggle={toggleEditMode}
             onCreateVirtual={openVirtualTableModal}
-            onQuickSale={onQuickSale}
+            onQuickSale={() => onQuickSale(activeAreaId)}
           />
         ) : null}
         <svg aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1] size-full overflow-hidden [&_line]:stroke-[color-mix(in_srgb,var(--foreground)_52%,transparent)] [&_line]:[stroke-width:1.25] [&_line]:[vector-effect:non-scaling-stroke] [&_circle]:fill-[var(--foreground)] [&_circle]:stroke-[var(--surface)] [&_circle]:[stroke-width:1]">
@@ -1073,6 +1086,44 @@ export function TableMapView(props: Props) {
           onSeparateOne={() => separate(groupMenu.tableId, false)}
           tableName={groupMenuTable.name}
         />
+      ) : null}
+      {editMode && selectedTable?.isVirtual ? (
+        <AppModal
+          containerClassName={mobileLayout ? "!p-0" : "!p-4"}
+          dialogClassName={mobileLayout ? "!rounded-b-none !rounded-t-[20px] !border-x-0 !border-b-0" : ""}
+          dismissDisabled={isBusy}
+          label="Eliminar mesa temporal"
+          maxWidth={448}
+          onClose={() => setSelectedTableId(null)}
+          placement={mobileLayout ? "bottom" : "center"}
+        >
+          <section className={`w-full max-w-[440px] bg-[var(--surface)] text-[var(--foreground)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-0 [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 ${mobileLayout ? "rounded-t-[20px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5" : "rounded-[var(--radius)] border border-[var(--separator)] p-6 shadow-[var(--shadow)]"}`}>
+            <h2>Eliminar {selectedTable.name}</h2>
+            <p>
+              {selectedTable.status === "occupied"
+                ? "La comanda sin cobrar se cancelará y la mesa temporal desaparecerá del turno."
+                : "La mesa temporal desaparecerá del turno."}
+            </p>
+            <div>
+              <UiButton
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45"
+                disabled={isBusy}
+                onClick={() => setSelectedTableId(null)}
+                type="button"
+              >
+                Cancelar
+              </UiButton>
+              <UiButton
+                className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger)] px-4 font-extrabold text-white disabled:opacity-45"
+                disabled={isBusy || !isOnline}
+                onClick={() => void confirmDeleteVirtual()}
+                type="button"
+              >
+                <Trash2 size={17} /> Eliminar mesa
+              </UiButton>
+            </div>
+          </section>
+        </AppModal>
       ) : null}
       {pendingIds ? (
         <AppModal containerClassName={mobileLayout ? "!p-0" : "!p-4"} dialogClassName={mobileLayout ? "!rounded-b-none !rounded-t-[20px] !border-x-0 !border-b-0" : ""} maxWidth={448} dismissDisabled={isBusy} label="Abrir mesa" onClose={() => setPendingIds(null)} placement={mobileLayout ? "bottom" : "center"}>

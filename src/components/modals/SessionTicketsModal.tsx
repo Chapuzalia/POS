@@ -17,7 +17,7 @@ const paymentMethods: PaymentMethod[] = ['cash', 'card']
 type SessionTicketsModalProps = {
   canReprint: boolean
   isBusy: boolean
-  onChangePayment: (ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => void
+  onChangePayment: (ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => void | Promise<void>
   onClose: () => void
   onReprint: (ticket: SessionTicketRecord) => void
   onVoidTicket: (ticket: SessionTicketRecord) => void
@@ -97,7 +97,7 @@ export function SessionTicketsModal({
                           <UiNativeSelect
                             className="bg-transparent text-sm font-semibold text-[var(--field-foreground)] !outline-none"
                             disabled={isBusy || ticket.status !== 'active'}
-                            onChange={(event) => onChangePayment(ticket, event.target.value as PaymentMethod)}
+                            onChange={(event) => void onChangePayment(ticket, event.target.value as PaymentMethod)}
                             triggerClassName="!min-h-8 !border-0 !bg-transparent !px-0 !shadow-none"
                             value={ticket.paymentMethod ?? ''}
                           >

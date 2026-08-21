@@ -38,6 +38,7 @@ import type { useRestaurantController } from '../features/restaurant'
 import { ReservationsPage, type useReservationsController } from '../features/reservations'
 import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
+import { finishCashlogyPayment } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
 import type {
   CatalogStartTab,
@@ -275,6 +276,32 @@ export function PosPage(props: Props) {
     else void quickSale.completePayment(method, null)
   }
 
+  const returnFromQuickSale = async () => {
+    if (restaurant.posView.type !== 'quick_sale' || quickSale.lines.length === 0) {
+      await restaurant.returnToMap()
+      return
+    }
+    if (!props.context.canTakeOrders || !cash.session) {
+      props.onSetError('Necesitas una caja abierta y permiso para guardar esta venta en una mesa temporal.')
+      return
+    }
+    if (!props.isOnline) {
+      props.onSetError('Conéctate para guardar automáticamente esta venta en Mesas virtuales.')
+      return
+    }
+
+    const sequence = restaurant.map.tables.filter((table) => table.isVirtual).length + 1
+    const created = await restaurant.createVirtualTableFromQuickSale({
+      areaId: null,
+      capacity: 1,
+      name: `Venta rápida ${sequence}`,
+      shape: 'square',
+    }, quickSale.lines, quickSale.discount)
+    if (!created) return
+    quickSale.clear()
+    props.onSetMobileTicketOpen(false)
+  }
+
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
@@ -322,7 +349,7 @@ export function PosPage(props: Props) {
         isBusy={props.isBusy}
         isOnline={props.isOnline}
         canSaveQuickSale={Boolean(props.context.canTakeOrders && quickSale.lines.length > 0)}
-        onBack={() => void restaurant.returnToMap()}
+        onBack={() => void returnFromQuickSale()}
         onCancelEmpty={() => void restaurant.cancelEmptyOrder()}
         onMove={() => void restaurant.prepareMove()}
         onSaveQuickSale={() => setQuickSaleVirtualModalOpen(true)}
@@ -356,12 +383,13 @@ export function PosPage(props: Props) {
         }}
         onMove={restaurant.moveOrder}
         onCreateVirtual={restaurant.createVirtualTable}
+        onDeleteVirtual={restaurant.deleteVirtualTable}
         onOpen={restaurant.openTableOrder}
         onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)}
         onOpenReservation={(reservationId) => void props.reservations.openReservation(reservationId)}
-        onQuickSale={() => {
+        onQuickSale={(areaId) => {
           if (!props.context.canTakePayments) return
-          restaurant.reset()
+          restaurant.reset(areaId)
           quickSale.setDiscount(null)
         }}
         selectedAreaId={restaurant.posView.areaId}
@@ -484,7 +512,15 @@ export function PosPage(props: Props) {
       /> : null}
       <CashlogyPaymentModal
         finalizeDisabled={props.isBusy}
-        onFinalizeRecovered={() => {
+        onFinalizeRecovered={(transaction) => {
+          const historicalTicket = transaction.saleId
+            ? cash.tickets.find((ticket) => ticket.payload.sale.id === transaction.saleId)
+            : null
+          if (historicalTicket) {
+            if (historicalTicket.paymentMethod === 'card') void cash.ticketActions.changePayment(historicalTicket, 'cash')
+            else finishCashlogyPayment(transaction)
+            return
+          }
           if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', null)
           else void quickSale.completePayment('cash', null)
         }}
