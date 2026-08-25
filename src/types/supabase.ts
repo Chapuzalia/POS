@@ -44,6 +44,7 @@ export type DeviceRow = {
   can_open_cash_session: boolean
   can_close_cash_session: boolean
   can_manage_cash: boolean
+  production_destination_id: string | null
 }
 
 export type SaleRow = {

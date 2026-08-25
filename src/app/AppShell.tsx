@@ -59,6 +59,7 @@ import { AppRouter } from './AppRouter'
 import { isBackofficeUser, isCrmUser, isSuperadmin } from './app-permissions'
 import { PosPage } from './PosPage'
 import { useDomainErrors } from './useDomainErrors'
+import { KdsPage } from '../features/production/components/KdsPage'
 
 const themes = themesData as ThemeDefinition[]
 const defaultThemeId = themes[0]?.id ?? 'hero-minimal'
@@ -185,7 +186,7 @@ export function AppShell() {
     catalog,
     cashSession: cash.session,
     context,
-    enabled: Boolean(context && !isBackofficeUser(context) && hasTenantFeature(context, 'restaurant')),
+    enabled: Boolean(context && context.deviceMode !== 'kds' && !isBackofficeUser(context) && hasTenantFeature(context, 'restaurant')),
     isBusy,
     isOnline,
     onAddFeedback: addFeedback.triggerAddFeedback,
@@ -202,7 +203,7 @@ export function AppShell() {
   const reservations = useReservationsController({
     cashSession: cash.session,
     context,
-    enabled: Boolean(context && !isBackofficeUser(context) && hasTenantFeature(context, 'restaurant') && hasTenantFeature(context, 'reservations') && restaurant.tablesEnabled),
+    enabled: Boolean(context && context.deviceMode !== 'kds' && !isBackofficeUser(context) && hasTenantFeature(context, 'restaurant') && hasTenantFeature(context, 'reservations') && restaurant.tablesEnabled),
     isOnline,
     operationalMap: restaurant.map,
     onError: setRestaurantError,
@@ -382,7 +383,7 @@ export function AppShell() {
   if (!supabaseConfig.isReady) return <MissingConfigScreen />
   if (isBootstrapping || (isLoading && !context)) return <LoadingScreen />
   if (!context) return <LoginScreen
-    allowOfflineEnter={!loginLeaseBlocked}
+    allowOfflineEnter={!loginLeaseBlocked && getCachedContext()?.deviceMode !== 'kds'}
     cachedContext={getCachedContext()}
     conflictAccountName={pendingLoginContext?.userName ?? null}
     error={error}
@@ -404,6 +405,7 @@ export function AppShell() {
       onError={setGeneralError}
       onLogout={session.logout}
     />
+    if (context.deviceMode === 'kds') return <KdsPage context={context} isOnline={isOnline} onLogout={session.logout} />
     if (isOnline && !restaurant.tablesConfigLoaded) return <LoadingScreen />
     if (!cash.session && !reservations.isOpen) return <PosStartupReveal><CashSessionGate
       canOpenReservations={hasTenantFeature(context, 'restaurant') && hasTenantFeature(context, 'reservations')}

@@ -66,6 +66,13 @@ import {
   getCashlogyPaymentAmounts,
   settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
+import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
+import {
+  loadOrderProductionState,
+  sendProductionBatch,
+  subscribeToOrderProduction,
+} from '../../production/service'
+import type { OrderProductionState, ProductionSelection } from '../../production/types'
 
 async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string) {
   try {
@@ -132,6 +139,7 @@ export function useRestaurantController(options: Options) {
   const [splitOrderGroup, setSplitOrderGroup] = useState<RestaurantOrderGroupDetail | null>(null)
   const [equalSplitOpen, setEqualSplitOpen] = useState(false)
   const [equalSplit, setEqualSplit] = useState<RestaurantEqualSplit | null>(null)
+  const [productionState, setProductionState] = useState<OrderProductionState | null>(null)
   const draft = useRestaurantDraft({
     context: options.context,
     isOnline: options.isOnline,
@@ -141,6 +149,30 @@ export function useRestaurantController(options: Options) {
   useEffect(() => {
     setInvoiceCustomer(null)
   }, [invoiceOrderId])
+
+  const productionAvailable = Boolean(
+    options.context
+    && options.context.deviceMode !== 'kds'
+    && hasTenantFeature(options.context, 'production'),
+  )
+  const refreshProduction = useCallback(async (orderId = invoiceOrderId) => {
+    if (!productionAvailable || !options.isOnline || !orderId) {
+      setProductionState(null)
+      return
+    }
+    setProductionState(await loadOrderProductionState(orderId))
+  }, [invoiceOrderId, options.isOnline, productionAvailable])
+
+  useEffect(() => {
+    if (!options.context || !options.isOnline || !invoiceOrderId || !productionAvailable) {
+      setProductionState(null)
+      return undefined
+    }
+    void refreshProduction(invoiceOrderId).catch((cause) => options.onError(getReadableError(cause)))
+    return subscribeToOrderProduction(options.context, invoiceOrderId, () => {
+      void refreshProduction(invoiceOrderId).catch(() => undefined)
+    })
+  }, [invoiceOrderId, options, productionAvailable, refreshProduction])
 
   const settlePayment = useCallback(async (
     method: PaymentMethod | null,
@@ -742,6 +774,8 @@ export function useRestaurantController(options: Options) {
     if (!current || !options.context || !options.catalog) return false
     const candidate = buildSaleLine(createId(), options.catalog, sellable, selection, item)
     if (lineId) {
+      if ((productionState?.lines.find((line) => line.lineId === lineId)?.sentQuantity ?? 0) > 0
+        && !window.confirm('Este producto ya se envió a producción. Se notificará la modificación a cocina/barra. ¿Continuar?')) return false
       const timestamp = nowIso()
       draft.updateDraft((detail) => ({
         ...detail,
@@ -803,12 +837,15 @@ export function useRestaurantController(options: Options) {
     }))
     options.onAddFeedback({ feedbackType: 'added', productName: candidate.productName, sourceElement })
     return true
-  }, [draft, options])
+  }, [draft, options, productionState])
 
   const changeLineQuantity = useCallback((lineId: string, direction: 1 | -1) => {
     if (!options.isOnline) return
     const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
     if (!line) return
+    if (direction === -1
+      && (productionState?.lines.find((state) => state.lineId === lineId)?.sentQuantity ?? 0) > line.quantity - 1
+      && !window.confirm('Esta unidad ya se envió a producción. Se generará una anulación para cocina/barra. ¿Continuar?')) return
     if (direction === -1 && !canDecreaseLineQuantity(line)) {
       options.onError('No puedes reducir la cantidad por debajo de las unidades servidas.')
       return
@@ -819,7 +856,7 @@ export function useRestaurantController(options: Options) {
         .map((item) => item.id === lineId ? { ...item, quantity: item.quantity + direction, updatedAt: nowIso() } : item)
         .filter((item) => item.quantity > 0),
     }))
-  }, [draft, options])
+  }, [draft, options, productionState])
 
   const runServiceAction = useCallback((action: (order: RestaurantOrderDetail) => Promise<void>) => runBusy(async () => {
     if (!options.context || !options.isOnline) return
@@ -831,6 +868,20 @@ export function useRestaurantController(options: Options) {
       draft.replaceOrder(await loadRestaurantOrder(options.context, saved.order.id))
     }
   }), [draft, options, runBusy])
+
+  const sendToProduction = useCallback((selection?: ProductionSelection[]) => runBusy(async () => {
+    if (!options.context || !options.isOnline || !productionAvailable) return
+    const saved = await draft.flush()
+    if (!saved) return
+    await sendProductionBatch({
+      orderId: saved.order.id,
+      expectedRevision: saved.order.revision,
+      deviceId: options.context.deviceId,
+      requestId: `pos:${options.context.deviceId}:${createId()}`,
+      selection,
+    })
+    await refreshProduction(saved.order.id)
+  }), [draft, options.context, options.isOnline, productionAvailable, refreshProduction, runBusy])
 
   const reset = useCallback((areaId?: string) => {
     draft.clearOrder()
@@ -878,6 +929,8 @@ export function useRestaurantController(options: Options) {
     reset,
     returnToMap,
     saveState: draft.saveState,
+    productionState,
+    sendToProduction,
     serveLineFully: (lineId: string) => void runServiceAction(() => markRestaurantOrderLineFullyServed(lineId)),
     serveLineUnit: (lineId: string) => void runServiceAction(() => markRestaurantOrderLineUnitsServed(lineId, 1)),
     serveOrderFully: () => void runServiceAction((order) => markRestaurantOrderFullyServed(order.order.id)),

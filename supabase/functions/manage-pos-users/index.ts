@@ -822,11 +822,13 @@ Deno.serve(async (request) => {
       }, 201)
     }
 
-    if (action === 'create-device-with-user') {
+    if (action === 'create-device-with-user' || action === 'create-kds-device') {
       const venueId = String(body.venueId ?? '')
       const deviceName = String(body.deviceName ?? '').trim()
-      const deviceMode = String(body.deviceMode ?? '')
-      if (!venueId || !deviceName || !['checkout', 'satellite', 'hybrid'].includes(deviceMode)) {
+      const isKds = action === 'create-kds-device'
+      const deviceMode = isKds ? 'kds' : String(body.deviceMode ?? '')
+      const productionDestinationId = isKds ? String(body.productionDestinationId ?? '') : null
+      if (!venueId || !deviceName || (!isKds && !['checkout', 'satellite', 'hybrid'].includes(deviceMode)) || (isKds && !productionDestinationId)) {
         return response({ error: 'Local, nombre y modo del dispositivo son obligatorios' }, 400)
       }
 
@@ -837,6 +839,17 @@ Deno.serve(async (request) => {
       if (venueError || tenantError) throw venueError ?? tenantError
       if (!venue || !tenant) return response({ error: 'El local o el negocio no existen o están desactivados' }, 400)
       if (!canManageVenue(venue.id)) return response({ error: 'No tienes acceso a este local' }, 403)
+
+      if (isKds) {
+        const [{ data: feature }, { data: venueProduction }, { data: destination }] = await Promise.all([
+          adminClient.from('tenant_feature_assignments').select('tenant_id').eq('tenant_id', tenantId).eq('feature_key', 'production').maybeSingle(),
+          adminClient.from('venues').select('production_enabled').eq('tenant_id', tenantId).eq('id', venueId).maybeSingle(),
+          adminClient.from('production_destinations').select('id').eq('tenant_id', tenantId).eq('venue_id', venueId).eq('id', productionDestinationId).eq('is_active', true).eq('kds_enabled', true).maybeSingle(),
+        ])
+        if (!feature || venueProduction?.production_enabled !== true || !destination) {
+          return response({ error: 'Activa Producción en el plan y en el local, y selecciona un destino KDS activo' }, 409)
+        }
+      }
 
       const emailDevice = normalizeEmailPart(deviceName) || 'dispositivo'
       const emailVenue = normalizeEmailPart(venue.name, '-') || 'local'
@@ -851,12 +864,13 @@ Deno.serve(async (request) => {
           name: deviceName,
           is_active: true,
           device_mode: deviceMode,
+          production_destination_id: productionDestinationId,
           default_cash_register_id: null,
-          can_take_orders: true,
-          can_take_payments: deviceMode !== 'satellite',
-          can_open_cash_session: deviceMode !== 'satellite',
-          can_close_cash_session: deviceMode !== 'satellite',
-          can_manage_cash: deviceMode !== 'satellite',
+          can_take_orders: !isKds,
+          can_take_payments: !isKds && deviceMode !== 'satellite',
+          can_open_cash_session: !isKds && deviceMode !== 'satellite',
+          can_close_cash_session: !isKds && deviceMode !== 'satellite',
+          can_manage_cash: !isKds && deviceMode !== 'satellite',
         })
         .select('id, venue_id')
         .single()

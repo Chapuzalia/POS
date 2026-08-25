@@ -1,8 +1,8 @@
-import { Input as UiInput } from "../../../../components/ui/Input";
-import { ListBox, ListBoxItem, Select } from "@heroui/react";
-import { Check, ChevronDown, Search } from "lucide-react";
-import { useDeferredValue, useMemo, useState, type ReactNode } from "react";
-import { normalizeText } from "../../../../lib/format";
+import { Input as UiInput } from '../../../../components/ui/Input';
+import { ListBox, ListBoxItem, Select } from '@heroui/react';
+import { Check, ChevronDown, Search } from 'lucide-react';
+import { useDeferredValue, useMemo, useState, type ReactNode } from 'react';
+import { normalizeText } from '../../../../lib/format';
 
 export type CrmSelectOption = {
   description?: string;
