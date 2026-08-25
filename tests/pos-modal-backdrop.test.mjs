@@ -12,6 +12,16 @@ test('the shared POS modal delegates dismissal, focus trap and Escape to HeroUI'
   assert.match(source, /isKeyboardDismissDisabled=\{dismissDisabled\}/)
 })
 
+test('only the Cashlogy payment modal blocks implicit dismissal for its whole lifecycle', async () => {
+  const [paymentModal, machineModal] = await Promise.all([
+    readFile(new URL('../src/features/local-printing/components/CashlogyPaymentModal.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/local-printing/components/CashlogyMachineModal.tsx', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(paymentModal, /<AppModal dismissDisabled label="Cobro Cashlogy"/)
+  assert.doesNotMatch(machineModal, /<AppModal[^>]*dismissDisabled/)
+})
+
 test('POS modal families use the shared HeroUI modal policy', async () => {
   const modalSources = [
     '../src/components/modals/CashPaymentModal.tsx',
