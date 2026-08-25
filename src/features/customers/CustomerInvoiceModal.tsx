@@ -1,9 +1,9 @@
-import { ArrowLeft, Building2, LoaderCircle, Pencil, Plus, Search, X } from 'lucide-react'
+import { ArrowLeft, Building2, LoaderCircle, Pencil, Plus, Search, Trash2, X } from 'lucide-react'
 import { useEffect, useRef, useState, type FormEvent } from 'react'
 import { AppModal, Button, Input } from '../../components/ui'
 import type { Customer, CustomerCreateInput } from '../../types'
 import { getReadableError } from '../../utils/errors'
-import { createCustomer, searchCustomers, updateCustomer } from './service'
+import { createCustomer, deleteCustomer, searchCustomers, updateCustomer } from './service'
 
 type Props = {
   isBusy: boolean
@@ -43,7 +43,7 @@ function customerToForm(customer: Customer): CustomerCreateInput {
 }
 
 export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Props) {
-  const [mode, setMode] = useState<'search' | 'create' | 'edit'>('search')
+  const [mode, setMode] = useState<'search' | 'create' | 'edit' | 'delete'>('search')
   const [query, setQuery] = useState('')
   const [results, setResults] = useState<Customer[]>([])
   const [loading, setLoading] = useState(true)
@@ -51,6 +51,7 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
   const [error, setError] = useState<string | null>(null)
   const [form, setForm] = useState<CustomerCreateInput>(emptyCustomer)
   const [editingCustomerId, setEditingCustomerId] = useState<string | null>(null)
+  const [customerPendingDeletion, setCustomerPendingDeletion] = useState<Customer | null>(null)
   const requestRef = useRef(0)
 
   useEffect(() => {
@@ -101,14 +102,39 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
   }
 
   function editCustomer(customer: Customer) {
+    setCustomerPendingDeletion(null)
     setEditingCustomerId(customer.id)
     setForm(customerToForm(customer))
     setError(null)
     setMode('edit')
   }
 
+  function openDeleteConfirmation(customer: Customer) {
+    setEditingCustomerId(null)
+    setCustomerPendingDeletion(customer)
+    setError(null)
+    setMode('delete')
+  }
+
+  async function confirmDelete() {
+    if (!customerPendingDeletion || saving || isBusy) return
+    setSaving(true)
+    setError(null)
+    try {
+      await deleteCustomer(tenantId, customerPendingDeletion.id)
+      setResults((current) => current.filter((customer) => customer.id !== customerPendingDeletion.id))
+      setCustomerPendingDeletion(null)
+      setMode('search')
+    } catch (deleteError) {
+      setError(getReadableError(deleteError))
+    } finally {
+      setSaving(false)
+    }
+  }
+
   function returnToSearch() {
     setEditingCustomerId(null)
+    setCustomerPendingDeletion(null)
     setForm(emptyCustomer)
     setError(null)
     setMode('search')
@@ -116,13 +142,14 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
 
   const busy = isBusy || saving
   const isEditing = mode === 'edit'
+  const isDeleting = mode === 'delete'
   return (
     <AppModal dismissDisabled={busy} label="Seleccionar cliente para factura" maxWidth={680} onClose={onClose}>
       <section className="flex max-h-[min(86svh,760px)] min-h-[440px] w-full flex-col bg-[var(--surface)]">
         <header className="flex items-start justify-between gap-3 border-b border-[var(--separator)] p-5">
           <div className="min-w-0">
-            <h2 className="text-xl font-black">{mode === 'search' ? 'Generar factura' : isEditing ? 'Editar cliente' : 'Nuevo cliente'}</h2>
-            <p className="mt-1 text-sm text-[var(--muted)]">{mode === 'search' ? 'Busca por nombre, razón social o NIF/CIF.' : isEditing ? 'Actualiza sus datos fiscales.' : 'Datos fiscales que quedarán asociados a la factura.'}</p>
+            <h2 className="text-xl font-black">{mode === 'search' ? 'Generar factura' : isEditing ? 'Editar cliente' : isDeleting ? 'Eliminar cliente' : 'Nuevo cliente'}</h2>
+            <p className="mt-1 text-sm text-[var(--muted)]">{mode === 'search' ? 'Busca por nombre, razón social o NIF/CIF.' : isEditing ? 'Actualiza sus datos fiscales.' : isDeleting ? 'Confirma que quieres borrar este cliente.' : 'Datos fiscales que quedarán asociados a la factura.'}</p>
           </div>
           <Button aria-label="Cerrar" disabled={busy} onClick={onClose} size="sm" type="button"><X className="h-4 w-4" /></Button>
         </header>
@@ -140,7 +167,7 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
               {!loading && !results.length ? <p className="grid min-h-36 place-items-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-5 text-center text-sm font-semibold text-[var(--muted)]">No se han encontrado clientes.</p> : null}
               {!loading ? <div className="space-y-2">{results.map((customer) => (
                 <div className="group relative" key={customer.id}>
-                  <button className="flex min-h-20 w-full items-start gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 pr-14 text-left transition-colors hover:border-[var(--accent)] hover:bg-[var(--surface-muted)] focus-visible:border-[var(--accent)]" disabled={busy} onClick={() => onSelect(customer)} type="button">
+                  <button className="flex min-h-20 w-full items-start gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 pr-24 text-left transition-colors hover:border-[var(--accent)] hover:bg-[var(--surface-muted)] focus-visible:border-[var(--accent)]" disabled={busy} onClick={() => onSelect(customer)} type="button">
                     <Building2 className="mt-1 h-5 w-5 shrink-0 text-[var(--accent)]" />
                     <span className="min-w-0">
                       <strong className="block truncate">{customer.legalName}</strong>
@@ -148,11 +175,30 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
                       <span className="block truncate text-xs text-[var(--muted)]">{customer.address} · {customer.postalCode} {customer.city}</span>
                     </span>
                   </button>
-                  <button aria-label={`Editar ${customer.legalName}`} className="absolute right-3 top-1/2 grid min-h-10 min-w-10 -translate-y-1/2 place-items-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] focus-visible:bg-[var(--accent-soft)] focus-visible:text-[var(--accent)]" disabled={busy} onClick={() => editCustomer(customer)} title="Editar cliente" type="button">
-                    <Pencil className="h-4 w-4" />
-                  </button>
+                  <div className="absolute right-2 top-1/2 flex -translate-y-1/2 items-center gap-1">
+                    <button aria-label={`Editar ${customer.legalName}`} className="grid min-h-10 min-w-10 place-items-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--accent-soft)] hover:text-[var(--accent)] focus-visible:bg-[var(--accent-soft)] focus-visible:text-[var(--accent)]" disabled={busy} onClick={() => editCustomer(customer)} title="Editar cliente" type="button">
+                      <Pencil className="h-4 w-4" />
+                    </button>
+                    <button aria-label={`Eliminar ${customer.legalName}`} className="grid min-h-10 min-w-10 place-items-center rounded-full text-[var(--muted)] transition-colors hover:bg-[var(--danger-soft)] hover:text-[var(--danger)] focus-visible:bg-[var(--danger-soft)] focus-visible:text-[var(--danger)]" disabled={busy} onClick={() => openDeleteConfirmation(customer)} title="Eliminar cliente" type="button">
+                      <Trash2 className="h-4 w-4" />
+                    </button>
+                  </div>
                 </div>
               ))}</div> : null}
+            </div>
+          </div>
+        ) : mode === 'delete' && customerPendingDeletion ? (
+          <div className="flex min-h-0 flex-1 flex-col p-5">
+            <button className="mb-4 inline-flex min-h-10 items-center gap-2 self-start text-sm font-bold text-[var(--muted)]" disabled={busy} onClick={returnToSearch} type="button"><ArrowLeft className="h-4 w-4" /> Volver a buscar</button>
+            <div className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-5">
+              <Trash2 className="mb-3 h-6 w-6 text-[var(--danger)]" />
+              <h3 className="text-lg font-black">¿Eliminar {customerPendingDeletion.legalName}?</h3>
+              <p className="mt-2 text-sm text-[var(--muted)]">Esta acción no se puede deshacer. Si el cliente ya está asociado a una factura, se conservará y no se eliminará.</p>
+            </div>
+            {error ? <p className="mt-4 rounded-[var(--radius)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">{error}</p> : null}
+            <div className="mt-auto flex justify-end gap-2 border-t border-[var(--separator)] pt-4">
+              <Button disabled={busy} onClick={returnToSearch} type="button">Cancelar</Button>
+              <Button disabled={busy} onClick={() => void confirmDelete()} type="button" variant="danger">{saving ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />} Eliminar</Button>
             </div>
           </div>
         ) : (

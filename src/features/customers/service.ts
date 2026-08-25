@@ -83,6 +83,19 @@ export async function updateCustomer(tenantId: string, customerId: string, input
   return mapCustomer(data as CustomerRow)
 }
 
+export async function deleteCustomer(tenantId: string, customerId: string): Promise<void> {
+  const { error } = await client().rpc('delete_invoice_customer', {
+    p_tenant_id: tenantId,
+    p_customer_id: customerId,
+  })
+  if (error) {
+    if (error.code === '23503' || error.message.includes('CUSTOMER_HAS_INVOICES')) {
+      throw new Error('No se puede eliminar este cliente porque ya está asociado a una factura.')
+    }
+    throw error
+  }
+}
+
 export async function loadTicketInvoice(tenantId: string, ticketId: string): Promise<TicketInvoice | null> {
   const { data, error } = await client().from('tickets')
     .select('customer_id, customer_snapshot, invoice_series, invoice_number, invoice_issued_at')
