@@ -61,6 +61,28 @@ export async function createCustomer(tenantId: string, input: CustomerCreateInpu
   return mapCustomer(data as CustomerRow)
 }
 
+export async function updateCustomer(tenantId: string, customerId: string, input: CustomerCreateInput): Promise<Customer> {
+  const value = validateCustomerCreateInput(input)
+  const { data, error } = await client().from('customers').update({
+    legal_name: value.legalName,
+    tax_id: value.taxId,
+    address: value.address,
+    postal_code: value.postalCode,
+    city: value.city,
+    province: value.province,
+    country: value.country,
+    email: value.email,
+    phone: value.phone,
+  }).eq('tenant_id', tenantId).eq('id', customerId).select('*').single()
+  if (error) {
+    if (error.code === '23505' || error.message.includes('CUSTOMER_TAX_ID_DUPLICATE')) {
+      throw new Error(`Ya existe un cliente con el NIF/CIF ${normalizeCustomerTaxId(value.taxId)}.`)
+    }
+    throw error
+  }
+  return mapCustomer(data as CustomerRow)
+}
+
 export async function loadTicketInvoice(tenantId: string, ticketId: string): Promise<TicketInvoice | null> {
   const { data, error } = await client().from('tickets')
     .select('customer_id, customer_snapshot, invoice_series, invoice_number, invoice_issued_at')

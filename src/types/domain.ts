@@ -451,6 +451,8 @@ export type SaleCreatedPayload = {
     qrBase64: string | null
     verificationUrl: string | null
     externalCode: string | null
+    errorCode: string | null
+    errorMessage: string | null
   }
 }
 

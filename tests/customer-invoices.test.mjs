@@ -10,7 +10,9 @@ const migration = await readFile(new URL('../supabase/migrations/20260821180000_
 const fiscalMigration = await readFile(new URL('../supabase/migrations/20260803220000_add_verifacti_integration.sql', import.meta.url), 'utf8')
 const customerService = await readFile(new URL('../src/features/customers/service.ts', import.meta.url), 'utf8')
 const customerModal = await readFile(new URL('../src/features/customers/CustomerInvoiceModal.tsx', import.meta.url), 'utf8')
+const fiscalService = await readFile(new URL('../src/features/fiscal/service.ts', import.meta.url), 'utf8')
 const quickSaleHook = await readFile(new URL('../src/features/quick-sale/hooks/useQuickSale.ts', import.meta.url), 'utf8')
+const restaurantHook = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const posPage = await readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8')
 
 const customer = {
@@ -60,6 +62,15 @@ test('crear cliente valida y persiste todos los datos fiscales desde el modal', 
   assert.match(customerModal, /Guardar y seleccionar/)
   assert.match(customerService, /rpc\('create_invoice_customer'/)
   assert.match(migration, /insert into public\.customers[\s\S]*legal_name, tax_id, address, postal_code, city, province, country, email, phone/i)
+})
+
+test('el lápiz de cada tarjeta permite editar el cliente sin seleccionarlo', () => {
+  assert.match(customerModal, /Pencil/)
+  assert.match(customerModal, /aria-label=\{`Editar \$\{customer\.legalName\}`\}/)
+  assert.match(customerModal, /onClick=\{\(\) => editCustomer\(customer\)\}/)
+  assert.match(customerModal, /Guardar cambios/)
+  assert.match(customerService, /from\('customers'\)\.update/)
+  assert.match(customerService, /\.eq\('tenant_id', tenantId\)\.eq\('id', customerId\)/)
 })
 
 test('buscar cliente admite nombre, razón social y NIF/CIF con resultados compactos', () => {
@@ -187,6 +198,26 @@ test('la previsualización de factura muestra borrador y no usa el UUID como nú
   assert.match(text, /FACTURA \(BORRADOR\)/)
   assert.match(text, /Pendiente de numeración/)
   assert.doesNotMatch(text, new RegExp(billed.ticket.id))
+})
+
+test('un rechazo de VeriFactu imprime un resumen breve en lugar del QR', () => {
+  const repeatedMessage = 'El NIF/NOMBRE (77311554Z/David Puta) del destinatario no se encuentra registrado en la Agencia Tributaria. Para personas jurídicas el NIF debe estar registrado en la AEAT. El NIF/NOMBRE (77311554Z/David Puta) del destinatario no se encuentra registrado en la Agencia Tributaria.'
+  const billed = payload([line('Café', 1100, 10)], null, customer)
+  billed.ticket.invoice = { ...billed.ticket.invoice, series: 'F-2026', number: '000007', issuedAt: billed.sale.createdAt }
+  billed.fiscal = {
+    invoiceId: 'fiscal-1', provider: 'verifactu', status: 'rejected', uuid: null,
+    qrBase64: null, verificationUrl: null, externalCode: null,
+    errorCode: 'HTTP_400', errorMessage: repeatedMessage,
+  }
+  const request = mapSaleToPrintRequest({ sale: billed, establishment: { name: 'TICKIT BAR' }, printerId: 'main', printerLayout: layout })
+  const text = request.lines.join('\n')
+  assert.match(text, /VERIFACTU/)
+  assert.match(text, /QR no disponible\./)
+  assert.match(text, /Motivo:[\s\S]*El NIF\/NOMBRE[\s\S]*no se encuentra registrado[\s\S]*Agencia Tributaria\./)
+  assert.doesNotMatch(text, /Para personas jurídicas/)
+  assert.equal(request.elements, undefined)
+  assert.match(fiscalService, /error_code, error_message/)
+  assert.match(restaurantHook, /loadFiscalReceiptData/)
 })
 
 test('la factura imprime descuentos y varios tipos de IVA desde los importes finales cobrados', () => {

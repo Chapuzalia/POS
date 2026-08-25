@@ -45,7 +45,7 @@ import {
   saveRestaurantOrderLines,
 } from '../../tables/service'
 import { canDecreaseLineQuantity } from '../../tables/service-status'
-import { autoIssueFiscalTicket } from '../../fiscal/service'
+import { autoIssueFiscalTicket, loadFiscalReceiptData } from '../../fiscal/service'
 import { loadTicketInvoice } from '../../customers/service'
 import type {
   PayRestaurantEqualPartResult,
@@ -72,7 +72,12 @@ async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string)
     return (await autoIssueFiscalTicket(context.tenantId, ticketId)).fiscal
   } catch (error) {
     console.error('Automatic fiscal submission failed before restaurant print', error)
-    return undefined
+    try {
+      return await loadFiscalReceiptData(context.tenantId, ticketId) ?? undefined
+    } catch (receiptError) {
+      console.error('Could not load fiscal rejection before restaurant print', receiptError)
+      return undefined
+    }
   }
 }
 

@@ -605,6 +605,8 @@ type SessionTicketQueryRow = {
     external_code: string | null
     qr_base64: string | null
     verification_url: string | null
+    error_code: string | null
+    error_message: string | null
   }> | null
 }
 
@@ -694,7 +696,7 @@ export async function loadSessionTicketsFromSupabase(
           )
         ),
         fiscal_invoices (
-          id, provider, status, external_uuid, external_code, qr_base64, verification_url
+          id, provider, status, external_uuid, external_code, qr_base64, verification_url, error_code, error_message
         )
       `)
       .eq('tenant_id', context.tenantId)
@@ -841,6 +843,8 @@ export async function loadSessionTicketsFromSupabase(
           externalCode: ticket.fiscal_invoices[0].external_code,
           qrBase64: ticket.fiscal_invoices[0].qr_base64,
           verificationUrl: ticket.fiscal_invoices[0].verification_url,
+          errorCode: ticket.fiscal_invoices[0].error_code,
+          errorMessage: ticket.fiscal_invoices[0].error_message,
         },
       } : {}),
     }

@@ -91,6 +91,17 @@ function saleLineAdditions(line: SaleCreatedPayload['lines'][number]) {
   return [...components, ...line.modifiers.map((modifier) => modifier.name)].filter(Boolean)
 }
 
+export function summarizeFiscalError(value: string | null | undefined) {
+  const normalized = value?.replace(/\s+/g, ' ').trim()
+  if (!normalized) return null
+  const sentenceEnd = normalized.search(/[.!?](?:\s|$)/)
+  const firstSentence = sentenceEnd >= 0 ? normalized.slice(0, sentenceEnd + 1) : normalized
+  const maxLength = 180
+  return firstSentence.length <= maxLength
+    ? firstSentence
+    : `${firstSentence.slice(0, maxLength - 3).trimEnd()}...`
+}
+
 function fiscalBreakdown(sale: SaleCreatedPayload) {
   const complete = sale.lines.length > 0 && sale.lines.every(
     (line) => line.fiscalSnapshot && isValidTaxRate(line.fiscalSnapshot.taxRate),
@@ -199,6 +210,11 @@ export function buildSaleTicketLines(
     lines.push('', ...section(sale.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu', printerLayout))
     if (sale.fiscal.externalCode) lines.push(...wrapReceiptText(`Código: ${sale.fiscal.externalCode}`, printerLayout.columns, printerLayout.characterSet))
     if (sale.fiscal.verificationUrl) lines.push(...wrapReceiptText(sale.fiscal.verificationUrl, printerLayout.columns, printerLayout.characterSet))
+    const fiscalError = summarizeFiscalError(sale.fiscal.errorMessage ?? sale.fiscal.errorCode)
+    if (!sale.fiscal.verificationUrl && fiscalError) {
+      lines.push(...wrapReceiptText('QR no disponible.', printerLayout.columns, printerLayout.characterSet))
+      lines.push(...wrapReceiptText(`Motivo: ${fiscalError}`, printerLayout.columns, printerLayout.characterSet))
+    }
   }
 
   if (establishment.footer?.trim()) {
