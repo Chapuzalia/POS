@@ -414,6 +414,21 @@ test('la identidad física de Cashlogy es única y se persiste en todos los cobr
   assert.match(syncService, /change_sale_payment_method_cashlogy/)
 })
 
+test('los cobros divididos usan Cashlogy y reservan el modal manual para terminales sin máquina', async () => {
+  const [itemSplit, equalSplit] = await Promise.all([
+    readFile(new URL('src/features/tables/components/SplitOrderModal.tsx', root), 'utf8'),
+    readFile(new URL('src/features/tables/components/EqualSplitOrderModal.tsx', root), 'utf8'),
+  ])
+
+  for (const modal of [itemSplit, equalSplit]) {
+    assert.match(modal, /usePrintAgentStore\(\(state\) => state\.cashlogyConfigured\)/)
+    assert.match(modal, /method === 'cash' && cashlogyConfigured/)
+    assert.match(modal, /else if \(method === 'cash'\) setCashOpen\(true\)/)
+  }
+  assert.match(itemSplit, /cashlogyConfigured\) void completePayment\('cash', null\)/)
+  assert.match(equalSplit, /cashlogyConfigured\) void completePart\('cash', null\)/)
+})
+
 test('la gestión es headless, cubre los cinco flujos y no contiene fallback externo', async () => {
   const [client, modal, managementStore, selector] = await Promise.all([
     readFile(new URL('src/features/local-printing/api/printAgentClient.ts', root), 'utf8'),
