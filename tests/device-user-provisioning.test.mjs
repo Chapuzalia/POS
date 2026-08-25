@@ -82,6 +82,23 @@ test('accesos integra las credenciales y la edición dentro de cada dispositivo'
   assert.match(edgeFunction, /\['owner', 'manager'\]/)
 })
 
+test('produccion permite editar el nombre y la contrasena de un KDS sin darle permisos de caja', async () => {
+  const [productionPage, productionService, edgeFunction] = await Promise.all([
+    readFile(new URL('../src/features/crm/production/pages/ProductionPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/production/services/productionAdminService.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(productionPage, /Pencil/)
+  assert.match(productionPage, /Nueva contraseña \(6 caracteres\)/)
+  assert.match(productionPage, /updateKdsDevice/)
+  assert.match(productionService, /action: 'update-kds-device'/)
+  assert.match(edgeFunction, /action === 'update-kds-device'/)
+  assert.match(edgeFunction, /device\.device_mode !== 'kds'/)
+  assert.match(edgeFunction, /can_take_orders: deviceMode !== 'kds'/)
+  assert.match(edgeFunction, /can_manage_cash: deviceMode !== 'satellite' && deviceMode !== 'kds'/)
+})
+
 test('el owner asigna locales al manager y el manager solo administra dispositivos de su ambito', async () => {
   const [permissions, accessPage, accessService, edgeFunction, migration] = await Promise.all([
     readFile(new URL('../src/features/crm/routing/crmPermissions.ts', import.meta.url), 'utf8'),

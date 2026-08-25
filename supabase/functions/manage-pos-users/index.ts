@@ -928,16 +928,17 @@ Deno.serve(async (request) => {
       return response({ credentials: { email, password }, deviceId: device.id, userId }, 201)
     }
 
-    if (action === 'update-device') {
+    if (action === 'update-device' || action === 'update-kds-device') {
       const deviceId = String(body.deviceId ?? '')
       const deviceName = String(body.deviceName ?? '').trim()
-      const deviceMode = String(body.deviceMode ?? '')
+      const isKdsUpdate = action === 'update-kds-device'
+      const deviceMode = isKdsUpdate ? 'kds' : String(body.deviceMode ?? '')
       const password = String(body.password ?? '')
       if (
         !deviceId
         || !deviceName
         || deviceName.length > 80
-        || !['checkout', 'satellite', 'hybrid'].includes(deviceMode)
+        || (!isKdsUpdate && !['checkout', 'satellite', 'hybrid'].includes(deviceMode))
         || (password && password.length !== 6)
       ) {
         return response({ error: 'Nombre y modo son obligatorios; la nueva contrasena debe tener exactamente 6 caracteres' }, 400)
@@ -961,6 +962,7 @@ Deno.serve(async (request) => {
       ])
       if (deviceError || assignmentError || tenantError) throw deviceError ?? assignmentError ?? tenantError
       if (!device) return response({ error: 'El dispositivo no existe' }, 404)
+      if (isKdsUpdate && device.device_mode !== 'kds') return response({ error: 'El dispositivo no es un KDS' }, 400)
       if (!canManageVenue(device.venue_id)) return response({ error: 'No tienes acceso al local de este dispositivo' }, 403)
       if (!assignment) return response({ error: 'El dispositivo no tiene credenciales asociadas' }, 409)
       if (!tenant) return response({ error: 'El negocio no existe o esta desactivado' }, 400)
@@ -1006,11 +1008,11 @@ Deno.serve(async (request) => {
       const nextDeviceValues = {
         name: deviceName,
         device_mode: deviceMode,
-        can_take_orders: true,
-        can_take_payments: deviceMode !== 'satellite',
-        can_open_cash_session: deviceMode !== 'satellite',
-        can_close_cash_session: deviceMode !== 'satellite',
-        can_manage_cash: deviceMode !== 'satellite',
+        can_take_orders: deviceMode !== 'kds',
+        can_take_payments: deviceMode !== 'satellite' && deviceMode !== 'kds',
+        can_open_cash_session: deviceMode !== 'satellite' && deviceMode !== 'kds',
+        can_close_cash_session: deviceMode !== 'satellite' && deviceMode !== 'kds',
+        can_manage_cash: deviceMode !== 'satellite' && deviceMode !== 'kds',
       }
 
       const { error: deviceUpdateError } = await adminClient

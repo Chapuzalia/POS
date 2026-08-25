@@ -297,6 +297,8 @@ export function PosPage(props: Props) {
         onIncrement={(lineId) => updateQuantity(lineId, 1)}
         onRemove={quickSale.removeLine}
         onRemoveInvoiceCustomer={removeInvoiceCustomer}
+        onSetQuantity={quickSale.setQuantity}
+        onSetUnitPrice={quickSale.setUnitPrice}
       />
 
   const handlePayment = (method: PaymentMethod | null) => {

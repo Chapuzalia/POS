@@ -7,6 +7,7 @@ import { buildSalePayload } from '../src/features/quick-sale/services/salePayloa
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
 
 const migration = await readFile(new URL('../supabase/migrations/20260821180000_add_invoice_customers.sql', import.meta.url), 'utf8')
+const customerDeleteMigration = await readFile(new URL('../supabase/migrations/20260825140000_delete_unused_invoice_customers.sql', import.meta.url), 'utf8')
 const fiscalMigration = await readFile(new URL('../supabase/migrations/20260803220000_add_verifacti_integration.sql', import.meta.url), 'utf8')
 const customerService = await readFile(new URL('../src/features/customers/service.ts', import.meta.url), 'utf8')
 const customerModal = await readFile(new URL('../src/features/customers/CustomerInvoiceModal.tsx', import.meta.url), 'utf8')
@@ -71,6 +72,19 @@ test('el lápiz de cada tarjeta permite editar el cliente sin seleccionarlo', ()
   assert.match(customerModal, /Guardar cambios/)
   assert.match(customerService, /from\('customers'\)\.update/)
   assert.match(customerService, /\.eq\('tenant_id', tenantId\)\.eq\('id', customerId\)/)
+})
+
+test('la papelera permite confirmar y eliminar solamente clientes sin facturas', () => {
+  assert.match(customerModal, /Trash2/)
+  assert.match(customerModal, /aria-label=\{`Eliminar \$\{customer\.legalName\}`\}/)
+  assert.match(customerModal, /onClick=\{\(\) => openDeleteConfirmation\(customer\)\}/)
+  assert.match(customerModal, /¿Eliminar \{customerPendingDeletion\.legalName\}\?/)
+  assert.match(customerService, /rpc\('delete_invoice_customer'/)
+  assert.match(customerService, /CUSTOMER_HAS_INVOICES/)
+  assert.match(customerDeleteMigration, /user_has_tenant_access\(p_tenant_id\)/)
+  assert.match(customerDeleteMigration, /CUSTOMER_HAS_INVOICES/)
+  assert.match(customerDeleteMigration, /delete from public\.customers/i)
+  assert.match(migration, /customer_id uuid references public\.customers\(id\) on delete restrict/i)
 })
 
 test('buscar cliente admite nombre, razón social y NIF/CIF con resultados compactos', () => {

@@ -98,6 +98,14 @@ export async function createKdsDevice(context: TenantContext, venueId: string, d
   return data.credentials
 }
 
+export async function updateKdsDevice(context: TenantContext, deviceId: string, deviceName: string, password?: string) {
+  const { data, error } = await requireSupabase().functions.invoke<{ credentials?: { email: string }; error?: string }>('manage-pos-users', {
+    body: { action: 'update-kds-device', tenantId: context.tenantId, deviceId, deviceName: deviceName.trim(), password: password ?? '' },
+  })
+  if (error || data?.error) throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudo actualizar el KDS.'))
+  return data?.credentials
+}
+
 export async function deleteKdsDevice(context: TenantContext, deviceId: string) {
   const { data, error } = await requireSupabase().functions.invoke<{ error?: string }>('manage-pos-users', {
     body: { action: 'delete-device', tenantId: context.tenantId, deviceId },

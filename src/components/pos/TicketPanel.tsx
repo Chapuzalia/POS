@@ -1,11 +1,17 @@
 import { Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import { useRef, useState, type MouseEvent, type PointerEvent } from "react";
-import { formatMoney, getLineTotal } from "../../lib/format";
+import {
+  centsToInput,
+  formatMoney,
+  getLineTotal,
+  parseMoneyToCents,
+} from "../../lib/format";
 import type { LineDiscountAllocation } from "../../lib/discounts";
 import { getLineAdditionNames } from "../../lib/mixers";
 import type { TicketLine } from "../../types";
 import { cx } from "../../utils/cx";
 import { Button } from "../ui";
+import { NumericKeypadModal } from "../ui/NumericKeypadModal";
 import { MenuComponentDetails } from "./MenuComponentDetails";
 import { InvoiceTicketNotice } from './InvoiceTicketNotice'
 
@@ -21,6 +27,15 @@ type TicketPanelProps = {
   onIncrement: (lineId: string) => void;
   onRemove: (lineId: string) => void;
   onRemoveInvoiceCustomer?: () => void;
+  onSetQuantity: (lineId: string, quantity: number) => void;
+  onSetUnitPrice: (lineId: string, unitPriceCents: number) => void;
+};
+
+type TicketValueEditor = {
+  initialValue: string;
+  kind: "quantity" | "unitPrice";
+  lineId: string;
+  productName: string;
 };
 
 const swipeDeleteThreshold = 72;
@@ -45,33 +60,96 @@ export function TicketPanel({
   onIncrement,
   onRemove,
   onRemoveInvoiceCustomer,
+  onSetQuantity,
+  onSetUnitPrice,
 }: TicketPanelProps) {
+  const [valueEditor, setValueEditor] = useState<TicketValueEditor | null>(null);
+  const [valueEditorError, setValueEditorError] = useState<string | null>(null);
+
+  function closeValueEditor() {
+    setValueEditor(null);
+    setValueEditorError(null);
+  }
+
+  function confirmValueEditor(value: string) {
+    if (!valueEditor) return;
+
+    if (valueEditor.kind === "quantity") {
+      const quantity = Number.parseInt(value, 10);
+      if (!Number.isSafeInteger(quantity) || quantity < 1) {
+        setValueEditorError("La cantidad debe ser al menos 1.");
+        return;
+      }
+      onSetQuantity(valueEditor.lineId, quantity);
+    } else {
+      onSetUnitPrice(valueEditor.lineId, parseMoneyToCents(value));
+    }
+
+    closeValueEditor();
+  }
+
   return (
-    <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
-      {invoiceCustomerName && onChangeInvoiceCustomer && onRemoveInvoiceCustomer ? <InvoiceTicketNotice customerName={invoiceCustomerName} disabled={isBusy} onChange={onChangeInvoiceCustomer} onRemove={onRemoveInvoiceCustomer} /> : null}
-      <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
-        {lines.length === 0 ? (
-          <div className="flex h-full min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">
-            Pulsa un producto para crear un ticket.
-          </div>
-        ) : (
-          <div className="space-y-2">
-            {lines.map((line, index) => (
-              <TicketLineRow
-                isBusy={isBusy}
-                key={line.id}
-                line={line}
-                onDecrement={onDecrement}
-                onEdit={onEdit}
-                onIncrement={onIncrement}
-                discount={lineDiscounts[index]}
-                onRemove={onRemove}
-              />
-            ))}
-          </div>
-        )}
-      </div>
-    </section>
+    <>
+      <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
+        {invoiceCustomerName && onChangeInvoiceCustomer && onRemoveInvoiceCustomer ? <InvoiceTicketNotice customerName={invoiceCustomerName} disabled={isBusy} onChange={onChangeInvoiceCustomer} onRemove={onRemoveInvoiceCustomer} /> : null}
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
+          {lines.length === 0 ? (
+            <div className="flex h-full min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">
+              Pulsa un producto para crear un ticket.
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {lines.map((line, index) => (
+                <TicketLineRow
+                  isBusy={isBusy}
+                  key={line.id}
+                  line={line}
+                  onDecrement={onDecrement}
+                  onEdit={onEdit}
+                  onIncrement={onIncrement}
+                  onOpenQuantityEditor={() => {
+                    setValueEditorError(null);
+                    setValueEditor({
+                      initialValue: String(line.quantity),
+                      kind: "quantity",
+                      lineId: line.id,
+                      productName: line.productName,
+                    });
+                  }}
+                  onOpenUnitPriceEditor={() => {
+                    setValueEditorError(null);
+                    setValueEditor({
+                      initialValue: centsToInput(line.unitPriceCents),
+                      kind: "unitPrice",
+                      lineId: line.id,
+                      productName: line.productName,
+                    });
+                  }}
+                  discount={lineDiscounts[index]}
+                  onRemove={onRemove}
+                />
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+      {valueEditor ? (
+        <NumericKeypadModal
+          allowDecimal={valueEditor.kind === "unitPrice"}
+          disabled={isBusy}
+          error={valueEditorError}
+          initialValue={valueEditor.initialValue}
+          key={`${valueEditor.kind}:${valueEditor.lineId}`}
+          maxDigits={valueEditor.kind === "quantity" ? 4 : 8}
+          maxFractionDigits={valueEditor.kind === "unitPrice" ? 2 : undefined}
+          onCancel={closeValueEditor}
+          onConfirm={confirmValueEditor}
+          subtitle={valueEditor.productName}
+          title={valueEditor.kind === "quantity" ? "Editar cantidad" : "Editar precio unitario"}
+          unit={valueEditor.kind === "quantity" ? "unidades" : "€ / unidad"}
+        />
+      ) : null}
+    </>
   );
 }
 
@@ -81,6 +159,8 @@ type TicketLineRowProps = {
   onDecrement: (lineId: string) => void;
   onEdit: (line: TicketLine) => void;
   onIncrement: (lineId: string) => void;
+  onOpenQuantityEditor: () => void;
+  onOpenUnitPriceEditor: () => void;
   onRemove: (lineId: string) => void;
   discount?: LineDiscountAllocation;
 };
@@ -92,6 +172,8 @@ function TicketLineRow({
   onDecrement,
   onEdit,
   onIncrement,
+  onOpenQuantityEditor,
+  onOpenUnitPriceEditor,
   onRemove,
 }: TicketLineRowProps) {
   const additionNames = getLineAdditionNames(line.modifiers, line.mixer);
@@ -210,9 +292,17 @@ function TicketLineRow({
             {additionNames.length ? ` + ${additionNames.join(", ")}` : ""}
           </p>
           <MenuComponentDetails compact components={line.components} />
-          <p className="mt-1 font-mono text-sm tabular-nums text-[var(--muted)]">
+          <button
+            aria-haspopup="dialog"
+            aria-label={`Editar precio unitario de ${line.productName}`}
+            className="mt-1 inline cursor-pointer touch-manipulation border-0 bg-transparent p-0 font-mono text-sm tabular-nums text-[var(--muted)] focus:outline-none focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-default"
+            data-ticket-line-action="true"
+            disabled={isBusy}
+            onClick={onOpenUnitPriceEditor}
+            type="button"
+          >
             {formatMoney(line.unitPriceCents)}/u
-          </p>
+          </button>
           {discount && discount.discountAmountCents > 0 ? (
             <div className="mt-1 flex flex-wrap items-baseline gap-x-2">
               <span className="font-mono text-sm tabular-nums text-[var(--muted)] line-through">{formatMoney(discount.grossCents)}</span>
@@ -256,8 +346,17 @@ function TicketLineRow({
           >
             <Minus className="h-4 w-4" />
           </Button>
-          <span className="w-7 text-center font-mono font-bold tabular-nums">
-            {line.quantity}
+          <span className="w-7 text-center">
+            <button
+              aria-haspopup="dialog"
+              aria-label={`Editar cantidad de ${line.productName}`}
+              className="inline cursor-pointer touch-manipulation border-0 bg-transparent p-0 font-mono font-bold tabular-nums focus:outline-none focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-default"
+              disabled={isBusy}
+              onClick={onOpenQuantityEditor}
+              type="button"
+            >
+              {line.quantity}
+            </button>
           </span>
           <Button
             disabled={isBusy}

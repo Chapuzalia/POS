@@ -21,7 +21,13 @@ import type {
 } from '../../../types'
 import { addProductSalesStats } from '../services/productSalesStats'
 import { shouldOpenProductSelectionDialog } from '../services/productSelectionDialog'
-import { addQuickSaleTicketLine, changeQuickSaleTicketLineQuantity, replaceQuickSaleTicketLine } from '../services/ticketLines'
+import {
+  addQuickSaleTicketLine,
+  changeQuickSaleTicketLineQuantity,
+  replaceQuickSaleTicketLine,
+  setQuickSaleTicketLineQuantity,
+  setQuickSaleTicketLineUnitPrice,
+} from '../services/ticketLines'
 import { applyQuickSaleLinesUpdate } from '../services/lineUpdates'
 import { useQuickSalePayment } from './useQuickSalePayment'
 
@@ -273,6 +279,12 @@ export function useQuickSale(options: Options) {
     selectProduct,
     setInvoiceCustomer,
     setDiscount: resetDiscount,
+    setQuantity: (lineId: string, quantity: number) => {
+      updateLines((previous) => setQuickSaleTicketLineQuantity(previous, lineId, quantity))
+    },
+    setUnitPrice: (lineId: string, unitPriceCents: number) => {
+      updateLines((previous) => setQuickSaleTicketLineUnitPrice(previous, lineId, unitPriceCents))
+    },
     subtotalCents,
     totalCents: discountCalculation.totalCents,
   }

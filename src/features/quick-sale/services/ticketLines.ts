@@ -3,6 +3,8 @@ import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
 import type { ProductLineSelection, TicketLine } from '../../../types'
 
+export { setQuickSaleTicketLineQuantity, setQuickSaleTicketLineUnitPrice } from './ticketLineEdits'
+
 export function addQuickSaleTicketLine(
   lines: TicketLine[],
   catalog: CatalogData,

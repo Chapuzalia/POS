@@ -1,4 +1,4 @@
-import { Copy, Link2, Plus, Printer, RefreshCw, Save, Trash2, Unplug } from 'lucide-react'
+import { Copy, Link2, Pencil, Plus, Printer, RefreshCw, Save, Trash2, Unplug, X } from 'lucide-react'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { Button, Input } from '../../../../components/ui'
 import type { CatalogData } from '../../../catalog/domain/types'
@@ -16,8 +16,10 @@ import {
   saveProductionRoute,
   setVenueProductionEnabled,
   unlinkAgent,
+  updateKdsDevice,
   type ProductionAdminState,
   type ProductionDestination,
+  type ProductionKdsDevice,
 } from '../services/productionAdminService'
 
 type Props = { catalog: CatalogData | null; context: TenantContext; disabled: boolean; runAction: RunAction; venueId: string }
@@ -70,7 +72,7 @@ export function ProductionCrm({ catalog, context, disabled, runAction, venueId }
         </div>
       </section>
 
-      <section className="grid gap-5 lg:grid-cols-2"><div className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]"><h2 className="text-lg font-black">Dispositivos KDS</h2><p className="mb-4 text-sm text-[var(--crm-text-muted)]">Cuentas reales, cada una ligada a un único destino y sin permisos de caja.</p><div className="space-y-2"><Input onChange={(event) => setKdsName(event.target.value)} value={kdsName} /><CrmSelect onChange={setKdsDestinationId} options={state.destinations.filter((destination) => destination.isActive && destination.kdsEnabled).map((destination) => ({ label: destination.name, value: destination.id }))} placeholder="Selecciona destino KDS" value={kdsDestinationId} /><Button disabled={disabled || !kdsDestinationId || !kdsName.trim()} fullWidth onClick={() => void runAction(async () => { setCredentials(await createKdsDevice(context, venueId, kdsDestinationId, kdsName)); await refresh() })} size="md" type="button" variant="primary"><Plus className="h-4 w-4" /> Crear KDS</Button>{credentials ? <div className="rounded-xl border border-[var(--crm-border)] p-3 text-sm"><strong>Credenciales (se muestran una vez)</strong><p className="font-mono">{credentials.email}</p><p className="font-mono">{credentials.password}</p><Button onClick={() => void navigator.clipboard.writeText(`${credentials.email}\n${credentials.password}`)} size="sm" type="button" variant="secondary"><Copy className="h-4 w-4" /> Copiar</Button></div> : null}{state.kdsDevices.map((device) => <div className="flex items-center justify-between rounded-xl border border-[var(--crm-border)] p-3 text-sm" key={device.id}><span><strong>{device.name}</strong> · {state.destinations.find((destination) => destination.id === device.destinationId)?.name ?? 'Destino eliminado'}</span><Button disabled={disabled} onClick={() => void mutate(() => deleteKdsDevice(context, device.id))} size="sm" type="button" variant="tertiary"><Trash2 className="h-4 w-4" /></Button></div>)}</div></div>
+      <section className="grid gap-5 lg:grid-cols-2"><div className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]"><h2 className="text-lg font-black">Dispositivos KDS</h2><p className="mb-4 text-sm text-[var(--crm-text-muted)]">Cuentas reales, cada una ligada a un único destino y sin permisos de caja.</p><div className="space-y-2"><Input onChange={(event) => setKdsName(event.target.value)} value={kdsName} /><CrmSelect onChange={setKdsDestinationId} options={state.destinations.filter((destination) => destination.isActive && destination.kdsEnabled).map((destination) => ({ label: destination.name, value: destination.id }))} placeholder="Selecciona destino KDS" value={kdsDestinationId} /><Button disabled={disabled || !kdsDestinationId || !kdsName.trim()} fullWidth onClick={() => void runAction(async () => { setCredentials(await createKdsDevice(context, venueId, kdsDestinationId, kdsName)); await refresh() })} size="md" type="button" variant="primary"><Plus className="h-4 w-4" /> Crear KDS</Button>{credentials ? <div className="rounded-xl border border-[var(--crm-border)] p-3 text-sm"><strong>Credenciales (se muestran una vez)</strong><p className="font-mono">{credentials.email}</p><p className="font-mono">{credentials.password}</p><Button onClick={() => void navigator.clipboard.writeText(`${credentials.email}\n${credentials.password}`)} size="sm" type="button" variant="secondary"><Copy className="h-4 w-4" /> Copiar</Button></div> : null}{state.kdsDevices.map((device) => <KdsDeviceRow destinationName={state.destinations.find((destination) => destination.id === device.destinationId)?.name ?? 'Destino eliminado'} device={device} disabled={disabled} key={device.id} onDelete={() => mutate(() => deleteKdsDevice(context, device.id))} onSave={(name, password) => mutate(() => updateKdsDevice(context, device.id, name, password || undefined))} />)}</div></div>
 
         <div className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]"><h2 className="text-lg font-black">Print Agent del local</h2><p className="mb-3 text-sm text-[var(--crm-text-muted)]">Un agente por local. El secreto solo se entrega al agente al consumir el código.</p>{state.agent ? <div className="mb-3 rounded-xl border border-[var(--crm-border)] p-3 text-sm"><p><strong>{state.agent.isActive ? 'Vinculado' : 'Desvinculado'}</strong> · {state.agent.workerState}</p><p>Versión {state.agent.version ?? 'desconocida'} · {state.agent.productionCapability ? 'compatible' : 'sin worker'}</p><p>Última señal: {state.agent.lastSeenAt ? new Date(state.agent.lastSeenAt).toLocaleString() : 'nunca'}</p></div> : null}<div className="flex flex-wrap gap-2"><Button disabled={disabled} onClick={() => void runAction(async () => setPairing(await createAgentPairingCode(venueId)))} size="md" type="button" variant="primary"><Link2 className="h-4 w-4" /> Generar código</Button>{state.agent?.isActive ? <Button disabled={disabled} onClick={() => void mutate(() => unlinkAgent(venueId))} size="md" type="button" variant="secondary"><Unplug className="h-4 w-4" /> Desvincular</Button> : null}</div>{pairing ? <div className="mt-3 rounded-xl border-2 border-[var(--crm-accent)] p-3 text-center"><p className="font-mono text-3xl font-black tracking-widest">{pairing.code}</p><p className="text-xs">Caduca {new Date(pairing.expiresAt).toLocaleTimeString()}</p></div> : null}</div>
       </section>
@@ -78,6 +80,44 @@ export function ProductionCrm({ catalog, context, disabled, runAction, venueId }
       <section className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]"><h2 className="text-lg font-black">Últimas impresiones</h2><div className="mt-3 space-y-2">{state.dispatches.map((dispatch) => <div className="flex flex-wrap items-center justify-between gap-2 rounded-xl border border-[var(--crm-border)] p-3 text-sm" key={dispatch.id}><div><strong>{dispatch.status.toUpperCase()}</strong> · {dispatch.printerId}<p className="text-[var(--crm-text-muted)]">{new Date(dispatch.createdAt).toLocaleString()} {dispatch.errorMessage ? `· ${dispatch.errorMessage}` : ''}</p></div><div className="flex gap-2"><Button disabled={disabled || !state.agent?.isActive} onClick={() => void mutate(() => reprintDispatch(dispatch.id))} size="sm" type="button" variant="secondary"><Printer className="h-4 w-4" /> Reimprimir</Button><Button disabled={disabled || !state.agent?.isActive || state.printers.length < 2} onClick={() => { const printerId = window.prompt(`Printer ID de destino:\n${state.printers.map((printer) => `${printer.printerId} — ${printer.displayName}`).join('\n')}`, dispatch.printerId); if (printerId) void mutate(() => reprintDispatch(dispatch.id, printerId)) }} size="sm" type="button" variant="tertiary">Reasignar</Button></div></div>)}</div></section>
     </> : null}
   </div>
+}
+
+function KdsDeviceRow(props: { destinationName: string; device: ProductionKdsDevice; disabled: boolean; onDelete: () => Promise<void>; onSave: (name: string, password: string) => Promise<void> }) {
+  const [editing, setEditing] = useState(false)
+  const [name, setName] = useState(props.device.name)
+  const [password, setPassword] = useState('')
+
+  const cancel = () => {
+    setEditing(false)
+    setName(props.device.name)
+    setPassword('')
+  }
+
+  const submit = async (event: FormEvent<HTMLFormElement>) => {
+    event.preventDefault()
+    await props.onSave(name.trim(), password)
+    setEditing(false)
+    setPassword('')
+  }
+
+  return <article className="rounded-xl border border-[var(--crm-border)] p-3 text-sm">
+    <div className="flex items-center justify-between gap-3">
+      <span className="min-w-0 truncate"><strong>{props.device.name}</strong> · {props.destinationName}</span>
+      <div className="flex shrink-0 gap-1">
+        <Button aria-label={`Editar ${props.device.name}`} disabled={props.disabled} onClick={() => setEditing(true)} size="sm" type="button" variant="tertiary"><Pencil className="h-4 w-4" /></Button>
+        <Button aria-label={`Eliminar ${props.device.name}`} disabled={props.disabled} onClick={() => void props.onDelete()} size="sm" type="button" variant="tertiary"><Trash2 className="h-4 w-4" /></Button>
+      </div>
+    </div>
+    {editing ? <form className="mt-3 grid gap-2 border-t border-[var(--crm-border)] pt-3 sm:grid-cols-2" onSubmit={(event) => void submit(event)}>
+      <Input aria-label="Nombre del KDS" disabled={props.disabled} maxLength={80} onChange={(event) => setName(event.target.value)} placeholder="Nombre del KDS" required value={name} />
+      <Input aria-label="Nueva contraseña" autoComplete="new-password" disabled={props.disabled} maxLength={6} minLength={6} onChange={(event) => setPassword(event.target.value)} placeholder="Nueva contraseña (6 caracteres)" type="password" value={password} />
+      <p className="text-xs text-[var(--crm-text-muted)] sm:col-span-2">Deja la contraseña vacía para conservar la actual.</p>
+      <div className="flex justify-end gap-2 sm:col-span-2">
+        <Button disabled={props.disabled} onClick={cancel} size="sm" type="button" variant="secondary"><X className="h-4 w-4" /> Cancelar</Button>
+        <Button disabled={props.disabled || !name.trim() || (password.length > 0 && password.length !== 6)} size="sm" type="submit" variant="primary"><Save className="h-4 w-4" /> Guardar</Button>
+      </div>
+    </form> : null}
+  </article>
 }
 
 function RouteEditor(props: { disabled: boolean; destinations: ProductionDestination[]; items: Array<{ id: string; name: string }>; label: string; onSave: (source: string, destination: string | null) => void; routes: Array<{ sourceId: string; destinationId: string }>; selectedDestination: string; selectedSource: string; setDestination: (value: string) => void; setSource: (value: string) => void }) {

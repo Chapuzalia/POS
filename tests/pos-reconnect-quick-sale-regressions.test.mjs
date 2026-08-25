@@ -2,6 +2,10 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { applyQuickSaleLinesUpdate } from '../src/features/quick-sale/services/lineUpdates.ts'
+import {
+  setQuickSaleTicketLineQuantity,
+  setQuickSaleTicketLineUnitPrice,
+} from '../src/features/quick-sale/services/ticketLineEdits.ts'
 
 const root = new URL('../', import.meta.url)
 
@@ -80,6 +84,18 @@ test('las actualizaciones funcionales conservan taps consecutivos y persisten el
   }
   assert.equal(visible[0].quantity, 4)
   assert.deepEqual(persisted.at(-1), visible)
+})
+
+test('el keypad actualiza cantidad y precio unitario sin mutar las demas lineas', () => {
+  const original = [line('A', 2), line('B')]
+  const withQuantity = setQuickSaleTicketLineQuantity(original, 'A', 7)
+  const withPrice = setQuickSaleTicketLineUnitPrice(withQuantity, 'A', 650)
+
+  assert.equal(withPrice[0].quantity, 7)
+  assert.equal(withPrice[0].unitPriceCents, 650)
+  assert.strictEqual(withPrice[1], original[1])
+  assert.equal(original[0].quantity, 2)
+  assert.equal(original[0].unitPriceCents, 100)
 })
 
 test('los breadcrumbs cubren conectividad, configuracion, montaje y restauracion', async () => {
