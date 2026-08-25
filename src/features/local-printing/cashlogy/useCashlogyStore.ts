@@ -29,6 +29,7 @@ type CashlogyState = {
   finish: (requestId: string) => void
   discardForRetry: () => void
   hide: () => void
+  show: () => void
   clearError: () => void
 }
 
@@ -119,7 +120,23 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
     recoveryPromise = null
     transactionPollingPromise = null
     const intent = loadCashlogyIntent(scope)
-    set({ scope, intent, transaction: null, error: null, modalOpen: Boolean(intent), isPolling: false })
+    const interruptedBeforeRequest = intent?.chargeRequestedAt === null
+    set({
+      scope,
+      intent,
+      transaction: null,
+      error: interruptedBeforeRequest
+        ? new CashlogyError({
+            code: 'CASHLOGY_INVALID_STATE',
+            message: 'El inicio anterior se interrumpió antes de enviar el cobro a Cashlogy. Puedes volver al pago con seguridad.',
+          })
+        : null,
+      modalOpen: Boolean(intent),
+      isCheckingHealth: false,
+      isStarting: false,
+      isPolling: false,
+      isCancelling: false,
+    })
   },
 
   async checkHealth(signal) {
@@ -149,69 +166,60 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
     }
     const existing = get().intent
     if (existing) {
-      if (existing.amountCents !== amountCents) throw new CashlogyError({ code: 'CASHLOGY_BUSY' })
-      if (settlementPromise) return settlementPromise
-      settlementPromise = get().recover(signal).then((transaction) => {
-        if (!transaction) throw new CashlogyError({ code: 'CASHLOGY_STATUS_UNKNOWN' })
-        return transaction
-      }).finally(() => { settlementPromise = null })
-      return settlementPromise
+      set({ modalOpen: true })
+      throw new CashlogyError({
+        code: 'CASHLOGY_BUSY',
+        message: existing.amountCents === amountCents
+          ? 'Este cobro Cashlogy ya está en curso. Revisa la operación abierta.'
+          : 'Hay otro cobro Cashlogy pendiente de resolución.',
+      })
     }
 
     if (get().isStarting || get().isPolling) throw new CashlogyError({ code: 'CASHLOGY_BUSY' })
-    set({ isStarting: true })
-    let health: CashlogyHealth
-    try {
-      health = await get().checkHealth(signal)
-    } catch (error) {
-      set({ isStarting: false })
-      throw error
-    }
-    if (!(health.enabled && health.ok && health.sessionState === 'ready')) {
-      const error = new CashlogyError({
-        code: health.enabled ? 'CASHLOGY_NOT_READY' : 'CASHLOGY_DISABLED',
-        message: health.lastError?.message || undefined,
-        originalCode: health.lastError?.code,
-        details: health,
-      })
-      set({ error, modalOpen: true, isStarting: false })
-      throw error
-    }
-
     const intent: CashlogyIntent = {
       requestId: createCashlogyRequestId('payment'),
       saleId,
       amountCents,
       terminalCode: print.cashlogyTerminalCode,
       transactionId: null,
+      chargeRequestedAt: null,
       createdAt: new Date().toISOString(),
     }
     persistIntent(intent)
     set({ intent, transaction: null, error: null, modalOpen: true, isStarting: true })
     settlementPromise = (async () => {
       try {
+        const health: CashlogyHealth = await get().checkHealth(signal)
+        if (!(health.enabled && health.ok && health.sessionState === 'ready')) {
+          throw new CashlogyError({
+            code: health.enabled ? 'CASHLOGY_NOT_READY' : 'CASHLOGY_DISABLED',
+            message: health.lastError?.message || undefined,
+            originalCode: health.lastError?.code,
+            details: health,
+          })
+        }
+
         let transaction: CashlogyTransaction
+        const requestedIntent = { ...intent, chargeRequestedAt: new Date().toISOString() }
+        persistIntent(requestedIntent)
+        set({ intent: requestedIntent })
         try {
           transaction = (await client().createCashlogyCharge({
-            requestId: intent.requestId,
-            saleId: intent.saleId,
-            amountCents: intent.amountCents,
-            terminalCode: intent.terminalCode,
+            requestId: requestedIntent.requestId,
+            saleId: requestedIntent.saleId,
+            amountCents: requestedIntent.amountCents,
+            terminalCode: requestedIntent.terminalCode,
             test: false,
           }, signal)).transaction
         } catch (chargeError) {
-          if (!isUncertainCashlogyError(chargeError)) {
-            persistIntent(null)
-            set({ intent: null, modalOpen: false })
-            throw chargeError
-          }
+          if (!isUncertainCashlogyError(chargeError)) throw chargeError
           try {
-            transaction = (await client().getCashlogyTransactionByRequestId(intent.requestId, signal)).transaction
+            transaction = (await client().getCashlogyTransactionByRequestId(requestedIntent.requestId, signal)).transaction
           } catch {
             throw chargeError
           }
         }
-        const identified = { ...intent, transactionId: transaction.id }
+        const identified = { ...requestedIntent, transactionId: transaction.id }
         persistIntent(identified)
         set({ intent: identified, transaction })
         return await resolveTransaction(transaction, signal)
@@ -280,13 +288,18 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
 
   discardForRetry() {
     const status = get().transaction?.status
-    if (status !== 'cancelled' && status !== 'failed') return
+    const failedBeforeTransaction = !get().transaction && Boolean(get().error) && !get().isStarting && !get().isPolling
+    if (status !== 'cancelled' && status !== 'failed' && !failedBeforeTransaction) return
     persistIntent(null)
     set({ intent: null, transaction: null, error: null, modalOpen: false, isPolling: false })
   },
 
   hide() {
     set({ modalOpen: false })
+  },
+
+  show() {
+    if (get().intent) set({ modalOpen: true })
   },
 
   clearError() { set({ error: null }) },

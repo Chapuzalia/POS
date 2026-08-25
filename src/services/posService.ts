@@ -597,6 +597,8 @@ type SessionTicketQueryRow = {
       amount_cents: number
       received_cents: number | null
       change_cents: number
+      cashlogy_request_id: string | null
+      cashlogy_transaction_id: string | null
     }> | null
   }> | null
   fiscal_invoices: Array<{
@@ -694,7 +696,9 @@ export async function loadSessionTicketsFromSupabase(
             method,
             amount_cents,
             received_cents,
-            change_cents
+            change_cents,
+            cashlogy_request_id,
+            cashlogy_transaction_id
           )
         ),
         fiscal_invoices (
@@ -835,6 +839,8 @@ export async function loadSessionTicketsFromSupabase(
         amountCents: payment.amount_cents,
         receivedCents: payment.received_cents,
         changeCents: payment.change_cents,
+        cashlogyRequestId: payment.cashlogy_request_id,
+        cashlogyTransactionId: payment.cashlogy_transaction_id,
       } : null,
       ...(ticket.fiscal_invoices?.[0] ? {
         fiscal: {
@@ -972,7 +978,22 @@ export async function syncEvent(event: OfflineEvent) {
   }
 
   if (event.kind === 'sale_payment_changed') {
-    const { changeCents, paymentId, paymentMethod, receivedCents, saleId } = event.payload
+    const { cashlogyRequestId, cashlogyTransactionId, changeCents, paymentId, paymentMethod, receivedCents, saleId } = event.payload
+    if (cashlogyRequestId || cashlogyTransactionId) {
+      if (!cashlogyRequestId || !cashlogyTransactionId || paymentMethod !== 'cash' || receivedCents === null) {
+        throw new Error('La identidad del cobro Cashlogy está incompleta.')
+      }
+      const { error } = await supabase.rpc('change_sale_payment_method_cashlogy', {
+        p_sale_id: saleId,
+        p_payment_id: paymentId,
+        p_received_cents: receivedCents,
+        p_change_cents: changeCents,
+        p_cashlogy_request_id: cashlogyRequestId,
+        p_cashlogy_transaction_id: cashlogyTransactionId,
+      })
+      if (error) throw error
+      return
+    }
     const { error: saleError } = await supabase
       .from('sales')
       .update({ payment_method: paymentMethod })

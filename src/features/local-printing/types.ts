@@ -320,6 +320,7 @@ export type CashlogyIntent = {
   amountCents: number
   terminalCode: string
   transactionId: string | null
+  chargeRequestedAt?: string | null
   createdAt: string
 }
 

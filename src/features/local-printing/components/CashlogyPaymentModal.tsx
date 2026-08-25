@@ -1,4 +1,5 @@
 import { AlertTriangle, Ban, CheckCircle2, LoaderCircle } from 'lucide-react'
+import { useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AppModal, Button, Metric } from '../../../components/ui'
 import { formatMoney } from '../../../lib/format'
@@ -22,7 +23,8 @@ const statusLabels: Record<CashlogyTransactionStatus, string> = {
   needs_attention: 'Revisión manual necesaria',
 }
 
-export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: { finalizeDisabled?: boolean; onFinalizeRecovered: (transaction: CashlogyTransaction) => void }) {
+export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: { finalizeDisabled?: boolean; onFinalizeRecovered: (transaction: CashlogyTransaction) => Promise<void> | void }) {
+  const [isFinalizing, setIsFinalizing] = useState(false)
   const state = useCashlogyStore(useShallow((value) => ({
     modalOpen: value.modalOpen,
     intent: value.intent,
@@ -42,23 +44,46 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
   const active = status ? cashlogyActiveStatuses.has(status) : state.isStarting || state.isPolling
   const acceptedCents = (state.transaction?.automaticAcceptedCents ?? 0) + (state.transaction?.manualAcceptedCents ?? 0)
   const critical = status === 'unknown' || status === 'needs_attention'
+  const startFailed = !state.transaction && Boolean(state.error) && !state.isStarting && !state.isPolling
   const canCancel = Boolean(status && cashlogyCancellableStatuses.has(status) && !state.isCancelling)
+
+  const finalizeRecovered = async () => {
+    if (!state.transaction || isFinalizing) return
+    setIsFinalizing(true)
+    try {
+      await onFinalizeRecovered(state.transaction)
+    } finally {
+      setIsFinalizing(false)
+    }
+  }
 
   return <AppModal dismissDisabled label="Cobro Cashlogy" maxWidth={520} onClose={state.hide}>
     <section className="w-full p-6">
       <div className={`flex items-start gap-3 rounded-[var(--radius)] border p-4 ${critical ? 'border-red-500 bg-red-500/10' : 'border-[var(--separator)] bg-[var(--background)]'}`}>
         {critical ? <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
           : status === 'completed' ? <CheckCircle2 className="mt-0.5 h-6 w-6 shrink-0 text-emerald-600" />
-            : status === 'cancelled' || status === 'failed' ? <Ban className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
+            : status === 'cancelled' || status === 'failed' || startFailed ? <Ban className="mt-0.5 h-6 w-6 shrink-0 text-amber-600" />
               : <LoaderCircle className="mt-0.5 h-6 w-6 shrink-0 animate-spin text-[var(--accent)]" />}
         <div>
-          <h2 className="text-xl font-black">{state.isCancelling ? 'Cancelando cobro…' : status ? statusLabels[status] : 'Recuperando operación'}</h2>
+          <h2 className="text-xl font-black">{state.isCancelling
+            ? 'Cancelando cobro…'
+            : status
+              ? statusLabels[status]
+              : startFailed
+                ? 'No se pudo iniciar el cobro'
+                : state.isStarting
+                  ? 'Conectando con Cashlogy…'
+                  : 'Recuperando operación'}</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">
             {critical
               ? 'No repitas el cobro. Comprueba físicamente la máquina y revisa la operación con el responsable de caja.'
+              : startFailed
+                ? 'Revisa el mensaje de error antes de volver al pago.'
               : status === 'waiting_for_cash'
                 ? 'Introduce billetes y monedas en Cashlogy. Puedes cancelar el cobro o volver al TPV.'
-                : 'Puedes volver al TPV; el cobro seguirá controlado y podrás consultar su estado de nuevo.'}
+                : state.isStarting
+                  ? 'Espera mientras se comprueba la máquina. El cobro ya está bloqueado para evitar duplicados.'
+                  : 'Puedes volver al TPV; el cobro seguirá controlado y podrás consultar su estado de nuevo.'}
           </p>
         </div>
       </div>
@@ -85,9 +110,13 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
           {state.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
           Cancelar cobro
         </Button> : null}
-        {status === 'completed' && state.transaction ? <Button disabled={finalizeDisabled} onClick={() => onFinalizeRecovered(state.transaction!)} variant="primary">Aplicar cobro confirmado</Button> : null}
+        {status === 'completed' && state.transaction ? <Button disabled={finalizeDisabled || isFinalizing} onClick={() => void finalizeRecovered()} variant="primary">
+          {isFinalizing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+          {isFinalizing ? 'Registrando venta…' : 'Aplicar cobro confirmado'}
+        </Button> : null}
         {status === 'cancelled' ? <Button onClick={state.discardForRetry}>Volver al pago</Button> : null}
         {status === 'failed' ? <Button onClick={state.discardForRetry} variant="primary">Iniciar un nuevo intento</Button> : null}
+        {startFailed ? <Button onClick={state.discardForRetry} variant="primary">Volver al pago</Button> : null}
         {critical ? <>
           <Button disabled={state.isPolling} onClick={() => void state.recover().catch(() => undefined)} variant="primary">
             {state.isPolling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}

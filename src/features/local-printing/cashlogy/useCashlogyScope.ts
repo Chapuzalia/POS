@@ -24,6 +24,7 @@ export function useCashlogyScope(context: TenantContext | null) {
       try { await useCashlogyStore.getState().checkHealth(abortController.signal) } catch { /* se muestra en el estado */ }
       const payment = useCashlogyStore.getState()
       const paymentNeedsRecovery = payment.intent
+        && payment.intent.chargeRequestedAt !== null
         && !payment.isPolling
         && !payment.isStarting
         && !payment.isCancelling
