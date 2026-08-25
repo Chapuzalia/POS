@@ -4,9 +4,11 @@ import type {
   PaymentMethod,
   SaleCreatedPayload,
   TenantContext,
+  TicketInvoice,
 } from '../../../types/index.ts'
 import type { RestaurantEqualSplit, RestaurantOrderLine, RestaurantOrderLineMove } from '../../tables/types.ts'
 import { calculateDiscountForLines } from '../../../lib/discounts.ts'
+import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import { normalizeCatalogSnapshot } from '../../catalog/services/catalogSnapshots.ts'
 import type { FiscalReceiptData } from '../../fiscal/service.ts'
 
@@ -45,6 +47,7 @@ type BuildRestaurantPrintPayloadInput = {
   ticketId: string
   totalCents: number
   fiscal?: FiscalReceiptData
+  invoice?: TicketInvoice | null
 }
 
 export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadInput): SaleCreatedPayload {
@@ -69,12 +72,17 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       discountAmountCents,
       totalCents: input.totalCents,
       createdAt: input.createdAt,
+      invoice: input.invoice ?? null,
     },
     lines: input.lines.map((line, index) => {
       const components = printComponents(line)
       const modifierDeltaCents = line.modifiers.reduce((total, modifier) => total + modifier.priceCents, 0)
         + components.reduce((total, component) => total + (component.modifiers ?? []).reduce((sum, modifier) => sum + modifier.priceCents, 0), 0)
       const componentDeltaCents = components.reduce((total, component) => total + component.priceDeltaCents, 0)
+      const taxRate = line.catalogSnapshot?.vatRate ?? input.context.venueDefaultTaxRate
+      const fiscalSnapshot = lineAllocations?.[index] && taxRate !== undefined && isValidTaxRate(taxRate)
+        ? { taxRate, ...calculateTaxFromGross(lineAllocations[index].netCents, taxRate) }
+        : null
       return {
       id: `${input.ticketId}:${line.id}`,
       ticketId: input.ticketId,
@@ -96,7 +104,7 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
       modifiers: line.modifiers,
       components,
       catalogSnapshot: normalizeCatalogSnapshot(line.catalogSnapshot, { productId: line.productId, productName: line.productName, variantId: line.variantId, variantName: line.variantName, basePriceCents: line.unitPriceCents }),
-      fiscalSnapshot: null,
+      fiscalSnapshot,
     }}),
     sale: {
       id: input.saleId,

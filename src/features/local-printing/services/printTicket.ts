@@ -71,7 +71,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
       printStatus: 'printed', printJobId: job.jobId || job.id || null,
       printRequestId: job.requestId || requestId, printedAt: job.printedAt || new Date().toISOString(), printErrorCode: null,
     })
-    sileo.success({ title: options.isReprint ? 'Copia impresa correctamente' : 'Ticket impreso correctamente' })
+    sileo.success({ title: options.isReprint ? 'Copia impresa correctamente' : payload.ticket.invoice ? 'Factura impresa correctamente' : 'Ticket impreso correctamente' })
   } catch (error) {
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'PRINT_FAILED'
     updateTicketPrintState(payload.sale.id, getPrintFailurePatch(code, requestId))

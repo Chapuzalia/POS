@@ -4,12 +4,14 @@ import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import type {
   AppliedDiscount,
   CashSession,
+  Customer,
   PaymentMethod,
   SaleCreatedPayload,
   SaleLinePayload,
   TenantContext,
   TicketLine,
 } from '../../../types/index.ts'
+import { customerFiscalSnapshot } from '../../customers/customerValidation.ts'
 import { nowIso } from '../../../utils/dates.ts'
 
 function buildTicketPayload(
@@ -20,6 +22,7 @@ function buildTicketPayload(
   receivedCents: number | null,
   discount: AppliedDiscount | null,
   validatePayment: boolean,
+  invoiceCustomer: Customer | null,
 ): SaleCreatedPayload {
   const createdAt = nowIso()
   const ticketId = createId()
@@ -102,6 +105,13 @@ function buildTicketPayload(
       discountAmountCents,
       totalCents,
       createdAt,
+      invoice: invoiceCustomer ? {
+        customerId: invoiceCustomer.id,
+        customer: customerFiscalSnapshot(invoiceCustomer),
+        series: null,
+        number: null,
+        issuedAt: null,
+      } : null,
     },
     lines: saleLines,
     sale: {
@@ -136,8 +146,9 @@ export function buildSalePayload(
   paymentMethod: PaymentMethod | null,
   receivedCents: number | null,
   discount: AppliedDiscount | null,
+  invoiceCustomer: Customer | null = null,
 ) {
-  return buildTicketPayload(context, cashSession, lines, paymentMethod, receivedCents, discount, true)
+  return buildTicketPayload(context, cashSession, lines, paymentMethod, receivedCents, discount, true, invoiceCustomer)
 }
 
 export function buildPreTicketPayload(
@@ -145,6 +156,7 @@ export function buildPreTicketPayload(
   cashSession: CashSession,
   lines: TicketLine[],
   discount: AppliedDiscount | null,
+  invoiceCustomer: Customer | null = null,
 ) {
-  return buildTicketPayload(context, cashSession, lines, null, null, discount, false)
+  return buildTicketPayload(context, cashSession, lines, null, null, discount, false, invoiceCustomer)
 }

@@ -7,6 +7,35 @@ export type CatalogStartTab = 'all' | 'top'
 export type PaymentMethod = 'cash' | 'card'
 export type HistoricalPaymentMethod = PaymentMethod | 'invitation' | 'other'
 
+export type CustomerFiscalSnapshot = {
+  legalName: string
+  taxId: string
+  address: string
+  postalCode: string
+  city: string
+  province: string
+  country: string
+  email: string | null
+  phone: string | null
+}
+
+export type Customer = CustomerFiscalSnapshot & {
+  id: string
+  tenantId: string
+  createdAt: string
+  updatedAt: string
+}
+
+export type CustomerCreateInput = CustomerFiscalSnapshot
+
+export type TicketInvoice = {
+  customerId: string
+  customer: CustomerFiscalSnapshot
+  series: string | null
+  number: string | null
+  issuedAt: string | null
+}
+
 export type DiscountCalculationType = 'percentage' | 'fixed'
 export type DiscountFixedApplication = 'ticket' | 'unit'
 export type DiscountRuleKind = 'discount' | 'promotion'
@@ -389,6 +418,7 @@ export type SaleCreatedPayload = {
     discountAmountCents: number
     totalCents: number
     createdAt: string
+    invoice?: TicketInvoice | null
   }
   lines: SaleLinePayload[]
   sale: {
@@ -421,6 +451,8 @@ export type SaleCreatedPayload = {
     qrBase64: string | null
     verificationUrl: string | null
     externalCode: string | null
+    errorCode: string | null
+    errorMessage: string | null
   }
 }
 

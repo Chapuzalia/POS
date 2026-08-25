@@ -5,7 +5,7 @@ import type {
   CashlogyAccounting, CashlogyCancelResponse, CashlogyCapabilities, CashlogyCashManagementOperation, CashlogyChargeRequest,
   CashlogyConnector, CashlogyDenominations, CashlogyDevice, CashlogyDeviceError, CashlogyDiagnosticLog,
   CashlogyHealth, CashlogyLevels, CashlogyOperationResponse, CashlogyRecoveryResult, CashlogyRequestedDenomination,
-  CashlogyTotal, CashlogyTransaction, DiscoveryProgress, PrintJob, Printer,
+  CashlogyTotal, CashlogyTransaction, DiscoveryProgress, PrintJob, Printer, PrintRequest,
 } from '../types.ts'
 
 type ClientOptions = { baseUrl: string; token?: string | null; defaultTimeoutMs?: number; fetchImpl?: typeof fetch }
@@ -166,7 +166,24 @@ export function createPrintAgentClient(options: ClientOptions) {
     getSelectedPrinter: (signal?: AbortSignal) => request<{ printer?: Printer | null } | Printer | null>('/api/v1/printers/selected', { retries: 1, signal }),
     selectPrinter: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; printer?: Printer }>('/api/v1/printers/select', { body: payload, method: 'POST', signal }),
     testPrinter: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/printers/test', { body: payload, method: 'POST', signal }),
-    printTicket: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/print', { body: payload, method: 'POST', signal }),
+    printTicket: async (payload: unknown, signal?: AbortSignal) => {
+      try {
+        return await request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/print', { body: payload, method: 'POST', signal })
+      } catch (error) {
+        const structured = payload as Partial<PrintRequest> | null
+        if (
+          !(error instanceof PrintAgentError) ||
+          error.code !== 'INVALID_REQUEST' ||
+          !structured?.elements?.length
+        ) throw error
+        const { elements: _unsupportedElements, ...legacyPayload } = structured
+        return request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/print', {
+          body: legacyPayload,
+          method: 'POST',
+          signal,
+        })
+      }
+    },
     openCashDrawer: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/cash-drawer/open', { body: payload, method: 'POST', signal }),
     getCashlogyHealth: (signal?: AbortSignal) => request<CashlogyHealth>('/api/v1/cashlogy/health', { retries: 1, signal }),
     discoverCashlogyConnectors: (signal?: AbortSignal) => request<{ connectors: CashlogyConnector[] }>('/api/v1/cashlogy/connectors/discover', { method: 'POST', signal }),

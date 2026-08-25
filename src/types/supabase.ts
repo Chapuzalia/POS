@@ -60,3 +60,19 @@ export type TicketLineProductSalesRow = {
   allocated_quantity: number | null
   line_total_cents: number
 }
+
+export type CustomerRow = {
+  id: string
+  tenant_id: string
+  legal_name: string
+  tax_id: string
+  address: string
+  postal_code: string
+  city: string
+  province: string
+  country: string
+  email: string | null
+  phone: string | null
+  created_at: string
+  updated_at: string
+}

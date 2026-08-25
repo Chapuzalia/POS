@@ -6,6 +6,7 @@ export { summarizeSales } from '../features/cash-registers/services/cashSummary.
 export { buildSalePayload } from '../features/quick-sale/services/salePayload.ts'
 import type {
   CashClosedPayload,
+  CustomerFiscalSnapshot,
   HistoricalPaymentMethod,
   LoginInput,
   OfflineEvent,
@@ -544,6 +545,12 @@ type SessionTicketQueryRow = {
   } | null
   total_cents: number
   local_created_at: string
+  is_invoice: boolean
+  customer_id: string | null
+  customer_snapshot: CustomerFiscalSnapshot | null
+  invoice_series: string | null
+  invoice_number: string | null
+  invoice_issued_at: string | null
   ticket_lines: Array<{
     id: string
     product_id: string | null
@@ -598,6 +605,8 @@ type SessionTicketQueryRow = {
     external_code: string | null
     qr_base64: string | null
     verification_url: string | null
+    error_code: string | null
+    error_message: string | null
   }> | null
 }
 
@@ -631,6 +640,12 @@ export async function loadSessionTicketsFromSupabase(
         discount_amount_cents,
         total_cents,
         local_created_at,
+        is_invoice,
+        customer_id,
+        customer_snapshot,
+        invoice_series,
+        invoice_number,
+        invoice_issued_at,
         discount_rule_kind,
         discount_scope,
         discount_automatic,
@@ -681,7 +696,7 @@ export async function loadSessionTicketsFromSupabase(
           )
         ),
         fiscal_invoices (
-          id, provider, status, external_uuid, external_code, qr_base64, verification_url
+          id, provider, status, external_uuid, external_code, qr_base64, verification_url, error_code, error_message
         )
       `)
       .eq('tenant_id', context.tenantId)
@@ -788,6 +803,13 @@ export async function loadSessionTicketsFromSupabase(
         discountAmountCents: ticket.discount_amount_cents ?? 0,
         totalCents: ticket.total_cents,
         createdAt: ticket.local_created_at,
+        invoice: ticket.is_invoice && ticket.customer_id && ticket.customer_snapshot ? {
+          customerId: ticket.customer_id,
+          customer: ticket.customer_snapshot,
+          series: ticket.invoice_series,
+          number: ticket.invoice_number,
+          issuedAt: ticket.invoice_issued_at,
+        } : null,
       },
       lines,
       sale: {
@@ -821,6 +843,8 @@ export async function loadSessionTicketsFromSupabase(
           externalCode: ticket.fiscal_invoices[0].external_code,
           qrBase64: ticket.fiscal_invoices[0].qr_base64,
           verificationUrl: ticket.fiscal_invoices[0].verification_url,
+          errorCode: ticket.fiscal_invoices[0].error_code,
+          errorMessage: ticket.fiscal_invoices[0].error_message,
         },
       } : {}),
     }
@@ -918,12 +942,16 @@ export async function syncEvent(event: OfflineEvent) {
   }
 
   if (event.kind === 'sale_created') {
-    const rpcName = 'subtotalCents' in event.payload.ticket
+    const invoiceCustomerId = event.payload.ticket.invoice?.customerId ?? null
+    const rpcName = invoiceCustomerId
+      ? 'sync_invoice_sale_created'
+      : 'subtotalCents' in event.payload.ticket
       ? 'sync_sale_created_v2'
       : 'sync_sale_created'
     const { error } = await supabase.rpc(rpcName, {
       p_event_id: event.id,
       p_payload: event.payload,
+      ...(invoiceCustomerId ? { p_customer_id: invoiceCustomerId } : {}),
     })
 
     if (error) {

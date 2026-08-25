@@ -3,17 +3,39 @@ import { hasPrintControlCharacters } from '../services/receiptFormatters.ts'
 
 const cents = z.number().int().nonnegative()
 
+const printLineSchema = z.string().max(1000).refine(
+  (line) => !hasPrintControlCharacters(line),
+  'Cada elemento debe ser una sola línea sin caracteres de control.',
+)
+
+const printElementSchema = z.discriminatedUnion('type', [
+  z.object({ type: z.literal('text'), value: printLineSchema }).strict(),
+  z.object({
+    type: z.literal('qr'),
+    data: z.string().min(1).max(4096).refine(
+      (value) => !hasPrintControlCharacters(value),
+      'El contenido del QR no puede contener caracteres de control.',
+    ),
+    size: z.number().int().min(1).max(16).optional(),
+    errorCorrection: z.enum(['L', 'M', 'Q', 'H']).optional(),
+  }).strict(),
+])
+
 export const printRequestSchema = z.object({
   requestId: z.string().trim().min(3).max(200),
   printerId: z.string().trim().min(1).max(200),
   force: z.boolean(),
-  lines: z.array(z.string().max(1000).refine(
-    (line) => !hasPrintControlCharacters(line),
-    'Cada elemento debe ser una sola línea sin caracteres de control.',
-  )).min(1).max(1000).refine(
+  lines: z.array(printLineSchema).min(1).max(1000).refine(
     (lines) => lines.reduce((total, line) => total + line.length, 0) <= 100000,
     'El documento supera los 100.000 caracteres.',
   ),
+  elements: z.array(printElementSchema).min(1).max(1000).refine(
+    (elements) => elements.reduce(
+      (total, element) => total + (element.type === 'text' ? element.value.length : element.data.length),
+      0,
+    ) <= 100000,
+    'El documento estructurado supera los 100.000 caracteres.',
+  ).optional(),
   options: z.object({
     cut: z.boolean(),
     openCashDrawer: z.boolean(),

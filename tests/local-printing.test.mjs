@@ -9,6 +9,7 @@ import { getAutomaticSaleHardwareAction, shouldOpenCashDrawer } from '../src/fea
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
 import { buildSalePayload } from '../src/features/quick-sale/services/salePayload.ts'
 import { pollPrintJob } from '../src/features/local-printing/services/jobPolling.ts'
+import { recoverSelectedPrinter } from '../src/features/local-printing/services/printerSelectionRecovery.ts'
 import { clearPrintAgentConfig, loadPrintAgentConfig, savePrintAgentConfig } from '../src/features/local-printing/services/printAgentStorage.ts'
 import { printRequestSchema } from '../src/features/local-printing/schemas/printSchemas.ts'
 import {
@@ -40,6 +41,26 @@ const sale = {
     venueId: 'mess', deviceId: 'ipad', userId: 'user', totalCents: 1600, paymentMethod: 'cash', createdAt: '2026-07-18T16:30:00+02:00',
   },
   payment: { id: 'payment', tenantId: 'tenant', saleId: 'sale_123', method: 'cash', amountCents: 1600, receivedCents: 2000, changeCents: 400 },
+}
+
+const verifactuUrl = 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345678&numserie=F-2026-000123&fecha=21-08-2026&importe=16.00'
+
+function completeInvoiceSale() {
+  const invoiceSale = structuredClone(sale)
+  invoiceSale.ticket.invoice = {
+    customerId: 'customer_1',
+    customer: {
+      legalName: 'Cliente Ejemplo SL', taxId: 'B87654321', address: 'Calle Mayor 1',
+      postalCode: '08700', city: 'Igualada', province: 'Barcelona', country: 'España',
+      email: null, phone: null,
+    },
+    series: 'F-2026', number: '000123', issuedAt: '2026-08-21T18:30:00+02:00',
+  }
+  invoiceSale.fiscal = {
+    invoiceId: 'fiscal_1', provider: 'verifactu', status: 'accepted', uuid: 'uuid_1',
+    externalCode: 'VF-123', qrBase64: null, verificationUrl: verifactuUrl,
+  }
+  return invoiceSale
 }
 
 const quickSaleContext = { tenantId: 'tenant', venueId: 'mess', venueDefaultTaxRate: 21, deviceId: 'ipad', userId: 'user' }
@@ -95,6 +116,19 @@ test('construye headers sin filtrar el token a la URL o al cuerpo', () => {
   assert.equal(buildPrintAgentHeaders(null).Authorization, undefined)
 })
 
+test('recupera la selección remota perdida y no confunde errores de configuración con red', async () => {
+  const storeSource = readFileSync(new URL('../src/features/local-printing/store/usePrintAgentStore.ts', import.meta.url), 'utf8')
+  const selectedIds = []
+  const recovered = await recoverSelectedPrinter(null, 'simulated-printer', async (printerId) => {
+    selectedIds.push(printerId)
+    return { id: printerId, paperWidth: 80, characterSet: 'CP858' }
+  })
+  assert.equal(recovered.id, 'simulated-printer')
+  assert.deepEqual(selectedIds, ['simulated-printer'])
+  assert.deepEqual(await recoverSelectedPrinter({ id: 'physical' }, 'simulated-printer', async () => { throw new Error('no debe ejecutarse') }), { id: 'physical' })
+  assert.match(storeSource, /printRequestSchema\.parse\(rawPayload\)[\s\S]*code: 'INVALID_REQUEST'/)
+})
+
 test('distingue timeout, error de red, HTTP, token ausente y respuesta no JSON', async () => {
   const abortableFetch = (_url, init) => new Promise((_resolve, reject) => {
     init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
@@ -113,6 +147,29 @@ test('distingue timeout, error de red, HTTP, token ausente y respuesta no JSON',
 
   const anonymous = createPrintAgentClient({ baseUrl: 'https://tpv-printer.local:8443', fetchImpl: async () => new Response('{}') })
   await assert.rejects(anonymous.getServerInfo(), (error) => error.code === 'UNAUTHORIZED')
+})
+
+test('reintenta con lines cuando un servidor antiguo no admite elements', async () => {
+  const payload = mapSaleToPrintRequest({
+    sale: completeInvoiceSale(), establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80,
+  })
+  const bodies = []
+  const client = createPrintAgentClient({
+    baseUrl: 'https://tpv-printer.local:8443', token: 'secret',
+    fetchImpl: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return bodies.length === 1
+        ? new Response(JSON.stringify({ code: 'INVALID_REQUEST' }), { status: 400 })
+        : new Response(JSON.stringify({ ok: true, jobId: 'legacy-job', status: 'printed' }), { status: 200 })
+    },
+  })
+  const response = await client.printTicket(payload)
+  assert.equal(response.jobId, 'legacy-job')
+  assert.equal(bodies.length, 2)
+  assert.ok(bodies[0].elements.some((element) => element.type === 'qr'))
+  assert.equal(bodies[1].elements, undefined)
+  assert.ok(bodies[1].lines.join('').includes('prewww2.aeat.es'))
 })
 
 test('permite cancelar una consulta mediante AbortSignal', async () => {
@@ -148,6 +205,52 @@ test('mapea cubatas, extras, efectivo e importes enteros con idempotencia establ
   assert.match(text, /Cambio[ ]+4,00 €/)
   assert.equal(payload.options.openCashDrawer, true)
   assert.deepEqual(Object.keys(printRequestSchema.parse(payload)).sort(), ['force', 'lines', 'options', 'printerId', 'requestId'])
+})
+
+test('un ticket normal sin VeriFactu no añade QR', () => {
+  const normalSale = structuredClone(sale)
+  const payload = mapSaleToPrintRequest({
+    sale: normalSale, establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80,
+  })
+  assert.equal(payload.elements, undefined)
+  assert.equal(payload.lines.join('').includes('prewww2.aeat.es'), false)
+})
+
+test('una factura simplificada sustituye el enlace VeriFactu por un QR con el contenido exacto', () => {
+  const simplifiedInvoiceSale = structuredClone(sale)
+  simplifiedInvoiceSale.fiscal = {
+    invoiceId: 'fiscal_ticket', provider: 'verifactu', status: 'accepted', uuid: 'uuid_ticket',
+    externalCode: null, qrBase64: null, verificationUrl: verifactuUrl,
+  }
+  const payload = mapSaleToPrintRequest({
+    sale: simplifiedInvoiceSale, establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80,
+  })
+  const qrElements = payload.elements?.filter((element) => element.type === 'qr') ?? []
+  assert.equal(qrElements.length, 1)
+  assert.equal(qrElements[0].data, verifactuUrl)
+  assert.ok(payload.lines.join('').includes('prewww2.aeat.es'), 'lines conserva el fallback para agentes antiguos')
+  assert.equal(
+    payload.elements.some((element) => element.type === 'text' && element.value.includes('prewww2.aeat.es')),
+    false,
+  )
+})
+
+test('una factura completa sustituye el enlace VeriFactu por un QR con el contenido exacto', () => {
+  const payload = mapSaleToPrintRequest({
+    sale: completeInvoiceSale(), establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80,
+  })
+  const qrElements = payload.elements?.filter((element) => element.type === 'qr') ?? []
+  assert.equal(qrElements.length, 1)
+  assert.equal(qrElements[0].data, verifactuUrl)
+  assert.ok(payload.lines.join('').includes('prewww2.aeat.es'), 'lines conserva el fallback para agentes antiguos')
+  assert.equal(
+    payload.elements.some((element) => element.type === 'text' && element.value.includes('prewww2.aeat.es')),
+    false,
+  )
+  assert.equal(printRequestSchema.parse(payload).elements[0].type, 'text')
 })
 
 test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipos', () => {

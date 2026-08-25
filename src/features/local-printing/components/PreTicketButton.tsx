@@ -1,7 +1,7 @@
 import { LoaderCircle, Printer } from 'lucide-react'
 import { sileo } from 'sileo'
 import { Button } from '../../../components/ui'
-import type { AppliedDiscount, CashSession, TenantContext, TicketLine } from '../../../types'
+import type { AppliedDiscount, CashSession, Customer, TenantContext, TicketLine } from '../../../types'
 import { getPrintAgentErrorMessage } from '../api/PrintAgentError'
 import { usePrintAgent } from '../hooks/usePrintAgent'
 import { printPreTicket } from '../services/printPreTicket'
@@ -11,10 +11,11 @@ type Props = {
   context: TenantContext
   disabled?: boolean
   discount: AppliedDiscount | null
+  invoiceCustomer?: Customer | null
   lines: TicketLine[]
 }
 
-export function PreTicketButton({ cashSession, context, disabled, discount, lines }: Props) {
+export function PreTicketButton({ cashSession, context, disabled, discount, invoiceCustomer, lines }: Props) {
   const agent = usePrintAgent()
   const isConfigured = agent.hasToken && Boolean(agent.selectedPrinterId)
 
@@ -22,7 +23,7 @@ export function PreTicketButton({ cashSession, context, disabled, discount, line
 
   async function handlePrint() {
     try {
-      await printPreTicket({ cashSession, context, discount, lines })
+      await printPreTicket({ cashSession, context, discount, invoiceCustomer, lines })
       sileo.success({ title: 'Pre-ticket impreso correctamente' })
     } catch (error) {
       sileo.warning({

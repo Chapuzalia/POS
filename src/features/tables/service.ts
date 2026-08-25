@@ -1,7 +1,7 @@
 import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import { normalizeCatalogSnapshot } from '../catalog/services/catalogSnapshots'
-import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TenantContext, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
+import type { AppliedDiscount, Customer, PaymentMethod, SaleLineCatalogSnapshot, TenantContext, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
 import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, QuickSaleVirtualTableCreateInput, QuickSaleVirtualTableCreateResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult, VirtualRestaurantTableCreateInput, VirtualRestaurantTableDeleteInput } from './types'
 import { getOrderPendingUnits } from './service-status'
 import { buildCatalogOrderLinesPayload, buildRestaurantOrderLinesPayload } from './order-line-payload'
@@ -330,13 +330,14 @@ export async function moveRestaurantOrderLines(sourceOrderId: string, targetOrde
   if (error) throw error
   return data as MoveRestaurantOrderLinesResult
 }
-export async function closeRestaurantOrder(orderId: string, paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending = false, discount: AppliedDiscount | null = null) {
-  const { data, error } = await requireSupabase().rpc('close_restaurant_order_checked_v2', {
+export async function closeRestaurantOrder(orderId: string, paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending = false, discount: AppliedDiscount | null = null, invoiceCustomer: Customer | null = null) {
+  const { data, error } = await requireSupabase().rpc(invoiceCustomer ? 'close_restaurant_order_with_invoice' : 'close_restaurant_order_checked_v2', {
     p_order_id: orderId,
     p_payment_method: paymentMethod,
     p_received_cents: receivedCents,
     p_allow_pending: allowPending,
     p_discount: discount,
+    ...(invoiceCustomer ? { p_customer_id: invoiceCustomer.id } : {}),
   })
   if (error) throw error
   return data as CloseRestaurantOrderResult

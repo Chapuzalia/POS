@@ -382,8 +382,13 @@ export type PrintRequest = {
   printerId: string
   force: boolean
   lines: string[]
+  elements?: PrintElement[]
   options: { cut: boolean; openCashDrawer: boolean; copies: number }
 }
+
+export type PrintElement =
+  | { type: 'text'; value: string }
+  | { type: 'qr'; data: string; size?: number; errorCorrection?: 'L' | 'M' | 'Q' | 'H' }
 
 export type PrinterLayout = {
   columns: 32 | 48

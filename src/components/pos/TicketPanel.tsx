@@ -7,16 +7,20 @@ import type { TicketLine } from "../../types";
 import { cx } from "../../utils/cx";
 import { Button } from "../ui";
 import { MenuComponentDetails } from "./MenuComponentDetails";
+import { InvoiceTicketNotice } from './InvoiceTicketNotice'
 
 type TicketPanelProps = {
   isBusy: boolean;
   lineDiscounts: LineDiscountAllocation[];
   lines: TicketLine[];
+  invoiceCustomerName?: string | null;
+  onChangeInvoiceCustomer?: () => void;
   onClear: () => void;
   onDecrement: (lineId: string) => void;
   onEdit: (line: TicketLine) => void;
   onIncrement: (lineId: string) => void;
   onRemove: (lineId: string) => void;
+  onRemoveInvoiceCustomer?: () => void;
 };
 
 const swipeDeleteThreshold = 72;
@@ -34,13 +38,17 @@ export function TicketPanel({
   lineDiscounts,
   isBusy,
   lines,
+  invoiceCustomerName,
+  onChangeInvoiceCustomer,
   onDecrement,
   onEdit,
   onIncrement,
   onRemove,
+  onRemoveInvoiceCustomer,
 }: TicketPanelProps) {
   return (
     <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
+      {invoiceCustomerName && onChangeInvoiceCustomer && onRemoveInvoiceCustomer ? <InvoiceTicketNotice customerName={invoiceCustomerName} disabled={isBusy} onChange={onChangeInvoiceCustomer} onRemove={onRemoveInvoiceCustomer} /> : null}
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
         {lines.length === 0 ? (
           <div className="flex h-full min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">

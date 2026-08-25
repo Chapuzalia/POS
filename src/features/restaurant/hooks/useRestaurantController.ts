@@ -6,6 +6,7 @@ import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '
 import type {
   AppliedDiscount,
   CashSession,
+  Customer,
   PaymentMethod,
   ProductLineSelection,
   SaleCreatedPayload,
@@ -44,7 +45,8 @@ import {
   saveRestaurantOrderLines,
 } from '../../tables/service'
 import { canDecreaseLineQuantity } from '../../tables/service-status'
-import { autoIssueFiscalTicket } from '../../fiscal/service'
+import { autoIssueFiscalTicket, loadFiscalReceiptData } from '../../fiscal/service'
+import { loadTicketInvoice } from '../../customers/service'
 import type {
   PayRestaurantEqualPartResult,
   PayRestaurantOrderItemsResult,
@@ -70,7 +72,12 @@ async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string)
     return (await autoIssueFiscalTicket(context.tenantId, ticketId)).fiscal
   } catch (error) {
     console.error('Automatic fiscal submission failed before restaurant print', error)
-    return undefined
+    try {
+      return await loadFiscalReceiptData(context.tenantId, ticketId) ?? undefined
+    } catch (receiptError) {
+      console.error('Could not load fiscal rejection before restaurant print', receiptError)
+      return undefined
+    }
   }
 }
 
@@ -120,6 +127,7 @@ export function useRestaurantController(options: Options) {
   const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
   const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null)
+  const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null)
   const [pendingLineRemoval, setPendingLineRemoval] = useState<RestaurantOrderDetail['lines'][number] | null>(null)
   const [splitOrderGroup, setSplitOrderGroup] = useState<RestaurantOrderGroupDetail | null>(null)
   const [equalSplitOpen, setEqualSplitOpen] = useState(false)
@@ -129,6 +137,10 @@ export function useRestaurantController(options: Options) {
     isOnline: options.isOnline,
     onError: (message) => options.onError(message),
   })
+  const invoiceOrderId = posView.type === 'table_order' ? posView.orderId : null
+  useEffect(() => {
+    setInvoiceCustomer(null)
+  }, [invoiceOrderId])
 
   const settlePayment = useCallback(async (
     method: PaymentMethod | null,
@@ -653,13 +665,17 @@ export function useRestaurantController(options: Options) {
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), options.appliedDiscount).totalCents
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
-      const result = await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines))
+      const result = await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines), invoiceCustomer)
       if (result.requiresConfirmation) {
         setPendingPayment({ method, receivedCents: cashlogy.receivedCents, pendingUnits: result.pendingUnits })
         return
       }
       finishCashlogyPayment(cashlogy.transaction)
       const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
+      const invoice = invoiceCustomer ? await loadTicketInvoice(options.context.tenantId, result.ticketId) : null
+      if (invoiceCustomer && !invoice) {
+        throw new Error('El cobro se ha registrado, pero no se ha confirmado el número de factura. No se imprimirá como ticket normal.')
+      }
       void options.printSale(buildRestaurantPrintPayload({
         cashSession: options.cashSession,
         context: options.context,
@@ -675,6 +691,7 @@ export function useRestaurantController(options: Options) {
         ticketId: result.ticketId,
         totalCents: result.totalCents,
         fiscal,
+        invoice,
       }))
       await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
       const nextOrder = result.nextOrderId ? await loadRestaurantOrder(options.context, result.nextOrderId) : null
@@ -684,6 +701,7 @@ export function useRestaurantController(options: Options) {
       setPendingPayment(null)
       options.setMobileTicketOpen(false)
       options.setAppliedDiscount(null)
+      setInvoiceCustomer(null)
       options.onPaidFeedback(method)
       setPosView(nextOrder
         ? { type: 'table_order', orderId: nextOrder.order.id }
@@ -694,7 +712,7 @@ export function useRestaurantController(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [draft, options, realtime, refreshSales, settlePayment])
+  }, [draft, invoiceCustomer, options, realtime, refreshSales, settlePayment])
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false
@@ -823,6 +841,7 @@ export function useRestaurantController(options: Options) {
     setSplitOrderGroup(null)
     setEqualSplitOpen(false)
     setEqualSplit(null)
+    setInvoiceCustomer(null)
   }, [draft])
 
   return {
@@ -838,6 +857,7 @@ export function useRestaurantController(options: Options) {
     confirmLineRemoval,
     equalSplit,
     equalSplitOpen,
+    invoiceCustomer,
     map: realtime.map,
     moveOrder,
     moveOrderId,
@@ -854,6 +874,7 @@ export function useRestaurantController(options: Options) {
     posView,
     prepareMove,
     requestCloseCash,
+    removeInvoiceCustomer: () => setInvoiceCustomer(null),
     reset,
     returnToMap,
     saveState: draft.saveState,
@@ -862,6 +883,7 @@ export function useRestaurantController(options: Options) {
     serveOrderFully: () => void runServiceAction((order) => markRestaurantOrderFullyServed(order.order.id)),
     setEqualSplit,
     setEqualSplitOpen,
+    setInvoiceCustomer,
     setMap: realtime.setMap,
     setMoveOrderId,
     setPendingLineRemoval,

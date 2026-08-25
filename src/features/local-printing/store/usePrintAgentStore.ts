@@ -400,7 +400,14 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     },
 
     async printTicket(rawPayload, signal) {
-      const payload = printRequestSchema.parse(rawPayload)
+      let payload: PrintRequest
+      try {
+        payload = printRequestSchema.parse(rawPayload)
+      } catch (error) {
+        const mapped = new PrintAgentError({ code: 'INVALID_REQUEST', cause: error })
+        set({ lastConnectionError: mapped })
+        throw mapped
+      }
       set({ isPrintingTicket: true, lastConnectionError: null, currentJob: { requestId: payload.requestId, status: 'pending' } })
       const activeClient = client()
       try {

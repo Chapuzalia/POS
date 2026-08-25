@@ -9,6 +9,7 @@ import { loadProductSalesStatsFromSupabase } from '../../../services/posService'
 import type {
   AppliedDiscount,
   CashSession,
+  Customer,
   Discount,
   PaymentMethod,
   ProductLineSelection,
@@ -63,6 +64,7 @@ type Options = {
 export function useQuickSale(options: Options) {
   const [lines, setLines] = useState<TicketLine[]>([])
   const [discount, setDiscount] = useState<AppliedDiscount | null>(null)
+  const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null)
   const [excludedAutomaticDiscountIds, setExcludedAutomaticDiscountIds] = useState<string[]>([])
   const [productDialog, setProductDialog] = useState<ProductDialogState | null>(null)
   const [cashPaymentOpen, setCashPaymentOpen] = useState(false)
@@ -136,6 +138,7 @@ export function useQuickSale(options: Options) {
     cashSession: options.cashSession,
     lines,
     discount: activeDiscount,
+    invoiceCustomer,
     ledger: options.ledger,
     tickets: options.tickets,
     isOnline: options.isOnline,
@@ -152,6 +155,7 @@ export function useQuickSale(options: Options) {
       setDiscount(null)
       setExcludedAutomaticDiscountIds([])
       setDiscountModalOpen(false)
+      setInvoiceCustomer(null)
       setPaidFeedback(method)
       window.setTimeout(() => setPaidFeedback(null), 500)
     },
@@ -223,6 +227,7 @@ export function useQuickSale(options: Options) {
   const reset = useCallback((nextLines: TicketLine[] = []) => {
     setLines(nextLines)
     setDiscount(null)
+    setInvoiceCustomer(null)
     setExcludedAutomaticDiscountIds([])
     setProductDialog(null)
     setCashPaymentOpen(false)
@@ -240,6 +245,7 @@ export function useQuickSale(options: Options) {
     clear: () => {
       updateLines(() => [])
       setDiscount(null)
+      setInvoiceCustomer(null)
       setExcludedAutomaticDiscountIds([])
     },
     closeCashPayment: () => setCashPaymentOpen(false),
@@ -251,6 +257,7 @@ export function useQuickSale(options: Options) {
     discountModalOpen,
     editLine,
     hydrate: (nextLines: TicketLine[]) => setLines(nextLines),
+    invoiceCustomer,
     lineDiscounts: discountCalculation.lineAllocations,
     lines,
     openCashPayment: () => setCashPaymentOpen(true),
@@ -260,9 +267,11 @@ export function useQuickSale(options: Options) {
     productDialog,
     refreshProductStats,
     removeDiscount,
+    removeInvoiceCustomer: () => setInvoiceCustomer(null),
     removeLine: (lineId: string) => updateLines((previous) => previous.filter((line) => line.id !== lineId)),
     reset,
     selectProduct,
+    setInvoiceCustomer,
     setDiscount: resetDiscount,
     subtotalCents,
     totalCents: discountCalculation.totalCents,
