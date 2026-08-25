@@ -44,7 +44,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
   const critical = status === 'unknown' || status === 'needs_attention'
   const canCancel = Boolean(status && cashlogyCancellableStatuses.has(status) && !state.isCancelling)
 
-  return <AppModal dismissDisabled={status === 'completed'} label="Cobro Cashlogy" maxWidth={520} onClose={state.hide}>
+  return <AppModal dismissDisabled label="Cobro Cashlogy" maxWidth={520} onClose={state.hide}>
     <section className="w-full p-6">
       <div className={`flex items-start gap-3 rounded-[var(--radius)] border p-4 ${critical ? 'border-red-500 bg-red-500/10' : 'border-[var(--separator)] bg-[var(--background)]'}`}>
         {critical ? <AlertTriangle className="mt-0.5 h-6 w-6 shrink-0 text-red-600" />
