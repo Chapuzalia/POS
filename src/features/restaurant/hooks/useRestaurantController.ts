@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { createId, getLineSignature } from '../../../lib/format'
 import { calculateDiscountForLines } from '../../../lib/discounts'
 import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
@@ -66,6 +66,7 @@ import {
   getCashlogyPaymentAmounts,
   settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
+import type { CashlogyTransaction } from '../../local-printing/types'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 import {
   loadOrderProductionState,
@@ -88,7 +89,12 @@ async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string)
   }
 }
 
-type PendingPayment = { method: PaymentMethod | null; receivedCents: number | null; pendingUnits: number }
+type PendingPayment = {
+  method: PaymentMethod | null
+  receivedCents: number | null
+  pendingUnits: number
+  cashlogyTransaction?: CashlogyTransaction | null
+}
 
 type Options = {
   appliedDiscount: AppliedDiscount | null
@@ -131,6 +137,7 @@ function withCalculationLines(
 }
 
 export function useRestaurantController(options: Options) {
+  const paymentLockRef = useRef(false)
   const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
   const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null)
@@ -178,9 +185,13 @@ export function useRestaurantController(options: Options) {
     method: PaymentMethod | null,
     amountCents: number,
     receivedCents: number | null,
+    confirmedTransaction: CashlogyTransaction | null = null,
   ) => {
     if (method !== 'cash') return { transaction: null, receivedCents, changeCents: null }
-    const transaction = await settleCashlogyPaymentIfConfigured(amountCents)
+    const transaction = confirmedTransaction ?? await settleCashlogyPaymentIfConfigured(amountCents)
+    if (transaction && transaction.requestedAmountCents !== amountCents) {
+      throw new Error('El importe del cobro confirmado en Cashlogy no coincide con la venta actual.')
+    }
     const amounts = getCashlogyPaymentAmounts(transaction, amountCents)
     return {
       transaction,
@@ -480,6 +491,8 @@ export function useRestaurantController(options: Options) {
   ): Promise<PayRestaurantEqualPartResult> => {
     const current = draft.getCurrentOrder()
     if (!options.context || !options.cashSession || !equalSplit || !current) throw new Error('No hay una división activa.')
+    if (paymentLockRef.current) throw new Error('Ya hay un cobro en curso.')
+    paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
     try {
@@ -496,7 +509,7 @@ export function useRestaurantController(options: Options) {
             productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
           })), effectiveDiscount).totalCents
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
-      const result = await payRestaurantEqualPart(equalSplit.id, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount)
+      const result = await payRestaurantEqualPart(equalSplit.id, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount, cashlogy.transaction)
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
         finishCashlogyPayment(cashlogy.transaction)
@@ -537,6 +550,7 @@ export function useRestaurantController(options: Options) {
       throw error
     } finally {
       options.setBusy(false)
+      paymentLockRef.current = false
     }
   }, [draft, equalSplit, options, realtime, refreshSales, settlePayment])
 
@@ -549,6 +563,8 @@ export function useRestaurantController(options: Options) {
   ): Promise<PayRestaurantOrderItemsResult> => {
     const current = draft.getCurrentOrder()
     if (!options.context || !options.cashSession || !options.isOnline || !current) throw new Error('No hay una comanda abierta.')
+    if (paymentLockRef.current) throw new Error('Ya hay un cobro en curso.')
+    paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
     try {
@@ -564,7 +580,7 @@ export function useRestaurantController(options: Options) {
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), discount).totalCents
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
-      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines))
+      const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), cashlogy.transaction)
       if (!result.requiresConfirmation) {
         finishCashlogyPayment(cashlogy.transaction)
         const printLines = paymentLines
@@ -612,6 +628,7 @@ export function useRestaurantController(options: Options) {
       throw error
     } finally {
       options.setBusy(false)
+      paymentLockRef.current = false
     }
   }, [draft, options, realtime, refreshSales, settlePayment])
   const splitOrder = useCallback(async (
@@ -680,8 +697,10 @@ export function useRestaurantController(options: Options) {
     method: PaymentMethod | null,
     receivedCents: number | null,
     forceWithPending = false,
+    confirmedCashlogyTransaction: CashlogyTransaction | null = null,
   ) => {
-    if (!options.context?.canTakePayments || !options.cashSession || !draft.getCurrentOrder() || !options.isOnline) return
+    if (!options.context?.canTakePayments || !options.cashSession || !draft.getCurrentOrder() || !options.isOnline || paymentLockRef.current) return
+    paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
     try {
@@ -696,10 +715,11 @@ export function useRestaurantController(options: Options) {
       const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), options.appliedDiscount).totalCents
-      const cashlogy = await settlePayment(method, amountCents, receivedCents)
-      const result = await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines), invoiceCustomer)
+      const recoveredCashlogy = confirmedCashlogyTransaction ?? (forceWithPending ? pendingPayment?.cashlogyTransaction ?? null : null)
+      const cashlogy = await settlePayment(method, amountCents, receivedCents, recoveredCashlogy)
+      const result = await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines), invoiceCustomer, cashlogy.transaction)
       if (result.requiresConfirmation) {
-        setPendingPayment({ method, receivedCents: cashlogy.receivedCents, pendingUnits: result.pendingUnits })
+        setPendingPayment({ method, receivedCents: cashlogy.receivedCents, pendingUnits: result.pendingUnits, cashlogyTransaction: cashlogy.transaction })
         return
       }
       finishCashlogyPayment(cashlogy.transaction)
@@ -743,8 +763,9 @@ export function useRestaurantController(options: Options) {
       options.onError(getReadableError(error))
     } finally {
       options.setBusy(false)
+      paymentLockRef.current = false
     }
-  }, [draft, invoiceCustomer, options, realtime, refreshSales, settlePayment])
+  }, [draft, invoiceCustomer, options, pendingPayment, realtime, refreshSales, settlePayment])
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false

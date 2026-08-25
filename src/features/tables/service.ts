@@ -8,6 +8,7 @@ import { buildCatalogOrderLinesPayload, buildRestaurantOrderLinesPayload } from 
 import { normalizeMapElements } from './map-elements'
 import { getDateRange, localDateKey } from '../reservations/domain/reservationAvailability'
 import { hasTenantFeature } from '../platform/tenantFeatureAccess'
+import type { CashlogyTransaction } from '../local-printing/types'
 
 export { buildRestaurantOrderLinesPayload } from './order-line-payload'
 
@@ -343,15 +344,27 @@ export async function moveRestaurantOrderLines(sourceOrderId: string, targetOrde
   if (error) throw error
   return data as MoveRestaurantOrderLinesResult
 }
-export async function closeRestaurantOrder(orderId: string, paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending = false, discount: AppliedDiscount | null = null, invoiceCustomer: Customer | null = null) {
-  const { data, error } = await requireSupabase().rpc(invoiceCustomer ? 'close_restaurant_order_with_invoice' : 'close_restaurant_order_checked_v2', {
+export async function closeRestaurantOrder(orderId: string, paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending = false, discount: AppliedDiscount | null = null, invoiceCustomer: Customer | null = null, cashlogyTransaction: CashlogyTransaction | null = null) {
+  const paymentParams = {
     p_order_id: orderId,
     p_payment_method: paymentMethod,
     p_received_cents: receivedCents,
     p_allow_pending: allowPending,
     p_discount: discount,
-    ...(invoiceCustomer ? { p_customer_id: invoiceCustomer.id } : {}),
-  })
+  }
+  const { data, error } = cashlogyTransaction
+    ? await requireSupabase().rpc('close_restaurant_order_cashlogy', {
+      ...paymentParams,
+      p_cashlogy_request_id: cashlogyTransaction.requestId,
+      p_cashlogy_transaction_id: cashlogyTransaction.id,
+      p_customer_id: invoiceCustomer?.id ?? null,
+    })
+    : invoiceCustomer
+      ? await requireSupabase().rpc('close_restaurant_order_with_invoice', {
+        ...paymentParams,
+        p_customer_id: invoiceCustomer.id,
+      })
+      : await requireSupabase().rpc('close_restaurant_order_checked_v2', paymentParams)
   if (error) throw error
   return data as CloseRestaurantOrderResult
 }
@@ -378,15 +391,29 @@ export async function configureRestaurantEqualSplit(orderId: string, partCount: 
   return mapEqualSplit(data)
 }
 
-export async function payRestaurantEqualPart(splitId: string, paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending: boolean, discount: AppliedDiscount | null, useDefaultDiscount: boolean): Promise<PayRestaurantEqualPartResult> {
-  const { data, error } = await requireSupabase().rpc('pay_restaurant_order_equal_part', { p_split_id: splitId, p_payment_method: paymentMethod, p_received_cents: receivedCents, p_allow_pending: allowPending, p_discount: discount, p_use_default_discount: useDefaultDiscount })
+export async function payRestaurantEqualPart(splitId: string, paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending: boolean, discount: AppliedDiscount | null, useDefaultDiscount: boolean, cashlogyTransaction: CashlogyTransaction | null = null): Promise<PayRestaurantEqualPartResult> {
+  const paymentParams = {
+    p_split_id: splitId,
+    p_payment_method: paymentMethod,
+    p_received_cents: receivedCents,
+    p_allow_pending: allowPending,
+    p_discount: discount,
+    p_use_default_discount: useDefaultDiscount,
+  }
+  const { data, error } = cashlogyTransaction
+    ? await requireSupabase().rpc('pay_restaurant_order_equal_part_cashlogy', {
+      ...paymentParams,
+      p_cashlogy_request_id: cashlogyTransaction.requestId,
+      p_cashlogy_transaction_id: cashlogyTransaction.id,
+    })
+    : await requireSupabase().rpc('pay_restaurant_order_equal_part', paymentParams)
   if (error) throw error
   const result = data as Record<string, unknown>
   return { ...result, requiresConfirmation: Boolean(result.requiresConfirmation), pendingUnits: Number(result.pendingUnits), split: mapEqualSplit(result.split) } as PayRestaurantEqualPartResult
 }
 
-export async function payRestaurantOrderItems(orderId: string, expectedRevision: number, moves: RestaurantOrderLineMove[], paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending: boolean, discount: AppliedDiscount | null): Promise<PayRestaurantOrderItemsResult> {
-  const { data, error } = await requireSupabase().rpc('pay_restaurant_order_items', {
+export async function payRestaurantOrderItems(orderId: string, expectedRevision: number, moves: RestaurantOrderLineMove[], paymentMethod: PaymentMethod | null, receivedCents: number | null, allowPending: boolean, discount: AppliedDiscount | null, cashlogyTransaction: CashlogyTransaction | null = null): Promise<PayRestaurantOrderItemsResult> {
+  const paymentParams = {
     p_order_id: orderId,
     p_expected_revision: expectedRevision,
     p_items: moves.map((move) => ({ lineId: move.lineId, quantity: move.quantity })),
@@ -394,7 +421,14 @@ export async function payRestaurantOrderItems(orderId: string, expectedRevision:
     p_received_cents: receivedCents,
     p_allow_pending: allowPending,
     p_discount: discount,
-  })
+  }
+  const { data, error } = cashlogyTransaction
+    ? await requireSupabase().rpc('pay_restaurant_order_items_cashlogy', {
+      ...paymentParams,
+      p_cashlogy_request_id: cashlogyTransaction.requestId,
+      p_cashlogy_transaction_id: cashlogyTransaction.id,
+    })
+    : await requireSupabase().rpc('pay_restaurant_order_items', paymentParams)
   if (error) throw error
   const result = data as Record<string, unknown>
   return { ...result, requiresConfirmation: Boolean(result.requiresConfirmation), pendingUnits: Number(result.pendingUnits) } as PayRestaurantOrderItemsResult

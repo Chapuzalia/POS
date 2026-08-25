@@ -443,6 +443,8 @@ export type SaleCreatedPayload = {
     amountCents: number
     receivedCents: number | null
     changeCents: number
+    cashlogyRequestId?: string | null
+    cashlogyTransactionId?: string | null
   } | null
   fiscal?: {
     invoiceId: string
@@ -554,6 +556,8 @@ export type OfflineEvent =
         paymentMethod: PaymentMethod
         receivedCents: number | null
         changeCents: number
+        cashlogyRequestId?: string | null
+        cashlogyTransactionId?: string | null
       }
     }
   | {

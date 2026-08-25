@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
 import { buildSalePayload } from '../services/salePayload'
@@ -10,6 +10,7 @@ import {
   settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
 import type { AppliedDiscount, CashSession, Customer, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
+import type { CashlogyTransaction } from '../../local-printing/types'
 
 type Options = {
   context: TenantContext | null
@@ -32,18 +33,44 @@ type Options = {
 }
 
 export function useQuickSalePayment(options: Options) {
-  return useCallback(async (paymentMethod: PaymentMethod | null, receivedCents: number | null) => {
+  const paymentInFlightRef = useRef(false)
+
+  const completePayment = useCallback(async (
+    paymentMethod: PaymentMethod | null,
+    receivedCents: number | null,
+    confirmedCashlogyTransaction: CashlogyTransaction | null = null,
+  ) => {
     const { context, cashSession, lines } = options
     if (!context || !cashSession || lines.length === 0) return
     if (options.invoiceCustomer && !options.isOnline) {
       options.onError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
       return
     }
-    const preview = buildSalePayload(context, cashSession, lines, paymentMethod, receivedCents, options.discount, options.invoiceCustomer)
+    if (confirmedCashlogyTransaction && !confirmedCashlogyTransaction.saleId) {
+      options.onError('El cobro recuperado no pertenece a una venta rápida identificable.')
+      return
+    }
+    const preview = buildSalePayload(
+      context,
+      cashSession,
+      lines,
+      paymentMethod,
+      receivedCents,
+      options.discount,
+      options.invoiceCustomer,
+      confirmedCashlogyTransaction?.saleId ? { saleId: confirmedCashlogyTransaction.saleId } : undefined,
+    )
     let cashlogyTransaction = null
     if (paymentMethod === 'cash') {
       try {
-        cashlogyTransaction = await settleCashlogyPaymentIfConfigured(preview.sale.totalCents, preview.sale.id)
+        cashlogyTransaction = confirmedCashlogyTransaction
+          ?? await settleCashlogyPaymentIfConfigured(preview.sale.totalCents, preview.sale.id)
+        if (cashlogyTransaction && (
+          cashlogyTransaction.requestedAmountCents !== preview.sale.totalCents
+          || cashlogyTransaction.saleId !== preview.sale.id
+        )) {
+          throw new Error('El cobro confirmado en Cashlogy no coincide con esta venta.')
+        }
       } catch (error) {
         options.onError(error instanceof Error ? error.message : 'No se pudo completar el cobro con Cashlogy.')
         return
@@ -57,6 +84,8 @@ export function useQuickSalePayment(options: Options) {
             ...preview.payment,
             receivedCents: cashlogyAmounts.receivedCents,
             changeCents: cashlogyAmounts.changeCents ?? 0,
+            cashlogyRequestId: cashlogyTransaction.requestId,
+            cashlogyTransactionId: cashlogyTransaction.id,
           },
         }
       : preview
@@ -100,4 +129,18 @@ export function useQuickSalePayment(options: Options) {
     const printTask = options.printSale(printPayload)
     await printTask
   }, [options])
+
+  return useCallback(async (
+    paymentMethod: PaymentMethod | null,
+    receivedCents: number | null,
+    confirmedCashlogyTransaction: CashlogyTransaction | null = null,
+  ) => {
+    if (paymentInFlightRef.current) return
+    paymentInFlightRef.current = true
+    try {
+      await completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction)
+    } finally {
+      paymentInFlightRef.current = false
+    }
+  }, [completePayment])
 }

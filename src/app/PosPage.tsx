@@ -29,7 +29,7 @@ import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
 import { hasTenantFeature } from '../features/platform/tenantFeatureAccess'
 import { calculateDiscountForLines, type DiscountScheduleContext } from '../lib/discounts'
-import { getLineTotal, getTicketTotal } from '../lib/format'
+import { formatMoney, getLineTotal, getTicketTotal } from '../lib/format'
 import { addDiagnosticBreadcrumb } from '../lib/diagnostics'
 import { validateConfiguredDiscountPin, validateManualDiscountPin } from '../services/discountRules'
 import type { useCashSession } from '../features/cash-registers'
@@ -39,7 +39,7 @@ import { ReservationsPage, type useReservationsController } from '../features/re
 import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
 import { CustomerInvoiceModal } from '../features/customers'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
-import { finishCashlogyPayment } from '../features/local-printing/cashlogy/useCashlogyStore'
+import { finishCashlogyPayment, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
 import type {
   CatalogStartTab,
@@ -115,6 +115,11 @@ export function PosPage(props: Props) {
   const quickSale = props.quickSale
   const cash = props.cash
   const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured)
+  const cashlogyPaymentIntent = useCashlogyStore((state) => state.intent)
+  const cashlogyPaymentModalOpen = useCashlogyStore((state) => state.modalOpen)
+  const showCashlogyPayment = useCashlogyStore((state) => state.show)
+  const cashlogyPaymentLocked = Boolean(cashlogyPaymentIntent)
+  const posInteractionBlocked = props.isBusy || cashlogyPaymentLocked
   const cashlogyManagementOpen = useCashlogyManagementStore((state) => state.modalOpen)
   const canManageCash = Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))
   const discountsEnabled = hasTenantFeature(props.context, 'discounts')
@@ -154,7 +159,7 @@ export function PosPage(props: Props) {
     props.context.canTakePayments
       && cash.session
       && activeLines.length > 0
-      && !props.isBusy
+      && !posInteractionBlocked
       && (restaurant.posView.type !== 'table_order' || props.isOnline),
   )
   const subtotalCents = getTicketTotal(activeLines)
@@ -180,6 +185,15 @@ export function PosPage(props: Props) {
     ? props.restaurantPaidFeedback
     : quickSale.paidFeedback
   const tableMapVisible = restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map'
+  const cashlogyPendingNotice = cashlogyPaymentIntent && !cashlogyPaymentModalOpen
+    ? <section className="flex items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] p-3 text-[var(--foreground)]">
+        <div className="min-w-0">
+          <p className="font-black">Cobro Cashlogy en curso</p>
+          <p className="text-sm text-[var(--muted)]">{formatMoney(cashlogyPaymentIntent.amountCents)} · El ticket está bloqueado para evitar duplicados.</p>
+        </div>
+        <UiButton className="shrink-0 rounded-[var(--radius)] border border-[var(--accent)] px-3 py-2 text-sm font-black" onClick={showCashlogyPayment} type="button">Reabrir cobro</UiButton>
+      </section>
+    : null
 
   const updateQuantity = (lineId: string, direction: 1 | -1) => {
     if (restaurant.posView.type === 'table_order') restaurant.changeLineQuantity(lineId, direction)
@@ -207,7 +221,7 @@ export function PosPage(props: Props) {
   const activeTicketPanel: ReactNode = restaurant.posView.type === 'table_order' && restaurant.order
     ? <RestaurantOrderPanel
         invoiceCustomerName={invoiceCustomer?.legalName}
-        isBusy={props.isBusy || !props.isOnline}
+        isBusy={posInteractionBlocked || !props.isOnline}
         lineDiscounts={Object.fromEntries(
           activeLines.map((line, index) => [line.id, discountCalculation.lineAllocations[index]]),
         )}
@@ -251,7 +265,7 @@ export function PosPage(props: Props) {
       />
     : <TicketPanel
         invoiceCustomerName={invoiceCustomer?.legalName}
-        isBusy={props.isBusy}
+        isBusy={posInteractionBlocked}
         lines={activeLines}
         onClear={quickSale.clear}
         onDecrement={(lineId) => updateQuantity(lineId, -1)}
@@ -286,6 +300,10 @@ export function PosPage(props: Props) {
       />
 
   const handlePayment = (method: PaymentMethod | null) => {
+    if (cashlogyPaymentLocked) {
+      showCashlogyPayment()
+      return
+    }
     if (invoiceCustomer && !props.isOnline) {
       props.onSetError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
       return
@@ -334,12 +352,12 @@ export function PosPage(props: Props) {
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
       <AppHeader
         cashSession={cash.session}
-        canCloseCash={props.context.canCloseCashSession === true}
-        canGenerateInvoice={Boolean(cash.session && activeLines.length > 0 && props.context.canTakePayments)}
-        canManageCash={canManageCash}
-        canOpenCashDrawer={canManageCash}
+        canCloseCash={props.context.canCloseCashSession === true && !cashlogyPaymentLocked}
+        canGenerateInvoice={Boolean(cash.session && activeLines.length > 0 && props.context.canTakePayments && !posInteractionBlocked)}
+        canManageCash={canManageCash && !cashlogyPaymentLocked}
+        canOpenCashDrawer={canManageCash && !cashlogyPaymentLocked}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
-        cashlogyConnected={cashlogyConfigured && canManageCash}
+        cashlogyConnected={cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
@@ -360,7 +378,7 @@ export function PosPage(props: Props) {
         preTicketAction={restaurant.posView.type !== 'table_map' && cash.session ? <PreTicketButton
           cashSession={cash.session}
           context={props.context}
-          disabled={props.isBusy}
+          disabled={posInteractionBlocked}
           discount={appliedDiscount}
           invoiceCustomer={invoiceCustomer}
           lines={activeLines}
@@ -372,12 +390,15 @@ export function PosPage(props: Props) {
           {props.error}
         </div>
       </div> : null}
+      {cashlogyPendingNotice ? <div className="mx-auto w-full max-w-[1600px] px-4 pt-4">
+        {cashlogyPendingNotice}
+      </div> : null}
       <AddProductFlyAnimation feedback={props.addFeedback.flyFeedback} />
       {reservationsEnabled && props.reservations.isOpen ? <ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /> : null}
 
       {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
         invoiceSelected={Boolean(invoiceCustomer)}
-        isBusy={props.isBusy}
+        isBusy={posInteractionBlocked}
         isOnline={props.isOnline}
         canSaveQuickSale={Boolean(props.context.canTakeOrders && quickSale.lines.length > 0)}
         onBack={() => void returnFromQuickSale()}
@@ -396,7 +417,7 @@ export function PosPage(props: Props) {
         canOpen={Boolean(props.context.canTakeOrders)}
         cashSessionId={cash.session.id}
         canQuickSale={props.context.canTakePayments === true}
-        isBusy={props.isBusy}
+        isBusy={posInteractionBlocked}
         isOnline={props.isOnline}
         map={restaurant.map}
         mobileLayout={mobileTableMapLayout}
@@ -445,7 +466,7 @@ export function PosPage(props: Props) {
         <CatalogPanel
           catalog={props.catalog}
           catalogStartTab={props.catalogStartTab}
-          disabled={props.isBusy || (restaurant.posView.type === 'table_order' && !props.isOnline)}
+          disabled={posInteractionBlocked || (restaurant.posView.type === 'table_order' && !props.isOnline)}
           onSelectProduct={props.onSelectProduct}
           productSalesStats={props.productSalesStats}
         />
@@ -551,17 +572,17 @@ export function PosPage(props: Props) {
       /> : null}
       <CashlogyPaymentModal
         finalizeDisabled={props.isBusy}
-        onFinalizeRecovered={(transaction) => {
+        onFinalizeRecovered={async (transaction) => {
           const historicalTicket = transaction.saleId
             ? cash.tickets.find((ticket) => ticket.payload.sale.id === transaction.saleId)
             : null
           if (historicalTicket) {
-            if (historicalTicket.paymentMethod === 'card') void cash.ticketActions.changePayment(historicalTicket, 'cash')
+            if (historicalTicket.paymentMethod === 'card') await cash.ticketActions.changePayment(historicalTicket, 'cash', transaction)
             else finishCashlogyPayment(transaction)
             return
           }
-          if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', null)
-          else void quickSale.completePayment('cash', null)
+          if (restaurant.posView.type === 'table_order') await restaurant.completePayment('cash', null, false, transaction)
+          else await quickSale.completePayment('cash', null, transaction)
         }}
       />
       {cashlogyMachineOpen || cashlogyManagementOpen ? <CashlogyMachineModal

@@ -1,4 +1,4 @@
-import { useCallback } from 'react'
+import { useCallback, useRef } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent, forgetOfflineEvent, getOfflineQueue } from '../../../lib/offlineStore'
 import { loadSessionTicketsFromSupabase } from '../../../services/posService'
@@ -12,6 +12,7 @@ import {
   getCashlogyPaymentAmounts,
   settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
+import type { CashlogyTransaction } from '../../local-printing/types'
 
 type Options = {
   context: TenantContext | null
@@ -32,6 +33,7 @@ type Options = {
 }
 
 export function useCashTicketActions(options: Options) {
+  const paymentChangeLockRef = useRef(false)
   const openHistory = useCallback(async () => {
     const { context, cashSession, isOnline } = options
     if (!context || !cashSession) return
@@ -58,18 +60,26 @@ export function useCashTicketActions(options: Options) {
     await options.printTicket(ticket.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, ticket.id) })
   }, [options])
 
-  const changePayment = useCallback(async (ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => {
+  const changePayment = useCallback(async (ticket: SessionTicketRecord, paymentMethod: PaymentMethod, confirmedCashlogyTransaction: CashlogyTransaction | null = null) => {
     const { context } = options
     const currentPayment = ticket.payload.payment
-    if (!context || !currentPayment || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod) return
+    if (!context || !currentPayment || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod || paymentChangeLockRef.current) return
+    paymentChangeLockRef.current = true
     const requiresCashlogyConfirmation = ticket.paymentMethod === 'card' && paymentMethod === 'cash'
     options.setBusy(true)
     options.setError(null)
-    let cashlogyTransaction = null
+    let cashlogyTransaction: CashlogyTransaction | null = confirmedCashlogyTransaction
     let cashlogyConfirmationFinished = !requiresCashlogyConfirmation
     try {
       if (requiresCashlogyConfirmation) {
-        cashlogyTransaction = await settleCashlogyPaymentIfConfigured(ticket.totalCents, ticket.payload.sale.id)
+        cashlogyTransaction = confirmedCashlogyTransaction
+          ?? await settleCashlogyPaymentIfConfigured(ticket.totalCents, ticket.payload.sale.id)
+        if (cashlogyTransaction && (
+          cashlogyTransaction.requestedAmountCents !== ticket.totalCents
+          || cashlogyTransaction.saleId !== ticket.payload.sale.id
+        )) {
+          throw new Error('El cobro confirmado en Cashlogy no pertenece a este ticket.')
+        }
         cashlogyConfirmationFinished = true
       }
       const cashlogyAmounts = getCashlogyPaymentAmounts(cashlogyTransaction, ticket.totalCents)
@@ -77,7 +87,14 @@ export function useCashTicketActions(options: Options) {
         ? cashlogyAmounts.receivedCents ?? ticket.totalCents
         : null
       const changeCents = paymentMethod === 'cash' ? cashlogyAmounts.changeCents ?? 0 : 0
-      const nextTickets = options.tickets.map((item) => item.id === ticket.id ? { ...item, paymentMethod, payload: { ...item.payload, sale: { ...item.payload.sale, paymentMethod }, payment: { ...currentPayment, method: paymentMethod, receivedCents, changeCents } } } : item)
+      const nextTickets = options.tickets.map((item) => item.id === ticket.id ? { ...item, paymentMethod, payload: { ...item.payload, sale: { ...item.payload.sale, paymentMethod }, payment: {
+        ...currentPayment,
+        method: paymentMethod,
+        receivedCents,
+        changeCents,
+        cashlogyRequestId: cashlogyTransaction?.requestId ?? currentPayment.cashlogyRequestId ?? null,
+        cashlogyTransactionId: cashlogyTransaction?.id ?? currentPayment.cashlogyTransactionId ?? null,
+      } } } : item)
       options.persistTickets(nextTickets)
       options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod } : sale))
       const pendingSale = getOfflineQueue().find((event) =>
@@ -88,10 +105,22 @@ export function useCashTicketActions(options: Options) {
         finishCashlogyPayment(cashlogyTransaction)
         return
       }
-      enqueueOfflineEvent({ id: createId(), kind: 'sale_payment_changed', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: { saleId: ticket.payload.sale.id, paymentId: currentPayment.id, paymentMethod, receivedCents, changeCents } })
+      enqueueOfflineEvent({ id: createId(), kind: 'sale_payment_changed', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: {
+        saleId: ticket.payload.sale.id,
+        paymentId: currentPayment.id,
+        paymentMethod,
+        receivedCents,
+        changeCents,
+        cashlogyRequestId: cashlogyTransaction?.requestId ?? currentPayment.cashlogyRequestId ?? null,
+        cashlogyTransactionId: cashlogyTransaction?.id ?? currentPayment.cashlogyTransactionId ?? null,
+      } })
       options.refreshPendingCount()
-      finishCashlogyPayment(cashlogyTransaction)
-      void options.syncPendingEvents()
+      if (cashlogyTransaction) {
+        await options.syncPendingEvents()
+        finishCashlogyPayment(cashlogyTransaction)
+      } else {
+        void options.syncPendingEvents()
+      }
     } catch (error) {
       if (requiresCashlogyConfirmation && !cashlogyConfirmationFinished) {
         options.setError(`${getReadableError(error)} El ticket continúa pagado con tarjeta.`)
@@ -102,6 +131,7 @@ export function useCashTicketActions(options: Options) {
       }
     } finally {
       options.setBusy(false)
+      paymentChangeLockRef.current = false
     }
   }, [options])
 

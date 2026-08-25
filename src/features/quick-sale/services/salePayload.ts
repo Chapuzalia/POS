@@ -23,10 +23,11 @@ function buildTicketPayload(
   discount: AppliedDiscount | null,
   validatePayment: boolean,
   invoiceCustomer: Customer | null,
+  identity?: { saleId?: string },
 ): SaleCreatedPayload {
   const createdAt = nowIso()
   const ticketId = createId()
-  const saleId = createId()
+  const saleId = identity?.saleId ?? createId()
   const subtotalCents = getTicketTotal(lines)
   const grossLineTotals = lines.map(getLineTotal)
   const calculation = calculateDiscountForLines(
@@ -147,8 +148,9 @@ export function buildSalePayload(
   receivedCents: number | null,
   discount: AppliedDiscount | null,
   invoiceCustomer: Customer | null = null,
+  identity?: { saleId?: string },
 ) {
-  return buildTicketPayload(context, cashSession, lines, paymentMethod, receivedCents, discount, true, invoiceCustomer)
+  return buildTicketPayload(context, cashSession, lines, paymentMethod, receivedCents, discount, true, invoiceCustomer, identity)
 }
 
 export function buildPreTicketPayload(
