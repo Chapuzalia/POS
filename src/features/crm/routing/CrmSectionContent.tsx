@@ -21,6 +21,7 @@ import type { CatalogData } from '../../catalog/domain/types.ts'
 import type { CrmStats, CrmVenue, TenantContext } from '../../../types'
 import type { CrmSection } from './crmNavigation'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
+import { ProductionCrm } from '../production/pages/ProductionPage'
 
 type Props = {
   activeSection: CrmSection
@@ -92,6 +93,8 @@ export function CrmSectionContent({
       return catalog ? <CatalogTransferCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} venueName={venues.find((venue) => venue.id === selectedVenueId)?.name ?? 'local'} /> : null
     case 'tables':
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
+    case 'production':
+      return <ProductionCrm catalog={catalog} context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} />
     case 'inventory-stock':
       return catalog ? <InventoryStockCrm catalog={catalog} disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} /> : null
     case 'inventory-warehouses':

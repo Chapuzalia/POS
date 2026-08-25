@@ -49,6 +49,7 @@ export async function loadCrmAccessData(
         "id, venue_id, name, is_active, device_mode, default_cash_register_id",
       )
       .eq("tenant_id", context.tenantId)
+      .neq("device_mode", "kds")
       .order("name"),
     client.functions.invoke<{
       allowedVenueIds: string[] | null;

@@ -179,7 +179,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
                 <SidebarNavItem activeSection={activeSection} item={item} key={item.id} onNavigate={navigate} />
               ))}
               <SidebarCollapsible activeSection={activeSection} icon={ReceiptText} isOpen={isReportsOpen} items={allowed(reportNavItems)} label="Informes de ventas" onNavigate={navigate} onToggle={() => setIsReportsOpen((value) => !value)} sections={reportSections} />
-              {allowed(navItems.slice(3, 6)).map((item) => (
+              {allowed(navItems.slice(3, 7)).map((item) => (
                 <SidebarNavItem activeSection={activeSection} item={item} key={item.id} onNavigate={navigate} />
               ))}
             </div>
@@ -188,7 +188,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
           <section aria-labelledby="crm-nav-account" className="!mt-[22px]">
             <p className="!mx-2.5 !mt-0 !mb-2 !text-[10px] !leading-tight !font-bold !tracking-[0.14em] !text-[var(--crm-sidebar-muted)] !uppercase" id="crm-nav-account">Cuenta</p>
             <div className="!grid !gap-[3px]">
-              {allowed(navItems.slice(6)).map((item) => (
+              {allowed(navItems.slice(7)).map((item) => (
                 <SidebarNavItem activeSection={activeSection} item={item} key={item.id} onNavigate={navigate} />
               ))}
             </div>

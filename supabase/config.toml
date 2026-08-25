@@ -1,3 +1,8 @@
 [functions.verifacti-webhook]
 verify_jwt = false
 
+[functions.production-agent]
+# Pairing uses a short-lived single-use code; all subsequent calls use the
+# rotated agent secret validated inside the function.
+verify_jwt = false
+

@@ -27,6 +27,14 @@ export async function loadTenantState(context: TenantContext) {
       salesLedger: [],
     }
   }
+  if (context.deviceMode === 'kds') {
+    return {
+      ...emptyCatalogState,
+      cashSession: null,
+      productSalesStats: [],
+      salesLedger: [],
+    }
+  }
   const [posCatalog, cashSession, productSalesStats] = await Promise.all([
     loadPosCatalogFromSupabase(context),
     loadOpenCashSession(context),

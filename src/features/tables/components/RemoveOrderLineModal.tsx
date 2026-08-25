@@ -7,9 +7,10 @@ type Props = {
   line: RestaurantOrderLine
   onCancel: () => void
   onConfirm: () => void
+  sentQuantity?: number
 }
 
-export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm }: Props) {
+export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm, sentQuantity = 0 }: Props) {
   const served = line.servedQuantity > 0
 
   return (
@@ -24,6 +25,7 @@ export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm }: Prop
         </div>
 
         {served ? <p className="mt-4 rounded-[var(--radius)] border border-[var(--warning)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">Este producto ya está marcado como servido. Confirma que quieres eliminarlo igualmente.</p> : null}
+        {sentQuantity > 0 ? <p className="mt-4 rounded-[var(--radius)] border border-[var(--danger)] p-3 text-sm font-semibold text-[var(--danger)]">{sentQuantity} unidad(es) ya se enviaron a producción. Al confirmar se generará una anulación visible en KDS y, si corresponde, en impresora.</p> : null}
 
         <div className="mt-5 grid grid-cols-2 gap-2">
           <Button disabled={isBusy} onClick={onCancel} type="button" variant="secondary">Cancelar</Button>

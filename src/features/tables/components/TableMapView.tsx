@@ -954,8 +954,10 @@ export function TableMapView(props: Props) {
                           {elapsed(table.orderOpenedAt)}
                         </small>
                         <small>
-                          {table.pendingUnits
-                            ? `${table.pendingUnits} por servir`
+                          {table.readyUnits
+                            ? `${table.readyUnits} listo${table.readyUnits === 1 ? '' : 's'}`
+                            : table.pendingUnits
+                              ? `${table.pendingUnits} por servir`
                             : "Todo servido"}
                         </small>
                       </>

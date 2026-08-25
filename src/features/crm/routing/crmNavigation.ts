@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Boxes, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PlugZap, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
+import { Armchair, BarChart3, Boxes, ChefHat, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PlugZap, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'reports' | 'x-reports' | 'inventory-stock' | 'inventory-warehouses' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'inventory-stock' | 'inventory-warehouses' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -28,6 +28,7 @@ export const navItems: CrmNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'access', label: 'Accesos', icon: Users },
   { id: 'tables', label: 'Mesas y zonas', icon: Armchair },
+  { id: 'production', label: 'Producción', icon: ChefHat },
   { id: 'import', label: 'Importar / exportar', icon: Upload },
   { id: 'stats', label: 'Estadísticas', icon: BarChart3 },
   { id: 'integrations', label: 'Integraciones', icon: PlugZap },
@@ -50,6 +51,7 @@ export function getSectionTitle(section: CrmSection) {
     modifiers: 'Modificadores reutilizables',
     import: 'Importar y exportar catálogo',
     tables: 'Mesas y zonas del local',
+    production: 'Producción del local',
     discounts: 'Descuentos del local',
     reports: 'Tickets',
     'x-reports': 'Informes Z',

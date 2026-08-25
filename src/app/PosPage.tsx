@@ -245,6 +245,8 @@ export function PosPage(props: Props) {
         onServeAll={restaurant.serveLineFully}
         onServeAllOrder={restaurant.serveOrderFully}
         onServeOne={restaurant.serveLineUnit}
+        productionState={restaurant.productionState}
+        onSendToProduction={restaurant.sendToProduction}
         order={restaurant.order}
       />
     : <TicketPanel
@@ -504,6 +506,7 @@ export function PosPage(props: Props) {
         line={restaurant.pendingLineRemoval}
         onCancel={() => restaurant.setPendingLineRemoval(null)}
         onConfirm={() => void restaurant.confirmLineRemoval()}
+        sentQuantity={restaurant.productionState?.lines.find((line) => line.lineId === restaurant.pendingLineRemoval?.id)?.sentQuantity ?? 0}
       /> : null}
       {restaurantEnabled && restaurant.splitOrderGroup && restaurant.order ? <SplitOrderModal
         defaultDiscount={appliedDiscount}

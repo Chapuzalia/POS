@@ -194,7 +194,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
       .maybeSingle<VenueRow>(),
     supabase
       .from('devices')
-      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
+      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash, production_destination_id')
       .eq('tenant_id', tenant.id)
       .eq('venue_id', assignment.venue_id)
       .eq('id', assignment.device_id)
@@ -228,6 +228,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     deviceId: device.id,
     deviceName: device.name,
     deviceMode: device.device_mode,
+    productionDestinationId: device.production_destination_id,
     defaultCashRegisterId: device.default_cash_register_id,
     canTakeOrders: device.can_take_orders,
     canTakePayments: device.can_take_payments,
@@ -372,7 +373,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
       .maybeSingle<VenueRow>(),
     supabase
       .from('devices')
-      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash')
+      .select('id, name, device_mode, default_cash_register_id, can_take_orders, can_take_payments, can_open_cash_session, can_close_cash_session, can_manage_cash, production_destination_id')
       .eq('tenant_id', tenant.id)
       .eq('venue_id', assignment.venue_id)
       .eq('id', assignment.device_id)
@@ -402,6 +403,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     deviceId: device.id,
     deviceName: device.name,
     deviceMode: device.device_mode,
+    productionDestinationId: device.production_destination_id,
     defaultCashRegisterId: device.default_cash_register_id,
     canTakeOrders: device.can_take_orders,
     canTakePayments: device.can_take_payments,

@@ -136,7 +136,7 @@ export type AppliedDiscount = {
 }
 
 export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'cashier'
-export type DeviceMode = 'satellite' | 'checkout' | 'hybrid'
+export type DeviceMode = 'satellite' | 'checkout' | 'hybrid' | 'kds'
 
 export type ThemeMode = 'light' | 'dark'
 
@@ -165,6 +165,7 @@ export type TenantContext = {
   deviceId: string
   deviceName: string
   deviceMode?: DeviceMode
+  productionDestinationId?: string | null
   defaultCashRegisterId?: string | null
   canTakeOrders?: boolean
   canTakePayments?: boolean

@@ -8,6 +8,7 @@ const SECTION_FEATURES: Partial<Record<CrmSection, TenantFeatureKey>> = {
   access: 'multi_device',
   discounts: 'discounts',
   tables: 'restaurant',
+  production: 'production',
   'inventory-stock': 'inventory',
   'inventory-warehouses': 'inventory',
   'inventory-settings': 'inventory',

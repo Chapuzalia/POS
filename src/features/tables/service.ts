@@ -7,6 +7,7 @@ import { getOrderPendingUnits } from './service-status'
 import { buildCatalogOrderLinesPayload, buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
 import { getDateRange, localDateKey } from '../reservations/domain/reservationAvailability'
+import { hasTenantFeature } from '../platform/tenantFeatureAccess'
 
 export { buildRestaurantOrderLinesPayload } from './order-line-payload'
 
@@ -101,12 +102,23 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
     if (error) throw error
     lines = ((data ?? []) as OrderLineRow[]).map(mapLine)
   }
+  const readyByLine = new Map<string, number>()
+  if (hasTenantFeature(context, 'production') && lines.length) {
+    const { data, error } = await client.from('production_line_allocations')
+      .select('current_order_line_id, ready_quantity')
+      .in('current_order_line_id', lines.map((line) => line.id))
+    if (error) throw error
+    ;((data ?? []) as Array<{ current_order_line_id: string; ready_quantity: number }>).forEach((allocation) => {
+      readyByLine.set(allocation.current_order_line_id, (readyByLine.get(allocation.current_order_line_id) ?? 0) + Number(allocation.ready_quantity))
+    })
+  }
   const orderByGroup = new Map<string, RestaurantOrder[]>()
   orders.forEach((order) => orderByGroup.set(order.orderGroupId, [...(orderByGroup.get(order.orderGroupId) ?? []), order]))
   orderByGroup.forEach((groupOrders) => groupOrders.sort((a, b) => a.splitSequence - b.splitSequence))
   const groupByOrder = new Map(orders.map((order) => [order.id, order.orderGroupId]))
   const totals = new Map<string, number>()
   const pendingUnits = new Map<string, number>()
+  const readyUnits = new Map<string, number>()
   const paidCents = new Map<string, number>()
   ;((equalSplitsResult.data ?? []) as Array<{ order_group_id: string; paid_cents: number }>).forEach((split) => paidCents.set(split.order_group_id, (paidCents.get(split.order_group_id) ?? 0) + Number(split.paid_cents)))
   lines.forEach((line) => {
@@ -114,6 +126,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
     if (!groupId) return
     totals.set(groupId, (totals.get(groupId) ?? 0) + line.quantity * line.unitPriceCents)
     pendingUnits.set(groupId, (pendingUnits.get(groupId) ?? 0) + Math.max(0, line.quantity - line.servedQuantity))
+    readyUnits.set(groupId, (readyUnits.get(groupId) ?? 0) + Math.max(0, (readyByLine.get(line.id) ?? 0) - line.servedQuantity))
   })
   const linkByTable = new Map(links.map((link) => [link.table_id, link]))
   const tableIdsByGroup = new Map<string, string[]>()
@@ -132,7 +145,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
     const groupId = order?.orderGroupId
     // reservedUntil and reservationNote are legacy-only; persistent reservations are the source of truth.
     const tableReservations = reservationsByTable.get(table.id) ?? []
-    return { ...table, status: order ? 'occupied' : 'free', orderId: order?.id ?? null, orderOpenedAt: order?.openedAt ?? null, guestCount: order?.guestCount ?? null, totalCents: groupId ? Math.max(0, (totals.get(groupId) ?? 0) - (paidCents.get(groupId) ?? 0)) : 0, pendingUnits: groupId ? (pendingUnits.get(groupId) ?? 0) : 0, groupTableIds: groupId ? (tableIdsByGroup.get(groupId) ?? []) : [], nextReservation: tableReservations[0] ?? null, reservationCount: tableReservations.length }
+    return { ...table, status: order ? 'occupied' : 'free', orderId: order?.id ?? null, orderOpenedAt: order?.openedAt ?? null, guestCount: order?.guestCount ?? null, totalCents: groupId ? Math.max(0, (totals.get(groupId) ?? 0) - (paidCents.get(groupId) ?? 0)) : 0, pendingUnits: groupId ? (pendingUnits.get(groupId) ?? 0) : 0, readyUnits: groupId ? (readyUnits.get(groupId) ?? 0) : 0, groupTableIds: groupId ? (tableIdsByGroup.get(groupId) ?? []) : [], nextReservation: tableReservations[0] ?? null, reservationCount: tableReservations.length }
   })
   return { areas, tables: mappedTables }
 }
@@ -431,7 +444,7 @@ export function subscribeToRestaurantMap(
 ) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`restaurant-map:${context.tenantId}:${context.venueId}`)
-  ;(['order_groups', 'orders', 'order_tables', 'order_lines', 'restaurant_tables', 'restaurant_order_equal_splits', 'restaurant_order_equal_split_payments', 'reservations', 'reservation_tables'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
+  ;(['order_groups', 'orders', 'order_tables', 'order_lines', 'restaurant_tables', 'restaurant_order_equal_splits', 'restaurant_order_equal_split_payments', 'reservations', 'reservation_tables', 'production_line_allocations'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
   channel.subscribe((status, error) => onStatus?.(status, error))
   return () => { void supabase?.removeChannel(channel) }
 }
