@@ -6,6 +6,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Check, Minus, Plus, UsersRound, X } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
 import { PaymentPanel } from '../../../components/pos'
+import { usePrintAgentStore } from '../../local-printing'
 import { calculateAppliedDiscount, calculateDiscountForLines, type DiscountScheduleContext } from '../../../lib/discounts'
 import { formatMoney } from '../../../lib/format'
 import type { AppliedDiscount, Discount, PaymentMethod } from '../../../types'
@@ -32,6 +33,7 @@ type Props = {
 }
 
 export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSchedule, isBusy, manualDiscountEnabled, manualDiscountRequiresPin, onClose, onCompleted, onConfigure, onPay, order, split, validateManualPin, validatePin, venueId }: Props) {
+  const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured)
   const [partCount, setPartCount] = useState(Math.max(2, order.order.guestCount))
   const [cashOpen, setCashOpen] = useState(false)
   const [paying, setPaying] = useState(false)
@@ -136,7 +138,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSched
           <p className="mt-3 text-sm font-semibold text-[var(--muted)]">{split.remainingParts === 1 ? 'Último cobro' : `Quedan ${split.remainingParts} personas`}</p>
         </div>
         {useDefaultDiscount && currentDiscount ? <p className="rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-2 text-sm font-semibold text-[var(--foreground)]">Este pago hereda el descuento de la comanda. Puedes cambiarlo o quitarlo solo para esta parte.</p> : null}
-        <PaymentPanel discount={currentDiscount} disabled={false} feedback={feedback} heading="Cobrar siguiente parte" onOpenDiscount={() => setDiscountOpen(true)} onPayment={(method) => { if (method === 'cash') setCashOpen(true); else void completePart(method, null) }} onRemoveDiscount={() => { setCurrentDiscount(null); setUseDefaultDiscount(false) }} subtotalCents={split.nextPartCents} totalCents={nextPayment.totalCents} />
+        <PaymentPanel discount={currentDiscount} disabled={isBusy || paying} feedback={feedback} heading="Cobrar siguiente parte" onOpenDiscount={() => setDiscountOpen(true)} onPayment={(method) => { if (method === 'cash' && cashlogyConfigured) void completePart('cash', null); else if (method === 'cash') setCashOpen(true); else void completePart(method, null) }} onRemoveDiscount={() => { setCurrentDiscount(null); setUseDefaultDiscount(false) }} subtotalCents={split.nextPartCents} totalCents={nextPayment.totalCents} />
         {localError ? <p className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-bold text-[var(--danger)]">{localError}</p> : null}
         {paying ? <p className="text-center text-sm font-bold text-[var(--muted)]">Registrando cobro…</p> : null}
       </div>}

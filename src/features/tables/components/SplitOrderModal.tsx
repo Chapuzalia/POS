@@ -14,6 +14,7 @@ import {
 } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
 import { PaymentPanel } from '../../../components/pos'
+import { usePrintAgentStore } from '../../local-printing'
 import { calculateDiscountForLines, type DiscountScheduleContext } from '../../../lib/discounts'
 import { formatMoney, normalizeText } from '../../../lib/format'
 import type { AppliedDiscount, Discount, PaymentMethod } from '../../../types'
@@ -67,6 +68,7 @@ export function SplitOrderModal({
   order,
   venueId,
 }: Props) {
+  const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured)
   const [step, setStep] = useState<'select' | 'pay'>('select')
   const [quantities, setQuantities] = useState<Record<string, number>>({})
   const [searchQuery, setSearchQuery] = useState('')
@@ -395,7 +397,8 @@ export function SplitOrderModal({
               heading="Cobrar ítems seleccionados"
               onOpenDiscount={() => setDiscountOpen(true)}
               onPayment={(method) => {
-                if (method === 'cash') setCashOpen(true)
+                if (method === 'cash' && cashlogyConfigured) void completePayment('cash', null)
+                else if (method === 'cash') setCashOpen(true)
                 else void completePayment(method, null)
               }}
               onRemoveDiscount={() => setCurrentDiscount(null)}
