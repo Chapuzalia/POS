@@ -1,7 +1,40 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildTopProductCombinations, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
+import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
+
+test('estadisticas agrupa el importe vendido por categoria y producto', () => {
+  const breakdown = buildSalesBreakdowns([
+    { categoryId: 'bebidas', categoryName: 'Bebidas', productId: 'cola', productName: 'Cola', quantity: 2, totalCents: 500 },
+    { categoryId: 'bebidas', categoryName: 'Bebidas', productId: 'agua', productName: 'Agua', quantity: 1, totalCents: 200 },
+    { categoryId: null, categoryName: null, productId: null, productName: 'Producto borrado', quantity: 3, totalCents: 300 },
+  ])
+
+  assert.deepEqual(breakdown.salesByCategory, [
+    { id: 'bebidas', label: 'Bebidas', quantity: 3, totalCents: 700 },
+    { id: 'uncategorized', label: 'Sin categoría', quantity: 3, totalCents: 300 },
+  ])
+  assert.deepEqual(breakdown.salesByProduct.map(({ label, totalCents }) => ({ label, totalCents })), [
+    { label: 'Cola', totalCents: 500 },
+    { label: 'Producto borrado', totalCents: 300 },
+    { label: 'Agua', totalCents: 200 },
+  ])
+})
+
+test('la card circular alterna categorias y productos y usa los datos del mes cargado', async () => {
+  const [statsPage, chart, service] = await Promise.all([
+    readFile(new URL('../src/features/crm/analytics/pages/StatsPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/analytics/components/SalesBreakdownChart.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
+  ])
+
+  assert.match(statsPage, /<SalesBreakdownChart stats=\{stats\}/)
+  assert.match(chart, /role="switch"/)
+  assert.match(chart, /stats\?\.salesByCategory/)
+  assert.match(chart, /stats\?\.salesByProduct/)
+  assert.match(service, /category_name_snapshot/)
+  assert.match(service, /\.\.\.salesBreakdown/)
+})
 
 test('estadisticas separa productos top por mixer y modificadores sin duplicar mixers historicos', () => {
   const combinations = buildTopProductCombinations([

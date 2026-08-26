@@ -8,6 +8,7 @@ import { getOperationalDateKey } from '../../../../lib/operationalDay'
 import { paymentLabels } from '../../sales/services/salesReportModel'
 import { type CrmStats } from '../../../../types'
 import { HourlySalesChart } from '../components/HourlySalesChart'
+import { SalesBreakdownChart } from '../components/SalesBreakdownChart'
 
 export type StatsCrmProps = {
   dayChangeTime: string | null
@@ -65,6 +66,10 @@ export function StatsCrm({ dayChangeTime, disabled, onRefresh, stats: loadedStat
           </div>
         </div>
         <HourlySalesChart points={stats?.hourlySales ?? []} />
+      </section>
+
+      <section className=" pt-4 min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !col-span-full !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <SalesBreakdownChart stats={stats} />
       </section>
 
       <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">

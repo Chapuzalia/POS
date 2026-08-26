@@ -621,6 +621,18 @@ export type CrmStats = {
     invitationCents: number
     otherCents: number
   }>
+  salesByCategory: Array<{
+    id: string
+    label: string
+    quantity: number
+    totalCents: number
+  }>
+  salesByProduct: Array<{
+    id: string
+    label: string
+    quantity: number
+    totalCents: number
+  }>
   topProductCombinations: Array<{
     productName: string
     mixers: string[]

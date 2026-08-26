@@ -3,7 +3,7 @@ import { getOperationalDateKey, getOperationalMonthRangeIso } from '../../../../
 import { supabase } from '../../../../lib/supabase'
 import { type CrmStats, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
 import { type NameRow } from '../../sales/services/salesReportsService'
-import { buildHourlySalesStats, buildTopProductCombinations, sortCrmTopProductsByUnits } from './analyticsModel.ts'
+import { buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from './analyticsModel.ts'
 export { applyCrmOpenCashSalesTotals } from './analyticsModel.ts'
 
 export type SaleStatsRow = {
@@ -13,7 +13,10 @@ export type SaleStatsRow = {
 }
 
 export type TicketLineStatsRow = {
+  product_id: string | null
   product_name: string
+  category_id_snapshot: string | null
+  category_name_snapshot: string | null
   quantity: number
   allocated_quantity: number | null
   line_total_cents: number
@@ -103,7 +106,10 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue, mont
       discount_name,
       discount_amount_cents,
       ticket_lines(
+        product_id,
         product_name,
+        category_id_snapshot,
+        category_name_snapshot,
         quantity,
         allocated_quantity,
         line_total_cents,
@@ -162,6 +168,14 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue, mont
   const sales = (salesRows ?? []) as SaleStatsRow[]
   const paidTickets = (ticketRows ?? []) as TicketWithLinesStatsRow[]
   const lines = paidTickets.flatMap((ticket) => ticket.ticket_lines ?? [])
+  const salesBreakdown = buildSalesBreakdowns(lines.map((line) => ({
+    categoryId: line.category_id_snapshot,
+    categoryName: line.category_name_snapshot,
+    productId: line.product_id,
+    productName: line.product_name,
+    quantity: Number(line.allocated_quantity ?? line.quantity),
+    totalCents: line.line_total_cents,
+  })))
   const openSessions = (openSessionRows ?? []) as OpenCashSessionRow[]
   const venuesById = new Map(((venueRows ?? []) as NameRow[]).map((venue) => [venue.id, venue.name]))
   const devicesById = new Map(((deviceRows ?? []) as NameRow[]).map((device) => [device.id, device.name]))
@@ -286,6 +300,7 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue, mont
     monthSalesCents,
     monthTicketCount: paidTickets.length,
     openCashSessions,
+    ...salesBreakdown,
     topProductCombinations: buildTopProductCombinations(lines.map((line) => ({
       productName: line.product_name,
       quantity: Number(line.allocated_quantity ?? line.quantity),

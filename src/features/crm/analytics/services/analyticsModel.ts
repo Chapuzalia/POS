@@ -1,5 +1,53 @@
 import type { CrmStats } from '../../../../types/domain.ts'
 
+export type SalesBreakdownLine = {
+  categoryId: string | null
+  categoryName: string | null
+  productId: string | null
+  productName: string
+  quantity: number
+  totalCents: number
+}
+
+type SalesBreakdownItem = CrmStats['salesByCategory'][number]
+
+function addSalesBreakdownItem(
+  items: Map<string, SalesBreakdownItem>,
+  id: string,
+  label: string,
+  line: SalesBreakdownLine,
+) {
+  const current = items.get(id) ?? { id, label, quantity: 0, totalCents: 0 }
+  current.quantity += line.quantity
+  current.totalCents += line.totalCents
+  items.set(id, current)
+}
+
+function sortSalesBreakdown(items: Map<string, SalesBreakdownItem>) {
+  return [...items.values()].sort((left, right) =>
+    right.totalCents - left.totalCents
+    || right.quantity - left.quantity
+    || left.label.localeCompare(right.label, 'es'),
+  )
+}
+
+export function buildSalesBreakdowns(lines: SalesBreakdownLine[]): Pick<CrmStats, 'salesByCategory' | 'salesByProduct'> {
+  const categories = new Map<string, SalesBreakdownItem>()
+  const products = new Map<string, SalesBreakdownItem>()
+
+  lines.forEach((line) => {
+    const categoryLabel = line.categoryName?.trim() || 'Sin categoría'
+    const productLabel = line.productName.trim() || 'Producto sin nombre'
+    addSalesBreakdownItem(categories, line.categoryId ?? 'uncategorized', categoryLabel, line)
+    addSalesBreakdownItem(products, line.productId ?? `deleted:${productLabel.toLocaleLowerCase('es')}`, productLabel, line)
+  })
+
+  return {
+    salesByCategory: sortSalesBreakdown(categories),
+    salesByProduct: sortSalesBreakdown(products),
+  }
+}
+
 export type TopProductCombinationLine = {
   productName: string
   quantity: number
