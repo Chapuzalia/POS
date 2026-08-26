@@ -1,9 +1,9 @@
 import { useEffect, useRef } from 'react'
 import type { TenantContext } from '../../../types'
-import { checkLoginLease, heartbeatLoginLease } from '../../../services/loginLeaseService'
+import { claimLoginLease, checkLoginLease, heartbeatLoginLease } from '../../../services/loginLeaseService'
 
 const inactivityMs = 4 * 60 * 60 * 1000
-const leaseCheckIntervalMs = 30_000
+const heartbeatThrottleMs = 30_000
 
 type UseLoginActivityOptions = {
   context: TenantContext | null
@@ -11,13 +11,12 @@ type UseLoginActivityOptions = {
   onSessionClosed: (message: string, leaseBlocked: boolean) => Promise<void>
 }
 
-/** Keeps a claimed POS login alive and closes it after local inactivity. */
+/** Tracks local inactivity and validates the activity-based login lease. */
 export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLoginActivityOptions) {
   const activityRef = useRef({
     context: null as TenantContext | null,
     lastActivityAt: Date.now(),
     lastHeartbeatAt: Date.now(),
-    lastSyncedActivityAt: Date.now(),
   })
 
   useEffect(() => {
@@ -32,7 +31,6 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
       activity.context = context
       activity.lastActivityAt = now
       activity.lastHeartbeatAt = now
-      activity.lastSyncedActivityAt = now
     }
 
     let active = true
@@ -50,7 +48,7 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
       const remainingMs = Math.max(0, inactivityMs - (Date.now() - activity.lastActivityAt))
       idleTimeoutId = window.setTimeout(() => void close('La sesión se ha cerrado tras 4 horas sin actividad.', false), remainingMs)
     }
-    const validateLease = async (forceHeartbeat = false) => {
+    const validateLease = async (heartbeatOnActivity = false) => {
       if (!active || closing || leaseRequestInFlight) return
       if (Date.now() - activity.lastActivityAt >= inactivityMs) {
         await close('La sesión se ha cerrado tras 4 horas sin actividad.', false)
@@ -59,14 +57,11 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
       if (!isOnline) return
       leaseRequestInFlight = true
       try {
-        const now = Date.now()
-        const hasUnsyncedActivity = activity.lastActivityAt > activity.lastSyncedActivityAt
-        const shouldHeartbeat = hasUnsyncedActivity && (forceHeartbeat || now - activity.lastHeartbeatAt >= leaseCheckIntervalMs)
-        const syncedActivityAt = activity.lastActivityAt
-        const ownsLease = shouldHeartbeat ? await heartbeatLoginLease() : await checkLoginLease()
-        if (shouldHeartbeat && ownsLease) {
-          activity.lastHeartbeatAt = Date.now()
-          activity.lastSyncedActivityAt = syncedActivityAt
+        let ownsLease = heartbeatOnActivity ? await heartbeatLoginLease() : await checkLoginLease()
+        if (heartbeatOnActivity && !ownsLease) {
+          // This recovery mode can only take an expired lease. It cannot
+          // replace another active device or a newer tab on this device.
+          ownsLease = await claimLoginLease(false)
         }
         if (!ownsLease) {
           await close('La sesión se ha cerrado porque la cuenta se ha liberado o se ha abierto en otro dispositivo.', true)
@@ -78,9 +73,13 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
       }
     }
     const recordActivity = () => {
-      activity.lastActivityAt = Date.now()
+      const now = Date.now()
+      activity.lastActivityAt = now
       scheduleIdleClose()
-      if (activity.lastActivityAt - activity.lastHeartbeatAt >= leaseCheckIntervalMs) void validateLease(true)
+      if (isOnline && now - activity.lastHeartbeatAt >= heartbeatThrottleMs) {
+        activity.lastHeartbeatAt = now
+        void validateLease(true)
+      }
     }
     const handleVisibilityChange = () => {
       if (document.visibilityState === 'visible') void validateLease()
@@ -88,7 +87,6 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
 
     scheduleIdleClose()
     void validateLease()
-    const intervalId = window.setInterval(() => void validateLease(), leaseCheckIntervalMs)
     window.addEventListener('pointerdown', recordActivity, { passive: true })
     window.addEventListener('keydown', recordActivity)
     window.addEventListener('wheel', recordActivity, { passive: true })
@@ -96,7 +94,6 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
     return () => {
       active = false
       if (idleTimeoutId) window.clearTimeout(idleTimeoutId)
-      window.clearInterval(intervalId)
       window.removeEventListener('pointerdown', recordActivity)
       window.removeEventListener('keydown', recordActivity)
       window.removeEventListener('wheel', recordActivity)
