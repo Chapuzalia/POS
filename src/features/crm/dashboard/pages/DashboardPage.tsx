@@ -7,31 +7,17 @@ import { formatMoney } from "../../../../lib/format";
 import { formatCrmDateTime } from "../../shared/formatCrmDateTime";
 import { useState } from "react";
 import type { CrmStats } from "../../../../types";
-import type {
-  CatalogCategory,
-  CatalogPlacement,
-  CatalogProduct,
-} from "../../../catalog/domain/types.ts";
 
 export type DashboardCrmProps = {
-  activeCategories: number;
-  activeProducts: number;
-  categories: CatalogCategory[];
   disabled: boolean;
   onRefresh: () => Promise<void>;
-  placements: CatalogPlacement[];
-  products: CatalogProduct[];
   selectedVenueId: string;
   stats: CrmStats | null;
 };
 
 export function DashboardCrm({
-  activeProducts,
-  categories,
   disabled,
   onRefresh,
-  placements,
-  products,
   selectedVenueId,
   stats,
 }: DashboardCrmProps) {
