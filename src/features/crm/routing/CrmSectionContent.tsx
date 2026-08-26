@@ -74,7 +74,7 @@ export function CrmSectionContent({
 
   switch (activeSection) {
     case 'dashboard':
-      return catalog ? <DashboardCrm activeCategories={catalog.categories.filter((category) => category.active).length} activeProducts={catalog.products.filter((product) => product.active).length} categories={catalog.categories} disabled={disabled} onRefresh={onStatsRefresh} placements={catalog.placements} products={catalog.products} selectedVenueId={selectedVenueId} stats={stats} /> : null
+      return catalog ? <DashboardCrm disabled={disabled} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} /> : null
     case 'products':
       return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
