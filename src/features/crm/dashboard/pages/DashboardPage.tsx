@@ -5,7 +5,7 @@ import { RefreshCw, Coins, CreditCard } from "lucide-react";
 import { TopProductsList } from "../../analytics/pages/StatsPage";
 import { formatMoney } from "../../../../lib/format";
 import { formatCrmDateTime } from "../../shared/formatCrmDateTime";
-import { type CSSProperties, useState } from "react";
+import { useState } from "react";
 import type { CrmStats } from "../../../../types";
 import type {
   CatalogCategory,
