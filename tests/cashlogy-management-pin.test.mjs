@@ -4,11 +4,11 @@ import test from 'node:test'
 
 import { validateCashlogyManagementPin } from '../src/features/local-printing/cashlogy/cashlogyManagementPin.ts'
 
-test('el PIN de gestión Cashlogy acepta únicamente 7474', () => {
-  assert.equal(validateCashlogyManagementPin('7474'), true)
-  assert.equal(validateCashlogyManagementPin('7473'), false)
+test('el PIN de gestión Cashlogy acepta únicamente 1988', () => {
+  assert.equal(validateCashlogyManagementPin('1988'), true)
+  assert.equal(validateCashlogyManagementPin('1987'), false)
   assert.equal(validateCashlogyManagementPin(''), false)
-  assert.equal(validateCashlogyManagementPin('07474'), false)
+  assert.equal(validateCashlogyManagementPin('01988'), false)
 })
 
 test('retirar y vaciar solicitan autorización antes de abrir sus vistas', async () => {
