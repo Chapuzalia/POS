@@ -1,62 +1,73 @@
 import { supabase } from '../lib/supabase'
 
-const clientIdKey = 'club-pos:login-client-id'
-let activeClientId: string | null = null
-let releaseBrowserLock: (() => void) | null = null
+const deviceIdKey = 'club-pos:login-device-id'
+const instanceIdKey = 'club-pos:login-instance-id'
+const legacyClientIdKey = 'club-pos:login-client-id'
 
-function createClientId() {
+type LoginIdentity = {
+  deviceId: string
+  instanceId: string
+}
+
+let activeIdentity: LoginIdentity | null = null
+let fallbackDeviceId: string | null = null
+
+function createId() {
   return crypto.randomUUID()
 }
 
-async function holdBrowserLock(clientId: string) {
-  if (!navigator.locks) {
-    return true
-  }
+function getDeviceId() {
+  if (fallbackDeviceId) return fallbackDeviceId
 
-  let resolveAcquired: (acquired: boolean) => void = () => undefined
-  const acquired = new Promise<boolean>((resolve) => {
-    resolveAcquired = resolve
-  })
-
-  void navigator.locks.request(`club-pos-login:${clientId}`, { ifAvailable: true }, (lock) => {
-    resolveAcquired(Boolean(lock))
-
-    if (!lock) {
-      return undefined
+  try {
+    const storedDeviceId = localStorage.getItem(deviceIdKey)
+    if (storedDeviceId) {
+      fallbackDeviceId = storedDeviceId
+      return storedDeviceId
     }
 
-    return new Promise<void>((resolve) => {
-      releaseBrowserLock = resolve
-    })
-  })
-
-  return acquired
+    // Preserve ownership across this rollout when the old session-scoped id exists.
+    const legacyClientId = sessionStorage.getItem(legacyClientIdKey)
+    const deviceId = legacyClientId ?? createId()
+    localStorage.setItem(deviceIdKey, deviceId)
+    fallbackDeviceId = deviceId
+    return deviceId
+  } catch {
+    fallbackDeviceId = createId()
+    return fallbackDeviceId
+  }
 }
 
-async function getClientId() {
-  if (activeClientId) {
-    return activeClientId
-  }
-
-  let candidate = sessionStorage.getItem(clientIdKey) ?? createClientId()
-
-  if (!(await holdBrowserLock(candidate))) {
-    candidate = createClientId()
-    await holdBrowserLock(candidate)
-  }
-
-  sessionStorage.setItem(clientIdKey, candidate)
-  activeClientId = candidate
-  return candidate
+function getInstanceId() {
+  const instanceId = sessionStorage.getItem(instanceIdKey) ?? createId()
+  sessionStorage.setItem(instanceIdKey, instanceId)
+  return instanceId
 }
 
-export async function claimLoginLease() {
+function getLoginIdentity() {
+  if (activeIdentity) {
+    return activeIdentity
+  }
+
+  activeIdentity = {
+    deviceId: getDeviceId(),
+    instanceId: getInstanceId(),
+  }
+  sessionStorage.removeItem(legacyClientIdKey)
+  return activeIdentity
+}
+
+export async function claimLoginLease(allowSameDevice = true) {
   if (!supabase) {
     throw new Error('Supabase no está configurado.')
   }
 
-  const clientId = await getClientId()
-  const { data, error } = await supabase.rpc('claim_user_login', { p_client_id: clientId })
+  const identity = getLoginIdentity()
+  const { data, error } = await supabase.rpc('claim_user_login', {
+    p_allow_same_device: allowSameDevice,
+    p_client_id: identity.instanceId,
+    p_device_id: identity.deviceId,
+  })
 
   if (error) {
     throw error
@@ -70,8 +81,11 @@ export async function forceClaimLoginLease() {
     throw new Error('Supabase no está configurado.')
   }
 
-  const clientId = await getClientId()
-  const { data, error } = await supabase.rpc('force_claim_user_login', { p_client_id: clientId })
+  const identity = getLoginIdentity()
+  const { data, error } = await supabase.rpc('force_claim_user_login', {
+    p_client_id: identity.instanceId,
+    p_device_id: identity.deviceId,
+  })
 
   if (error) {
     throw error
@@ -81,11 +95,14 @@ export async function forceClaimLoginLease() {
 }
 
 export async function heartbeatLoginLease() {
-  if (!supabase || !activeClientId) {
+  if (!supabase || !activeIdentity) {
     return false
   }
 
-  const { data, error } = await supabase.rpc('heartbeat_user_login', { p_client_id: activeClientId })
+  const { data, error } = await supabase.rpc('heartbeat_user_login', {
+    p_client_id: activeIdentity.instanceId,
+    p_device_id: activeIdentity.deviceId,
+  })
 
   if (error) {
     throw error
@@ -95,11 +112,14 @@ export async function heartbeatLoginLease() {
 }
 
 export async function checkLoginLease() {
-  if (!supabase || !activeClientId) {
+  if (!supabase || !activeIdentity) {
     return false
   }
 
-  const { data, error } = await supabase.rpc('check_user_login', { p_client_id: activeClientId })
+  const { data, error } = await supabase.rpc('check_user_login', {
+    p_client_id: activeIdentity.instanceId,
+    p_device_id: activeIdentity.deviceId,
+  })
 
   if (error) {
     throw error
@@ -109,8 +129,11 @@ export async function checkLoginLease() {
 }
 
 export async function releaseLoginLease() {
-  if (supabase && activeClientId) {
-    const { error } = await supabase.rpc('release_user_login', { p_client_id: activeClientId })
+  if (supabase && activeIdentity) {
+    const { error } = await supabase.rpc('release_user_login', {
+      p_client_id: activeIdentity.instanceId,
+      p_device_id: activeIdentity.deviceId,
+    })
 
     if (error) {
       throw error
@@ -121,8 +144,7 @@ export async function releaseLoginLease() {
 }
 
 export function releaseLocalLoginLock() {
-  releaseBrowserLock?.()
-  releaseBrowserLock = null
-  activeClientId = null
-  sessionStorage.removeItem(clientIdKey)
+  activeIdentity = null
+  sessionStorage.removeItem(instanceIdKey)
+  sessionStorage.removeItem(legacyClientIdKey)
 }
