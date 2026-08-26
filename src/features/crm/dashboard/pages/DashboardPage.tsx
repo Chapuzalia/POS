@@ -36,21 +36,6 @@ export function DashboardCrm({
   stats,
 }: DashboardCrmProps) {
   const [showAllOpenCashSessions, setShowAllOpenCashSessions] = useState(true);
-  const categoryBars = categories.map((category) => ({
-    ...category,
-    count: new Set(
-      placements
-        .filter((placement) => placement.categoryId === category.id)
-        .map((placement) => placement.productId),
-    ).size,
-  }));
-  const maxCategoryCount = Math.max(
-    1,
-    ...categoryBars.map((category) => category.count),
-  );
-  const activeRatio = products.length
-    ? Math.round((activeProducts / products.length) * 100)
-    : 0;
 
   return (
     <div className="!grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] xl:!gap-6">
