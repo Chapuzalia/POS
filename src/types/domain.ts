@@ -589,6 +589,12 @@ export type CrmStats = {
     totalCents: number
     count: number
   }>
+  dayActivity: {
+    totalCents: number
+    cashCents: number
+    cardCents: number
+    ticketCount: number
+  }
   discountApplications: Array<{
     id: string
     name: string
@@ -620,6 +626,18 @@ export type CrmStats = {
     cardCents: number
     invitationCents: number
     otherCents: number
+  }>
+  salesByCategory: Array<{
+    id: string
+    label: string
+    quantity: number
+    totalCents: number
+  }>
+  salesByProduct: Array<{
+    id: string
+    label: string
+    quantity: number
+    totalCents: number
   }>
   topProductCombinations: Array<{
     productName: string

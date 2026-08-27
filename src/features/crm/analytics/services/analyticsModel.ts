@@ -1,4 +1,89 @@
-import type { CrmStats } from '../../../../types/domain.ts'
+import { getOperationalDateKey, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
+import type { CrmStats, HistoricalPaymentMethod } from '../../../../types/domain.ts'
+
+export type SalesBreakdownLine = {
+  categoryId: string | null
+  categoryName: string | null
+  productId: string | null
+  productName: string
+  quantity: number
+  totalCents: number
+}
+
+export function buildDayActivityStats(
+  tickets: Array<{ id: string; createdAt: string; totalCents: number }>,
+  sales: Array<{
+    ticketId: string
+    paymentMethod: HistoricalPaymentMethod | null
+    totalCents: number
+  }>,
+  config: OperationalDayConfig,
+  now = new Date(),
+): CrmStats['dayActivity'] {
+  const currentDayKey = getOperationalDateKey(now, config)
+  const dayTicketIds = new Set<string>()
+  let totalCents = 0
+
+  tickets.forEach((ticket) => {
+    if (getOperationalDateKey(ticket.createdAt, config) !== currentDayKey) return
+    dayTicketIds.add(ticket.id)
+    totalCents += ticket.totalCents
+  })
+
+  let cashCents = 0
+  let cardCents = 0
+  sales.forEach((sale) => {
+    if (!dayTicketIds.has(sale.ticketId)) return
+    if (sale.paymentMethod === 'cash') cashCents += sale.totalCents
+    if (sale.paymentMethod === 'card') cardCents += sale.totalCents
+  })
+
+  return {
+    totalCents,
+    cashCents,
+    cardCents,
+    ticketCount: dayTicketIds.size,
+  }
+}
+
+type SalesBreakdownItem = CrmStats['salesByCategory'][number]
+
+function addSalesBreakdownItem(
+  items: Map<string, SalesBreakdownItem>,
+  id: string,
+  label: string,
+  line: SalesBreakdownLine,
+) {
+  const current = items.get(id) ?? { id, label, quantity: 0, totalCents: 0 }
+  current.quantity += line.quantity
+  current.totalCents += line.totalCents
+  items.set(id, current)
+}
+
+function sortSalesBreakdown(items: Map<string, SalesBreakdownItem>) {
+  return [...items.values()].sort((left, right) =>
+    right.totalCents - left.totalCents
+    || right.quantity - left.quantity
+    || left.label.localeCompare(right.label, 'es'),
+  )
+}
+
+export function buildSalesBreakdowns(lines: SalesBreakdownLine[]): Pick<CrmStats, 'salesByCategory' | 'salesByProduct'> {
+  const categories = new Map<string, SalesBreakdownItem>()
+  const products = new Map<string, SalesBreakdownItem>()
+
+  lines.forEach((line) => {
+    const categoryLabel = line.categoryName?.trim() || 'Sin categoría'
+    const productLabel = line.productName.trim() || 'Producto sin nombre'
+    addSalesBreakdownItem(categories, line.categoryId ?? 'uncategorized', categoryLabel, line)
+    addSalesBreakdownItem(products, line.productId ?? `deleted:${productLabel.toLocaleLowerCase('es')}`, productLabel, line)
+  })
+
+  return {
+    salesByCategory: sortSalesBreakdown(categories),
+    salesByProduct: sortSalesBreakdown(products),
+  }
+}
 
 export type TopProductCombinationLine = {
   productName: string
