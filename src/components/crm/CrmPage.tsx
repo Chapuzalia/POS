@@ -4,7 +4,7 @@ import { canAccessCrm, canAccessCrmSection } from '../../features/crm/routing/cr
 import type { CrmSection } from '../../features/crm/routing/crmNavigation'
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
-import { applyCrmOpenCashSalesTotals, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
+import { applyCrmOpenCashSalesTotals, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import { catalogAdminService } from '../../features/crm/catalog/services/catalogAdminService.ts'
@@ -143,10 +143,19 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     }
     const refreshOpenCashSales = async () => {
       const cashSessionIds = statsRef.current?.openCashSessions.map((session) => session.id) ?? []
-      if (!cashSessionIds.length) return
+      const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
+      if (!selectedVenue) return
       try {
-        const totals = await loadCrmOpenCashSalesTotals(context, cashSessionIds)
-        if (active) setStats((current) => applyCrmOpenCashSalesTotals(current, totals))
+        const [totals, dayActivity] = await Promise.all([
+          loadCrmOpenCashSalesTotals(context, cashSessionIds),
+          loadCrmDayActivity(context, selectedVenue),
+        ])
+        if (active) {
+          setStats((current) => {
+            const next = applyCrmOpenCashSalesTotals(current, totals)
+            return next ? { ...next, dayActivity } : next
+          })
+        }
       } catch (salesError) {
         if (active) onError(getReadableError(salesError))
       }
@@ -182,7 +191,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
       if (fallbackTimer) window.clearInterval(fallbackTimer)
       unsubscribers.forEach((unsubscribe) => unsubscribe())
     }
-  }, [activeSection, context, isOnline, onError, venues])
+  }, [activeSection, context, isOnline, onError, selectedVenueId, venues])
 
   if (!canAccessCrm(context.role)) return null
   const disabled = !isOnline || isBusy || isCatalogLoading

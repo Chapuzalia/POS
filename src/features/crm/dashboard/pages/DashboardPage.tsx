@@ -7,6 +7,7 @@ import { formatMoney } from "../../../../lib/format";
 import { formatCrmDateTime } from "../../shared/formatCrmDateTime";
 import { useState } from "react";
 import type { CrmStats } from "../../../../types";
+import { groupOpenCashSessionsByVenue } from "../openCashSessionsModel";
 
 export type DashboardCrmProps = {
   disabled: boolean;
@@ -21,7 +22,7 @@ export function DashboardCrm({
   selectedVenueId,
   stats,
 }: DashboardCrmProps) {
-  const [showAllOpenCashSessions, setShowAllOpenCashSessions] = useState(true);
+  const [showAllOpenCashSessions, setShowAllOpenCashSessions] = useState(false);
 
   return (
     <div className="!grid !grid-cols-1 !items-start !gap-4 xl:!grid-cols-[minmax(0,1.12fr)_minmax(0,1fr)] xl:!gap-6">
@@ -52,6 +53,30 @@ export function DashboardCrm({
           showAll={showAllOpenCashSessions}
           stats={stats}
         />
+      </section>
+
+      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+        <div className="flex min-h-11 items-center justify-between gap-2.5 border-b border-[var(--crm-border-subtle)] px-4 py-3 text-[var(--crm-text)] [&_h2]:m-0 [&_p]:m-0 [&_p]:mt-1 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)] !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
+          <span>Actividad del día</span>
+        </div>
+        <div className="grid gap-[9px] px-[22px] pt-3 pb-[22px]">
+          <MiniMetric
+            label="Total"
+            value={formatMoney(stats?.dayActivity.totalCents ?? 0)}
+          />
+          <MiniMetric
+            label="Efectivo"
+            value={formatMoney(stats?.dayActivity.cashCents ?? 0)}
+          />
+          <MiniMetric
+            label="Tarjeta"
+            value={formatMoney(stats?.dayActivity.cardCents ?? 0)}
+          />
+          <MiniMetric
+            label="Tickets"
+            value={String(stats?.dayActivity.ticketCount ?? 0)}
+          />
+        </div>
       </section>
 
       <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
@@ -96,10 +121,7 @@ function OpenCashSessionsList({
   const sessions = (stats?.openCashSessions ?? []).filter(
     (session) => showAll || session.venueId === selectedVenueId,
   );
-  const totalOpenSalesCents = sessions.reduce(
-    (total, session) => total + session.salesCents,
-    0,
-  );
+  const venueGroups = groupOpenCashSessionsByVenue(sessions);
 
   if (!stats) {
     return <EmptyList message="Cargando cajas abiertas." />;
@@ -119,40 +141,55 @@ function OpenCashSessionsList({
 
   return (
     <div className="grid gap-3 px-[22px] pt-3 pb-[22px]">
-      <div className="!flex !min-h-[62px] !flex-col !items-start !justify-between !gap-3 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-green-soft)] !px-4 !py-3 md:!flex-row md:!items-center">
-        <span>
-          {sessions.length === 1
-            ? "1 caja abierta"
-            : `${sessions.length} cajas abiertas`}
-        </span>
-        <strong>{formatMoney(totalOpenSalesCents)}</strong>
-      </div>
-      <div className="grid gap-2">
-        {sessions.map((session) => (
-          <div
-            className="!grid !grid-cols-2 !items-center !gap-3.5 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !py-[13px] md:!grid-cols-[minmax(0,1fr)_repeat(3,minmax(80px,max-content))] xl:!grid-cols-[minmax(210px,1fr)_minmax(104px,0.32fr)_minmax(78px,0.2fr)_minmax(92px,0.26fr)_minmax(240px,0.8fr)]"
-            key={session.id}
-          >
-            <div className="!col-span-full grid w-full min-w-0 grid-cols-[minmax(0,1fr)_repeat(2,minmax(72px,max-content))] items-center gap-3.5 xl:!col-span-4">
-              <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-lg [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
-                <strong>{session.venueName}</strong>
-                <span>{`${session.deviceName} - abierta ${formatCrmDateTime(session.openedAt)}`}</span>
-              </div>
-              <div className="grid gap-[3px] [&_span]:text-[11px] [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)] [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:tabular-nums [&_strong]:text-[var(--crm-text)]">
-                <span>Facturado</span>
-                <strong>{formatMoney(session.salesCents)}</strong>
-              </div>
-              <div className="grid gap-[3px] [&_span]:text-[11px] [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)] [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:tabular-nums [&_strong]:text-[var(--crm-text)]">
-                <span>Tickets</span>
-                <strong>{session.ticketCount}</strong>
-              </div>
+      {venueGroups.map((group) => (
+        <div className="grid gap-2" key={group.venueId}>
+          <div className="!flex !min-h-[62px] !flex-col !items-start !justify-between !gap-3 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-green-soft)] !px-4 !py-3 md:!flex-row md:!items-center">
+            <div className="grid gap-0.5">
+              {showAll ? <strong>{group.venueName}</strong> : null}
+              <span>
+                {group.sessions.length === 1
+                  ? "1 caja abierta"
+                  : `${group.sessions.length} cajas abiertas`}
+              </span>
             </div>
-            <div className="!col-span-full !flex !min-w-0 !flex-wrap justify-center !gap-[5px] xl:!col-span-1 xl:!justify-end">
-              <span className="rounded-full flex flex-row gap-1 bg-[var(--crm-green-soft)] px-4 py-1"><Coins />{`${formatMoney(session.cashCents)}`}</span>
-              <span className="rounded-full flex flex-row gap-1 bg-[var(--crm-green-soft)] px-4 py-1"><CreditCard />{`${formatMoney(session.cardCents)}`}</span>
-            </div>
+            <strong>{formatMoney(group.totalSalesCents)}</strong>
           </div>
-        ))}
+          <div className="grid gap-2">
+            {group.sessions.map((session) => (
+              <OpenCashSessionRow
+                key={session.id}
+                session={session}
+              />
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function OpenCashSessionRow({ session }: {
+  session: CrmStats["openCashSessions"][number];
+}) {
+  return (
+    <div className="!grid !grid-cols-2 !items-center !gap-3.5 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !py-[13px] md:!grid-cols-[minmax(0,1fr)_repeat(3,minmax(80px,max-content))] xl:!grid-cols-[minmax(210px,1fr)_minmax(104px,0.32fr)_minmax(78px,0.2fr)_minmax(92px,0.26fr)_minmax(240px,0.8fr)]">
+      <div className="!col-span-full grid w-full min-w-0 grid-cols-[minmax(0,1fr)_repeat(2,minmax(72px,max-content))] items-center gap-3.5 xl:!col-span-4">
+        <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-lg [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
+          <strong>{session.deviceName}</strong>
+          <span>{`Abierta ${formatCrmDateTime(session.openedAt)}`}</span>
+        </div>
+        <div className="grid gap-[3px] [&_span]:text-[11px] [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)] [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:tabular-nums [&_strong]:text-[var(--crm-text)]">
+          <span>Facturado</span>
+          <strong>{formatMoney(session.salesCents)}</strong>
+        </div>
+        <div className="grid gap-[3px] [&_span]:text-[11px] [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)] [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:tabular-nums [&_strong]:text-[var(--crm-text)]">
+          <span>Tickets</span>
+          <strong>{session.ticketCount}</strong>
+        </div>
+      </div>
+      <div className="!col-span-full !flex !min-w-0 !flex-wrap justify-center !gap-[5px] xl:!col-span-1 xl:!justify-end">
+        <span className="rounded-full flex flex-row gap-1 bg-[var(--crm-green-soft)] px-4 py-1"><Coins />{`${formatMoney(session.cashCents)}`}</span>
+        <span className="rounded-full flex flex-row gap-1 bg-[var(--crm-green-soft)] px-4 py-1"><CreditCard />{`${formatMoney(session.cardCents)}`}</span>
       </div>
     </div>
   );

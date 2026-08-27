@@ -117,6 +117,26 @@ export function getOperationalMonthStartIso(config: OperationalDayConfig, now = 
   return getOperationalMonthRangeIso(config, operationalDate.slice(0, 7)).startIso
 }
 
+export function getOperationalDayRangeIso(
+  config: OperationalDayConfig,
+  dayKey = getOperationalDateKey(new Date(), config),
+) {
+  const match = /^(\d{4})-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/.exec(dayKey)
+  if (!match) throw new Error('El día debe tener formato YYYY-MM-DD.')
+  const dayChangeTime = normalizeDayChangeTime(config.dayChangeTime) ?? '00:00'
+  const [hour, minute] = dayChangeTime.split(':').map(Number)
+
+  const boundary = (dateKey: string) => {
+    const [year, month, day] = dateKey.split('-').map(Number)
+    return zonedDateTimeToDate({ year, month, day, hour, minute, second: 0 }, config.timeZone).toISOString()
+  }
+
+  return {
+    startIso: boundary(dayKey),
+    endIso: boundary(shiftIsoDate(dayKey, 1)),
+  }
+}
+
 export function getOperationalMonthRangeIso(config: OperationalDayConfig, monthKey: string) {
   const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(monthKey)
   if (!match) throw new Error('El mes debe tener formato YYYY-MM.')

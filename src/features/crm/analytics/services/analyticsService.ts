@@ -1,13 +1,14 @@
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
-import { getOperationalDateKey, getOperationalMonthRangeIso } from '../../../../lib/operationalDay'
+import { getOperationalDateKey, getOperationalDayRangeIso, getOperationalMonthRangeIso } from '../../../../lib/operationalDay'
 import { supabase } from '../../../../lib/supabase'
 import { type CrmStats, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
 import { type NameRow } from '../../sales/services/salesReportsService'
-import { buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from './analyticsModel.ts'
+import { buildDayActivityStats, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from './analyticsModel.ts'
 export { applyCrmOpenCashSalesTotals } from './analyticsModel.ts'
 
 export type SaleStatsRow = {
   id: string
+  ticket_id: string
   payment_method: HistoricalPaymentMethod | null
   total_cents: number
 }
@@ -82,6 +83,55 @@ export async function loadCrmOpenCashSalesTotals(
   return totalsByCashSession
 }
 
+export async function loadCrmDayActivity(
+  context: TenantContext,
+  venue: CrmVenue,
+): Promise<CrmStats['dayActivity']> {
+  const client = requireSupabase()
+  const operationalDayConfig = {
+    dayChangeTime: venue.dayChangeTime,
+    timeZone: venue.timeZone,
+  }
+  const dayRange = getOperationalDayRangeIso(operationalDayConfig)
+  const [
+    { data: saleRows, error: salesError },
+    { data: ticketRows, error: ticketsError },
+  ] = await Promise.all([
+    client
+      .from('sales')
+      .select('id, ticket_id, payment_method, total_cents')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venue.id)
+      .gte('local_created_at', dayRange.startIso)
+      .lt('local_created_at', dayRange.endIso),
+    client
+      .from('tickets')
+      .select('id, local_created_at, total_cents')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venue.id)
+      .eq('status', 'paid')
+      .gte('local_created_at', dayRange.startIso)
+      .lt('local_created_at', dayRange.endIso),
+  ])
+
+  if (salesError) throw salesError
+  if (ticketsError) throw ticketsError
+
+  return buildDayActivityStats(
+    ((ticketRows ?? []) as Array<Pick<TicketWithLinesStatsRow, 'id' | 'local_created_at' | 'total_cents'>>).map((ticket) => ({
+      id: ticket.id,
+      createdAt: ticket.local_created_at,
+      totalCents: ticket.total_cents,
+    })),
+    ((saleRows ?? []) as SaleStatsRow[]).map((sale) => ({
+      ticketId: sale.ticket_id,
+      paymentMethod: sale.payment_method,
+      totalCents: sale.total_cents,
+    })),
+    operationalDayConfig,
+  )
+}
+
 export async function loadCrmStats(context: TenantContext, venue: CrmVenue, monthKey?: string): Promise<CrmStats> {
   const client = requireSupabase()
   const operationalDayConfig = {
@@ -92,7 +142,7 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue, mont
   const monthRange = getOperationalMonthRangeIso(operationalDayConfig, selectedMonthKey)
   let salesQuery = client
     .from('sales')
-    .select('id, payment_method, total_cents')
+    .select('id, ticket_id, payment_method, total_cents')
     .eq('tenant_id', context.tenantId)
     .gte('local_created_at', monthRange.startIso)
     .lt('local_created_at', monthRange.endIso)
@@ -180,6 +230,19 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue, mont
   const venuesById = new Map(((venueRows ?? []) as NameRow[]).map((venue) => [venue.id, venue.name]))
   const devicesById = new Map(((deviceRows ?? []) as NameRow[]).map((device) => [device.id, device.name]))
   const monthSalesCents = paidTickets.reduce((total, ticket) => total + ticket.total_cents, 0)
+  const dayActivity = buildDayActivityStats(
+    paidTickets.map((ticket) => ({
+      id: ticket.id,
+      createdAt: ticket.local_created_at,
+      totalCents: ticket.total_cents,
+    })),
+    sales.map((sale) => ({
+      ticketId: sale.ticket_id,
+      paymentMethod: sale.payment_method,
+      totalCents: sale.total_cents,
+    })),
+    operationalDayConfig,
+  )
   const discountsCents = paidTickets.reduce((total, ticket) => total + (ticket.discount_amount_cents ?? 0), 0)
   const discountedTicketCount = paidTickets.filter((ticket) => (ticket.discount_amount_cents ?? 0) > 0).length
   const byPaymentMap = new Map<PaymentMethod, { method: PaymentMethod; totalCents: number; count: number }>()
@@ -286,6 +349,7 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue, mont
   return {
     averageTicketCents: paidTickets.length ? Math.round(monthSalesCents / paidTickets.length) : 0,
     byPayment: [...byPaymentMap.values()].sort((a, b) => b.totalCents - a.totalCents),
+    dayActivity,
     discountApplications: [...discountMap.values()].map((item) => ({
       ...item,
       ticketPercentage: paidTickets.length ? Math.round((item.applications / paidTickets.length) * 1000) / 10 : 0,

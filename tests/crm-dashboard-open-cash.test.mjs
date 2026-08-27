@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
+import { groupOpenCashSessionsByVenue } from '../src/features/crm/dashboard/openCashSessionsModel.ts'
 
 test('estadisticas agrupa el importe vendido por categoria y producto', () => {
   const breakdown = buildSalesBreakdowns([
@@ -143,17 +144,47 @@ test('el dashboard muestra primero las cajas y permite filtrar por el local sele
     readFile(new URL('../src/types/domain.ts', import.meta.url), 'utf8'),
   ])
 
-  assert.ok(dashboard.indexOf('<span>Cajas abiertas</span>') < dashboard.indexOf('<span>Resumen del catálogo</span>'))
-  assert.match(dashboard, /useState\(true\)/)
+  assert.ok(dashboard.indexOf('<span>Cajas abiertas</span>') < dashboard.indexOf('<span>Actividad del día</span>'))
+  assert.match(dashboard, /useState\(false\)/)
   assert.match(dashboard, /checked=\{showAllOpenCashSessions\}/)
   assert.match(dashboard, /Todas las cajas del negocio/)
   assert.match(dashboard, /showAll \|\| session\.venueId === selectedVenueId/)
   assert.match(dashboard, /No hay cajas abiertas en el local seleccionado/)
+  assert.match(dashboard, /<strong>\{session\.deviceName\}<\/strong>/)
+  assert.doesNotMatch(dashboard, /showVenueName/)
   assert.match(routing, /selectedVenueId=\{selectedVenueId\}/)
 
   assert.match(service, /venueId: session\.venue_id/)
   assert.doesNotMatch(service, /openSessionsQuery = openSessionsQuery\.eq\('venue_id'/)
   assert.match(domain, /openCashSessions: Array<\{[\s\S]*venueId: string/)
+})
+
+test('la vista de todo el negocio agrupa cajas y facturación por local', () => {
+  const baseSession = {
+    deviceName: 'Caja 1',
+    openedAt: '2026-08-27T10:00:00.000Z',
+    openingFloatCents: 0,
+    ticketCount: 1,
+    cashCents: 0,
+    cardCents: 0,
+    invitationCents: 0,
+    otherCents: 0,
+  }
+  const groups = groupOpenCashSessionsByVenue([
+    { ...baseSession, id: 'a-1', venueId: 'a', venueName: 'Local A', salesCents: 1_000 },
+    { ...baseSession, id: 'b-1', venueId: 'b', venueName: 'Local B', salesCents: 2_000 },
+    { ...baseSession, id: 'a-2', venueId: 'a', venueName: 'Local A', salesCents: 500 },
+  ])
+
+  assert.deepEqual(groups.map((group) => ({
+    venueId: group.venueId,
+    venueName: group.venueName,
+    sessionIds: group.sessions.map((session) => session.id),
+    totalSalesCents: group.totalSalesCents,
+  })), [
+    { venueId: 'a', venueName: 'Local A', sessionIds: ['a-1', 'a-2'], totalSalesCents: 1_500 },
+    { venueId: 'b', venueName: 'Local B', sessionIds: ['b-1'], totalSalesCents: 2_000 },
+  ])
 })
 
 test('las cajas abiertas usan el mismo patrón realtime por local que el mapa de mesas', async () => {
@@ -178,7 +209,8 @@ test('las cajas abiertas usan el mismo patrón realtime por local que el mapa de
   assert.match(crmPage, /window\.setTimeout\(\(\) => void refreshOpenCashSales\(\), 250\)/)
   assert.match(tableRealtime, /realtimeTimer = window\.setTimeout/)
   assert.match(crmPage, /loadCrmOpenCashSalesTotals\(context, cashSessionIds\)/)
-  assert.match(crmPage, /setStats\(\(current\) => applyCrmOpenCashSalesTotals\(current, totals\)\)/)
+  assert.match(crmPage, /const next = applyCrmOpenCashSalesTotals\(current, totals\)/)
+  assert.match(crmPage, /return next \? \{ \.\.\.next, dayActivity \} : next/)
   assert.match(crmPage, /window\.setInterval\(scheduleSalesRefresh, 3000\)/)
   assert.doesNotMatch(crmPage, /window\.setInterval\(refreshCashSessions/)
   assert.match(publicationMigration, /alter publication supabase_realtime add table public\.%I/i)

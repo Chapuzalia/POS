@@ -1,4 +1,5 @@
-import type { CrmStats } from '../../../../types/domain.ts'
+import { getOperationalDateKey, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
+import type { CrmStats, HistoricalPaymentMethod } from '../../../../types/domain.ts'
 
 export type SalesBreakdownLine = {
   categoryId: string | null
@@ -7,6 +8,42 @@ export type SalesBreakdownLine = {
   productName: string
   quantity: number
   totalCents: number
+}
+
+export function buildDayActivityStats(
+  tickets: Array<{ id: string; createdAt: string; totalCents: number }>,
+  sales: Array<{
+    ticketId: string
+    paymentMethod: HistoricalPaymentMethod | null
+    totalCents: number
+  }>,
+  config: OperationalDayConfig,
+  now = new Date(),
+): CrmStats['dayActivity'] {
+  const currentDayKey = getOperationalDateKey(now, config)
+  const dayTicketIds = new Set<string>()
+  let totalCents = 0
+
+  tickets.forEach((ticket) => {
+    if (getOperationalDateKey(ticket.createdAt, config) !== currentDayKey) return
+    dayTicketIds.add(ticket.id)
+    totalCents += ticket.totalCents
+  })
+
+  let cashCents = 0
+  let cardCents = 0
+  sales.forEach((sale) => {
+    if (!dayTicketIds.has(sale.ticketId)) return
+    if (sale.paymentMethod === 'cash') cashCents += sale.totalCents
+    if (sale.paymentMethod === 'card') cardCents += sale.totalCents
+  })
+
+  return {
+    totalCents,
+    cashCents,
+    cardCents,
+    ticketCount: dayTicketIds.size,
+  }
 }
 
 type SalesBreakdownItem = CrmStats['salesByCategory'][number]
