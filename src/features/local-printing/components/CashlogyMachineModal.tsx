@@ -65,6 +65,8 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     isPolling: state.isPolling,
     isMutating: state.isMutating,
     isCancelling: state.isCancelling,
+    isRecordingStackerCollection: state.isRecordingStackerCollection,
+    stackerCollectionPending: state.stackerCollectionPending,
     open: state.open,
     hide: state.hide,
     startRefill: state.startRefill,
@@ -97,7 +99,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
   const [pinError, setPinError] = useState<string | null>(null)
 
   const operationActive = Boolean(management.operation && cashlogyManagementActiveStatuses.has(management.operation.status))
-  const operationBusy = management.isStarting || management.isMutating || management.isCancelling || operationActive
+  const operationBusy = management.isStarting || management.isMutating || management.isCancelling || management.isRecordingStackerCollection || operationActive
   const ready = health?.enabled === true && health.ok === true && health.sessionState === 'ready'
   const denominationOptions = useMemo(() => {
     const live = getDispensableDenominations(accounting)
@@ -332,6 +334,7 @@ type OperationViewProps = {
   denominationOptions: ReturnType<typeof getDispensableDenominations>
   management: Pick<CashlogyManagementState,
     | 'intent' | 'operation' | 'error' | 'isStarting' | 'isPolling' | 'isMutating' | 'isCancelling'
+    | 'isRecordingStackerCollection' | 'stackerCollectionPending'
     | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'cancel' | 'recover'>
   onCloseReviewed: () => void
   onCloseResolved: () => void
@@ -347,8 +350,8 @@ function OperationView(props: OperationViewProps) {
   const type = management.intent!.type
   const active = Boolean(operation && cashlogyManagementActiveStatuses.has(operation.status))
   const canCancel = Boolean(operation && cashlogyManagementCancellableStatuses.has(operation.status))
-  const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || (!operation && Boolean(management.error))
-  const busy = management.isStarting || management.isMutating || management.isCancelling
+  const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || management.stackerCollectionPending || (!operation && Boolean(management.error))
+  const busy = management.isStarting || management.isMutating || management.isCancelling || management.isRecordingStackerCollection
   const acceptedCents = operation?.acceptedCents ?? 0
 
   return <section className="grid gap-5">

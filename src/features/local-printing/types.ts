@@ -310,6 +310,7 @@ export type CashlogyManagementIntent = {
   requestId: string
   type: CashlogyCashManagementType
   operationId: string | null
+  cashSessionId?: string | null
   denominationOptions?: CashlogyAvailableDenomination[]
   createdAt: string
 }

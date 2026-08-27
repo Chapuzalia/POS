@@ -935,6 +935,7 @@ declare
   cash_entries_total integer := 0;
   cash_exits_total integer := 0;
   card_cashback_total integer := 0;
+  stacker_collections_total integer := 0;
   expected_cash_total integer := 0;
   expected_card_total integer := 0;
   counted_cash_total integer := 0;
@@ -1042,11 +1043,17 @@ begin
   from public.cash_movements cm
   where cm.cash_session_id = session_row.id;
 
+  select coalesce(sum(sc.amount_cents), 0)::integer
+  into stacker_collections_total
+  from public.cash_session_stacker_collections sc
+  where sc.cash_session_id = session_row.id;
+
   expected_cash_total := session_row.opening_float_cents
     + cash_payments_total
     + cash_entries_total
     - cash_exits_total
-    - card_cashback_total;
+    - card_cashback_total
+    - stacker_collections_total;
   expected_card_total := card_payments_total + card_cashback_total;
 
   snapshot := jsonb_build_object(
@@ -1070,7 +1077,8 @@ begin
     'cashMovements', jsonb_build_object(
       'cashEntriesCents', cash_entries_total,
       'cashExitsCents', cash_exits_total,
-      'cardCashbackCents', card_cashback_total
+      'cardCashbackCents', card_cashback_total,
+      'stackerCollectionsCents', stacker_collections_total
     ),
     'cashFund', jsonb_build_object(
       'openingCashFundCents', session_row.opening_float_cents,
@@ -1366,6 +1374,147 @@ CREATE TABLE public.cash_movements (
     CONSTRAINT cash_movements_amount_cents_check CHECK ((amount_cents > 0)),
     CONSTRAINT cash_movements_direction_check CHECK ((direction = ANY (ARRAY['entry'::text, 'exit'::text])))
 );
+
+
+--
+-- Name: cash_session_stacker_collections; Type: TABLE; Schema: public; Owner: -
+--
+
+CREATE TABLE public.cash_session_stacker_collections (
+    id uuid DEFAULT gen_random_uuid() NOT NULL,
+    tenant_id uuid NOT NULL,
+    venue_id uuid NOT NULL,
+    cash_session_id uuid NOT NULL,
+    device_id uuid NOT NULL,
+    created_by uuid NOT NULL,
+    request_id text NOT NULL,
+    operation_id text NOT NULL,
+    amount_cents integer NOT NULL,
+    created_at timestamp with time zone DEFAULT now() NOT NULL,
+    CONSTRAINT cash_session_stacker_collections_amount_check CHECK ((amount_cents >= 0)),
+    CONSTRAINT cash_session_stacker_collections_operation_check CHECK ((btrim(operation_id) <> ''::text)),
+    CONSTRAINT cash_session_stacker_collections_pkey PRIMARY KEY (id),
+    CONSTRAINT cash_session_stacker_collections_request_check CHECK ((btrim(request_id) <> ''::text)),
+    CONSTRAINT cash_session_stacker_collections_tenant_operation_key UNIQUE (tenant_id, operation_id),
+    CONSTRAINT cash_session_stacker_collections_tenant_request_key UNIQUE (tenant_id, request_id)
+);
+
+
+--
+-- Name: record_cashlogy_stacker_collection(uuid, uuid, text, text, integer); Type: FUNCTION; Schema: public; Owner: -
+--
+
+CREATE FUNCTION public.record_cashlogy_stacker_collection(p_cash_session_id uuid, p_device_id uuid, p_request_id text, p_operation_id text, p_amount_cents integer) RETURNS public.cash_session_stacker_collections
+    LANGUAGE plpgsql SECURITY DEFINER
+    SET search_path TO ''
+    AS $$
+declare
+  session_row public.cash_sessions%rowtype;
+  device_row public.devices%rowtype;
+  collection_row public.cash_session_stacker_collections%rowtype;
+  member_role text;
+begin
+  if auth.uid() is null then
+    raise exception 'Autenticacion requerida' using errcode = '42501';
+  end if;
+  if p_request_id is null or nullif(btrim(p_request_id), '') is null then
+    raise exception 'El requestId de Cashlogy es obligatorio';
+  end if;
+  if p_operation_id is null or nullif(btrim(p_operation_id), '') is null then
+    raise exception 'El operationId de Cashlogy es obligatorio';
+  end if;
+  if p_amount_cents is null or p_amount_cents < 0 then
+    raise exception 'El importe retirado del stacker no es valido';
+  end if;
+
+  select cs.* into session_row
+  from public.cash_sessions cs
+  where cs.id = p_cash_session_id
+  for update;
+
+  if session_row.id is null then
+    raise exception 'Caja no disponible';
+  end if;
+
+  select d.* into device_row
+  from public.devices d
+  where d.id = p_device_id;
+
+  select tm.role into member_role
+  from public.tenant_memberships tm
+  where tm.tenant_id = session_row.tenant_id
+    and tm.user_id = auth.uid()
+    and tm.is_active
+  limit 1;
+
+  if device_row.id is null
+    or not device_row.is_active
+    or device_row.tenant_id <> session_row.tenant_id
+    or device_row.venue_id <> session_row.venue_id then
+    raise exception 'El dispositivo no pertenece a esta caja' using errcode = '42501';
+  end if;
+  if coalesce(member_role, '') not in ('manager', 'owner')
+    and (not public.user_has_device_access(session_row.tenant_id, session_row.venue_id, device_row.id)
+      or not public.user_has_venue_access(session_row.tenant_id, session_row.venue_id)) then
+    raise exception 'El usuario no tiene acceso al dispositivo o al local' using errcode = '42501';
+  end if;
+  if not coalesce(device_row.can_manage_cash, false)
+    and coalesce(member_role, '') not in ('manager', 'owner') then
+    raise exception 'No tienes permiso para retirar el stacker' using errcode = '42501';
+  end if;
+
+  select sc.* into collection_row
+  from public.cash_session_stacker_collections sc
+  where sc.tenant_id = session_row.tenant_id
+    and (sc.request_id = btrim(p_request_id) or sc.operation_id = btrim(p_operation_id))
+  limit 1;
+
+  if collection_row.id is not null then
+    if collection_row.cash_session_id <> session_row.id
+      or collection_row.request_id <> btrim(p_request_id)
+      or collection_row.operation_id <> btrim(p_operation_id)
+      or collection_row.amount_cents <> p_amount_cents then
+      raise exception 'La identidad de la retirada de stacker entra en conflicto con un registro existente' using errcode = '23505';
+    end if;
+    return collection_row;
+  end if;
+
+  if session_row.status <> 'open' then
+    raise exception 'No se puede registrar una retirada de stacker en una caja cerrada' using errcode = '55000';
+  end if;
+  if device_row.active_cash_session_id is distinct from session_row.id then
+    raise exception 'El dispositivo no esta vinculado a esta caja' using errcode = '42501';
+  end if;
+
+  insert into public.cash_session_stacker_collections (
+    tenant_id, venue_id, cash_session_id, device_id, created_by,
+    request_id, operation_id, amount_cents
+  ) values (
+    session_row.tenant_id, session_row.venue_id, session_row.id, device_row.id, auth.uid(),
+    btrim(p_request_id), btrim(p_operation_id), p_amount_cents
+  )
+  on conflict do nothing
+  returning * into collection_row;
+
+  if collection_row.id is null then
+    select sc.* into collection_row
+    from public.cash_session_stacker_collections sc
+    where sc.tenant_id = session_row.tenant_id
+      and (sc.request_id = btrim(p_request_id) or sc.operation_id = btrim(p_operation_id))
+    limit 1;
+  end if;
+
+  if collection_row.id is null
+    or collection_row.cash_session_id <> session_row.id
+    or collection_row.request_id <> btrim(p_request_id)
+    or collection_row.operation_id <> btrim(p_operation_id)
+    or collection_row.amount_cents <> p_amount_cents then
+    raise exception 'La identidad de la retirada de stacker entra en conflicto con un registro existente' using errcode = '23505';
+  end if;
+
+  return collection_row;
+end;
+$$;
 
 
 --
@@ -7069,6 +7218,13 @@ CREATE UNIQUE INDEX cash_movements_session_request_idx ON public.cash_movements 
 
 
 --
+-- Name: cash_session_stacker_collections_session_idx; Type: INDEX; Schema: public; Owner: -
+--
+
+CREATE INDEX cash_session_stacker_collections_session_idx ON public.cash_session_stacker_collections USING btree (cash_session_id, created_at);
+
+
+--
 -- Name: cash_session_table_layouts_scope_idx; Type: INDEX; Schema: public; Owner: -
 --
 
@@ -8362,6 +8518,46 @@ ALTER TABLE ONLY public.cash_movements
 
 
 --
+-- Name: cash_session_stacker_collections cash_session_stacker_collections_cash_session_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cash_session_stacker_collections
+    ADD CONSTRAINT cash_session_stacker_collections_cash_session_id_fkey FOREIGN KEY (cash_session_id) REFERENCES public.cash_sessions(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: cash_session_stacker_collections cash_session_stacker_collections_created_by_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cash_session_stacker_collections
+    ADD CONSTRAINT cash_session_stacker_collections_created_by_fkey FOREIGN KEY (created_by) REFERENCES auth.users(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: cash_session_stacker_collections cash_session_stacker_collections_device_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cash_session_stacker_collections
+    ADD CONSTRAINT cash_session_stacker_collections_device_id_fkey FOREIGN KEY (device_id) REFERENCES public.devices(id) ON DELETE RESTRICT;
+
+
+--
+-- Name: cash_session_stacker_collections cash_session_stacker_collections_tenant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cash_session_stacker_collections
+    ADD CONSTRAINT cash_session_stacker_collections_tenant_id_fkey FOREIGN KEY (tenant_id) REFERENCES public.tenants(id) ON DELETE CASCADE;
+
+
+--
+-- Name: cash_session_stacker_collections cash_session_stacker_collections_venue_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
+--
+
+ALTER TABLE ONLY public.cash_session_stacker_collections
+    ADD CONSTRAINT cash_session_stacker_collections_venue_id_fkey FOREIGN KEY (venue_id) REFERENCES public.venues(id) ON DELETE RESTRICT;
+
+
+--
 -- Name: cash_registers cash_registers_tenant_id_fkey; Type: FK CONSTRAINT; Schema: public; Owner: -
 --
 
@@ -9526,6 +9722,20 @@ CREATE POLICY cash_movements_select ON public.cash_movements FOR SELECT TO authe
 
 
 --
+-- Name: cash_session_stacker_collections; Type: ROW SECURITY; Schema: public; Owner: -
+--
+
+ALTER TABLE public.cash_session_stacker_collections ENABLE ROW LEVEL SECURITY;
+
+
+--
+-- Name: cash_session_stacker_collections cash_session_stacker_collections_select; Type: POLICY; Schema: public; Owner: -
+--
+
+CREATE POLICY cash_session_stacker_collections_select ON public.cash_session_stacker_collections FOR SELECT TO authenticated USING ((public.user_is_tenant_admin(tenant_id) OR public.user_has_venue_access(tenant_id, venue_id)));
+
+
+--
 -- Name: cash_registers; Type: ROW SECURITY; Schema: public; Owner: -
 --
 
@@ -10487,6 +10697,21 @@ GRANT ALL ON FUNCTION public.configure_restaurant_order_equal_split(p_order_id u
 --
 
 GRANT SELECT ON TABLE public.cash_movements TO authenticated;
+
+
+--
+-- Name: TABLE cash_session_stacker_collections; Type: ACL; Schema: public; Owner: -
+--
+
+GRANT SELECT ON TABLE public.cash_session_stacker_collections TO authenticated;
+
+
+--
+-- Name: FUNCTION record_cashlogy_stacker_collection(p_cash_session_id uuid, p_device_id uuid, p_request_id text, p_operation_id text, p_amount_cents integer); Type: ACL; Schema: public; Owner: -
+--
+
+REVOKE ALL ON FUNCTION public.record_cashlogy_stacker_collection(p_cash_session_id uuid, p_device_id uuid, p_request_id text, p_operation_id text, p_amount_cents integer) FROM PUBLIC;
+GRANT ALL ON FUNCTION public.record_cashlogy_stacker_collection(p_cash_session_id uuid, p_device_id uuid, p_request_id text, p_operation_id text, p_amount_cents integer) TO authenticated;
 
 
 --

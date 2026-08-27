@@ -21,6 +21,7 @@ import {
   pollCashlogyTransaction,
 } from '../src/features/local-printing/cashlogy/cashlogyPolling.ts'
 import { createCashlogyRequestId } from '../src/features/local-printing/cashlogy/cashlogyRequestId.ts'
+import { getCompletedStackerCollection } from '../src/features/local-printing/cashlogy/stackerCollection.ts'
 import {
   getCashlogyIntentStorageKey,
   getCashlogyManagementIntentStorageKey,
@@ -266,6 +267,31 @@ test('los pollings terminan solo en estados terminales y permiten la fase awaiti
   assert.ok(cashlogyManagementCancellableStatuses.has('accepting'))
   assert.equal(cashlogyManagementCancellableStatuses.has('awaiting_dispense'), false)
   assert.ok(cashlogyManagementTerminalStatuses.has('needs_attention'))
+})
+
+test('solo una retirada de stacker completada produce el importe real que debe registrarse', () => {
+  const intent = {
+    requestId: 'cashlogy:stacker:intent-1',
+    type: 'remove_stacker',
+    operationId: null,
+    cashSessionId: 'cash-session-1',
+    createdAt: '2026-08-27T10:00:00Z',
+  }
+  const completed = operation('remove_stacker', 'completed', {
+    requestId: intent.requestId,
+    dispensedCents: 12345,
+  })
+
+  assert.deepEqual(getCompletedStackerCollection(completed, intent), {
+    cashSessionId: 'cash-session-1',
+    requestId: intent.requestId,
+    operationId: completed.id,
+    amountCents: 12345,
+  })
+  for (const status of ['failed', 'cancelled', 'unknown', 'needs_attention']) {
+    assert.equal(getCompletedStackerCollection({ ...completed, status }, intent), null)
+  }
+  assert.equal(getCompletedStackerCollection(operation('withdraw', 'completed', { dispensedCents: 12345 }), intent), null)
 })
 
 test('requestId e intenciones de venta y gestión sobreviven a una recarga por terminal', () => {

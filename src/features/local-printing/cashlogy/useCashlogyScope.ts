@@ -6,7 +6,7 @@ import { cashlogyActiveStatuses, cashlogyManagementActiveStatuses } from './cash
 import { useCashlogyManagementStore } from './useCashlogyManagementStore'
 import { useCashlogyStore } from './useCashlogyStore'
 
-export function useCashlogyScope(context: TenantContext | null) {
+export function useCashlogyScope(context: TenantContext | null, cashSessionId: string | null) {
   const tenantId = context?.tenantId ?? null
   const establishmentId = context?.venueId ?? null
   const terminalId = context?.deviceId ?? null
@@ -38,7 +38,8 @@ export function useCashlogyScope(context: TenantContext | null) {
         && !management.isStarting
         && !management.isMutating
         && !management.isCancelling
-        && (!management.operation
+        && (management.stackerCollectionPending
+          || !management.operation
           || (cashlogyManagementActiveStatuses.has(management.operation.status)
             && management.operation.status !== 'awaiting_dispense'))
       if (managementNeedsRecovery) {
@@ -52,4 +53,8 @@ export function useCashlogyScope(context: TenantContext | null) {
       window.clearInterval(interval)
     }
   }, [disabled, establishmentId, tenantId, terminalId])
+
+  useEffect(() => {
+    useCashlogyManagementStore.getState().setCashSessionId(disabled ? null : cashSessionId)
+  }, [cashSessionId, disabled, establishmentId, tenantId, terminalId])
 }

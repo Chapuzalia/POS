@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { recordCashlogyStackerCollection } from '../../cash-registers/service'
 import { createPrintAgentClient } from '../api/printAgentClient'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
 import type {
@@ -18,9 +19,11 @@ import {
   pollCashlogyOperation,
 } from './cashlogyPolling'
 import { loadCashlogyIntent, loadCashlogyManagementIntent, saveCashlogyManagementIntent } from './cashlogyStorage'
+import { getCompletedStackerCollection } from './stackerCollection'
 
 export type CashlogyManagementState = {
   scope: PrintAgentScope | null
+  cashSessionId: string | null
   intent: CashlogyManagementIntent | null
   operation: CashlogyCashManagementOperation | null
   error: CashlogyError | null
@@ -29,7 +32,10 @@ export type CashlogyManagementState = {
   isPolling: boolean
   isMutating: boolean
   isCancelling: boolean
+  isRecordingStackerCollection: boolean
+  stackerCollectionPending: boolean
   configureScope: (scope: PrintAgentScope) => void
+  setCashSessionId: (cashSessionId: string | null) => void
   open: () => void
   hide: () => void
   startRefill: () => Promise<CashlogyCashManagementOperation>
@@ -94,6 +100,52 @@ function identifyOperation(operation: CashlogyCashManagementOperation) {
   })
 }
 
+async function recordCompletedStackerCollection(operation: CashlogyCashManagementOperation) {
+  const state = useCashlogyManagementStore.getState()
+  const collection = getCompletedStackerCollection(operation, state.intent)
+  if (!collection) {
+    if (operation.type === 'remove_stacker' && operation.status === 'completed' && state.intent?.cashSessionId) {
+      useCashlogyManagementStore.setState({ stackerCollectionPending: true })
+      throw new CashlogyError({
+        code: 'CASHLOGY_INVALID_STATE',
+        message: 'Cashlogy ha retirado el stacker, pero no ha devuelto un importe válido para registrarlo en la caja.',
+        details: operation,
+      })
+    }
+    if (operation.type === 'remove_stacker' && operation.status !== 'completed') {
+      useCashlogyManagementStore.setState({ stackerCollectionPending: false })
+    }
+    return
+  }
+  if (!state.scope) {
+    useCashlogyManagementStore.setState({ stackerCollectionPending: true })
+    throw new CashlogyError({
+      code: 'CASHLOGY_INVALID_STATE',
+      message: 'La retirada del stacker no se puede asociar al dispositivo actual.',
+      details: operation,
+    })
+  }
+  useCashlogyManagementStore.setState({ isRecordingStackerCollection: true, stackerCollectionPending: true })
+  try {
+    await recordCashlogyStackerCollection({ ...collection, deviceId: state.scope.terminalId })
+    useCashlogyManagementStore.setState({ stackerCollectionPending: false, error: null })
+  } catch (error) {
+    useCashlogyManagementStore.setState({ stackerCollectionPending: true })
+    throw new CashlogyError({
+      code: 'CASHLOGY_NETWORK_ERROR',
+      message: 'Cashlogy ha retirado el stacker, pero el importe aún no se ha podido registrar en la caja. Consulta el estado de nuevo antes de cerrar.',
+      details: error,
+    })
+  } finally {
+    useCashlogyManagementStore.setState({ isRecordingStackerCollection: false })
+  }
+}
+
+async function resolveObservedOperation(operation: CashlogyCashManagementOperation) {
+  identifyOperation(operation)
+  if (!shouldPoll(operation)) await recordCompletedStackerCollection(operation)
+}
+
 function shouldPoll(operation: CashlogyCashManagementOperation) {
   return cashlogyManagementActiveStatuses.has(operation.status)
     && !(operation.type === 'give_change' && operation.status === 'awaiting_dispense')
@@ -126,8 +178,8 @@ function startPolling(operation: CashlogyCashManagementOperation) {
     onUpdate: (next) => {
       if (generation === operationPollingGeneration) identifyOperation(next)
     },
-  }).then((terminal) => {
-    if (generation === operationPollingGeneration) identifyOperation(terminal)
+  }).then(async (terminal) => {
+    if (generation === operationPollingGeneration) await resolveObservedOperation(terminal)
   }).catch((error) => {
     if (controller.signal.aborted || generation !== operationPollingGeneration) return
     useCashlogyManagementStore.setState({ error: toCashlogyError(error) })
@@ -170,6 +222,7 @@ async function createOperation(
     requestId: createCashlogyRequestId(type),
     type,
     operationId: null,
+    cashSessionId: type === 'remove_stacker' ? state.cashSessionId : null,
     ...(denominationOptions?.length ? { denominationOptions } : {}),
     createdAt: new Date().toISOString(),
   }
@@ -187,7 +240,7 @@ async function createOperation(
       }
       operation = await recoverAfterUncertainResult(intent.requestId, error)
     }
-    identifyOperation(operation)
+    await resolveObservedOperation(operation)
     startPolling(operation)
     return operation
   } catch (error) {
@@ -214,7 +267,7 @@ async function mutateOperation(
       if (!isUncertainCashlogyError(error)) throw error
       operation = await recoverAfterUncertainResult(current.requestId, error)
     }
-    identifyOperation(operation)
+    await resolveObservedOperation(operation)
     startPolling(operation)
     return operation
   } catch (error) {
@@ -228,6 +281,7 @@ async function mutateOperation(
 
 export const useCashlogyManagementStore = create<CashlogyManagementState>((set, get) => ({
   scope: null,
+  cashSessionId: null,
   intent: null,
   operation: null,
   error: null,
@@ -236,14 +290,18 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
   isPolling: false,
   isMutating: false,
   isCancelling: false,
+  isRecordingStackerCollection: false,
+  stackerCollectionPending: false,
 
   configureScope(scope) {
     stopPolling()
     startPromise = null
     recoveryPromise = null
     const intent = loadCashlogyManagementIntent(scope)
-    set({ scope, intent, operation: null, error: null, modalOpen: Boolean(intent), isStarting: false, isPolling: false, isMutating: false, isCancelling: false })
+    set({ scope, cashSessionId: null, intent, operation: null, error: null, modalOpen: Boolean(intent), isStarting: false, isPolling: false, isMutating: false, isCancelling: false, isRecordingStackerCollection: false, stackerCollectionPending: false })
   },
+
+  setCashSessionId(cashSessionId) { set({ cashSessionId }) },
 
   open() { set({ modalOpen: true }) },
 
@@ -323,7 +381,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
         })
       }
       const operation = (await client().getCashlogyCashManagementOperationByRequestId(current.requestId, signal)).operation
-      identifyOperation(operation)
+      await resolveObservedOperation(operation)
       if (!response.cancelled && cashlogyManagementActiveStatuses.has(operation.status)) {
         throw new CashlogyError({
           code: 'CASHLOGY_CASH_MANAGEMENT_NOT_ACTIVE',
@@ -352,7 +410,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     recoveryPromise = (async () => {
       try {
         const operation = (await client().getCashlogyCashManagementOperationByRequestId(intent.requestId, signal)).operation
-        identifyOperation(operation)
+        await resolveObservedOperation(operation)
         startPolling(operation)
         return operation
       } catch (error) {
@@ -366,7 +424,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
 
   clearResolved() {
     const operation = get().operation
-    if (!operation || cashlogyManagementActiveStatuses.has(operation.status)) return
+    if (!operation || cashlogyManagementActiveStatuses.has(operation.status) || get().isRecordingStackerCollection || get().stackerCollectionPending) return
     if (operation.status === 'unknown' || operation.status === 'needs_attention') return
     stopPolling()
     persistIntent(null)

@@ -49,12 +49,14 @@ const cashMovementsSchema = z.object({
   cashEntriesCents: cents.optional(),
   cashExitsCents: cents.optional(),
   cardCashbackCents: cents.optional(),
+  stackerCollectionsCents: cents.optional(),
   entriesCents: cents.optional(),
   exitsCents: cents.optional(),
 }).transform((value) => ({
   cashEntriesCents: value.cashEntriesCents ?? value.entriesCents ?? 0,
   cashExitsCents: value.cashExitsCents ?? value.exitsCents ?? 0,
   cardCashbackCents: value.cardCashbackCents ?? 0,
+  stackerCollectionsCents: value.stackerCollectionsCents ?? 0,
 }))
 
 export const cashClosingPrintDocumentSchema = z.object({

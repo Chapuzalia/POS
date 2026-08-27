@@ -495,6 +495,7 @@ export type CashClosingPrintSnapshot = {
     cashEntriesCents: number
     cashExitsCents: number
     cardCashbackCents: number
+    stackerCollectionsCents?: number
   }
   cashFund: { openingCashFundCents: number; finalCashFundCents: number }
   expectedAndCounted: {
