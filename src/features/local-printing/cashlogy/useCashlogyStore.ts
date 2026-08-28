@@ -1,7 +1,7 @@
 import { create } from 'zustand'
 import { createPrintAgentClient } from '../api/printAgentClient'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
-import type { CashlogyHealth, CashlogyIntent, CashlogyTransaction, PrintAgentScope } from '../types'
+import type { CashlogyHealth, CashlogyIntent, CashlogyLevel, CashlogyTransaction, PrintAgentScope } from '../types'
 import { CashlogyError, isUncertainCashlogyError, toCashlogyError } from './cashlogyError'
 import { createCashlogyRequestId } from './cashlogyRequestId'
 import {
@@ -15,6 +15,7 @@ type CashlogyState = {
   scope: PrintAgentScope | null
   intent: CashlogyIntent | null
   transaction: CashlogyTransaction | null
+  levels: CashlogyLevel[]
   error: CashlogyError | null
   modalOpen: boolean
   isCheckingHealth: boolean
@@ -107,6 +108,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
   scope: null,
   intent: null,
   transaction: null,
+  levels: [],
   error: null,
   modalOpen: false,
   isCheckingHealth: false,
@@ -125,6 +127,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
       scope,
       intent,
       transaction: null,
+      levels: [],
       error: interruptedBeforeRequest
         ? new CashlogyError({
             code: 'CASHLOGY_INVALID_STATE',
@@ -186,7 +189,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
       createdAt: new Date().toISOString(),
     }
     persistIntent(intent)
-    set({ intent, transaction: null, error: null, modalOpen: true, isStarting: true })
+    set({ intent, transaction: null, levels: [], error: null, modalOpen: true, isStarting: true })
     settlementPromise = (async () => {
       try {
         const health: CashlogyHealth = await get().checkHealth(signal)
@@ -197,6 +200,13 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
             originalCode: health.lastError?.code,
             details: health,
           })
+        }
+
+        try {
+          const result = await client().getCashlogyLevels(signal)
+          set({ levels: result.levels })
+        } catch {
+          set({ levels: [] })
         }
 
         let transaction: CashlogyTransaction
@@ -283,7 +293,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
   finish(requestId) {
     if (get().intent?.requestId !== requestId) return
     persistIntent(null)
-    set({ intent: null, transaction: null, error: null, modalOpen: false, isPolling: false })
+    set({ intent: null, transaction: null, levels: [], error: null, modalOpen: false, isPolling: false })
   },
 
   discardForRetry() {
@@ -291,7 +301,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
     const failedBeforeTransaction = !get().transaction && Boolean(get().error) && !get().isStarting && !get().isPolling
     if (status !== 'cancelled' && status !== 'failed' && !failedBeforeTransaction) return
     persistIntent(null)
-    set({ intent: null, transaction: null, error: null, modalOpen: false, isPolling: false })
+    set({ intent: null, transaction: null, levels: [], error: null, modalOpen: false, isPolling: false })
   },
 
   hide() {
