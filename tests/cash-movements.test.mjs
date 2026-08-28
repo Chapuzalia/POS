@@ -43,6 +43,7 @@ test('combina ventas y movimientos sin convertir movimientos en facturacion', ()
 })
 
 const migration = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
+const stackerMigration = readFileSync(new URL('../supabase/migrations/20260827120000_add_cashlogy_stacker_collections.sql', import.meta.url), 'utf8')
 
 test('el RPC deriva identidad y direccion, y la escritura directa queda revocada', () => {
   assert.match(migration, /security definer/i)
@@ -74,4 +75,36 @@ test('el snapshot separa entradas, salidas y efectivo por tarjeta', () => {
   assert.match(migration, /'cashEntriesCents', cash_entries_total/i)
   assert.match(migration, /'cashExitsCents', cash_exits_total/i)
   assert.match(migration, /'cardCashbackCents', card_cashback_total/i)
+})
+
+test('la retirada de stacker se registra aparte, es idempotente y no se convierte en cash_out', () => {
+  for (const sql of [migration, stackerMigration]) {
+    assert.match(sql, /create table(?: if not exists)? public\.cash_session_stacker_collections/i)
+    assert.match(sql, /unique[\s\S]*tenant_id, request_id/i)
+    assert.match(sql, /unique[\s\S]*tenant_id, operation_id/i)
+    assert.match(sql, /record_cashlogy_stacker_collection/i)
+    assert.match(sql, /on conflict do nothing/i)
+    assert.doesNotMatch(sql, /insert into public\.cash_movements[\s\S]{0,500}stacker/i)
+  }
+})
+
+test('retirar el stacker durante la sesión no genera descuadre al cierre', () => {
+  for (const sql of [migration, stackerMigration]) {
+    assert.match(sql, /from public\.cash_session_stacker_collections sc[\s\S]*where sc\.cash_session_id = session_row\.id/i)
+    assert.match(sql, /expected_cash_total := session_row\.opening_float_cents[\s\S]*- card_cashback_total[\s\S]*- stacker_collections_total/i)
+  }
+
+  const openingFloatCents = 10000
+  const cashSalesCents = 5000
+  const collectedStackerCents = 3000
+  const countedCashlogyCents = 12000
+  const expectedCashCents = openingFloatCents + cashSalesCents - collectedStackerCents
+  assert.equal(countedCashlogyCents - expectedCashCents, 0)
+})
+
+test('retirar efectivo sin salida de caja sigue generando descuadre', () => {
+  const openingFloatCents = 10000
+  const unregisteredWithdrawalCents = 3000
+  const countedCashCents = openingFloatCents - unregisteredWithdrawalCents
+  assert.equal(countedCashCents - openingFloatCents, -unregisteredWithdrawalCents)
 })

@@ -65,6 +65,8 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     isPolling: state.isPolling,
     isMutating: state.isMutating,
     isCancelling: state.isCancelling,
+    isRecordingStackerCollection: state.isRecordingStackerCollection,
+    stackerCollectionPending: state.stackerCollectionPending,
     open: state.open,
     hide: state.hide,
     startRefill: state.startRefill,
@@ -97,7 +99,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
   const [pinError, setPinError] = useState<string | null>(null)
 
   const operationActive = Boolean(management.operation && cashlogyManagementActiveStatuses.has(management.operation.status))
-  const operationBusy = management.isStarting || management.isMutating || management.isCancelling || operationActive
+  const operationBusy = management.isStarting || management.isMutating || management.isCancelling || management.isRecordingStackerCollection || operationActive
   const ready = health?.enabled === true && health.ok === true && health.sessionState === 'ready'
   const denominationOptions = useMemo(() => {
     const live = getDispensableDenominations(accounting)
@@ -332,6 +334,7 @@ type OperationViewProps = {
   denominationOptions: ReturnType<typeof getDispensableDenominations>
   management: Pick<CashlogyManagementState,
     | 'intent' | 'operation' | 'error' | 'isStarting' | 'isPolling' | 'isMutating' | 'isCancelling'
+    | 'isRecordingStackerCollection' | 'stackerCollectionPending'
     | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'cancel' | 'recover'>
   onCloseReviewed: () => void
   onCloseResolved: () => void
@@ -347,8 +350,8 @@ function OperationView(props: OperationViewProps) {
   const type = management.intent!.type
   const active = Boolean(operation && cashlogyManagementActiveStatuses.has(operation.status))
   const canCancel = Boolean(operation && cashlogyManagementCancellableStatuses.has(operation.status))
-  const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || (!operation && Boolean(management.error))
-  const busy = management.isStarting || management.isMutating || management.isCancelling
+  const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || management.stackerCollectionPending || (!operation && Boolean(management.error))
+  const busy = management.isStarting || management.isMutating || management.isCancelling || management.isRecordingStackerCollection
   const acceptedCents = operation?.acceptedCents ?? 0
 
   return <section className="grid gap-5">
@@ -474,11 +477,11 @@ function DenominationTable({ denominations, loading, showStacker }: { denominati
   ].sort((left, right) => right.valueCents - left.valueCents)
   if (loading && rows.length === 0) return <div className="flex items-center justify-center gap-2 border-t border-[var(--separator)] p-8 text-sm text-[var(--muted)]"><LoaderCircle className="h-4 w-4 animate-spin" />Consultando Cashlogy…</div>
   if (rows.length === 0) return <div className="border-t border-[var(--separator)] p-6 text-center text-sm text-[var(--muted)]">Sin desglose por denominación.</div>
-  return <div className="overflow-x-auto border-t border-[var(--separator)]"><table className="w-full min-w-[600px] text-sm"><thead className="bg-[var(--background)] text-left text-xs uppercase text-[var(--muted)]"><tr><th className="px-4 py-3">Tipo</th><th className="px-4 py-3 text-right">Valor</th><th className="px-4 py-3 text-right">Reciclador</th><th className="px-4 py-3 text-right">Stacker</th><th className="px-4 py-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-[var(--separator)]">{rows.map((row) => <DenominationRow key={`${row.kind}-${row.valueCents}`} row={row} showStacker={showStacker} />)}</tbody></table></div>
+  return <div className="overflow-x-auto border-t border-[var(--separator)]"><table className="w-full min-w-[600px] text-sm"><thead className="bg-[var(--background)] text-left text-xs uppercase text-[var(--muted)]"><tr><th className="px-4 py-3">Tipo</th><th className="px-4 py-3 text-right">Valor</th><th className="px-4 py-3 text-right">Reciclador (uds./importe)</th><th className="px-4 py-3 text-right">Stacker (uds./importe)</th><th className="px-4 py-3 text-right">Total</th></tr></thead><tbody className="divide-y divide-[var(--separator)]">{rows.map((row) => <DenominationRow key={`${row.kind}-${row.valueCents}`} row={row} showStacker={showStacker} />)}</tbody></table></div>
 }
 
 function DenominationRow({ row, showStacker }: { row: CashlogyDenomination & { kind: string }; showStacker: boolean }) {
-  return <tr><td className="px-4 py-3 text-[var(--muted)]">{row.kind}</td><td className="px-4 py-3 text-right font-mono font-bold">{formatMoney(row.valueCents)}</td><td className="px-4 py-3 text-right font-mono">{row.recyclerCount}</td><td className="px-4 py-3 text-right font-mono">{showStacker ? row.stackerCount : '••••'}</td><td className="px-4 py-3 text-right font-mono">{showStacker ? formatMoney(row.valueCents * (row.recyclerCount + row.stackerCount)) : '••••'}</td></tr>
+  return <tr><td className="px-4 py-3 text-[var(--muted)]">{row.kind}</td><td className="px-4 py-3 text-right font-mono font-bold">{formatMoney(row.valueCents)}</td><td className="px-4 py-3 text-right font-mono">{row.recyclerCount}/{formatMoney(row.valueCents * row.recyclerCount)}</td><td className="px-4 py-3 text-right font-mono">{showStacker ? `${row.stackerCount}/${formatMoney(row.valueCents * row.stackerCount)}` : '••••'}</td><td className="px-4 py-3 text-right font-mono">{showStacker ? formatMoney(row.valueCents * (row.recyclerCount + row.stackerCount)) : '••••'}</td></tr>
 }
 
 function LevelList({ levels }: { levels: CashlogyLevel[] }) {

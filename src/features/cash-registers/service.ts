@@ -115,6 +115,25 @@ export async function createCashMovement(context: TenantContext, input: {
   return mapCashMovement(data as CashMovementRow)
 }
 
+export async function recordCashlogyStackerCollection(input: {
+  cashSessionId: string
+  deviceId: string
+  requestId: string
+  operationId: string
+  amountCents: number
+}) {
+  const { data, error } = await client().rpc('record_cashlogy_stacker_collection', {
+    p_cash_session_id: input.cashSessionId,
+    p_device_id: input.deviceId,
+    p_request_id: input.requestId,
+    p_operation_id: input.operationId,
+    p_amount_cents: input.amountCents,
+  })
+  if (error) throw error
+  if (!data) throw new Error('La retirada del stacker se completó, pero no se pudo registrar en la caja.')
+  return data
+}
+
 export async function closeCashRegisterSession(context: TenantContext, sessionId: string, payload: CashClosedPayload) {
   const { error } = await client().rpc('close_cash_register_session', { p_cash_session_id: sessionId, p_device_id: context.deviceId, p_payload: payload })
   if (error) throw error

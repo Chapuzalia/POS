@@ -83,7 +83,7 @@ export function useCashSession(options: Options) {
   const setGlobalBusy = options.setBusy
   const syncPendingEvents = options.syncPendingEvents
   usePrintAgentScope(cashContext)
-  useCashlogyScope(cashContext)
+  useCashlogyScope(cashContext, session?.id ?? null)
 
   useEffect(() => {
     if (!cashContext || !session) {
