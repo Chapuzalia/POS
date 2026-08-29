@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { formatMoney } from '../../../../lib/format'
+import { orderHourlySalesByOperationalDay } from '../services/analyticsModel.ts'
 
 type HourlyMetric = 'tickets' | 'revenue'
 export type HourlySalesPoint = { hour: number; ticketCount: number; totalCents: number }
@@ -47,25 +48,29 @@ function normalizeHourlySalesPoints(points: HourlySalesPoint[], dayCount: number
 }
 
 export function HourlySalesChart({
-  comparisonDayCount,
+  comparisonOpenDayCount,
   comparisonLabel,
   comparisonPoints,
   currentLabel,
-  periodDayCount,
+  dayChangeTime,
+  periodOpenDayCount,
   points,
 }: {
-  comparisonDayCount?: number
+  comparisonOpenDayCount?: number
   comparisonLabel: string
   comparisonPoints?: HourlySalesPoint[]
   currentLabel: string
-  periodDayCount: number
+  dayChangeTime: string | null
+  periodOpenDayCount: number
   points: HourlySalesPoint[]
 }) {
   const [metric, setMetric] = useState<HourlyMetric>('tickets')
   const [hoveredHour, setHoveredHour] = useState<number | null>(null)
-  const hasComparison = comparisonPoints !== undefined && comparisonDayCount !== undefined
-  const currentSeries = hasComparison ? normalizeHourlySalesPoints(points, periodDayCount) : points
-  const comparisonSeries = hasComparison ? normalizeHourlySalesPoints(comparisonPoints, comparisonDayCount) : []
+  const hasComparison = comparisonPoints !== undefined && comparisonOpenDayCount !== undefined
+  const orderedPoints = orderHourlySalesByOperationalDay(points, dayChangeTime)
+  const orderedComparisonPoints = orderHourlySalesByOperationalDay(comparisonPoints ?? [], dayChangeTime)
+  const currentSeries = hasComparison ? normalizeHourlySalesPoints(orderedPoints, periodOpenDayCount) : orderedPoints
+  const comparisonSeries = hasComparison ? normalizeHourlySalesPoints(orderedComparisonPoints, comparisonOpenDayCount) : []
   const ticketPeak = findPeak(currentSeries, 'tickets')
   const revenuePeak = findPeak(currentSeries, 'revenue')
   const comparisonTicketPeak = findPeak(comparisonSeries, 'tickets')
@@ -92,9 +97,9 @@ export function HourlySalesChart({
     ...comparisonSeries.map((point) => getMetricValue(point, metric)),
     1,
   )
-  const withCoordinates = (series: HourlySalesPoint[]) => series.map((point) => ({
+  const withCoordinates = (series: HourlySalesPoint[]) => series.map((point, index) => ({
     ...point,
-    x: padding.left + (point.hour / 23) * chartWidth,
+    x: padding.left + (index / 23) * chartWidth,
     y: padding.top + chartHeight - (getMetricValue(point, metric) / maximum) * chartHeight,
   }))
   const chartPoints = withCoordinates(currentSeries)
@@ -131,7 +136,7 @@ export function HourlySalesChart({
         <div className="!flex !flex-wrap !items-center !gap-3 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
           <span className="!flex !items-center !gap-1.5"><i className="!h-0.5 !w-5 !rounded !bg-[var(--crm-blue)]" />{currentLabel}</span>
           {hasComparison ? <span className="!flex !items-center !gap-1.5"><i className="!w-5 !border-t-2 !border-dashed !border-[#8b5cf6]" />{comparisonLabel}</span> : null}
-          {hasComparison ? <span>Media diaria</span> : null}
+          {hasComparison ? <span>Media por día abierto</span> : null}
         </div>
       </div>
 
@@ -161,7 +166,7 @@ export function HourlySalesChart({
           {hasComparison ? <polyline fill="none" points={comparisonLinePoints} stroke={comparisonColor} strokeDasharray="10 8" strokeLinecap="round" strokeLinejoin="round" strokeWidth="3" /> : null}
           <polyline fill="none" points={linePoints} stroke={color} strokeLinecap="round" strokeLinejoin="round" strokeWidth="4" />
 
-          {chartPoints.map((point) => (
+          {chartPoints.map((point, index) => (
             <g key={point.hour}>
               <circle cx={point.x} cy={point.y} fill="var(--crm-surface)" r="4.5" stroke={color} strokeWidth="3" />
               <circle
@@ -177,7 +182,7 @@ export function HourlySalesChart({
                 r="15"
                 tabIndex={0}
               />
-              {point.hour % 3 === 0 || point.hour === 23 ? <text fill="var(--crm-text-muted)" fontSize="12" textAnchor="middle" x={point.x} y={height - 12}>{String(point.hour).padStart(2, '0')}h</text> : null}
+              {index % 3 === 0 || index === chartPoints.length - 1 ? <text fill="var(--crm-text-muted)" fontSize="12" textAnchor="middle" x={point.x} y={height - 12}>{String(point.hour).padStart(2, '0')}h</text> : null}
             </g>
           ))}
 

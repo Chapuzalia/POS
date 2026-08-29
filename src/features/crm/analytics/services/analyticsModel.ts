@@ -1,4 +1,4 @@
-import { getOperationalDateKey, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
+import { getOperationalDateKey, normalizeDayChangeTime, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
 import type { CrmStats, HistoricalPaymentMethod } from '../../../../types/domain.ts'
 
 export type SalesBreakdownLine = {
@@ -178,6 +178,19 @@ export function buildHourlySalesStats(
   })
 
   return hours
+}
+
+export function orderHourlySalesByOperationalDay<T extends { hour: number }>(
+  points: T[],
+  dayChangeTime: string | null | undefined,
+) {
+  const normalizedDayChangeTime = normalizeDayChangeTime(dayChangeTime)
+  const startHour = normalizedDayChangeTime ? Number(normalizedDayChangeTime.slice(0, 2)) : 0
+  return points.toSorted((left, right) => (
+    (left.hour - startHour + 24) % 24
+  ) - (
+    (right.hour - startHour + 24) % 24
+  ))
 }
 
 export function sortCrmTopProductsByUnits(products: CrmStats['topProducts']) {

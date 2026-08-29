@@ -9,6 +9,7 @@ type BreakdownItem = CrmStats['salesByCategory'][number]
 type ChartSegment = BreakdownItem & {
   color: string
   comparisonPercentage: number | null
+  comparisonValue: number | null
   percentage: number
 }
 
@@ -65,7 +66,7 @@ function Toggle({
   )
 }
 
-export function SalesBreakdownChart({ comparisonStats, stats }: { comparisonStats: CrmStats | null; stats: CrmStats | null }) {
+export function SalesBreakdownChart({ comparisonLabel, comparisonStats, stats }: { comparisonLabel: string; comparisonStats: CrmStats | null; stats: CrmStats | null }) {
   const [mode, setMode] = useState<BreakdownMode>('categories')
   const [metric, setMetric] = useState<BreakdownMetric>('amount')
   const [activeSegmentId, setActiveSegmentId] = useState<string | null>(null)
@@ -82,6 +83,7 @@ export function SalesBreakdownChart({ comparisonStats, stats }: { comparisonStat
       ...item,
       color: chartColors[index % chartColors.length] ?? '#64748b',
       comparisonPercentage: comparisonItem && comparisonTotal > 0 ? (getBreakdownValue(comparisonItem, metric) / comparisonTotal) * 100 : comparisonStats ? 0 : null,
+      comparisonValue: comparisonItem ? getBreakdownValue(comparisonItem, metric) : comparisonStats ? 0 : null,
       percentage: total > 0 ? (getBreakdownValue(item, metric) / total) * 100 : 0,
     }
   })
@@ -154,7 +156,6 @@ export function SalesBreakdownChart({ comparisonStats, stats }: { comparisonStat
               })}
               <text fill="var(--crm-text-muted)" fontSize="11" fontWeight="600" textAnchor="middle" x="110" y="101">{activeSegment ? truncateLabel(activeSegment.label) : metric === 'amount' ? 'Total vendido' : 'Unidades vendidas'}</text>
               <text fill="var(--crm-text)" fontSize="17" fontWeight="800" textAnchor="middle" x="110" y="124">{formatValue(activeSegment, total)}</text>
-              {activeSegment ? <text fill="var(--crm-text-muted)" fontSize="10" fontWeight="700" textAnchor="middle" x="110" y="141">{percentFormatter.format(activeSegment.percentage)} % del total</text> : null}
             </svg>
           </div>
 
@@ -175,6 +176,11 @@ export function SalesBreakdownChart({ comparisonStats, stats }: { comparisonStat
                       {percentFormatter.format(segment.percentage)} % · {segment.quantity.toLocaleString('es-ES')} uds
                       {shareChange !== null ? <b className={'!rounded-full !px-1.5 !py-0.5 !text-[9px] !font-bold !tabular-nums ' + shareColor}>{signedPercentFormatter.format(shareChange)} pp</b> : null}
                     </span>
+                    {segment.comparisonValue !== null && segment.comparisonPercentage !== null ? (
+                      <small className="!text-[10px] !font-semibold !text-[var(--crm-text-secondary)]">
+                        {comparisonLabel}: {metric === 'amount' ? formatMoney(segment.comparisonValue) : segment.comparisonValue.toLocaleString('es-ES') + ' uds'} · {percentFormatter.format(segment.comparisonPercentage)} %
+                      </small>
+                    ) : null}
                   </div>
                   <b className="!shrink-0 !text-[13px] !font-bold !tabular-nums !text-[var(--crm-text)]">{metric === 'amount' ? formatMoney(segment.totalCents) : segment.quantity.toLocaleString('es-ES')}</b>
                 </div>

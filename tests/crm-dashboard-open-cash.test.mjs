@@ -1,8 +1,8 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
-import { compareNormalizedValues, createCrmStatsPeriod, getPreviousCrmStatsPeriod, summarizeCrmStatsPeriod } from '../src/features/crm/analytics/services/analyticsPeriod.ts'
+import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, orderHourlySalesByOperationalDay, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
+import { compareNormalizedValues, countCrmStatsOpenDays, createCrmStatsPeriod, getPreviousCrmStatsPeriod, summarizeCrmStatsPeriod } from '../src/features/crm/analytics/services/analyticsPeriod.ts'
 import { groupOpenCashSessionsByVenue } from '../src/features/crm/dashboard/openCashSessionsModel.ts'
 
 test('estadisticas agrupa el importe vendido por categoria y producto', () => {
@@ -30,11 +30,13 @@ test('la card circular alterna categorías, productos, importe y cantidad', asyn
     readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
   ])
 
-  assert.match(statsPage, /<SalesBreakdownChart comparisonStats=\{comparisonStats\} stats=\{stats\}/)
+  assert.match(statsPage, /<SalesBreakdownChart comparisonLabel=\{comparisonLabel\} comparisonStats=\{comparisonStats\} stats=\{stats\}/)
   assert.match(chart, /role="switch"/)
   assert.match(chart, /Cambiar entre importe y cantidad/)
   assert.match(chart, /metric === 'amount'/)
   assert.match(chart, /comparisonPercentage/)
+  assert.equal((chart.match(/<text /g) ?? []).length, 2)
+  assert.doesNotMatch(chart, /% del total/)
   assert.match(service, /category_name_snapshot/)
   assert.match(service, /\.\.\.salesBreakdown/)
 })
@@ -75,7 +77,7 @@ test('el desglose por combinacion se muestra solo en estadisticas y no cambia el
     readFile(new URL('../src/features/crm/dashboard/pages/DashboardPage.tsx', import.meta.url), 'utf8'),
   ])
 
-  assert.match(statsPage, /<TopProductCombinationsList comparisonLabel=\{comparisonLabel\} comparisonStats=\{comparisonStats\} stats=\{stats\}/)
+  assert.match(statsPage, /<TopProductCombinationsList comparisonLabel=\{comparisonLabel\} comparisonStats=\{comparisonStats\} currentLabel=\{currentLabel\} stats=\{stats\}/)
   assert.match(statsPage, /Mixer: \{mixer\}/)
   assert.match(statsPage, /Modificador: \{modifier\}/)
   assert.match(dashboardPage, /<TopProductsList stats=\{stats\}/)
@@ -92,6 +94,11 @@ test('las ventas por hora se agrupan en la zona horaria del local', () => {
   assert.equal(hourlySales.length, 24)
   assert.deepEqual(hourlySales[20], { hour: 20, ticketCount: 2, totalCents: 1_500 })
   assert.deepEqual(hourlySales[0], { hour: 0, ticketCount: 1, totalCents: 750 })
+
+  assert.deepEqual(
+    orderHourlySalesByOperationalDay(hourlySales, '05:00').map((point) => point.hour),
+    [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4],
+  )
 })
 
 test('estadisticas permite alternar el grafico horario entre tickets y facturacion', async () => {
@@ -101,7 +108,9 @@ test('estadisticas permite alternar el grafico horario entre tickets y facturaci
   ])
 
   assert.match(statsPage, /Actividad por hora/)
-  assert.match(statsPage, /hora local del establecimiento/)
+  assert.match(statsPage, /hora local/)
+  assert.match(statsPage, /día operativo desde las/)
+  assert.match(statsPage, /dayChangeTime=\{dayChangeTime\}/)
   assert.match(hourlyChart, /setMetric\('tickets'\)/)
   assert.match(hourlyChart, /setMetric\('revenue'\)/)
   assert.match(hourlyChart, /Más tickets/)
@@ -121,13 +130,17 @@ test('estadísticas permite año, mes, día, período y una comparación indepen
   assert.match(statsPage, /type="checkbox"/)
   assert.match(statsPage, /Comparar con…/)
   assert.match(statsPage, /getPreviousCrmStatsPeriod/)
-  assert.match(statsPage, /valores diarios normalizados/)
+  assert.match(statsPage, /Variaciones calculadas por día abierto/)
+  assert.match(statsPage, /por día abierto/)
+  assert.match(statsPage, /días abiertos/)
   assert.match(routing, /onRefresh=\{\(period, comparisonPeriod\) => onStatsRefresh\(\{ comparisonPeriod, period \}\)\}/)
   assert.match(crmPage, /Promise\.all\(\[/)
   assert.match(crmPage, /options\.comparisonPeriod/)
   assert.match(analyticsService, /getOperationalPeriodRangeIso/)
-  assert.match(analyticsService, /period: periodSummary/)
+  assert.match(analyticsService, /period: \{ \.\.\.periodSummary, openDayCount \}/)
   assert.match(analyticsService, /\.range\(from, to\)/)
+  assert.match(analyticsService, /operatingDaySessionRowsPromise/)
+  assert.match(analyticsService, /openDayCount/)
 })
 
 test('la comparación normaliza períodos de distinta duración', () => {
@@ -140,6 +153,24 @@ test('la comparación normaliza períodos de distinta duración', () => {
   assert.equal(summarizeCrmStatsPeriod(year, '2026-08-29').dayCount, 365)
   assert.equal(compareNormalizedValues(1_000, 1, 365_000, 365).percentage, 0)
   assert.equal(compareNormalizedValues(2_000, 1, 365_000, 365).percentage, 100)
+})
+
+test('la comparación normaliza solo con días en los que el local estuvo abierto', () => {
+  const openDayCount = countCrmStatsOpenDays(
+    [
+      '2026-08-01T10:00:00.000Z',
+      '2026-08-01T18:00:00.000Z',
+      '2026-08-03T10:00:00.000Z',
+    ],
+    [
+      '2026-08-03T20:00:00.000Z',
+      '2026-08-05T02:00:00.000Z',
+    ],
+    { dayChangeTime: '05:00', timeZone: 'Europe/Madrid' },
+  )
+
+  assert.equal(openDayCount, 3)
+  assert.equal(compareNormalizedValues(300_000, openDayCount, 200_000, 2).percentage, 0)
 })
 
 test('los productos top de estadisticas se ordenan primero por unidades vendidas', () => {

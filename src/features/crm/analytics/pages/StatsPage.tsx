@@ -27,6 +27,10 @@ const periodKindOptions = [
 ]
 
 const periodInputClass = 'h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] !min-h-10 !min-w-0 !rounded-[10px] !px-3 !text-sm !font-semibold'
+const normalizedCountFormatter = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 })
+const formatComparisonMoney = (value: number) => formatMoney(Math.round(value))
+const formatComparisonCount = (value: number) => normalizedCountFormatter.format(value)
+const normalizePerOpenDay = (total: number, openDayCount: number) => total / Math.max(1, openDayCount)
 
 export type StatsCrmProps = {
   comparisonStats: CrmStats | null
@@ -151,41 +155,102 @@ function PeriodSelector({
   )
 }
 
+function ComparisonValueDetails({
+  comparisonLabel,
+  comparisonOpenDayCount,
+  comparisonTotal,
+  currentLabel,
+  currentOpenDayCount,
+  currentTotal,
+  formatValue,
+  normalizeByDay,
+}: {
+  comparisonLabel: string
+  comparisonOpenDayCount: number
+  comparisonTotal: number
+  currentLabel: string
+  currentOpenDayCount: number
+  currentTotal: number
+  formatValue: (value: number) => string
+  normalizeByDay: boolean
+}) {
+  const periods = [
+    { dayCount: currentOpenDayCount, label: currentLabel, total: currentTotal },
+    { dayCount: comparisonOpenDayCount, label: comparisonLabel, total: comparisonTotal },
+  ]
+
+  return (
+    <div className="!mt-2 !grid !gap-2 !rounded-xl !bg-[var(--crm-surface-soft)] !p-3">
+      {periods.map((period) => (
+        <div className="!grid !min-w-0 !grid-cols-[minmax(0,1fr)_auto] !items-baseline !gap-x-2 !gap-y-0.5" key={period.label}>
+          <span className="!truncate !text-[10px] !font-bold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">{period.label}</span>
+          <strong className="!whitespace-nowrap !text-xs !font-bold !tabular-nums !text-[var(--crm-text)]">
+            {formatValue(period.total)} {normalizeByDay ? 'total' : 'por ticket'}
+          </strong>
+          {normalizeByDay ? (
+            <span className="!col-span-2 !text-[11px] !font-semibold !tabular-nums !text-[var(--crm-text-secondary)]">
+              {formatValue(period.total / Math.max(1, period.dayCount))} por día abierto
+            </span>
+          ) : null}
+        </div>
+      ))}
+    </div>
+  )
+}
+
 function ComparativeKpi({
   color,
-  comparisonDayCount,
+  comparisonOpenDayCount,
   comparisonLabel,
   comparisonTotal,
-  currentDayCount,
+  currentLabel,
+  currentOpenDayCount,
   currentTotal,
+  formatValue,
   label,
   normalizeByDay = true,
   value,
 }: {
   color: 'green' | 'blue' | 'neutral'
-  comparisonDayCount?: number
+  comparisonOpenDayCount?: number
   comparisonLabel: string
   comparisonTotal?: number
-  currentDayCount: number
+  currentLabel: string
+  currentOpenDayCount: number
   currentTotal: number
+  formatValue: (value: number) => string
   label: string
   normalizeByDay?: boolean
   value: number | string
 }) {
   return (
-    <div className="!relative">
-      <KpiCard color={color} label={label} value={value} />
-      {comparisonTotal !== undefined && comparisonDayCount !== undefined ? (
-        <span className="!absolute !top-4 !right-4 !rounded-full !bg-white/90 !p-0.5 !shadow-sm">
-          <NormalizedComparisonBadge
-            comparisonDayCount={comparisonDayCount}
-            comparisonLabel={comparisonLabel}
-            comparisonTotal={comparisonTotal}
-            currentDayCount={currentDayCount}
-            currentTotal={currentTotal}
-            normalizeByDay={normalizeByDay}
-          />
-        </span>
+    <div>
+      <div className="!relative">
+        <KpiCard color={color} label={label} value={value} />
+        {comparisonTotal !== undefined && comparisonOpenDayCount !== undefined ? (
+          <span className="!absolute !top-4 !right-4 !rounded-full !bg-white/90 !p-0.5 !shadow-sm">
+            <NormalizedComparisonBadge
+              comparisonLabel={comparisonLabel}
+              comparisonOpenDayCount={comparisonOpenDayCount}
+              comparisonTotal={comparisonTotal}
+              currentOpenDayCount={currentOpenDayCount}
+              currentTotal={currentTotal}
+              normalizeByDay={normalizeByDay}
+            />
+          </span>
+        ) : null}
+      </div>
+      {comparisonTotal !== undefined && comparisonOpenDayCount !== undefined ? (
+        <ComparisonValueDetails
+          comparisonLabel={comparisonLabel}
+          comparisonOpenDayCount={comparisonOpenDayCount}
+          comparisonTotal={comparisonTotal}
+          currentLabel={currentLabel}
+          currentOpenDayCount={currentOpenDayCount}
+          currentTotal={currentTotal}
+          formatValue={formatValue}
+          normalizeByDay={normalizeByDay}
+        />
       ) : null}
     </div>
   )
@@ -200,9 +265,11 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
   const comparisonStats = compareEnabled && isSameCrmStatsPeriod(loadedComparisonStats?.period, comparisonPeriod)
     ? loadedComparisonStats
     : null
+  const currentLabel = formatCrmStatsPeriod(selectedPeriod)
   const comparisonLabel = formatCrmStatsPeriod(comparisonPeriod)
-  const currentDayCount = stats?.period.dayCount ?? 1
-  const comparisonDayCount = comparisonStats?.period.dayCount
+  const operationalDayStart = dayChangeTime?.slice(0, 5) || '00:00'
+  const currentOpenDayCount = stats?.period.openDayCount ?? 0
+  const comparisonOpenDayCount = comparisonStats?.period.openDayCount
 
   const selectPeriod = (nextPeriod: CrmStatsPeriod) => {
     setSelectedPeriod(nextPeriod)
@@ -231,8 +298,8 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
         <div className="!grid !gap-4 !px-[18px] !pt-[18px] !pb-3 md:!px-[22px]">
           <div className="!flex !flex-wrap !items-center !justify-between !gap-3">
             <div>
-              <h2 className="!m-0 !text-base !font-bold !text-[var(--crm-text)]">Ventas · {formatCrmStatsPeriod(selectedPeriod)}</h2>
-              {compareEnabled ? <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Variaciones calculadas con valores diarios normalizados.</p> : null}
+              <h2 className="!m-0 !text-base !font-bold !text-[var(--crm-text)]">Ventas · {currentLabel}</h2>
+              {compareEnabled ? <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Variaciones calculadas por día abierto.</p> : null}
             </div>
             <div className="!flex !items-center !gap-2">
               <label className="!flex !min-h-10 !cursor-pointer !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3 !text-xs !font-bold !text-[var(--crm-text-secondary)]">
@@ -261,14 +328,20 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
             <div className="!grid !gap-2 !rounded-xl !bg-[var(--crm-surface-soft)] !p-3">
               <span className="!text-xs !font-bold !text-[var(--crm-text-secondary)]">Comparar con…</span>
               <PeriodSelector currentDay={currentDay} disabled={disabled} idPrefix="stats-comparison" onChange={selectComparisonPeriod} period={comparisonPeriod} />
+              {stats && comparisonStats ? (
+                <div className="!grid !grid-cols-1 !gap-1.5 !border-t !border-[var(--crm-border-subtle)] !pt-2 sm:!grid-cols-2 sm:!gap-3">
+                  <span className="!text-[11px] !font-semibold !text-[var(--crm-text-secondary)]"><b className="!text-[var(--crm-text)]">{currentLabel}</b> · {currentOpenDayCount} {currentOpenDayCount === 1 ? 'día abierto' : 'días abiertos'}</span>
+                  <span className="!text-[11px] !font-semibold !text-[var(--crm-text-secondary)]"><b className="!text-[var(--crm-text)]">{comparisonLabel}</b> · {comparisonOpenDayCount} {comparisonOpenDayCount === 1 ? 'día abierto' : 'días abiertos'}</span>
+                </div>
+              ) : null}
             </div>
           ) : null}
         </div>
         <div className="!grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] md:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
-          <ComparativeKpi color="green" comparisonDayCount={comparisonDayCount} comparisonLabel={comparisonLabel} comparisonTotal={comparisonStats?.monthSalesCents} currentDayCount={currentDayCount} currentTotal={stats?.monthSalesCents ?? 0} label="Ventas" value={formatMoney(stats?.monthSalesCents ?? 0)} />
-          <ComparativeKpi color="blue" comparisonDayCount={comparisonDayCount} comparisonLabel={comparisonLabel} comparisonTotal={comparisonStats?.monthTicketCount} currentDayCount={currentDayCount} currentTotal={stats?.monthTicketCount ?? 0} label="Tickets" value={stats?.monthTicketCount ?? 0} />
-          <ComparativeKpi color="neutral" comparisonDayCount={comparisonDayCount} comparisonLabel={comparisonLabel} comparisonTotal={comparisonStats?.averageTicketCents} currentDayCount={currentDayCount} currentTotal={stats?.averageTicketCents ?? 0} label="Ticket medio" normalizeByDay={false} value={formatMoney(stats?.averageTicketCents ?? 0)} />
-          <ComparativeKpi color="neutral" comparisonDayCount={comparisonDayCount} comparisonLabel={comparisonLabel} comparisonTotal={comparisonStats?.discountsCents} currentDayCount={currentDayCount} currentTotal={stats?.discountsCents ?? 0} label="Descuentos hechos" value={formatMoney(stats?.discountsCents ?? 0)} />
+          <ComparativeKpi color="green" comparisonLabel={comparisonLabel} comparisonOpenDayCount={comparisonOpenDayCount} comparisonTotal={comparisonStats?.monthSalesCents} currentLabel={currentLabel} currentOpenDayCount={currentOpenDayCount} currentTotal={stats?.monthSalesCents ?? 0} formatValue={formatComparisonMoney} label="Ventas" value={formatMoney(stats?.monthSalesCents ?? 0)} />
+          <ComparativeKpi color="blue" comparisonLabel={comparisonLabel} comparisonOpenDayCount={comparisonOpenDayCount} comparisonTotal={comparisonStats?.monthTicketCount} currentLabel={currentLabel} currentOpenDayCount={currentOpenDayCount} currentTotal={stats?.monthTicketCount ?? 0} formatValue={formatComparisonCount} label="Tickets" value={stats?.monthTicketCount ?? 0} />
+          <ComparativeKpi color="neutral" comparisonLabel={comparisonLabel} comparisonOpenDayCount={comparisonOpenDayCount} comparisonTotal={comparisonStats?.averageTicketCents} currentLabel={currentLabel} currentOpenDayCount={currentOpenDayCount} currentTotal={stats?.averageTicketCents ?? 0} formatValue={formatComparisonMoney} label="Ticket medio" normalizeByDay={false} value={formatMoney(stats?.averageTicketCents ?? 0)} />
+          <ComparativeKpi color="neutral" comparisonLabel={comparisonLabel} comparisonOpenDayCount={comparisonOpenDayCount} comparisonTotal={comparisonStats?.discountsCents} currentLabel={currentLabel} currentOpenDayCount={currentOpenDayCount} currentTotal={stats?.discountsCents ?? 0} formatValue={formatComparisonMoney} label="Descuentos hechos" value={formatMoney(stats?.discountsCents ?? 0)} />
         </div>
       </section>
 
@@ -276,28 +349,29 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
         <div className="!flex !min-h-[60px] !items-center !justify-between !gap-3 !px-[18px] !pt-[18px] !pb-3 md:!px-[22px]">
           <div>
             <span className="!text-base !font-bold">Actividad por hora</span>
-            <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">{compareEnabled ? 'Media por día y hora local del establecimiento' : 'Acumulado del período por hora local del establecimiento'}</p>
+            <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">{compareEnabled ? 'Media por día abierto y hora local' : 'Acumulado del período por hora local'} · día operativo desde las {operationalDayStart}</p>
           </div>
         </div>
         <HourlySalesChart
-          comparisonDayCount={comparisonStats?.period.dayCount}
+          comparisonOpenDayCount={comparisonStats?.period.openDayCount}
           comparisonLabel={comparisonLabel}
           comparisonPoints={comparisonStats?.hourlySales}
-          currentLabel={formatCrmStatsPeriod(selectedPeriod)}
-          periodDayCount={stats?.period.dayCount ?? 1}
+          currentLabel={currentLabel}
+          dayChangeTime={dayChangeTime}
+          periodOpenDayCount={stats?.period.openDayCount ?? 0}
           points={stats?.hourlySales ?? []}
         />
       </section>
 
       <section className="pt-4 min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !col-span-full !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
-        <SalesBreakdownChart comparisonStats={comparisonStats} stats={stats} />
+        <SalesBreakdownChart comparisonLabel={comparisonLabel} comparisonStats={comparisonStats} stats={stats} />
       </section>
 
       <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
         <div className="!flex !min-h-[60px] !items-center !justify-between !gap-3 !px-[18px] !pt-[18px] !pb-2 md:!px-[22px]">
           <span className="!text-base !font-bold">Por método de pago</span>
         </div>
-        <PaymentBreakdown comparisonLabel={comparisonLabel} comparisonStats={comparisonStats} stats={stats} />
+        <PaymentBreakdown comparisonLabel={comparisonLabel} comparisonStats={comparisonStats} currentLabel={currentLabel} stats={stats} />
       </section>
 
       <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
@@ -307,13 +381,13 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
             <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Desglosados por mixer y modificadores</p>
           </div>
         </div>
-        <TopProductCombinationsList comparisonLabel={comparisonLabel} comparisonStats={comparisonStats} stats={stats} />
+        <TopProductCombinationsList comparisonLabel={comparisonLabel} comparisonStats={comparisonStats} currentLabel={currentLabel} stats={stats} />
       </section>
     </div>
   )
 }
 
-export function PaymentBreakdown({ comparisonLabel, comparisonStats, stats }: { comparisonLabel: string; comparisonStats: CrmStats | null; stats: CrmStats | null }) {
+export function PaymentBreakdown({ comparisonLabel, comparisonStats, currentLabel, stats }: { comparisonLabel: string; comparisonStats: CrmStats | null; currentLabel: string; stats: CrmStats | null }) {
   const currentByMethod = new Map((stats?.byPayment ?? []).map((payment) => [payment.method, payment]))
   const comparisonByMethod = new Map((comparisonStats?.byPayment ?? []).map((payment) => [payment.method, payment]))
   const methods = [...new Set([...currentByMethod.keys(), ...comparisonByMethod.keys()])]
@@ -330,14 +404,25 @@ export function PaymentBreakdown({ comparisonLabel, comparisonStats, stats }: { 
               <span className="!flex !flex-wrap !items-center !gap-1.5 !text-xs !font-medium !text-[var(--crm-text-secondary)]">
                 {payment.count} operaciones
                 {comparison && stats && comparisonStats ? (
-                  <NormalizedComparisonBadge comparisonDayCount={comparisonStats.period.dayCount} comparisonLabel={comparisonLabel} comparisonTotal={comparison.count} currentDayCount={stats.period.dayCount} currentTotal={payment.count} />
+                  <NormalizedComparisonBadge comparisonLabel={comparisonLabel} comparisonOpenDayCount={comparisonStats.period.openDayCount} comparisonTotal={comparison.count} currentOpenDayCount={stats.period.openDayCount} currentTotal={payment.count} />
                 ) : null}
               </span>
+              {comparison && stats && comparisonStats ? (
+                <small className="!text-[10px] !font-semibold !text-[var(--crm-text-muted)]">
+                  {currentLabel}: {formatComparisonCount(normalizePerOpenDay(payment.count, stats.period.openDayCount))}/día abierto · {comparisonLabel}: {comparison.count} total, {formatComparisonCount(normalizePerOpenDay(comparison.count, comparisonStats.period.openDayCount))}/día abierto
+                </small>
+              ) : null}
             </div>
             <div className="!grid !justify-items-end !gap-1">
               <b className="!whitespace-nowrap !text-[15px] !font-semibold !tabular-nums">{formatMoney(payment.totalCents)}</b>
               {comparison && stats && comparisonStats ? (
-                <NormalizedComparisonBadge comparisonDayCount={comparisonStats.period.dayCount} comparisonLabel={comparisonLabel} comparisonTotal={comparison.totalCents} currentDayCount={stats.period.dayCount} currentTotal={payment.totalCents} />
+                <NormalizedComparisonBadge comparisonLabel={comparisonLabel} comparisonOpenDayCount={comparisonStats.period.openDayCount} comparisonTotal={comparison.totalCents} currentOpenDayCount={stats.period.openDayCount} currentTotal={payment.totalCents} />
+              ) : null}
+              {comparison && stats && comparisonStats ? (
+                <small className="!max-w-52 !text-right !text-[10px] !font-semibold !text-[var(--crm-text-muted)]">
+                  {currentLabel}: {formatComparisonMoney(normalizePerOpenDay(payment.totalCents, stats.period.openDayCount))}/día abierto<br />
+                  {comparisonLabel}: {formatComparisonMoney(comparison.totalCents)} total · {formatComparisonMoney(normalizePerOpenDay(comparison.totalCents, comparisonStats.period.openDayCount))}/día abierto
+                </small>
               ) : null}
             </div>
           </div>
@@ -364,7 +449,7 @@ export function TopProductsList({ stats }: { stats: CrmStats | null }) {
   )
 }
 
-function TopProductCombinationsList({ comparisonLabel, comparisonStats, stats }: { comparisonLabel: string; comparisonStats: CrmStats | null; stats: CrmStats | null }) {
+function TopProductCombinationsList({ comparisonLabel, comparisonStats, currentLabel, stats }: { comparisonLabel: string; comparisonStats: CrmStats | null; currentLabel: string; stats: CrmStats | null }) {
   const comparisonByCombination = new Map((comparisonStats?.topProductCombinations ?? []).map((product) => [
     JSON.stringify([product.productName, product.mixers, product.modifiers]),
     product,
@@ -384,9 +469,14 @@ function TopProductCombinationsList({ comparisonLabel, comparisonStats, stats }:
                 <span className="!flex !flex-wrap !items-center !gap-1.5 !text-xs !text-[var(--crm-text-secondary)]">
                   {product.quantity.toLocaleString('es-ES')} uds
                   {comparison && stats && comparisonStats ? (
-                    <NormalizedComparisonBadge comparisonDayCount={comparisonStats.period.dayCount} comparisonLabel={comparisonLabel} comparisonTotal={comparison.quantity} currentDayCount={stats.period.dayCount} currentTotal={product.quantity} />
+                    <NormalizedComparisonBadge comparisonLabel={comparisonLabel} comparisonOpenDayCount={comparisonStats.period.openDayCount} comparisonTotal={comparison.quantity} currentOpenDayCount={stats.period.openDayCount} currentTotal={product.quantity} />
                   ) : null}
                 </span>
+                {comparison && stats && comparisonStats ? (
+                  <small className="!text-[10px] !font-semibold !text-[var(--crm-text-muted)]">
+                    {currentLabel}: {formatComparisonCount(normalizePerOpenDay(product.quantity, stats.period.openDayCount))}/día abierto · {comparisonLabel}: {formatComparisonCount(comparison.quantity)} total, {formatComparisonCount(normalizePerOpenDay(comparison.quantity, comparisonStats.period.openDayCount))}/día abierto
+                  </small>
+                ) : null}
               </div>
               {product.mixers.length || product.modifiers.length ? (
                 <div className="!flex !min-w-0 !flex-wrap !gap-1">
@@ -398,7 +488,13 @@ function TopProductCombinationsList({ comparisonLabel, comparisonStats, stats }:
             <div className="!grid !shrink-0 !justify-items-end !gap-1">
               <b className="!whitespace-nowrap !text-[15px] !font-semibold !tabular-nums">{formatMoney(product.totalCents)}</b>
               {comparison && stats && comparisonStats ? (
-                <NormalizedComparisonBadge comparisonDayCount={comparisonStats.period.dayCount} comparisonLabel={comparisonLabel} comparisonTotal={comparison.totalCents} currentDayCount={stats.period.dayCount} currentTotal={product.totalCents} />
+                <NormalizedComparisonBadge comparisonLabel={comparisonLabel} comparisonOpenDayCount={comparisonStats.period.openDayCount} comparisonTotal={comparison.totalCents} currentOpenDayCount={stats.period.openDayCount} currentTotal={product.totalCents} />
+              ) : null}
+              {comparison && stats && comparisonStats ? (
+                <small className="!max-w-48 !text-right !text-[10px] !font-semibold !text-[var(--crm-text-muted)]">
+                  {currentLabel}: {formatComparisonMoney(normalizePerOpenDay(product.totalCents, stats.period.openDayCount))}/día abierto<br />
+                  {comparisonLabel}: {formatComparisonMoney(comparison.totalCents)} total · {formatComparisonMoney(normalizePerOpenDay(comparison.totalCents, comparisonStats.period.openDayCount))}/día abierto
+                </small>
               ) : null}
             </div>
           </div>
