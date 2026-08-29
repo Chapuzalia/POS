@@ -8,7 +8,7 @@ import { applyCrmOpenCashSalesTotals, loadCrmDayActivity, loadCrmOpenCashSalesTo
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import { catalogAdminService } from '../../features/crm/catalog/services/catalogAdminService.ts'
-import type { CrmStats, CrmVenue, TenantContext } from '../../types'
+import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 
 export type CrmPageProps = {
@@ -24,6 +24,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)
+  const [comparisonStats, setComparisonStats] = useState<CrmStats | null>(null)
   const [venues, setVenues] = useState<CrmVenue[]>([])
   const [selectedVenueId, setSelectedVenueId] = useState('')
   const handleCatalogLoadError = useCallback((loadError: unknown) => onError(getReadableError(loadError)), [onError])
@@ -101,19 +102,32 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     }
   }, [activeSection, inventoryEnabled])
 
-  const refreshStats = useCallback(async (options: { monthKey?: string; silent?: boolean } = {}) => {
+  const statsLoadRequestId = useRef(0)
+  const refreshStats = useCallback(async (options: { comparisonPeriod?: CrmStatsPeriod; period?: CrmStatsPeriod; silent?: boolean } = {}) => {
     const loadStats = async () => {
+      const requestId = statsLoadRequestId.current + 1
+      statsLoadRequestId.current = requestId
       onError(null)
       if (!selectedVenueId) {
         setStats(null)
+        setComparisonStats(null)
         return
       }
       const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
       if (!selectedVenue) {
         setStats(null)
+        setComparisonStats(null)
         return
       }
-      setStats(await loadCrmStats(context, selectedVenue, options.monthKey))
+      const [nextStats, nextComparisonStats] = await Promise.all([
+        loadCrmStats(context, selectedVenue, options.period),
+        options.comparisonPeriod
+          ? loadCrmStats(context, selectedVenue, options.comparisonPeriod, { includeLiveState: false })
+          : Promise.resolve(null),
+      ])
+      if (statsLoadRequestId.current !== requestId) return
+      setStats(nextStats)
+      setComparisonStats(nextComparisonStats)
     }
     if (options.silent) {
       try { await loadStats() } catch (statsError) { onError(getReadableError(statsError)) }
@@ -201,8 +215,9 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     if (canAccessCrmSection(context.role, section, context.features) && !inventorySectionBlocked) setActiveSection(section)
   }} onVenueChange={(venueId) => {
     setStats(null)
+    setComparisonStats(null)
     setSelectedVenueId(venueId)
   }} selectedVenueId={selectedVenueId} venues={venues}>
-    <CrmSectionContent activeSection={activeSection} catalog={catalog} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+    <CrmSectionContent activeSection={activeSection} catalog={catalog} comparisonStats={comparisonStats} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
   </CrmShell>
 }

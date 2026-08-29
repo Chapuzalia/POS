@@ -137,6 +137,23 @@ export function getOperationalDayRangeIso(
   }
 }
 
+export function getOperationalPeriodRangeIso(
+  config: OperationalDayConfig,
+  startDayKey: string,
+  endDayKey: string,
+) {
+  if (startDayKey > endDayKey) {
+    throw new Error('La fecha inicial del período no puede ser posterior a la fecha final.')
+  }
+
+  const startRange = getOperationalDayRangeIso(config, startDayKey)
+  const endRange = getOperationalDayRangeIso(config, endDayKey)
+  return {
+    startIso: startRange.startIso,
+    endIso: endRange.endIso,
+  }
+}
+
 export function getOperationalMonthRangeIso(config: OperationalDayConfig, monthKey: string) {
   const match = /^(\d{4})-(0[1-9]|1[0-2])$/.exec(monthKey)
   if (!match) throw new Error('El mes debe tener formato YYYY-MM.')

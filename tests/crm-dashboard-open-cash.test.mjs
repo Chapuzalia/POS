@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
+import { compareNormalizedValues, createCrmStatsPeriod, getPreviousCrmStatsPeriod, summarizeCrmStatsPeriod } from '../src/features/crm/analytics/services/analyticsPeriod.ts'
 import { groupOpenCashSessionsByVenue } from '../src/features/crm/dashboard/openCashSessionsModel.ts'
 
 test('estadisticas agrupa el importe vendido por categoria y producto', () => {
@@ -22,17 +23,18 @@ test('estadisticas agrupa el importe vendido por categoria y producto', () => {
   ])
 })
 
-test('la card circular alterna categorias y productos y usa los datos del mes cargado', async () => {
+test('la card circular alterna categorías, productos, importe y cantidad', async () => {
   const [statsPage, chart, service] = await Promise.all([
     readFile(new URL('../src/features/crm/analytics/pages/StatsPage.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/analytics/components/SalesBreakdownChart.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
   ])
 
-  assert.match(statsPage, /<SalesBreakdownChart stats=\{stats\}/)
+  assert.match(statsPage, /<SalesBreakdownChart comparisonStats=\{comparisonStats\} stats=\{stats\}/)
   assert.match(chart, /role="switch"/)
-  assert.match(chart, /stats\?\.salesByCategory/)
-  assert.match(chart, /stats\?\.salesByProduct/)
+  assert.match(chart, /Cambiar entre importe y cantidad/)
+  assert.match(chart, /metric === 'amount'/)
+  assert.match(chart, /comparisonPercentage/)
   assert.match(service, /category_name_snapshot/)
   assert.match(service, /\.\.\.salesBreakdown/)
 })
@@ -73,7 +75,7 @@ test('el desglose por combinacion se muestra solo en estadisticas y no cambia el
     readFile(new URL('../src/features/crm/dashboard/pages/DashboardPage.tsx', import.meta.url), 'utf8'),
   ])
 
-  assert.match(statsPage, /<TopProductCombinationsList stats=\{stats\}/)
+  assert.match(statsPage, /<TopProductCombinationsList comparisonLabel=\{comparisonLabel\} comparisonStats=\{comparisonStats\} stats=\{stats\}/)
   assert.match(statsPage, /Mixer: \{mixer\}/)
   assert.match(statsPage, /Modificador: \{modifier\}/)
   assert.match(dashboardPage, /<TopProductsList stats=\{stats\}/)
@@ -106,7 +108,7 @@ test('estadisticas permite alternar el grafico horario entre tickets y facturaci
   assert.match(hourlyChart, /Mayor facturación/)
 })
 
-test('el selector mensual recarga todos los paneles de estadisticas', async () => {
+test('estadísticas permite año, mes, día, período y una comparación independiente', async () => {
   const [statsPage, routing, crmPage, analyticsService] = await Promise.all([
     readFile(new URL('../src/features/crm/analytics/pages/StatsPage.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/crm/routing/CrmSectionContent.tsx', import.meta.url), 'utf8'),
@@ -114,13 +116,30 @@ test('el selector mensual recarga todos los paneles de estadisticas', async () =
     readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
   ])
 
-  assert.match(statsPage, /type="month"/)
-  assert.match(statsPage, /max=\{currentMonthKey\}/)
-  assert.match(statsPage, /loadedStats\?\.monthKey === selectedMonthKey/)
-  assert.match(statsPage, /void onRefresh\(monthKey\)/)
-  assert.match(routing, /onRefresh=\{\(monthKey\) => onStatsRefresh\(\{ monthKey \}\)\}/)
-  assert.match(crmPage, /loadCrmStats\(context, selectedVenue, options\.monthKey\)/)
-  assert.match(analyticsService, /monthKey: selectedMonthKey/)
+  for (const inputType of ['month', 'date']) assert.match(statsPage, new RegExp(`type="${inputType}"`))
+  for (const kind of ['year', 'month', 'day', 'period']) assert.match(statsPage, new RegExp(`value: '${kind}'`))
+  assert.match(statsPage, /type="checkbox"/)
+  assert.match(statsPage, /Comparar con…/)
+  assert.match(statsPage, /getPreviousCrmStatsPeriod/)
+  assert.match(statsPage, /valores diarios normalizados/)
+  assert.match(routing, /onRefresh=\{\(period, comparisonPeriod\) => onStatsRefresh\(\{ comparisonPeriod, period \}\)\}/)
+  assert.match(crmPage, /Promise\.all\(\[/)
+  assert.match(crmPage, /options\.comparisonPeriod/)
+  assert.match(analyticsService, /getOperationalPeriodRangeIso/)
+  assert.match(analyticsService, /period: periodSummary/)
+  assert.match(analyticsService, /\.range\(from, to\)/)
+})
+
+test('la comparación normaliza períodos de distinta duración', () => {
+  const day = createCrmStatsPeriod('day', '2026-08-29')
+  const year = createCrmStatsPeriod('year', '2025')
+  const period = createCrmStatsPeriod('period', '2026-08-10', '2026-08-19')
+
+  assert.deepEqual(day, { kind: 'day', startDate: '2026-08-29', endDate: '2026-08-29' })
+  assert.deepEqual(getPreviousCrmStatsPeriod(period), { kind: 'period', startDate: '2026-07-31', endDate: '2026-08-09' })
+  assert.equal(summarizeCrmStatsPeriod(year, '2026-08-29').dayCount, 365)
+  assert.equal(compareNormalizedValues(1_000, 1, 365_000, 365).percentage, 0)
+  assert.equal(compareNormalizedValues(2_000, 1, 365_000, 365).percentage, 100)
 })
 
 test('los productos top de estadisticas se ordenan primero por unidades vendidas', () => {
