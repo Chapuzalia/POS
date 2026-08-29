@@ -1,7 +1,7 @@
 import { Button as UiButton } from '../../../components/ui/Button'
 import { Description, Dropdown, Label } from '@heroui/react'
 
-import { ArrowLeft, ArrowRightLeft, ChevronDown, CircleX, ListChecks, Plus, Scissors, UsersRound } from 'lucide-react'
+import { ArrowLeft, ArrowRightLeft, ChevronDown, CircleX, ListChecks, Save, Scissors, UsersRound } from 'lucide-react'
 import type { RestaurantOrderDetail } from '../types'
 import type { RestaurantOrderSaveState } from '../types'
 
@@ -35,13 +35,13 @@ export function TableOrderBar({ isBusy, isOnline, invoiceSelected = false, onBac
       <div className="flex items-center gap-2">
         <UiButton className="inline-flex min-h-11 items-center gap-2 px-4 font-bold" onClick={onBack} type="button"><ArrowLeft size={17} /><p className="truncate max-lg:hidden">Volver al mapa</p></UiButton>
         {quickSale ? <UiButton
-          aria-label="Guardar como mesa virtual"
+          aria-label="Guardar comanda en una mesa"
           className="inline-flex size-11 min-h-11 min-w-11 items-center justify-center px-0 font-bold"
           disabled={!isOnline || isBusy || !canSaveQuickSale || invoiceSelected}
           onClick={onSaveQuickSale}
-          title={invoiceSelected ? 'Quita el cliente de factura antes de guardar la venta en una mesa.' : 'Guardar como mesa virtual'}
+          title={invoiceSelected ? 'Quita el cliente de factura antes de guardar la venta en una mesa.' : 'Guardar comanda en una mesa'}
           type="button"
-        ><Plus size={18} /></UiButton> : null}
+        ><Save size={18} /></UiButton> : null}
         {order?.lines.length === 0 ? <UiButton aria-label="Cerrar mesa vacía" className="inline-flex min-h-9 items-center gap-2 px-3 text-sm font-bold text-[var(--danger)]" disabled={!isOnline || isBusy} onClick={onCancelEmpty} title="Cerrar mesa vacía" type="button" variant="dangerSoft"><CircleX size={16} /><span className="max-lg:hidden">Cerrar mesa</span></UiButton> : null}
       </div>
       {order ? <>

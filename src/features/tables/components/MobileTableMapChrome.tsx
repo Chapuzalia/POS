@@ -30,6 +30,7 @@ export function MobileTableMapChrome({
   onQuickSale,
 }: Props) {
   const activeArea = areas.find((area) => area.id === activeAreaId) ?? areas[0]
+  const activeAreaIndex = Math.max(0, areas.findIndex((area) => area.id === activeArea?.id))
 
   return (
     <>
@@ -38,10 +39,21 @@ export function MobileTableMapChrome({
           <Dropdown>
             <Dropdown.Trigger
               aria-label={`Cambiar sala. Sala actual: ${activeArea?.name ?? 'Sin sala'}`}
-              className="inline-flex min-h-11 max-w-[min(58vw,220px)] items-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-3 text-sm font-extrabold text-[var(--foreground)] shadow-[var(--shadow)]"
+              className="inline-flex min-h-10 max-w-[min(58vw,220px)] items-center gap-2 rounded-full border border-[var(--separator)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-2.5 text-xs font-extrabold text-[var(--foreground)] shadow-[var(--shadow)]"
             >
+              <span aria-hidden="true" className="flex shrink-0 items-center gap-1">
+                {areas.map((area) => (
+                  <span
+                    className={`h-1.5 rounded-full transition-[width,background-color] ${area.id === activeArea?.id ? "w-5 bg-[var(--accent)]" : "w-1.5 bg-[var(--separator)]"}`}
+                    key={area.id}
+                  />
+                ))}
+              </span>
               <span className="truncate">{activeArea?.name ?? 'Sala'}</span>
-              <ChevronDown className="size-4 shrink-0" />
+              <ChevronDown className="size-3.5 shrink-0" />
+              <span className="sr-only">
+                Sala {activeAreaIndex + 1} de {areas.length} seleccionada
+              </span>
             </Dropdown.Trigger>
             <Dropdown.Popover className="!w-[min(280px,calc(100vw-24px))]">
               <Dropdown.Menu onAction={(key) => onAreaChange(String(key))} selectionMode="single" selectedKeys={activeAreaId ? new Set([activeAreaId]) : new Set()}>
@@ -54,7 +66,8 @@ export function MobileTableMapChrome({
             </Dropdown.Popover>
           </Dropdown>
         ) : (
-          <div className="inline-flex min-h-11 max-w-[min(58vw,220px)] items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-3 text-sm font-extrabold text-[var(--foreground)] shadow-[var(--shadow)]">
+          <div className="inline-flex min-h-10 max-w-[min(58vw,220px)] items-center gap-2 rounded-full border border-[var(--separator)] bg-[color-mix(in_srgb,var(--surface)_96%,transparent)] px-2.5 text-xs font-extrabold text-[var(--foreground)] shadow-[var(--shadow)]">
+            <span aria-hidden="true" className="h-1.5 w-5 shrink-0 rounded-full bg-[var(--accent)]" />
             <span className="truncate">{activeArea?.name ?? 'Sala'}</span>
           </div>
         )}

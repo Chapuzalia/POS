@@ -1,7 +1,6 @@
 import {
   ArrowDownToLine,
   Ban,
-  Coins,
   HandCoins,
   Layers,
   LoaderCircle,
@@ -31,9 +30,9 @@ import type {
   CashlogyAccounting,
   CashlogyDenomination,
   CashlogyDeviceError,
-  CashlogyLevel,
 } from '../types'
 import { CashlogyDenominationSelector } from './CashlogyDenominationSelector'
+import { CashlogyLevelCards } from './CashlogyLevelCards'
 import { CashlogyOperationStatus } from './CashlogyOperationStatus'
 
 type Props = {
@@ -465,7 +464,7 @@ function AccountingPanel({ accounting, deviceErrors, disabled, loading, onRefres
       <Metric label="Total en Cashlogy" value={showStacker ? (loading && !accounting ? '…' : formatMoney(accounting?.total.totalCents ?? 0)) : 'Protegido por PIN'} />
     </div>
     <DenominationTable denominations={accounting?.denominations ?? null} loading={loading} showStacker={showStacker} />
-    {accounting?.levels.levels.length ? <LevelList levels={accounting.levels.levels} /> : null}
+    {accounting?.levels.levels.length ? <CashlogyLevelCards levels={accounting.levels.levels} variant="accounting" /> : null}
     {deviceErrors.length ? <div className="border-t border-[var(--separator)] p-4"><h4 className="font-black">Avisos de Cashlogy</h4><div className="mt-2 grid gap-2">{deviceErrors.map((error) => <div className="rounded-[var(--radius)] border border-amber-500/30 bg-amber-500/10 p-3 text-sm" key={`${error.code}-${error.mainMessage}`}><p className="font-bold">{error.title || error.mainMessage || error.code}</p>{error.additionalMessage ? <p className="mt-1 text-[var(--muted)]">{error.additionalMessage}</p> : null}{error.requiresTechnicalIntervention ? <p className="mt-1 font-semibold">Requiere intervención técnica.</p> : null}</div>)}</div></div> : null}
   </section>
 }
@@ -482,10 +481,4 @@ function DenominationTable({ denominations, loading, showStacker }: { denominati
 
 function DenominationRow({ row, showStacker }: { row: CashlogyDenomination & { kind: string }; showStacker: boolean }) {
   return <tr><td className="px-4 py-3 text-[var(--muted)]">{row.kind}</td><td className="px-4 py-3 text-right font-mono font-bold">{formatMoney(row.valueCents)}</td><td className="px-4 py-3 text-right font-mono">{row.recyclerCount}/{formatMoney(row.valueCents * row.recyclerCount)}</td><td className="px-4 py-3 text-right font-mono">{showStacker ? `${row.stackerCount}/${formatMoney(row.valueCents * row.stackerCount)}` : '••••'}</td><td className="px-4 py-3 text-right font-mono">{showStacker ? formatMoney(row.valueCents * (row.recyclerCount + row.stackerCount)) : '••••'}</td></tr>
-}
-
-function LevelList({ levels }: { levels: CashlogyLevel[] }) {
-  const relevant = levels.filter((level) => level.state !== 'ok' || level.percentage !== null)
-  if (!relevant.length) return null
-  return <div className="border-t border-[var(--separator)] p-4"><h4 className="font-black">Niveles</h4><div className="mt-2 flex flex-wrap gap-2">{relevant.map((level) => <span className={`rounded-full px-3 py-1 text-xs font-bold ${level.state === 'ok' ? 'bg-emerald-500/10 text-emerald-700' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'}`} key={level.index}><Coins className="mr-1 inline h-3.5 w-3.5" />{formatMoney(level.valueCents)} · {level.state}{level.percentage !== null ? ` · ${level.percentage}%` : ''}</span>)}</div></div>
 }

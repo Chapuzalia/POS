@@ -5,6 +5,7 @@ import test from 'node:test'
 const migration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 const orderBar = await readFile(new URL('../src/features/tables/components/TableOrderBar.tsx', import.meta.url), 'utf8')
+const restaurantController = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 
 test('empty order cancellation is atomic and concurrency-safe', () => {
   assert.match(migration, /where o\.id = p_order_id\s+for update/i)
@@ -22,4 +23,11 @@ test('the client passes the expected revision to the cancellation RPC', () => {
 test('the close action is only rendered for an empty table order', () => {
   assert.match(orderBar, /order\?\.lines\.length === 0/)
   assert.match(orderBar, /Cerrar mesa vacía/)
+})
+
+test('closing an empty table does not require confirmation', () => {
+  const closeAction = restaurantController.match(/const cancelEmptyOrder[\s\S]*?\n  const prepareMove/)?.[0]
+  assert.ok(closeAction)
+  assert.doesNotMatch(closeAction, /window\.confirm/)
+  assert.match(closeAction, /await draft\.flush\(\)[\s\S]*cancelEmptyRestaurantOrder/)
 })

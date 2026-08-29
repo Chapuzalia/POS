@@ -13,7 +13,9 @@ const emptyErrors: DomainErrors = {
 
 export function useDomainErrors() {
   const [errors, setErrors] = useState<DomainErrors>(emptyErrors)
+  const [errorId, setErrorId] = useState(0)
   const set = useCallback((domain: ErrorDomain, message: string | null) => {
+    if (message) setErrorId((current) => current + 1)
     setErrors(message ? { ...emptyErrors, [domain]: message } : emptyErrors)
   }, [])
   const clear = useCallback(() => setErrors(emptyErrors), [])
@@ -24,6 +26,7 @@ export function useDomainErrors() {
   const setSessionError = useCallback((message: string | null) => set('session', message), [set])
   return {
     clear,
+    errorId,
     error: useMemo(
       () => errors.session ?? errors.cash ?? errors.sale ?? errors.restaurant ?? errors.general,
       [errors],

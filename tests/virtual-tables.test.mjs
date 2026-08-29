@@ -8,6 +8,8 @@ const mapView = await readFile(new URL('../src/features/tables/components/TableM
 const virtualModal = await readFile(new URL('../src/features/tables/components/VirtualTableModal.tsx', import.meta.url), 'utf8')
 const mobileChrome = await readFile(new URL('../src/features/tables/components/MobileTableMapChrome.tsx', import.meta.url), 'utf8')
 const deletionMigration = await readFile(new URL('../supabase/migrations/20260821150000_auto_save_quick_sales_and_delete_virtual_tables.sql', import.meta.url), 'utf8')
+const cleanupMigration = await readFile(new URL('../supabase/migrations/20260829200000_cleanup_free_virtual_room_tables.sql', import.meta.url), 'utf8')
+const controller = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 
 test('las mesas virtuales quedan vinculadas a una sesión y conservan el historial al cerrar', () => {
   assert.match(migration, /add column if not exists cash_session_id uuid references public\.cash_sessions\(id\) on delete restrict/i)
@@ -50,4 +52,22 @@ test('el editor permite eliminar mesas temporales del turno y cancela solo coman
   assert.match(deletionMigration, /set status = 'cancelled'/)
   assert.match(deletionMigration, /tables = \([\s\S]*layout\.tables - selected_table\.id::text/)
   assert.match(deletionMigration, /delete from public\.restaurant_tables/)
+})
+
+test('solo las mesas libres de la sala Virtual se eliminan automáticamente', () => {
+  assert.match(cleanupMigration, /create or replace function public\.cleanup_virtual_room_restaurant_table/)
+  assert.match(cleanupMigration, /if selected_table\.area_id is not null then return false/)
+  assert.match(cleanupMigration, /if exists \([\s\S]*public\.order_lines[\s\S]*return false/)
+  assert.match(cleanupMigration, /delete from public\.restaurant_tables[\s\S]*tables\.area_id is null/)
+  assert.match(service, /rpc\('cleanup_virtual_room_restaurant_table'/)
+  assert.match(controller, /table\.isVirtual && table\.areaId\.startsWith\('virtual:'\)/)
+})
+
+test('la limpieza se ejecuta al vaciar, cobrar o mover la comanda', () => {
+  const cleanupCalls = controller.match(/await cleanupVirtualRoomTable\(/g) ?? []
+  assert.ok(cleanupCalls.length >= 6)
+  assert.match(controller, /cancelEmptyRestaurantOrder[\s\S]*cleanupVirtualRoomTable\(saved, false\)/)
+  assert.match(controller, /moveRestaurantOrder\(moveOrderId, tableId\)[\s\S]*cleanupVirtualRoomTable\(sourceOrder, false\)/)
+  assert.match(controller, /saved\.lines\.length === 1[\s\S]*cleanupVirtualRoomTable\(saved, false\)/)
+  assert.match(controller, /selectionContainsAllOrderLines\(saved\.lines, moves\)[\s\S]*cleanupVirtualRoomTable\(saved, true\)/)
 })

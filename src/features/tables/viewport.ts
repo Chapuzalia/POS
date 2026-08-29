@@ -3,6 +3,7 @@ export type Viewport = { zoom: number; panX: number; panY: number }
 export type MapBounds = { minX: number; minY: number; maxX: number; maxY: number }
 export type MapPlaneSize = { width: number; height: number }
 export type MapRect = { positionX: number; positionY: number; width: number; height: number }
+export type MapInsets = { top: number; right: number; bottom: number; left: number }
 
 export const MIN_ZOOM = 0.5
 export const MAX_ZOOM = 2
@@ -44,6 +45,53 @@ export function fitBounds(content: MapBounds, viewportWidth: number, viewportHei
   const zoom = clamp(Math.min((viewportWidth - padding * 2) / (mapWidth * widthRatio), (viewportHeight - padding * 2) / (mapHeight * heightRatio)), MIN_ZOOM, MAX_ZOOM)
   const centerX = ((content.minX + content.maxX) / 2 / 100) * mapWidth * zoom, centerY = ((content.minY + content.maxY) / 2 / 100) * mapHeight * zoom
   return { zoom, panX: viewportWidth / 2 - centerX, panY: viewportHeight / 2 - centerY }
+}
+
+export function shouldRotateMapToFit(
+  viewportWidth: number,
+  viewportHeight: number,
+  designWidth: number,
+  designHeight: number,
+  insets: MapInsets = { top: 0, right: 0, bottom: 0, left: 0 },
+) {
+  const usableWidth = Math.max(1, viewportWidth - insets.left - insets.right)
+  const usableHeight = Math.max(1, viewportHeight - insets.top - insets.bottom)
+  const viewportIsHorizontal = usableWidth >= usableHeight
+  const mapIsHorizontal = designWidth >= designHeight
+  return viewportIsHorizontal !== mapIsHorizontal
+}
+
+export function fitBoundsToViewport(
+  content: MapBounds,
+  viewportWidth: number,
+  viewportHeight: number,
+  mapWidth: number,
+  mapHeight: number,
+  insets: MapInsets = { top: 0, right: 0, bottom: 0, left: 0 },
+  padding = 16,
+): Viewport {
+  if (viewportWidth <= 0 || viewportHeight <= 0 || mapWidth <= 0 || mapHeight <= 0) {
+    return { zoom: 1, panX: 0, panY: 0 }
+  }
+  const usableWidth = Math.max(1, viewportWidth - insets.left - insets.right)
+  const usableHeight = Math.max(1, viewportHeight - insets.top - insets.bottom)
+  const contentWidth = Math.max(0.01, (content.maxX - content.minX) / 100) * mapWidth
+  const contentHeight = Math.max(0.01, (content.maxY - content.minY) / 100) * mapHeight
+  const zoom = clamp(
+    Math.min(
+      Math.max(1, usableWidth - padding * 2) / contentWidth,
+      Math.max(1, usableHeight - padding * 2) / contentHeight,
+    ),
+    0.05,
+    MAX_ZOOM,
+  )
+  const contentCenterX = ((content.minX + content.maxX) / 2 / 100) * mapWidth * zoom
+  const contentCenterY = ((content.minY + content.maxY) / 2 / 100) * mapHeight * zoom
+  return {
+    zoom,
+    panX: insets.left + usableWidth / 2 - contentCenterX,
+    panY: insets.top + usableHeight / 2 - contentCenterY,
+  }
 }
 
 export function contentBounds(items: Array<{ positionX: number; positionY: number; width: number; height: number }>): MapBounds {

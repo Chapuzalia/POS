@@ -2,18 +2,17 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { snapTableAlignment, snapTableCenter } from '../src/features/tables/alignment.ts'
+import { getAreaSwipeEntryOffset, getAreaSwipeTarget, getAreaSwipeVisualFeedback } from '../src/features/tables/area-swipe.ts'
 import { externalLabelSize, placeExternalLabels, rectsOverlap, tableContentMode, tableVisualRect } from '../src/features/tables/external-label-layout.ts'
 import { compactJoinedCompositions, compositionHasOpenOrder, findJoinProposal, isCompactComposition, separateFromComposition, translateComposition } from '../src/features/tables/joined-layout.ts'
-import { fitBounds, getMapPlaneSize, intersectionRatio, mapToScreen, orientMapRect, positionFloatingPanel, screenToMap, zoomAtPoint } from '../src/features/tables/viewport.ts'
+import { fitBounds, fitBoundsToViewport, getMapPlaneSize, intersectionRatio, mapToScreen, orientMapRect, positionFloatingPanel, screenToMap, shouldRotateMapToFit, zoomAtPoint } from '../src/features/tables/viewport.ts'
 import { getRestaurantTableVisualStatus } from '../src/features/tables/table-visual-status.ts'
-import { loadTableMapQuarterTurn, persistTableMapQuarterTurn, tableMapOrientationStorageKey } from '../src/features/tables/map-orientation.ts'
 import { getReadableError } from '../src/utils/errors.ts'
 
 const tableMapViewSource = await readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8')
 const mobileChromeSource = await readFile(new URL('../src/features/tables/components/MobileTableMapChrome.tsx', import.meta.url), 'utf8')
 const mobileSheetsSource = await readFile(new URL('../src/features/tables/components/MobileTableMapSheets.tsx', import.meta.url), 'utf8')
 const mobileLayoutSource = await readFile(new URL('../src/features/tables/useMobileTableMapLayout.ts', import.meta.url), 'utf8')
-const viewportControlsSource = await readFile(new URL('../src/features/tables/components/MapViewportControls.tsx', import.meta.url), 'utf8')
 const tableManagementSource = await readFile(new URL('../src/features/table-management/TableManagementPage.tsx', import.meta.url), 'utf8')
 const reservationBadgeSource = await readFile(new URL('../src/features/reservations/components/ReservationTableBadge.tsx', import.meta.url), 'utf8')
 const tableServiceSource = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
@@ -61,6 +60,56 @@ test('fitBounds centra contenido y respeta los limites de zoom', () => {
   assert.ok(fitted.zoom >= .5 && fitted.zoom <= 2)
   const tiny = fitBounds({ minX: 49, minY: 49, maxX: 51, maxY: 51 }, 1000, 600, 30)
   assert.equal(tiny.zoom, 2)
+})
+
+test('el mapa fijo adopta la orientacion del espacio util', () => {
+  const mobileInsets = { top: 124, right: 12, bottom: 12, left: 12 }
+  assert.equal(shouldRotateMapToFit(800, 390, 1200, 800, mobileInsets), false)
+  assert.equal(shouldRotateMapToFit(390, 800, 1200, 800, mobileInsets), true)
+  assert.equal(shouldRotateMapToFit(390, 800, 800, 1200, mobileInsets), false)
+})
+
+test('el gesto horizontal cambia de sala en ambos sentidos y de forma circular', () => {
+  const areas = ['interior', 'terraza', 'barra']
+  assert.equal(getAreaSwipeTarget(areas, 'interior', -90, 8, 390), 'terraza')
+  assert.equal(getAreaSwipeTarget(areas, 'terraza', 90, 8, 390), 'interior')
+  assert.equal(getAreaSwipeTarget(areas, 'interior', 90, 8, 390), 'barra')
+  assert.equal(getAreaSwipeTarget(areas, 'barra', -90, 8, 390), 'interior')
+})
+
+test('el gesto ignora movimientos cortos, verticales o mapas con una sola sala', () => {
+  assert.equal(getAreaSwipeTarget(['a', 'b'], 'a', 30, 2, 390), null)
+  assert.equal(getAreaSwipeTarget(['a', 'b'], 'a', 70, 90, 390), null)
+  assert.equal(getAreaSwipeTarget(['a'], 'a', -100, 0, 390), null)
+})
+
+test('el gesto da feedback visual limitado y prepara la entrada de la nueva sala', () => {
+  assert.deepEqual(getAreaSwipeVisualFeedback(-40, 5, 400), { offsetX: -40, opacity: 1 - (40 / 88) * 0.12 })
+  assert.deepEqual(getAreaSwipeVisualFeedback(120, 5, 400), { offsetX: 88, opacity: 0.88 })
+  assert.deepEqual(getAreaSwipeVisualFeedback(20, 40, 400), { offsetX: 0, opacity: 1 })
+  assert.equal(getAreaSwipeEntryOffset(-80, 400), 48)
+  assert.equal(getAreaSwipeEntryOffset(80, 400), -48)
+})
+
+test('el encaje fijo mantiene todo el contenido fuera de los controles', () => {
+  const insets = { top: 124, right: 12, bottom: 12, left: 12 }
+  const viewport = fitBoundsToViewport(
+    { minX: 0, minY: 0, maxX: 100, maxY: 100 },
+    390,
+    800,
+    390,
+    585,
+    insets,
+    16,
+  )
+  const left = viewport.panX
+  const top = viewport.panY
+  const right = left + 390 * viewport.zoom
+  const bottom = top + 585 * viewport.zoom
+  assert.ok(left >= insets.left + 16 - 1e-9)
+  assert.ok(top >= insets.top + 16 - 1e-9)
+  assert.ok(right <= 390 - insets.right - 16 + 1e-9)
+  assert.ok(bottom <= 800 - insets.bottom - 16 + 1e-9)
 })
 
 test('el menu contextual se abre junto al punto pulsado y se recoloca en los bordes', () => {
@@ -306,9 +355,11 @@ test('las mesas ocupadas usan naranja con pendientes y rojo cuando todo esta ser
   assert.equal(getRestaurantTableVisualStatus({ status: 'occupied', pendingUnits: 0 }), 'occupied')
   assert.equal(getRestaurantTableVisualStatus({ status: 'reserved', pendingUnits: 0 }), 'reserved')
 })
-test('cada zona se abre una vez con la vista ajustada', () => {
-  assert.match(tableMapViewSource, /fittedAreaRef\.current === `\$\{activeAreaId\}:\$\{rotatedMap\}`/)
-  assert.match(tableMapViewSource, /fitViewport\(canvas, \[\.\.\.tables, \.\.\.mapElements\]\.map\(\(item\) => orientMapRect\(item, rotatedMap\)\), planeSize\)/)
+test('cada cambio de tamano recalcula el encaje fijo a partir del contenido real', () => {
+  assert.match(tableMapViewSource, /const viewport = useMemo/)
+  assert.match(tableMapViewSource, /fitBoundsToViewport\(/)
+  assert.match(tableMapViewSource, /contentBounds\(fittedItems\)/)
+  assert.match(tableMapViewSource, /const observer = new ResizeObserver\(updateSize\)/)
 })
 
 test('el zoom escala la geometria sin rasterizar ni escalar inversamente el texto', () => {
@@ -342,16 +393,9 @@ test('el giro de 90 grados conserva el plano y la conversion de puntero', () => 
   assert.ok(Math.abs(result.y - point.y) < 1e-9)
 })
 
-test('la orientacion mobile persiste por local al desmontar y volver al mapa', () => {
-  const values = new Map()
-  const storage = { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value) }
-  assert.equal(loadTableMapQuarterTurn('venue-a', storage), false)
-  persistTableMapQuarterTurn('venue-a', true, storage)
-  assert.equal(values.get(tableMapOrientationStorageKey('venue-a')), 'quarter-turn')
-  assert.equal(loadTableMapQuarterTurn('venue-a', storage), true)
-  assert.equal(loadTableMapQuarterTurn('venue-b', storage), false)
-  persistTableMapQuarterTurn('venue-a', false, storage)
-  assert.equal(loadTableMapQuarterTurn('venue-a', storage), false)
+test('la orientacion del TPV es automatica y no conserva una preferencia manual', () => {
+  assert.match(tableMapViewSource, /shouldRotateMapToFit\(/)
+  assert.doesNotMatch(tableMapViewSource, /loadTableMapQuarterTurn|persistTableMapQuarterTurn|toggleMapOrientation/)
 })
 
 test('crear zona envia el formulario mediante el boton HeroUI', () => {
@@ -378,13 +422,11 @@ test('mobile usa una composicion propia y tablet conserva el encabezado de escri
   assert.match(mobileLayoutSource, /max-height: 500px/)
 })
 
-test('mobile presenta sala, edicion, seleccion y acciones sin persistir la proyeccion visual', () => {
+test('mobile presenta sala y edicion sin persistir la proyeccion visual', () => {
   assert.match(mobileChromeSource, /Cambiar sala/)
   assert.match(mobileChromeSource, /min-h-11/)
   assert.match(mobileChromeSource, /Editando mesas/)
   assert.match(mobileChromeSource, /Guardado automático/)
-  assert.match(tableMapViewSource, /selectedTableId === table\.id/)
-  assert.match(tableMapViewSource, /<MobileTableActionSheet/)
   assert.match(tableMapViewSource, /<MobileGroupActionsSheet/)
   assert.match(mobileSheetsSource, /placement="bottom"/)
   assert.match(mobileSheetsSource, /safe-area-inset-bottom/)
@@ -393,19 +435,46 @@ test('mobile presenta sala, edicion, seleccion y acciones sin persistir la proye
   assert.doesNotMatch(tableMapViewSource, /layoutFromMap\([^)]*orientMapRect/)
 })
 
-test('los controles mobile son compactos, tactiles y respetan el safe area', () => {
-  assert.match(viewportControlsSource, /mobileLayout/)
-  assert.match(viewportControlsSource, /safe-area-inset-bottom/)
-  assert.match(viewportControlsSource, /\[&>button\]:min-h-11/)
-  assert.match(viewportControlsSource, /<ZoomOut/)
-  assert.match(viewportControlsSource, /Math\.round\(zoom \* 100\)/)
-  assert.match(viewportControlsSource, /<ZoomIn/)
-  assert.match(viewportControlsSource, /<Maximize2/)
-  assert.match(viewportControlsSource, /Girar mapa 90 grados/)
-  assert.match(viewportControlsSource, /<RotateCw/)
+test('mobile abre las mesas directamente igual que iPad sin hoja de acciones intermedia', () => {
+  assert.match(tableMapViewSource, /if \(table\.status === "occupied" && table\.orderId\)\s+onOpenOrder\(table\.orderId\)/)
+  assert.match(tableMapViewSource, /else if \(table\.status === "free" && canOpen\) prepareOpenTable\(table\)/)
+  assert.doesNotMatch(tableMapViewSource, /if \(mobileLayout\) \{\s+setSelectedTableId\(table\.id\)/)
+  assert.doesNotMatch(tableMapViewSource, /MobileTableActionSheet/)
+  assert.doesNotMatch(mobileSheetsSource, /MobileTableActionSheet|Abrir comanda|Abrir mesa/)
+})
+
+test('el mapa TPV no muestra controles de zoom ni giro y reserva sus botones', () => {
+  assert.doesNotMatch(tableMapViewSource, /<MapViewportControls|useMapViewport|onWheel=/)
+  assert.match(tableMapViewSource, /MOBILE_MAP_TOP_INSET = 124/)
+  assert.match(tableMapViewSource, /width: canvasSize\.width, height: MOBILE_MAP_TOP_INSET/)
   assert.match(tableMapViewSource, /orientMapRect\(table, rotatedMap\)/)
 })
 
-test('el espacio entre mesas conserva pan y pinch sobre la capa transformada', () => {
+test('la sala activa queda marcada en escritorio y en el indicador mobile', () => {
+  assert.match(tableMapViewSource, /aria-current=\{area\.id === activeAreaId \? "page" : undefined\}/)
+  assert.match(tableMapViewSource, /!border-\[var\(--accent\)\] !bg-\[var\(--accent\)\] !text-\[var\(--accent-foreground\)\]/)
+  assert.match(mobileChromeSource, /Sala \{activeAreaIndex \+ 1\} de \{areas\.length\} seleccionada/)
+  assert.match(mobileChromeSource, /area\.id === activeArea\?\.id \? "w-5 bg-\[var\(--accent\)\]"/)
+})
+
+test('mobile combina el indicador compacto y el desplegable en un unico control', () => {
+  assert.match(mobileChromeSource, /<Dropdown\.Trigger[\s\S]*rounded-full[\s\S]*areas\.map\(\(area\)/)
+  assert.match(mobileChromeSource, /<Dropdown\.Popover/)
+  assert.match(mobileChromeSource, /<Dropdown\.Menu/)
+  assert.doesNotMatch(mobileChromeSource, /pointer-events-none absolute left-3 top-16/)
+})
+
+test('el espacio entre mesas queda fijo y la capa solo aplica el encaje calculado', () => {
   assert.match(tableMapViewSource, /className="map-transform-layer absolute z-\[2\]"/)
+  assert.doesNotMatch(tableMapViewSource, /startBackgroundPointer|moveBackgroundPointer|endBackgroundPointer/)
+})
+
+test('el desplazamiento horizontal del fondo navega entre salas sin reactivar el pan', () => {
+  assert.match(tableMapViewSource, /onPointerDown=\{startAreaSwipe\}/)
+  assert.match(tableMapViewSource, /moveAreaSwipe\(event\)/)
+  assert.match(tableMapViewSource, /AREA_SWIPE_VISUAL_STYLE/)
+  assert.match(tableMapViewSource, /transform 160ms ease-out/)
+  assert.match(tableMapViewSource, /getAreaSwipeTarget\(/)
+  assert.match(tableMapViewSource, /onAreaChange\(targetAreaId\)/)
+  assert.doesNotMatch(tableMapViewSource, /startBackgroundPointer|moveBackgroundPointer|endBackgroundPointer/)
 })

@@ -144,21 +144,29 @@ test('el botón de pre-ticket respeta configuración, vacío, loading y feedback
   assert.match(mapper, /openCashDrawer: isPreTicket \? false/)
 })
 
-test('Venta rápida solo ofrece guardar cuando hay mesas y productos, reutilizando el mismo modal', async () => {
-  const [page, bar, mapView, modal] = await Promise.all([
+test('Venta rápida guarda la comanda seleccionando una mesa existente desde el mapa', async () => {
+  const [page, bar, mapView, controller, service, migration] = await Promise.all([
     readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/tables/components/TableOrderBar.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/tables/components/VirtualTableModal.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8'),
+    readFile(new URL('../supabase/migrations/20260829180000_save_quick_sale_as_existing_table.sql', import.meta.url), 'utf8'),
   ])
   assert.match(page, /restaurantEnabled && !props\.reservations\.isOpen && restaurant\.tablesEnabled/)
   assert.match(page, /canSaveQuickSale=\{Boolean\(props\.context\.canTakeOrders && quickSale\.lines\.length > 0\)\}/)
-  assert.match(bar, /quickSale \? <UiButton[\s\S]*Guardar como mesa virtual/)
-  assert.match(page, /defaultName="Virtual"/)
-  assert.match(page, /requirePhysicalArea/)
-  assert.match(mapView, /<VirtualTableModal/)
-  assert.match(modal, /Zona de la mesa virtual/)
-  assert.match(modal, /setName\(event\.target\.value\)/)
+  assert.match(bar, /aria-label="Guardar comanda en una mesa"[\s\S]*<Save size=\{18\}/)
+  assert.doesNotMatch(bar, /Guardar como mesa virtual|<Plus size=\{18\}/)
+  assert.match(page, /startQuickSaleTableSelection[\s\S]*setPosView\(\{ type: 'table_map'/)
+  assert.match(page, /quickSaleSaveMode=\{quickSaleTableSelectionOpen\}/)
+  assert.match(mapView, /quickSaleSaveMode[\s\S]*onSaveQuickSale\(table\.id\)/)
+  assert.match(mapView, /Selecciona una mesa libre para guardar la comanda/)
+  assert.match(controller, /saveQuickSaleToExistingTable[\s\S]*saveQuickSaleAsExistingTable/)
+  assert.match(service, /rpc\('save_quick_sale_as_existing_table'/)
+  assert.match(migration, /public\.open_restaurant_order[\s\S]*public\.save_catalog_order_lines/)
+  assert.match(migration, /set draft_discount = p_discount/)
+  assert.match(page, /const saved = await restaurant\.saveQuickSaleToExistingTable[\s\S]*if \(!saved\) return[\s\S]*quickSale\.clear\(\)/)
+  assert.doesNotMatch(page, /await restaurant\.openExistingOrder\(orderId\)/)
 })
 
 test('la conversión es atómica, selecciona sala y limpia Venta rápida únicamente tras éxito', async () => {
@@ -175,7 +183,7 @@ test('la conversión es atómica, selecciona sala y limpia Venta rápida únicam
   assert.doesNotMatch(migration, /create table public\.(virtual_tables|virtual_orders|virtual_sales)/)
   assert.match(service, /p_lines: buildCatalogOrderLinesPayload\(input\.lines\)/)
   assert.match(controller, /await saveQuickSaleAsVirtualTable[\s\S]*setPosView\(\{ type: 'table_map', areaId: input\.areaId/)
-  assert.match(page, /const created = await restaurant\.createVirtualTableFromQuickSale[\s\S]*if \(created\) \{[\s\S]*quickSale\.clear\(\)/)
+  assert.match(page, /const created = await restaurant\.createVirtualTableFromQuickSale[\s\S]*if \(!created\) return[\s\S]*quickSale\.clear\(\)/)
 })
 
 test('la mesa resultante usa carga, realtime, cobro y ciclo de vida estándar', async () => {
@@ -193,18 +201,25 @@ test('la mesa resultante usa carga, realtime, cobro y ciclo de vida estándar', 
   assert.match(migration, /deactivate_closed_session_virtual_tables/)
 })
 
-test('volver desde Venta rápida la guarda automáticamente en una mesa temporal', async () => {
-  const [page, controller, migration] = await Promise.all([
+test('volver desde Venta rápida permite guardar con nombre o descartar sin crear mesa', async () => {
+  const [page, modal, controller, migration] = await Promise.all([
     readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8'),
+    readFile(new URL('../src/features/tables/components/QuickSaleExitModal.tsx', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/migrations/20260821150000_auto_save_quick_sales_and_delete_virtual_tables.sql', import.meta.url), 'utf8'),
   ])
-  assert.match(page, /const returnFromQuickSale = async/)
+  assert.match(page, /const requestReturnFromQuickSale = \(\) =>/)
   assert.match(page, /quickSale\.lines\.length === 0[\s\S]*restaurant\.returnToMap\(\)/)
-  assert.match(page, /createVirtualTableFromQuickSale\(\{[\s\S]*areaId: null/)
+  assert.match(page, /setQuickSaleExitName\(`Venta rápida \$\{sequence\}`\)[\s\S]*setQuickSaleExitOpen\(true\)/)
+  assert.match(page, /const saveQuickSaleAsVirtual = async \(name: string\)[\s\S]*createVirtualTableFromQuickSale\(\{[\s\S]*areaId: null[\s\S]*name,/)
+  assert.match(page, /const discardQuickSaleAndReturnToMap = \(\) => \{[\s\S]*quickSale\.clear\(\)[\s\S]*restaurant\.returnToMap\(\)/)
   assert.doesNotMatch(page, /const areaId = sourceAreaId/)
-  assert.match(page, /name: `Venta rápida \$\{sequence\}`[\s\S]*quickSale\.lines, quickSale\.discount/)
-  assert.match(page, /onBack=\{\(\) => void returnFromQuickSale\(\)\}/)
+  assert.match(page, /onBack=\{requestReturnFromQuickSale\}/)
+  assert.match(page, /<QuickSaleExitModal[\s\S]*onDiscard=\{discardQuickSaleAndReturnToMap\}[\s\S]*onSave=\{saveQuickSaleAsVirtual\}/)
+  assert.match(modal, /Nombre de la mesa virtual/)
+  assert.match(modal, /<Trash2 size=\{17\} \/> No guardar/)
+  assert.match(modal, /<Save size=\{17\} \/> Guardar/)
+  assert.match(modal, /dismissDisabled/)
   assert.match(page, /restaurant\.reset\(areaId\)/)
   assert.match(controller, /setPosView\(\{ type: 'table_map', areaId: input\.areaId \?\? `virtual:\$\{options\.cashSession\.id\}` \}\)/)
   assert.doesNotMatch(migration, /if p_area_id is null/)
