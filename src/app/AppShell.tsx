@@ -84,6 +84,7 @@ export function AppShell() {
   const [isLoading, setIsLoading] = useState(false)
   const {
     error,
+    errorId,
     clear: clearErrors,
     setCashError,
     setGeneralError,
@@ -440,6 +441,7 @@ export function AppShell() {
       catalogStartTab={catalogStartTab}
       context={context}
       error={error}
+      errorId={errorId}
       floatingTicketButtonRef={floatingTicketButtonRef}
       isBusy={isBusy}
       isLoading={isLoading}

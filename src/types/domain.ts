@@ -583,6 +583,19 @@ export type OfflineEvent =
       payload: CashClosedPayload
     }
 
+export type CrmStatsPeriodKind = 'year' | 'month' | 'day' | 'period'
+
+export type CrmStatsPeriod = {
+  kind: CrmStatsPeriodKind
+  startDate: string
+  endDate: string
+}
+
+export type CrmStatsPeriodSummary = CrmStatsPeriod & {
+  dayCount: number
+  effectiveEndDate: string
+}
+
 export type CrmStats = {
   averageTicketCents: number
   byPayment: Array<{
@@ -628,6 +641,7 @@ export type CrmStats = {
     invitationCents: number
     otherCents: number
   }>
+  period: CrmStatsPeriodSummary
   salesByCategory: Array<{
     id: string
     label: string

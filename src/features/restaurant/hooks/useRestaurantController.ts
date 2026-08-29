@@ -24,6 +24,7 @@ import {
 import { applySessionLayout, saveSessionTableLayout } from '../../tables/layout-service'
 import {
   cancelEmptyRestaurantOrder,
+  cleanupVirtualRoomRestaurantTable,
   closeRestaurantOrder,
   configureRestaurantEqualSplit,
   createVirtualRestaurantTable,
@@ -41,6 +42,7 @@ import {
   payRestaurantEqualPart,
   payRestaurantOrderItems,
   removeRestaurantOrderLineConfirmed,
+  saveQuickSaleAsExistingTable,
   saveQuickSaleAsVirtualTable,
   saveRestaurantOrderLines,
 } from '../../tables/service'
@@ -136,7 +138,23 @@ function withCalculationLines(
   } : null
 }
 
+function getVirtualRoomTable(detail: RestaurantOrderDetail) {
+  return detail.tables.find((table) => table.isVirtual && table.areaId.startsWith('virtual:')) ?? null
+}
+
+function selectionContainsAllOrderLines(lines: RestaurantOrderDetail['lines'], moves: RestaurantOrderLineMove[]) {
+  if (lines.length === 0) return false
+  const selectedQuantities = new Map<string, number>()
+  for (const move of moves) {
+    selectedQuantities.set(move.lineId, (selectedQuantities.get(move.lineId) ?? 0) + move.quantity)
+  }
+  return lines.every((line) => (selectedQuantities.get(line.id) ?? 0) >= line.quantity)
+}
+
 export function useRestaurantController(options: Options) {
+  const cashSessionId = options.cashSession?.id
+  const deviceId = options.context?.deviceId
+  const reportError = options.onError
   const paymentLockRef = useRef(false)
   const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
   const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
@@ -237,6 +255,18 @@ export function useRestaurantController(options: Options) {
     if (nextOrder) draft.replaceOrder(nextOrder)
   }, [draft, options.context, options.isOnline, realtime])
 
+  const cleanupVirtualRoomTable = useCallback(async (detail: RestaurantOrderDetail, closeAsPaid: boolean) => {
+    const table = getVirtualRoomTable(detail)
+    if (!cashSessionId || !deviceId || !table) return null
+    try {
+      const removed = await cleanupVirtualRoomRestaurantTable({ cashSessionId, deviceId, tableId: table.id, closeAsPaid })
+      return removed ? table.areaId : null
+    } catch (error) {
+      reportError(`La comanda se ha actualizado, pero no se pudo retirar la mesa de la sala Virtual: ${getReadableError(error)}`)
+      return null
+    }
+  }, [cashSessionId, deviceId, reportError])
+
   const runBusy = useCallback(async (action: () => Promise<void>) => {
     if (options.isBusy) return
     options.setBusy(true)
@@ -324,6 +354,39 @@ export function useRestaurantController(options: Options) {
     return true
   }, [draft, options, realtime])
 
+  const saveQuickSaleToExistingTable = useCallback(async (
+    tableId: string,
+    lines: TicketLine[],
+    discount: AppliedDiscount | null,
+  ) => {
+    if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline || options.isBusy || lines.length === 0) return false
+    options.setBusy(true)
+    options.onError(null)
+    try {
+      await saveQuickSaleAsExistingTable({
+        cashSessionId: options.cashSession.id,
+        deviceId: options.context.deviceId,
+        tableId,
+        lines,
+        discount,
+      })
+    } catch (error) {
+      options.onError(getReadableError(error))
+      options.setBusy(false)
+      return false
+    }
+
+    try {
+      const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
+      realtime.setMap(nextMap)
+    } catch (error) {
+      options.onError(`La comanda se ha guardado, pero el mapa no se ha podido actualizar: ${getReadableError(error)}`)
+    } finally {
+      options.setBusy(false)
+    }
+    return true
+  }, [options, realtime])
+
   const deleteVirtualTable = useCallback(async (tableId: string) => {
     if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline || options.isBusy) return false
     options.setBusy(true)
@@ -378,19 +441,19 @@ export function useRestaurantController(options: Options) {
   const cancelEmptyOrder = useCallback(() => runBusy(async () => {
     const current = draft.getCurrentOrder()
     if (!options.context || !options.isOnline || !current || current.lines.length > 0) return
-    if (!window.confirm('¿Cerrar esta mesa vacía? La comanda se cancelará y la mesa volverá a quedar libre.')) return
     const saved = await draft.flush()
     if (!saved || saved.lines.length > 0) return
     const areaId = saved.tables[0]?.areaId
     await cancelEmptyRestaurantOrder(saved.order.id, saved.order.revision)
+    const cleanedAreaId = await cleanupVirtualRoomTable(saved, false)
     const nextMap = await realtime.loadCurrentMap(options.context)
     options.setAppliedDiscount(null)
     draft.clearOrder()
     setEqualSplitOpen(false)
     setEqualSplit(null)
     realtime.setMap(nextMap)
-    setPosView({ type: 'table_map', areaId: areaId ?? nextMap.areas[0]?.id })
-  }), [draft, options, realtime, runBusy])
+    setPosView({ type: 'table_map', areaId: cleanedAreaId ?? areaId ?? nextMap.areas[0]?.id })
+  }), [cleanupVirtualRoomTable, draft, options, realtime, runBusy])
 
   const prepareMove = useCallback(async () => {
     const current = draft.getCurrentOrder()
@@ -403,11 +466,13 @@ export function useRestaurantController(options: Options) {
 
   const moveOrder = useCallback((tableId: string) => runBusy(async () => {
     if (!moveOrderId || !options.isOnline) return
+    const sourceOrder = draft.getCurrentOrder()
     await moveRestaurantOrder(moveOrderId, tableId)
+    if (sourceOrder) await cleanupVirtualRoomTable(sourceOrder, false)
     await refreshState(moveOrderId)
     setPosView({ type: 'table_order', orderId: moveOrderId })
     setMoveOrderId(null)
-  }), [moveOrderId, options.isOnline, refreshState, runBusy])
+  }), [cleanupVirtualRoomTable, draft, moveOrderId, options.isOnline, refreshState, runBusy])
 
   const confirmLineRemoval = useCallback(() => runBusy(async () => {
     const line = pendingLineRemoval
@@ -428,6 +493,19 @@ export function useRestaurantController(options: Options) {
           lines: saved.lines.filter((candidate) => candidate.id !== currentLine.id),
         })
       }
+      const cleanedAreaId = saved.lines.length === 1
+        ? await cleanupVirtualRoomTable(saved, false)
+        : null
+      if (cleanedAreaId) {
+        const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession?.id)
+        realtime.setMap(nextMap)
+        draft.clearOrder()
+        options.setAppliedDiscount(null)
+        options.setMobileTicketOpen(false)
+        setPendingLineRemoval(null)
+        setPosView({ type: 'table_map', areaId: cleanedAreaId })
+        return
+      }
       draft.replaceOrder(await loadRestaurantOrder(options.context, saved.order.id))
       setPendingLineRemoval(null)
     } catch (error) {
@@ -436,7 +514,7 @@ export function useRestaurantController(options: Options) {
       setPendingLineRemoval(null)
       options.onError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
     }
-  }), [draft, options, pendingLineRemoval, runBusy])
+  }), [cleanupVirtualRoomTable, draft, options, pendingLineRemoval, realtime, runBusy])
 
   const openSplitOrder = useCallback(() => runBusy(async () => {
     if (!options.context || !options.isOnline || !draft.getCurrentOrder()) return
@@ -513,6 +591,9 @@ export function useRestaurantController(options: Options) {
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
         finishCashlogyPayment(cashlogy.transaction)
+        const cleanedAreaId = result.completed
+          ? await cleanupVirtualRoomTable(current, true)
+          : null
         const printLines = paymentLines
         const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
         void options.printSale(buildRestaurantPrintPayload({
@@ -541,7 +622,7 @@ export function useRestaurantController(options: Options) {
           options.setMobileTicketOpen(false)
           setPosView(nextOrder
             ? { type: 'table_order', orderId: nextOrder.order.id }
-            : { type: 'table_map', areaId: nextMap.areas[0]?.id })
+            : { type: 'table_map', areaId: cleanedAreaId ?? nextMap.areas[0]?.id })
         }
       }
       return result
@@ -552,7 +633,7 @@ export function useRestaurantController(options: Options) {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [draft, equalSplit, options, realtime, refreshSales, settlePayment])
+  }, [cleanupVirtualRoomTable, draft, equalSplit, options, realtime, refreshSales, settlePayment])
 
   const paySelectedOrderItems = useCallback(async (
     moves: RestaurantOrderLineMove[],
@@ -583,6 +664,9 @@ export function useRestaurantController(options: Options) {
       const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), cashlogy.transaction)
       if (!result.requiresConfirmation) {
         finishCashlogyPayment(cashlogy.transaction)
+        const cleanedAreaId = selectionContainsAllOrderLines(saved.lines, moves)
+          ? await cleanupVirtualRoomTable(saved, true)
+          : null
         const printLines = paymentLines
         const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
         void options.printSale(buildRestaurantPrintPayload({
@@ -603,7 +687,7 @@ export function useRestaurantController(options: Options) {
         }))
         await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
         const [nextOrder, nextMap] = await Promise.all([
-          loadRestaurantOrder(options.context, saved.order.id),
+          cleanedAreaId ? Promise.resolve(null) : loadRestaurantOrder(options.context, saved.order.id),
           realtime.loadCurrentMap(options.context, options.cashSession.id),
         ])
         draft.replaceOrder(nextOrder)
@@ -611,7 +695,9 @@ export function useRestaurantController(options: Options) {
         options.setAppliedDiscount(null)
         options.setMobileTicketOpen(false)
         setSplitOrderGroup(null)
-        setPosView({ type: 'table_order', orderId: nextOrder.order.id })
+        setPosView(nextOrder
+          ? { type: 'table_order', orderId: nextOrder.order.id }
+          : { type: 'table_map', areaId: cleanedAreaId ?? nextMap.areas[0]?.id })
       }
       return result
     } catch (error) {
@@ -630,7 +716,7 @@ export function useRestaurantController(options: Options) {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [draft, options, realtime, refreshSales, settlePayment])
+  }, [cleanupVirtualRoomTable, draft, options, realtime, refreshSales, settlePayment])
   const splitOrder = useCallback(async (
     sourceOrderId: string,
     targetOrderId: string | null,
@@ -723,6 +809,7 @@ export function useRestaurantController(options: Options) {
         return
       }
       finishCashlogyPayment(cashlogy.transaction)
+      const cleanedAreaId = await cleanupVirtualRoomTable(saved, true)
       const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
       const invoice = invoiceCustomer ? await loadTicketInvoice(options.context.tenantId, result.ticketId) : null
       if (invoiceCustomer && !invoice) {
@@ -757,7 +844,7 @@ export function useRestaurantController(options: Options) {
       options.onPaidFeedback(method)
       setPosView(nextOrder
         ? { type: 'table_order', orderId: nextOrder.order.id }
-        : { type: 'table_map', areaId: nextMap.areas[0]?.id })
+        : { type: 'table_map', areaId: cleanedAreaId ?? nextMap.areas[0]?.id })
       window.setTimeout(() => options.onPaidFeedback(null), 500)
     } catch (error) {
       options.onError(getReadableError(error))
@@ -765,7 +852,7 @@ export function useRestaurantController(options: Options) {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [draft, invoiceCustomer, options, pendingPayment, realtime, refreshSales, settlePayment])
+  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, pendingPayment, realtime, refreshSales, settlePayment])
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false
@@ -950,6 +1037,7 @@ export function useRestaurantController(options: Options) {
     reset,
     returnToMap,
     saveState: draft.saveState,
+    saveQuickSaleToExistingTable,
     productionState,
     sendToProduction,
     serveLineFully: (lineId: string) => void runServiceAction(() => markRestaurantOrderLineFullyServed(lineId)),

@@ -23,7 +23,7 @@ import { RestaurantOrderPanel } from '../features/tables/components/RestaurantOr
 import { SplitOrderModal } from '../features/tables/components/SplitOrderModal'
 import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
-import { VirtualTableModal } from '../features/tables/components/VirtualTableModal'
+import { QuickSaleExitModal } from '../features/tables/components/QuickSaleExitModal'
 import { useMobileTableMapLayout } from '../features/tables/useMobileTableMapLayout'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
@@ -41,6 +41,10 @@ import { CustomerInvoiceModal } from '../features/customers'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { finishCashlogyPayment, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
+import {
+  isActiveCashlogyError,
+  POS_TRANSIENT_ERROR_DURATION_MS,
+} from './pos-error-lifecycle'
 import type {
   CatalogStartTab,
   Customer,
@@ -65,6 +69,33 @@ type AddFeedback = {
   successId: string | null
 }
 
+function ErrorCountdownIndicator() {
+  return <svg aria-hidden="true" className="h-4 w-4 shrink-0" viewBox="0 0 20 20">
+    <circle cx="10" cy="10" fill="none" opacity="0.25" r="8" stroke="currentColor" strokeWidth="2.5" />
+    <circle
+      cx="10"
+      cy="10"
+      fill="none"
+      pathLength={100}
+      r="8"
+      stroke="currentColor"
+      strokeDasharray="100"
+      strokeDashoffset="0"
+      strokeLinecap="round"
+      strokeWidth="2.5"
+      transform="rotate(-90 10 10)"
+    >
+      <animate
+        attributeName="stroke-dashoffset"
+        dur={`${POS_TRANSIENT_ERROR_DURATION_MS}ms`}
+        fill="freeze"
+        from="0"
+        to="100"
+      />
+    </circle>
+  </svg>
+}
+
 type Props = {
   addFeedback: AddFeedback
   cash: CashController
@@ -76,6 +107,7 @@ type Props = {
   manualDiscountRequiresPin: boolean
   context: TenantContext
   error: string | null
+  errorId: number
   floatingTicketButtonRef: RefObject<HTMLButtonElement | null>
   isBusy: boolean
   isLoading: boolean
@@ -103,9 +135,14 @@ type Props = {
 }
 
 export function PosPage(props: Props) {
+  const displayedError = props.error
+  const displayedErrorId = props.errorId
+  const clearDisplayedError = props.onSetError
   const [configOpen, setConfigOpen] = useState(false)
   const [cashlogyMachineOpen, setCashlogyMachineOpen] = useState(false)
-  const [quickSaleVirtualModalOpen, setQuickSaleVirtualModalOpen] = useState(false)
+  const [quickSaleExitName, setQuickSaleExitName] = useState('')
+  const [quickSaleExitOpen, setQuickSaleExitOpen] = useState(false)
+  const [quickSaleTableSelectionOpen, setQuickSaleTableSelectionOpen] = useState(false)
   const [shiftSummaryOpen, setShiftSummaryOpen] = useState(false)
   const [shiftSummaryLoading, setShiftSummaryLoading] = useState(false)
   const [shiftSummaryError, setShiftSummaryError] = useState<string | null>(null)
@@ -116,6 +153,8 @@ export function PosPage(props: Props) {
   const cash = props.cash
   const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured)
   const cashlogyPaymentIntent = useCashlogyStore((state) => state.intent)
+  const cashlogyPaymentTransaction = useCashlogyStore((state) => state.transaction)
+  const cashlogyPaymentError = useCashlogyStore((state) => state.error)
   const cashlogyPaymentModalOpen = useCashlogyStore((state) => state.modalOpen)
   const showCashlogyPayment = useCashlogyStore((state) => state.show)
   const cashlogyPaymentLocked = Boolean(cashlogyPaymentIntent)
@@ -126,6 +165,17 @@ export function PosPage(props: Props) {
   const restaurantEnabled = hasTenantFeature(props.context, 'restaurant')
   const reservationsEnabled = restaurantEnabled && hasTenantFeature(props.context, 'reservations')
   const appliedDiscount = discountsEnabled ? quickSale.discount : null
+  const activeCashlogyError = isActiveCashlogyError({
+    displayedError,
+    cashlogyError: cashlogyPaymentError,
+    intent: cashlogyPaymentIntent,
+    transaction: cashlogyPaymentTransaction,
+  })
+  useEffect(() => {
+    if (!displayedError || activeCashlogyError) return undefined
+    const timer = window.setTimeout(() => clearDisplayedError(null), POS_TRANSIENT_ERROR_DURATION_MS)
+    return () => window.clearTimeout(timer)
+  }, [activeCashlogyError, clearDisplayedError, displayedError, displayedErrorId])
   useEffect(() => {
     addDiagnosticBreadcrumb('pos.mount', { venueId: props.context.venueId })
     return () => addDiagnosticBreadcrumb('pos.unmount', { venueId: props.context.venueId })
@@ -323,28 +373,64 @@ export function PosPage(props: Props) {
     else void quickSale.completePayment(method, null)
   }
 
-  const returnFromQuickSale = async () => {
+  const requestReturnFromQuickSale = () => {
     if (restaurant.posView.type !== 'quick_sale' || quickSale.lines.length === 0) {
-      await restaurant.returnToMap()
+      void restaurant.returnToMap()
       return
     }
+    const sequence = restaurant.map.tables.filter((table) => table.isVirtual).length + 1
+    setQuickSaleExitName(`Venta rápida ${sequence}`)
+    setQuickSaleExitOpen(true)
+    props.onSetMobileTicketOpen(false)
+  }
+
+  const saveQuickSaleAsVirtual = async (name: string) => {
     if (!props.context.canTakeOrders || !cash.session) {
       props.onSetError('Necesitas una caja abierta y permiso para guardar esta venta en una mesa temporal.')
-      return
+      return false
     }
     if (!props.isOnline) {
-      props.onSetError('Conéctate para guardar automáticamente esta venta en Mesas virtuales.')
-      return
+      props.onSetError('Conéctate para guardar esta venta en una mesa virtual.')
+      return false
     }
 
-    const sequence = restaurant.map.tables.filter((table) => table.isVirtual).length + 1
     const created = await restaurant.createVirtualTableFromQuickSale({
       areaId: null,
       capacity: 1,
-      name: `Venta rápida ${sequence}`,
+      name,
       shape: 'square',
     }, quickSale.lines, quickSale.discount)
-    if (!created) return
+    if (!created) return false
+    setQuickSaleExitOpen(false)
+    quickSale.clear()
+    props.onSetMobileTicketOpen(false)
+    return true
+  }
+
+  const discardQuickSaleAndReturnToMap = () => {
+    setQuickSaleExitOpen(false)
+    quickSale.clear()
+    props.onSetMobileTicketOpen(false)
+    void restaurant.returnToMap()
+  }
+
+  const startQuickSaleTableSelection = () => {
+    if (restaurant.posView.type !== 'quick_sale') return
+    setQuickSaleTableSelectionOpen(true)
+    props.onSetMobileTicketOpen(false)
+    restaurant.setPosView({ type: 'table_map', areaId: restaurant.posView.areaId })
+  }
+
+  const cancelQuickSaleTableSelection = () => {
+    const areaId = restaurant.posView.type === 'table_map' ? restaurant.posView.areaId : undefined
+    setQuickSaleTableSelectionOpen(false)
+    restaurant.setPosView({ type: 'quick_sale', areaId })
+  }
+
+  const saveQuickSaleToTable = async (tableId: string) => {
+    const saved = await restaurant.saveQuickSaleToExistingTable(tableId, quickSale.lines, quickSale.discount)
+    if (!saved) return
+    setQuickSaleTableSelectionOpen(false)
     quickSale.clear()
     props.onSetMobileTicketOpen(false)
   }
@@ -388,8 +474,9 @@ export function PosPage(props: Props) {
         themeMode={props.themes.find((theme) => theme.id === props.selectedThemeId)?.mode ?? 'light'}
       />
       {props.error ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
-        <div className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
-          {props.error}
+        <div className="flex items-center gap-2.5 rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
+          {!activeCashlogyError ? <ErrorCountdownIndicator key={displayedErrorId} /> : null}
+          <span>{props.error}</span>
         </div>
       </div> : null}
       {cashlogyPendingNotice ? <div className="mx-auto w-full max-w-[1600px] px-4 pt-4">
@@ -403,10 +490,10 @@ export function PosPage(props: Props) {
         isBusy={posInteractionBlocked}
         isOnline={props.isOnline}
         canSaveQuickSale={Boolean(props.context.canTakeOrders && quickSale.lines.length > 0)}
-        onBack={() => void returnFromQuickSale()}
+        onBack={requestReturnFromQuickSale}
         onCancelEmpty={() => void restaurant.cancelEmptyOrder()}
         onMove={() => void restaurant.prepareMove()}
-        onSaveQuickSale={() => setQuickSaleVirtualModalOpen(true)}
+        onSaveQuickSale={startQuickSaleTableSelection}
         onSplitItems={() => void restaurant.openSplitOrder()}
         onSplitEqual={() => void restaurant.openEqualSplitOrder()}
         order={restaurant.posView.type === 'table_order' ? restaurant.order : null}
@@ -426,6 +513,7 @@ export function PosPage(props: Props) {
         moveOrderId={restaurant.moveOrderId}
         onAreaChange={(areaId) => restaurant.setPosView({ type: 'table_map', areaId })}
         onCancelMove={() => restaurant.setMoveOrderId(null)}
+        onCancelQuickSaleSave={cancelQuickSaleTableSelection}
         onError={props.onSetError}
         onLayoutChange={async (tables, expectedRevision) => {
           try {
@@ -436,6 +524,7 @@ export function PosPage(props: Props) {
           }
         }}
         onMove={restaurant.moveOrder}
+        onSaveQuickSale={saveQuickSaleToTable}
         onCreateVirtual={restaurant.createVirtualTable}
         onDeleteVirtual={restaurant.deleteVirtualTable}
         onOpen={restaurant.openTableOrder}
@@ -443,9 +532,11 @@ export function PosPage(props: Props) {
         onOpenReservation={(reservationId) => void props.reservations.openReservation(reservationId)}
         onQuickSale={(areaId) => {
           if (!props.context.canTakePayments) return
+          setQuickSaleTableSelectionOpen(false)
           restaurant.reset(areaId)
           quickSale.setDiscount(null)
         }}
+        quickSaleSaveMode={quickSaleTableSelectionOpen}
         selectedAreaId={restaurant.posView.areaId}
       /> : null}
 
@@ -591,22 +682,14 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
-      {restaurantEnabled && restaurant.tablesEnabled && quickSaleVirtualModalOpen ? <VirtualTableModal
-        areas={restaurant.map.areas}
-        defaultName="Virtual"
+      {quickSaleExitOpen ? <QuickSaleExitModal
+        canSave={Boolean(props.context.canTakeOrders && cash.session)}
+        defaultName={quickSaleExitName}
         isBusy={props.isBusy}
         isOnline={props.isOnline}
         mobileLayout={mobileTableMapLayout}
-        onClose={() => setQuickSaleVirtualModalOpen(false)}
-        onSubmit={async (value) => {
-          const created = await restaurant.createVirtualTableFromQuickSale(value, quickSale.lines, quickSale.discount)
-          if (created) {
-            quickSale.clear()
-            props.onSetMobileTicketOpen(false)
-          }
-          return created
-        }}
-        requirePhysicalArea
+        onDiscard={discardQuickSaleAndReturnToMap}
+        onSave={saveQuickSaleAsVirtual}
       /> : null}
       {quickSale.productDialog && props.catalog ? <ProductDialog
         allowVariantSelection={quickSale.productDialog.allowVariantSelection}

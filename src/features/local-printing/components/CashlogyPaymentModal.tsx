@@ -1,11 +1,13 @@
-import { AlertTriangle, Ban, CheckCircle2, Coins, LoaderCircle } from 'lucide-react'
+import { AlertTriangle, Ban, CheckCircle2, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
 import { AppModal, Button, Metric } from '../../../components/ui'
 import { formatMoney } from '../../../lib/format'
+import { shouldShowCashlogyOperationDetails } from '../cashlogy/cashlogyPresentation'
 import { cashlogyActiveStatuses, cashlogyCancellableStatuses } from '../cashlogy/cashlogyPolling'
 import { useCashlogyStore } from '../cashlogy/useCashlogyStore'
-import type { CashlogyLevel, CashlogyTransaction, CashlogyTransactionStatus } from '../types'
+import type { CashlogyTransaction, CashlogyTransactionStatus } from '../types'
+import { CashlogyLevelCards } from './CashlogyLevelCards'
 
 const statusLabels: Record<CashlogyTransactionStatus, string> = {
   queued: 'Preparando Cashlogy',
@@ -48,6 +50,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
   const critical = status === 'unknown' || status === 'needs_attention'
   const startFailed = !state.transaction && Boolean(state.error) && !state.isStarting && !state.isPolling
   const canCancel = Boolean(status && cashlogyCancellableStatuses.has(status) && !state.isCancelling)
+  const showOperationDetails = shouldShowCashlogyOperationDetails(status)
 
   const finalizeRecovered = async () => {
     if (!state.transaction || isFinalizing) return
@@ -90,18 +93,20 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
         </div>
       </div>
 
-      <div className="mt-4 grid gap-3 sm:grid-cols-2">
-        <Metric label="Importe solicitado" value={formatMoney(state.intent.amountCents)} />
-        <Metric label="Efectivo aceptado" value={formatMoney(acceptedCents)} />
-        {state.transaction?.returnedCents !== null && state.transaction?.returnedCents !== undefined
-          ? <Metric label="Cambio devuelto" value={formatMoney(state.transaction.returnedCents)} />
-          : null}
-        {state.transaction?.netPaidCents !== null && state.transaction?.netPaidCents !== undefined
-          ? <Metric label="Neto pagado" value={formatMoney(state.transaction.netPaidCents)} />
-          : null}
-      </div>
+      {showOperationDetails ? <>
+        <div className="mt-4 grid gap-3 sm:grid-cols-2">
+          <Metric label="Importe solicitado" value={formatMoney(state.intent.amountCents)} />
+          <Metric label="Efectivo aceptado" value={formatMoney(acceptedCents)} />
+          {state.transaction?.returnedCents !== null && state.transaction?.returnedCents !== undefined
+            ? <Metric label="Cambio devuelto" value={formatMoney(state.transaction.returnedCents)} />
+            : null}
+          {state.transaction?.netPaidCents !== null && state.transaction?.netPaidCents !== undefined
+            ? <Metric label="Neto pagado" value={formatMoney(state.transaction.netPaidCents)} />
+            : null}
+        </div>
 
-      <RecyclerLevels levels={state.levels} />
+        <CashlogyLevelCards levels={state.levels} variant="payment" />
+      </> : null}
 
       {state.error ? <div className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm">
         <p className="font-bold text-red-700 dark:text-red-300">{state.error.message}</p>
@@ -131,10 +136,4 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
       </div>
     </section>
   </AppModal>
-}
-
-function RecyclerLevels({ levels }: { levels: CashlogyLevel[] }) {
-  const relevant = levels.filter((level) => level.state !== 'ok' || level.percentage !== null)
-  if (!relevant.length) return null
-  return <div className="mt-4 rounded-[var(--radius)] border border-[var(--separator)] p-4"><h3 className="font-black">Niveles</h3><div className="mt-2 flex flex-wrap gap-2">{relevant.map((level) => <span className={`rounded-full px-3 py-1 text-xs font-bold ${level.state === 'ok' ? 'bg-emerald-500/10 text-emerald-700' : 'bg-amber-500/15 text-amber-700 dark:text-amber-300'}`} key={level.index}><Coins className="mr-1 inline h-3.5 w-3.5" />{formatMoney(level.valueCents)} · {level.state}{level.percentage !== null ? ` · ${level.percentage}%` : ''}</span>)}</div></div>
 }

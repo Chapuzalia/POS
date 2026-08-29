@@ -21,6 +21,12 @@ import {
   pollCashlogyTransaction,
 } from '../src/features/local-printing/cashlogy/cashlogyPolling.ts'
 import { createCashlogyRequestId } from '../src/features/local-printing/cashlogy/cashlogyRequestId.ts'
+import {
+  formatCashlogyLevelPercentage,
+  getCashlogyLevelTone,
+  getVisibleCashlogyLevels,
+  shouldShowCashlogyOperationDetails,
+} from '../src/features/local-printing/cashlogy/cashlogyPresentation.ts'
 import { getCompletedStackerCollection } from '../src/features/local-printing/cashlogy/stackerCollection.ts'
 import {
   getCashlogyIntentStorageKey,
@@ -78,6 +84,29 @@ const accounting = {
   },
   queriedAt: '2026-08-18T10:00:00Z',
 }
+
+test('los niveles de Cashlogy se presentan por capacidad y omiten recicladores desactivados', () => {
+  assert.equal(getCashlogyLevelTone(21), 'green')
+  assert.equal(getCashlogyLevelTone(20), 'orange')
+  assert.equal(getCashlogyLevelTone(10), 'orange')
+  assert.equal(getCashlogyLevelTone(9), 'red')
+  assert.equal(getCashlogyLevelTone(null), 'red')
+  assert.equal(formatCashlogyLevelPercentage(15), '15%')
+  assert.equal(formatCashlogyLevelPercentage(null), '—%')
+
+  const levels = [
+    { index: 1, valueCents: 1, stateCode: 0, state: 'ok', percentage: 0 },
+    { index: 2, valueCents: 2, stateCode: 0, state: 'ok', percentage: 10 },
+    { index: 3, valueCents: 5, stateCode: 1, state: 'warning', percentage: 0 },
+  ]
+  assert.deepEqual(getVisibleCashlogyLevels(levels).map((level) => level.index), [2, 3])
+})
+
+test('una operación Cashlogy cancelada no muestra detalles económicos', () => {
+  assert.equal(shouldShowCashlogyOperationDetails('cancelled'), false)
+  assert.equal(shouldShowCashlogyOperationDetails('completed'), true)
+  assert.equal(shouldShowCashlogyOperationDetails(undefined), true)
+})
 
 test('la configuración predeterminada conserva el modo de solo impresora', () => {
   const config = getDefaultPrintAgentConfig()

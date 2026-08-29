@@ -21,8 +21,8 @@ test('la configuración del local carga, edita y limpia la hora de cambio', () =
 test('informes y estadísticas aplican el día operativo a la fecha real de venta', () => {
   assert.match(reportsPage, /getOperationalDateKey\(ticket\.createdAt, operationalDayConfig\)/)
   assert.match(reportsPage, /Día operativo desde/)
-  assert.match(analyticsService, /getOperationalMonthRangeIso/)
-  assert.match(analyticsService, /\.gte\('local_created_at', monthRange\.startIso\)/)
-  assert.match(analyticsService, /\.lt\('local_created_at', monthRange\.endIso\)/)
+  assert.match(analyticsService, /getOperationalPeriodRangeIso/)
+  assert.match(analyticsService, /\.gte\('local_created_at', periodRange\.startIso\)/)
+  assert.match(analyticsService, /\.lt\('local_created_at', periodRange\.endIso\)/)
   assert.match(cashClosingModel, /getOperationalDateKey\(closing\.closedAt/)
 })

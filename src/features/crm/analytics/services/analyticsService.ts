@@ -1,9 +1,10 @@
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
-import { getOperationalDateKey, getOperationalDayRangeIso, getOperationalMonthRangeIso } from '../../../../lib/operationalDay'
+import { getOperationalDateKey, getOperationalDayRangeIso, getOperationalPeriodRangeIso } from '../../../../lib/operationalDay'
 import { supabase } from '../../../../lib/supabase'
-import { type CrmStats, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
+import { type CrmStats, type CrmStatsPeriod, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
 import { type NameRow } from '../../sales/services/salesReportsService'
 import { buildDayActivityStats, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from './analyticsModel.ts'
+import { createCrmStatsPeriod, summarizeCrmStatsPeriod } from './analyticsPeriod.ts'
 export { applyCrmOpenCashSalesTotals } from './analyticsModel.ts'
 
 export type SaleStatsRow = {
@@ -56,6 +57,21 @@ export type OpenCashSessionSaleRow = {
   cash_session_id: string
   payment_method: HistoricalPaymentMethod | null
   total_cents: number
+}
+
+const statsBatchSize = 1_000
+
+async function loadStatsRows<T>(loadBatch: (from: number, to: number) => Promise<{ data: T[] | null; error: unknown }>) {
+  const rows: T[] = []
+  let offset = 0
+  while (true) {
+    const { data, error } = await loadBatch(offset, offset + statsBatchSize - 1)
+    if (error) throw error
+    const batch = data ?? []
+    rows.push(...batch)
+    if (batch.length < statsBatchSize) return rows
+    offset += statsBatchSize
+  }
 }
 
 export async function loadCrmOpenCashSalesTotals(
@@ -132,76 +148,97 @@ export async function loadCrmDayActivity(
   )
 }
 
-export async function loadCrmStats(context: TenantContext, venue: CrmVenue, monthKey?: string): Promise<CrmStats> {
+export async function loadCrmStats(
+  context: TenantContext,
+  venue: CrmVenue,
+  period?: CrmStatsPeriod,
+  options: { includeLiveState?: boolean } = {},
+): Promise<CrmStats> {
   const client = requireSupabase()
   const operationalDayConfig = {
     dayChangeTime: venue.dayChangeTime,
     timeZone: venue.timeZone,
   }
-  const selectedMonthKey = monthKey ?? getOperationalDateKey(new Date(), operationalDayConfig).slice(0, 7)
-  const monthRange = getOperationalMonthRangeIso(operationalDayConfig, selectedMonthKey)
-  let salesQuery = client
-    .from('sales')
-    .select('id, ticket_id, payment_method, total_cents')
-    .eq('tenant_id', context.tenantId)
-    .gte('local_created_at', monthRange.startIso)
-    .lt('local_created_at', monthRange.endIso)
-  let ticketsQuery = client
-    .from('tickets')
-    .select(`
-      id,
-      local_created_at,
-      total_cents,
-      discount_id,
-      discount_name,
-      discount_amount_cents,
-      ticket_lines(
-        product_id,
-        product_name,
-        category_id_snapshot,
-        category_name_snapshot,
-        quantity,
-        allocated_quantity,
-        line_total_cents,
-        modifiers,
-        ticket_line_components(component_type, product_name_snapshot, sort_order, metadata)
-      )
-    `)
-    .eq('tenant_id', context.tenantId)
-    .eq('status', 'paid')
-    .gte('local_created_at', monthRange.startIso)
-    .lt('local_created_at', monthRange.endIso)
-  let openSessionsQuery = client
-    .from('cash_sessions')
-    .select('id, venue_id, device_id, opened_at, opening_float_cents')
-    .eq('tenant_id', context.tenantId)
-    .eq('status', 'open')
-    .order('opened_at', { ascending: false })
+  const currentDay = getOperationalDateKey(new Date(), operationalDayConfig)
+  const selectedPeriod = period ?? createCrmStatsPeriod('month', currentDay.slice(0, 7))
+  const periodSummary = summarizeCrmStatsPeriod(selectedPeriod, currentDay)
+  const periodRange = getOperationalPeriodRangeIso(
+    operationalDayConfig,
+    periodSummary.startDate,
+    periodSummary.effectiveEndDate,
+  )
+  const salesRowsPromise = loadStatsRows<SaleStatsRow>(async (from, to) => {
+    const { data, error } = await client
+      .from('sales')
+      .select('id, ticket_id, payment_method, total_cents')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venue.id)
+      .gte('local_created_at', periodRange.startIso)
+      .lt('local_created_at', periodRange.endIso)
+      .order('local_created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to)
+    return { data: (data ?? []) as SaleStatsRow[], error }
+  })
+  const ticketRowsPromise = loadStatsRows<TicketWithLinesStatsRow>(async (from, to) => {
+    const { data, error } = await client
+      .from('tickets')
+      .select(`
+        id,
+        local_created_at,
+        total_cents,
+        discount_id,
+        discount_name,
+        discount_amount_cents,
+        ticket_lines(
+          product_id,
+          product_name,
+          category_id_snapshot,
+          category_name_snapshot,
+          quantity,
+          allocated_quantity,
+          line_total_cents,
+          modifiers,
+          ticket_line_components(component_type, product_name_snapshot, sort_order, metadata)
+        )
+      `)
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venue.id)
+      .eq('status', 'paid')
+      .gte('local_created_at', periodRange.startIso)
+      .lt('local_created_at', periodRange.endIso)
+      .order('local_created_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to)
+    return { data: (data ?? []) as TicketWithLinesStatsRow[], error }
+  })
+  const liveStateRowsPromise = options.includeLiveState === false
+    ? Promise.resolve([
+        { data: [] as OpenCashSessionRow[], error: null },
+        { data: [] as NameRow[], error: null },
+        { data: [] as NameRow[], error: null },
+      ] as const)
+    : Promise.all([
+        client
+          .from('cash_sessions')
+          .select('id, venue_id, device_id, opened_at, opening_float_cents')
+          .eq('tenant_id', context.tenantId)
+          .eq('status', 'open')
+          .order('opened_at', { ascending: false }),
+        client.from('venues').select('id, name').eq('tenant_id', context.tenantId),
+        client.from('devices').select('id, name').eq('tenant_id', context.tenantId),
+      ])
 
-  salesQuery = salesQuery.eq('venue_id', venue.id)
-  ticketsQuery = ticketsQuery.eq('venue_id', venue.id)
-
+  const [sales, paidTickets, liveStateRows] = await Promise.all([
+    salesRowsPromise,
+    ticketRowsPromise,
+    liveStateRowsPromise,
+  ])
   const [
-    { data: salesRows, error: salesError },
-    { data: ticketRows, error: linesError },
     { data: openSessionRows, error: openSessionsError },
     { data: venueRows, error: venuesError },
     { data: deviceRows, error: devicesError },
-  ] = await Promise.all([
-    salesQuery,
-    ticketsQuery,
-    openSessionsQuery,
-    client.from('venues').select('id, name').eq('tenant_id', context.tenantId),
-    client.from('devices').select('id, name').eq('tenant_id', context.tenantId),
-  ])
-
-  if (salesError) {
-    throw salesError
-  }
-
-  if (linesError) {
-    throw linesError
-  }
+  ] = liveStateRows
 
   if (openSessionsError) {
     throw openSessionsError
@@ -215,8 +252,6 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue, mont
     throw devicesError
   }
 
-  const sales = (salesRows ?? []) as SaleStatsRow[]
-  const paidTickets = (ticketRows ?? []) as TicketWithLinesStatsRow[]
   const lines = paidTickets.flatMap((ticket) => ticket.ticket_lines ?? [])
   const salesBreakdown = buildSalesBreakdowns(lines.map((line) => ({
     categoryId: line.category_id_snapshot,
@@ -360,10 +395,11 @@ export async function loadCrmStats(context: TenantContext, venue: CrmVenue, mont
       createdAt: ticket.local_created_at,
       totalCents: ticket.total_cents,
     })), venue.timeZone),
-    monthKey: selectedMonthKey,
+    monthKey: selectedPeriod.startDate.slice(0, 7),
     monthSalesCents,
     monthTicketCount: paidTickets.length,
     openCashSessions,
+    period: periodSummary,
     ...salesBreakdown,
     topProductCombinations: buildTopProductCombinations(lines.map((line) => ({
       productName: line.product_name,

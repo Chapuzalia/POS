@@ -2,7 +2,7 @@ import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import { normalizeCatalogSnapshot } from '../catalog/services/catalogSnapshots'
 import type { AppliedDiscount, Customer, PaymentMethod, SaleLineCatalogSnapshot, TenantContext, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
-import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, QuickSaleVirtualTableCreateInput, QuickSaleVirtualTableCreateResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult, VirtualRestaurantTableCreateInput, VirtualRestaurantTableDeleteInput } from './types'
+import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, DiningAreaUpdateInput, MoveRestaurantOrderLinesResult, OpenRestaurantOrderInput, PayRestaurantEqualPartResult, PayRestaurantOrderItemsResult, QuickSaleExistingTableSaveInput, QuickSaleExistingTableSaveResult, QuickSaleVirtualTableCreateInput, QuickSaleVirtualTableCreateResult, RestaurantEqualSplit, RestaurantMap, RestaurantOrder, RestaurantOrderDetail, RestaurantOrderGroupDetail, RestaurantOrderLine, RestaurantOrderLineMove, RestaurantTable, RestaurantTableCreateInput, RestaurantTableMapItem, RestaurantTableReservation, RestaurantTableUpdateInput, SaveRestaurantOrderLinesResult, VirtualRestaurantTableCreateInput, VirtualRestaurantTableDeleteInput } from './types'
 import { getOrderPendingUnits } from './service-status'
 import { buildCatalogOrderLinesPayload, buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
@@ -219,6 +219,18 @@ export async function saveQuickSaleAsVirtualTable(input: QuickSaleVirtualTableCr
   const result = data as Record<string, unknown>
   return { tableId: String(result.tableId), orderId: String(result.orderId), revision: Number(result.revision) }
 }
+export async function saveQuickSaleAsExistingTable(input: QuickSaleExistingTableSaveInput): Promise<QuickSaleExistingTableSaveResult> {
+  const { data, error } = await requireSupabase().rpc('save_quick_sale_as_existing_table', {
+    p_cash_session_id: input.cashSessionId,
+    p_device_id: input.deviceId,
+    p_table_id: input.tableId,
+    p_lines: buildCatalogOrderLinesPayload(input.lines),
+    p_discount: input.discount,
+  })
+  if (error) throw error
+  const result = data as Record<string, unknown>
+  return { tableId: String(result.tableId), orderId: String(result.orderId), revision: Number(result.revision) }
+}
 export async function deleteVirtualRestaurantTable(input: VirtualRestaurantTableDeleteInput) {
   const { error } = await requireSupabase().rpc('delete_session_virtual_restaurant_table', {
     p_cash_session_id: input.cashSessionId,
@@ -376,6 +388,22 @@ export async function cancelEmptyRestaurantOrder(orderId: string, expectedRevisi
   })
   if (error) throw error
   return Number(data)
+}
+
+export async function cleanupVirtualRoomRestaurantTable(input: {
+  cashSessionId: string
+  deviceId: string
+  tableId: string
+  closeAsPaid: boolean
+}) {
+  const { data, error } = await requireSupabase().rpc('cleanup_virtual_room_restaurant_table', {
+    p_cash_session_id: input.cashSessionId,
+    p_device_id: input.deviceId,
+    p_table_id: input.tableId,
+    p_close_as_paid: input.closeAsPaid,
+  })
+  if (error) throw error
+  return Boolean(data)
 }
 
 export async function loadRestaurantEqualSplit(context: TenantContext, orderId: string): Promise<RestaurantEqualSplit | null> {

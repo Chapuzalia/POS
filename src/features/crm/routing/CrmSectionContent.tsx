@@ -18,7 +18,7 @@ import type { RunAction } from '../shared/types'
 import { VenueSettingsCrm } from '../venues/pages/VenueSettingsPage'
 import { TableManagementPage } from '../../table-management/TableManagementPage'
 import type { CatalogData } from '../../catalog/domain/types.ts'
-import type { CrmStats, CrmVenue, TenantContext } from '../../../types'
+import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../../types'
 import type { CrmSection } from './crmNavigation'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 import { ProductionCrm } from '../production/pages/ProductionPage'
@@ -26,6 +26,7 @@ import { ProductionCrm } from '../production/pages/ProductionPage'
 type Props = {
   activeSection: CrmSection
   catalog: CatalogData | null
+  comparisonStats: CrmStats | null
   context: TenantContext
   disabled: boolean
   duplicateCatalogProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
@@ -35,7 +36,7 @@ type Props = {
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
   onInventoryEnabledChange: () => Promise<void>
-  onStatsRefresh: (options?: { monthKey?: string; silent?: boolean }) => Promise<void>
+  onStatsRefresh: (options?: { comparisonPeriod?: CrmStatsPeriod; period?: CrmStatsPeriod; silent?: boolean }) => Promise<void>
   onVenuesChanged: () => Promise<void>
   runAction: RunAction
   selectedVenueId: string
@@ -48,6 +49,7 @@ const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'formats',
 export function CrmSectionContent({
   activeSection,
   catalog,
+  comparisonStats,
   context,
   disabled,
   duplicateCatalogProduct,
@@ -121,10 +123,11 @@ export function CrmSectionContent({
       />
     case 'stats':
       return <StatsCrm
+        comparisonStats={comparisonStats}
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
         disabled={disabled}
         key={selectedVenueId}
-        onRefresh={(monthKey) => onStatsRefresh({ monthKey })}
+        onRefresh={(period, comparisonPeriod) => onStatsRefresh({ comparisonPeriod, period })}
         stats={stats}
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />

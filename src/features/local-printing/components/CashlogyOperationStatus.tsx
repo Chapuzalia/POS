@@ -2,6 +2,7 @@ import { AlertTriangle, Ban, CheckCircle2, LoaderCircle } from 'lucide-react'
 import { Metric } from '../../../components/ui'
 import { formatMoney } from '../../../lib/format'
 import type { CashlogyError } from '../cashlogy/cashlogyError'
+import { shouldShowCashlogyOperationDetails } from '../cashlogy/cashlogyPresentation'
 import type { CashlogyCashManagementOperation, CashlogyCashManagementStatus, CashlogyCashManagementType } from '../types'
 
 const statusLabels: Record<CashlogyCashManagementStatus, string> = {
@@ -43,6 +44,7 @@ export function CashlogyOperationStatus({
   const completed = operation?.status === 'completed'
   const stopped = operation?.status === 'cancelled' || operation?.status === 'failed'
   const title = isCancelling ? 'Cancelando operación…' : operation ? statusLabels[operation.status] : isPending ? 'Iniciando operación…' : 'Recuperando operación'
+  const showOperationDetails = shouldShowCashlogyOperationDetails(operation?.status)
 
   return <div className="grid gap-4">
     <div className={`flex items-start gap-3 rounded-[var(--radius)] border p-4 ${critical ? 'border-red-500/50 bg-red-500/10' : 'border-[var(--separator)] bg-[var(--background)]'}`}>
@@ -67,7 +69,7 @@ export function CashlogyOperationStatus({
       </div>
     </div>
 
-    {operation ? <div className="grid gap-3 sm:grid-cols-3">
+    {operation && showOperationDetails ? <div className="grid gap-3 sm:grid-cols-3">
       {operation.acceptedCents !== null ? <Metric label="Efectivo introducido" value={formatMoney(operation.acceptedCents)} /> : null}
       {operation.requestedAmountCents !== null ? <Metric label="Importe solicitado" value={formatMoney(operation.requestedAmountCents)} /> : null}
       {operation.dispensedCents !== null ? <Metric label="Importe entregado" value={formatMoney(operation.dispensedCents)} /> : null}

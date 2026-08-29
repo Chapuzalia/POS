@@ -6,6 +6,7 @@ import {
   Check,
   Pencil,
   Plus,
+  Save,
   ShoppingBag,
   Trash2,
   Unlink,
@@ -25,6 +26,11 @@ import { formatMoney as formatCurrency } from "../../../lib/format";
 import { getReadableError } from "../../../utils/errors";
 import { snapTableAlignment } from "../alignment";
 import {
+  getAreaSwipeEntryOffset,
+  getAreaSwipeTarget,
+  getAreaSwipeVisualFeedback,
+} from "../area-swipe";
+import {
   externalLabelSize,
   placeExternalLabels,
   tableContentMode,
@@ -41,7 +47,6 @@ import {
   type JoinProposal,
 } from "../joined-layout";
 import { layoutFromMap } from "../layout-service";
-import { loadTableMapQuarterTurn, persistTableMapQuarterTurn } from "../map-orientation";
 import { getRestaurantTableVisualStatus } from "../table-visual-status";
 import type {
   RestaurantMap,
@@ -50,19 +55,19 @@ import type {
   SessionTableLayout,
   TableLayoutEntry,
 } from "../types";
-import { useMapViewport } from "../useMapViewport";
 import {
+  contentBounds,
+  fitBoundsToViewport,
   getMapPlaneSize,
   orientMapRect,
   positionFloatingPanel,
   screenToMap,
+  shouldRotateMapToFit,
 } from "../viewport";
-import { MapViewportControls } from "./MapViewportControls";
 import { MobileTableMapChrome } from "./MobileTableMapChrome";
 import { VirtualTableModal } from './VirtualTableModal'
 import {
   MobileGroupActionsSheet,
-  MobileTableActionSheet,
 } from "./MobileTableMapSheets";
 import { ReservationTableBadge } from "../../reservations/components/ReservationTableBadge";
 
@@ -81,6 +86,7 @@ type Props = {
   ) => Promise<SessionTableLayout>;
   onError: (message: string) => void;
   onMove: (tableId: string) => Promise<void>;
+  onSaveQuickSale: (tableId: string) => Promise<void>;
   onCreateVirtual: (input: { areaId: string | null; name: string; capacity: number; shape: RestaurantTableShape }) => Promise<boolean>;
   onDeleteVirtual: (tableId: string) => Promise<boolean>;
   onOpen: (tableIds: string[], guestCount: number) => Promise<void>;
@@ -90,6 +96,8 @@ type Props = {
   selectedAreaId?: string;
   moveOrderId: string | null;
   onCancelMove: () => void;
+  quickSaleSaveMode: boolean;
+  onCancelQuickSaleSave: () => void;
   openCashPanel?: ReactNode;
 };
 
@@ -105,7 +113,16 @@ type DragState = {
 };
 type Guidelines = { x: number | null; y: number | null };
 type GroupMenu = { tableId: string; left: number; top: number };
+type AreaSwipeState = { pointerId: number; startX: number; startY: number };
 const SNAP_TOLERANCE = 0.7;
+const MOBILE_MAP_TOP_INSET = 124;
+const MOBILE_MAP_EDGE_INSET = 12;
+const FIXED_MAP_PADDING = 16;
+const AREA_SWIPE_VISUAL_STYLE = {
+  opacity: "var(--area-swipe-opacity, 1)",
+  transform: "translate3d(var(--area-swipe-offset-x, 0px), 0, 0)",
+  transition: "var(--area-swipe-transition, none)",
+} as const;
 
 function elapsed(openedAt: string | null) {
   if (!openedAt) return "";
@@ -147,7 +164,6 @@ export function TableMapView(props: Props) {
   const {
     canOpen,
     canQuickSale,
-    cashSessionId,
     isBusy,
     isOnline,
     map,
@@ -160,13 +176,16 @@ export function TableMapView(props: Props) {
     onDeleteVirtual,
     onLayoutChange,
     onMove,
+    onSaveQuickSale,
     onOpen,
     onOpenOrder,
     onQuickSale,
     openCashPanel,
     selectedAreaId,
+    quickSaleSaveMode,
+    onCancelQuickSaleSave,
   } = props;
-  const orientationVenueId = map.areas.find((area) => area.id === selectedAreaId)?.venueId ?? map.areas[0]?.venueId;
+  const tableSelectionMode = Boolean(moveOrderId || quickSaleSaveMode);
   const [editMode, setEditMode] = useState(false);
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [displayTables, setDisplayTables] = useState(map.tables);
@@ -182,23 +201,36 @@ export function TableMapView(props: Props) {
   const [groupMenu, setGroupMenu] = useState<GroupMenu | null>(null);
   const [savingLayout, setSavingLayout] = useState(false);
   const [virtualModalOpen, setVirtualModalOpen] = useState(false);
-  const [quarterTurn, setQuarterTurn] = useState(() => loadTableMapQuarterTurn(orientationVenueId));
   const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 });
   const canvasRef = useRef<HTMLElement>(null);
   const dragRef = useRef<DragState | null>(null);
+  const areaSwipeRef = useRef<AreaSwipeState | null>(null);
+  const areaSwipeAnimationFrameRef = useRef<number | null>(null);
   const previousLabelSidesRef = useRef(new Map<string, LabelSide>());
   const latestRevisionRef = useRef(map.layoutRevision ?? 0);
-  const fittedAreaRef = useRef<string | null>(null);
-  const viewportApi = useMapViewport(
-    `table-map:${cashSessionId}:${selectedAreaId ?? "default"}`,
-  );
-  const { fit: fitViewport, viewport } = viewportApi;
   const activeAreaId =
     selectedAreaId && map.areas.some((area) => area.id === selectedAreaId)
       ? selectedAreaId
       : map.areas[0]?.id;
   const activeArea = map.areas.find((area) => area.id === activeAreaId);
-  const rotatedMap = mobileLayout && quarterTurn;
+  const designWidth = activeArea?.canvasWidth ?? 1200;
+  const designHeight = activeArea?.canvasHeight ?? 800;
+  const mapInsets = useMemo(
+    () => ({
+      top: mobileLayout ? MOBILE_MAP_TOP_INSET : 0,
+      right: mobileLayout ? MOBILE_MAP_EDGE_INSET : 0,
+      bottom: mobileLayout ? MOBILE_MAP_EDGE_INSET : 0,
+      left: mobileLayout ? MOBILE_MAP_EDGE_INSET : 0,
+    }),
+    [mobileLayout],
+  );
+  const rotatedMap = shouldRotateMapToFit(
+    canvasSize.width,
+    canvasSize.height,
+    designWidth,
+    designHeight,
+    mapInsets,
+  );
   const mapElements = useMemo(
     () => activeArea?.mapElements ?? [],
     [activeArea?.mapElements],
@@ -208,20 +240,39 @@ export function TableMapView(props: Props) {
       getMapPlaneSize(
         canvasSize.width,
         canvasSize.height,
-        rotatedMap ? (activeArea?.canvasHeight ?? 800) : (activeArea?.canvasWidth ?? 1200),
-        rotatedMap ? (activeArea?.canvasWidth ?? 1200) : (activeArea?.canvasHeight ?? 800),
+        rotatedMap ? designHeight : designWidth,
+        rotatedMap ? designWidth : designHeight,
       ),
     [
-      activeArea?.canvasHeight,
-      activeArea?.canvasWidth,
       canvasSize.height,
       canvasSize.width,
+      designHeight,
+      designWidth,
       rotatedMap,
     ],
   );
   const tables = useMemo(
     () => displayTables.filter((table) => table.areaId === activeAreaId),
     [activeAreaId, displayTables],
+  );
+  const fittedItems = useMemo(
+    () => [
+      ...map.tables.filter((table) => table.areaId === activeAreaId),
+      ...mapElements,
+    ].map((item) => orientMapRect(item, rotatedMap)),
+    [activeAreaId, map.tables, mapElements, rotatedMap],
+  );
+  const viewport = useMemo(
+    () => fitBoundsToViewport(
+      contentBounds(fittedItems),
+      canvasSize.width,
+      canvasSize.height,
+      planeSize.width,
+      planeSize.height,
+      mapInsets,
+      FIXED_MAP_PADDING,
+    ),
+    [canvasSize.height, canvasSize.width, fittedItems, mapInsets, planeSize.height, planeSize.width],
   );
   const layoutGroups = useMemo(() => {
     const groups = new Map<string, RestaurantTableMapItem[]>();
@@ -263,12 +314,9 @@ export function TableMapView(props: Props) {
     const reserved =
       canvasSize.width && canvasSize.height
         ? [
-            {
-              x: Math.max(8, canvasSize.width - 240),
-              y: Math.max(8, canvasSize.height - 72),
-              width: 232,
-              height: 64,
-            },
+            ...(mobileLayout
+              ? [{ x: 0, y: 0, width: canvasSize.width, height: MOBILE_MAP_TOP_INSET }]
+              : []),
             ...(groupMenu
               ? [
                   {
@@ -318,37 +366,16 @@ export function TableMapView(props: Props) {
     );
   }, [externalLabels]);
 
+  useEffect(() => () => {
+    if (areaSwipeAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(areaSwipeAnimationFrameRef.current);
+    }
+  }, []);
+
   useEffect(() => {
     setSelectedTableId(null);
     setGroupMenu(null);
   }, [activeAreaId]);
-
-  useEffect(() => {
-    setQuarterTurn(loadTableMapQuarterTurn(orientationVenueId));
-  }, [orientationVenueId]);
-
-  useEffect(() => {
-    const canvas = canvasRef.current;
-    if (
-      !canvas ||
-      !activeAreaId ||
-      !canvasSize.width ||
-      !canvasSize.height ||
-      fittedAreaRef.current === `${activeAreaId}:${rotatedMap}`
-    )
-      return;
-    fittedAreaRef.current = `${activeAreaId}:${rotatedMap}`;
-    fitViewport(canvas, [...tables, ...mapElements].map((item) => orientMapRect(item, rotatedMap)), planeSize);
-  }, [
-    activeAreaId,
-    canvasSize.height,
-    canvasSize.width,
-    fitViewport,
-    mapElements,
-    planeSize,
-    rotatedMap,
-    tables,
-  ]);
 
   useEffect(() => {
     const revision = map.layoutRevision ?? 0;
@@ -398,8 +425,8 @@ export function TableMapView(props: Props) {
       if (table.status === "free") void onMove(table.id);
       return;
     }
-    if (mobileLayout) {
-      setSelectedTableId(table.id);
+    if (quickSaleSaveMode) {
+      if (table.status === "free") void onSaveQuickSale(table.id);
       return;
     }
     if (table.status === "occupied" && table.orderId)
@@ -663,6 +690,86 @@ export function TableMapView(props: Props) {
     setPendingIds(null);
   }
 
+  function startAreaSwipe(event: ReactPointerEvent<HTMLElement>) {
+    if (editMode || tableSelectionMode || map.areas.length < 2 || areaSwipeRef.current) return;
+    if (
+      event.target !== event.currentTarget &&
+      !(event.target as HTMLElement).classList.contains("map-transform-layer")
+    )
+      return;
+    if (areaSwipeAnimationFrameRef.current !== null) {
+      cancelAnimationFrame(areaSwipeAnimationFrameRef.current);
+      areaSwipeAnimationFrameRef.current = null;
+    }
+    updateAreaSwipeVisual(0, 1, false);
+    areaSwipeRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+    };
+    event.currentTarget.setPointerCapture(event.pointerId);
+  }
+
+  function updateAreaSwipeVisual(offsetX: number, opacity: number, animate: boolean) {
+    const canvas = canvasRef.current;
+    if (!canvas) return;
+    const reduceMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    canvas.style.setProperty(
+      "--area-swipe-transition",
+      animate && !reduceMotion
+        ? "transform 160ms ease-out, opacity 160ms ease-out"
+        : "none",
+    );
+    canvas.style.setProperty("--area-swipe-offset-x", `${offsetX}px`);
+    canvas.style.setProperty("--area-swipe-opacity", String(opacity));
+  }
+
+  function moveAreaSwipe(event: ReactPointerEvent<HTMLElement>) {
+    const swipe = areaSwipeRef.current;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    const feedback = getAreaSwipeVisualFeedback(
+      event.clientX - swipe.startX,
+      event.clientY - swipe.startY,
+      canvasSize.width,
+    );
+    updateAreaSwipeVisual(feedback.offsetX, feedback.opacity, false);
+  }
+
+  function finishAreaSwipe(event: ReactPointerEvent<HTMLElement>) {
+    const swipe = areaSwipeRef.current;
+    if (!swipe || swipe.pointerId !== event.pointerId) return;
+    areaSwipeRef.current = null;
+    const targetAreaId = getAreaSwipeTarget(
+      map.areas.map((area) => area.id),
+      activeAreaId,
+      event.clientX - swipe.startX,
+      event.clientY - swipe.startY,
+      canvasSize.width,
+    );
+    if (!targetAreaId || targetAreaId === activeAreaId) {
+      updateAreaSwipeVisual(0, 1, true);
+      return;
+    }
+    setSelectedTableId(null);
+    setGroupMenu(null);
+    const entryOffset = getAreaSwipeEntryOffset(
+      event.clientX - swipe.startX,
+      canvasSize.width,
+    );
+    onAreaChange(targetAreaId);
+    updateAreaSwipeVisual(entryOffset, 0.92, false);
+    areaSwipeAnimationFrameRef.current = requestAnimationFrame(() => {
+      areaSwipeAnimationFrameRef.current = null;
+      updateAreaSwipeVisual(0, 1, true);
+    });
+  }
+
+  function cancelAreaSwipe(event: ReactPointerEvent<HTMLElement>) {
+    if (areaSwipeRef.current?.pointerId !== event.pointerId) return;
+    areaSwipeRef.current = null;
+    updateAreaSwipeVisual(0, 1, true);
+  }
+
   async function confirmDeleteVirtual() {
     if (!selectedTable?.isVirtual) return;
     const deleted = await onDeleteVirtual(selectedTable.id);
@@ -677,14 +784,6 @@ export function TableMapView(props: Props) {
 
   function openVirtualTableModal() {
     setVirtualModalOpen(true);
-  }
-
-  function toggleMapOrientation() {
-    setQuarterTurn((current) => {
-      const next = !current;
-      persistTableMapQuarterTurn(orientationVenueId, next);
-      return next;
-    });
   }
 
   const groupMenuTable = groupMenu
@@ -718,7 +817,8 @@ export function TableMapView(props: Props) {
         <nav className="flex gap-2 overflow-x-auto pb-0.5 [&>button]:min-h-[42px] [&>button]:whitespace-nowrap [&>button]:rounded-full [&>button]:border [&>button]:border-[var(--separator)] [&>button]:bg-[var(--surface)] [&>button]:px-[18px] [&>button]:font-extrabold [&>button]:text-[var(--foreground)]" aria-label="Zonas">
           {map.areas.map((area) => (
             <UiButton
-              className={area.id === activeAreaId ? "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]" : ""}
+              aria-current={area.id === activeAreaId ? "page" : undefined}
+              className={area.id === activeAreaId ? "!border-[var(--accent)] !bg-[var(--accent)] !text-[var(--accent-foreground)] shadow-[0_0_0_3px_color-mix(in_srgb,var(--accent)_22%,transparent)]" : ""}
               key={area.id}
               onClick={() => onAreaChange(area.id)}
               type="button"
@@ -730,7 +830,7 @@ export function TableMapView(props: Props) {
         <div className="flex gap-2.5 max-[760px]:grid max-[760px]:grid-cols-2">
           <UiButton
             className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45"
-            disabled={!isOnline || isBusy || !canOpen || Boolean(moveOrderId)}
+            disabled={!isOnline || isBusy || !canOpen || tableSelectionMode}
             onClick={openVirtualTableModal}
             type="button"
           >
@@ -738,7 +838,7 @@ export function TableMapView(props: Props) {
           </UiButton>
           <UiButton
             className={`inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border bg-[var(--surface)] px-4 font-extrabold disabled:opacity-45 ${editMode ? "border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]" : "border-[var(--separator)] text-[var(--foreground)]"}`}
-            disabled={!isOnline || isBusy || Boolean(moveOrderId)}
+            disabled={!isOnline || isBusy || tableSelectionMode}
             onClick={toggleEditMode}
             type="button"
           >
@@ -748,6 +848,7 @@ export function TableMapView(props: Props) {
           {canQuickSale ? (
             <UiButton
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45"
+              disabled={tableSelectionMode}
               onClick={() => onQuickSale(activeAreaId)}
               type="button"
             >
@@ -770,32 +871,31 @@ export function TableMapView(props: Props) {
       {!canOpen && openCashPanel ? (
         <div className="contents">{openCashPanel}</div>
       ) : null}
-      {moveOrderId ? (
+      {tableSelectionMode ? (
         <div className="flex items-center gap-2.5 rounded-[var(--radius)] bg-[var(--accent-soft)] px-3.5 py-2.5 font-bold text-[var(--foreground)] max-[760px]:flex-wrap max-[760px]:items-start [&>span]:flex-1 max-[760px]:[&>span]:min-w-[70%] [&>button]:inline-flex [&>button]:items-center [&>button]:gap-1.5 [&>button]:rounded-md [&>button]:border-0 [&>button]:bg-[var(--surface)] [&>button]:px-3 [&>button]:py-2 [&>button]:font-extrabold [&>button]:text-[var(--foreground)]">
-          <ArrowRightLeft size={18} />
-          <span>Selecciona una mesa libre como destino.</span>
-          <UiButton onClick={onCancelMove} type="button">
+          {quickSaleSaveMode ? <Save size={18} /> : <ArrowRightLeft size={18} />}
+          <span>{quickSaleSaveMode ? "Selecciona una mesa libre para guardar la comanda." : "Selecciona una mesa libre como destino."}</span>
+          <UiButton onClick={quickSaleSaveMode ? onCancelQuickSaleSave : onCancelMove} type="button">
             <X size={16} /> Cancelar
           </UiButton>
         </div>
       ) : null}
 
       <section
-        className={`relative flex-1 touch-none cursor-grab overflow-hidden border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] active:cursor-grabbing ${mobileLayout ? 'min-h-0 rounded-none border-x-0 border-b-0 shadow-none' : 'min-h-[560px] rounded-[var(--radius)] shadow-[var(--shadow)]'}`}
-        onPointerDown={viewportApi.startBackgroundPointer}
+        className={`relative flex-1 touch-none overflow-hidden border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] ${mobileLayout ? 'min-h-0 rounded-none border-x-0 border-b-0 shadow-none' : 'min-h-[560px] rounded-[var(--radius)] shadow-[var(--shadow)]'}`}
+        onPointerDown={startAreaSwipe}
         onPointerMove={(event) => {
+          moveAreaSwipe(event);
           moveTableDrag(event);
-          viewportApi.moveBackgroundPointer(event);
         }}
         onPointerUp={(event) => {
           finishTableDrag(event);
-          viewportApi.endBackgroundPointer(event);
+          finishAreaSwipe(event);
         }}
         onPointerCancel={(event) => {
           finishTableDrag(event);
-          viewportApi.endBackgroundPointer(event);
+          cancelAreaSwipe(event);
         }}
-        onWheel={viewportApi.onWheel}
         ref={canvasRef}
       >
         {mobileLayout ? (
@@ -803,8 +903,8 @@ export function TableMapView(props: Props) {
             activeAreaId={activeAreaId}
             areas={map.areas}
             canQuickSale={canQuickSale}
-            canCreateVirtual={canOpen && isOnline && !isBusy && !moveOrderId}
-            editDisabled={!isOnline || isBusy || Boolean(moveOrderId)}
+            canCreateVirtual={canOpen && isOnline && !isBusy && !tableSelectionMode}
+            editDisabled={!isOnline || isBusy || tableSelectionMode}
             editMode={editMode}
             onAreaChange={(areaId) => {
               setSelectedTableId(null);
@@ -815,7 +915,7 @@ export function TableMapView(props: Props) {
             onQuickSale={() => onQuickSale(activeAreaId)}
           />
         ) : null}
-        <svg aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1] size-full overflow-hidden [&_line]:stroke-[color-mix(in_srgb,var(--foreground)_52%,transparent)] [&_line]:[stroke-width:1.25] [&_line]:[vector-effect:non-scaling-stroke] [&_circle]:fill-[var(--foreground)] [&_circle]:stroke-[var(--surface)] [&_circle]:[stroke-width:1]">
+        <svg aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1] size-full overflow-hidden [&_line]:stroke-[color-mix(in_srgb,var(--foreground)_52%,transparent)] [&_line]:[stroke-width:1.25] [&_line]:[vector-effect:non-scaling-stroke] [&_circle]:fill-[var(--foreground)] [&_circle]:stroke-[var(--surface)] [&_circle]:[stroke-width:1]" style={AREA_SWIPE_VISUAL_STYLE}>
           {externalLabels.map((label) => {
             const table = externalLabelTables.get(label.id);
             return (
@@ -841,6 +941,7 @@ export function TableMapView(props: Props) {
         <div
           className="map-transform-layer absolute z-[2]"
           style={{
+            ...AREA_SWIPE_VISUAL_STYLE,
             width: planeSize.width * viewport.zoom,
             height: planeSize.height * viewport.zoom,
             left: viewport.panX,
@@ -920,11 +1021,12 @@ export function TableMapView(props: Props) {
             const mode = contentModes.get(table.id) ?? "full";
             const visualStatus = getRestaurantTableVisualStatus(table);
             const isDropTarget = dropTargetId === table.id || Boolean(table.layoutGroupId && displayTables.find((item) => item.id === dropTargetId)?.layoutGroupId === table.layoutGroupId);
-            const isUnavailable = Boolean(moveOrderId && table.status !== "free");
+            const isUnavailable = tableSelectionMode && table.status !== "free";
             return (
               <UiButton
                 aria-label={`${table.name}, ${statusLabel(table.status)}${table.layoutGroupId ? ", juntada" : ""}`}
                 className={`absolute z-[2] flex min-h-0 min-w-0 flex-col items-center justify-center gap-[3px] overflow-visible border-2 p-0 leading-[1.2] text-[var(--foreground)] shadow-[0_8px_18px_rgba(17,24,39,.12)] ${mobileLayout ? "p-1.5" : ""} ${editMode ? "touch-none cursor-grab active:cursor-grabbing" : ""} ${visualStatus === "free" ? "border-[var(--success)] bg-[var(--success-soft)]" : visualStatus === "occupied" ? "border-[var(--danger)] bg-[var(--danger-soft)]" : "border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_15%,var(--surface))]"} ${table.shape === "round" ? "rounded-full" : table.shape === "square" ? "rounded-[10px]" : "rounded-[7px]"} ${isDropTarget ? "border-[var(--accent)] outline-[3px] outline-[color-mix(in_srgb,var(--accent)_38%,transparent)] shadow-[0_0_0_5px_color-mix(in_srgb,var(--accent)_10%,transparent)]" : ""} ${mobileLayout && selectedTableId === table.id ? "ring-4 ring-[color-mix(in_srgb,var(--accent)_48%,transparent)] ring-offset-2 ring-offset-[var(--surface-secondary)]" : ""} ${isUnavailable ? "opacity-35" : editMode && joinPreview ? "opacity-70" : ""} ${viewport.zoom < 0.75 ? "gap-px p-1.5" : ""}`}
+                disabled={isUnavailable}
                 key={table.id}
                 onClick={() => chooseTable(table)}
                 onPointerDown={(event) => startTableDrag(event, table)}
@@ -992,7 +1094,7 @@ export function TableMapView(props: Props) {
             </div>
           ) : null}
         </div>
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5] size-full overflow-hidden">
+        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5] size-full overflow-hidden" style={AREA_SWIPE_VISUAL_STYLE}>
           {externalLabels.map((label) => {
             const table = externalLabelTables.get(label.id);
             if (!table) return null;
@@ -1013,27 +1115,6 @@ export function TableMapView(props: Props) {
             );
           })}
         </div>
-        <MapViewportControls
-          mobileLayout={mobileLayout}
-          rotated={rotatedMap}
-          zoom={viewport.zoom}
-          onFit={() =>
-            canvasRef.current &&
-            viewportApi.fit(
-              canvasRef.current,
-              [...tables, ...mapElements].map((item) => orientMapRect(item, rotatedMap)),
-              planeSize,
-            )
-          }
-          onRotate={toggleMapOrientation}
-          onReset={() => viewportApi.setViewport({ zoom: 1, panX: 0, panY: 0 })}
-          onZoomIn={() =>
-            canvasRef.current && viewportApi.zoomBy(1.2, canvasRef.current)
-          }
-          onZoomOut={() =>
-            canvasRef.current && viewportApi.zoomBy(1 / 1.2, canvasRef.current)
-          }
-        />
         {editMode && groupMenu && !mobileLayout ? (
           <div
             className="absolute right-auto z-30 grid min-w-[220px] gap-[5px] rounded-[10px] border border-[var(--separator)] bg-[var(--surface)] p-2 shadow-[var(--shadow)] max-[760px]:min-w-[min(230px,calc(100%-16px))] [&>strong]:px-2 [&>strong]:py-1.5 [&>strong]:text-[13px] [&>p]:m-0 [&>p]:max-w-[230px] [&>p]:px-2 [&>p]:pb-[7px] [&>p]:pt-1 [&>p]:text-xs [&>p]:leading-[1.35] [&>p]:text-[var(--muted)] [&>button]:flex [&>button]:min-h-10 [&>button]:items-center [&>button]:gap-2 [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:px-[9px] [&>button]:font-bold [&>button]:text-[var(--foreground)] [&>button]:hover:bg-[var(--accent-soft)] [&>button]:hover:outline-2 [&>button]:hover:outline-[var(--accent)] [&>button]:focus-visible:bg-[var(--accent-soft)] [&>button]:focus-visible:outline-2 [&>button]:focus-visible:outline-[var(--accent)] [&>button]:disabled:cursor-not-allowed [&>button]:disabled:opacity-45"
@@ -1063,23 +1144,6 @@ export function TableMapView(props: Props) {
           </div>
         ) : null}
       </section>
-      {mobileLayout && !editMode && selectedTable ? (
-        <MobileTableActionSheet
-          canOpen={canOpen}
-          isBusy={isBusy}
-          isOnline={isOnline}
-          onClose={() => setSelectedTableId(null)}
-          onPrimaryAction={() => {
-            setSelectedTableId(null);
-            if (selectedTable.status === "occupied" && selectedTable.orderId) {
-              onOpenOrder(selectedTable.orderId);
-            } else if (selectedTable.status === "free" && canOpen) {
-              prepareOpenTable(selectedTable);
-            }
-          }}
-          table={selectedTable}
-        />
-      ) : null}
       {mobileLayout && editMode && groupMenu && groupMenuTable ? (
         <MobileGroupActionsSheet
           locked={groupMenuLocked}
