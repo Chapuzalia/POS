@@ -4,7 +4,7 @@ import { supabase } from '../../../../lib/supabase'
 import { type CrmStats, type CrmStatsPeriod, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'
 import { type NameRow } from '../../sales/services/salesReportsService'
 import { buildDayActivityStats, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from './analyticsModel.ts'
-import { createCrmStatsPeriod, summarizeCrmStatsPeriod } from './analyticsPeriod.ts'
+import { countCrmStatsOpenDays, createCrmStatsPeriod, summarizeCrmStatsPeriod } from './analyticsPeriod.ts'
 export { applyCrmOpenCashSalesTotals } from './analyticsModel.ts'
 
 export type SaleStatsRow = {
@@ -57,6 +57,11 @@ export type OpenCashSessionSaleRow = {
   cash_session_id: string
   payment_method: HistoricalPaymentMethod | null
   total_cents: number
+}
+
+export type OperatingDaySessionRow = {
+  id: string
+  opened_at: string
 }
 
 const statsBatchSize = 1_000
@@ -212,6 +217,19 @@ export async function loadCrmStats(
       .range(from, to)
     return { data: (data ?? []) as TicketWithLinesStatsRow[], error }
   })
+  const operatingDaySessionRowsPromise = loadStatsRows<OperatingDaySessionRow>(async (from, to) => {
+    const { data, error } = await client
+      .from('cash_sessions')
+      .select('id, opened_at')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', venue.id)
+      .gte('opened_at', periodRange.startIso)
+      .lt('opened_at', periodRange.endIso)
+      .order('opened_at', { ascending: true })
+      .order('id', { ascending: true })
+      .range(from, to)
+    return { data: (data ?? []) as OperatingDaySessionRow[], error }
+  })
   const liveStateRowsPromise = options.includeLiveState === false
     ? Promise.resolve([
         { data: [] as OpenCashSessionRow[], error: null },
@@ -229,9 +247,10 @@ export async function loadCrmStats(
         client.from('devices').select('id, name').eq('tenant_id', context.tenantId),
       ])
 
-  const [sales, paidTickets, liveStateRows] = await Promise.all([
+  const [sales, paidTickets, operatingDaySessions, liveStateRows] = await Promise.all([
     salesRowsPromise,
     ticketRowsPromise,
+    operatingDaySessionRowsPromise,
     liveStateRowsPromise,
   ])
   const [
@@ -265,6 +284,11 @@ export async function loadCrmStats(
   const venuesById = new Map(((venueRows ?? []) as NameRow[]).map((venue) => [venue.id, venue.name]))
   const devicesById = new Map(((deviceRows ?? []) as NameRow[]).map((device) => [device.id, device.name]))
   const monthSalesCents = paidTickets.reduce((total, ticket) => total + ticket.total_cents, 0)
+  const openDayCount = countCrmStatsOpenDays(
+    operatingDaySessions.map((session) => session.opened_at),
+    paidTickets.map((ticket) => ticket.local_created_at),
+    operationalDayConfig,
+  )
   const dayActivity = buildDayActivityStats(
     paidTickets.map((ticket) => ({
       id: ticket.id,
@@ -399,7 +423,7 @@ export async function loadCrmStats(
     monthSalesCents,
     monthTicketCount: paidTickets.length,
     openCashSessions,
-    period: periodSummary,
+    period: { ...periodSummary, openDayCount },
     ...salesBreakdown,
     topProductCombinations: buildTopProductCombinations(lines.map((line) => ({
       productName: line.product_name,

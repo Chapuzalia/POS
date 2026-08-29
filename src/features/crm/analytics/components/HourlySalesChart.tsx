@@ -47,25 +47,25 @@ function normalizeHourlySalesPoints(points: HourlySalesPoint[], dayCount: number
 }
 
 export function HourlySalesChart({
-  comparisonDayCount,
+  comparisonOpenDayCount,
   comparisonLabel,
   comparisonPoints,
   currentLabel,
-  periodDayCount,
+  periodOpenDayCount,
   points,
 }: {
-  comparisonDayCount?: number
+  comparisonOpenDayCount?: number
   comparisonLabel: string
   comparisonPoints?: HourlySalesPoint[]
   currentLabel: string
-  periodDayCount: number
+  periodOpenDayCount: number
   points: HourlySalesPoint[]
 }) {
   const [metric, setMetric] = useState<HourlyMetric>('tickets')
   const [hoveredHour, setHoveredHour] = useState<number | null>(null)
-  const hasComparison = comparisonPoints !== undefined && comparisonDayCount !== undefined
-  const currentSeries = hasComparison ? normalizeHourlySalesPoints(points, periodDayCount) : points
-  const comparisonSeries = hasComparison ? normalizeHourlySalesPoints(comparisonPoints, comparisonDayCount) : []
+  const hasComparison = comparisonPoints !== undefined && comparisonOpenDayCount !== undefined
+  const currentSeries = hasComparison ? normalizeHourlySalesPoints(points, periodOpenDayCount) : points
+  const comparisonSeries = hasComparison ? normalizeHourlySalesPoints(comparisonPoints, comparisonOpenDayCount) : []
   const ticketPeak = findPeak(currentSeries, 'tickets')
   const revenuePeak = findPeak(currentSeries, 'revenue')
   const comparisonTicketPeak = findPeak(comparisonSeries, 'tickets')
@@ -131,7 +131,7 @@ export function HourlySalesChart({
         <div className="!flex !flex-wrap !items-center !gap-3 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
           <span className="!flex !items-center !gap-1.5"><i className="!h-0.5 !w-5 !rounded !bg-[var(--crm-blue)]" />{currentLabel}</span>
           {hasComparison ? <span className="!flex !items-center !gap-1.5"><i className="!w-5 !border-t-2 !border-dashed !border-[#8b5cf6]" />{comparisonLabel}</span> : null}
-          {hasComparison ? <span>Media diaria</span> : null}
+          {hasComparison ? <span>Media por día abierto</span> : null}
         </div>
       </div>
 

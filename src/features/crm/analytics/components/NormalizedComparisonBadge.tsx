@@ -8,25 +8,25 @@ const comparisonFormatter = new Intl.NumberFormat('es-ES', {
 })
 
 export function NormalizedComparisonBadge({
-  comparisonDayCount,
+  comparisonOpenDayCount,
   comparisonLabel,
   comparisonTotal,
-  currentDayCount,
+  currentOpenDayCount,
   currentTotal,
   normalizeByDay = true,
 }: {
-  comparisonDayCount: number
+  comparisonOpenDayCount: number
   comparisonLabel: string
   comparisonTotal: number
-  currentDayCount: number
+  currentOpenDayCount: number
   currentTotal: number
   normalizeByDay?: boolean
 }) {
   const comparison = compareNormalizedValues(
     currentTotal,
-    normalizeByDay ? currentDayCount : 1,
+    normalizeByDay ? currentOpenDayCount : 1,
     comparisonTotal,
-    normalizeByDay ? comparisonDayCount : 1,
+    normalizeByDay ? comparisonOpenDayCount : 1,
   )
   const Icon = comparison.direction === 'up' ? TrendingUp : comparison.direction === 'down' ? TrendingDown : Minus
   const colorClass = comparison.direction === 'up'
@@ -41,7 +41,7 @@ export function NormalizedComparisonBadge({
   return (
     <span
       className={`!inline-flex !w-fit !items-center !gap-1 !rounded-full !px-2 !py-1 !text-[10px] !font-bold !tabular-nums ${colorClass}`}
-      title={`${text} frente a ${comparisonLabel}${normalizeByDay ? ' (valores por día)' : ''}`}
+      title={`${text} frente a ${comparisonLabel}${normalizeByDay ? ' (valores por día abierto)' : ''}`}
     >
       <Icon className="!size-3" />
       {text}

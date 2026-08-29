@@ -1,4 +1,4 @@
-import { shiftIsoDate } from '../../../../lib/operationalDay.ts'
+import { getOperationalDateKey, shiftIsoDate, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
 import type { CrmStatsPeriod, CrmStatsPeriodKind, CrmStatsPeriodSummary } from '../../../../types'
 
 const isoDatePattern = /^(\d{4})-(0[1-9]|1[0-2])-([0-2]\d|3[01])$/
@@ -69,7 +69,20 @@ export function summarizeCrmStatsPeriod(period: CrmStatsPeriod, currentDay: stri
     ...period,
     dayCount: getCrmStatsPeriodDayCount(period, currentDay),
     effectiveEndDate,
+    openDayCount: 0,
   }
+}
+
+export function countCrmStatsOpenDays(
+  cashSessionOpenedAt: string[],
+  paidTicketCreatedAt: string[],
+  config: OperationalDayConfig,
+) {
+  const openDays = new Set<string>()
+  ;[...cashSessionOpenedAt, ...paidTicketCreatedAt].forEach((timestamp) => {
+    openDays.add(getOperationalDateKey(timestamp, config))
+  })
+  return openDays.size
 }
 
 export function getPreviousCrmStatsPeriod(period: CrmStatsPeriod): CrmStatsPeriod {

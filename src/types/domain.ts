@@ -594,6 +594,7 @@ export type CrmStatsPeriod = {
 export type CrmStatsPeriodSummary = CrmStatsPeriod & {
   dayCount: number
   effectiveEndDate: string
+  openDayCount: number
 }
 
 export type CrmStats = {
