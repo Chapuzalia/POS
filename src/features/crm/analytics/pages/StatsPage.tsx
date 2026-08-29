@@ -267,6 +267,7 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
     : null
   const currentLabel = formatCrmStatsPeriod(selectedPeriod)
   const comparisonLabel = formatCrmStatsPeriod(comparisonPeriod)
+  const operationalDayStart = dayChangeTime?.slice(0, 5) || '00:00'
   const currentOpenDayCount = stats?.period.openDayCount ?? 0
   const comparisonOpenDayCount = comparisonStats?.period.openDayCount
 
@@ -348,7 +349,7 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
         <div className="!flex !min-h-[60px] !items-center !justify-between !gap-3 !px-[18px] !pt-[18px] !pb-3 md:!px-[22px]">
           <div>
             <span className="!text-base !font-bold">Actividad por hora</span>
-            <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">{compareEnabled ? 'Media por día abierto y hora local del establecimiento' : 'Acumulado del período por hora local del establecimiento'}</p>
+            <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">{compareEnabled ? 'Media por día abierto y hora local' : 'Acumulado del período por hora local'} · día operativo desde las {operationalDayStart}</p>
           </div>
         </div>
         <HourlySalesChart
@@ -356,6 +357,7 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
           comparisonLabel={comparisonLabel}
           comparisonPoints={comparisonStats?.hourlySales}
           currentLabel={currentLabel}
+          dayChangeTime={dayChangeTime}
           periodOpenDayCount={stats?.period.openDayCount ?? 0}
           points={stats?.hourlySales ?? []}
         />

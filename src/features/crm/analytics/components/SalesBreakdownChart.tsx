@@ -156,7 +156,6 @@ export function SalesBreakdownChart({ comparisonLabel, comparisonStats, stats }:
               })}
               <text fill="var(--crm-text-muted)" fontSize="11" fontWeight="600" textAnchor="middle" x="110" y="101">{activeSegment ? truncateLabel(activeSegment.label) : metric === 'amount' ? 'Total vendido' : 'Unidades vendidas'}</text>
               <text fill="var(--crm-text)" fontSize="17" fontWeight="800" textAnchor="middle" x="110" y="124">{formatValue(activeSegment, total)}</text>
-              {activeSegment ? <text fill="var(--crm-text-muted)" fontSize="10" fontWeight="700" textAnchor="middle" x="110" y="141">{percentFormatter.format(activeSegment.percentage)} % del total</text> : null}
             </svg>
           </div>
 

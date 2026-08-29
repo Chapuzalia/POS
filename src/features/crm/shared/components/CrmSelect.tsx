@@ -220,14 +220,13 @@ export function CrmSelect({
                       </small>
                     ) : null}
                   </span>
-                  <span
-                    aria-hidden="true"
-                    className="!ml-auto !flex !size-5 !shrink-0 !items-center !justify-center"
-                  >
-                    {option.value === selectedValue ? (
-                      <Check className="!size-4 !shrink-0 !stroke-[2.5] !text-[var(--crm-popover-accent)]" />
-                    ) : null}
-                  </span>
+                  <ListBoxItem.Indicator className="!ml-auto !flex !size-5 !shrink-0 !items-center !justify-center">
+                    {({ isSelected }) =>
+                      isSelected ? (
+                        <Check className="!size-4 !shrink-0 !stroke-[2.5] !text-[var(--crm-popover-accent)]" />
+                      ) : null
+                    }
+                  </ListBoxItem.Indicator>
                 </ListBoxItem>
               )}
             </ListBox>

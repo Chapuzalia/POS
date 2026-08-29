@@ -40,6 +40,13 @@ test('CRM select delegates accessible listbox and keyboard behavior to HeroUI', 
   assert.doesNotMatch(select, /document\.addEventListener/)
 })
 
+test('CRM select derives its checkmark from the live listbox selection state', () => {
+  assert.match(select, /<ListBoxItem\.Indicator/)
+  assert.match(select, /\{\(\{ isSelected \}\) =>\s*isSelected \? \(/)
+  assert.doesNotMatch(select, /<ListBoxItem\.Indicator[^>]*>\s*<Check/)
+  assert.doesNotMatch(select, /option\.value === selectedValue \? \(/)
+})
+
 test('CRM select retains form values and uses CRM theme tokens', () => {
   assert.match(select, /<Select\.Popover/)
   assert.match(select, /type="hidden" value=\{selectedValue\}/)

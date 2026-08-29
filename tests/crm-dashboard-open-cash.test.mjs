@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
+import { applyCrmOpenCashSalesTotals, buildHourlySalesStats, buildSalesBreakdowns, buildTopProductCombinations, orderHourlySalesByOperationalDay, sortCrmTopProductsByUnits } from '../src/features/crm/analytics/services/analyticsModel.ts'
 import { compareNormalizedValues, countCrmStatsOpenDays, createCrmStatsPeriod, getPreviousCrmStatsPeriod, summarizeCrmStatsPeriod } from '../src/features/crm/analytics/services/analyticsPeriod.ts'
 import { groupOpenCashSessionsByVenue } from '../src/features/crm/dashboard/openCashSessionsModel.ts'
 
@@ -35,6 +35,8 @@ test('la card circular alterna categorías, productos, importe y cantidad', asyn
   assert.match(chart, /Cambiar entre importe y cantidad/)
   assert.match(chart, /metric === 'amount'/)
   assert.match(chart, /comparisonPercentage/)
+  assert.equal((chart.match(/<text /g) ?? []).length, 2)
+  assert.doesNotMatch(chart, /% del total/)
   assert.match(service, /category_name_snapshot/)
   assert.match(service, /\.\.\.salesBreakdown/)
 })
@@ -92,6 +94,11 @@ test('las ventas por hora se agrupan en la zona horaria del local', () => {
   assert.equal(hourlySales.length, 24)
   assert.deepEqual(hourlySales[20], { hour: 20, ticketCount: 2, totalCents: 1_500 })
   assert.deepEqual(hourlySales[0], { hour: 0, ticketCount: 1, totalCents: 750 })
+
+  assert.deepEqual(
+    orderHourlySalesByOperationalDay(hourlySales, '05:00').map((point) => point.hour),
+    [5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 19, 20, 21, 22, 23, 0, 1, 2, 3, 4],
+  )
 })
 
 test('estadisticas permite alternar el grafico horario entre tickets y facturacion', async () => {
@@ -101,7 +108,9 @@ test('estadisticas permite alternar el grafico horario entre tickets y facturaci
   ])
 
   assert.match(statsPage, /Actividad por hora/)
-  assert.match(statsPage, /hora local del establecimiento/)
+  assert.match(statsPage, /hora local/)
+  assert.match(statsPage, /día operativo desde las/)
+  assert.match(statsPage, /dayChangeTime=\{dayChangeTime\}/)
   assert.match(hourlyChart, /setMetric\('tickets'\)/)
   assert.match(hourlyChart, /setMetric\('revenue'\)/)
   assert.match(hourlyChart, /Más tickets/)
