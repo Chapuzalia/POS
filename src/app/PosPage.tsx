@@ -303,10 +303,7 @@ export function PosPage(props: Props) {
             item,
           })
         }}
-        onRemove={(lineId) => {
-          const line = restaurant.order?.lines.find((candidate) => candidate.id === lineId)
-          if (line) restaurant.setPendingLineRemoval(line)
-        }}
+        onRemove={restaurant.requestLineRemoval}
         onRemoveInvoiceCustomer={removeInvoiceCustomer}
         onServeAll={restaurant.serveLineFully}
         onServeAllOrder={restaurant.serveOrderFully}
@@ -619,7 +616,7 @@ export function PosPage(props: Props) {
           </div>
         </section>
       </AppModal> : null}
-      {restaurantEnabled && restaurant.pendingLineRemoval ? <RemoveOrderLineModal
+      {restaurantEnabled && restaurant.pendingLineRemoval && restaurant.pendingLineRemoval.servedQuantity > 0 ? <RemoveOrderLineModal
         isBusy={props.isBusy}
         line={restaurant.pendingLineRemoval}
         onCancel={() => restaurant.setPendingLineRemoval(null)}

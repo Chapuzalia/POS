@@ -23,8 +23,10 @@ import type {
   Reservation,
   ReservationConflict,
   ReservationDraft,
+  ReservationMap,
   ReservationTable,
 } from "../types";
+import { ReservationSelectionStep } from "./ReservationSelectionStep";
 
 type Props = {
   checkAvailability: (
@@ -35,12 +37,15 @@ type Props = {
   conflicts: ReservationConflict[];
   date: string;
   disabled: boolean;
+  loadReservations: (date: string) => Promise<Reservation[]>;
+  map: ReservationMap;
   onClose: () => void;
   onSave: (draft: ReservationDraft, allowConflict: boolean) => Promise<boolean>;
   onTableIdsChange: (tableIds: string[]) => void;
   preselectedTableIds: string[];
   preselectedStartsAt?: string;
   reservation: Reservation | null;
+  reservations: Reservation[];
   tables: ReservationTable[];
   timeZone: string;
 };
@@ -51,8 +56,7 @@ type FieldErrors = Partial<
     | "time"
     | "duration"
     | "partySize"
-    | "customerName"
-    | "customerPhone",
+    | "customerName",
     string
   >
 >;
@@ -162,6 +166,7 @@ function InfiniteTimeColumn({
 }
 
 export function ReservationFormModal(props: Props) {
+  const isCreateFlow = !props.reservation;
   const initialSchedule = props.reservation
     ? localParts(props.reservation.startsAt, props.timeZone)
     : props.preselectedStartsAt
@@ -225,8 +230,18 @@ export function ReservationFormModal(props: Props) {
     null,
   );
   const [areaId, setAreaId] = useState("all");
+  const [step, setStep] = useState<1 | 2>(1);
+  const [selectionReservations, setSelectionReservations] = useState(
+    props.reservations,
+  );
+  const [isLoadingSelectionReservations, setIsLoadingSelectionReservations] =
+    useState(false);
+  const [selectionReservationsError, setSelectionReservationsError] = useState<
+    string | null
+  >(null);
   const lockedSchedule = props.reservation?.status === "seated";
   const checkAvailability = props.checkAvailability;
+  const loadReservations = props.loadReservations;
   const reservationId = props.reservation?.id;
   const selectedCapacity = totalReservationTableCapacity(
     props.tables,
@@ -357,6 +372,32 @@ export function ReservationFormModal(props: Props) {
     };
   }, [checkAvailability, reservationId, schedule]);
 
+  useEffect(() => {
+    if (!isCreateFlow || step !== 2) return undefined;
+    let active = true;
+    setSelectionReservations(
+      date === props.date ? props.reservations : [],
+    );
+    setIsLoadingSelectionReservations(true);
+    setSelectionReservationsError(null);
+    void loadReservations(date)
+      .then((nextReservations) => {
+        if (active) setSelectionReservations(nextReservations);
+      })
+      .catch(() => {
+        if (active)
+          setSelectionReservationsError(
+            "No se pudieron cargar las reservas de este día.",
+          );
+      })
+      .finally(() => {
+        if (active) setIsLoadingSelectionReservations(false);
+      });
+    return () => {
+      active = false;
+    };
+  }, [date, isCreateFlow, loadReservations, props.date, props.reservations, step]);
+
   function requestClose() {
     if (dirty && !props.disabled) setDiscardConfirmation(true);
     else props.onClose();
@@ -398,10 +439,33 @@ export function ReservationFormModal(props: Props) {
     if (partySize <= 0) next.partySize = "Debe haber al menos una persona.";
     if (!customerName.trim())
       next.customerName = "Escribe el nombre de la reserva.";
-    if (!customerPhone.trim())
-      next.customerPhone = "Escribe un teléfono de contacto.";
     setErrors(next);
     return Object.keys(next).length === 0;
+  }
+
+  function goToSelectionStep() {
+    if (!validate()) return;
+    setStep(2);
+    formScrollRef.current?.scrollTo({ top: 0, behavior: "smooth" });
+  }
+
+  function updateTableIds(next: string[]) {
+    setTableIds(next);
+    props.onTableIdsChange(next);
+    setConflictAcknowledged(false);
+  }
+
+  function selectTimelineSlot(nextTableIds: string[], startsAt: string) {
+    const nextSchedule = localParts(startsAt, props.timeZone);
+    setDate(nextSchedule.date);
+    setTime(nextSchedule.time);
+    updateTableIds(nextTableIds);
+    setErrors((current) => ({
+      ...current,
+      date: undefined,
+      time: undefined,
+    }));
+    setPastConfirmation(false);
   }
 
   async function submit(allowConflict: boolean) {
@@ -470,21 +534,50 @@ export function ReservationFormModal(props: Props) {
             </UiButton>
           </header>
 
-          <nav aria-label="Secciones de la reserva" className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--separator)] bg-[var(--surface)] px-5 py-3 md:hidden">
-            {(["service", "client", "tables"] as const).map((section, index) => {
-              const label = section === "service" ? "Servicio" : section === "client" ? "Cliente" : "Mesas";
-              const active = activeMobileSection === section;
-              return (
-                <button aria-current={active ? "step" : undefined} className={`flex min-h-8 items-center gap-1.5 rounded-lg px-1.5 text-[11px] font-extrabold ${active ? "text-[var(--accent)]" : "text-[var(--muted)]"}`} key={section} onClick={() => scrollToMobileSection(section)} type="button">
-                  <span className={`grid size-5 place-items-center rounded-full text-[10px] ${active ? "bg-[var(--accent)] text-[var(--accent-foreground)]" : "bg-[var(--surface-secondary)] text-[var(--muted)]"}`}>{index + 1}</span>
-                  {label}
-                </button>
-              );
-            })}
-          </nav>
+          {isCreateFlow ? (
+            <nav
+              aria-label="Pasos de la nueva reserva"
+              className="flex shrink-0 items-center border-b border-[var(--separator)] bg-[var(--surface)] px-5 py-3"
+            >
+              {([1, 2] as const).map((wizardStep, index) => (
+                <div
+                  aria-current={step === wizardStep ? "step" : undefined}
+                  className={`flex flex-1 items-center gap-2 text-xs font-extrabold ${step === wizardStep ? "text-[var(--accent)]" : "text-[var(--muted)]"}`}
+                  key={wizardStep}
+                >
+                  <span
+                    className={`grid size-7 shrink-0 place-items-center rounded-full ${step === wizardStep ? "bg-[var(--accent)] text-[var(--accent-foreground)]" : "bg-[var(--surface-secondary)]"}`}
+                  >
+                    {wizardStep}
+                  </span>
+                  {wizardStep === 1 ? "Datos" : "Mesa y horario"}
+                  {index === 0 ? (
+                    <i className="mx-2 h-px flex-1 bg-[var(--separator)]" />
+                  ) : null}
+                </div>
+              ))}
+            </nav>
+          ) : (
+            <nav aria-label="Secciones de la reserva" className="flex shrink-0 items-center justify-between gap-2 border-b border-[var(--separator)] bg-[var(--surface)] px-5 py-3 md:hidden">
+              {(["service", "client", "tables"] as const).map((section, index) => {
+                const label = section === "service" ? "Servicio" : section === "client" ? "Cliente" : "Mesas";
+                const active = activeMobileSection === section;
+                return (
+                  <button aria-current={active ? "step" : undefined} className={`flex min-h-8 items-center gap-1.5 rounded-lg px-1.5 text-[11px] font-extrabold ${active ? "text-[var(--accent)]" : "text-[var(--muted)]"}`} key={section} onClick={() => scrollToMobileSection(section)} type="button">
+                    <span className={`grid size-5 place-items-center rounded-full text-[10px] ${active ? "bg-[var(--accent)] text-[var(--accent-foreground)]" : "bg-[var(--surface-secondary)] text-[var(--muted)]"}`}>{index + 1}</span>
+                    {label}
+                  </button>
+                );
+              })}
+            </nav>
+          )}
 
-          <div className="grid min-h-0 flex-1 grid-cols-1 overflow-y-auto overscroll-contain bg-[var(--background)] pb-32 [-webkit-overflow-scrolling:touch] md:pb-0 lg:grid-cols-5 lg:overflow-hidden lg:bg-transparent" onScroll={trackMobileSection} ref={formScrollRef}>
-            <div className="overflow-visible overscroll-contain p-4 [-webkit-overflow-scrolling:touch] md:p-6 lg:col-span-3 lg:overflow-y-auto lg:border-r lg:border-[var(--separator)]">
+          <div
+            className={`grid min-h-0 flex-1 grid-cols-1 overflow-y-auto overscroll-contain bg-[var(--background)] pb-32 [-webkit-overflow-scrolling:touch] md:pb-0 lg:overflow-hidden lg:bg-transparent ${isCreateFlow ? "lg:grid-cols-1" : "lg:grid-cols-5"}`}
+            onScroll={isCreateFlow ? undefined : trackMobileSection}
+            ref={formScrollRef}
+          >
+            <div className={`overflow-visible overscroll-contain p-4 [-webkit-overflow-scrolling:touch] md:p-6 lg:overflow-y-auto ${isCreateFlow ? step === 2 ? "hidden" : "" : "lg:col-span-3 lg:border-r lg:border-[var(--separator)]"}`}>
               {lockedSchedule ? (
                 <div className="mb-5 flex items-start gap-2 rounded-xl bg-[var(--accent-soft)] p-3 text-sm font-semibold">
                   <ShieldAlert className="mt-0.5 shrink-0" size={18} />
@@ -750,20 +843,15 @@ export function ReservationFormModal(props: Props) {
                       <FieldError>{errors.customerName}</FieldError>
                     </label>
                     <label>
-                      Teléfono *
+                      Teléfono opcional
                       <input
                         className={inputClass}
                         inputMode="tel"
-                        onChange={(event) => {
-                          setCustomerPhone(event.target.value);
-                          setErrors((current) => ({
-                            ...current,
-                            customerPhone: undefined,
-                          }));
-                        }}
+                        onChange={(event) =>
+                          setCustomerPhone(event.target.value)
+                        }
                         value={customerPhone}
                       />
-                      <FieldError>{errors.customerPhone}</FieldError>
                     </label>
                     <label>
                       Email opcional
@@ -791,7 +879,29 @@ export function ReservationFormModal(props: Props) {
               </div>
             </div>
 
-            <aside className="flex min-h-0 scroll-mt-4 flex-col border-t border-[var(--separator)] bg-[var(--background)] lg:col-span-2 lg:border-t-0" ref={tablesSectionRef}>
+            <aside className={`min-h-0 scroll-mt-4 flex-col border-t border-[var(--separator)] bg-[var(--background)] lg:border-t-0 ${isCreateFlow ? step === 1 ? "hidden" : "flex" : "flex lg:col-span-2"}`} ref={tablesSectionRef}>
+              {isCreateFlow ? (
+                <ReservationSelectionStep
+                  availabilityError={availabilityError}
+                  conflictTableIds={[...conflictTableIds]}
+                  date={date}
+                  disabled={props.disabled || lockedSchedule}
+                  hasActiveConflicts={hasActiveConflicts}
+                  isCheckingAvailability={isCheckingAvailability}
+                  isLoadingReservations={isLoadingSelectionReservations}
+                  map={props.map}
+                  onSlotSelect={selectTimelineSlot}
+                  onTableIdsChange={updateTableIds}
+                  partySize={partySize}
+                  reservations={selectionReservations}
+                  reservationsError={selectionReservationsError}
+                  schedule={schedule}
+                  selectedCapacity={selectedCapacity}
+                  tableIds={tableIds}
+                  timeZone={props.timeZone}
+                />
+              ) : (
+                <>
               <div className="m-4 overflow-visible rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-4 shadow-[0_2px_8px_rgba(17,24,39,.04)] [-webkit-overflow-scrolling:touch] md:m-0 md:rounded-none md:border-0 md:p-6 md:shadow-none lg:overflow-y-auto">
                 <div className="flex flex-wrap items-start justify-between gap-3">
                   <div>
@@ -976,8 +1086,76 @@ export function ReservationFormModal(props: Props) {
                   </UiButton>
                 </div>
               </footer>
+                </>
+              )}
             </aside>
           </div>
+          {isCreateFlow ? (
+            <footer className="fixed inset-x-0 bottom-0 z-20 mt-auto border-t border-[var(--separator)] bg-[var(--surface)] p-4 pb-[max(1rem,env(safe-area-inset-bottom))] shadow-[0_-8px_20px_rgba(17,24,39,.05)] md:static md:shadow-none">
+              {step === 2 && pastConfirmation ? (
+                <div className="mb-3 rounded-xl border border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] p-3 text-xs font-semibold text-[var(--warning)]">
+                  <strong className="flex items-center gap-2">
+                    <AlertTriangle size={16} /> Reserva en el pasado
+                  </strong>
+                  Se guardará para el {date} a las {time}. Vuelve a pulsar
+                  guardar para confirmarlo.
+                </div>
+              ) : null}
+              {step === 2 && hasActiveConflicts ? (
+                <label className="mb-3 flex items-start gap-2 text-xs font-semibold text-[var(--muted)]">
+                  <input
+                    checked={conflictAcknowledged}
+                    className="mt-0.5 size-4"
+                    onChange={(event) =>
+                      setConflictAcknowledged(event.target.checked)
+                    }
+                    type="checkbox"
+                  />
+                  Entiendo que se solapará con otra reserva y quiero conservar
+                  esta asignación.
+                </label>
+              ) : null}
+              <div className="flex items-center justify-between gap-3">
+                <div className="hidden text-xs font-bold text-[var(--muted)] sm:block">
+                  {date} · {time} · {partySize} pax
+                </div>
+                <div className="ml-auto grid w-full grid-cols-2 gap-2 sm:w-auto sm:min-w-80">
+                  <UiButton
+                    className="min-h-12 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] md:min-h-11"
+                    onClick={() =>
+                      step === 1 ? requestClose() : setStep(1)
+                    }
+                    type="button"
+                  >
+                    {step === 1 ? "Cancelar" : "Atrás"}
+                  </UiButton>
+                  <UiButton
+                    className={`min-h-12 rounded-xl border px-4 font-extrabold md:min-h-11 ${step === 2 && hasActiveConflicts ? "border-[var(--warning)] bg-[var(--surface)] text-[var(--warning)]" : "border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]"}`}
+                    disabled={
+                      props.disabled ||
+                      (step === 2 &&
+                        (isCheckingAvailability ||
+                          (hasActiveConflicts && !conflictAcknowledged)))
+                    }
+                    onClick={() =>
+                      step === 1
+                        ? goToSelectionStep()
+                        : void submit(hasActiveConflicts)
+                    }
+                    type="button"
+                  >
+                    {step === 1
+                      ? "Siguiente"
+                      : hasActiveConflicts
+                        ? "Guardar igualmente"
+                        : pastConfirmation
+                          ? "Confirmar fecha y guardar"
+                          : "Guardar reserva"}
+                  </UiButton>
+                </div>
+              </div>
+            </footer>
+          ) : null}
         </section>
       </AppModal>
 

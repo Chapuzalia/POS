@@ -12,8 +12,14 @@ import {
 import type { Reservation, ReservationMap, ReservationStatus } from "../types";
 
 type Props = {
+  allowUnassignedCreate?: boolean;
   areaId: string;
   date: string;
+  draft?: {
+    endsAt: string;
+    startsAt: string;
+    tableIds: string[];
+  };
   map: ReservationMap;
   onCreate: (tableIds?: string[], startsAt?: string) => void;
   onSelect: (reservation: Reservation) => void;
@@ -58,6 +64,17 @@ function reservationMinutes(reservation: Reservation, timeZone: string) {
       (new Date(reservation.endsAt).getTime() -
         new Date(reservation.startsAt).getTime()) /
         60_000,
+    ),
+  );
+  return { start, end: start + duration };
+}
+
+function intervalMinutes(startsAt: string, endsAt: string, timeZone: string) {
+  const start = minutesInTimeZone(startsAt, timeZone);
+  const duration = Math.max(
+    15,
+    Math.round(
+      (new Date(endsAt).getTime() - new Date(startsAt).getTime()) / 60_000,
     ),
   );
   return { start, end: start + duration };
@@ -158,6 +175,15 @@ export function ReservationTimelineView(props: Props) {
     const bounds = props.reservations.map((reservation) =>
       reservationMinutes(reservation, props.timeZone),
     );
+    if (props.draft) {
+      bounds.push(
+        intervalMinutes(
+          props.draft.startsAt,
+          props.draft.endsAt,
+          props.timeZone,
+        ),
+      );
+    }
     const earliest = bounds.length
       ? Math.min(...bounds.map((item) => item.start))
       : DEFAULT_START;
@@ -173,7 +199,7 @@ export function ReservationTimelineView(props: Props) {
       Math.ceil(Math.max(DEFAULT_END, latest + 30) / 60) * 60,
     );
     return { start, end, width: (end - start) * PIXELS_PER_MINUTE };
-  }, [props.reservations, props.timeZone]);
+  }, [props.draft, props.reservations, props.timeZone]);
   const timelineWidth = Math.max(schedule.width, availableTrackWidth);
   const pixelsPerMinute = timelineWidth / (schedule.end - schedule.start);
 
@@ -218,6 +244,13 @@ export function ReservationTimelineView(props: Props) {
     (reservation) => reservation.tableIds.length === 0,
   );
   const unassignedLayout = placeInLanes(unassigned, props.timeZone);
+  const draftMinutes = props.draft
+    ? intervalMinutes(
+        props.draft.startsAt,
+        props.draft.endsAt,
+        props.timeZone,
+      )
+    : null;
   const today = localDateKey(new Date(), props.timeZone);
   const nowMinutes = minutesInTimeZone(new Date(), props.timeZone);
   const showNow =
@@ -282,20 +315,26 @@ export function ReservationTimelineView(props: Props) {
     layout: ReturnType<typeof placeInLanes>,
     tableIds: string[],
     emptyLabel: string,
+    createEnabled = true,
   ) => {
     const height = Math.max(48, 14 + layout.laneCount * LANE_HEIGHT);
+    const showsDraft = Boolean(
+      props.draft &&
+        draftMinutes &&
+        tableIds.some((tableId) => props.draft?.tableIds.includes(tableId)),
+    );
     return (
       <div
         aria-label={emptyLabel}
-        className="relative cursor-crosshair border-b border-[var(--separator)] hover:bg-[color-mix(in_srgb,var(--accent)_3%,var(--surface))]"
-        onClick={(event) => createAt(event, tableIds)}
+        className={`relative border-b border-[var(--separator)] ${createEnabled ? "cursor-crosshair hover:bg-[color-mix(in_srgb,var(--accent)_3%,var(--surface))]" : "cursor-default"}`}
+        onClick={createEnabled ? (event) => createAt(event, tableIds) : undefined}
         style={{
           backgroundImage: `repeating-linear-gradient(to right, var(--separator) 0 1px, transparent 1px ${30 * pixelsPerMinute}px)`,
           height,
           width: timelineWidth,
         }}
       >
-        {!layout.positioned.length ? (
+        {!layout.positioned.length && !showsDraft && createEnabled ? (
           <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-xs font-semibold text-[var(--muted)] opacity-65">
             Pulsa para crear
           </span>
@@ -311,6 +350,22 @@ export function ReservationTimelineView(props: Props) {
             timelineStart={schedule.start}
           />
         ))}
+        {showsDraft && draftMinutes ? (
+          <div
+            aria-label="Nueva reserva seleccionada"
+            className="pointer-events-none absolute z-[4] flex h-[30px] min-w-11 items-center overflow-hidden rounded-lg border-2 border-[var(--accent)] bg-[var(--accent)] px-2 text-xs font-black text-[var(--accent-foreground)] shadow-md"
+            style={{
+              left: (draftMinutes.start - schedule.start) * pixelsPerMinute + 2,
+              top: 7,
+              width: Math.max(
+                44,
+                (draftMinutes.end - draftMinutes.start) * pixelsPerMinute - 4,
+              ),
+            }}
+          >
+            <span className="truncate">Nueva reserva seleccionada</span>
+          </div>
+        ) : null}
         {showNow ? (
           <div
             aria-label="Hora actual"
@@ -395,7 +450,12 @@ export function ReservationTimelineView(props: Props) {
                   </small>
                 </span>
               </div>
-              {renderLane(unassignedLayout, [], "Reservas sin mesa")}
+              {renderLane(
+                unassignedLayout,
+                [],
+                "Reservas sin mesa",
+                props.allowUnassignedCreate !== false,
+              )}
             </div>
           ) : null}
 

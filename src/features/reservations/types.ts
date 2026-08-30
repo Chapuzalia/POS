@@ -107,6 +107,7 @@ export type ReservationsController = {
   editor: ReservationEditorState | null
   isLoading: boolean
   isOpen: boolean
+  loadReservations: (date: string) => Promise<Reservation[]>
   map: ReservationMap
   open: () => void
   openReservation: (reservationId: string) => Promise<void>

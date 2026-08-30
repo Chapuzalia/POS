@@ -171,13 +171,15 @@ export function ReservationDetailPanel(props: Props) {
               <h3 className="m-0 text-[11px] font-black uppercase tracking-wider text-[var(--muted)]">
                 Contacto
               </h3>
-              <a
-                className="flex min-h-10 items-center gap-2  text-[var(--foreground)] no-underline"
-                href={`tel:${reservation.customerPhone}`}
-              >
-                <Phone size={17} />
-                {reservation.customerPhone}
-              </a>
+              {reservation.customerPhone ? (
+                <a
+                  className="flex min-h-10 items-center gap-2  text-[var(--foreground)] no-underline"
+                  href={`tel:${reservation.customerPhone}`}
+                >
+                  <Phone size={17} />
+                  {reservation.customerPhone}
+                </a>
+              ) : null}
               {reservation.customerEmail ? (
                 <a
                   className="flex min-h-10 items-center gap-2 truncate  text-[var(--foreground)] no-underline"
@@ -186,6 +188,11 @@ export function ReservationDetailPanel(props: Props) {
                   <Mail size={17} />
                   {reservation.customerEmail}
                 </a>
+              ) : null}
+              {!reservation.customerPhone && !reservation.customerEmail ? (
+                <p className="m-0 text-sm font-semibold text-[var(--muted)]">
+                  Sin datos de contacto
+                </p>
               ) : null}
             </section>
             {reservation.notes ? (
@@ -282,13 +289,15 @@ export function ReservationDetailPanel(props: Props) {
                   Editar
                 </UiButton>
               ) : null}
-              <a
-                className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm  text-[var(--foreground)]"
-                href={`tel:${reservation.customerPhone}`}
-              >
-                <Phone size={17} />
-                Llamar
-              </a>
+              {reservation.customerPhone ? (
+                <a
+                  className="inline-flex min-h-11 items-center justify-center gap-1.5 rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm  text-[var(--foreground)]"
+                  href={`tel:${reservation.customerPhone}`}
+                >
+                  <Phone size={17} />
+                  Llamar
+                </a>
+              ) : null}
               {actions.noShow && props.canManage ? (
                 <UiButton
                   className="inline-flex min-h-11 items-center justify-center rounded-xl border border-[var(--separator)] bg-[var(--surface)] px-2 text-sm  text-[var(--foreground)]"

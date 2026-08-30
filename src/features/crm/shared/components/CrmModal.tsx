@@ -10,6 +10,7 @@ export type CrmModalProps = {
 
 export function CrmModal({ children, label, onClose, size = 'compact' }: CrmModalProps) {
   const crmTheme = document.querySelector<HTMLElement>('.crm-shell')?.dataset.crmTheme ?? 'light'
+  const maxWidth = size === 'large' ? 1200 : 560
 
   return (
     <Modal isOpen onOpenChange={(isOpen) => {
@@ -22,14 +23,14 @@ export function CrmModal({ children, label, onClose, size = 'compact' }: CrmModa
         isDismissable
       >
         <Modal.Container
-          className={size === 'large' ? '!max-w-[1200px] !p-3 sm:!p-6' : '!max-w-[560px] !p-3 sm:!p-6'}
+          className="!max-w-none !p-3 sm:!p-6"
           placement="center"
           scroll="inside"
-          size="full"
         >
           <Modal.Dialog
             aria-label={label}
-            className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !w-full !max-h-[calc(100dvh-24px)] !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !p-0 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] [&>*]:!max-w-none sm:!max-h-[calc(100dvh-48px)] sm:!rounded-[var(--crm-radius-lg)]"
+            className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !h-auto !min-h-0 !w-full !max-h-[calc(100dvh-24px)] !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !p-0 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] [&>*]:!max-w-none sm:!max-h-[calc(100dvh-48px)] sm:!rounded-[var(--crm-radius-lg)]"
+            style={{ maxWidth }}
           >
             {children}
           </Modal.Dialog>

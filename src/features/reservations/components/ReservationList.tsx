@@ -53,7 +53,9 @@ function ReservationRow({ onSelect, reservation, searchMode, selected }: {
           <small className="flex items-center gap-1 text-xs text-[var(--muted)]">
             <Users aria-hidden="true" size={13} />
             {reservation.partySize} {reservation.partySize === 1 ? 'persona' : 'personas'}
-            <span className="max-sm:hidden">· {reservation.customerPhone}</span>
+            {reservation.customerPhone ? (
+              <span className="max-sm:hidden">· {reservation.customerPhone}</span>
+            ) : null}
           </small>
           {reservation.notes ? <em className="truncate text-[11px] not-italic text-[var(--muted)] max-md:hidden">{reservation.notes}</em> : null}
         </div>

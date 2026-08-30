@@ -4,9 +4,12 @@ import { Toaster } from 'sileo'
 import './index.css'
 import 'sileo/styles.css'
 import App from './App.tsx'
+import { registerServiceWorker } from './pwa/registerServiceWorker.ts'
 
 import * as Sentry from "@sentry/react";
 import "./sentry"
+
+registerServiceWorker()
 
 const appleStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true
 const displayModeStandalone = window.matchMedia('(display-mode: standalone)').matches

@@ -11,11 +11,9 @@ type Props = {
 }
 
 export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm, sentQuantity = 0 }: Props) {
-  const served = line.servedQuantity > 0
-
   return (
-    <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={448} dismissDisabled={isBusy} label="Eliminar producto" onClose={onCancel} placement="bottom">
-      <section aria-labelledby="remove-order-line-title" className="w-full rounded-t-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-md sm:rounded-[var(--radius)]">
+    <AppModal containerClassName="!p-3 sm:!p-4" maxWidth={448} dismissDisabled={isBusy} label="Eliminar producto" onClose={onCancel} placement="center">
+      <section aria-labelledby="remove-order-line-title" className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-md">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-bold" id="remove-order-line-title">Eliminar producto</h2>
@@ -24,7 +22,7 @@ export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm, sentQu
           <Button aria-label="Cerrar" disabled={isBusy} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
         </div>
 
-        {served ? <p className="mt-4 rounded-[var(--radius)] border border-[var(--warning)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">Este producto ya está marcado como servido. Confirma que quieres eliminarlo igualmente.</p> : null}
+        <p className="mt-4 rounded-[var(--radius)] border border-[var(--warning)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">Este producto ya está marcado como servido. Confirma que quieres eliminarlo igualmente.</p>
         {sentQuantity > 0 ? <p className="mt-4 rounded-[var(--radius)] border border-[var(--danger)] p-3 text-sm font-semibold text-[var(--danger)]">{sentQuantity} unidad(es) ya se enviaron a producción. Al confirmar se generará una anulación visible en KDS y, si corresponde, en impresora.</p> : null}
 
         <div className="mt-5 grid grid-cols-2 gap-2">

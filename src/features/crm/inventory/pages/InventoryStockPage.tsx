@@ -9,7 +9,6 @@ import type { RunAction } from "../../shared/types";
 import {
   addInventoryStockQuantity,
   formatInventoryQuantity,
-  parseInventoryQuantity,
   parseInventoryStockQuantity,
 } from "../inventoryModel";
 import {
@@ -150,28 +149,7 @@ export function InventoryStockCrm({
     setError(null);
   }
 
-  function addQuickQuantity(warehouseId: string, amount: number) {
-    setQuantities((current) => {
-      const value = current[warehouseId]?.trim() || "0";
-      let currentAddition = 0;
-      try {
-        currentAddition = parseInventoryQuantity(value, decimalPlaces);
-      } catch {
-        // A preset replaces an invalid draft so the user can recover in one tap.
-      }
-      return {
-        ...current,
-        [warehouseId]: String(
-          addInventoryStockQuantity(
-            currentAddition,
-            String(amount),
-            decimalPlaces,
-          ),
-        ),
-      };
-    });
-    setError(null);
-  }
+ 
 
   async function save() {
     if (!selected) return;
@@ -373,11 +351,6 @@ export function InventoryStockCrm({
                   <Pencil className="size-4" /> Establecer total
                 </Button>
               </div>
-              <p className="text-xs text-[var(--crm-text-muted)]">
-                {stockEditMode === "add"
-                  ? "Indica lo que acabas de recibir. Se sumará al stock actual."
-                  : "Introduce directamente la cantidad total que debe quedar."}
-              </p>
             </div>
 
             {selectedRoutes.map((route) => {
@@ -410,9 +383,7 @@ export function InventoryStockCrm({
                     <strong className="block">
                       {route.priority}. {warehouse?.name}
                     </strong>
-                    <small className="block text-[var(--crm-text-muted)]">
-                      Se consume por este orden, independientemente del TPV.
-                    </small>
+
                     <small className="mt-2 block text-[var(--crm-text-muted)]">
                       Stock actual:{" "}
                       <strong className="font-mono text-[var(--crm-text)]">
@@ -459,28 +430,7 @@ export function InventoryStockCrm({
                         />
                       </span>
                     </label>
-                    {stockEditMode === "add" ? (
-                      <div className="flex flex-wrap items-center gap-1">
-                        <span className="mr-1 text-[11px] text-[var(--crm-text-muted)]">
-                          Rápido:
-                        </span>
-                        {[1, 5, 10].map((amount) => (
-                          <Button
-                            aria-label={`Añadir ${amount} ${selectedUnit?.name ?? "unidades"} en ${warehouse?.name ?? "almacén"}`}
-                            className="!min-w-0 !px-2"
-                            key={amount}
-                            onClick={() =>
-                              addQuickQuantity(route.warehouseId, amount)
-                            }
-                            size="sm"
-                            type="button"
-                            variant="tertiary"
-                          >
-                            +{amount}
-                          </Button>
-                        ))}
-                      </div>
-                    ) : null}
+                    
                     <small
                       className={
                         resultingQuantity === null

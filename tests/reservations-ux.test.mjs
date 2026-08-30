@@ -2,13 +2,15 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const [page, list, detail, form, map, timeline] = await Promise.all([
+const [page, list, detail, form, map, timeline, selectionStep, optionalPhoneMigration] = await Promise.all([
   readFile(new URL('../src/features/reservations/components/ReservationsPage.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationList.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationDetailPanel.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationFormModal.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationMapView.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationTimelineView.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../src/features/reservations/components/ReservationSelectionStep.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../supabase/migrations/20260830120000_make_reservation_phone_optional.sql', import.meta.url), 'utf8'),
 ])
 
 test('el mapa permite desplazar el lienzo desde el espacio entre mesas', () => {
@@ -149,4 +151,35 @@ test('la disponibilidad se recalcula al cambiar el intervalo antes de guardar', 
   assert.match(form, /Comprobando disponibilidad/)
   assert.match(form, /\[checkAvailability, reservationId, schedule\]/)
   assert.match(form, /isCheckingAvailability/)
+})
+
+test('el alta de reserva se divide en datos y selección visual', () => {
+  assert.match(form, /const isCreateFlow = !props\.reservation/)
+  assert.match(form, /useState<1 \| 2>\(1\)/)
+  assert.match(form, /Pasos de la nueva reserva/)
+  assert.match(form, /Mesa y horario/)
+  assert.match(form, /Siguiente/)
+  assert.match(form, /Atrás/)
+  assert.match(form, /<ReservationSelectionStep/)
+  assert.match(selectionStep, /Mapa real/)
+  assert.match(selectionStep, /Timeline/)
+  assert.match(selectionStep, /<ReservationMapView/)
+  assert.match(selectionStep, /<ReservationTimelineView/)
+})
+
+test('el plano y el timeline permiten elegir mesa y hueco en el segundo paso', () => {
+  assert.match(map, /selection\?:/)
+  assert.match(map, /props\.selection\.onChange\(next\)/)
+  assert.match(timeline, /draft\?:/)
+  assert.match(timeline, /Nueva reserva seleccionada/)
+  assert.match(selectionStep, /onSlotSelect/)
+  assert.match(selectionStep, /allowUnassignedCreate=\{false\}/)
+})
+
+test('el teléfono de la reserva es opcional en interfaz y base de datos', () => {
+  assert.match(form, /Teléfono opcional/)
+  assert.doesNotMatch(form, /next\.customerPhone/)
+  assert.match(optionalPhoneMigration, /drop constraint if exists reservations_customer_phone_check/)
+  assert.doesNotMatch(optionalPhoneMigration, /btrim\(coalesce\(p_customer_phone, ''\)\) = ''/)
+  assert.match(optionalPhoneMigration, /customer_phone = btrim\(coalesce\(p_customer_phone, ''\)\)/)
 })

@@ -226,6 +226,17 @@ export function useReservationsController(options: Options) {
     return loadReservationConflicts(context, startsAt, endsAt, reservationId)
   }, [])
 
+  const loadReservations = useCallback(async (dateKey: string) => {
+    const { context, isOnline } = latestRef.current
+    if (!context || !isOnline) return []
+    const currentTimeZone = timeZoneRef.current
+    const dayReservations = await loadReservationsForDate(context, dateKey, currentTimeZone)
+    return sortReservations(
+      dayReservations,
+      dateKey === localDateKey(new Date(), currentTimeZone),
+    )
+  }, [])
+
   const updateStatus = useCallback(async (
     reservation: Reservation,
     status: ReservationStatus,
@@ -306,6 +317,7 @@ export function useReservationsController(options: Options) {
     editor,
     isLoading,
     isOpen,
+    loadReservations,
     map,
     open: () => {
       setDate(today)

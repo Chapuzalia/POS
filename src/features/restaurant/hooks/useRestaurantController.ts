@@ -68,6 +68,7 @@ import {
   getCashlogyPaymentAmounts,
   settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
+import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
 import type { CashlogyTransaction } from '../../local-printing/types'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 import {
@@ -474,14 +475,17 @@ export function useRestaurantController(options: Options) {
     setMoveOrderId(null)
   }), [cleanupVirtualRoomTable, draft, moveOrderId, options.isOnline, refreshState, runBusy])
 
-  const confirmLineRemoval = useCallback(() => runBusy(async () => {
-    const line = pendingLineRemoval
-    if (!options.context || !options.isOnline || !line) return
+  const removeLine = useCallback((lineId: string, confirmed: boolean) => runBusy(async () => {
+    if (!options.context || !options.isOnline) return
     const saved = await draft.flush()
     if (!saved) return
-    const currentLine = saved.lines.find((candidate) => candidate.id === line.id)
+    const currentLine = saved.lines.find((candidate) => candidate.id === lineId)
     if (!currentLine) {
       setPendingLineRemoval(null)
+      return
+    }
+    if (requiresConfirmedRestaurantLineRemoval(currentLine.servedQuantity) && !confirmed) {
+      setPendingLineRemoval(currentLine)
       return
     }
     try {
@@ -514,7 +518,22 @@ export function useRestaurantController(options: Options) {
       setPendingLineRemoval(null)
       options.onError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
     }
-  }), [cleanupVirtualRoomTable, draft, options, pendingLineRemoval, realtime, runBusy])
+  }), [cleanupVirtualRoomTable, draft, options, realtime, runBusy])
+
+  const requestLineRemoval = useCallback((lineId: string) => {
+    const line = draft.getCurrentOrder()?.lines.find((candidate) => candidate.id === lineId)
+    if (!line || !options.isOnline) return
+    if (requiresConfirmedRestaurantLineRemoval(line.servedQuantity)) {
+      setPendingLineRemoval(line)
+      return
+    }
+    void removeLine(line.id, false)
+  }, [draft, options.isOnline, removeLine])
+
+  const confirmLineRemoval = useCallback(() => {
+    if (!pendingLineRemoval) return
+    void removeLine(pendingLineRemoval.id, true)
+  }, [pendingLineRemoval, removeLine])
 
   const openSplitOrder = useCallback(() => runBusy(async () => {
     if (!options.context || !options.isOnline || !draft.getCurrentOrder()) return
@@ -785,18 +804,25 @@ export function useRestaurantController(options: Options) {
     forceWithPending = false,
     confirmedCashlogyTransaction: CashlogyTransaction | null = null,
   ) => {
-    if (!options.context?.canTakePayments || !options.cashSession || !draft.getCurrentOrder() || !options.isOnline || paymentLockRef.current) return
+    const context = options.context
+    const cashSession = options.cashSession
+    if (!context?.canTakePayments || !cashSession || !draft.getCurrentOrder() || !options.isOnline || paymentLockRef.current) return
     paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
     try {
       const saved = await draft.flush()
       if (!saved) return
-      const pendingCheck = await loadRestaurantOrderPendingUnits(options.context, saved.order.id)
-      draft.replaceOrder(pendingCheck.detail)
-      if (pendingCheck.pendingUnits > 0 && !forceWithPending) {
-        setPendingPayment({ method, receivedCents, pendingUnits: pendingCheck.pendingUnits })
-        return
+      const requiresCashlogyPreflight = method === 'cash'
+        && usePrintAgentStore.getState().cashlogyConfigured
+        && !forceWithPending
+      if (requiresCashlogyPreflight) {
+        const pendingCheck = await loadRestaurantOrderPendingUnits(context, saved.order.id)
+        draft.replaceOrder(pendingCheck.detail)
+        if (pendingCheck.pendingUnits > 0) {
+          setPendingPayment({ method, receivedCents, pendingUnits: pendingCheck.pendingUnits })
+          return
+        }
       }
       const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
@@ -809,33 +835,29 @@ export function useRestaurantController(options: Options) {
         return
       }
       finishCashlogyPayment(cashlogy.transaction)
-      const cleanedAreaId = await cleanupVirtualRoomTable(saved, true)
-      const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
-      const invoice = invoiceCustomer ? await loadTicketInvoice(options.context.tenantId, result.ticketId) : null
-      if (invoiceCustomer && !invoice) {
-        throw new Error('El cobro se ha registrado, pero no se ha confirmado el número de factura. No se imprimirá como ticket normal.')
+      const nextOrder = result.nextOrderId ? await loadRestaurantOrder(context, result.nextOrderId) : null
+      const returnAreaId = getVirtualRoomTable(saved)?.areaId
+        ?? saved.tables[0]?.areaId
+        ?? realtime.map.areas[0]?.id
+      if (!nextOrder) {
+        const releasedTableIds = new Set(saved.tables.map((table) => table.id))
+        realtime.setMap((current) => ({
+          ...current,
+          tables: current.tables
+            .filter((table) => !releasedTableIds.has(table.id) || !table.isVirtual)
+            .map((table) => releasedTableIds.has(table.id) ? {
+              ...table,
+              status: table.nextReservation ? 'reserved' : 'free',
+              orderId: null,
+              orderOpenedAt: null,
+              guestCount: null,
+              totalCents: 0,
+              pendingUnits: 0,
+              readyUnits: 0,
+              groupTableIds: [],
+            } : table),
+        }))
       }
-      void options.printSale(buildRestaurantPrintPayload({
-        cashSession: options.cashSession,
-        context: options.context,
-        createdAt: nowIso(),
-        discount: options.appliedDiscount,
-        lines: saved.lines,
-        paymentId: result.paymentId,
-        paymentMethod: method,
-        receivedCents: cashlogy.receivedCents,
-        changeCents: cashlogy.changeCents,
-        saleId: result.saleId,
-        subtotalCents: getRestaurantPrintSubtotal(saved.lines),
-        ticketId: result.ticketId,
-        totalCents: result.totalCents,
-        fiscal,
-        invoice,
-      }))
-      await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
-      const nextOrder = result.nextOrderId ? await loadRestaurantOrder(options.context, result.nextOrderId) : null
-      const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
-      realtime.setMap(nextMap)
       draft.replaceOrder(nextOrder)
       setPendingPayment(null)
       options.setMobileTicketOpen(false)
@@ -844,8 +866,50 @@ export function useRestaurantController(options: Options) {
       options.onPaidFeedback(method)
       setPosView(nextOrder
         ? { type: 'table_order', orderId: nextOrder.order.id }
-        : { type: 'table_map', areaId: cleanedAreaId ?? nextMap.areas[0]?.id })
+        : { type: 'table_map', areaId: returnAreaId })
       window.setTimeout(() => options.onPaidFeedback(null), 500)
+
+      const refreshMapTask = (async () => {
+        await cleanupVirtualRoomTable(saved, true)
+        const nextMap = await realtime.loadCurrentMap(context, cashSession.id)
+        realtime.setMap(nextMap)
+      })()
+      const refreshSalesTask = Promise.all([
+        options.syncPendingEvents(),
+        refreshSales(result.saleId, 'Cobro completado sin imprimir', false),
+      ])
+      const printTask = (async () => {
+        const [fiscal, invoice] = await Promise.all([
+          fiscalizeTicketForPrint(context, result.ticketId),
+          invoiceCustomer ? loadTicketInvoice(context.tenantId, result.ticketId) : Promise.resolve(null),
+        ])
+        if (invoiceCustomer && !invoice) {
+          throw new Error('El cobro se ha registrado, pero no se ha confirmado el número de factura. No se imprimirá como ticket normal.')
+        }
+        await options.printSale(buildRestaurantPrintPayload({
+          cashSession,
+          context,
+          createdAt: nowIso(),
+          discount: options.appliedDiscount,
+          lines: saved.lines,
+          paymentId: result.paymentId,
+          paymentMethod: method,
+          receivedCents: cashlogy.receivedCents,
+          changeCents: cashlogy.changeCents,
+          saleId: result.saleId,
+          subtotalCents: getRestaurantPrintSubtotal(saved.lines),
+          ticketId: result.ticketId,
+          totalCents: result.totalCents,
+          fiscal,
+          invoice,
+        }))
+      })()
+      void Promise.allSettled([refreshMapTask, refreshSalesTask, printTask]).then((tasks) => {
+        const failures = tasks
+          .filter((task): task is PromiseRejectedResult => task.status === 'rejected')
+          .map((task) => getReadableError(task.reason))
+        if (failures.length > 0) options.onError(failures.join(' '))
+      })
     } catch (error) {
       options.onError(getReadableError(error))
     } finally {
@@ -1033,6 +1097,7 @@ export function useRestaurantController(options: Options) {
     posView,
     prepareMove,
     requestCloseCash,
+    requestLineRemoval,
     removeInvoiceCustomer: () => setInvoiceCustomer(null),
     reset,
     returnToMap,
