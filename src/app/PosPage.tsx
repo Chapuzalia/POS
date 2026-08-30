@@ -38,6 +38,7 @@ import type { useRestaurantController } from '../features/restaurant'
 import { ReservationsPage, type useReservationsController } from '../features/reservations'
 import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
 import { CustomerInvoiceModal } from '../features/customers'
+import { InventoryPreparationsPanel } from '../features/inventory'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { finishCashlogyPayment, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
@@ -139,6 +140,7 @@ export function PosPage(props: Props) {
   const displayedErrorId = props.errorId
   const clearDisplayedError = props.onSetError
   const [configOpen, setConfigOpen] = useState(false)
+  const [preparationsOpen, setPreparationsOpen] = useState(false)
   const [cashlogyMachineOpen, setCashlogyMachineOpen] = useState(false)
   const [quickSaleExitName, setQuickSaleExitName] = useState('')
   const [quickSaleExitOpen, setQuickSaleExitOpen] = useState(false)
@@ -445,6 +447,7 @@ export function PosPage(props: Props) {
         canManageCash={canManageCash && !cashlogyPaymentLocked}
         canOpenCashDrawer={canManageCash && !cashlogyPaymentLocked}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
+        canOpenPreparations={hasTenantFeature(props.context, 'inventory')}
         cashlogyConnected={cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
@@ -455,6 +458,7 @@ export function PosPage(props: Props) {
         onGenerateInvoice={() => setCustomerModalOpen(true)}
         onOpenConfig={() => setConfigOpen(true)}
         onOpenReservations={props.reservations.open}
+        onOpenPreparations={() => setPreparationsOpen(true)}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
         onOpenCashlogyMachine={() => setCashlogyMachineOpen(true)}
         onOpenShiftSummary={openShiftSummary}
@@ -682,6 +686,7 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
+      {preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={() => setPreparationsOpen(false)}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onClose={() => setPreparationsOpen(false)} /></div></AppModal> : null}
       {quickSaleExitOpen ? <QuickSaleExitModal
         canSave={Boolean(props.context.canTakeOrders && cash.session)}
         defaultName={quickSaleExitName}

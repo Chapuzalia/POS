@@ -120,7 +120,7 @@ export function InventoryWarehousesCrm({ disabled, runAction, selectedVenueId, t
           onSaved={async () => { await refresh(); setDeletingWarehouseId(null) }}
           runAction={runAction}
           selectedVenueId={selectedVenueId}
-          stockProductCount={stockSummaries.find((summary) => summary.warehouseId === deletingWarehouse.id)?.nonZeroProductCount ?? 0}
+          stockProductCount={stockSummaries.find((summary) => summary.warehouseId === deletingWarehouse.id)?.nonZeroItemCount ?? 0}
           tenantContext={tenantContext}
           warehouse={deletingWarehouse}
           warehouses={warehouses}
@@ -184,7 +184,7 @@ function WarehouseDeleteModal({
         {needsTransfer ? (
           <>
             <div className="!rounded-xl !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !font-semibold !text-[var(--crm-yellow)]">
-              Este almacén contiene {stockProductCount} {stockProductCount === 1 ? 'producto con stock' : 'productos con stock'}. Selecciona dónde transferir sus cantidades antes de eliminarlo.
+              Este almacén contiene {stockProductCount} {stockProductCount === 1 ? 'artículo con stock' : 'artículos con stock'}. Selecciona dónde transferir sus cantidades antes de eliminarlo.
             </div>
             <label className="!grid !gap-1.5">
               <span className="!text-xs !font-semibold !text-[var(--crm-text-secondary)]">Almacén de destino</span>
@@ -305,8 +305,8 @@ function DeviceWarehouseRouting({
     <div className="!border-t !border-[var(--crm-border-subtle)]">
       <div className="!grid !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!grid-cols-[minmax(0,1fr)_minmax(240px,360px)] md:!items-end md:!px-[22px]">
         <div className="!min-w-0">
-          <h3 className="!m-0 !text-[15px] !font-bold">Acceso y prioridad por TPV</h3>
-          <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">El número 1 se consume primero; el almacén general puede dejarse con la prioridad más alta.</p>
+          <h3 className="!m-0 !text-[15px] !font-bold">Acceso operativo por TPV</h3>
+          <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Se conserva para operaciones ligadas al dispositivo. El consumo de recetas usa la ruta configurada en cada artículo.</p>
         </div>
         <CrmSelect
           ariaLabel="Seleccionar TPV para configurar almacenes"

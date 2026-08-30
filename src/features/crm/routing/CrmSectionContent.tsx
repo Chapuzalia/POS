@@ -11,6 +11,9 @@ import { PlanCrm } from '../plan/pages/PlanPage'
 import { InventoryStockCrm } from '../inventory/pages/InventoryStockPage'
 import { InventoryWarehousesCrm } from '../inventory/pages/InventoryWarehousesPage'
 import { InventorySettingsCrm } from '../inventory/pages/InventorySettingsPage'
+import { InventoryItemsCrm } from '../inventory/pages/InventoryItemsPage'
+import { InventoryPreparationsCrm } from '../inventory/pages/InventoryPreparationsPage'
+import { InventoryConfigurationCrm } from '../inventory/pages/InventoryConfigurationPage'
 import { IntegrationsCrm } from '../integrations/pages/IntegrationsPage'
 import { SalesReportsCrm } from '../sales/pages/SalesReportsPage'
 import { CashClosingReportsCrm } from '../sales/pages/CashClosingReportsPage'
@@ -44,7 +47,7 @@ type Props = {
   venues: CrmVenue[]
 }
 
-const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import', 'inventory-stock'])
+const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import'])
 
 export function CrmSectionContent({
   activeSection,
@@ -70,7 +73,7 @@ export function CrmSectionContent({
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
   }
 
-  if (!inventoryEnabled && (activeSection === 'inventory-warehouses' || activeSection === 'inventory-settings')) {
+  if (!inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock') {
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">Control de stock desactivado</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Actívalo desde la página Stock para acceder a esta configuración.</p></section>
   }
 
@@ -98,11 +101,17 @@ export function CrmSectionContent({
     case 'production':
       return <ProductionCrm catalog={catalog} context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} />
     case 'inventory-stock':
-      return catalog ? <InventoryStockCrm catalog={catalog} disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} /> : null
+      return <InventoryStockCrm disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'inventory-items':
+      return <InventoryItemsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'inventory-preparations':
+      return <InventoryPreparationsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-warehouses':
       return <InventoryWarehousesCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
-    case 'inventory-settings':
+    case 'inventory-units':
       return <InventorySettingsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'inventory-settings':
+      return <InventoryConfigurationCrm />
     case 'reports':
       return <SalesReportsCrm
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}

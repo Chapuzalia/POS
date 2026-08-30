@@ -25,30 +25,83 @@ export type InventoryWarehouse = {
   updatedAt: string
 }
 
-export type InventoryWarehouseStockSummary = {
-  nonZeroProductCount: number
-  warehouseId: string
+export type InventoryItem = {
+  id: string
+  tenantId: string
+  venueId: string
+  name: string
+  description: string
+  baseUnitId: string
+  active: boolean
+  createdAt: string
+  updatedAt: string
 }
 
-export type InventoryProductSetting = {
-  contentQuantity: number
-  contentUnitId: string
-  productId: string
-  unitId: string
+export type InventoryItemWarehouseRoute = {
+  inventoryItemId: string
+  warehouseId: string
+  priority: number
+  enabled: boolean
 }
 
 export type InventoryStockLevel = {
   enabled: boolean
-  productId: string
+  inventoryItemId: string
   warehouseId: string
   quantity: number
 }
 
-export type InventoryDevice = {
-  active: boolean
+export type InventoryRecipe = {
   id: string
-  name: string
+  variantId: string
+  mode: 'direct' | 'recipe'
+  active: boolean
 }
+
+export type InventoryRecipeLine = {
+  id: string
+  recipeId: string
+  inventoryItemId: string
+  quantity: number | null
+  unitId: string | null
+  usesFormatDefault: boolean
+  sortOrder: number
+}
+
+export type ModifierInventoryEffect = {
+  id: string
+  modifierId: string
+  operation: 'ADD' | 'REMOVE'
+  inventoryItemId: string
+  quantity: number | null
+  unitId: string | null
+  sortOrder: number
+}
+
+export type InventoryProductionRecipe = {
+  id: string
+  inventoryItemId: string
+  productionWarehouseId: string
+  referenceQuantity: number
+  referenceUnitId: string
+  active: boolean
+}
+
+export type InventoryProductionRecipeLine = {
+  id: string
+  recipeId: string
+  inventoryItemId: string
+  quantity: number
+  unitId: string
+  sortOrder: number
+}
+
+export type InventoryWarehouseStockSummary = {
+  nonZeroItemCount: number
+  warehouseId: string
+}
+
+export type InventoryDevice = { active: boolean; id: string; name: string }
 
 export type InventoryDeviceWarehouse = {
   deviceId: string
@@ -63,8 +116,14 @@ export type InventoryWarehouseRouting = {
 }
 
 export type InventorySnapshot = {
+  items: InventoryItem[]
+  itemRoutes: InventoryItemWarehouseRoute[]
   levels: InventoryStockLevel[]
-  settings: InventoryProductSetting[]
+  modifierEffects: ModifierInventoryEffect[]
+  productionRecipeLines: InventoryProductionRecipeLine[]
+  productionRecipes: InventoryProductionRecipe[]
+  recipeLines: InventoryRecipeLine[]
+  recipes: InventoryRecipe[]
   units: InventoryUnit[]
   warehouses: InventoryWarehouse[]
 }

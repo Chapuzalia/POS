@@ -15,6 +15,7 @@ import {
   validateSelectionCapacity,
   validateVariantDrafts,
 } from '../services/catalogAdminModel.ts'
+import { ProductInventoryEditor } from '../../inventory/components/ProductInventoryEditor.tsx'
 
 type Props = {
   catalog: CatalogData
@@ -343,6 +344,8 @@ export function CatalogProductEditor({ catalog, defaultTaxRate, disabled, mutate
               {!activeFormats.length ? <p className="!rounded-xl !bg-[var(--crm-yellow-soft)] !p-3 !text-sm !font-semibold !text-[var(--crm-yellow)]">No hay formatos activos. Créalo en Productos → Formatos.</p> : null}
               <div className="!grid !gap-2 sm:!grid-cols-[1fr_140px_auto]"><CrmSelect ariaLabel="Nuevo formato de venta" onChange={setNewVariantFormatId} options={activeFormats.map((format) => ({ label: format.name, value: format.id, disabled: productVariants.some((variant) => variant.formatId === format.id) }))} placeholder="Selecciona un formato" value={newVariantFormatId} /><UiInput aria-label="Precio de la nueva variante" className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px]" inputMode="decimal" onChange={(event) => setNewVariantPrice(event.target.value)} value={newVariantPrice} /><UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || !newVariantFormatId} onClick={() => void addVariant()} type="button"><Plus className="!size-4" /> Añadir</UiButton></div>
             </section>
+
+            <ProductInventoryEditor catalog={catalog} disabled={disabled} product={product} />
 
             <section className="!grid !gap-3 !border-t !border-[var(--crm-border-subtle)] !pt-5">
               <div><h3 className="!font-bold">Apariciones en TPV</h3><p className="!text-sm !text-[var(--crm-text-muted)]">El producto puede mostrarse varias veces y fijar una variante distinta en cada ubicación.</p></div>

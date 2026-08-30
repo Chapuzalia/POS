@@ -10,7 +10,10 @@ const SECTION_FEATURES: Partial<Record<CrmSection, TenantFeatureKey>> = {
   tables: 'restaurant',
   production: 'production',
   'inventory-stock': 'inventory',
+  'inventory-items': 'inventory',
+  'inventory-preparations': 'inventory',
   'inventory-warehouses': 'inventory',
+  'inventory-units': 'inventory',
   'inventory-settings': 'inventory',
 }
 
