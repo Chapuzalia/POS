@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { CrmShell } from '../../features/crm/layout/CrmShell'
 import { canAccessCrm, canAccessCrmSection } from '../../features/crm/routing/crmPermissions'
 import type { CrmSection } from '../../features/crm/routing/crmNavigation'
@@ -218,6 +218,8 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     setComparisonStats(null)
     setSelectedVenueId(venueId)
   }} selectedVenueId={selectedVenueId} venues={venues}>
-    <CrmSectionContent activeSection={activeSection} catalog={catalog} comparisonStats={comparisonStats} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+    <Suspense fallback={<section aria-busy="true" className="grid min-h-48 place-items-center rounded-2xl bg-[var(--crm-surface)] p-6 text-sm font-bold text-[var(--crm-text-muted)]" role="status">Cargando sección…</section>}>
+      <CrmSectionContent activeSection={activeSection} catalog={catalog} comparisonStats={comparisonStats} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+    </Suspense>
   </CrmShell>
 }

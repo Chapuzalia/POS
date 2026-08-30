@@ -9,6 +9,7 @@ import type { RunAction } from "../../shared/types";
 import {
   addInventoryStockQuantity,
   formatInventoryQuantity,
+  parseInventoryQuantity,
   parseInventoryStockQuantity,
 } from "../inventoryModel";
 import {
@@ -149,7 +150,28 @@ export function InventoryStockCrm({
     setError(null);
   }
 
- 
+  function addQuickQuantity(warehouseId: string, amount: number) {
+    setQuantities((current) => {
+      const value = current[warehouseId]?.trim() || "0";
+      let currentAddition = 0;
+      try {
+        currentAddition = parseInventoryQuantity(value, decimalPlaces);
+      } catch {
+        // A preset replaces an invalid draft so the user can recover in one tap.
+      }
+      return {
+        ...current,
+        [warehouseId]: String(
+          addInventoryStockQuantity(
+            currentAddition,
+            String(amount),
+            decimalPlaces,
+          ),
+        ),
+      };
+    });
+    setError(null);
+  }
 
   async function save() {
     if (!selected) return;
@@ -430,7 +452,30 @@ export function InventoryStockCrm({
                         />
                       </span>
                     </label>
-                    
+
+                    {stockEditMode === "add" ? (
+                      <div
+                        aria-label={`Cantidades rápidas para ${warehouse?.name ?? "almacén"}`}
+                        className="grid grid-cols-3 gap-2"
+                        role="group"
+                      >
+                        {[1, 5, 10].map((amount) => (
+                          <Button
+                            className="!min-h-9 !px-2 !text-xs"
+                            disabled={disabled}
+                            key={amount}
+                            onClick={() =>
+                              addQuickQuantity(route.warehouseId, amount)
+                            }
+                            type="button"
+                            variant="tertiary"
+                          >
+                            +{amount} {unitLabel}
+                          </Button>
+                        ))}
+                      </div>
+                    ) : null}
+
                     <small
                       className={
                         resultingQuantity === null

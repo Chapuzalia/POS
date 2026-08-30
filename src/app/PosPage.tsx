@@ -1,7 +1,7 @@
 import { Button as UiButton } from '../components/ui/Button'
 import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
 import {
   CashPaymentModal,
@@ -35,10 +35,9 @@ import { validateConfiguredDiscountPin, validateManualDiscountPin } from '../ser
 import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
-import { ReservationsPage, type useReservationsController } from '../features/reservations'
+import type { useReservationsController } from '../features/reservations/hooks/useReservationsController'
 import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
 import { CustomerInvoiceModal } from '../features/customers'
-import { InventoryPreparationsPanel } from '../features/inventory'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { finishCashlogyPayment, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
@@ -57,10 +56,19 @@ import type {
   TenantContext,
 } from '../types'
 
+const ReservationsPage = lazy(() => import('../features/reservations/components/ReservationsPage').then((module) => ({ default: module.ReservationsPage })))
+const InventoryPreparationsPanel = lazy(() => import('../features/inventory/InventoryPreparationsPanel').then((module) => ({ default: module.InventoryPreparationsPanel })))
+
 type CashController = ReturnType<typeof useCashSession>
 type QuickSaleController = ReturnType<typeof useQuickSale>
 type RestaurantController = ReturnType<typeof useRestaurantController>
 type ReservationsController = ReturnType<typeof useReservationsController>
+
+function DeferredPanelFallback({ label }: { label: string }) {
+  return <div aria-busy="true" className="grid min-h-40 w-full place-items-center p-6 text-sm font-extrabold text-[var(--muted)]" role="status">
+    Cargando {label}…
+  </div>
+}
 
 type AddFeedback = {
   announcement: string
@@ -484,7 +492,7 @@ export function PosPage(props: Props) {
         {cashlogyPendingNotice}
       </div> : null}
       <AddProductFlyAnimation feedback={props.addFeedback.flyFeedback} />
-      {reservationsEnabled && props.reservations.isOpen ? <ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /> : null}
+      {reservationsEnabled && props.reservations.isOpen ? <Suspense fallback={<DeferredPanelFallback label="reservas" />}><ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /></Suspense> : null}
 
       {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
         invoiceSelected={Boolean(invoiceCustomer)}
@@ -683,7 +691,7 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
-      {preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={() => setPreparationsOpen(false)}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onClose={() => setPreparationsOpen(false)} /></div></AppModal> : null}
+      {preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={() => setPreparationsOpen(false)}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onClose={() => setPreparationsOpen(false)} /></Suspense></div></AppModal> : null}
       {quickSaleExitOpen ? <QuickSaleExitModal
         canSave={Boolean(props.context.canTakeOrders && cash.session)}
         defaultName={quickSaleExitName}

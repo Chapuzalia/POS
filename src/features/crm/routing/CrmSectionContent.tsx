@@ -1,30 +1,32 @@
-import { AccessManagementCrm } from '../access/pages/AccessPage'
-import { StatsCrm } from '../analytics/pages/StatsPage'
-import { CatalogGroupsCrm } from '../catalog/pages/CatalogGroupsPage.tsx'
-import { CatalogFormatsCrm } from '../catalog/pages/CatalogFormatsPage.tsx'
-import { CatalogProductsCrm } from '../catalog/pages/CatalogProductsPage.tsx'
-import { CatalogStructureCrm } from '../catalog/pages/CatalogStructurePage.tsx'
-import { CatalogTransferCrm } from '../catalog/pages/CatalogTransferPage.tsx'
-import { DashboardCrm } from '../dashboard/pages/DashboardPage'
-import { DiscountsCrm } from '../discounts/pages/DiscountsPage'
-import { PlanCrm } from '../plan/pages/PlanPage'
-import { InventoryStockCrm } from '../inventory/pages/InventoryStockPage'
-import { InventoryWarehousesCrm } from '../inventory/pages/InventoryWarehousesPage'
-import { InventorySettingsCrm } from '../inventory/pages/InventorySettingsPage'
-import { InventoryItemsCrm } from '../inventory/pages/InventoryItemsPage'
-import { InventoryPreparationsCrm } from '../inventory/pages/InventoryPreparationsPage'
-import { InventoryConfigurationCrm } from '../inventory/pages/InventoryConfigurationPage'
-import { IntegrationsCrm } from '../integrations/pages/IntegrationsPage'
-import { SalesReportsCrm } from '../sales/pages/SalesReportsPage'
-import { CashClosingReportsCrm } from '../sales/pages/CashClosingReportsPage'
+import { lazy } from 'react'
 import type { RunAction } from '../shared/types'
-import { VenueSettingsCrm } from '../venues/pages/VenueSettingsPage'
-import { TableManagementPage } from '../../table-management/TableManagementPage'
 import type { CatalogData } from '../../catalog/domain/types.ts'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../../types'
 import type { CrmSection } from './crmNavigation'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
-import { ProductionCrm } from '../production/pages/ProductionPage'
+
+const AccessManagementCrm = lazy(() => import('../access/pages/AccessPage').then((module) => ({ default: module.AccessManagementCrm })))
+const StatsCrm = lazy(() => import('../analytics/pages/StatsPage').then((module) => ({ default: module.StatsCrm })))
+const CatalogGroupsCrm = lazy(() => import('../catalog/pages/CatalogGroupsPage.tsx').then((module) => ({ default: module.CatalogGroupsCrm })))
+const CatalogFormatsCrm = lazy(() => import('../catalog/pages/CatalogFormatsPage.tsx').then((module) => ({ default: module.CatalogFormatsCrm })))
+const CatalogProductsCrm = lazy(() => import('../catalog/pages/CatalogProductsPage.tsx').then((module) => ({ default: module.CatalogProductsCrm })))
+const CatalogStructureCrm = lazy(() => import('../catalog/pages/CatalogStructurePage.tsx').then((module) => ({ default: module.CatalogStructureCrm })))
+const CatalogTransferCrm = lazy(() => import('../catalog/pages/CatalogTransferPage.tsx').then((module) => ({ default: module.CatalogTransferCrm })))
+const DashboardCrm = lazy(() => import('../dashboard/pages/DashboardPage').then((module) => ({ default: module.DashboardCrm })))
+const DiscountsCrm = lazy(() => import('../discounts/pages/DiscountsPage').then((module) => ({ default: module.DiscountsCrm })))
+const PlanCrm = lazy(() => import('../plan/pages/PlanPage').then((module) => ({ default: module.PlanCrm })))
+const InventoryStockCrm = lazy(() => import('../inventory/pages/InventoryStockPage').then((module) => ({ default: module.InventoryStockCrm })))
+const InventoryWarehousesCrm = lazy(() => import('../inventory/pages/InventoryWarehousesPage').then((module) => ({ default: module.InventoryWarehousesCrm })))
+const InventorySettingsCrm = lazy(() => import('../inventory/pages/InventorySettingsPage').then((module) => ({ default: module.InventorySettingsCrm })))
+const InventoryItemsCrm = lazy(() => import('../inventory/pages/InventoryItemsPage').then((module) => ({ default: module.InventoryItemsCrm })))
+const InventoryPreparationsCrm = lazy(() => import('../inventory/pages/InventoryPreparationsPage').then((module) => ({ default: module.InventoryPreparationsCrm })))
+const InventoryConfigurationCrm = lazy(() => import('../inventory/pages/InventoryConfigurationPage').then((module) => ({ default: module.InventoryConfigurationCrm })))
+const IntegrationsCrm = lazy(() => import('../integrations/pages/IntegrationsPage').then((module) => ({ default: module.IntegrationsCrm })))
+const SalesReportsCrm = lazy(() => import('../sales/pages/SalesReportsPage').then((module) => ({ default: module.SalesReportsCrm })))
+const CashClosingReportsCrm = lazy(() => import('../sales/pages/CashClosingReportsPage').then((module) => ({ default: module.CashClosingReportsCrm })))
+const VenueSettingsCrm = lazy(() => import('../venues/pages/VenueSettingsPage').then((module) => ({ default: module.VenueSettingsCrm })))
+const TableManagementPage = lazy(() => import('../../table-management/TableManagementPage').then((module) => ({ default: module.TableManagementPage })))
+const ProductionCrm = lazy(() => import('../production/pages/ProductionPage').then((module) => ({ default: module.ProductionCrm })))
 
 type Props = {
   activeSection: CrmSection

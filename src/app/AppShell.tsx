@@ -1,6 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
-import { CrmPage } from '../components/crm/CrmPage'
-import { SuperAdminPage } from '../components/superadmin/SuperAdminPage'
+import { lazy, useCallback, useEffect, useRef, useState } from 'react'
 import { LoginScreen } from '../components/screens/LoginScreen'
 import { LoadingScreen, MissingConfigScreen, PosStartupReveal } from '../components/screens/StateScreens'
 import themesData from '../config/themes.json'
@@ -12,7 +10,7 @@ import type { CatalogData } from '../features/catalog/domain/types'
 import { subscribeToCatalogTabChanges } from '../features/catalog/data/catalog-realtime'
 import { removeProductSalesStats } from '../features/quick-sale/services/productSalesStats'
 import { useRestaurantController } from '../features/restaurant'
-import { useReservationsController } from '../features/reservations'
+import { useReservationsController } from '../features/reservations/hooks/useReservationsController'
 import { useLoginActivity, useTenantSession } from '../features/session'
 import { loadTenantState } from '../features/session/services/loadTenantState'
 import { shouldResetTenantState } from '../features/session/session-state'
@@ -57,9 +55,12 @@ import type {
 import { getReadableError } from '../utils/errors'
 import { AppRouter } from './AppRouter'
 import { isBackofficeUser, isCrmUser, isSuperadmin } from './app-permissions'
-import { PosPage } from './PosPage'
 import { useDomainErrors } from './useDomainErrors'
-import { KdsPage } from '../features/production/components/KdsPage'
+
+const CrmPage = lazy(() => import('../components/crm/CrmPage').then((module) => ({ default: module.CrmPage })))
+const SuperAdminPage = lazy(() => import('../components/superadmin/SuperAdminPage').then((module) => ({ default: module.SuperAdminPage })))
+const PosPage = lazy(() => import('./PosPage').then((module) => ({ default: module.PosPage })))
+const KdsPage = lazy(() => import('../features/production/components/KdsPage').then((module) => ({ default: module.KdsPage })))
 
 const themes = themesData as ThemeDefinition[]
 const defaultThemeId = themes[0]?.id ?? 'hero-minimal'

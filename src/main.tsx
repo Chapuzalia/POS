@@ -1,15 +1,20 @@
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Toaster } from 'sileo'
+import { AppErrorBoundary } from './components/errors/AppErrorBoundary.tsx'
 import './index.css'
 import 'sileo/styles.css'
 import App from './App.tsx'
 import { registerServiceWorker } from './pwa/registerServiceWorker.ts'
 
-import * as Sentry from "@sentry/react";
-import "./sentry"
-
 registerServiceWorker()
+
+if (
+  import.meta.env.VITE_SENTRY_ENABLED === 'true'
+  && Boolean(import.meta.env.VITE_SENTRY_DSN)
+) {
+  window.setTimeout(() => void import('./sentry.ts'), 0)
+}
 
 const appleStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true
 const displayModeStandalone = window.matchMedia('(display-mode: standalone)').matches
@@ -40,7 +45,7 @@ const sentryFallback = (
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>
-    <Sentry.ErrorBoundary fallback={sentryFallback}>
+    <AppErrorBoundary fallback={sentryFallback}>
       <App />
       <Toaster
         position="top-center"
@@ -55,6 +60,6 @@ createRoot(document.getElementById('root')!).render(
           },
         }}
       />
-    </Sentry.ErrorBoundary>
+    </AppErrorBoundary>
   </StrictMode>,
 )
