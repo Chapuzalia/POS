@@ -1,4 +1,4 @@
-import { PackagePlus, Pencil, Plus, Save, Search, X } from 'lucide-react'
+import { PackagePlus, Pencil, Plus, Save, X } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Checkbox, Input, TextArea } from '../../../../components/ui'
 import { DataTable } from '../../../../components/ui/DataTable'
@@ -32,7 +32,7 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
   const refresh = useCallback(async () => setSnapshot(await loadInventorySnapshot(tenantContext, selectedVenueId)), [selectedVenueId, tenantContext])
   useEffect(() => { void runAction(refresh) }, [refresh, runAction])
 
-  const items = useMemo(() => snapshot.items.filter((item) => item.name.toLocaleLowerCase('es').includes(query.trim().toLocaleLowerCase('es'))).toSorted((a, b) => a.name.localeCompare(b.name, 'es')), [query, snapshot.items])
+  const items = useMemo(() => snapshot.items.toSorted((a, b) => a.name.localeCompare(b.name, 'es')), [snapshot.items])
   const stock = (itemId: string) => snapshot.levels.filter((level) => level.inventoryItemId === itemId && level.enabled).reduce((sum, level) => sum + level.quantity, 0)
 
   function open(item?: InventoryItem) {
@@ -60,8 +60,7 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
 
   return <section className="overflow-hidden rounded-2xl bg-[var(--crm-surface)] shadow-[var(--crm-shadow-card)]">
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] p-5"><div><h2 className="text-lg font-bold">Artículos de inventario</h2><p className="text-sm text-[var(--crm-text-muted)]">Todo lo que existe físicamente: ingredientes, bebidas y elaboraciones.</p></div><Button disabled={disabled || !snapshot.units.length || !snapshot.warehouses.length} onClick={() => open()} type="button"><Plus className="size-4" /> Nuevo artículo</Button></header>
-    <div className="border-b border-[var(--crm-border-subtle)] p-4"><label className="flex h-11 items-center gap-2 rounded-xl bg-[var(--crm-input-bg)] px-3"><Search className="size-4 text-[var(--crm-text-muted)]" /><Input className="border-0 bg-transparent p-0 focus:shadow-none" onChange={(event) => setQuery(event.target.value)} placeholder="Carne, harina, salsa…" value={query} /></label></div>
-    {items.length ? <DataTable aria-label="Artículos de inventario" className="!w-full !min-w-[900px] !border-collapse">
+    {items.length ? <DataTable aria-label="Artículos de inventario" className="!w-full !min-w-[900px] !border-collapse" filterPlaceholder="Carne, harina, salsa…" filterValue={query} onFilterChange={setQuery}>
       <thead>
         <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-xs !font-bold !uppercase !text-[var(--crm-text-muted)]">
           <th className="!min-w-[240px] !px-5 !py-3">Artículo</th>
@@ -70,7 +69,7 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
           <th className="!min-w-[170px] !px-3 !py-3">Ruta principal</th>
           <th className="!min-w-[120px] !px-3 !py-3">Vínculos</th>
           <th className="!min-w-[120px] !px-3 !py-3">Tipo</th>
-          <th aria-label="Acciones" className="!w-[64px] !px-3 !py-3" />
+          <th aria-label="Acciones" className="!w-[64px] !px-3 !py-3" data-sortable="false" />
         </tr>
       </thead>
       <tbody>
@@ -83,9 +82,9 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
           return <tr className="!border-b !border-[var(--crm-border-subtle)] last:!border-0" key={item.id}>
             <td className="!px-5 !py-3"><span className="flex items-center gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--crm-blue-soft)] text-[var(--crm-blue)]"><PackagePlus className="size-4" /></span><span className="min-w-0"><strong className="block">{item.name}</strong><small className="block max-w-[320px] truncate text-[var(--crm-text-muted)]">{item.description || 'Sin descripción'} · {item.active ? 'Activo' : 'Inactivo'}</small></span></span></td>
             <td className="!px-3 !py-3"><strong className="block">{unit?.name ?? 'Sin unidad'}</strong><small className="text-[var(--crm-text-muted)]">{unit?.symbol}</small></td>
-            <td className="!whitespace-nowrap !px-3 !py-3"><strong className="font-mono">{formatInventoryQuantity(stock(item.id), unit?.decimalPlaces ?? 6)} {unit?.symbol}</strong></td>
+            <td className="!whitespace-nowrap !px-3 !py-3" data-sort-value={stock(item.id)}><strong className="font-mono">{formatInventoryQuantity(stock(item.id), unit?.decimalPlaces ?? 6)} {unit?.symbol}</strong></td>
             <td className="!px-3 !py-3">{primary?.name ?? 'Sin ruta'}</td>
-            <td className="!px-3 !py-3">{linkedVariants} {linkedVariants === 1 ? 'variante' : 'variantes'}</td>
+            <td className="!px-3 !py-3" data-sort-value={linkedVariants}>{linkedVariants} {linkedVariants === 1 ? 'variante' : 'variantes'}</td>
             <td className="!px-3 !py-3">{preparation ? 'Elaboración' : 'Artículo'}</td>
             <td className="!px-3 !py-3"><Button aria-label={`Editar ${item.name}`} disabled={disabled} onClick={() => open(item)} type="button" variant="tertiary"><Pencil className="size-4" /></Button></td>
           </tr>

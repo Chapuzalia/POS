@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  addInventoryStockQuantity,
   calculateStockUnitConsumption,
   inventoryQuantityStep,
   parseInventoryQuantity,
   parsePositiveInventoryQuantity,
+  parseInventoryStockQuantity,
   validateInventoryDecimalPlaces,
 } from '../src/features/crm/inventory/inventoryModel.ts'
 import {
@@ -112,6 +114,13 @@ test('las cantidades admiten unidades completas y consumos fraccionarios control
   assert.equal(parsePositiveInventoryQuantity('80', 0, 'El consumo'), 80)
   assert.throws(() => parsePositiveInventoryQuantity('0', 0, 'El consumo'), /mayor que cero/)
   assert.throws(() => validateInventoryDecimalPlaces(7), /entre 0 y 6/)
+})
+
+test('una entrada de stock se suma al nivel actual aunque este sea negativo', () => {
+  assert.equal(parseInventoryStockQuantity('-4,314289', 6), -4.314289)
+  assert.equal(addInventoryStockQuantity(-4.314289, '5', 6), 0.685711)
+  assert.equal(addInventoryStockQuantity(2.5, '0,25', 2), 2.75)
+  assert.throws(() => addInventoryStockQuantity(2, '-1', 0), /cantidad válida|negativa/)
 })
 
 test('calcula cubatas, chupitos y mixers en la unidad fisica de stock', () => {
@@ -361,16 +370,28 @@ test('las pantallas separan artículos físicos, stock y elaboraciones', () => {
 })
 
 test('el listado de stock abre el detalle por artículo físico', () => {
-  assert.match(stockPage, /placeholder="Buscar artículo físico"/)
-  assert.match(stockPage, /aria-label="Buscar artículo"/)
+  assert.match(stockPage, /filterPlaceholder="Buscar artículo físico…"/)
   assert.match(stockPage, /onClick=\{\(\) => open\(row\.item\.id\)\}/)
   assert.match(stockPage, /<CrmModal label=\{`Stock de \$\{selected\.name\}`\}/)
   assert.match(stockPage, /Existencias por artículo y almacén/)
   assert.match(stockPage, /El stock negativo está permitido/)
   assert.match(stockPage, /<DataTable aria-label="Stock por artículo"/)
   assert.match(stockPage, /<thead>[\s\S]*<tbody>/)
-  assert.match(stockPage, /<tr aria-label=\{`Editar stock de \$\{row\.item\.name\}`\}/)
+  assert.match(stockPage, /<Button aria-label=\{`Editar stock de \$\{row\.item\.name\}`\}/)
+  assert.doesNotMatch(stockPage, /<tr[^>]*onClick=/)
   assert.doesNotMatch(stockPage, /catalog\.products/)
+})
+
+test('el modal de stock permite sumar una entrada o establecer el total', () => {
+  assert.match(stockPage, /type StockEditMode = 'add' \| 'set'/)
+  assert.match(stockPage, /useState<StockEditMode>\('add'\)/)
+  assert.match(stockPage, /> Añadir stock<\/Button>/)
+  assert.match(stockPage, /> Establecer total<\/Button>/)
+  assert.match(stockPage, /\[1, 5, 10\]\.map/)
+  assert.match(stockPage, /Stock actual:/)
+  assert.match(stockPage, /Quedará:/)
+  assert.match(stockPage, /addInventoryStockQuantity/)
+  assert.match(stockPage, /parseInventoryStockQuantity/)
 })
 
 test('el listado de artículos reutiliza el modelo de tabla del proyecto', () => {

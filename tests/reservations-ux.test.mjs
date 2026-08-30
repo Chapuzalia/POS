@@ -60,7 +60,7 @@ test('reservas convierte excepciones y zonas en filtros operativos', () => {
 test('la lista usa una tabla real, separa el historial y conserva la seleccion', () => {
   assert.match(list, /Historial del día/)
   assert.match(list, /aria-current=\{selected \? 'true'/)
-  assert.match(list, /<table/)
+  assert.match(list, /<DataTable aria-label="Reservas"/)
   assert.match(list, /<thead/)
   assert.match(list, /<tbody/)
   assert.match(list, /scope="col">Hora<\/th>/)
@@ -68,7 +68,8 @@ test('la lista usa una tabla real, separa el historial y conserva la seleccion',
   assert.match(list, /scope="col">Mesa \/ zona<\/th>/)
   assert.match(list, /scope="col">Estado<\/th>/)
   assert.doesNotMatch(list, /role="listitem"/)
-  assert.doesNotMatch(list, /<UiButton/)
+  assert.match(list, /<Button aria-label=\{`Abrir reserva de/)
+  assert.doesNotMatch(list, /<tr[^>]*onClick=/)
 })
 
 test('la vista general movil usa los breakpoints predefinidos de Tailwind', () => {

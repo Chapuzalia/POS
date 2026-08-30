@@ -2,6 +2,7 @@ import { Input as UiInput } from '../ui/Input'
 import { Button as UiButton } from '../ui/Button'
 import { Checkbox as UiCheckbox } from '../ui/Checkbox'
 import { AppModal } from '../ui/AppModal'
+import { DataTable } from '../ui/DataTable'
 import { Building2, Check, ChevronRight, Crown, Eye, LockKeyhole, LogOut, Menu, Pencil, Plus, Power, RefreshCw, Store, Trash2, UserRound, X } from 'lucide-react'
 import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
@@ -324,32 +325,31 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
               </div>
             </div>
 
-            <div className="!w-full !overflow-x-auto">
-              <div className="!min-w-[1120px]">
-                <div className="!grid !grid-cols-[minmax(170px,1fr)_minmax(220px,1.2fr)_75px_80px_95px_100px_200px] !items-center !gap-3 !border-b !border-[var(--crm-border)] !bg-[var(--crm-surface-soft)] !px-[22px] !py-3 !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
-                  <span>Negocio</span><span>Propietario</span><span>Locales</span><span>Usuarios</span><span>Estado</span><span>Alta</span><span className="!text-right">Acciones</span>
-                </div>
+            {tenants.length ? <DataTable aria-label="Negocios" className="!w-full !min-w-[1120px] !border-collapse" filterPlaceholder="Filtrar negocios…">
+              <thead><tr className="!border-b !border-[var(--crm-border)] !bg-[var(--crm-surface-soft)] !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
+                <th className="!min-w-[170px] !px-[22px] !py-3">Negocio</th><th className="!min-w-[220px] !px-3 !py-3">Propietario</th><th className="!w-[75px] !px-3 !py-3">Locales</th><th className="!w-[80px] !px-3 !py-3">Usuarios</th><th className="!w-[95px] !px-3 !py-3">Estado</th><th className="!w-[100px] !px-3 !py-3">Alta</th><th aria-label="Acciones" className="!w-[200px] !px-[22px] !py-3" data-sortable="false" />
+              </tr></thead>
+              <tbody>
                 {tenants.map((tenant) => (
-                  <div className="!grid !min-h-[76px] !grid-cols-[minmax(170px,1fr)_minmax(220px,1.2fr)_75px_80px_95px_100px_200px] !items-center !gap-3 !border-b !border-[var(--crm-border)] !px-[22px] !py-3 !text-xs !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={tenant.id}>
-                    <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{tenant.name}</strong><span>{tenant.slug}</span></div>
-                    <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{tenant.owner?.fullName || 'Sin OWNER'}</strong><span>{tenant.owner?.email || 'Cuenta no configurada'}</span></div>
-                    <span>{tenant.venueCount}</span>
-                    <span>{tenant.memberCount}</span>
-                    <span className={tenant.isActive
+                  <tr className="!min-h-[76px] !border-b !border-[var(--crm-border)] !text-xs !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={tenant.id}>
+                    <td className="!min-w-[170px] !px-[22px] !py-3"><div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{tenant.name}</strong><span>{tenant.slug}</span></div></td>
+                    <td className="!min-w-[220px] !px-3 !py-3"><div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{tenant.owner?.fullName || 'Sin OWNER'}</strong><span>{tenant.owner?.email || 'Cuenta no configurada'}</span></div></td>
+                    <td className="!w-[75px] !px-3 !py-3" data-sort-value={tenant.venueCount}>{tenant.venueCount}</td>
+                    <td className="!w-[80px] !px-3 !py-3" data-sort-value={tenant.memberCount}>{tenant.memberCount}</td>
+                    <td className="!w-[95px] !px-3 !py-3"><span className={tenant.isActive
                       ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-green-soft)] text-[var(--crm-green)] !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
-                      : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-surface-soft)] text-[var(--crm-text-muted)] !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>{tenant.isActive ? 'Activo' : 'Inactivo'}</span>
-                    <span>{dateFormatter.format(new Date(tenant.createdAt))}</span>
-                    <div className="!flex !items-center !justify-end !gap-1.5">
+                      : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-surface-soft)] text-[var(--crm-text-muted)] !inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>{tenant.isActive ? 'Activo' : 'Inactivo'}</span></td>
+                    <td className="!w-[100px] !px-3 !py-3" data-sort-value={new Date(tenant.createdAt).getTime()}>{dateFormatter.format(new Date(tenant.createdAt))}</td>
+                    <td className="!w-[200px] !px-[22px] !py-3"><div className="!flex !items-center !justify-end !gap-1.5">
                       <UiButton aria-label={`Ver detalles de ${tenant.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-secondary)]" onClick={() => setTenantModal({ mode: 'details', tenant })} title="Ver detalles" type="button"><Eye className="!size-4" /></UiButton>
                       <UiButton aria-label={`Editar ${tenant.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-secondary)]" disabled={!isOnline || isBusy} onClick={() => openEditModal(tenant)} title="Editar" type="button"><Pencil className="!size-4" /></UiButton>
                       <UiButton aria-label={`${tenant.isActive ? 'Desactivar' : 'Activar'} ${tenant.name}`} className={tenant.isActive ? 'inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-yellow-soft)] !p-0 !text-[var(--crm-yellow)]' : 'inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-green-soft)] !p-0 !text-[var(--crm-green)]'} disabled={!isOnline || isBusy} onClick={() => void toggleTenant(tenant)} title={tenant.isActive ? 'Desactivar' : 'Activar'} type="button"><Power className="!size-4" /></UiButton>
                       <UiButton aria-label={`Eliminar ${tenant.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95 !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-red-soft)] !p-0 !text-[var(--crm-red)]" disabled={!isOnline || isBusy} onClick={() => void removeTenant(tenant)} title="Eliminar" type="button"><Trash2 className="!size-4" /></UiButton>
-                    </div>
-                  </div>
+                    </div></td>
+                  </tr>
                 ))}
-                {!tenants.length && !isBusy ? <div className="!grid !min-h-[260px] !place-items-center !content-center !gap-2 !text-[13px] !font-medium !text-[var(--crm-text-muted)]"><Store className="h-6 w-6" /><span>Todavía no hay negocios.</span></div> : null}
-              </div>
-            </div>
+              </tbody>
+            </DataTable> : !isBusy ? <div className="!grid !min-h-[260px] !place-items-center !content-center !gap-2 !text-[13px] !font-medium !text-[var(--crm-text-muted)]"><Store className="h-6 w-6" /><span>Todavía no hay negocios.</span></div> : null}
           </section>
         </main>
       </section>

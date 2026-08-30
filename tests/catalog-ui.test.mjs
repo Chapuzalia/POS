@@ -27,8 +27,9 @@ test('catalog components own their Tailwind styles and consume only CRM theme to
 })
 
 test('the products table reserves a stable column for all row actions', () => {
-  assert.ok(productsPage.includes('grid-cols-[minmax(160px,1.2fr)_105px_64px_68px_104px_minmax(120px,.9fr)_168px]'))
+  assert.match(productsPage, /<DataTable[\s\S]*aria-label="Productos del catálogo"/)
   assert.ok(productsPage.includes('min-w-[940px]'))
+  assert.match(productsPage, /aria-label="Acciones"[\s\S]*data-sortable="false"/)
   assert.ok(productsPage.includes('Duplicar ${summary.product.name}'))
   assert.match(productsPage, /<Dropdown>/)
   assert.match(productsPage, /Duplicar aquí/)
@@ -36,9 +37,9 @@ test('the products table reserves a stable column for all row actions', () => {
 })
 
 test('product sorting lives in clickable column headers without manual reorder controls', () => {
-  assert.match(productsPage, /function CatalogProductSortHeader/)
-  assert.ok(productsPage.includes('Ordenar por ${label}'))
-  assert.match(productsPage, /sortKey="product"/)
-  assert.match(productsPage, /sortKey="price"/)
+  assert.match(productsPage, /sortDescriptor=\{\{ column: sortKey/)
+  assert.match(productsPage, /data-column-key="product"/)
+  assert.match(productsPage, /data-column-key="price"/)
+  assert.match(productsPage, /onSortChange=/)
   assert.doesNotMatch(productsPage, /Ordenar productos|Subir producto|Bajar producto|\bmoveProduct\b/)
 })

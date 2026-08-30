@@ -1,7 +1,8 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
+import { DataTable } from '../../../../components/ui/DataTable'
 import { Dropdown, Label } from '@heroui/react'
-import { ArrowDown, ArrowUp, ArrowUpDown, Boxes, ChevronDown, Copy, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { Boxes, ChevronDown, Copy, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useDeferredValue, useMemo, useState } from 'react'
 import { sileo } from 'sileo'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
@@ -9,7 +10,6 @@ import type { CrmVenue } from '../../../../types'
 import { formatMoney } from '../../../../lib/format.ts'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination.tsx'
 import { CrmSelect } from '../../shared/components/CrmSelect.tsx'
-import { EmptyList } from '../../shared/components/EmptyList.tsx'
 import { CatalogCheckbox, CatalogPanel, CatalogPanelHeader, CatalogStatus } from '../components/CatalogUi.tsx'
 import {
   filterCatalogProducts,
@@ -29,7 +29,6 @@ type Props = {
   mutate: (action: () => Promise<unknown>) => Promise<boolean>
   venues: CrmVenue[]
 }
-
 const defaultFilters: CatalogProductFilters = {
   query: '',
   status: 'all',
@@ -38,7 +37,6 @@ const defaultFilters: CatalogProductFilters = {
   tabId: '',
   showInternal: false,
 }
-
 type CatalogProductSortKey = 'product' | 'type' | 'vat' | 'variants' | 'price' | 'locations'
 type CatalogProductSortDirection = 'asc' | 'desc'
 
@@ -104,8 +102,13 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
     setPage(1)
   }
 
-  function handleSort(nextSortKey: CatalogProductSortKey) {
+  function handleSort(nextSortKey: CatalogProductSortKey, nextDirection?: CatalogProductSortDirection) {
     setPage(1)
+    if (nextDirection) {
+      setSortKey(nextSortKey)
+      setSortDirection(nextDirection)
+      return
+    }
     if (sortKey === nextSortKey) {
       setSortDirection((current) => current === 'asc' ? 'desc' : 'asc')
       return
@@ -154,28 +157,36 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
           </CatalogCheckbox>
         </CatalogPanelHeader>
 
-        <div className="grid overflow-auto !grid !overflow-auto">
-          <div className="sticky top-0 z-[1] grid min-w-[940px] grid-cols-[minmax(160px,1.2fr)_105px_64px_68px_104px_minmax(120px,.9fr)_168px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface-soft)] px-3 py-2.5 text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !sticky !top-0 !z-[1] !grid !min-h-[50px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[.045em] !text-[var(--crm-text-muted)]">
-            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Producto" onSort={handleSort} sortKey="product" />
-            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Tipo / estado" onSort={handleSort} sortKey="type" />
-            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="IVA" onSort={handleSort} sortKey="vat" />
-            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Variantes" onSort={handleSort} sortKey="variants" />
-            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Precio" onSort={handleSort} sortKey="price" />
-            <CatalogProductSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ubicaciones" onSort={handleSort} sortKey="locations" />
-            <span>Acciones</span>
-          </div>
+        <DataTable
+          aria-label="Productos del catálogo"
+          className="!w-full !min-w-[940px] !border-collapse"
+          emptyContent="No hay productos que coincidan con los filtros."
+          filterable={false}
+          onSortChange={({ column, direction }) => handleSort(column as CatalogProductSortKey, direction === 'ascending' ? 'asc' : 'desc')}
+          sortDescriptor={{ column: sortKey, direction: sortDirection === 'asc' ? 'ascending' : 'descending' }}
+        >
+          <thead><tr className="!border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !text-[11px] !font-semibold !uppercase !tracking-[.045em] !text-[var(--crm-text-muted)]">
+            <th className="!min-w-[160px] !px-[22px] !py-3" data-column-key="product">Producto</th>
+            <th className="!w-[105px] !px-3 !py-3" data-column-key="type">Tipo / estado</th>
+            <th className="!w-[64px] !px-3 !py-3" data-column-key="vat">IVA</th>
+            <th className="!w-[68px] !px-3 !py-3" data-column-key="variants">Variantes</th>
+            <th className="!w-[104px] !px-3 !py-3" data-column-key="price">Precio</th>
+            <th className="!min-w-[120px] !px-3 !py-3" data-column-key="locations">Ubicaciones</th>
+            <th aria-label="Acciones" className="!w-[168px] !px-[22px] !py-3" data-sortable="false" />
+          </tr></thead>
+          <tbody>
           {visibleProducts.map((summary) => (
-            <div className="grid min-h-16 min-w-[940px] grid-cols-[minmax(160px,1.2fr)_105px_64px_68px_104px_minmax(120px,.9fr)_168px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] px-3 py-2.5 text-[13px] font-medium text-[var(--crm-text-secondary)] transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] !grid !min-h-[78px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !text-[13px]" key={summary.product.id}>
-              <div className="flex min-w-0 items-center gap-[11px]">
+            <tr className="!min-h-[78px] !border-b !border-[var(--crm-border-subtle)] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] hover:!bg-[var(--crm-surface-hover)]" key={summary.product.id}>
+              <td className="!min-w-[160px] !px-[22px] !py-3"><div className="flex min-w-0 items-center gap-[11px]">
                 {summary.product.image?.publicUrl ? <img alt="" className="grid size-[42px] shrink-0 place-items-center overflow-hidden rounded-xl border-0 bg-[var(--crm-surface-soft)] object-cover text-[var(--crm-text-muted)]" src={summary.product.image.publicUrl} /> : <div className="grid size-[42px] shrink-0 place-items-center overflow-hidden rounded-xl border-0 bg-[var(--crm-surface-soft)] object-cover text-[var(--crm-text-muted)]"><Boxes className="!size-4" /></div>}
                 <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{summary.product.name}</strong><span>{summary.product.description || 'Sin descripción'}{summary.internal ? ' · Interno' : ''}</span></div>
-              </div>
-              <div className="!grid !gap-1.5"><span>{summary.product.type === 'menu' ? 'Menú' : 'Estándar'}</span><CatalogStatus active={summary.product.active} /></div>
-              <span>{summary.product.vatRate === null ? 'Heredado' : `${summary.product.vatRate} %`}</span>
-              <strong>{summary.variants.length}</strong>
-              <strong>{priceLabel(summary)}</strong>
-              <span>{summary.tabs.map((tab) => tab.label).join(', ') || 'Sin apariciones'}<br /><small>{summary.categories.map((category) => category.name).join(', ')}</small></span>
-              <div className="flex min-w-0 items-center justify-end gap-[7px]">
+              </div></td>
+              <td className="!w-[105px] !px-3 !py-3"><div className="!grid !gap-1.5"><span>{summary.product.type === 'menu' ? 'Menú' : 'Estándar'}</span><CatalogStatus active={summary.product.active} /></div></td>
+              <td className="!w-[64px] !px-3 !py-3" data-sort-value={summary.product.vatRate ?? defaultTaxRate}>{summary.product.vatRate === null ? 'Heredado' : `${summary.product.vatRate} %`}</td>
+              <td className="!w-[68px] !px-3 !py-3" data-sort-value={summary.variants.length}><strong>{summary.variants.length}</strong></td>
+              <td className="!w-[104px] !px-3 !py-3" data-sort-value={summary.minPriceCents ?? Number.MAX_SAFE_INTEGER}><strong>{priceLabel(summary)}</strong></td>
+              <td className="!min-w-[120px] !px-3 !py-3">{summary.tabs.map((tab) => tab.label).join(', ') || 'Sin apariciones'}<br /><small>{summary.categories.map((category) => category.name).join(', ')}</small></td>
+              <td className="!w-[168px] !px-[22px] !py-3"><div className="flex min-w-0 items-center justify-end gap-[7px]">
                 <UiButton aria-label={`Editar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => setEditorProductId(summary.product.id)} type="button"><Pencil className="!size-4" /></UiButton>
                 <Dropdown>
                   <Dropdown.Trigger aria-label={`Duplicar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-0 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] disabled:opacity-50" isDisabled={disabled}>
@@ -192,11 +203,11 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
                 </Dropdown>
                 <UiButton aria-label={summary.product.active ? 'Desactivar' : 'Activar'} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.setProductActive(catalog.venueId, summary.product.id, !summary.product.active))} type="button">{summary.product.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</UiButton>
                 <UiButton aria-label={`Eliminar ${summary.product.name}`} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95" disabled={disabled} onClick={() => void removeProduct(summary)} type="button"><Trash2 className="!size-4" /></UiButton>
-              </div>
-            </div>
+              </div></td>
+            </tr>
           ))}
-          {!filtered.length ? <EmptyList message="No hay productos que coincidan con los filtros." /> : null}
-        </div>
+          </tbody>
+        </DataTable>
         <CrmPagination currentPage={visiblePage} onPageChange={setPage} totalResults={filtered.length} />
       </CatalogPanel>
 
@@ -220,36 +231,5 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
           product={selectedProduct}
         />) : null}
     </div>
-  )
-}
-
-function CatalogProductSortHeader({
-  currentDirection,
-  currentKey,
-  label,
-  onSort,
-  sortKey,
-}: {
-  currentDirection: CatalogProductSortDirection
-  currentKey: CatalogProductSortKey
-  label: string
-  onSort: (sortKey: CatalogProductSortKey) => void
-  sortKey: CatalogProductSortKey
-}) {
-  const isActive = currentKey === sortKey
-  const SortIcon = isActive ? currentDirection === 'asc' ? ArrowUp : ArrowDown : ArrowUpDown
-
-  return (
-    <UiButton
-      aria-label={`Ordenar por ${label}`}
-      className={isActive
-        ? '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-secondary)] !shadow-none'
-        : '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)] !shadow-none'}
-      onClick={() => onSort(sortKey)}
-      type="button"
-    >
-      <span>{label}</span>
-      <SortIcon className="!size-3.5" />
-    </UiButton>
   )
 }
