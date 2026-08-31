@@ -1030,6 +1030,37 @@ export function useRestaurantController(options: Options) {
     }))
   }, [draft, options, productionState])
 
+  const setLineQuantity = useCallback((lineId: string, quantity: number) => {
+    if (!options.isOnline) return
+    const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
+    if (!line || line.quantity === quantity) return
+    if (!Number.isSafeInteger(quantity) || quantity < line.servedQuantity || quantity < 1) {
+      options.onError('No puedes reducir la cantidad por debajo de las unidades servidas.')
+      return
+    }
+    if (quantity < line.quantity
+      && (productionState?.lines.find((state) => state.lineId === lineId)?.sentQuantity ?? 0) > quantity
+      && !window.confirm('Parte de esta cantidad ya se envió a producción. Se generará una anulación para cocina/barra. ¿Continuar?')) return
+    draft.updateDraft((detail) => ({
+      ...detail,
+      lines: detail.lines.map((item) => item.id === lineId ? { ...item, quantity, updatedAt: nowIso() } : item),
+    }))
+  }, [draft, options, productionState])
+
+  const setLineUnitPrice = useCallback((lineId: string, unitPriceCents: number) => {
+    if (!options.isOnline) return
+    if (!Number.isSafeInteger(unitPriceCents) || unitPriceCents < 0) {
+      options.onError('El precio unitario no es válido.')
+      return
+    }
+    const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
+    if (!line || line.unitPriceCents === unitPriceCents) return
+    draft.updateDraft((detail) => ({
+      ...detail,
+      lines: detail.lines.map((item) => item.id === lineId ? { ...item, unitPriceCents, updatedAt: nowIso() } : item),
+    }))
+  }, [draft, options])
+
   const runServiceAction = useCallback((action: (order: RestaurantOrderDetail) => Promise<void>) => runBusy(async () => {
     if (!options.context || !options.isOnline) return
     const saved = await draft.flush()
@@ -1111,6 +1142,8 @@ export function useRestaurantController(options: Options) {
     setEqualSplit,
     setEqualSplitOpen,
     setInvoiceCustomer,
+    setLineQuantity,
+    setLineUnitPrice,
     setMap: realtime.setMap,
     setMoveOrderId,
     setPendingLineRemoval,

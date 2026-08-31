@@ -1,6 +1,6 @@
 import { Button as UiButton } from '../../../components/ui/Button'
 import { CalendarPlus, Check, Users, X } from 'lucide-react'
-import { useMemo, useRef, useState } from 'react'
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { RestaurantTableMapItem } from '../../tables/types'
 import { MapViewportControls } from '../../tables/components/MapViewportControls'
 import { useMapViewport } from '../../tables/useMapViewport'
@@ -28,9 +28,13 @@ export function ReservationMapView(props: Props) {
   const canvasRef = useRef<HTMLElement>(null)
   const area = props.map.areas.find((candidate) => candidate.id === areaId) ?? props.map.areas[0]
   const sourceTables = props.selection ? props.map.tables : props.map.operationalMap?.tables ?? props.map.tables
-  const tables = sourceTables.filter((table) => table.areaId === area?.id)
+  const tables = useMemo(() => sourceTables.filter((table) => table.areaId === area?.id), [area?.id, sourceTables])
+  const mapElements = useMemo(() => area?.mapElements ?? [], [area?.mapElements])
+  const fittedItems = useMemo(() => [...tables, ...mapElements], [mapElements, tables])
   const viewportApi = useMapViewport(`reservation-map:${props.date}:${area?.id ?? 'default'}`)
   const viewport = viewportApi.viewport
+  const fitViewport = viewportApi.fit
+  const autoFit = Boolean(props.selection)
   const planeSize = getMapPlaneSize(
     canvasRef.current?.clientWidth ?? 1200,
     canvasRef.current?.clientHeight ?? 700,
@@ -44,6 +48,33 @@ export function ReservationMapView(props: Props) {
     props.selection?.selectedTableIds.includes(table.id)
   )), [props.map.tables, props.selection?.selectedTableIds])
   const conflictTableIds = new Set(props.selection?.conflictTableIds ?? [])
+  const fitSelectionToCanvas = useCallback(() => {
+    const canvas = canvasRef.current
+    if (!autoFit || !canvas || !fittedItems.length) return
+    const fittedPlaneSize = getMapPlaneSize(
+      canvas.clientWidth,
+      canvas.clientHeight,
+      area?.canvasWidth ?? 1200,
+      area?.canvasHeight ?? 800,
+    )
+    fitViewport(canvas, fittedItems, fittedPlaneSize)
+  }, [area?.canvasHeight, area?.canvasWidth, autoFit, fitViewport, fittedItems])
+
+  useLayoutEffect(() => {
+    const canvas = canvasRef.current
+    if (!autoFit || !canvas) return
+    fitSelectionToCanvas()
+    let animationFrame = 0
+    const observer = new ResizeObserver(() => {
+      cancelAnimationFrame(animationFrame)
+      animationFrame = requestAnimationFrame(fitSelectionToCanvas)
+    })
+    observer.observe(canvas)
+    return () => {
+      cancelAnimationFrame(animationFrame)
+      observer.disconnect()
+    }
+  }, [autoFit, fitSelectionToCanvas])
 
   function selectTable(tableId: string) {
     setSelectedTableId(tableId)
@@ -55,24 +86,32 @@ export function ReservationMapView(props: Props) {
   }
 
   return (
-    <div className="flex min-w-0 flex-1 flex-col gap-2.5">
+    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5">
       <nav aria-label="Zonas" className="flex gap-2 overflow-x-auto pb-0.5 [&>button]:min-h-[42px] [&>button]:whitespace-nowrap [&>button]:rounded-full [&>button]:border [&>button]:border-[var(--separator)] [&>button]:bg-[var(--surface)] [&>button]:px-[18px] [&>button]:font-extrabold [&>button]:text-[var(--foreground)]">
         {props.map.areas.map((candidate) => <UiButton className={candidate.id === area?.id ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]' : ''} key={candidate.id} onClick={() => {
           setAreaId(candidate.id)
           setSelectedTableId(null)
         }} type="button">{candidate.name}</UiButton>)}
       </nav>
-      <div className="flex min-h-112 flex-1 gap-3 max-md:flex-col">
+      <div className={`flex flex-1 gap-3 max-md:flex-col ${props.selection ? 'min-h-112 md:min-h-0' : 'min-h-112'}`}>
         <section
-          className="relative min-h-105 flex-1 touch-none cursor-grab overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] shadow-[var(--shadow)] active:cursor-grabbing md:min-h-112"
-          onPointerDown={viewportApi.startBackgroundPointer}
-          onPointerMove={viewportApi.moveBackgroundPointer}
-          onPointerUp={viewportApi.endBackgroundPointer}
-          onPointerCancel={viewportApi.endBackgroundPointer}
-          onWheel={viewportApi.onWheel}
+          className={`relative flex-1 overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] shadow-[var(--shadow)] ${props.selection ? 'min-h-105 cursor-default md:min-h-0' : 'min-h-105 touch-none cursor-grab active:cursor-grabbing md:min-h-112'}`}
+          onPointerDown={props.selection ? undefined : viewportApi.startBackgroundPointer}
+          onPointerMove={props.selection ? undefined : viewportApi.moveBackgroundPointer}
+          onPointerUp={props.selection ? undefined : viewportApi.endBackgroundPointer}
+          onPointerCancel={props.selection ? undefined : viewportApi.endBackgroundPointer}
+          onWheel={props.selection ? undefined : viewportApi.onWheel}
           ref={canvasRef}
         >
           <div className="map-transform-layer absolute z-[2]" style={{ width: planeSize.width * viewport.zoom, height: planeSize.height * viewport.zoom, left: viewport.panX, top: viewport.panY }}>
+            {mapElements.map((element) => <div
+              aria-hidden="true"
+              className={`pointer-events-none absolute z-0 ${element.kind === 'wall' ? 'rounded-[3px] bg-[repeating-linear-gradient(90deg,#64748b_0_18px,#94a3b8_18px_20px)] shadow-[inset_0_0_0_1px_rgba(15,23,42,.28)]' : element.kind === 'column' ? 'box-border rounded-full border-[3px] border-[#64748b] bg-[repeating-linear-gradient(45deg,#cbd5e1_0_5px,#94a3b8_5px_7px)]' : 'flex items-center justify-center overflow-hidden text-center font-black tracking-[.04em] text-[var(--muted)] [&>span]:truncate'}`}
+              key={element.id}
+              style={{ left: `${element.positionX}%`, top: `${element.positionY}%`, width: `${element.width}%`, height: `${element.height}%` }}
+            >
+              {element.kind === 'text' ? <span>{element.text}</span> : null}
+            </div>)}
             {tables.map((table) => {
               const tableReservations = props.reservations.filter((reservation) => reservation.tableIds.includes(table.id))
               const next = getNextReservationForTable(tableReservations, table.id, new Date(0))
@@ -98,13 +137,13 @@ export function ReservationMapView(props: Props) {
             })}
           </div>
           {!tables.length ? <div className="absolute inset-0 grid place-items-center font-extrabold text-[var(--muted)]">No hay mesas activas en esta zona.</div> : null}
-          <MapViewportControls
-            onFit={() => canvasRef.current && viewportApi.fit(canvasRef.current, tables, planeSize)}
+          {!props.selection ? <MapViewportControls
+            onFit={() => canvasRef.current && fitViewport(canvasRef.current, fittedItems, planeSize)}
             onReset={() => viewportApi.setViewport({ zoom: 1, panX: 0, panY: 0 })}
             onZoomIn={() => canvasRef.current && viewportApi.zoomBy(1.2, canvasRef.current)}
             onZoomOut={() => canvasRef.current && viewportApi.zoomBy(1 / 1.2, canvasRef.current)}
             zoom={viewport.zoom}
-          />
+          /> : null}
         </section>
         <aside className="w-full max-h-56 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 md:max-h-none md:w-60 lg:w-72 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:border-b [&>header]:border-[var(--separator)] [&>header]:pb-2.5 [&_h3]:m-0 [&_p]:m-0 [&_p]:text-xs [&_p]:text-[var(--muted)] [&>header_span]:text-xs [&>header_span]:text-[var(--muted)] [&>button]:grid [&>button]:w-full [&>button]:grid-cols-[3.5rem_1fr] [&>button]:gap-2 [&>button]:border-0 [&>button]:border-b [&>button]:border-[var(--separator)] [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-3 [&>button]:text-left [&>button]:text-[var(--foreground)] [&>button_time]:font-black [&>button_span]:grid [&>button_span]:gap-1 [&>button_small]:text-[var(--muted)]">
           {props.selection ? <>

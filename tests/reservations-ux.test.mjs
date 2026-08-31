@@ -15,8 +15,8 @@ const [page, list, detail, form, map, timeline, selectionStep, optionalPhoneMigr
 
 test('el mapa permite desplazar el lienzo desde el espacio entre mesas', () => {
   assert.match(map, /className="map-transform-layer absolute z-\[2\]"/)
-  assert.match(map, /onPointerDown=\{viewportApi\.startBackgroundPointer\}/)
-  assert.match(map, /onPointerMove=\{viewportApi\.moveBackgroundPointer\}/)
+  assert.match(map, /onPointerDown=\{props\.selection \? undefined : viewportApi\.startBackgroundPointer\}/)
+  assert.match(map, /onPointerMove=\{props\.selection \? undefined : viewportApi\.moveBackgroundPointer\}/)
 })
 
 test('reservas ofrece una tercera vista temporal operativa', () => {
@@ -170,6 +170,18 @@ test('el alta de reserva se divide en datos y selección visual', () => {
 test('el plano y el timeline permiten elegir mesa y hueco en el segundo paso', () => {
   assert.match(map, /selection\?:/)
   assert.match(map, /props\.selection\.onChange\(next\)/)
+  assert.match(map, /flex min-h-0 min-w-0 flex-1 flex-col/)
+  assert.match(map, /props\.selection \? 'min-h-112 md:min-h-0' : 'min-h-112'/)
+  assert.match(map, /const autoFit = Boolean\(props\.selection\)/)
+  assert.match(map, /const fittedItems = useMemo\(\(\) => \[\.\.\.tables, \.\.\.mapElements\]/)
+  assert.match(map, /new ResizeObserver/)
+  assert.match(map, /requestAnimationFrame\(fitSelectionToCanvas\)/)
+  assert.match(map, /onWheel=\{props\.selection \? undefined : viewportApi\.onWheel\}/)
+  assert.match(map, /\{!props\.selection \? <MapViewportControls/)
+  assert.match(map, /\{mapElements\.map\(\(element\) => <div/)
+  assert.match(map, /element\.kind === 'wall'/)
+  assert.match(map, /element\.kind === 'column'/)
+  assert.match(map, /element\.kind === 'text' \? <span>\{element\.text\}<\/span>/)
   assert.match(timeline, /draft\?:/)
   assert.match(timeline, /Nueva reserva seleccionada/)
   assert.match(selectionStep, /onSlotSelect/)

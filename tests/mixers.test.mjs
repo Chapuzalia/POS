@@ -24,12 +24,13 @@ test('separa el mixer sintetico historico de los modificadores reales', () => {
 
 test('el payload de comanda envia el mixer separado y solo UUID reales en modifierIds', () => {
   const [payload] = buildRestaurantOrderLinesPayload(orderWith({
-    id: lineId, productId, variantId: productId, quantity: 2, note: null,
+    id: lineId, productId, variantId: productId, quantity: 2, unitPriceCents: 875, note: null,
     modifiers: [{ id: modifierId, groupId: 'g', name: 'Hielo', priceCents: 0 }],
     mixerProductId: productId,
   }))
   assert.deepEqual(payload.modifierIds, [modifierId])
   assert.equal(payload.mixerProductId, productId)
+  assert.equal(payload.unitPriceCents, 875)
   assert.ok(payload.modifierIds.every(isUuid))
 })
 

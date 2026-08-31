@@ -30,6 +30,9 @@ test('CRM permissions hide optional modules that are not assigned to the tenant'
   assert.equal(canAccessCrmSection('owner', 'discounts', ['discounts']), true)
   assert.equal(canAccessCrmSection('owner', 'tables', ['restaurant']), true)
   assert.equal(canAccessCrmSection('owner', 'inventory-stock', ['inventory']), true)
+  assert.equal(canAccessCrmSection('owner', 'inventory-preparations', ['inventory']), false)
+  assert.equal(canAccessCrmSection('owner', 'inventory-preparations', ['inventory_recipes']), false)
+  assert.equal(canAccessCrmSection('owner', 'inventory-preparations', ['inventory', 'inventory_recipes']), true)
   assert.equal(canAccessCrmSection('owner', 'access', ['multi_device']), true)
 })
 

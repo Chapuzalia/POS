@@ -83,15 +83,15 @@ export function CrmSectionContent({
     case 'dashboard':
       return catalog ? <DashboardCrm disabled={disabled} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} /> : null
     case 'products':
-      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} mutate={mutateCatalog} venues={venues} /> : null
+      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
       return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} inventoryFeatureEnabled={hasTenantFeature(context, 'inventory')} mutate={mutateCatalog} /> : null
     case 'categories':
       return catalog ? <CatalogStructureCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'selection-groups':
-      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" inventoryRecipesEnabled={hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')} mutate={mutateCatalog} /> : null
     case 'modifiers':
-      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" inventoryRecipesEnabled={hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')} mutate={mutateCatalog} /> : null
     case 'access':
       return <AccessManagementCrm disabled={disabled} runAction={runAction} tenantContext={context} />
     case 'discounts':

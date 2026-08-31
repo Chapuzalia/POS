@@ -174,6 +174,7 @@ export function PosPage(props: Props) {
   const discountsEnabled = hasTenantFeature(props.context, 'discounts')
   const restaurantEnabled = hasTenantFeature(props.context, 'restaurant')
   const reservationsEnabled = restaurantEnabled && hasTenantFeature(props.context, 'reservations')
+  const inventoryRecipesEnabled = hasTenantFeature(props.context, 'inventory') && hasTenantFeature(props.context, 'inventory_recipes')
   const appliedDiscount = discountsEnabled ? quickSale.discount : null
   const activeCashlogyError = isActiveCashlogyError({
     displayedError,
@@ -316,6 +317,8 @@ export function PosPage(props: Props) {
         onServeAll={restaurant.serveLineFully}
         onServeAllOrder={restaurant.serveOrderFully}
         onServeOne={restaurant.serveLineUnit}
+        onSetQuantity={restaurant.setLineQuantity}
+        onSetUnitPrice={restaurant.setLineUnitPrice}
         productionState={restaurant.productionState}
         onSendToProduction={restaurant.sendToProduction}
         order={restaurant.order}
@@ -452,7 +455,7 @@ export function PosPage(props: Props) {
         canManageCash={canManageCash && !cashlogyPaymentLocked}
         canOpenCashDrawer={canManageCash && !cashlogyPaymentLocked}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
-        canOpenPreparations={hasTenantFeature(props.context, 'inventory')}
+        canOpenPreparations={inventoryRecipesEnabled}
         cashlogyConnected={cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
@@ -691,7 +694,7 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
-      {preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={() => setPreparationsOpen(false)}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onClose={() => setPreparationsOpen(false)} /></Suspense></div></AppModal> : null}
+      {inventoryRecipesEnabled && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={() => setPreparationsOpen(false)}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onClose={() => setPreparationsOpen(false)} /></Suspense></div></AppModal> : null}
       {quickSaleExitOpen ? <QuickSaleExitModal
         canSave={Boolean(props.context.canTakeOrders && cash.session)}
         defaultName={quickSaleExitName}

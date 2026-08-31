@@ -1,6 +1,6 @@
 import type { TenantContext } from '../../types'
 
-export const tenantFeatureKeys = ['discounts', 'restaurant', 'reservations', 'inventory', 'multi_device', 'production'] as const
+export const tenantFeatureKeys = ['discounts', 'restaurant', 'reservations', 'inventory', 'multi_device', 'production', 'inventory_recipes'] as const
 
 export type TenantFeatureKey = typeof tenantFeatureKeys[number]
 

@@ -5,6 +5,7 @@ import { allocateInventoryByRoute, resolveEffectiveInventoryRecipe, scaleInvento
 
 const migrationPath = new URL('../supabase/migrations/20260830120000_add_inventory_items_recipes_and_preparations.sql', import.meta.url)
 const migration = await readFile(migrationPath, 'utf8')
+const featureMigration = await readFile(new URL('../supabase/migrations/20260831120000_add_inventory_recipes_feature.sql', import.meta.url), 'utf8')
 
 test('consumo directo hereda el formato y permite override por variante', () => {
   const inherited = { inventoryItemId: 'brugal', quantity: null, unitId: null, usesFormatDefault: true, formatId: 'copa' }
@@ -91,4 +92,14 @@ test('la migración sustituye la identidad product_id y mantiene el fallo no blo
   assert.match(migration, /on conflict \(venue_id, request_id\) do nothing/i)
   assert.match(migration, /revoke all on function public\.set_inventory_item_stock[\s\S]*from public, anon, authenticated[\s\S]*grant execute on function public\.set_inventory_item_stock/i)
   assert.doesNotMatch(migration, /record_inventory_production[\s\S]*device_id[\s\S]*production_warehouse_id\s*=\s*p_device_id/i)
+})
+
+test('escandallos es una feature opt-in sin activación para locales existentes', () => {
+  assert.match(featureMigration, /'inventory_recipes', 'Escandallos'/)
+  assert.match(featureMigration, /false, true, false, 160/)
+  assert.doesNotMatch(featureMigration, /insert into public\.tenant_feature_assignments/i)
+  assert.match(featureMigration, /inventory_recipes_feature_enabled/)
+  assert.match(featureMigration, /p_mode = 'recipe'[\s\S]*INVENTORY_RECIPES_FEATURE_DISABLED/)
+  assert.match(featureMigration, /inventory_accumulate_variant_recipe_without_feature_check/)
+  assert.match(featureMigration, /list_inventory_preparations_without_feature_check/)
 })

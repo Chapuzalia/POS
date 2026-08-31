@@ -6,6 +6,7 @@ import { getReadableError } from '../../../utils/errors'
 import { loadKdsQueue, markKdsItemReady, subscribeToKds } from '../service'
 import type { KdsQueue } from '../types'
 import { InventoryPreparationsPanel } from '../../inventory'
+import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 
 type Props = {
   context: TenantContext
@@ -28,6 +29,7 @@ export function KdsPage({ context, isOnline, onLogout }: Props) {
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
   const [view, setView] = useState<'orders' | 'preparations'>('orders')
+  const inventoryRecipesEnabled = hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')
 
   const refresh = useCallback(async () => {
     if (!isOnline) return
@@ -41,6 +43,9 @@ export function KdsPage({ context, isOnline, onLogout }: Props) {
   }, [context.deviceId, isOnline])
 
   useEffect(() => { void refresh() }, [refresh])
+  useEffect(() => {
+    if (!inventoryRecipesEnabled && view === 'preparations') setView('orders')
+  }, [inventoryRecipesEnabled, view])
   useEffect(() => {
     if (!isOnline || !context.productionDestinationId) return undefined
     return subscribeToKds(context, context.productionDestinationId, () => void refresh())
@@ -70,7 +75,7 @@ export function KdsPage({ context, isOnline, onLogout }: Props) {
           <h1 className="text-2xl font-black">{context.deviceName}</h1>
         </div>
         <div className="flex gap-2">
-          <Button onClick={() => setView((current) => current === 'orders' ? 'preparations' : 'orders')} size="md" type="button" variant="secondary">{view === 'orders' ? <Beaker className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />} {view === 'orders' ? 'Preparaciones' : 'Comandas'}</Button>
+          {inventoryRecipesEnabled ? <Button onClick={() => setView((current) => current === 'orders' ? 'preparations' : 'orders')} size="md" type="button" variant="secondary">{view === 'orders' ? <Beaker className="h-4 w-4" /> : <ListChecks className="h-4 w-4" />} {view === 'orders' ? 'Preparaciones' : 'Comandas'}</Button> : null}
           <Button disabled={!isOnline} onClick={() => void refresh()} size="md" type="button" variant="secondary"><RefreshCw className="h-4 w-4" /> Actualizar</Button>
           <Button onClick={() => void onLogout()} size="md" type="button" variant="tertiary"><LogOut className="h-4 w-4" /> Salir</Button>
         </div>
@@ -79,7 +84,7 @@ export function KdsPage({ context, isOnline, onLogout }: Props) {
       {!isOnline ? <div className="mb-4 flex items-center gap-2 rounded-[var(--radius)] border border-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_10%,var(--surface))] p-4 font-bold"><WifiOff className="h-5 w-5" /> El KDS necesita conexión. No se muestran datos en caché.</div> : null}
       {error ? <div className="mb-4 rounded-[var(--radius)] border border-[var(--danger)] p-4 font-semibold text-[var(--danger)]">{error}</div> : null}
 
-      {view === 'preparations' ? <InventoryPreparationsPanel context={context} isOnline={isOnline} /> : <>
+      {inventoryRecipesEnabled && view === 'preparations' ? <InventoryPreparationsPanel context={context} isOnline={isOnline} /> : <>
       {recentEvents.length ? <section className="mb-4 space-y-2">
         {recentEvents.map((event) => <article className="flex items-start gap-3 rounded-[var(--radius)] border-2 border-[var(--danger)] bg-[var(--surface)] p-3" key={event.id}>
           <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-[var(--danger)]" />

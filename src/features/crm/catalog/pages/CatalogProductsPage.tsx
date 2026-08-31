@@ -26,6 +26,7 @@ type Props = {
   defaultTaxRate: number
   disabled: boolean
   duplicateProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
+  inventoryRecipesEnabled: boolean
   mutate: (action: () => Promise<unknown>) => Promise<boolean>
   venues: CrmVenue[]
 }
@@ -46,7 +47,7 @@ function priceLabel(summary: CatalogProductSummary) {
   return `${formatMoney(summary.minPriceCents)} – ${formatMoney(summary.maxPriceCents ?? summary.minPriceCents)}`
 }
 
-export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicateProduct, mutate, venues }: Props) {
+export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicateProduct, inventoryRecipesEnabled, mutate, venues }: Props) {
   const [filters, setFilters] = useState(defaultFilters)
   const [sortKey, setSortKey] = useState<CatalogProductSortKey>('product')
   const [sortDirection, setSortDirection] = useState<CatalogProductSortDirection>('asc')
@@ -225,6 +226,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
           catalog={catalog}
           defaultTaxRate={defaultTaxRate}
           disabled={disabled}
+          inventoryRecipesEnabled={inventoryRecipesEnabled}
           key={editorProductId}
           mutate={mutate}
           onClose={() => setEditorProductId(null)}
