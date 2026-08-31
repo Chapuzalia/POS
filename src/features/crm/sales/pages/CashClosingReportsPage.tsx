@@ -798,7 +798,7 @@ export function CashClosingReportsCrm({
           </div>
         </div>
         <div className="!overflow-x-auto">
-          <UiDataTable className="!w-full !min-w-[1050px] !border-collapse">
+          <UiDataTable aria-label="Cierres de caja" className="!w-full !min-w-[1050px] !border-collapse" emptyContent={closings ? 'No hay cierres de caja para el período seleccionado.' : 'Cargando cierres…'} filterable={false}>
             <thead>
               <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
                 <th className="!px-[22px] !py-3">Fecha Cierre</th>
@@ -832,7 +832,7 @@ export function CashClosingReportsCrm({
                     role="button"
                     tabIndex={0}
                   >
-                    <td className="!whitespace-nowrap !px-[22px] !py-4 !text-[13px] !font-semibold">
+                    <td className="!whitespace-nowrap !px-[22px] !py-4 !text-[13px] !font-semibold" data-sort-value={new Date(closing.closedAt).getTime()}>
                       {dateFormatter.format(new Date(closing.closedAt))}
                     </td>
                     <td className="!px-3 !py-4">
@@ -843,7 +843,7 @@ export function CashClosingReportsCrm({
                         {snapshot.shiftLabel}
                       </span>
                     </td>
-                    <td className="!px-3 !py-4">
+                    <td className="!px-3 !py-4" data-sort-value={snapshot.summary.totalSalesCents}>
                       <strong className="!block !font-mono !text-[13px]">
                         {formatMoney(snapshot.summary.totalSalesCents)}
                       </strong>
@@ -851,7 +851,7 @@ export function CashClosingReportsCrm({
                         {snapshot.summary.salesCount} tickets
                       </span>
                     </td>
-                    <td className="!px-3 !py-4">
+                    <td className="!px-3 !py-4" data-sort-value={amounts.billedCashCents}>
                       <strong className="!block !font-mono !text-[13px]">
                         {formatMoney(amounts.billedCashCents)}
                       </strong>
@@ -863,7 +863,7 @@ export function CashClosingReportsCrm({
                         {formatMoney(amounts.cashOverOpeningFundCents)}
                       </span>
                     </td>
-                    <td className="!px-3 !py-4">
+                    <td className="!px-3 !py-4" data-sort-value={amounts.billedCardCents}>
                       <strong className="!block !font-mono !text-[13px]">
                         {formatMoney(amounts.billedCardCents)}
                       </strong>
@@ -877,6 +877,7 @@ export function CashClosingReportsCrm({
                     </td>
                     <td
                       className={`!px-3 !py-4 !font-mono !text-[13px] !font-bold ${difference === 0 ? "!text-[var(--crm-green)]" : "!text-[var(--crm-red)]"}`}
+                      data-sort-value={difference}
                     >
                       {formatMoney(difference)}
                     </td>
@@ -897,11 +898,6 @@ export function CashClosingReportsCrm({
               })}
             </tbody>
           </UiDataTable>
-          {closings && !filteredClosings.length ? (
-            <div className="!grid !min-h-44 !place-items-center !px-6 !text-center !text-sm !font-semibold !text-[var(--crm-text-muted)]">
-              No hay cierres de caja para el período seleccionado.
-            </div>
-          ) : null}
         </div>
       </section>
       {selectedClosing ? (

@@ -362,12 +362,15 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
           conflicts={controller.conflicts}
           date={controller.date}
           disabled={!isOnline || controller.isLoading}
+          loadReservations={controller.loadReservations}
+          map={controller.map}
           onClose={() => controller.setEditor(null)}
           onSave={controller.save}
           onTableIdsChange={controller.setSelectedTableIds}
           preselectedTableIds={controller.editor.preselectedTableIds}
           preselectedStartsAt={controller.editor.preselectedStartsAt}
           reservation={controller.editor.reservation}
+          reservations={controller.reservations}
           tables={tables}
           timeZone={controller.timeZone}
         />

@@ -11,6 +11,7 @@ import {
   LogOut,
   ReceiptText,
   RefreshCw,
+  PackagePlus,
   Settings,
   Vault,
   WalletCards,
@@ -33,6 +34,7 @@ type AppHeaderProps = {
   canGenerateInvoice: boolean;
   canOpenCashDrawer: boolean;
   canOpenReservations: boolean;
+  canOpenPreparations: boolean;
   cashlogyConnected: boolean;
   isLoading: boolean;
   isOnline: boolean;
@@ -40,6 +42,7 @@ type AppHeaderProps = {
   onOpenConfig: () => void;
   onGenerateInvoice: () => void;
   onOpenReservations: () => void;
+  onOpenPreparations: () => void;
   onOpenTicketHistory: () => void;
   onOpenCashMovements: () => void;
   onOpenCashClosingHistory: () => void;
@@ -60,6 +63,7 @@ export function AppHeader({
   canGenerateInvoice,
   canOpenCashDrawer,
   canOpenReservations,
+  canOpenPreparations,
   cashlogyConnected,
   isLoading,
   isOnline,
@@ -67,6 +71,7 @@ export function AppHeader({
   onOpenConfig,
   onGenerateInvoice,
   onOpenReservations,
+  onOpenPreparations,
   onOpenTicketHistory,
   onOpenCashMovements,
   onOpenCashClosingHistory,
@@ -99,6 +104,7 @@ export function AppHeader({
   }
   if (canCloseCash) menuItems.push({ action: onOpenCashClosingHistory, icon: WalletCards, id: 'closings', label: 'Histórico de cierres' })
   if (cashlogyConnected) menuItems.push({ action: onOpenCashlogyMachine, icon: Vault, id: 'cashlogy-machine', label: 'Máquina de efectivo' })
+  if (canOpenPreparations) menuItems.push({ action: onOpenPreparations, disabled: !isOnline || isLoading, icon: PackagePlus, id: 'inventory-preparations', label: 'Inventario · Preparaciones' })
   menuItems.push(
     { action: onOpenConfig, icon: Settings, id: 'settings', label: 'Ajustes' },
     { action: onLogout, danger: true, icon: LogOut, id: 'logout', label: 'Cerrar sesión' },

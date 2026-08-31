@@ -1,5 +1,6 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
+import { DataTable } from '../../../../components/ui/DataTable'
 import { Plus, Ruler, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { TenantContext } from '../../../../types'
@@ -54,29 +55,26 @@ export function InventorySettingsCrm({ disabled, runAction, selectedVenueId, ten
         </UiButton>
       </div>
 
-      <div className="!overflow-x-auto">
-        <div className="!min-w-[660px]">
-          <div className="!grid !grid-cols-[minmax(220px,1fr)_130px_190px_160px_120px] !gap-4 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !py-3 !text-[11px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
-            <span>Unidad</span><span>Abreviatura</span><span>Equivalencia</span><span>Precisión</span><span>Estado</span>
-          </div>
-          {units.map((unit) => {
+      {units.length ? <DataTable aria-label="Unidades de inventario" className="!w-full !min-w-[660px] !border-collapse" filterPlaceholder="Filtrar unidades…">
+        <thead><tr className="!border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !text-[11px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
+          <th className="!min-w-[220px] !px-[22px] !py-3">Unidad</th><th className="!w-[130px] !px-4 !py-3">Abreviatura</th><th className="!min-w-[190px] !px-4 !py-3">Equivalencia</th><th className="!w-[160px] !px-4 !py-3">Precisión</th><th className="!w-[120px] !px-4 !py-3">Estado</th>
+        </tr></thead>
+        <tbody>{units.map((unit) => {
             const contentUnit = units.find((candidate) => candidate.id === unit.contentUnitId)
             const isBaseUnit = unit.contentUnitId === unit.id && unit.contentQuantity === 1
             return (
-            <div className="!grid !min-h-16 !grid-cols-[minmax(220px,1fr)_130px_190px_160px_120px] !items-center !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !py-3 !text-[13px]" key={unit.id}>
-              <div className="!flex !min-w-0 !items-center !gap-3"><span className="!grid !size-9 !shrink-0 !place-items-center !rounded-[10px] !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]"><Ruler className="!size-4" /></span><strong>{unit.name}</strong></div>
-              <strong className="!font-mono">{unit.symbol}</strong>
-              <span className="!font-mono !text-[var(--crm-text-secondary)]">
+            <tr className="!min-h-16 !border-b !border-[var(--crm-border-subtle)] !text-[13px] last:!border-0" key={unit.id}>
+              <td className="!min-w-[220px] !px-[22px] !py-3"><div className="!flex !min-w-0 !items-center !gap-3"><span className="!grid !size-9 !shrink-0 !place-items-center !rounded-[10px] !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]"><Ruler className="!size-4" /></span><strong>{unit.name}</strong></div></td>
+              <td className="!w-[130px] !px-4 !py-3"><strong className="!font-mono">{unit.symbol}</strong></td>
+              <td className="!min-w-[190px] !px-4 !py-3 !font-mono !text-[var(--crm-text-secondary)]" data-sort-value={unit.contentQuantity}>
                 {isBaseUnit ? 'Unidad base' : `${unit.contentQuantity} ${contentUnit?.symbol ?? ''}`}
-              </span>
-              <span className="!text-[var(--crm-text-secondary)]">{unit.decimalPlaces === 0 ? 'Unidades enteras' : `${unit.decimalPlaces} decimales`}</span>
-              <span className={unit.active ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-green-soft)] text-[var(--crm-green)] !w-fit' : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-red-soft)] text-[var(--crm-red)] !w-fit'}>{unit.active ? 'Activa' : 'Inactiva'}</span>
-            </div>
+              </td>
+              <td className="!w-[160px] !px-4 !py-3 !text-[var(--crm-text-secondary)]" data-sort-value={unit.decimalPlaces}>{unit.decimalPlaces === 0 ? 'Unidades enteras' : `${unit.decimalPlaces} decimales`}</td>
+              <td className="!w-[120px] !px-4 !py-3"><span className={unit.active ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-green-soft)] text-[var(--crm-green)] !w-fit' : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-red-soft)] text-[var(--crm-red)] !w-fit'}>{unit.active ? 'Activa' : 'Inactiva'}</span></td>
+            </tr>
             )
-          })}
-        </div>
-      </div>
-      {!units.length ? <div className="!p-[18px] md:!p-[22px]"><EmptyList message="Todavía no hay unidades. Crea, por ejemplo, ml para destilados y botellín para refrescos." /></div> : null}
+          })}</tbody>
+      </DataTable> : <div className="!p-[18px] md:!p-[22px]"><EmptyList message="Todavía no hay unidades. Crea, por ejemplo, ml para destilados y botellín para refrescos." /></div>}
 
       {creating ? (
         <InventoryUnitEditor

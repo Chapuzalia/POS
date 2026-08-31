@@ -12,11 +12,20 @@ test('the delete button remains available for served order lines', () => {
   assert.match(panel, /disabled=\{isBusy\}[^>]+onClick=\{\(\) => onRemove\(line\.id\)\}/)
 })
 
-test('deleting an order line requires explicit confirmation', () => {
-  assert.match(app, /setPendingLineRemoval\(line\)/)
+test('only served order lines require explicit confirmation', () => {
+  assert.match(app, /requiresConfirmedRestaurantLineRemoval\(line\.servedQuantity\)/)
+  assert.match(app, /setPendingLineRemoval\(line\)[\s\S]*return[\s\S]*removeLine\(line\.id, false\)/)
+  assert.match(app, /onRemove=\{restaurant\.requestLineRemoval\}/)
+  assert.match(app, /restaurant\.pendingLineRemoval && restaurant\.pendingLineRemoval\.servedQuantity > 0/)
   assert.match(app, /confirmLineRemoval/)
   assert.match(modal, /Este producto ya está marcado como servido/)
   assert.match(modal, /onClick=\{onConfirm\}/)
+})
+
+test('the served-product confirmation modal is centered', () => {
+  assert.match(modal, /placement="center"/)
+  assert.doesNotMatch(modal, /placement="bottom"/)
+  assert.match(modal, /rounded-\[var\(--radius\)\]/)
 })
 
 test('the confirmed deletion locks the order and preserves revision safety', () => {

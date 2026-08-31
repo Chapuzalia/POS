@@ -1,18 +1,20 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Checkbox as UiCheckbox } from '../../../../components/ui/Checkbox'
 import { Button as UiButton } from '../../../../components/ui/Button'
-import { ArrowDown, ArrowUp, Eye, EyeOff, Pencil, Plus, Search, Trash2 } from 'lucide-react'
+import { ArrowDown, ArrowUp, Eye, EyeOff, Package, Pencil, Plus, Search, Trash2 } from 'lucide-react'
 import { useMemo, useState } from 'react'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
 import { formatMoney, normalizeText, parseMoneyToCents } from '../../../../lib/format.ts'
 import { CrmSelect } from '../../shared/components/CrmSelect.tsx'
 import { catalogAdminService } from '../services/catalogAdminService.ts'
 import { getCatalogProductSummaries, moveCatalogItem, toReorderItems } from '../services/catalogAdminModel.ts'
+import { ModifierInventoryEffectsEditor } from '../../inventory/components/ModifierInventoryEffectsEditor.tsx'
 
 type Props = {
   catalog: CatalogData
   disabled: boolean
   domain: 'selection' | 'modifier'
+  inventoryRecipesEnabled: boolean
   mutate: (action: () => Promise<unknown>) => Promise<boolean>
 }
 
@@ -20,7 +22,7 @@ function money(value: string) {
   try { return parseMoneyToCents(value) } catch { return Number.NaN }
 }
 
-export function CatalogGroupsCrm({ catalog, disabled, domain, mutate }: Props) {
+export function CatalogGroupsCrm({ catalog, disabled, domain, inventoryRecipesEnabled, mutate }: Props) {
   const groups = domain === 'selection' ? catalog.selectionGroups.filter((group) => group.type === 'mixer') : catalog.modifierGroups
   const assignments = domain === 'selection' ? catalog.selectionAssignments : catalog.modifierAssignments
   const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.id ?? '')
@@ -35,6 +37,7 @@ export function CatalogGroupsCrm({ catalog, disabled, domain, mutate }: Props) {
   const [modifierName, setModifierName] = useState('')
   const [modifierSupplement, setModifierSupplement] = useState('0,00')
   const [modifierDefault, setModifierDefault] = useState(false)
+  const [inventoryModifierId, setInventoryModifierId] = useState('')
   const selectedGroup = groups.find((group) => group.id === selectedGroupId) ?? null
   const options = useMemo(() => domain === 'selection'
     ? catalog.selectionOptions.filter((option) => option.groupId === selectedGroupId)
@@ -187,6 +190,8 @@ export function CatalogGroupsCrm({ catalog, disabled, domain, mutate }: Props) {
               return <div className="!grid !grid-cols-[1fr_auto] !items-center !gap-3 !rounded-xl !bg-[var(--crm-surface-soft)] !p-3" key={option.id}><span><strong>{label}</strong> · {supplement === 0 ? 'Incluido' : `${supplement > 0 ? '+' : ''}${formatMoney(supplement)}`} · {active ? 'Activo' : 'Inactivo'}{modifier?.isDefault ? ' · Predeterminado' : ''}</span><div className="flex min-w-0 items-center justify-end gap-[7px]"><UiButton aria-label="Subir opción" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || index === 0} onClick={() => void moveOption(option.id, -1)} type="button"><ArrowUp className="!size-4" /></UiButton><UiButton aria-label="Bajar opción" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || index === options.length - 1} onClick={() => void moveOption(option.id, 1)} type="button"><ArrowDown className="!size-4" /></UiButton><UiButton aria-label="Editar suplemento" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => { const value = window.prompt('Suplemento', (supplement / 100).toFixed(2).replace('.', ',')); if (value === null || !Number.isSafeInteger(money(value))) return; if (selectionOption) void mutate(() => catalogAdminService.saveSelectionOption(catalog.venueId, { ...selectionOption, supplementCents: money(value) })); else if (modifier) void mutate(() => catalogAdminService.saveModifier(catalog.venueId, { ...modifier, supplementCents: money(value) })) }} type="button"><Pencil className="!size-4" /></UiButton><UiButton aria-label="Activar o desactivar opción" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => { if (selectionOption) void mutate(() => catalogAdminService.saveSelectionOption(catalog.venueId, { ...selectionOption, active: !selectionOption.active })); else if (modifier) void mutate(() => catalogAdminService.saveModifier(catalog.venueId, { ...modifier, active: !modifier.active })) }} type="button">{active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</UiButton>{modifier ? <UiButton aria-label="Cambiar modificador predeterminado" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.saveModifier(catalog.venueId, { ...modifier, isDefault: !modifier.isDefault }))} type="button">★</UiButton> : null}<UiButton aria-label="Eliminar opción" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95" disabled={disabled} onClick={() => { if (!window.confirm(`¿Eliminar “${label}”?`)) return; void mutate(() => selectionOption ? catalogAdminService.deleteSelectionOption(catalog.venueId, option.id) : catalogAdminService.deleteModifier(catalog.venueId, option.id)) }} type="button"><Trash2 className="!size-4" /></UiButton></div></div>
             })}
           </div>
+          {inventoryRecipesEnabled && domain === 'modifier' ? <div className="!grid !gap-2 !rounded-xl !bg-[var(--crm-blue-soft)] !p-4"><div className="!flex !items-center !gap-2 !font-bold !text-[var(--crm-blue)]"><Package className="!size-4" /> Efectos en inventario</div><p className="!text-xs !text-[var(--crm-text-muted)]">El precio y el escandallo son independientes. Selecciona un modificador para configurar ADD o REMOVE.</p><CrmSelect onChange={setInventoryModifierId} options={catalog.modifiers.filter((modifier) => modifier.groupId === selectedGroup.id).map((modifier) => ({ label: modifier.name, value: modifier.id }))} placeholder="Selecciona un modificador" value={inventoryModifierId} /></div> : null}
+          {inventoryRecipesEnabled && inventoryModifierId ? <ModifierInventoryEffectsEditor catalog={catalog} disabled={disabled} modifierId={inventoryModifierId} onClose={() => setInventoryModifierId('')} /> : null}
         </div> : <p className="!text-[var(--crm-text-muted)]">Crea o selecciona un grupo para editar sus opciones.</p>}
       </section>
     </div>

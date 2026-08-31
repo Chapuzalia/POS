@@ -5,6 +5,7 @@ import test from 'node:test'
 const shell = await readFile(new URL('../src/features/crm/layout/CrmShell.tsx', import.meta.url), 'utf8')
 const sidebar = await readFile(new URL('../src/features/crm/layout/CrmSidebar.tsx', import.meta.url), 'utf8')
 const productForm = await readFile(new URL('../src/features/crm/catalog/forms/CatalogProductEditor.tsx', import.meta.url), 'utf8')
+const modal = await readFile(new URL('../src/features/crm/shared/components/CrmModal.tsx', import.meta.url), 'utf8')
 const select = await readFile(new URL('../src/features/crm/shared/components/CrmSelect.tsx', import.meta.url), 'utf8')
 const styles = await readFile(new URL('../src/index.css', import.meta.url), 'utf8')
 
@@ -28,6 +29,13 @@ test('catalog forms and modal headers own Tailwind styles backed by CRM tokens',
   assert.ok(productForm.includes('bg-[var(--crm-input-bg)]'))
   assert.ok(productForm.includes('text-[var(--crm-text)]'))
   assert.doesNotMatch(styles, /\.crm-input\b/)
+})
+
+test('CRM modals fit their content and only scroll after reaching the viewport limit', () => {
+  assert.doesNotMatch(modal, /size="full"/)
+  assert.match(modal, /!h-auto !min-h-0/)
+  assert.match(modal, /!max-h-\[calc\(100dvh-24px\)\]/)
+  assert.match(modal, /style=\{\{ maxWidth \}\}/)
 })
 
 test('light theme separates the canvas, cards and form controls through tokens', () => {

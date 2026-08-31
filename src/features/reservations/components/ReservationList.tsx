@@ -1,5 +1,7 @@
-import { useState, type KeyboardEvent } from 'react'
+import { useState } from 'react'
 import { AlertTriangle, ChevronDown, ChevronRight, Clock3, Users } from 'lucide-react'
+import { Button } from '../../../components/ui/Button'
+import { DataTable } from '../../../components/ui/DataTable'
 import { getReservationStatusLabel, isReservationLate, reservationTimingLabel } from '../domain/reservationStatus'
 import type { Reservation, ReservationStatus } from '../types'
 
@@ -34,20 +36,10 @@ function ReservationRow({ onSelect, reservation, searchMode, selected }: {
   const tableNames = reservation.tables.length
     ? reservation.tables.map((table) => table.name).join(' · ')
     : 'Sin mesa asignada'
-  const selectReservation = () => onSelect(reservation)
-  const handleKeyDown = (event: KeyboardEvent<HTMLTableRowElement>) => {
-    if (event.key !== 'Enter' && event.key !== ' ') return
-    event.preventDefault()
-    selectReservation()
-  }
-
   return (
     <tr
       aria-current={selected ? 'true' : undefined}
-      className={`group cursor-pointer border-b border-[var(--separator)] text-[var(--foreground)] transition-colors last:border-b-0 hover:bg-[var(--surface-secondary)] focus-visible:bg-[var(--surface-secondary)] focus-visible:outline-2 focus-visible:outline-[var(--accent)] focus-visible:outline-offset-[-2px] max-md:grid max-md:grid-cols-[3.5rem_minmax(0,1fr)_1rem] max-md:gap-x-2.5 max-md:gap-y-1 max-md:rounded-2xl max-md:border max-md:border-[var(--separator)] max-md:bg-[var(--surface)] max-md:p-3 max-md:shadow-sm ${selected ? 'bg-[var(--accent-soft)] shadow-[inset_4px_0_var(--accent)]' : 'bg-[var(--surface)]'} ${late ? 'shadow-[inset_4px_0_var(--warning)]' : ''}`}
-      onClick={selectReservation}
-      onKeyDown={handleKeyDown}
-      tabIndex={0}
+      className={`group border-b border-[var(--separator)] text-[var(--foreground)] transition-colors last:border-b-0 hover:bg-[var(--surface-secondary)] max-md:grid max-md:grid-cols-[3.5rem_minmax(0,1fr)_2.5rem] max-md:gap-x-2.5 max-md:gap-y-1 max-md:rounded-2xl max-md:border max-md:border-[var(--separator)] max-md:bg-[var(--surface)] max-md:p-3 max-md:shadow-sm ${selected ? 'bg-[var(--accent-soft)] shadow-[inset_4px_0_var(--accent)]' : 'bg-[var(--surface)]'} ${late ? 'shadow-[inset_4px_0_var(--warning)]' : ''}`}
     >
       <td className="w-18 px-4 py-3 align-middle max-md:row-span-3 max-md:w-auto max-md:border-r max-md:border-[var(--separator)] max-md:p-0 max-md:pr-2 max-md:pt-0.5">
         <time className={`text-lg font-black ${late ? 'text-[var(--warning)]' : ''}`}>
@@ -61,7 +53,9 @@ function ReservationRow({ onSelect, reservation, searchMode, selected }: {
           <small className="flex items-center gap-1 text-xs text-[var(--muted)]">
             <Users aria-hidden="true" size={13} />
             {reservation.partySize} {reservation.partySize === 1 ? 'persona' : 'personas'}
-            <span className="max-sm:hidden">· {reservation.customerPhone}</span>
+            {reservation.customerPhone ? (
+              <span className="max-sm:hidden">· {reservation.customerPhone}</span>
+            ) : null}
           </small>
           {reservation.notes ? <em className="truncate text-[11px] not-italic text-[var(--muted)] max-md:hidden">{reservation.notes}</em> : null}
         </div>
@@ -85,7 +79,9 @@ function ReservationRow({ onSelect, reservation, searchMode, selected }: {
         </div>
       </td>
       <td className="w-10 px-3 py-3 align-middle text-[var(--muted)] max-md:col-start-3 max-md:row-span-3 max-md:row-start-1 max-md:w-auto max-md:self-center max-md:p-0">
-        <ChevronRight aria-hidden="true" className="transition-transform group-hover:translate-x-0.5" size={18} />
+        <Button aria-label={`Abrir reserva de ${reservation.customerName}`} onClick={() => onSelect(reservation)} size="sm" type="button" variant="tertiary">
+          <ChevronRight aria-hidden="true" className="transition-transform group-hover:translate-x-0.5" size={18} />
+        </Button>
       </td>
     </tr>
   )
@@ -102,21 +98,14 @@ export function ReservationList({ onSelect, reservations, searchMode, selectedId
 
   return (
     <div className="w-full min-w-0 flex-1 overflow-y-auto overscroll-contain rounded-2xl border border-[var(--separator)] bg-[var(--surface)] shadow-sm [-webkit-overflow-scrolling:touch] max-md:flex-none max-md:overflow-visible max-md:rounded-none max-md:border-0 max-md:bg-transparent max-md:shadow-none">
-      <table className="w-full table-fixed border-collapse max-md:block">
-        <colgroup className="max-md:hidden">
-          <col className="w-18" />
-          <col className="w-[38%]" />
-          <col className="w-[28%]" />
-          <col />
-          <col className="w-10" />
-        </colgroup>
+      <DataTable aria-label="Reservas" className="w-full table-fixed border-collapse max-md:block" filterable={false} sortable={false}>
         <thead className="bg-[var(--surface-secondary)] text-left text-[10px] font-black uppercase tracking-wider text-[var(--muted)] max-md:hidden">
           <tr>
             <th className="px-4 py-2.5" scope="col">Hora</th>
             <th className="px-4 py-2.5" scope="col">Cliente</th>
             <th className="px-4 py-2.5" scope="col">Mesa / zona</th>
             <th className="px-4 py-2.5" scope="col">Estado</th>
-            <th aria-label="Abrir reserva" scope="col" />
+            <th aria-label="Abrir reserva" data-sortable="false" scope="col" />
           </tr>
         </thead>
         <tbody className="max-md:block max-md:space-y-2">
@@ -139,7 +128,7 @@ export function ReservationList({ onSelect, reservations, searchMode, selectedId
           ) : null}
           {showArchived ? archived.map((reservation) => <ReservationRow key={reservation.id} onSelect={onSelect} reservation={reservation} searchMode={searchMode} selected={selectedId === reservation.id} />) : null}
         </tbody>
-      </table>
+      </DataTable>
     </div>
   )
 }

@@ -7,8 +7,8 @@ const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 
 test('tenant feature helpers normalize assignments and preserve legacy cached sessions', () => {
   assert.deepEqual(
-    normalizeTenantFeatures(['inventory', 'unknown', 'discounts', 'inventory']),
-    ['discounts', 'inventory'],
+    normalizeTenantFeatures(['inventory_recipes', 'inventory', 'unknown', 'discounts', 'inventory']),
+    ['discounts', 'inventory', 'inventory_recipes'],
   )
   assert.equal(hasTenantFeature({}, 'discounts'), true)
   assert.equal(hasTenantFeature({ features: [] }, 'discounts'), false)
@@ -34,6 +34,8 @@ test('CRM and POS hide or disable every optional feature surface', () => {
   const tenantState = read('../src/features/session/services/loadTenantState.ts')
   const restaurantController = read('../src/features/restaurant/hooks/useRestaurantController.ts')
   const reservationsController = read('../src/features/reservations/hooks/useReservationsController.ts')
+  const kds = read('../src/features/production/components/KdsPage.tsx')
+  const productInventory = read('../src/features/crm/inventory/components/ProductInventoryEditor.tsx')
 
   assert.match(appShell, /hasTenantFeature\(context, 'restaurant'\)/)
   assert.match(appShell, /hasTenantFeature\(context, 'reservations'\)/)
@@ -43,12 +45,17 @@ test('CRM and POS hide or disable every optional feature surface', () => {
   assert.match(posPage, /discountsEnabled && quickSale\.discountModalOpen/)
   assert.match(posPage, /reservationsEnabled && props\.reservations\.isOpen/)
   assert.match(posPage, /restaurantEnabled && restaurant\.pendingPayment/)
+  assert.match(posPage, /hasTenantFeature\(props\.context, 'inventory_recipes'\)/)
+  assert.match(posPage, /inventoryRecipesEnabled && preparationsOpen/)
   assert.match(tenantState, /discounts: hasTenantFeature\(context, 'discounts'\) \? posCatalog\.discounts : \[\]/)
   assert.match(restaurantController, /if \(options\.enabled\) return[\s\S]*setPosView\(\{ type: 'quick_sale' \}\)/)
   assert.match(reservationsController, /if \(options\.enabled\) return[\s\S]*setIsOpen\(false\)/)
   assert.match(crmPermissions, /access: 'multi_device'/)
   assert.match(crmPermissions, /tables: 'restaurant'/)
   assert.match(crmPermissions, /'inventory-stock': 'inventory'/)
+  assert.match(crmPermissions, /'inventory-preparations': \['inventory', 'inventory_recipes'\]/)
   assert.match(crmSidebar, /allowedInventoryItems\.length/)
   assert.match(formats, /inventoryFeatureEnabled \? <div/)
+  assert.match(kds, /inventoryRecipesEnabled \? <Button/)
+  assert.match(productInventory, /inventoryRecipesEnabled \|\| value !== 'recipe'/)
 })

@@ -30,5 +30,8 @@ export function buildCatalogOrderLinesPayload(lines: PersistableOrderLine[]) {
 }
 
 export function buildRestaurantOrderLinesPayload(detail: RestaurantOrderDetail) {
-  return buildCatalogOrderLinesPayload(detail.lines)
+  return buildCatalogOrderLinesPayload(detail.lines).map((line, index) => ({
+    ...line,
+    unitPriceCents: detail.lines[index].unitPriceCents,
+  }))
 }

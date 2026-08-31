@@ -1,10 +1,9 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
-import { ArrowDown, ArrowUp, ArrowUpDown, Ban, FileText, History, QrCode, RefreshCw, Send, SlidersHorizontal, X } from 'lucide-react'
+import { Ban, FileText, History, QrCode, RefreshCw, Send, SlidersHorizontal, X } from 'lucide-react'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination'
 import { CrmModal } from '../../shared/components/CrmModal'
-import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { KpiCard } from '../../dashboard/pages/DashboardPage'
@@ -150,8 +149,13 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   const hasActiveFilters = Boolean(dateFrom || dateTo || productQuery || categoryQuery || discountFilter !== 'all')
   const activeFilterCount = [dateFrom || dateTo, productQuery, categoryQuery, discountFilter !== 'all'].filter(Boolean).length
 
-  function handleSort(nextSortKey: SalesReportSortKey) {
+  function handleSort(nextSortKey: SalesReportSortKey, nextDirection?: SalesReportSortDirection) {
     setCurrentPage(1)
+    if (nextDirection) {
+      setSortKey(nextSortKey)
+      setSortDirection(nextDirection)
+      return
+    }
     if (sortKey === nextSortKey) {
       setSortDirection((current) => current === 'asc' ? 'desc' : 'asc')
       return
@@ -404,36 +408,24 @@ export function SalesReportTicketsTable({
 }: {
   isLoading: boolean
   onSelect: (ticketId: string) => void
-  onSort: (sortKey: SalesReportSortKey) => void
+  onSort: (sortKey: SalesReportSortKey, direction?: SalesReportSortDirection) => void
   sortDirection: SalesReportSortDirection
   sortKey: SalesReportSortKey
   tickets: CrmSalesReports['tickets']
 }) {
   return (
     <div className="!overflow-x-auto">
-      <UiDataTable aria-label="Tickets de ventas" className="!w-full !min-w-[1200px] !border-collapse">
+      <UiDataTable aria-label="Tickets de ventas" className="!w-full !min-w-[1200px] !border-collapse" emptyContent={isLoading ? 'Cargando tickets...' : 'No hay tickets para este local.'} filterable={false} onSortChange={({ column, direction }) => onSort(column as SalesReportSortKey, direction === 'ascending' ? 'asc' : 'desc')} sortDescriptor={{ column: sortKey, direction: sortDirection === 'asc' ? 'ascending' : 'descending' }}>
         <thead>
           <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
-            <th className="!min-w-40 !px-[22px] !py-3">
-              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ticket" onSort={onSort} sortKey="ticketId" />
-            </th>
-            <th className="!min-w-[170px] !px-3 !py-3">
-              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Fecha" onSort={onSort} sortKey="createdAt" />
-            </th>
-            <th className="!min-w-[90px] !px-3 !py-3">
-              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Artículos" onSort={onSort} sortKey="quantity" />
-            </th>
-            <th className="!min-w-[120px] !px-3 !py-3">
-              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Método" onSort={onSort} sortKey="paymentMethod" />
-            </th>
-            <th className="!min-w-[170px] !px-3 !py-3">Descuento</th>
-            <th className="!min-w-[100px] !px-3 !py-3">
-              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Estado" onSort={onSort} sortKey="status" />
-            </th>
-            <th className="!min-w-[180px] !px-3 !py-3">Estado fiscal</th>
-            <th className="!min-w-[120px] !px-[22px] !py-3">
-              <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Total" onSort={onSort} sortKey="totalCents" />
-            </th>
+            <th className="!min-w-40 !px-[22px] !py-3" data-column-key="ticketId">Ticket</th>
+            <th className="!min-w-[170px] !px-3 !py-3" data-column-key="createdAt">Fecha</th>
+            <th className="!min-w-[90px] !px-3 !py-3" data-column-key="quantity">Artículos</th>
+            <th className="!min-w-[120px] !px-3 !py-3" data-column-key="paymentMethod">Método</th>
+            <th className="!min-w-[170px] !px-3 !py-3" data-sortable="false">Descuento</th>
+            <th className="!min-w-[100px] !px-3 !py-3" data-column-key="status">Estado</th>
+            <th className="!min-w-[180px] !px-3 !py-3" data-sortable="false">Estado fiscal</th>
+            <th className="!min-w-[120px] !px-[22px] !py-3" data-column-key="totalCents">Total</th>
           </tr>
         </thead>
         <tbody>
@@ -493,39 +485,7 @@ export function SalesReportTicketsTable({
           ))}
         </tbody>
       </UiDataTable>
-      {!tickets.length ? <EmptyList message={isLoading ? 'Cargando tickets...' : 'No hay tickets para este local.'} /> : null}
     </div>
-  )
-}
-
-export function SalesReportSortHeader({
-  currentDirection,
-  currentKey,
-  label,
-  onSort,
-  sortKey,
-}: {
-  currentDirection: SalesReportSortDirection
-  currentKey: SalesReportSortKey
-  label: string
-  onSort: (sortKey: SalesReportSortKey) => void
-  sortKey: SalesReportSortKey
-}) {
-  const isActive = currentKey === sortKey
-  const SortIcon = isActive ? currentDirection === 'asc' ? ArrowUp : ArrowDown : ArrowUpDown
-
-  return (
-    <UiButton
-      aria-label={`Ordenar por ${label}`}
-      className={isActive
-        ? '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-secondary)] !shadow-none'
-        : '!inline-flex !w-fit !items-center !gap-1.5 !border-0 !bg-transparent !p-0 !text-left !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)] !shadow-none'}
-      onClick={() => onSort(sortKey)}
-      type="button"
-    >
-      <span>{label}</span>
-      <SortIcon className="!size-3.5" />
-    </UiButton>
   )
 }
 
@@ -685,17 +645,15 @@ export function SalesReportTicketModal({
           <div className="!mb-5 !rounded-[10px] !bg-[var(--crm-surface-soft)] !px-3.5 !py-3 !text-xs !font-medium !text-[var(--crm-text-muted)]">Este ticket no tiene un registro fiscal asociado.</div>
         )}
 
-        <div className="!overflow-x-auto !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)]">
-          <div className="!grid !min-h-11 !min-w-[660px] !grid-cols-[minmax(240px,1fr)_minmax(150px,0.65fr)_80px_120px_120px] !items-center !gap-3 !border-b !border-[var(--crm-border)] !px-4 !text-[10px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
-            <span>Producto</span>
-            <span>Formato</span>
-            <span>Cantidad</span>
-            <span>Precio / ud.</span>
-            <span>Total</span>
-          </div>
+        <div className="!overflow-hidden !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)]">
+          <UiDataTable aria-label="Líneas del ticket" className="!w-full !min-w-[660px] !border-collapse" emptyContent="Este ticket no contiene líneas de producto." filterPlaceholder="Filtrar líneas del ticket…">
+            <thead><tr className="!min-h-11 !border-b !border-[var(--crm-border)] !text-[10px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
+              <th className="!min-w-[240px] !px-4 !py-3">Producto</th><th className="!min-w-[150px] !px-3 !py-3">Formato</th><th className="!w-[80px] !px-3 !py-3">Cantidad</th><th className="!w-[120px] !px-3 !py-3">Precio / ud.</th><th className="!w-[120px] !px-3 !py-3">Total</th>
+            </tr></thead>
+            <tbody>
           {ticket.lines.map((line) => (
-            <div className="!grid !min-h-[68px] !min-w-[660px] !grid-cols-[minmax(240px,1fr)_minmax(150px,0.65fr)_80px_120px_120px] !items-center !gap-3 !border-b !border-[var(--crm-border)] !px-4 !py-3 !text-[13px] !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={line.id}>
-              <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
+            <tr className="!min-h-[68px] !border-b !border-[var(--crm-border)] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={line.id}>
+              <td className="!min-w-[240px] !px-4 !py-3"><div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
                 <strong>{line.productName}</strong>
                 {line.modifiers.length ? (
                   <span>{line.modifiers.map((modifier) => `+ ${modifier.name}${modifier.priceCents ? ` (${formatMoney(modifier.priceCents)})` : ''}`).join(' · ')}</span>
@@ -708,14 +666,15 @@ export function SalesReportTicketModal({
                     {component.modifiers?.length ? ` · ${component.modifiers.map((modifier) => modifier.name).join(', ')}` : ''}
                   </span>)}
                 </div> : null}
-              </div>
-              <span>{line.variantName || 'Sin formato'}</span>
-              <span>{line.quantity}</span>
-              <span className="!font-mono">{formatMoney(line.quantity ? Math.round(line.lineTotalCents / line.quantity) : line.unitPriceCents)}</span>
-              <strong className="!font-mono !text-[var(--crm-text)]">{formatMoney(line.lineTotalCents)}</strong>
-            </div>
+              </div></td>
+              <td className="!min-w-[150px] !px-3 !py-3">{line.variantName || 'Sin formato'}</td>
+              <td className="!w-[80px] !px-3 !py-3" data-sort-value={line.quantity}>{line.quantity}</td>
+              <td className="!w-[120px] !px-3 !py-3 !font-mono" data-sort-value={line.quantity ? Math.round(line.lineTotalCents / line.quantity) : line.unitPriceCents}>{formatMoney(line.quantity ? Math.round(line.lineTotalCents / line.quantity) : line.unitPriceCents)}</td>
+              <td className="!w-[120px] !px-3 !py-3 !font-mono !font-bold !text-[var(--crm-text)]" data-sort-value={line.lineTotalCents}>{formatMoney(line.lineTotalCents)}</td>
+            </tr>
           ))}
-          {!ticket.lines.length ? <EmptyList message="Este ticket no contiene líneas de producto." /> : null}
+            </tbody>
+          </UiDataTable>
         </div>
       </div>
 
@@ -748,32 +707,31 @@ export function SalesReportAggregateTable({
   items: CrmSalesReportAggregate[]
   labelHeading: string
   loading: boolean
-  onSort: (sortKey: SalesReportSortKey) => void
+  onSort: (sortKey: SalesReportSortKey, direction?: SalesReportSortDirection) => void
   sortDirection: SalesReportSortDirection
   sortKey: SalesReportSortKey
 }) {
   return (
-    <div className="grid overflow-auto !grid !overflow-auto">
-      <div className="sticky top-0 z-[1] grid min-w-[920px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface-soft)] px-3 py-2.5 text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !sticky !top-0 !z-[1] !grid !min-h-[50px] !min-w-[760px] !grid-cols-[minmax(250px,1fr)_120px_120px_150px_150px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[22px] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label={labelHeading} onSort={onSort} sortKey="label" />
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Tickets" onSort={onSort} sortKey="ticketCount" />
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Unidades" onSort={onSort} sortKey="quantity" />
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Media / unidad" onSort={onSort} sortKey="average" />
-        <SalesReportSortHeader currentDirection={sortDirection} currentKey={sortKey} label="Ventas" onSort={onSort} sortKey="totalCents" />
-      </div>
+    <div className="overflow-auto">
+      <UiDataTable aria-label={`Ventas agrupadas por ${labelHeading.toLowerCase()}`} className="!w-full !min-w-[760px] !border-collapse" emptyContent={loading ? 'Calculando informe...' : `No hay ventas agrupadas por ${labelHeading.toLowerCase()}.`} filterable={false} onSortChange={({ column, direction }) => onSort(column as SalesReportSortKey, direction === 'ascending' ? 'asc' : 'desc')} sortDescriptor={{ column: sortKey, direction: sortDirection === 'asc' ? 'ascending' : 'descending' }}>
+        <thead><tr className="!border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !text-[11px] !font-semibold !uppercase !tracking-[0.045em] !text-[var(--crm-text-muted)]">
+          <th className="!min-w-[250px] !px-[22px] !py-3" data-column-key="label">{labelHeading}</th><th className="!w-[120px] !px-3 !py-3" data-column-key="ticketCount">Tickets</th><th className="!w-[120px] !px-3 !py-3" data-column-key="quantity">Unidades</th><th className="!w-[150px] !px-3 !py-3" data-column-key="average">Media / unidad</th><th className="!w-[150px] !px-[22px] !py-3" data-column-key="totalCents">Ventas</th>
+        </tr></thead>
+        <tbody>
       {items.map((item) => (
-        <div className="grid min-h-16 min-w-[920px] items-center gap-3 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] px-3 py-2.5 text-[13px] font-medium text-[var(--crm-text-secondary)] transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] !grid !min-h-[72px] !min-w-[760px] !grid-cols-[minmax(250px,1fr)_120px_120px_150px_150px] !items-center !gap-3.5 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[22px] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] !transition-colors !duration-150 hover:!bg-[var(--crm-surface-hover)]" key={item.id}>
-          <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
+        <tr className="!min-h-[72px] !border-b !border-[var(--crm-border-subtle)] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] hover:!bg-[var(--crm-surface-hover)]" key={item.id}>
+          <td className="!min-w-[250px] !px-[22px] !py-3"><div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
             <strong>{item.label}</strong>
             <span>{item.ticketCount === 1 ? '1 operación' : `${item.ticketCount} operaciones`}</span>
-          </div>
-          <span>{item.ticketCount}</span>
-          <span>{item.quantity}</span>
-          <span className="!font-mono">{formatMoney(item.quantity ? Math.round(item.totalCents / item.quantity) : 0)}</span>
-          <strong className="!font-mono !text-[var(--crm-text)]">{formatMoney(item.totalCents)}</strong>
-        </div>
+          </div></td>
+          <td className="!w-[120px] !px-3 !py-3" data-sort-value={item.ticketCount}>{item.ticketCount}</td>
+          <td className="!w-[120px] !px-3 !py-3" data-sort-value={item.quantity}>{item.quantity}</td>
+          <td className="!w-[150px] !px-3 !py-3 !font-mono" data-sort-value={item.quantity ? item.totalCents / item.quantity : 0}>{formatMoney(item.quantity ? Math.round(item.totalCents / item.quantity) : 0)}</td>
+          <td className="!w-[150px] !px-[22px] !py-3 !font-mono !font-bold !text-[var(--crm-text)]" data-sort-value={item.totalCents}>{formatMoney(item.totalCents)}</td>
+        </tr>
       ))}
-      {!items.length ? <EmptyList message={loading ? 'Calculando informe...' : `No hay ventas agrupadas por ${labelHeading.toLowerCase()}.`} /> : null}
+        </tbody>
+      </UiDataTable>
     </div>
   )
 }

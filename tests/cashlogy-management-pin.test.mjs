@@ -25,7 +25,7 @@ test('el contenido y los totales derivados del stacker permanecen ocultos sin PI
 
   assert.match(modal, /showStacker \? \(loading && !accounting[\s\S]*stackerTotalCents/)
   assert.match(modal, /showStacker \? \(loading && !accounting[\s\S]*totalCents/)
-  assert.match(modal, /showStacker \? row\.stackerCount : '••••'/)
+  assert.match(modal, /showStacker \? `\$\{row\.stackerCount\}\/\$\{formatMoney\(row\.valueCents \* row\.stackerCount\)\}` : '••••'/)
   assert.match(modal, /showStacker \? formatMoney\(row\.valueCents \* \(row\.recyclerCount \+ row\.stackerCount\)\) : '••••'/)
   assert.match(modal, /Mostrar stacker/)
 })

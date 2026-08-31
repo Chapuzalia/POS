@@ -2,19 +2,21 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const [page, list, detail, form, map, timeline] = await Promise.all([
+const [page, list, detail, form, map, timeline, selectionStep, optionalPhoneMigration] = await Promise.all([
   readFile(new URL('../src/features/reservations/components/ReservationsPage.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationList.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationDetailPanel.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationFormModal.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationMapView.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationTimelineView.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../src/features/reservations/components/ReservationSelectionStep.tsx', import.meta.url), 'utf8'),
+  readFile(new URL('../supabase/migrations/20260830120000_make_reservation_phone_optional.sql', import.meta.url), 'utf8'),
 ])
 
 test('el mapa permite desplazar el lienzo desde el espacio entre mesas', () => {
   assert.match(map, /className="map-transform-layer absolute z-\[2\]"/)
-  assert.match(map, /onPointerDown=\{viewportApi\.startBackgroundPointer\}/)
-  assert.match(map, /onPointerMove=\{viewportApi\.moveBackgroundPointer\}/)
+  assert.match(map, /onPointerDown=\{props\.selection \? undefined : viewportApi\.startBackgroundPointer\}/)
+  assert.match(map, /onPointerMove=\{props\.selection \? undefined : viewportApi\.moveBackgroundPointer\}/)
 })
 
 test('reservas ofrece una tercera vista temporal operativa', () => {
@@ -60,7 +62,7 @@ test('reservas convierte excepciones y zonas en filtros operativos', () => {
 test('la lista usa una tabla real, separa el historial y conserva la seleccion', () => {
   assert.match(list, /Historial del día/)
   assert.match(list, /aria-current=\{selected \? 'true'/)
-  assert.match(list, /<table/)
+  assert.match(list, /<DataTable aria-label="Reservas"/)
   assert.match(list, /<thead/)
   assert.match(list, /<tbody/)
   assert.match(list, /scope="col">Hora<\/th>/)
@@ -68,7 +70,8 @@ test('la lista usa una tabla real, separa el historial y conserva la seleccion',
   assert.match(list, /scope="col">Mesa \/ zona<\/th>/)
   assert.match(list, /scope="col">Estado<\/th>/)
   assert.doesNotMatch(list, /role="listitem"/)
-  assert.doesNotMatch(list, /<UiButton/)
+  assert.match(list, /<Button aria-label=\{`Abrir reserva de/)
+  assert.doesNotMatch(list, /<tr[^>]*onClick=/)
 })
 
 test('la vista general movil usa los breakpoints predefinidos de Tailwind', () => {
@@ -148,4 +151,47 @@ test('la disponibilidad se recalcula al cambiar el intervalo antes de guardar', 
   assert.match(form, /Comprobando disponibilidad/)
   assert.match(form, /\[checkAvailability, reservationId, schedule\]/)
   assert.match(form, /isCheckingAvailability/)
+})
+
+test('el alta de reserva se divide en datos y selección visual', () => {
+  assert.match(form, /const isCreateFlow = !props\.reservation/)
+  assert.match(form, /useState<1 \| 2>\(1\)/)
+  assert.match(form, /Pasos de la nueva reserva/)
+  assert.match(form, /Mesa y horario/)
+  assert.match(form, /Siguiente/)
+  assert.match(form, /Atrás/)
+  assert.match(form, /<ReservationSelectionStep/)
+  assert.match(selectionStep, /Mapa real/)
+  assert.match(selectionStep, /Timeline/)
+  assert.match(selectionStep, /<ReservationMapView/)
+  assert.match(selectionStep, /<ReservationTimelineView/)
+})
+
+test('el plano y el timeline permiten elegir mesa y hueco en el segundo paso', () => {
+  assert.match(map, /selection\?:/)
+  assert.match(map, /props\.selection\.onChange\(next\)/)
+  assert.match(map, /flex min-h-0 min-w-0 flex-1 flex-col/)
+  assert.match(map, /props\.selection \? 'min-h-112 md:min-h-0' : 'min-h-112'/)
+  assert.match(map, /const autoFit = Boolean\(props\.selection\)/)
+  assert.match(map, /const fittedItems = useMemo\(\(\) => \[\.\.\.tables, \.\.\.mapElements\]/)
+  assert.match(map, /new ResizeObserver/)
+  assert.match(map, /requestAnimationFrame\(fitSelectionToCanvas\)/)
+  assert.match(map, /onWheel=\{props\.selection \? undefined : viewportApi\.onWheel\}/)
+  assert.match(map, /\{!props\.selection \? <MapViewportControls/)
+  assert.match(map, /\{mapElements\.map\(\(element\) => <div/)
+  assert.match(map, /element\.kind === 'wall'/)
+  assert.match(map, /element\.kind === 'column'/)
+  assert.match(map, /element\.kind === 'text' \? <span>\{element\.text\}<\/span>/)
+  assert.match(timeline, /draft\?:/)
+  assert.match(timeline, /Nueva reserva seleccionada/)
+  assert.match(selectionStep, /onSlotSelect/)
+  assert.match(selectionStep, /allowUnassignedCreate=\{false\}/)
+})
+
+test('el teléfono de la reserva es opcional en interfaz y base de datos', () => {
+  assert.match(form, /Teléfono opcional/)
+  assert.doesNotMatch(form, /next\.customerPhone/)
+  assert.match(optionalPhoneMigration, /drop constraint if exists reservations_customer_phone_check/)
+  assert.doesNotMatch(optionalPhoneMigration, /btrim\(coalesce\(p_customer_phone, ''\)\) = ''/)
+  assert.match(optionalPhoneMigration, /customer_phone = btrim\(coalesce\(p_customer_phone, ''\)\)/)
 })

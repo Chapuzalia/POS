@@ -1,7 +1,7 @@
 import { Button as UiButton } from '../components/ui/Button'
 import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
-import { useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
 import {
   CashPaymentModal,
@@ -35,7 +35,7 @@ import { validateConfiguredDiscountPin, validateManualDiscountPin } from '../ser
 import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
-import { ReservationsPage, type useReservationsController } from '../features/reservations'
+import type { useReservationsController } from '../features/reservations/hooks/useReservationsController'
 import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
 import { CustomerInvoiceModal } from '../features/customers'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
@@ -56,10 +56,19 @@ import type {
   TenantContext,
 } from '../types'
 
+const ReservationsPage = lazy(() => import('../features/reservations/components/ReservationsPage').then((module) => ({ default: module.ReservationsPage })))
+const InventoryPreparationsPanel = lazy(() => import('../features/inventory/InventoryPreparationsPanel').then((module) => ({ default: module.InventoryPreparationsPanel })))
+
 type CashController = ReturnType<typeof useCashSession>
 type QuickSaleController = ReturnType<typeof useQuickSale>
 type RestaurantController = ReturnType<typeof useRestaurantController>
 type ReservationsController = ReturnType<typeof useReservationsController>
+
+function DeferredPanelFallback({ label }: { label: string }) {
+  return <div aria-busy="true" className="grid min-h-40 w-full place-items-center p-6 text-sm font-extrabold text-[var(--muted)]" role="status">
+    Cargando {label}…
+  </div>
+}
 
 type AddFeedback = {
   announcement: string
@@ -139,6 +148,7 @@ export function PosPage(props: Props) {
   const displayedErrorId = props.errorId
   const clearDisplayedError = props.onSetError
   const [configOpen, setConfigOpen] = useState(false)
+  const [preparationsOpen, setPreparationsOpen] = useState(false)
   const [cashlogyMachineOpen, setCashlogyMachineOpen] = useState(false)
   const [quickSaleExitName, setQuickSaleExitName] = useState('')
   const [quickSaleExitOpen, setQuickSaleExitOpen] = useState(false)
@@ -164,6 +174,7 @@ export function PosPage(props: Props) {
   const discountsEnabled = hasTenantFeature(props.context, 'discounts')
   const restaurantEnabled = hasTenantFeature(props.context, 'restaurant')
   const reservationsEnabled = restaurantEnabled && hasTenantFeature(props.context, 'reservations')
+  const inventoryRecipesEnabled = hasTenantFeature(props.context, 'inventory') && hasTenantFeature(props.context, 'inventory_recipes')
   const appliedDiscount = discountsEnabled ? quickSale.discount : null
   const activeCashlogyError = isActiveCashlogyError({
     displayedError,
@@ -301,14 +312,13 @@ export function PosPage(props: Props) {
             item,
           })
         }}
-        onRemove={(lineId) => {
-          const line = restaurant.order?.lines.find((candidate) => candidate.id === lineId)
-          if (line) restaurant.setPendingLineRemoval(line)
-        }}
+        onRemove={restaurant.requestLineRemoval}
         onRemoveInvoiceCustomer={removeInvoiceCustomer}
         onServeAll={restaurant.serveLineFully}
         onServeAllOrder={restaurant.serveOrderFully}
         onServeOne={restaurant.serveLineUnit}
+        onSetQuantity={restaurant.setLineQuantity}
+        onSetUnitPrice={restaurant.setLineUnitPrice}
         productionState={restaurant.productionState}
         onSendToProduction={restaurant.sendToProduction}
         order={restaurant.order}
@@ -445,6 +455,7 @@ export function PosPage(props: Props) {
         canManageCash={canManageCash && !cashlogyPaymentLocked}
         canOpenCashDrawer={canManageCash && !cashlogyPaymentLocked}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
+        canOpenPreparations={inventoryRecipesEnabled}
         cashlogyConnected={cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
@@ -455,6 +466,7 @@ export function PosPage(props: Props) {
         onGenerateInvoice={() => setCustomerModalOpen(true)}
         onOpenConfig={() => setConfigOpen(true)}
         onOpenReservations={props.reservations.open}
+        onOpenPreparations={() => setPreparationsOpen(true)}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
         onOpenCashlogyMachine={() => setCashlogyMachineOpen(true)}
         onOpenShiftSummary={openShiftSummary}
@@ -483,7 +495,7 @@ export function PosPage(props: Props) {
         {cashlogyPendingNotice}
       </div> : null}
       <AddProductFlyAnimation feedback={props.addFeedback.flyFeedback} />
-      {reservationsEnabled && props.reservations.isOpen ? <ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /> : null}
+      {reservationsEnabled && props.reservations.isOpen ? <Suspense fallback={<DeferredPanelFallback label="reservas" />}><ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /></Suspense> : null}
 
       {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
         invoiceSelected={Boolean(invoiceCustomer)}
@@ -615,7 +627,7 @@ export function PosPage(props: Props) {
           </div>
         </section>
       </AppModal> : null}
-      {restaurantEnabled && restaurant.pendingLineRemoval ? <RemoveOrderLineModal
+      {restaurantEnabled && restaurant.pendingLineRemoval && restaurant.pendingLineRemoval.servedQuantity > 0 ? <RemoveOrderLineModal
         isBusy={props.isBusy}
         line={restaurant.pendingLineRemoval}
         onCancel={() => restaurant.setPendingLineRemoval(null)}
@@ -682,6 +694,7 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
+      {inventoryRecipesEnabled && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={() => setPreparationsOpen(false)}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onClose={() => setPreparationsOpen(false)} /></Suspense></div></AppModal> : null}
       {quickSaleExitOpen ? <QuickSaleExitModal
         canSave={Boolean(props.context.canTakeOrders && cash.session)}
         defaultName={quickSaleExitName}

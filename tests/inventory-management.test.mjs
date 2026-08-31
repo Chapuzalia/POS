@@ -2,10 +2,12 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import {
+  addInventoryStockQuantity,
   calculateStockUnitConsumption,
   inventoryQuantityStep,
   parseInventoryQuantity,
   parsePositiveInventoryQuantity,
+  parseInventoryStockQuantity,
   validateInventoryDecimalPlaces,
 } from '../src/features/crm/inventory/inventoryModel.ts'
 import {
@@ -70,16 +72,21 @@ const consolidatedDatabase = readFileSync(
 const shell = readFileSync(new URL('../src/features/crm/layout/CrmSidebar.tsx', import.meta.url), 'utf8')
 const routes = readFileSync(new URL('../src/features/crm/routing/CrmSectionContent.tsx', import.meta.url), 'utf8')
 const stockPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryStockPage.tsx', import.meta.url), 'utf8')
+const itemsPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryItemsPage.tsx', import.meta.url), 'utf8')
+const preparationsPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryPreparationsPage.tsx', import.meta.url), 'utf8')
 const warehousesPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryWarehousesPage.tsx', import.meta.url), 'utf8')
 const settingsPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventorySettingsPage.tsx', import.meta.url), 'utf8')
 const formatsPage = readFileSync(new URL('../src/features/crm/catalog/pages/CatalogFormatsPage.tsx', import.meta.url), 'utf8')
 
-test('expone Inventario como submenu con sus tres paginas', () => {
+test('expone los seis conceptos del nuevo inventario en el submenu', () => {
   assert.deepEqual(
     inventoryNavItems.map(({ id, label }) => ({ id, label })),
     [
       { id: 'inventory-stock', label: 'Stock' },
+      { id: 'inventory-items', label: 'Artículos' },
+      { id: 'inventory-preparations', label: 'Elaboraciones' },
       { id: 'inventory-warehouses', label: 'Almacenes' },
+      { id: 'inventory-units', label: 'Unidades' },
       { id: 'inventory-settings', label: 'Configuración' },
     ],
   )
@@ -88,7 +95,10 @@ test('expone Inventario como submenu con sus tres paginas', () => {
   assert.match(shell, /label="Inventario"/)
   assert.match(shell, /inventoryNavItems/)
   assert.match(routes, /case 'inventory-stock':/)
+  assert.match(routes, /case 'inventory-items':/)
+  assert.match(routes, /case 'inventory-preparations':/)
   assert.match(routes, /case 'inventory-warehouses':/)
+  assert.match(routes, /case 'inventory-units':/)
   assert.match(routes, /case 'inventory-settings':/)
 })
 
@@ -104,6 +114,13 @@ test('las cantidades admiten unidades completas y consumos fraccionarios control
   assert.equal(parsePositiveInventoryQuantity('80', 0, 'El consumo'), 80)
   assert.throws(() => parsePositiveInventoryQuantity('0', 0, 'El consumo'), /mayor que cero/)
   assert.throws(() => validateInventoryDecimalPlaces(7), /entre 0 y 6/)
+})
+
+test('una entrada de stock se suma al nivel actual aunque este sea negativo', () => {
+  assert.equal(parseInventoryStockQuantity('-4,314289', 6), -4.314289)
+  assert.equal(addInventoryStockQuantity(-4.314289, '5', 6), 0.685711)
+  assert.equal(addInventoryStockQuantity(2.5, '0,25', 2), 2.75)
+  assert.throws(() => addInventoryStockQuantity(2, '-1', 0), /cantidad válida|negativa/)
 })
 
 test('calcula cubatas, chupitos y mixers en la unidad fisica de stock', () => {
@@ -332,15 +349,17 @@ test('la capacidad pertenece a la unidad reutilizable y no al producto', () => {
   )
 })
 
-test('las pantallas permiten crear configuracion y editar stock por almacen', () => {
-  assert.match(stockPage, /catalog\.products\.filter\(\(product\) => product\.active\)/)
+test('las pantallas separan artículos físicos, stock y elaboraciones', () => {
+  assert.match(stockPage, /snapshot\.items/)
   assert.match(stockPage, /snapshot\.warehouses\.map/)
-  assert.match(stockPage, /saveInventoryProductStock/)
+  assert.match(stockPage, /saveInventoryItemStock/)
   assert.match(stockPage, /parseInventoryQuantity/)
-  assert.match(stockPage, /unit\.contentQuantity/)
-  assert.match(stockPage, /unit\.contentUnitId/)
-  assert.doesNotMatch(stockPage, /Contenido por unidad/)
-  assert.doesNotMatch(stockPage, /draft\.contentQuantity/)
+  assert.match(itemsPage, /saveInventoryItem/)
+  assert.match(itemsPage, /Nuevo artículo/)
+  assert.match(itemsPage, /Ruta de almacenes/)
+  assert.match(preparationsPage, /saveInventoryProductionRecipe/)
+  assert.match(preparationsPage, /Almacén de producción/)
+  assert.match(preparationsPage, /La salida solo define proporciones/)
   assert.match(warehousesPage, /Nuevo almacén/)
   assert.match(settingsPage, /Nueva unidad/)
   assert.match(settingsPage, /decimalPlaces/)
@@ -350,35 +369,56 @@ test('las pantallas permiten crear configuracion y editar stock por almacen', ()
   assert.match(settingsPage, /contentUnitId/)
 })
 
-test('el listado de stock abre el detalle por producto y permite buscar, filtrar y paginar', () => {
-  assert.match(stockPage, /placeholder="Buscar producto"/)
-  assert.match(stockPage, /ariaLabel="Filtrar por categoría"/)
-  assert.match(stockPage, /categoryIdsByProduct/)
-  assert.match(stockPage, /CRM_PAGE_SIZE/)
-  assert.match(stockPage, /<CrmPagination/)
-  assert.match(stockPage, /onClick=\{\(\) => openProduct\(row\.product\.id\)\}/)
-  assert.match(stockPage, /<CrmModal label=\{`Stock de \$\{selectedProduct\.name\}`\}/)
-  assert.match(stockPage, /Stock según almacén/)
-  assert.match(stockPage, /type="submit"><Save[^>]*\/> Guardar<\/UiButton>/)
-  assert.doesNotMatch(stockPage, /snapshot\.warehouses\.map\(\(warehouse\) => <th/)
-  assert.doesNotMatch(stockPage, /aria-label=\{`Guardar stock de/)
+test('el listado de stock abre el detalle por artículo físico', () => {
+  assert.match(stockPage, /filterPlaceholder="Buscar artículo físico…"/)
+  assert.match(stockPage, /onClick=\{\(\) => open\(row\.item\.id\)\}/)
+  assert.match(stockPage, /label=\{`Stock de \$\{selected\.name\}`\}/)
+  assert.match(stockPage, /Existencias por artículo y almacén/)
+  assert.match(stockPage, /El stock negativo está\s+permitido/)
+  assert.match(stockPage, /aria-label="Stock por artículo"/)
+  assert.match(stockPage, /<thead>[\s\S]*<tbody>/)
+  assert.match(stockPage, /aria-label=\{`Editar stock de \$\{row\.item\.name\}`\}/)
+  assert.doesNotMatch(stockPage, /<tr[^>]*onClick=/)
+  assert.doesNotMatch(stockPage, /catalog\.products/)
 })
 
-test('el producto y cada TPV permiten elegir almacenes y prioridad de consumo', () => {
-  assert.match(stockPage, /enabledByWarehouse/)
-  assert.match(stockPage, /type="checkbox"/)
-  assert.match(stockPage, /Producto disponible en este almacén/)
-  assert.match(warehousesPage, /Acceso y prioridad por TPV/)
+test('el modal de stock permite sumar una entrada o establecer el total', () => {
+  assert.match(stockPage, /type StockEditMode = ["']add["'] \| ["']set["']/)
+  assert.match(stockPage, /useState<StockEditMode>\(["']add["']\)/)
+  assert.match(stockPage, /Añadir stock/)
+  assert.match(stockPage, /Establecer total/)
+  assert.match(stockPage, /\[1, 5, 10\]\.map/)
+  assert.match(stockPage, /Stock actual:/)
+  assert.match(stockPage, /Quedará:/)
+  assert.match(stockPage, /addInventoryStockQuantity/)
+  assert.match(stockPage, /parseInventoryStockQuantity/)
+})
+
+test('el listado de artículos reutiliza el modelo de tabla del proyecto', () => {
+  assert.match(itemsPage, /<DataTable aria-label="Artículos de inventario"/)
+  assert.match(itemsPage, /<thead>[\s\S]*<tbody>/)
+  assert.match(itemsPage, />Artículo<\/th>/)
+  assert.match(itemsPage, />Unidad<\/th>/)
+  assert.match(itemsPage, />Stock<\/th>/)
+  assert.match(itemsPage, />Ruta principal<\/th>/)
+  assert.doesNotMatch(itemsPage, /sm:grid-cols-2 xl:grid-cols-3/)
+})
+
+test('cada artículo define su propia ruta de consumo independiente del TPV', () => {
+  assert.match(itemsPage, /routes: Record/)
+  assert.match(itemsPage, /Ruta de almacenes/)
+  assert.match(itemsPage, /La ruta define de dónde se consume, no el TPV/)
+  assert.match(itemsPage, /Prioridad \$\{warehouse\.name\}/)
+  assert.match(warehousesPage, /Acceso operativo por TPV/)
   assert.match(warehousesPage, /saveInventoryDeviceWarehouses/)
-  assert.match(warehousesPage, /Guardar configuración/)
-  assert.match(warehousesPage, /Prioridad/)
+  assert.doesNotMatch(warehousesPage, /prioridad de consumo por TPV/i)
 })
 
-test('la pagina Stock conserva el interruptor y oculta la configuracion cuando esta apagado', () => {
-  assert.match(stockPage, /aria-label="Activar control de stock"/)
+test('la pagina Stock conserva el interruptor general del local', () => {
+  assert.match(stockPage, /Control de inventario activo/)
   assert.match(stockPage, /setVenueInventoryEnabled/)
   assert.match(stockPage, /inventoryEnabled \? \(/)
-  assert.match(stockPage, /las páginas de almacenes y configuración permanecerán ocultas/)
+  assert.match(stockPage, /Activa el control de inventario para gestionar existencias/)
   assert.match(shell, /inventoryEnabled \|\| item\.id === 'inventory-stock'/)
   assert.match(routes, /Control de stock desactivado/)
 })
