@@ -1,0 +1,54 @@
+{
+  "schemaVersion": 1,
+  "targets": {
+    "reservations-create-step-2": {
+      "targetKind": "existing-ui",
+      "projectId": "314cd306-4b30-45e3-a681-8c608f4bf25f",
+      "baselineDraftId": "bef8e986-99a0-4d44-b12c-9cb63fb64f72",
+      "activeDraftId": "e1369a33-1d32-4e5e-92bb-78ce7f7dfbad",
+      "designSystemPath": ".superdesign/design-system.md",
+      "referenceIds": [
+        "86a4ad95-077b-42ce-84be-3cd42618f83b"
+      ],
+      "contextFiles": [
+        ".superdesign/design-system.md",
+        "src/index.css",
+        "src/features/reservations/components/ReservationFormModal.tsx:480:1165",
+        "src/features/reservations/components/ReservationSelectionStep.tsx",
+        "src/features/reservations/components/ReservationMapView.tsx",
+        "src/components/ui/AppModal.tsx",
+        "src/components/ui/Button.tsx"
+      ],
+      "fingerprints": {
+        ".superdesign/design-system.md": "6e15148afe2ec7314b32fea46e2c3d157f8b6fa3169d0252e31e17b1bfe88eac",
+        "src/index.css": "f892f51099a857022a3b5861794499b89bfba22d855bfeaa4c42638d8cad2db5",
+        "src/features/reservations/components/ReservationFormModal.tsx": "9bcc806e07d0d4c6660fa7dcd22d073ff2db85f0f1d89fa101b34701bf8bf7dc",
+        "src/features/reservations/components/ReservationSelectionStep.tsx": "4368014f6437b26e3c5e39129c423217910a6257cb20904218c6fde8d3eb2e9e",
+        "src/features/reservations/components/ReservationMapView.tsx": "beebfe92cdbff22310c03e4135dad0431fb5a6f6a70b29f132527e21b00e9691",
+        "src/components/ui/AppModal.tsx": "fa267e38f892c7b342a8f3a776236248028938ff96d45ef4f6ff0dba630edf79",
+        "src/components/ui/Button.tsx": "7707d6d3abe996d63995ea1349495214b13a7a77930e72452db7715eadde71ee"
+      },
+      "components": [],
+      "drafts": {
+        "bef8e986-99a0-4d44-b12c-9cb63fb64f72": {
+          "title": "Nueva reserva — Paso 2",
+          "visualDirection": "reproducción fiel del estado actual",
+          "currentVersion": 1
+        },
+        "83fee9bc-813a-4659-b5d9-9382ec837a6e": {
+          "title": "Nueva reserva — Mapa dominante",
+          "visualDirection": "barra superior compacta y mapa dominante",
+          "parentDraftId": "bef8e986-99a0-4d44-b12c-9cb63fb64f72",
+          "currentVersion": 1
+        },
+        "e1369a33-1d32-4e5e-92bb-78ce7f7dfbad": {
+          "title": "Nueva reserva — Lienzo completo con inspector",
+          "visualDirection": "lienzo a máxima altura, zonas laterales e inspector contextual",
+          "parentDraftId": "bef8e986-99a0-4d44-b12c-9cb63fb64f72",
+          "currentVersion": 1
+        }
+      },
+      "updatedAt": "2026-08-31T12:27:41.5684388Z"
+    }
+  }
+}

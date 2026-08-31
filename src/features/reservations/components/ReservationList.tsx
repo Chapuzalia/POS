@@ -24,7 +24,7 @@ function statusClass(status: ReservationStatus, late: boolean) {
   return 'bg-[var(--accent-soft)] text-[var(--accent)]'
 }
 
-function ReservationRow({ onSelect, reservation, searchMode, selected }: {
+function renderReservationRow({ onSelect, reservation, searchMode, selected }: {
   onSelect: (reservation: Reservation) => void
   reservation: Reservation
   searchMode: boolean
@@ -40,14 +40,15 @@ function ReservationRow({ onSelect, reservation, searchMode, selected }: {
     <tr
       aria-current={selected ? 'true' : undefined}
       className={`group border-b border-[var(--separator)] text-[var(--foreground)] transition-colors last:border-b-0 hover:bg-[var(--surface-secondary)] max-md:grid max-md:grid-cols-[3.5rem_minmax(0,1fr)_2.5rem] max-md:gap-x-2.5 max-md:gap-y-1 max-md:rounded-2xl max-md:border max-md:border-[var(--separator)] max-md:bg-[var(--surface)] max-md:p-3 max-md:shadow-sm ${selected ? 'bg-[var(--accent-soft)] shadow-[inset_4px_0_var(--accent)]' : 'bg-[var(--surface)]'} ${late ? 'shadow-[inset_4px_0_var(--warning)]' : ''}`}
+      key={reservation.id}
     >
-      <td className="w-18 px-4 py-3 align-middle max-md:row-span-3 max-md:w-auto max-md:border-r max-md:border-[var(--separator)] max-md:p-0 max-md:pr-2 max-md:pt-0.5">
+      <td className=" w-18 px-4 py-3 align-middle max-md:row-span-3 max-md:w-auto max-md:border-r max-md:border-[var(--separator)] max-md:p-0 max-md:pr-2 max-md:pt-0.5">
         <time className={`text-lg font-black ${late ? 'text-[var(--warning)]' : ''}`}>
           {timeFormatter.format(new Date(reservation.startsAt))}
           {searchMode ? <small className="mt-1 block text-[11px] font-bold capitalize text-[var(--muted)]">{dateFormatter.format(new Date(reservation.startsAt))}</small> : null}
         </time>
       </td>
-      <td className="min-w-0 px-4 py-3 align-middle max-md:col-start-2 max-md:p-0">
+      <td className="min-w-0 px-4 py-3  align-middle max-md:col-start-2 max-md:p-0">
         <div className="grid min-w-0 gap-0.5">
           <strong className="truncate">{reservation.customerName}</strong>
           <small className="flex items-center gap-1 text-xs text-[var(--muted)]">
@@ -109,7 +110,7 @@ export function ReservationList({ onSelect, reservations, searchMode, selectedId
           </tr>
         </thead>
         <tbody className="max-md:block max-md:space-y-2">
-          {active.map((reservation) => <ReservationRow key={reservation.id} onSelect={onSelect} reservation={reservation} searchMode={searchMode} selected={selectedId === reservation.id} />)}
+          {active.map((reservation) => renderReservationRow({ onSelect, reservation, searchMode, selected: selectedId === reservation.id }))}
           {!active.length ? <tr><td className="px-4 py-8 text-center text-sm font-bold text-[var(--muted)]" colSpan={5}>No hay reservas activas.</td></tr> : null}
           {archived.length ? (
             <tr className="max-md:block">
@@ -126,7 +127,7 @@ export function ReservationList({ onSelect, reservations, searchMode, selectedId
               </td>
             </tr>
           ) : null}
-          {showArchived ? archived.map((reservation) => <ReservationRow key={reservation.id} onSelect={onSelect} reservation={reservation} searchMode={searchMode} selected={selectedId === reservation.id} />) : null}
+          {showArchived ? archived.map((reservation) => renderReservationRow({ onSelect, reservation, searchMode, selected: selectedId === reservation.id })) : null}
         </tbody>
       </DataTable>
     </div>
