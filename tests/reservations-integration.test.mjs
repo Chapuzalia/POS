@@ -75,6 +75,15 @@ test('el refresco conserva la reserva seleccionada y descarta respuestas antigua
   assert.doesNotMatch(controller, /\}, \[date, detail\?\.id, timeZone\]\)/)
 })
 
+test('la vista de lista entrega filas tr directas al componente de tabla', async () => {
+  const list = await readFile(new URL('../src/features/reservations/components/ReservationList.tsx', import.meta.url), 'utf8')
+  assert.match(list, /function renderReservationRow/)
+  assert.match(list, /<tr[\s\S]*key=\{reservation\.id\}/)
+  assert.match(list, /active\.map\(\(reservation\) => renderReservationRow/)
+  assert.match(list, /archived\.map\(\(reservation\) => renderReservationRow/)
+  assert.doesNotMatch(list, /<ReservationRow/)
+})
+
 test('la integración incluye menú, pantalla, mapa operativo y un único SQL raíz', async () => {
   const [header, page, tableMap, tableTypes] = await Promise.all([
     readFile(new URL('../src/components/layout/AppHeader.tsx', import.meta.url), 'utf8'),

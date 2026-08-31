@@ -504,6 +504,8 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
   assert.match(modal, /Cancelar operación/)
   assert.match(modal, /management\.cancel\(\)/)
   assert.match(modal, /Volver al TPV/)
+  assert.match(modal, /rows\.map\(\(row\) => renderDenominationRow\(row, showStacker\)\)/)
+  assert.doesNotMatch(modal, /<DenominationRow/)
   assert.doesNotMatch(modal, /suggestCashlogyDenominations/)
   assert.doesNotMatch(modal, /suggestedOperationId/)
   assert.match(managementStore, /persistIntent\(intent\)[\s\S]*createRequest/)

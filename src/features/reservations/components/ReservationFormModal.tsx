@@ -503,19 +503,19 @@ export function ReservationFormModal(props: Props) {
   return (
     <>
       <AppModal
-        containerClassName="!items-end !p-0 md:!items-center md:!p-6"
-        dialogClassName="!max-h-[calc(100dvh-3.5rem)] !rounded-b-none !rounded-t-2xl !border-x-0 !border-b-0 md:!max-h-[calc(100dvh-3rem)] md:!rounded-2xl md:!border"
+        containerClassName={`!items-end !p-0 md:!items-center ${isCreateFlow && step === 2 ? "md:!p-3" : "md:!p-6"}`}
+        dialogClassName={`!max-h-[calc(100dvh-3.5rem)] !rounded-b-none !rounded-t-2xl !border-x-0 !border-b-0 md:!rounded-2xl md:!border ${isCreateFlow && step === 2 ? "md:!max-h-[calc(100dvh-1.5rem)]" : "md:!max-h-[calc(100dvh-3rem)]"}`}
         dismissDisabled={props.disabled}
         label={props.reservation ? "Editar reserva" : "Nueva reserva"}
-        maxWidth={1200}
+        maxWidth={isCreateFlow && step === 2 ? 1440 : 1200}
         onClose={requestClose}
         placement="center"
       >
-        <section className="flex h-[calc(100dvh-3.5rem)] w-full flex-col overflow-hidden bg-[var(--surface)] text-[var(--foreground)] md:h-[min(48.75rem,calc(100dvh-3rem))]">
+        <section className={`flex h-[calc(100dvh-3.5rem)] w-full flex-col overflow-hidden bg-[var(--surface)] text-[var(--foreground)] ${isCreateFlow && step === 2 ? "md:h-[min(56rem,calc(100dvh-1.5rem))]" : "md:h-[min(48.75rem,calc(100dvh-3rem))]"}`}>
           <div aria-hidden="true" className="flex h-5 shrink-0 items-center justify-center md:hidden">
             <span className="h-1 w-10 rounded-full bg-[var(--separator)]" />
           </div>
-          <header className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--separator)] px-5 pb-4 md:p-6">
+          <header className={`flex shrink-0 items-start justify-between gap-3 border-b border-[var(--separator)] px-5 pb-4 ${isCreateFlow && step === 2 ? "md:px-6 md:py-4" : "md:p-6"}`}>
             <div>
               <h2 className="m-0 text-xl font-black md:text-2xl">
                 {props.reservation ? "Editar reserva" : "Nueva reserva"}

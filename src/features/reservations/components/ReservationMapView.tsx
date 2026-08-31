@@ -1,5 +1,5 @@
 import { Button as UiButton } from '../../../components/ui/Button'
-import { CalendarPlus, Check, Users, X } from 'lucide-react'
+import { Armchair, CalendarPlus, Check, CircleCheck, ShieldAlert, Users, X } from 'lucide-react'
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import type { RestaurantTableMapItem } from '../../tables/types'
 import { MapViewportControls } from '../../tables/components/MapViewportControls'
@@ -17,7 +17,10 @@ type Props = {
   selection?: {
     conflictTableIds: string[]
     disabled: boolean
+    hasActiveConflicts: boolean
     onChange: (tableIds: string[]) => void
+    partySize: number
+    selectedCapacity: number
     selectedTableIds: string[]
   }
 }
@@ -47,6 +50,10 @@ export function ReservationMapView(props: Props) {
   const selectedTables = useMemo(() => props.map.tables.filter((table) => (
     props.selection?.selectedTableIds.includes(table.id)
   )), [props.map.tables, props.selection?.selectedTableIds])
+  const capacityInsufficient = Boolean(
+    props.selection?.selectedTableIds.length
+      && props.selection.selectedCapacity < props.selection.partySize,
+  )
   const conflictTableIds = new Set(props.selection?.conflictTableIds ?? [])
   const fitSelectionToCanvas = useCallback(() => {
     const canvas = canvasRef.current
@@ -86,14 +93,25 @@ export function ReservationMapView(props: Props) {
   }
 
   return (
-    <div className="flex min-h-0 min-w-0 flex-1 flex-col gap-2.5">
-      <nav aria-label="Zonas" className="flex gap-2 overflow-x-auto pb-0.5 [&>button]:min-h-[42px] [&>button]:whitespace-nowrap [&>button]:rounded-full [&>button]:border [&>button]:border-[var(--separator)] [&>button]:bg-[var(--surface)] [&>button]:px-[18px] [&>button]:font-extrabold [&>button]:text-[var(--foreground)]">
+    <div className={`flex min-h-0 min-w-0 flex-1 gap-3 ${props.selection ? 'max-md:flex-col' : 'flex-col'}`}>
+      <nav
+        aria-label="Zonas"
+        className={`flex shrink-0 gap-2 [&>button]:shrink-0 [&>button]:border [&>button]:border-[var(--separator)] [&>button]:bg-[var(--surface)] [&>button]:font-extrabold [&>button]:text-[var(--foreground)] ${props.selection ? 'overflow-x-auto rounded-xl border border-[var(--separator)] bg-[var(--surface)] p-2 max-md:w-full max-md:border-0 max-md:bg-transparent max-md:p-0 md:w-19 md:flex-col md:overflow-hidden [&>button]:min-h-15 [&>button]:w-full [&>button]:min-w-0 [&>button]:flex-col [&>button]:gap-1 [&>button]:overflow-hidden [&>button]:rounded-xl [&>button]:px-1 [&>button]:text-xs' : 'overflow-x-auto pb-0.5 [&>button]:min-h-[42px] [&>button]:whitespace-nowrap [&>button]:rounded-full [&>button]:px-[18px]'}`}
+      >
+        {props.selection ? (
+          <span className="px-1 pb-1 pt-0.5 text-center text-[10px] font-black uppercase tracking-wider text-[var(--muted)] max-md:hidden">
+            Zonas
+          </span>
+        ) : null}
         {props.map.areas.map((candidate) => <UiButton className={candidate.id === area?.id ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]' : ''} key={candidate.id} onClick={() => {
           setAreaId(candidate.id)
           setSelectedTableId(null)
-        }} type="button">{candidate.name}</UiButton>)}
+        }} type="button">
+          {props.selection ? <Armchair aria-hidden="true" size={17} /> : null}
+          <span className={props.selection ? 'max-w-full truncate' : undefined}>{candidate.name}</span>
+        </UiButton>)}
       </nav>
-      <div className={`flex flex-1 gap-3 max-md:flex-col ${props.selection ? 'min-h-112 md:min-h-0' : 'min-h-112'}`}>
+      <div className={`flex min-w-0 flex-1 gap-3 max-md:flex-col ${props.selection ? 'min-h-112 md:min-h-0' : 'min-h-112'}`}>
         <section
           className={`relative flex-1 overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] shadow-[var(--shadow)] ${props.selection ? 'min-h-105 cursor-default md:min-h-0' : 'min-h-105 touch-none cursor-grab active:cursor-grabbing md:min-h-112'}`}
           onPointerDown={props.selection ? undefined : viewportApi.startBackgroundPointer}
@@ -145,14 +163,37 @@ export function ReservationMapView(props: Props) {
             zoom={viewport.zoom}
           /> : null}
         </section>
-        <aside className="w-full max-h-56 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 md:max-h-none md:w-60 lg:w-72 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:border-b [&>header]:border-[var(--separator)] [&>header]:pb-2.5 [&_h3]:m-0 [&_p]:m-0 [&_p]:text-xs [&_p]:text-[var(--muted)] [&>header_span]:text-xs [&>header_span]:text-[var(--muted)] [&>button]:grid [&>button]:w-full [&>button]:grid-cols-[3.5rem_1fr] [&>button]:gap-2 [&>button]:border-0 [&>button]:border-b [&>button]:border-[var(--separator)] [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-3 [&>button]:text-left [&>button]:text-[var(--foreground)] [&>button_time]:font-black [&>button_span]:grid [&>button_span]:gap-1 [&>button_small]:text-[var(--muted)]">
+        <aside className={`w-full max-h-64 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 md:max-h-none md:w-64 lg:w-72 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:border-b [&>header]:border-[var(--separator)] [&>header]:pb-2.5 [&_h3]:m-0 [&_p]:m-0 [&_p]:text-xs [&_p]:text-[var(--muted)] [&>header_span]:text-xs [&>header_span]:text-[var(--muted)] [&>button]:grid [&>button]:w-full [&>button]:gap-2 [&>button]:rounded-none [&>button]:border-0 [&>button]:border-b [&>button]:border-[var(--separator)] [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-3 [&>button]:text-left [&>button]:text-[var(--foreground)] [&>button_time]:font-black [&>button_span]:grid [&>button_span]:gap-1 [&>button_small]:text-[var(--muted)] ${props.selection ? '[&>button]:min-h-14 [&>button]:grid-cols-[minmax(0,1fr)_auto] [&>button]:items-center [&>button_span]:min-w-0 [&>button_svg]:justify-self-end' : '[&>button]:grid-cols-[3.5rem_1fr]'}`}>
           {props.selection ? <>
             <header>
               <div><h3>Mesas seleccionadas</h3><span>{selectedTables.length} elegidas</span></div>
             </header>
+            <div className="grid gap-2 border-b border-[var(--separator)] py-3">
+              <div className={`rounded-xl border p-3 ${capacityInsufficient ? 'border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] text-[var(--warning)]' : 'border-[var(--separator)] bg-[var(--background)] text-[var(--foreground)]'}`}>
+                <strong className="flex items-center gap-2 text-[13px]">
+                  <Users size={16} />
+                  {selectedTables.length
+                    ? `${props.selection.selectedCapacity} plazas para ${props.selection.partySize}`
+                    : 'Sin mesa asignada'}
+                </strong>
+                <p className="mt-1! font-semibold opacity-80">
+                  {capacityInsufficient
+                    ? `Faltan ${props.selection.partySize - props.selection.selectedCapacity} plazas.`
+                    : selectedTables.length
+                      ? 'Puedes combinar varias mesas desde el plano.'
+                      : 'Puedes guardar y asignar mesa más tarde.'}
+                </p>
+              </div>
+              <div className={`flex min-h-9 items-center gap-2 rounded-lg px-3 text-xs font-extrabold ${props.selection.hasActiveConflicts ? 'bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] text-[var(--warning)]' : 'bg-[color-mix(in_srgb,var(--success)_9%,var(--surface))] text-[var(--success)]'}`}>
+                {props.selection.hasActiveConflicts ? <ShieldAlert size={16} /> : <CircleCheck size={16} />}
+                {props.selection.hasActiveConflicts
+                  ? 'La selección tiene conflictos'
+                  : 'Sin conflictos en la selección'}
+              </div>
+            </div>
             {selectedTables.length ? selectedTables.map((table) => (
               <UiButton aria-label={`Quitar ${table.name}`} disabled={props.selection?.disabled} key={table.id} onClick={() => selectTable(table.id)} type="button">
-                <span><strong>{table.name}</strong><small>{props.map.areas.find((candidate) => candidate.id === table.areaId)?.name ?? "Sin zona"} · {table.capacity} plazas</small></span>
+                <span className="min-w-0"><strong className="truncate">{table.name}</strong><small className="truncate">{props.map.areas.find((candidate) => candidate.id === table.areaId)?.name ?? "Sin zona"} · {table.capacity} plazas</small></span>
                 <X aria-hidden="true" size={16} />
               </UiButton>
             )) : <p>Pulsa una o varias mesas del plano para reservarlas.</p>}

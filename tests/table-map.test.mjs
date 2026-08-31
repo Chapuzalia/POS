@@ -383,6 +383,16 @@ test('la próxima reserva flota bajo la mesa sin sustituir su estado operativo',
   assert.match(tableServiceSource, /nextReservation: tableReservations\[0\] \?\? null/)
 })
 
+test('mobile integra el nombre en la mesa, oculta Libre y compacta la reserva', () => {
+  assert.match(tableMapViewSource, /const mode = mobileLayout \? "compact" : contentModes\.get\(table\.id\)/)
+  assert.match(tableMapViewSource, /!mobileLayout \|\| table\.status !== "free"/)
+  assert.match(tableMapViewSource, /!mobileLayout \? externalLabels\.map/)
+  assert.match(tableMapViewSource, /compact=\{mobileLayout\}/)
+  assert.match(reservationBadgeSource, /compact = false/)
+  assert.match(reservationBadgeSource, /right-0 top-0[\s\S]*size-5/)
+  assert.match(reservationBadgeSource, /compact \? null : <span>\{time\}<\/span>/)
+})
+
 test('el giro de 90 grados conserva el plano y la conversion de puntero', () => {
   const item = { positionX: 12, positionY: 24, width: 16, height: 10 }
   assert.deepEqual(orientMapRect(item, true), { positionX: 66, positionY: 12, width: 10, height: 16 })

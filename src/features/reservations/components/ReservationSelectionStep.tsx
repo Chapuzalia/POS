@@ -1,4 +1,4 @@
-import { LoaderCircle, Map as MapIcon, Rows3, ShieldAlert, Users } from "lucide-react";
+import { LoaderCircle, Map as MapIcon, Rows3 } from "lucide-react";
 import { useState } from "react";
 import { Button as UiButton } from "../../../components/ui/Button";
 import type { Reservation, ReservationMap } from "../types";
@@ -30,35 +30,34 @@ type SelectionView = "map" | "timeline";
 export function ReservationSelectionStep(props: Props) {
   const [view, setView] = useState<SelectionView>("map");
   const [areaId, setAreaId] = useState("all");
-  const capacityInsufficient =
-    props.tableIds.length > 0 && props.selectedCapacity < props.partySize;
-
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-4 p-4 md:p-6">
-      <div className="flex flex-wrap items-start justify-between gap-3">
-        <div>
-          <span className="text-[11px] font-black uppercase tracking-wider text-[var(--accent)]">
-            Paso 2 de 2 · Mesa y horario
-          </span>
+    <section className="flex min-h-0 flex-1 flex-col bg-[var(--background)]">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-[var(--separator)] px-4 py-3 md:min-h-[76px] md:px-5">
+        <div className="min-w-0">
+          <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="text-[11px] font-black uppercase tracking-wider text-[var(--accent)]">
+              Paso 2 de 2 · Mesa y horario
+            </span>
+            <p
+              aria-live="polite"
+              className={`m-0 flex items-center gap-1.5 text-xs font-semibold ${props.availabilityError || props.reservationsError ? "text-[var(--warning)]" : "text-[var(--muted)]"}`}
+              role="status"
+            >
+              {props.isCheckingAvailability || props.isLoadingReservations ? (
+                <>
+                  <LoaderCircle className="animate-spin" size={14} />
+                  Actualizando disponibilidad…
+                </>
+              ) : props.availabilityError || props.reservationsError ? (
+                props.availabilityError || props.reservationsError
+              ) : (
+                "Pulsa una mesa o un hueco libre para seleccionarlo."
+              )}
+            </p>
+          </div>
           <h3 className="mb-0 mt-1 text-lg font-black">
             Elige sobre el plano real o el timeline
           </h3>
-          <p
-            aria-live="polite"
-            className={`mb-0 mt-1 flex items-center gap-1.5 text-xs font-semibold ${props.availabilityError || props.reservationsError ? "text-[var(--warning)]" : "text-[var(--muted)]"}`}
-            role="status"
-          >
-            {props.isCheckingAvailability || props.isLoadingReservations ? (
-              <>
-                <LoaderCircle className="animate-spin" size={14} />
-                Actualizando disponibilidad…
-              </>
-            ) : props.availabilityError || props.reservationsError ? (
-              props.availabilityError || props.reservationsError
-            ) : (
-              "Pulsa una mesa o un hueco libre para seleccionarlo."
-            )}
-          </p>
         </div>
 
         <div
@@ -85,55 +84,27 @@ export function ReservationSelectionStep(props: Props) {
         </div>
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <div
-          className={`rounded-xl border p-3 text-sm ${capacityInsufficient ? "border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] text-[var(--warning)]" : "border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)]"}`}
-        >
-          <strong className="flex items-center gap-2">
-            <Users size={16} />
-            {props.tableIds.length
-              ? `${props.selectedCapacity} plazas para ${props.partySize} personas`
-              : "Sin mesa asignada"}
-          </strong>
-          <p className="mb-0 mt-1 text-xs font-semibold opacity-80">
-            {capacityInsufficient
-              ? `Faltan ${props.partySize - props.selectedCapacity} plazas.`
-              : props.tableIds.length
-                ? "Puedes combinar varias mesas desde el plano."
-                : "También puedes guardar y asignar mesa más tarde."}
-          </p>
-        </div>
-        <div
-          className={`rounded-xl border p-3 text-sm ${props.hasActiveConflicts ? "border-[var(--warning)] bg-[color-mix(in_srgb,var(--warning)_10%,var(--surface))] text-[var(--warning)]" : "border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)]"}`}
-        >
-          <strong className="flex items-center gap-2">
-            <ShieldAlert size={16} />
-            {props.hasActiveConflicts
-              ? "La selección se solapa con otra reserva"
-              : "Sin conflictos en la selección"}
-          </strong>
-          <p className="mb-0 mt-1 text-xs font-semibold opacity-80">
-            Las reservas del día aparecen directamente sobre ambas vistas.
-          </p>
-        </div>
-      </div>
-
       {view === "map" ? (
-        <ReservationMapView
-          date={props.date}
-          map={props.map}
-          onCreate={() => undefined}
-          onSelectReservation={() => undefined}
-          reservations={props.reservations}
-          selection={{
-            conflictTableIds: props.conflictTableIds,
-            disabled: props.disabled,
-            onChange: props.onTableIdsChange,
-            selectedTableIds: props.tableIds,
-          }}
-        />
+        <div className="flex min-h-0 flex-1 p-3">
+          <ReservationMapView
+            date={props.date}
+            map={props.map}
+            onCreate={() => undefined}
+            onSelectReservation={() => undefined}
+            reservations={props.reservations}
+            selection={{
+              conflictTableIds: props.conflictTableIds,
+              disabled: props.disabled,
+              hasActiveConflicts: props.hasActiveConflicts,
+              onChange: props.onTableIdsChange,
+              partySize: props.partySize,
+              selectedCapacity: props.selectedCapacity,
+              selectedTableIds: props.tableIds,
+            }}
+          />
+        </div>
       ) : (
-        <div className="grid min-h-0 gap-3">
+        <div className="grid min-h-0 flex-1 gap-3 p-3">
           <label className="flex items-center gap-2 text-sm font-extrabold">
             Zona
             <select

@@ -10,7 +10,7 @@ const [page, list, detail, form, map, timeline, selectionStep, optionalPhoneMigr
   readFile(new URL('../src/features/reservations/components/ReservationMapView.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationTimelineView.tsx', import.meta.url), 'utf8'),
   readFile(new URL('../src/features/reservations/components/ReservationSelectionStep.tsx', import.meta.url), 'utf8'),
-  readFile(new URL('../supabase/migrations/20260830120000_make_reservation_phone_optional.sql', import.meta.url), 'utf8'),
+  readFile(new URL('../supabase/migrations/20260830210000_make_reservation_phone_optional.sql', import.meta.url), 'utf8'),
 ])
 
 test('el mapa permite desplazar el lienzo desde el espacio entre mesas', () => {
@@ -70,8 +70,10 @@ test('la lista usa una tabla real, separa el historial y conserva la seleccion',
   assert.match(list, /scope="col">Mesa \/ zona<\/th>/)
   assert.match(list, /scope="col">Estado<\/th>/)
   assert.doesNotMatch(list, /role="listitem"/)
-  assert.match(list, /<Button aria-label=\{`Abrir reserva de/)
-  assert.doesNotMatch(list, /<tr[^>]*onClick=/)
+  assert.match(list, /aria-label=\{`Abrir reserva de/)
+  assert.match(list, /className=\{`group cursor-pointer/)
+  assert.match(list, /onClick=\{\(\) => onSelect\(reservation\)\}/)
+  assert.doesNotMatch(list, /<Button[^>]*aria-label=\{`Abrir reserva de/)
 })
 
 test('la vista general movil usa los breakpoints predefinidos de Tailwind', () => {
@@ -170,7 +172,7 @@ test('el alta de reserva se divide en datos y selección visual', () => {
 test('el plano y el timeline permiten elegir mesa y hueco en el segundo paso', () => {
   assert.match(map, /selection\?:/)
   assert.match(map, /props\.selection\.onChange\(next\)/)
-  assert.match(map, /flex min-h-0 min-w-0 flex-1 flex-col/)
+  assert.match(map, /flex min-h-0 min-w-0 flex-1 gap-3/)
   assert.match(map, /props\.selection \? 'min-h-112 md:min-h-0' : 'min-h-112'/)
   assert.match(map, /const autoFit = Boolean\(props\.selection\)/)
   assert.match(map, /const fittedItems = useMemo\(\(\) => \[\.\.\.tables, \.\.\.mapElements\]/)
@@ -186,6 +188,22 @@ test('el plano y el timeline permiten elegir mesa y hueco en el segundo paso', (
   assert.match(timeline, /Nueva reserva seleccionada/)
   assert.match(selectionStep, /onSlotSelect/)
   assert.match(selectionStep, /allowUnassignedCreate=\{false\}/)
+})
+
+test('el segundo paso prioriza el mapa y mueve el contexto a los laterales', () => {
+  assert.match(form, /maxWidth=\{isCreateFlow && step === 2 \? 1440 : 1200\}/)
+  assert.match(form, /md:h-\[min\(56rem,calc\(100dvh-1\.5rem\)\)\]/)
+  assert.match(selectionStep, /md:min-h-\[76px\]/)
+  assert.doesNotMatch(selectionStep, /sm:grid-cols-2/)
+  assert.match(map, /md:w-19 md:flex-col/)
+  assert.match(map, /md:overflow-hidden/)
+  assert.match(map, /\[&>button\]:w-full \[&>button\]:min-w-0/)
+  assert.match(map, /max-w-full truncate/)
+  assert.match(map, /Mesas seleccionadas/)
+  assert.match(map, /grid-cols-\[minmax\(0,1fr\)_auto\]/)
+  assert.match(map, /aria-label=\{`Quitar \$\{table\.name\}`\}/)
+  assert.match(map, /Sin conflictos en la selección/)
+  assert.match(map, /props\.selection\.selectedCapacity/)
 })
 
 test('el teléfono de la reserva es opcional en interfaz y base de datos', () => {
