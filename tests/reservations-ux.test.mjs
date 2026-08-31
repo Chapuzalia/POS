@@ -70,8 +70,10 @@ test('la lista usa una tabla real, separa el historial y conserva la seleccion',
   assert.match(list, /scope="col">Mesa \/ zona<\/th>/)
   assert.match(list, /scope="col">Estado<\/th>/)
   assert.doesNotMatch(list, /role="listitem"/)
-  assert.match(list, /<Button aria-label=\{`Abrir reserva de/)
-  assert.doesNotMatch(list, /<tr[^>]*onClick=/)
+  assert.match(list, /aria-label=\{`Abrir reserva de/)
+  assert.match(list, /className=\{`group cursor-pointer/)
+  assert.match(list, /onClick=\{\(\) => onSelect\(reservation\)\}/)
+  assert.doesNotMatch(list, /<Button[^>]*aria-label=\{`Abrir reserva de/)
 })
 
 test('la vista general movil usa los breakpoints predefinidos de Tailwind', () => {

@@ -916,7 +916,7 @@ export function TableMapView(props: Props) {
           />
         ) : null}
         <svg aria-hidden="true" className="pointer-events-none absolute inset-0 z-[1] size-full overflow-hidden [&_line]:stroke-[color-mix(in_srgb,var(--foreground)_52%,transparent)] [&_line]:[stroke-width:1.25] [&_line]:[vector-effect:non-scaling-stroke] [&_circle]:fill-[var(--foreground)] [&_circle]:stroke-[var(--surface)] [&_circle]:[stroke-width:1]" style={AREA_SWIPE_VISUAL_STYLE}>
-          {externalLabels.map((label) => {
+          {!mobileLayout ? externalLabels.map((label) => {
             const table = externalLabelTables.get(label.id);
             return (
               <g
@@ -936,7 +936,7 @@ export function TableMapView(props: Props) {
                 />
               </g>
             );
-          })}
+          }) : null}
         </svg>
         <div
           className="map-transform-layer absolute z-[2]"
@@ -1018,7 +1018,7 @@ export function TableMapView(props: Props) {
             : null}
           {tables.map((table) => {
             const orientedTable = orientMapRect(table, rotatedMap);
-            const mode = contentModes.get(table.id) ?? "full";
+            const mode = mobileLayout ? "compact" : contentModes.get(table.id) ?? "full";
             const visualStatus = getRestaurantTableVisualStatus(table);
             const isDropTarget = dropTargetId === table.id || Boolean(table.layoutGroupId && displayTables.find((item) => item.id === dropTargetId)?.layoutGroupId === table.layoutGroupId);
             const isUnavailable = tableSelectionMode && table.status !== "free";
@@ -1043,9 +1043,11 @@ export function TableMapView(props: Props) {
                     <span className={`flex w-full max-w-none flex-col items-center whitespace-normal ${mode === "compact" ? "gap-0" : "gap-px"} [&>strong]:w-full [&>strong]:truncate [&>strong]:font-extrabold [&>strong]:leading-[1.2] ${mobileLayout ? "[&>strong]:text-[11px]" : "[&>strong]:text-[15px]"}`}>
                       <strong title={table.name}>{table.name}</strong>
                       {table.isVirtual && mode === "full" ? <em className="text-[9px] not-italic font-extrabold uppercase tracking-wide text-[var(--accent)]">Temporal</em> : null}
-                      <span className={`max-w-full truncate font-bold leading-[1.25] ${mobileLayout ? "text-[10px]" : "text-[11px]"} ${mode === "compact" ? "text-[9px]" : ""} ${viewport.zoom < 0.75 ? "text-[10px]" : ""}`}>
-                        {statusLabel(table.status)}
-                      </span>
+                      {!mobileLayout || table.status !== "free" ? (
+                        <span className={`max-w-full truncate font-bold leading-[1.25] ${mobileLayout ? "text-[10px]" : "text-[11px]"} ${mode === "compact" ? "text-[9px]" : ""} ${viewport.zoom < 0.75 ? "text-[10px]" : ""}`}>
+                          {statusLabel(table.status)}
+                        </span>
+                      ) : null}
                     </span>
                     {mode === "full" && table.status === "occupied" ? (
                       <>
@@ -1078,6 +1080,7 @@ export function TableMapView(props: Props) {
                 )}
                 {table.nextReservation ? (
                   <ReservationTableBadge
+                    compact={mobileLayout}
                     count={table.reservationCount}
                     onClick={() =>
                       props.onOpenReservation(table.nextReservation!.id)
@@ -1094,7 +1097,7 @@ export function TableMapView(props: Props) {
             </div>
           ) : null}
         </div>
-        <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5] size-full overflow-hidden" style={AREA_SWIPE_VISUAL_STYLE}>
+        {!mobileLayout ? <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5] size-full overflow-hidden" style={AREA_SWIPE_VISUAL_STYLE}>
           {externalLabels.map((label) => {
             const table = externalLabelTables.get(label.id);
             if (!table) return null;
@@ -1114,7 +1117,7 @@ export function TableMapView(props: Props) {
               </div>
             );
           })}
-        </div>
+        </div> : null}
         {editMode && groupMenu && !mobileLayout ? (
           <div
             className="absolute right-auto z-30 grid min-w-[220px] gap-[5px] rounded-[10px] border border-[var(--separator)] bg-[var(--surface)] p-2 shadow-[var(--shadow)] max-[760px]:min-w-[min(230px,calc(100%-16px))] [&>strong]:px-2 [&>strong]:py-1.5 [&>strong]:text-[13px] [&>p]:m-0 [&>p]:max-w-[230px] [&>p]:px-2 [&>p]:pb-[7px] [&>p]:pt-1 [&>p]:text-xs [&>p]:leading-[1.35] [&>p]:text-[var(--muted)] [&>button]:flex [&>button]:min-h-10 [&>button]:items-center [&>button]:gap-2 [&>button]:rounded-[7px] [&>button]:border-0 [&>button]:bg-transparent [&>button]:px-[9px] [&>button]:font-bold [&>button]:text-[var(--foreground)] [&>button]:hover:bg-[var(--accent-soft)] [&>button]:hover:outline-2 [&>button]:hover:outline-[var(--accent)] [&>button]:focus-visible:bg-[var(--accent-soft)] [&>button]:focus-visible:outline-2 [&>button]:focus-visible:outline-[var(--accent)] [&>button]:disabled:cursor-not-allowed [&>button]:disabled:opacity-45"
