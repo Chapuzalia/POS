@@ -7,7 +7,16 @@ const polygonSchema = z.array(z.number().finite()).min(4)
 export const ocrWordSchema = z.object({
   text: z.string(),
   confidence: z.number().min(0).max(1),
+  polygon: polygonSchema.optional(),
+}).strict()
+
+export const ocrBlockSchema = z.object({
+  type: z.string(),
+  text: z.string(),
   polygon: polygonSchema,
+  confidence: z.number().min(0).max(1).optional(),
+  tableId: z.string().optional(),
+  imageId: z.string().optional(),
 }).strict()
 
 export const ocrCellSchema = z.object({
@@ -16,14 +25,15 @@ export const ocrCellSchema = z.object({
   rowSpan: z.number().int().positive().default(1),
   columnSpan: z.number().int().positive().default(1),
   text: z.string(),
-  confidence: z.number().min(0).max(1),
-  polygon: polygonSchema,
+  confidence: z.number().min(0).max(1).optional(),
+  polygon: polygonSchema.optional(),
 }).strict()
 
 export const ocrTableSchema = z.object({
   rowCount: z.number().int().positive(),
   columnCount: z.number().int().positive(),
   cells: z.array(ocrCellSchema),
+  polygon: polygonSchema.optional(),
 }).strict()
 
 export const ocrPageSchema = z.object({
@@ -33,6 +43,7 @@ export const ocrPageSchema = z.object({
   unit: z.string(),
   text: z.string(),
   words: z.array(ocrWordSchema),
+  blocks: z.array(ocrBlockSchema).optional(),
   tables: z.array(ocrTableSchema),
   confidence: z.number().min(0).max(1),
 }).strict()

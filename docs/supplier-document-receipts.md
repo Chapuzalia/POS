@@ -15,22 +15,29 @@ El flag de frontend está condicionado además por `import.meta.env.DEV`, por lo
 que los controles de fixtures no aparecen en una build de producción. La Edge
 Function rechaza cualquier `fixtureId` si su propio flag no está habilitado.
 
-## Providers reales pendientes de Fases 1-2
+## Providers reales
 
 Configurar los siguientes secretos de Supabase Edge Functions:
 
+- `SUPPLIER_DOCUMENT_OCR_PROVIDER`: `azure` o `mistral`. Si no existe, se usa
+  `azure` para mantener el comportamiento anterior.
 - `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`: endpoint del recurso Azure.
 - `AZURE_DOCUMENT_INTELLIGENCE_API_KEY`: clave del recurso Azure.
 - `AZURE_DOCUMENT_INTELLIGENCE_API_VERSION`: opcional; por defecto `2024-11-30`.
 - `AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID`: opcional; por defecto `prebuilt-layout`.
+- `MISTRAL_API_KEY`: clave del proyecto Mistral, obligatoria cuando el provider es
+  `mistral`.
+- `MISTRAL_OCR_MODEL`: opcional; por defecto `mistral-ocr-latest`.
 - `OPENAI_API_KEY`: API key del proyecto OpenAI.
 - `OPENAI_SUPPLIER_DOCUMENT_MODEL`: modelo habilitado para Responses API y Structured Outputs.
 - `OPENAI_SUPPLIER_DOCUMENT_IMAGE_FALLBACK`: opcional, `true` para adjuntar imagen
   únicamente cuando el OCR tenga baja confianza o no detecte tablas.
 
-Azure se consume mediante `AzureDocumentOcrProvider`; OpenAI mediante
-`OpenAiSupplierDocumentProvider`. Ambos leen configuración exclusivamente en la
-Edge Function. Ninguna clave se expone al navegador o se guarda en tablas.
+Azure se consume mediante `AzureDocumentOcrProvider`, Mistral mediante
+`MistralDocumentOcrProvider` y OpenAI mediante `OpenAiSupplierDocumentProvider`.
+Todos leen configuración exclusivamente en la Edge Function. Ninguna clave se
+expone al navegador o se guarda en tablas. `extraction_metadata` conserva
+`ocrProvider` (`azure`, `mistral` o `mock`) y `ocrModel` para comparar ejecuciones.
 
 ## Comprobación al conectar providers
 
@@ -45,5 +52,5 @@ Edge Function. Ninguna clave se expone al navegador o se guarda en tablas.
 
 La extracción de texto PDF nativo está abstraída mediante
 `NativePdfTextExtractor`. La implementación actual devuelve `null` y delega el
-PDF completo en Azure hasta que se seleccione una librería/servicio de extracción
-de texto nativo para Edge Functions.
+PDF completo en el provider OCR seleccionado hasta que se seleccione una
+librería/servicio de extracción de texto nativo para Edge Functions.

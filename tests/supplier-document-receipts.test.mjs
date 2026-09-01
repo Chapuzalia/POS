@@ -16,8 +16,11 @@ import {
 } from '../supabase/functions/_shared/supplier-documents/core.ts'
 import { getSupplierDocumentMockFixture, supplierDocumentMockFixtures } from '../supabase/functions/_shared/supplier-documents/fixtures.ts'
 import {
+  createDocumentOcrProvider,
+  MistralDocumentOcrProvider,
   MockDocumentOcrProvider,
   MockSupplierDocumentAiProvider,
+  normalizeMistralOcrResponse,
   ProviderConfigurationError,
   AzureDocumentOcrProvider,
   OpenAiSupplierDocumentProvider,
@@ -27,6 +30,7 @@ const migration = await readFile(new URL('../supabase/migrations/20260901120000_
 const page = await readFile(new URL('../src/features/crm/supplier-documents/pages/SupplierReceiptsPage.tsx', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/crm/supplier-documents/services/supplierDocumentService.ts', import.meta.url), 'utf8')
 const edgeFunction = await readFile(new URL('../supabase/functions/process-supplier-document/index.ts', import.meta.url), 'utf8')
+const ocrProviders = await readFile(new URL('../supabase/functions/_shared/supplier-documents/providers.ts', import.meta.url), 'utf8')
 const supabaseConfig = await readFile(new URL('../supabase/config.toml', import.meta.url), 'utf8')
 const identityBackfillMigration = await readFile(new URL('../supabase/migrations/20260901152330_backfill_supplier_global_identity.sql', import.meta.url), 'utf8')
 
@@ -35,6 +39,39 @@ const units = [
   { id: 'l', name: 'Litro', symbol: 'L', contentQuantity: 1, contentUnitId: 'l' },
   { id: 'ud', name: 'Unidad', symbol: 'ud', contentQuantity: 1, contentUnitId: 'ud' },
 ]
+
+const realOcrSelection = {
+  azure: { endpoint: 'https://azure.example.test', apiKey: 'azure-key' },
+  mistral: { apiKey: 'mistral-key' },
+}
+
+const mistralOcrFixture = {
+  model: 'mistral-ocr-latest',
+  usage_info: { pages_processed: 1 },
+  pages: [{
+    index: 0,
+    markdown: 'Proveedor Uno\n\n[tbl-0.md](tbl-0.md)',
+    dimensions: { dpi: 200, width: 1200, height: 1600 },
+    confidence_scores: {
+      average_page_confidence_score: 0.94,
+      minimum_page_confidence_score: 0.82,
+      word_confidence_scores: [
+        { text: 'Proveedor', confidence: 0.96, start_index: 0 },
+        { text: 'Uno', confidence: 0.92, start_index: 10 },
+      ],
+    },
+    blocks: [
+      { type: 'text', content: 'Proveedor Uno', top_left_x: 20, top_left_y: 30, bottom_right_x: 310, bottom_right_y: 80 },
+      { type: 'table', content: 'Código | Descripción | Cantidad', table_id: 'tbl-0.md', top_left_x: 40, top_left_y: 200, bottom_right_x: 1160, bottom_right_y: 520 },
+    ],
+    tables: [{
+      id: 'tbl-0.md',
+      format: 'markdown',
+      content: '| Código | Descripción | Cantidad |\n| --- | --- | ---: |\n| A-1 | Agua 1L | 2 |',
+      word_confidence_scores: [{ text: 'Agua', confidence: 0.91, start_index: 80 }],
+    }],
+  }],
+}
 
 test('normaliza la identidad del proveedor sin confundir NIF distintos', () => {
   assert.equal(normalizeSupplierTaxId(' ES B-123.456-78 '), 'ESB12345678')
@@ -246,7 +283,45 @@ test('los providers mock cubren OCR e IA sin secretos y los reales fallan de for
   assert.equal(proposedProfile.columns.find((column) => column.field === 'description')?.required, true)
   assert.equal(proposedProfile.columns.find((column) => column.field === 'quantity')?.required, true)
   assert.throws(() => new AzureDocumentOcrProvider({ endpoint: '', apiKey: '' }), ProviderConfigurationError)
+  assert.throws(() => new MistralDocumentOcrProvider({ apiKey: '' }), /MISTRAL_API_KEY/)
   assert.throws(() => new OpenAiSupplierDocumentProvider({ apiKey: '', model: '' }), ProviderConfigurationError)
+})
+
+test('selecciona azure, mistral y mock desde una única factoría y mantiene azure por defecto', () => {
+  assert.ok(createDocumentOcrProvider({ ...realOcrSelection, provider: 'azure' }) instanceof AzureDocumentOcrProvider)
+  assert.ok(createDocumentOcrProvider({ ...realOcrSelection, provider: 'mistral' }) instanceof MistralDocumentOcrProvider)
+  assert.ok(createDocumentOcrProvider({ ...realOcrSelection }) instanceof AzureDocumentOcrProvider)
+  assert.ok(createDocumentOcrProvider({
+    ...realOcrSelection,
+    provider: 'mistral',
+    mockFixtureId: 'known-supplier',
+  }) instanceof MockDocumentOcrProvider)
+})
+
+test('mistral sin API key produce un error de configuración controlado', () => {
+  assert.throws(
+    () => createDocumentOcrProvider({ ...realOcrSelection, provider: 'mistral', mistral: { apiKey: '' } }),
+    (error) => error instanceof ProviderConfigurationError
+      && error.code === 'PROVIDER_NOT_CONFIGURED'
+      && error.message.includes('MISTRAL_API_KEY'),
+  )
+})
+
+test('normaliza una respuesta Mistral conservando páginas, bloques, geometría, tabla y confidence', () => {
+  const normalized = normalizeMistralOcrResponse(mistralOcrFixture)
+  assert.equal(normalized.provider, 'mistral')
+  assert.equal(normalized.metadata.model, 'mistral-ocr-latest')
+  assert.equal(normalized.confidence, 0.94)
+  assert.equal(normalized.pages[0].pageNumber, 1)
+  assert.equal(normalized.pages[0].width, 1200)
+  assert.equal(normalized.pages[0].words[0].confidence, 0.96)
+  assert.equal(normalized.pages[0].words[0].polygon, undefined)
+  assert.deepEqual(normalized.pages[0].blocks[0].polygon, [20, 30, 310, 30, 310, 80, 20, 80])
+  assert.equal(normalized.pages[0].tables[0].rowCount, 2)
+  assert.equal(normalized.pages[0].tables[0].columnCount, 3)
+  assert.equal(normalized.pages[0].tables[0].cells[4].text, 'Agua 1L')
+  assert.equal(normalized.pages[0].tables[0].cells[4].confidence, undefined)
+  assert.deepEqual(normalized.pages[0].tables[0].polygon, [40, 200, 1160, 200, 1160, 520, 40, 520])
 })
 
 test('la migración crea aislamiento, histórico e idempotencia transaccional', () => {
@@ -328,7 +403,12 @@ test('la UI es mobile-first, revisa incidencias y confirma solo por la RPC globa
 })
 
 test('la Edge Function mantiene IA y OCR sin autoridad sobre stock', () => {
-  assert.match(edgeFunction, /AzureDocumentOcrProvider/)
+  assert.match(ocrProviders, /class AzureDocumentOcrProvider/)
+  assert.match(ocrProviders, /class MistralDocumentOcrProvider/)
+  assert.match(edgeFunction, /createDocumentOcrProvider/)
+  assert.match(edgeFunction, /SUPPLIER_DOCUMENT_OCR_PROVIDER/)
+  assert.match(edgeFunction, /MISTRAL_API_KEY/)
+  assert.match(edgeFunction, /ocrModel/)
   assert.match(edgeFunction, /OpenAiSupplierDocumentProvider/)
   assert.match(edgeFunction, /MockDocumentOcrProvider/)
   assert.match(edgeFunction, /validateProposedProfile/)

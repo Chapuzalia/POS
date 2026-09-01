@@ -54,7 +54,7 @@ export class NoopNativePdfTextExtractor implements NativePdfTextExtractor {
   }
 }
 
-type AzureConfig = {
+export type AzureConfig = {
   endpoint: string
   apiKey: string
   apiVersion?: string
@@ -95,7 +95,7 @@ function polygon(value: number[] | undefined) {
 }
 
 export class AzureDocumentOcrProvider implements DocumentOcrProvider {
-  readonly name = 'azure-document-intelligence'
+  readonly name = 'azure'
   private readonly config: AzureConfig
   private readonly apiVersion: string
   private readonly modelId: string
@@ -182,6 +182,216 @@ export class AzureDocumentOcrProvider implements DocumentOcrProvider {
   }
 }
 
+export type MistralConfig = {
+  apiKey: string
+  model?: string
+}
+
+type MistralConfidenceScore = {
+  text?: string
+  confidence?: number
+  start_index?: number
+}
+
+type MistralBlock = {
+  type?: string
+  content?: string
+  top_left_x?: number
+  top_left_y?: number
+  bottom_right_x?: number
+  bottom_right_y?: number
+  table_id?: string
+  image_id?: string
+  confidence_scores?: { average_content_confidence_score?: number }
+}
+
+type MistralTable = {
+  id?: string
+  content?: string
+  format?: string
+  word_confidence_scores?: MistralConfidenceScore[]
+}
+
+export type MistralOcrResponse = {
+  model?: string
+  pages?: Array<{
+    index?: number
+    markdown?: string
+    dimensions?: { dpi?: number; height?: number; width?: number }
+    confidence_scores?: {
+      average_page_confidence_score?: number
+      minimum_page_confidence_score?: number
+      word_confidence_scores?: MistralConfidenceScore[]
+    }
+    blocks?: MistralBlock[] | null
+    tables?: MistralTable[]
+  }>
+  usage_info?: Record<string, unknown>
+}
+
+function dataUrl(bytes: Uint8Array, contentType: string) {
+  let binary = ''
+  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(offset, Math.min(offset + 0x8000, bytes.length)))
+  }
+  return `data:${contentType};base64,${btoa(binary)}`
+}
+
+function mistralNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function mistralConfidence(value: unknown) {
+  const parsed = mistralNumber(value)
+  return parsed !== undefined && parsed >= 0 && parsed <= 1 ? parsed : undefined
+}
+
+function mistralPolygon(value: MistralBlock | undefined) {
+  if (!value) return undefined
+  const left = mistralNumber(value.top_left_x)
+  const top = mistralNumber(value.top_left_y)
+  const right = mistralNumber(value.bottom_right_x)
+  const bottom = mistralNumber(value.bottom_right_y)
+  if (left === undefined || top === undefined || right === undefined || bottom === undefined) return undefined
+  return [left, top, right, top, right, bottom, left, bottom]
+}
+
+function markdownCells(line: string) {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  const cells: string[] = []
+  let current = ''
+  let escaped = false
+  for (const character of trimmed) {
+    if (escaped) {
+      current += character
+      escaped = false
+    } else if (character === '\\') {
+      escaped = true
+    } else if (character === '|') {
+      cells.push(current.trim())
+      current = ''
+    } else {
+      current += character
+    }
+  }
+  cells.push(current.trim())
+  return cells
+}
+
+function markdownTable(content: string, tableBlock?: MistralBlock) {
+  const rows = content.split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter((line) => line.includes('|'))
+    .map(markdownCells)
+    .filter((cells) => !cells.every((cell) => /^:?-{3,}:?$/.test(cell)))
+  const columnCount = rows.reduce((maximum, row) => Math.max(maximum, row.length), 0)
+  if (!rows.length || !columnCount) return null
+  return {
+    rowCount: rows.length,
+    columnCount,
+    cells: rows.flatMap((row, rowIndex) => Array.from({ length: columnCount }, (_, columnIndex) => ({
+      rowIndex,
+      columnIndex,
+      text: row[columnIndex] ?? '',
+    }))),
+    polygon: mistralPolygon(tableBlock),
+  }
+}
+
+export function normalizeMistralOcrResponse(payload: MistralOcrResponse): OcrDocument {
+  if (!payload.pages?.length) throw new Error('MISTRAL_OCR_EMPTY')
+  if (!payload.model) throw new Error('MISTRAL_OCR_MODEL_MISSING')
+  const pages = payload.pages.map((page, pageIndex) => {
+    const mistralPageIndex = page.index
+    if (typeof mistralPageIndex !== 'number' || !Number.isInteger(mistralPageIndex) || mistralPageIndex < 0) {
+      throw new Error(`MISTRAL_OCR_PAGE_INDEX_INVALID:${pageIndex}`)
+    }
+    if (typeof page.markdown !== 'string') throw new Error(`MISTRAL_OCR_PAGE_TEXT_MISSING:${pageIndex}`)
+    const width = mistralNumber(page.dimensions?.width)
+    const height = mistralNumber(page.dimensions?.height)
+    if (!width || !height) throw new Error(`MISTRAL_OCR_DIMENSIONS_MISSING:${pageIndex}`)
+    const wordScores = page.confidence_scores?.word_confidence_scores ?? []
+    const wordConfidences = wordScores.map((word) => mistralConfidence(word.confidence)).filter((value): value is number => value !== undefined)
+    const pageConfidence = mistralConfidence(page.confidence_scores?.average_page_confidence_score)
+      ?? (wordConfidences.length ? wordConfidences.reduce((sum, value) => sum + value, 0) / wordConfidences.length : undefined)
+    if (pageConfidence === undefined) throw new Error(`MISTRAL_OCR_CONFIDENCE_MISSING:${pageIndex}`)
+    const blocks = (page.blocks ?? []).map((block, blockIndex) => {
+      const blockPolygon = mistralPolygon(block)
+      if (!blockPolygon || typeof block.type !== 'string' || typeof block.content !== 'string') {
+        throw new Error(`MISTRAL_OCR_BLOCK_INVALID:${pageIndex}:${blockIndex}`)
+      }
+      const confidence = mistralConfidence(block.confidence_scores?.average_content_confidence_score)
+      return {
+        type: block.type,
+        text: block.content,
+        polygon: blockPolygon,
+        ...(confidence === undefined ? {} : { confidence }),
+        ...(block.table_id ? { tableId: block.table_id } : {}),
+        ...(block.image_id ? { imageId: block.image_id } : {}),
+      }
+    })
+    const tables = (page.tables ?? []).flatMap((table) => {
+      if (table.format !== 'markdown' || typeof table.content !== 'string') return []
+      const tableBlock = (page.blocks ?? []).find((block) => block.type === 'table' && block.table_id === table.id)
+      const normalized = markdownTable(table.content, tableBlock)
+      return normalized ? [normalized] : []
+    })
+    return {
+      pageNumber: mistralPageIndex + 1,
+      width,
+      height,
+      unit: 'pixel',
+      text: page.markdown,
+      words: wordScores.flatMap((word) => {
+        const confidence = mistralConfidence(word.confidence)
+        return typeof word.text === 'string' && confidence !== undefined ? [{ text: word.text, confidence }] : []
+      }),
+      blocks,
+      tables,
+      confidence: pageConfidence,
+    }
+  })
+  return ocrDocumentSchema.parse({
+    pages,
+    text: pages.map((page) => page.text).join('\n'),
+    confidence: pages.reduce((sum, page) => sum + page.confidence, 0) / pages.length,
+    provider: 'mistral',
+    metadata: { model: payload.model, usageInfo: payload.usage_info ?? null },
+  })
+}
+
+export class MistralDocumentOcrProvider implements DocumentOcrProvider {
+  readonly name = 'mistral'
+  private readonly apiKey: string
+  private readonly model: string
+
+  constructor(config: MistralConfig) {
+    if (!config.apiKey) throw new ProviderConfigurationError('Mistral OCR', ['MISTRAL_API_KEY'])
+    this.apiKey = config.apiKey
+    this.model = config.model || 'mistral-ocr-latest'
+  }
+
+  async analyze(input: DocumentBinaryInput) {
+    const encodedDocument = dataUrl(input.bytes, input.contentType)
+    const document = input.contentType.startsWith('image/')
+      ? { type: 'image_url', image_url: encodedDocument }
+      : { type: 'document_url', document_url: encodedDocument, document_name: input.fileName }
+    const response = await fetch('https://api.mistral.ai/v1/ocr', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: this.model,
+        document,
+        table_format: 'markdown',
+        include_blocks: true,
+        confidence_scores_granularity: 'word',
+      }),
+    })
+    if (!response.ok) throw new Error(`MISTRAL_OCR_FAILED:${response.status}:${await response.text()}`)
+    return normalizeMistralOcrResponse(await response.json() as MistralOcrResponse)
+  }
+}
+
 export class MockDocumentOcrProvider implements DocumentOcrProvider {
   readonly name = 'mock'
   private readonly fixtureId: string
@@ -193,6 +403,23 @@ export class MockDocumentOcrProvider implements DocumentOcrProvider {
     if (!fixture) throw new Error('MOCK_FIXTURE_NOT_FOUND')
     return ocrDocumentSchema.parse(structuredClone(fixture.ocr))
   }
+}
+
+export type DocumentOcrProviderSelection = {
+  provider?: string
+  mockFixtureId?: string | null
+  azure: AzureConfig
+  mistral: MistralConfig
+}
+
+export function createDocumentOcrProvider(selection: DocumentOcrProviderSelection): DocumentOcrProvider {
+  if (selection.mockFixtureId) return new MockDocumentOcrProvider(selection.mockFixtureId)
+  const provider = selection.provider?.trim().toLowerCase() || 'azure'
+  if (provider === 'azure') return new AzureDocumentOcrProvider(selection.azure)
+  if (provider === 'mistral') return new MistralDocumentOcrProvider(selection.mistral)
+  throw new ProviderConfigurationError('OCR de documentos de proveedor', [
+    `SUPPLIER_DOCUMENT_OCR_PROVIDER=${provider} (usa azure o mistral)`,
+  ])
 }
 
 type OpenAiConfig = { apiKey: string; model: string }

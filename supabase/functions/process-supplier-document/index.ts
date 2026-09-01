@@ -17,7 +17,7 @@ import {
 } from '../_shared/supplier-documents/core.ts'
 import { getSupplierDocumentMockFixture } from '../_shared/supplier-documents/fixtures.ts'
 import {
-  AzureDocumentOcrProvider,
+  createDocumentOcrProvider,
   MockDocumentOcrProvider,
   MockSupplierDocumentAiProvider,
   NoopNativePdfTextExtractor,
@@ -262,14 +262,20 @@ Deno.serve(async (request) => {
     const nativePdf = binary.contentType === 'application/pdf'
       ? await new NoopNativePdfTextExtractor().extract(binary)
       : null
-    const ocrProvider = fixtureId
-      ? new MockDocumentOcrProvider(fixtureId)
-      : new AzureDocumentOcrProvider({
+    const ocrProvider = createDocumentOcrProvider({
+      provider: Deno.env.get('SUPPLIER_DOCUMENT_OCR_PROVIDER') ?? undefined,
+      mockFixtureId: fixtureId,
+      azure: {
         endpoint: Deno.env.get('AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT') ?? '',
         apiKey: Deno.env.get('AZURE_DOCUMENT_INTELLIGENCE_API_KEY') ?? '',
         apiVersion: Deno.env.get('AZURE_DOCUMENT_INTELLIGENCE_API_VERSION') ?? undefined,
         modelId: Deno.env.get('AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID') ?? undefined,
-      })
+      },
+      mistral: {
+        apiKey: Deno.env.get('MISTRAL_API_KEY') ?? '',
+        model: Deno.env.get('MISTRAL_OCR_MODEL') ?? undefined,
+      },
+    })
     const ocr = nativePdf ?? await ocrProvider.analyze(binary)
     const knowledge = await loadGlobalKnowledge(admin)
     const fixture = fixtureId ? getSupplierDocumentMockFixture(fixtureId) : null
@@ -432,6 +438,9 @@ Deno.serve(async (request) => {
       extraction_metadata: {
         parserMode,
         ocrProvider: ocr.provider,
+        ocrModel: typeof ocr.metadata.model === 'string'
+          ? ocr.metadata.model
+          : typeof ocr.metadata.modelId === 'string' ? ocr.metadata.modelId : null,
         ocrConfidence: ocr.confidence,
         pageCount: ocr.pages.length,
         tableCount: ocr.pages.reduce((sum, page) => sum + page.tables.length, 0),
