@@ -102,6 +102,47 @@ test('el parser determinista usa la tabla OCR y el schema declarativo', () => {
   assert.equal(validateExtractionMath(parsed).coherent, true)
 })
 
+test('el perfil exige descripción y cantidad, y el parser elige una tabla con líneas reales', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  assert.ok(fixture?.knownProfile)
+  const invalidColumns = fixture.knownProfile.columns.map((column) => (
+    column.field === 'quantity' ? { ...column, required: false } : column
+  ))
+  assert.throws(
+    () => supplierProfileRulesSchema.parse({ ...fixture.knownProfile, columns: invalidColumns }),
+    /PROFILE_REQUIRED_COLUMN_MISSING:quantity/,
+  )
+  assert.throws(
+    () => supplierProfileRulesSchema.parse({
+      ...fixture.knownProfile,
+      columns: [...fixture.knownProfile.columns, fixture.knownProfile.columns[0]],
+    }),
+    /PROFILE_DUPLICATE_COLUMN:supplierReference/,
+  )
+
+  const ocr = structuredClone(fixture.ocr)
+  const sourceTable = ocr.pages[0].tables[0]
+  const headerOnly = {
+    ...sourceTable,
+    rowCount: 1,
+    cells: sourceTable.cells.filter((cell) => cell.rowIndex === 0),
+  }
+  const shiftedTable = {
+    ...sourceTable,
+    rowCount: sourceTable.rowCount + 1,
+    cells: [
+      { ...sourceTable.cells[0], rowIndex: 0, columnIndex: 0, text: 'DETALLE DE PRODUCTOS' },
+      ...sourceTable.cells.map((cell) => ({ ...cell, rowIndex: cell.rowIndex + 1 })),
+    ],
+  }
+  ocr.pages[0].tables = [headerOnly, shiftedTable]
+  const parsed = runDeterministicParser(fixture.knownProfile, ocr, {
+    documentType: 'delivery_note', supplierName: fixture.extraction.supplier.name, supplierTaxId: fixture.extraction.supplier.taxId,
+  })
+  assert.equal(parsed.lines.length, 1)
+  assert.equal(parsed.lines[0].supplierReference, '18452')
+})
+
 test('matching respeta EAN, referencia, alias, nombre y revisión manual', () => {
   const items = [
     { id: 'coke', name: 'Coca-Cola Zero', baseUnitId: 'l', referenceCost: 1.8, active: true },
@@ -197,6 +238,13 @@ test('los providers mock cubren OCR e IA sin secretos y los reales fallan de for
     documentType: 'delivery_note',
   })
   assert.equal(conversion.lines[0].packageExpression?.toLowerCase(), '24x33cl')
+  const proposedProfile = await new MockSupplierDocumentAiProvider('unknown-supplier').proposeProfile({
+    ocr: getSupplierDocumentMockFixture('unknown-supplier').ocr,
+    documentType: 'delivery_note',
+    extraction: getSupplierDocumentMockFixture('unknown-supplier').extraction,
+  })
+  assert.equal(proposedProfile.columns.find((column) => column.field === 'description')?.required, true)
+  assert.equal(proposedProfile.columns.find((column) => column.field === 'quantity')?.required, true)
   assert.throws(() => new AzureDocumentOcrProvider({ endpoint: '', apiKey: '' }), ProviderConfigurationError)
   assert.throws(() => new OpenAiSupplierDocumentProvider({ apiKey: '', model: '' }), ProviderConfigurationError)
 })
@@ -291,6 +339,9 @@ test('la Edge Function mantiene IA y OCR sin autoridad sobre stock', () => {
   assert.doesNotMatch(edgeFunction, /inventory_stock_levels.*(?:insert|update)/i)
   assert.doesNotMatch(edgeFunction, /allowGlobalCreation/)
   assert.match(edgeFunction, /if \(!globalSupplier\) \{[\s\S]*global_suppliers/)
+  assert.match(edgeFunction, /aiProvider\.proposeProfile/)
+  assert.match(edgeFunction, /profileGenerationRetried/)
+  assert.match(edgeFunction, /rejectedProfile/)
   assert.match(identityBackfillMigration, /insert into public\.global_suppliers/i)
   assert.match(identityBackfillMigration, /update public\.supplier_documents/i)
 })

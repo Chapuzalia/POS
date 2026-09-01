@@ -24,6 +24,7 @@ import {
   OpenAiSupplierDocumentProvider,
   ProviderConfigurationError,
   type DocumentBinaryInput,
+  type SupplierDocumentAiProvider,
 } from '../_shared/supplier-documents/providers.ts'
 
 type UntypedSupabaseClient = ReturnType<typeof createClient<any>>
@@ -276,6 +277,7 @@ Deno.serve(async (request) => {
     let parserMode: 'deterministic' | 'ai'
     let globalProfileId: string | null = null
     let globalSupplierId: string | null = null
+    let aiProvider: SupplierDocumentAiProvider | null = null
     if (fixture?.knownProfile) {
       extraction = runDeterministicParser(fixture.knownProfile, ocr, {
         documentType: document.document_type,
@@ -291,7 +293,7 @@ Deno.serve(async (request) => {
         globalSupplierId = known.globalSupplierId
         parserMode = 'deterministic'
       } else {
-        const aiProvider = fixtureId
+        aiProvider = fixtureId
           ? new MockSupplierDocumentAiProvider(fixtureId)
           : new OpenAiSupplierDocumentProvider({
             apiKey: Deno.env.get('OPENAI_API_KEY') ?? '',
@@ -313,7 +315,23 @@ Deno.serve(async (request) => {
     const requestedDocumentType = document.document_type
     const documentTypeCorrected = extraction.document.type !== requestedDocumentType
     const math = validateExtractionMath(extraction)
-    const profileValidation = parserMode === 'ai' ? validateProposedProfile(ocr, extraction) : null
+    let profileValidation = parserMode === 'ai' ? validateProposedProfile(ocr, extraction) : null
+    let profileGenerationRetried = false
+    let profileGenerationError: string | null = null
+    if (parserMode === 'ai' && aiProvider && math.coherent && !profileValidation?.candidate) {
+      profileGenerationRetried = true
+      try {
+        const proposedProfile = await aiProvider.proposeProfile({
+          ocr,
+          documentType: extraction.document.type,
+          extraction,
+        })
+        extraction = supplierDocumentExtractionSchema.parse({ ...extraction, proposedProfile })
+        profileValidation = validateProposedProfile(ocr, extraction)
+      } catch (error) {
+        profileGenerationError = error instanceof Error ? error.message : 'PROFILE_GENERATION_FAILED'
+      }
+    }
     const supplierResult = await ensureSupplier(
       admin, document.tenant_id, extraction, knowledge.suppliers,
     )
@@ -419,6 +437,10 @@ Deno.serve(async (request) => {
         tableCount: ocr.pages.reduce((sum, page) => sum + page.tables.length, 0),
         math,
         profileValidation: profileValidation ? { candidate: profileValidation.candidate, reason: profileValidation.reason } : null,
+        profileGenerationRetried,
+        profileGenerationError,
+        profileParsedLineCount: profileValidation?.parsed?.lines.length ?? null,
+        rejectedProfile: profileValidation && !profileValidation.candidate ? extraction.proposedProfile : null,
         mockFixtureId: fixtureId,
         requestedDocumentType,
         detectedDocumentType: extraction.document.type,

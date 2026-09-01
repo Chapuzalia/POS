@@ -2,8 +2,11 @@ import {
   ocrDocumentSchema,
   supplierDocumentExtractionJsonSchema,
   supplierDocumentExtractionSchema,
+  supplierProfileRulesJsonSchema,
+  supplierProfileRulesSchema,
   type OcrDocument,
   type SupplierDocumentExtraction,
+  type SupplierProfileRules,
 } from './core.ts'
 import { getSupplierDocumentMockFixture } from './fixtures.ts'
 
@@ -25,6 +28,11 @@ export interface SupplierDocumentAiProvider {
     documentType: 'invoice' | 'delivery_note'
     imageDataUrl?: string | null
   }): Promise<SupplierDocumentExtraction>
+  proposeProfile(input: {
+    ocr: OcrDocument
+    documentType: 'invoice' | 'delivery_note'
+    extraction: SupplierDocumentExtraction
+  }): Promise<SupplierProfileRules>
 }
 
 export interface NativePdfTextExtractor {
@@ -203,6 +211,20 @@ function responseOutputText(payload: Record<string, unknown>) {
   return null
 }
 
+function structuredOcr(input: { ocr: OcrDocument; documentType: 'invoice' | 'delivery_note' }) {
+  return {
+    requestedDocumentType: input.documentType,
+    text: input.ocr.text,
+    confidence: input.ocr.confidence,
+    pages: input.ocr.pages.map((page) => ({
+      pageNumber: page.pageNumber,
+      text: page.text,
+      words: page.words,
+      tables: page.tables,
+    })),
+  }
+}
+
 export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvider {
   readonly name = 'openai-responses'
   private readonly config: OpenAiConfig
@@ -216,18 +238,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
   }
 
   async interpret(input: { ocr: OcrDocument; documentType: 'invoice' | 'delivery_note'; imageDataUrl?: string | null }) {
-    const structuredOcr = JSON.stringify({
-      requestedDocumentType: input.documentType,
-      text: input.ocr.text,
-      confidence: input.ocr.confidence,
-      pages: input.ocr.pages.map((page) => ({
-        pageNumber: page.pageNumber,
-        text: page.text,
-        words: page.words,
-        tables: page.tables,
-      })),
-    })
-    const content: Array<Record<string, unknown>> = [{ type: 'input_text', text: structuredOcr }]
+    const content: Array<Record<string, unknown>> = [{ type: 'input_text', text: JSON.stringify(structuredOcr(input)) }]
     if (input.imageDataUrl) content.push({ type: 'input_image', image_url: input.imageDataUrl, detail: 'high' })
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -261,6 +272,52 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
     if (!outputText) throw new Error('OPENAI_DOCUMENT_EXTRACTION_EMPTY')
     return supplierDocumentExtractionSchema.parse(JSON.parse(outputText))
   }
+
+  async proposeProfile(input: {
+    ocr: OcrDocument
+    documentType: 'invoice' | 'delivery_note'
+    extraction: SupplierDocumentExtraction
+  }) {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: this.config.model,
+        store: false,
+        instructions: [
+          'Genera exclusivamente un perfil declarativo reutilizable para interpretar documentos con el mismo diseño que este OCR.',
+          'Las columnas description y quantity deben aparecer exactamente una vez y tener required=true.',
+          'Cada field debe aparecer como máximo una vez. Los headerAliases deben ser textos reales de una misma fila de cabecera del OCR, nunca valores de productos.',
+          'Usa requiredTexts estables del emisor y del diseño; no uses número, fecha, cliente, destinatario ni importes de este documento.',
+          'Las reglas deben localizar la tabla de productos y reproducir las líneas objetivo. Las filas auxiliares de descuentos, impuestos, subtotales o envases no son productos.',
+          'No devuelvas código, SQL ni expresiones ejecutables.',
+        ].join(' '),
+        input: [{
+          role: 'user',
+          content: [{
+            type: 'input_text',
+            text: JSON.stringify({
+              ocr: structuredOcr(input),
+              targetExtraction: { document: input.extraction.document, lines: input.extraction.lines },
+            }),
+          }],
+        }],
+        text: {
+          format: {
+            type: 'json_schema',
+            name: 'supplier_document_profile',
+            strict: true,
+            schema: supplierProfileRulesJsonSchema,
+          },
+        },
+      }),
+    })
+    if (!response.ok) throw new Error(`OPENAI_PROFILE_GENERATION_FAILED:${response.status}:${await response.text()}`)
+    const payload = await response.json() as Record<string, unknown>
+    const outputText = responseOutputText(payload)
+    if (!outputText) throw new Error('OPENAI_PROFILE_GENERATION_EMPTY')
+    return supplierProfileRulesSchema.parse(JSON.parse(outputText))
+  }
 }
 
 export class MockSupplierDocumentAiProvider implements SupplierDocumentAiProvider {
@@ -273,5 +330,11 @@ export class MockSupplierDocumentAiProvider implements SupplierDocumentAiProvide
     const fixture = getSupplierDocumentMockFixture(this.fixtureId)
     if (!fixture) throw new Error('MOCK_FIXTURE_NOT_FOUND')
     return supplierDocumentExtractionSchema.parse(structuredClone(fixture.extraction))
+  }
+
+  async proposeProfile() {
+    const fixture = getSupplierDocumentMockFixture(this.fixtureId)
+    if (!fixture?.extraction.proposedProfile) throw new Error('MOCK_PROFILE_NOT_FOUND')
+    return supplierProfileRulesSchema.parse(structuredClone(fixture.extraction.proposedProfile))
   }
 }

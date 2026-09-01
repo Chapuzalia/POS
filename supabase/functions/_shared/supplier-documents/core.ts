@@ -60,7 +60,7 @@ const parserFieldSchema = z.enum([
   'taxRate',
 ])
 
-export const supplierProfileRulesSchema = z.object({
+const supplierProfileRulesBaseSchema = z.object({
   version: z.literal(1),
   requiredTexts: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
   optionalTexts: z.array(z.string().trim().min(1).max(120)).max(30).default([]),
@@ -80,6 +80,21 @@ export const supplierProfileRulesSchema = z.object({
     operation: z.enum(['trim', 'collapse_spaces', 'uppercase', 'lowercase']),
   }).strict()).max(20).default([]),
 }).strict()
+
+export const supplierProfileRulesSchema = supplierProfileRulesBaseSchema.superRefine((rules, context) => {
+  for (const field of parserFieldSchema.options) {
+    const columns = rules.columns.filter((column) => column.field === field)
+    if (columns.length > 1) {
+      context.addIssue({ code: 'custom', message: `PROFILE_DUPLICATE_COLUMN:${field}`, path: ['columns'] })
+    }
+  }
+  for (const field of ['description', 'quantity'] as const) {
+    const column = rules.columns.find((candidate) => candidate.field === field)
+    if (!column?.required) {
+      context.addIssue({ code: 'custom', message: `PROFILE_REQUIRED_COLUMN_MISSING:${field}`, path: ['columns'] })
+    }
+  }
+})
 
 export type SupplierProfileRules = z.infer<typeof supplierProfileRulesSchema>
 
@@ -111,14 +126,14 @@ export const supplierDocumentExtractionSchema = z.object({
     taxId: nullableText,
   }).strict(),
   lines: z.array(extractedLineSchema).min(1).max(500),
-  proposedProfile: supplierProfileRulesSchema.nullable(),
+  proposedProfile: supplierProfileRulesBaseSchema.nullable(),
   confidence: z.number().min(0).max(1),
 }).strict()
 
 export type SupplierDocumentExtraction = z.infer<typeof supplierDocumentExtractionSchema>
 export type ExtractedLine = z.infer<typeof extractedLineSchema>
 
-const supplierProfileRulesJsonSchema = {
+export const supplierProfileRulesJsonSchema = {
   type: 'object',
   additionalProperties: false,
   required: [
@@ -319,54 +334,65 @@ export function runDeterministicParser(
   const rules = supplierProfileRulesSchema.parse(inputRules)
   const ocr = ocrDocumentSchema.parse(ocrInput)
   if (!profileMatchesOcr(rules, ocr)) throw new Error('PROFILE_FINGERPRINT_MISMATCH')
-  let selected: { matrix: string[][]; indexes: Map<string, number> } | null = null
+  let selected: { lines: ExtractedLine[]; score: number } | null = null
+  let matchedHeaders = false
   for (const page of ocr.pages) {
     for (const table of page.tables) {
       const matrix = tableMatrix(table)
-      const headers = matrix[0]?.map(normalizeDocumentText) ?? []
-      const indexes = new Map<string, number>()
-      for (const column of rules.columns) {
-        const index = headers.findIndex((header) => column.headerAliases.some((alias) => header.includes(normalizeDocumentText(alias))))
-        if (index >= 0) indexes.set(column.field, index)
-      }
-      if (rules.columns.filter((column) => column.required).every((column) => indexes.has(column.field))) {
-        selected = { matrix, indexes }
-        break
+      const normalizedTableText = normalizeDocumentText(matrix.flat().join(' '))
+      for (let headerRowIndex = 0; headerRowIndex < matrix.length; headerRowIndex += 1) {
+        const headers = matrix[headerRowIndex]?.map(normalizeDocumentText) ?? []
+        const indexes = new Map<z.infer<typeof parserFieldSchema>, number>()
+        for (const column of rules.columns) {
+          const index = headers.findIndex((header) => column.headerAliases.some((alias) => header.includes(normalizeDocumentText(alias))))
+          if (index >= 0) indexes.set(column.field, index)
+        }
+        const requiredColumns = rules.columns.filter((column) => column.required)
+        if (!requiredColumns.every((column) => indexes.has(column.field))) continue
+        matchedHeaders = true
+        const lines: ExtractedLine[] = []
+        for (const row of matrix.slice(headerRowIndex + 1)) {
+          const normalizedRow = normalizeDocumentText(row.join(' '))
+          if (rules.tableEndText && normalizedRow.includes(normalizeDocumentText(rules.tableEndText))) break
+          const get = (field: z.infer<typeof parserFieldSchema>) => {
+            const index = indexes.get(field)
+            return index === undefined ? '' : normalizeProfileField(row[index] ?? '', field, rules)
+          }
+          const description = get('description')
+          const quantity = parseProfileNumber(get('quantity'), rules)
+          if (!description || quantity === null || quantity <= 0) continue
+          const unitPrice = parseProfileNumber(get('unitPrice'), rules)
+          const discountAmount = parseProfileNumber(get('discountAmount'), rules) ?? 0
+          const lineTotal = parseProfileNumber(get('lineTotal'), rules)
+          const taxRate = parseProfileNumber(get('taxRate'), rules)
+          const parsedLine = extractedLineSchema.safeParse({
+            supplierReference: get('supplierReference') || null,
+            description,
+            barcode: get('barcode') || null,
+            quantity,
+            purchaseUnit: get('purchaseUnit') || null,
+            unitPrice,
+            discountAmount,
+            grossCost: unitPrice === null ? lineTotal : quantity * unitPrice,
+            netCost: lineTotal,
+            lineTotal,
+            taxRate,
+            packageExpression: packagingPattern.exec(description)?.[0] ?? null,
+            confidence: ocr.confidence,
+          })
+          if (parsedLine.success) lines.push(parsedLine.data)
+        }
+        if (lines.length === 0) continue
+        const markerScore = [rules.tableStartText, rules.tableEndText]
+          .filter((marker): marker is string => Boolean(marker))
+          .filter((marker) => normalizedTableText.includes(normalizeDocumentText(marker))).length
+        const score = lines.length * 1_000 + indexes.size * 10 + markerScore * 100 - headerRowIndex
+        if (!selected || score > selected.score) selected = { lines, score }
       }
     }
-    if (selected) break
   }
-  if (!selected) throw new Error('PROFILE_TABLE_NOT_FOUND')
-  const lines: ExtractedLine[] = []
-  for (const row of selected.matrix.slice(1)) {
-    const get = (field: z.infer<typeof parserFieldSchema>) => {
-      const index = selected?.indexes.get(field)
-      return index === undefined ? '' : normalizeProfileField(row[index] ?? '', field, rules)
-    }
-    const description = get('description')
-    const quantity = parseProfileNumber(get('quantity'), rules)
-    if (!description && quantity === null) continue
-    if (!description || quantity === null || quantity <= 0) throw new Error('PROFILE_LINE_INVALID')
-    const unitPrice = parseProfileNumber(get('unitPrice'), rules)
-    const discountAmount = parseProfileNumber(get('discountAmount'), rules) ?? 0
-    const lineTotal = parseProfileNumber(get('lineTotal'), rules)
-    const taxRate = parseProfileNumber(get('taxRate'), rules)
-    lines.push(extractedLineSchema.parse({
-      supplierReference: get('supplierReference') || null,
-      description,
-      barcode: get('barcode') || null,
-      quantity,
-      purchaseUnit: get('purchaseUnit') || null,
-      unitPrice,
-      discountAmount,
-      grossCost: unitPrice === null ? lineTotal : quantity * unitPrice,
-      netCost: lineTotal,
-      lineTotal,
-      taxRate,
-      packageExpression: packagingPattern.exec(description)?.[0] ?? null,
-      confidence: ocr.confidence,
-    }))
-  }
+  if (!selected) throw new Error(matchedHeaders ? 'PROFILE_LINES_NOT_FOUND' : 'PROFILE_TABLE_NOT_FOUND')
+  const lines = selected.lines
   return supplierDocumentExtractionSchema.parse({
     document: {
       type: defaults.documentType,
