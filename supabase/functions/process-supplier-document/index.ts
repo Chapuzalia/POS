@@ -3,10 +3,11 @@ import {
   chooseDefaultWarehouse,
   matchInventoryItem,
   normalizeAlias,
-  normalizeDocumentText,
   normalizePurchaseToBase,
+  normalizeSupplierTaxId,
   profileMatchesOcr,
   runDeterministicParser,
+  supplierIdentityMatches,
   supplierDocumentExtractionSchema,
   supplierProfileRulesSchema,
   validateExtractionMath,
@@ -66,6 +67,16 @@ function dateValue(value: string | null) {
   const match = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
   if (!match) return null
   return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
+}
+
+function learnedPackageExpression(value: unknown) {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const packaging = value as Record<string, unknown>
+  const packageCount = Number(packaging.packageCount ?? 1)
+  const unitQuantity = Number(packaging.unitQuantity)
+  const unitSymbol = typeof packaging.unitSymbol === 'string' ? packaging.unitSymbol.trim() : ''
+  if (!(packageCount > 0) || !(unitQuantity > 0) || !unitSymbol) return null
+  return `${packageCount}x${unitQuantity}${unitSymbol}`
 }
 
 function bytesToDataUrl(bytes: Uint8Array, contentType: string) {
@@ -135,13 +146,23 @@ async function ensureSupplier(
   tenantId: string,
   extraction: SupplierDocumentExtraction,
   globals: DbRow[],
-  allowGlobalCreation: boolean,
 ) {
-  const normalizedTaxId = extraction.supplier.taxId?.replace(/\s+/g, '').toUpperCase() ?? null
-  let globalSupplier = globals.find((candidate) => normalizedTaxId && String(candidate.tax_id ?? '').replace(/\s+/g, '').toUpperCase() === normalizedTaxId)
-    ?? globals.find((candidate) => normalizeDocumentText(String(candidate.name)) === normalizeDocumentText(extraction.supplier.name))
-    ?? null
-  if (!globalSupplier && allowGlobalCreation) {
+  const identity = { name: extraction.supplier.name, taxId: extraction.supplier.taxId }
+  const normalizedTaxId = normalizeSupplierTaxId(extraction.supplier.taxId)
+  const { data: locals, error: localError } = await admin.from('suppliers')
+    .select('id, name, tax_id, global_supplier_id')
+    .eq('tenant_id', tenantId)
+  if (localError) throw localError
+  let localSupplier = ((locals ?? []) as DbRow[]).find((candidate) => supplierIdentityMatches(identity, {
+    name: String(candidate.name), taxId: candidate.tax_id == null ? null : String(candidate.tax_id),
+  })) ?? null
+  let globalSupplier = localSupplier?.global_supplier_id
+    ? globals.find((candidate) => candidate.id === localSupplier?.global_supplier_id) ?? null
+    : null
+  globalSupplier ??= globals.find((candidate) => supplierIdentityMatches(identity, {
+    name: String(candidate.name), taxId: candidate.tax_id == null ? null : String(candidate.tax_id),
+  })) ?? null
+  if (!globalSupplier) {
     const { data, error } = await admin.from('global_suppliers').insert({
       name: extraction.supplier.name,
       tax_id: normalizedTaxId,
@@ -149,13 +170,6 @@ async function ensureSupplier(
     if (error) throw error
     globalSupplier = data as DbRow
   }
-  const { data: locals, error: localError } = await admin.from('suppliers')
-    .select('id, name, tax_id, global_supplier_id')
-    .eq('tenant_id', tenantId)
-  if (localError) throw localError
-  let localSupplier = ((locals ?? []) as DbRow[]).find((candidate) => normalizedTaxId && String(candidate.tax_id ?? '').replace(/\s+/g, '').toUpperCase() === normalizedTaxId)
-    ?? ((locals ?? []) as DbRow[]).find((candidate) => normalizeDocumentText(String(candidate.name)) === normalizeDocumentText(extraction.supplier.name))
-    ?? null
   if (!localSupplier) {
     const { data, error } = await admin.from('suppliers').insert({
       tenant_id: tenantId,
@@ -185,7 +199,7 @@ async function loadInventoryContext(
     admin.from('inventory_units').select('id, name, symbol, content_quantity, content_unit_id, is_active').eq('tenant_id', tenantId).eq('venue_id', venueId),
     admin.from('inventory_item_warehouse_routes').select('inventory_item_id, warehouse_id, priority, is_enabled').eq('tenant_id', tenantId).eq('venue_id', venueId),
     admin.from('inventory_warehouses').select('id, is_active, sort_order').eq('tenant_id', tenantId).eq('venue_id', venueId),
-    admin.from('supplier_item_aliases').select('alias_type, alias_value, inventory_item_id').eq('tenant_id', tenantId).eq('venue_id', venueId).eq('supplier_id', supplierId),
+    admin.from('supplier_item_aliases').select('alias_type, alias_value, inventory_item_id, packaging_json').eq('tenant_id', tenantId).eq('venue_id', venueId).eq('supplier_id', supplierId),
   ])
   for (const result of [itemsResult, unitsResult, routesResult, warehousesResult, aliasesResult]) if (result.error) throw result.error
   return {
@@ -207,6 +221,7 @@ async function loadInventoryContext(
     aliases: ((aliasesResult.data ?? []) as DbRow[]).map((row) => ({
       aliasType: row.alias_type as 'ean' | 'supplier_reference' | 'description',
       aliasValue: String(row.alias_value), inventoryItemId: String(row.inventory_item_id),
+      packageExpression: learnedPackageExpression(row.packaging_json),
     })),
   }
 }
@@ -295,14 +310,12 @@ Deno.serve(async (request) => {
       }
     }
     extraction = supplierDocumentExtractionSchema.parse(extraction)
-    if (extraction.document.type !== document.document_type) {
-      throw new Error('SUPPLIER_DOCUMENT_TYPE_MISMATCH')
-    }
+    const requestedDocumentType = document.document_type
+    const documentTypeCorrected = extraction.document.type !== requestedDocumentType
     const math = validateExtractionMath(extraction)
     const profileValidation = parserMode === 'ai' ? validateProposedProfile(ocr, extraction) : null
     const supplierResult = await ensureSupplier(
       admin, document.tenant_id, extraction, knowledge.suppliers,
-      Boolean(profileValidation?.candidate),
     )
     globalSupplierId ??= supplierResult.globalSupplier?.id ? String(supplierResult.globalSupplier.id) : null
     if (!globalProfileId && profileValidation?.candidate && globalSupplierId && extraction.proposedProfile) {
@@ -339,7 +352,7 @@ Deno.serve(async (request) => {
       const normalized = baseUnit ? normalizePurchaseToBase({
         purchaseQuantity: line.quantity,
         purchaseUnit: line.purchaseUnit,
-        packageExpression: line.packageExpression,
+        packageExpression: match.packageExpression ?? line.packageExpression,
         description: line.description,
         baseUnit,
         units: inventory.units,
@@ -379,6 +392,7 @@ Deno.serve(async (request) => {
           matchReason: match.reason,
           matchScore: match.score,
           packageExpression: line.packageExpression,
+          learnedPackageExpression: match.packageExpression ?? null,
           originalInventoryItemId: item?.id ?? null,
           originalWarehouseId: warehouseId,
         },
@@ -406,6 +420,9 @@ Deno.serve(async (request) => {
         math,
         profileValidation: profileValidation ? { candidate: profileValidation.candidate, reason: profileValidation.reason } : null,
         mockFixtureId: fixtureId,
+        requestedDocumentType,
+        detectedDocumentType: extraction.document.type,
+        documentTypeCorrected,
       },
     }).eq('id', document.id)
     if (updateError) throw updateError

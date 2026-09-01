@@ -1,5 +1,5 @@
 import type { TenantContext } from '../../../../types'
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
 import { loadInventorySnapshot } from '../../inventory/services/inventoryService'
 import type {
   SupplierDocument,
@@ -69,7 +69,13 @@ async function processDocument(documentId: string, fixtureId?: string) {
   const { data, error } = await requireSupabase().functions.invoke('process-supplier-document', {
     body: { documentId, ...(fixtureId ? { fixtureId } : {}) },
   })
-  if (error) throw error
+  if (error) {
+    throw new Error(await getFunctionInvokeErrorMessage(
+      data,
+      error,
+      'No se pudo procesar el documento.',
+    ))
+  }
   return data as { documentId: string; status: string; lineCount: number; needsReviewCount: number }
 }
 
@@ -90,7 +96,10 @@ export async function uploadSupplierDocument(
   })
   if (error) throw error
   const created = data as { documentId: string; storageBucket: string; storagePath: string; status: string; duplicate: boolean }
-  if (created.duplicate) return created
+  if (created.duplicate) {
+    if (created.status === 'error') await processDocument(created.documentId)
+    return created
+  }
   const { error: uploadError } = await client.storage.from(created.storageBucket).upload(created.storagePath, file, {
     contentType: file.type || undefined,
     upsert: false,

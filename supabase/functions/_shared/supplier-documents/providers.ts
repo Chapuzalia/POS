@@ -237,8 +237,11 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
         store: false,
         instructions: [
           'Interpreta un albarán o factura de proveedor a partir del OCR estructurado.',
+          'En supplier identifica siempre al emisor, vendedor o proveedor que expide el documento; nunca uses el cliente, comprador, destinatario, punto de venta ni dirección de entrega.',
+          'supplier.taxId debe ser exclusivamente el identificador fiscal del emisor; si no aparece o no es inequívoco devuelve null y no reutilices el NIF/CIF del destinatario.',
           'No inventes líneas ni valores. Devuelve importes como números decimales.',
           'Propón solo reglas declarativas compatibles con el schema, nunca código, SQL ni expresiones ejecutables.',
+          'Si proposedProfile no es null, sus requiredTexts y columnas deben existir en este OCR y al aplicar esas reglas deben reproducirse las mismas líneas extraídas; si no es posible, devuelve proposedProfile como null.',
           'La imagen, si existe, solo sirve para resolver OCR dudoso; prioriza siempre el OCR estructurado.',
         ].join(' '),
         input: [{ role: 'user', content }],

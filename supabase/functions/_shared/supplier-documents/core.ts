@@ -1,4 +1,4 @@
-import { z } from "npm:zod@4.4.3";
+import { z } from "zod";
 
 const nullableText = z.string().trim().max(500).nullable()
 const nullableMoney = z.number().finite().nonnegative().nullable()
@@ -224,6 +224,48 @@ export function normalizeDocumentText(value: string) {
 
 export function normalizeAlias(value: string) {
   return normalizeDocumentText(value)
+}
+
+const supplierLegalFormTokens = new Set([
+  'sa', 'sau', 'sl', 'slu', 'slne', 'sc', 'scp', 'scoop', 'sociedad', 'anonima',
+  'limitada', 'unipersonal', 'cooperativa',
+])
+
+export function normalizeSupplierTaxId(value: string | null | undefined) {
+  const normalized = value?.normalize('NFD').replace(accentPattern, '').toUpperCase().replace(/[^A-Z0-9]/g, '') ?? ''
+  return normalized.length >= 6 ? normalized : null
+}
+
+export function normalizeSupplierName(value: string) {
+  const tokens = normalizeDocumentText(value).split(' ').filter(Boolean)
+  for (const suffix of [['s', 'l', 'u'], ['s', 'a', 'u'], ['s', 'c', 'p'], ['s', 'l'], ['s', 'a'], ['s', 'c']]) {
+    if (suffix.every((token, index) => tokens[tokens.length - suffix.length + index] === token)) {
+      tokens.splice(tokens.length - suffix.length, suffix.length)
+      break
+    }
+  }
+  return tokens.filter((token) => !supplierLegalFormTokens.has(token)).join(' ')
+}
+
+export function supplierIdentityMatches(
+  supplier: { name: string; taxId?: string | null },
+  candidate: { name: string; taxId?: string | null },
+) {
+  const supplierTaxId = normalizeSupplierTaxId(supplier.taxId)
+  const candidateTaxId = normalizeSupplierTaxId(candidate.taxId)
+  if (supplierTaxId && candidateTaxId) return supplierTaxId === candidateTaxId
+
+  const supplierName = normalizeSupplierName(supplier.name)
+  const candidateName = normalizeSupplierName(candidate.name)
+  if (!supplierName || !candidateName) return false
+  if (supplierName === candidateName) return true
+
+  const supplierTokens = new Set(supplierName.split(' '))
+  const candidateTokens = new Set(candidateName.split(' '))
+  const shortestSize = Math.min(supplierTokens.size, candidateTokens.size)
+  if (shortestSize < 3) return false
+  const shared = [...supplierTokens].filter((token) => candidateTokens.has(token)).length
+  return shared / shortestSize >= 0.8 && Math.abs(supplierTokens.size - candidateTokens.size) <= 2
 }
 
 export function profileMatchesOcr(rules: SupplierProfileRules, ocr: OcrDocument) {
@@ -462,6 +504,67 @@ export type InventoryUnitDefinition = {
   contentUnitId: string
 }
 
+function inventoryContentUnit(unit: InventoryUnitDefinition, units: InventoryUnitDefinition[]) {
+  return units.find((candidate) => candidate.id === unit.contentUnitId) ?? unit
+}
+
+const countUnitPattern = /(unidad|pieza|botell|lata|envase)/
+const countUnitSymbolPattern = /^(u|ud|uds|pz|bot|b)$/
+
+export function inventoryUnitsCompatible(
+  leftUnit: InventoryUnitDefinition,
+  rightUnit: InventoryUnitDefinition,
+  units: InventoryUnitDefinition[],
+) {
+  const leftBase = inventoryContentUnit(leftUnit, units)
+  const rightBase = inventoryContentUnit(rightUnit, units)
+  const leftName = normalizeDocumentText(leftBase.name)
+  const rightName = normalizeDocumentText(rightBase.name)
+  const leftSymbol = normalizeDocumentText(leftBase.symbol)
+  const rightSymbol = normalizeDocumentText(rightBase.symbol)
+  const leftIsCount = countUnitPattern.test(leftName) || countUnitSymbolPattern.test(leftSymbol)
+  const rightIsCount = countUnitPattern.test(rightName) || countUnitSymbolPattern.test(rightSymbol)
+  return leftBase.id === rightBase.id
+    || leftName === rightName
+    || (leftSymbol !== '' && leftSymbol === rightSymbol)
+    || (leftIsCount && rightIsCount)
+}
+
+function convertInventoryQuantity(
+  quantity: number,
+  fromUnit: InventoryUnitDefinition,
+  toUnit: InventoryUnitDefinition,
+  units: InventoryUnitDefinition[],
+) {
+  if (!(quantity > 0) || !inventoryUnitsCompatible(fromUnit, toUnit, units)) return null
+  if (!(fromUnit.contentQuantity > 0) || !(toUnit.contentQuantity > 0)) return null
+  return Math.round((quantity * fromUnit.contentQuantity / toUnit.contentQuantity) * 1_000_000) / 1_000_000
+}
+
+function escapeRegularExpression(value: string) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
+
+function parseInventoryPackagingExpression(value: string, units: InventoryUnitDefinition[]) {
+  const candidates = units.flatMap((unit) => [unit.symbol, unit.name]
+    .filter((label, index, labels) => label.trim() && labels.indexOf(label) === index)
+    .map((label) => ({ label, unit })))
+    .sort((left, right) => right.label.length - left.label.length)
+  for (const candidate of candidates) {
+    const pattern = new RegExp(
+      `(?:(\\d+(?:[.,]\\d+)?)\\s*[x×]\\s*)?(\\d+(?:[.,]\\d+)?)\\s*${escapeRegularExpression(candidate.label)}(?=$|[^\\p{L}\\p{N}])`,
+      'iu',
+    )
+    const match = pattern.exec(value)
+    if (!match) continue
+    const packageCount = match[1] ? Number(match[1].replace(',', '.')) : 1
+    const unitQuantity = Number(match[2].replace(',', '.'))
+    if (!(packageCount > 0) || !(unitQuantity > 0)) return null
+    return { packageCount, unitQuantity, unit: candidate.unit }
+  }
+  return null
+}
+
 function canonicalUnitForInventoryUnit(unit: InventoryUnitDefinition, units: InventoryUnitDefinition[]) {
   const contentUnit = units.find((candidate) => candidate.id === unit.contentUnitId) ?? unit
   return canonicalUnits[normalizeDocumentText(contentUnit.symbol || contentUnit.name)] ?? null
@@ -474,8 +577,52 @@ export function normalizePurchaseToBase(input: {
   description: string
   baseUnit: InventoryUnitDefinition
   units: InventoryUnitDefinition[]
+  packageCount?: number | null
+  packageUnitQuantity?: number | null
+  packageUnitId?: string | null
 }) {
   if (!(input.purchaseQuantity > 0)) return null
+  if (input.packageUnitId) {
+    const packageUnit = input.units.find((unit) => unit.id === input.packageUnitId)
+    if (!packageUnit || !(input.packageCount && input.packageCount > 0)
+      || !(input.packageUnitQuantity && input.packageUnitQuantity > 0)) return null
+    const baseQuantity = convertInventoryQuantity(
+      input.purchaseQuantity * input.packageCount * input.packageUnitQuantity,
+      packageUnit,
+      input.baseUnit,
+      input.units,
+    )
+    if (baseQuantity === null) return null
+    return {
+      baseQuantity,
+      packaging: {
+        packageCount: input.packageCount,
+        unitQuantity: input.packageUnitQuantity,
+        unitSymbol: packageUnit.symbol,
+      },
+    }
+  }
+  const inventoryPackaging = parseInventoryPackagingExpression(
+    input.packageExpression ?? input.description,
+    input.units,
+  )
+  if (inventoryPackaging) {
+    const baseQuantity = convertInventoryQuantity(
+      input.purchaseQuantity * inventoryPackaging.packageCount * inventoryPackaging.unitQuantity,
+      inventoryPackaging.unit,
+      input.baseUnit,
+      input.units,
+    )
+    if (baseQuantity === null) return null
+    return {
+      baseQuantity,
+      packaging: {
+        packageCount: inventoryPackaging.packageCount,
+        unitQuantity: inventoryPackaging.unitQuantity,
+        unitSymbol: inventoryPackaging.unit.symbol,
+      },
+    }
+  }
   const baseCanonical = canonicalUnitForInventoryUnit(input.baseUnit, input.units)
   if (!baseCanonical) return null
   const purchaseUnit = normalizeDocumentText(input.purchaseUnit ?? '')
@@ -518,6 +665,7 @@ export type SupplierAlias = {
   aliasType: 'ean' | 'supplier_reference' | 'description'
   aliasValue: string
   inventoryItemId: string
+  packageExpression?: string | null
 }
 
 export type InventoryMatch = {
@@ -525,6 +673,7 @@ export type InventoryMatch = {
   status: 'recognized' | 'probable' | 'needs_review'
   reason: 'ean' | 'supplier_reference' | 'alias' | 'name_format' | 'approximate' | 'none'
   score: number
+  packageExpression?: string | null
 }
 
 function diceCoefficient(left: string, right: string) {
@@ -552,11 +701,11 @@ export function matchInventoryItem(
     return aliases.find((alias) => alias.aliasType === type && alias.aliasValue === normalized && activeItems.has(alias.inventoryItemId)) ?? null
   }
   const ean = findAlias('ean', line.barcode)
-  if (ean) return { inventoryItemId: ean.inventoryItemId, status: 'recognized', reason: 'ean', score: 1 }
+  if (ean) return { inventoryItemId: ean.inventoryItemId, status: 'recognized', reason: 'ean', score: 1, packageExpression: ean.packageExpression }
   const reference = findAlias('supplier_reference', line.supplierReference)
-  if (reference) return { inventoryItemId: reference.inventoryItemId, status: 'recognized', reason: 'supplier_reference', score: 1 }
+  if (reference) return { inventoryItemId: reference.inventoryItemId, status: 'recognized', reason: 'supplier_reference', score: 1, packageExpression: reference.packageExpression }
   const descriptionAlias = findAlias('description', line.description)
-  if (descriptionAlias) return { inventoryItemId: descriptionAlias.inventoryItemId, status: 'recognized', reason: 'alias', score: 0.99 }
+  if (descriptionAlias) return { inventoryItemId: descriptionAlias.inventoryItemId, status: 'recognized', reason: 'alias', score: 0.99, packageExpression: descriptionAlias.packageExpression }
   const normalizedDescription = normalizeDocumentText(`${line.description} ${line.packageExpression ?? ''}`)
   const exact = items.find((item) => item.active && normalizedDescription.includes(normalizeDocumentText(item.name)))
   if (exact) return { inventoryItemId: exact.id, status: 'recognized', reason: 'name_format', score: 0.96 }

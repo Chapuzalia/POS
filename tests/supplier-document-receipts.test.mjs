@@ -5,8 +5,11 @@ import {
   chooseDefaultWarehouse,
   matchInventoryItem,
   normalizePurchaseToBase,
+  normalizeSupplierName,
+  normalizeSupplierTaxId,
   parsePackagingExpression,
   runDeterministicParser,
+  supplierIdentityMatches,
   supplierProfileRulesSchema,
   validateExtractionMath,
   validateProposedProfile,
@@ -22,13 +25,30 @@ import {
 
 const migration = await readFile(new URL('../supabase/migrations/20260901120000_add_supplier_document_receipts.sql', import.meta.url), 'utf8')
 const page = await readFile(new URL('../src/features/crm/supplier-documents/pages/SupplierReceiptsPage.tsx', import.meta.url), 'utf8')
+const service = await readFile(new URL('../src/features/crm/supplier-documents/services/supplierDocumentService.ts', import.meta.url), 'utf8')
 const edgeFunction = await readFile(new URL('../supabase/functions/process-supplier-document/index.ts', import.meta.url), 'utf8')
+const supabaseConfig = await readFile(new URL('../supabase/config.toml', import.meta.url), 'utf8')
+const identityBackfillMigration = await readFile(new URL('../supabase/migrations/20260901152330_backfill_supplier_global_identity.sql', import.meta.url), 'utf8')
 
 const units = [
   { id: 'kg', name: 'Kilogramo', symbol: 'kg', contentQuantity: 1, contentUnitId: 'kg' },
   { id: 'l', name: 'Litro', symbol: 'L', contentQuantity: 1, contentUnitId: 'l' },
   { id: 'ud', name: 'Unidad', symbol: 'ud', contentQuantity: 1, contentUnitId: 'ud' },
 ]
+
+test('normaliza la identidad del proveedor sin confundir NIF distintos', () => {
+  assert.equal(normalizeSupplierTaxId(' ES B-123.456-78 '), 'ESB12345678')
+  assert.equal(normalizeSupplierTaxId(' - '), null)
+  assert.equal(normalizeSupplierName('Coca-Cola Europacific Partners Iberia, S.L.U.'), 'coca cola europacific partners iberia')
+  assert.equal(supplierIdentityMatches(
+    { name: 'Coca-Cola Europacific Partners' },
+    { name: 'COCA COLA EUROPACIFIC PARTNERS IBERIA, S.L.U.' },
+  ), true)
+  assert.equal(supplierIdentityMatches(
+    { name: 'Proveedor Uno, S.L.', taxId: 'B12345678' },
+    { name: 'Proveedor Uno SL', taxId: 'B87654321' },
+  ), false)
+})
 
 test('normaliza formatos de compra seguros y rechaza abreviaturas ambiguas', () => {
   assert.deepEqual(parsePackagingExpression('6x1L'), {
@@ -46,6 +66,27 @@ test('normaliza formatos de compra seguros y rechaza abreviaturas ambiguas', () 
     baseUnit: units[1],
     units,
   })?.baseQuantity, 15.84)
+  const bottleUnit = { id: 'b', name: 'Botellín', symbol: 'b', contentQuantity: 1, contentUnitId: 'b' }
+  assert.equal(parsePackagingExpression('24x1b'), null)
+  assert.equal(normalizePurchaseToBase({
+    purchaseQuantity: 3,
+    purchaseUnit: 'C24',
+    packageExpression: null,
+    description: 'BURN LATA25 C24',
+    baseUnit: bottleUnit,
+    units: [bottleUnit],
+    packageCount: 24,
+    packageUnitQuantity: 1,
+    packageUnitId: bottleUnit.id,
+  })?.baseQuantity, 72)
+  assert.equal(normalizePurchaseToBase({
+    purchaseQuantity: 3,
+    purchaseUnit: 'C24',
+    packageExpression: '24x1b',
+    description: 'BURN LATA25 C24',
+    baseUnit: bottleUnit,
+    units: [bottleUnit],
+  })?.baseQuantity, 72)
 })
 
 test('el parser determinista usa la tabla OCR y el schema declarativo', () => {
@@ -78,6 +119,28 @@ test('matching respeta EAN, referencia, alias, nombre y revisión manual', () =>
   assert.deepEqual(matchInventoryItem({ barcode: null, supplierReference: 'NEW', description: 'Sirope yuzu artesano', packageExpression: '6x1L' }, items, []), {
     inventoryItemId: null, status: 'needs_review', reason: 'none', score: 0,
   })
+})
+
+test('el alias recupera la conversión de formato aprendida', () => {
+  const match = matchInventoryItem(
+    { barcode: null, supplierReference: 'WGBRU', description: 'Ron Brugal', packageExpression: null },
+    [{ id: 'brugal', name: 'Ron Brugal', baseUnitId: 'l', referenceCost: 0.3, active: true }],
+    [{
+      aliasType: 'supplier_reference', aliasValue: 'wgbru', inventoryItemId: 'brugal',
+      packageExpression: '1x70cl',
+    }],
+  )
+  assert.equal(match.inventoryItemId, 'brugal')
+  assert.equal(match.packageExpression, '1x70cl')
+  const normalized = normalizePurchaseToBase({
+    purchaseQuantity: 2,
+    purchaseUnit: 'caja',
+    packageExpression: match.packageExpression ?? null,
+    description: 'Ron Brugal',
+    baseUnit: units[1],
+    units,
+  })
+  assert.equal(normalized?.baseQuantity, 1.4)
 })
 
 test('elige el almacén activo de menor prioridad', () => {
@@ -185,6 +248,8 @@ test('los aliases se aprenden al confirmar y siguen aislados por tenant, local y
   assert.match(migration, /'ean'[\s\S]*on conflict \(tenant_id, venue_id, supplier_id, alias_type, alias_value\)/i)
   assert.match(migration, /'supplier_reference'[\s\S]*confirmation_count = public\.supplier_item_aliases\.confirmation_count \+ 1/i)
   assert.match(migration, /'description'[\s\S]*inventory_item_id = excluded\.inventory_item_id/i)
+  assert.match(edgeFunction, /supplier_item_aliases'[\s\S]*packaging_json/)
+  assert.match(edgeFunction, /packageExpression: match\.packageExpression \?\? line\.packageExpression/)
 })
 
 test('el bucket privado exige el path exacto reservado para un documento accesible', () => {
@@ -201,7 +266,13 @@ test('la UI es mobile-first, revisa incidencias y confirma solo por la RPC globa
   assert.match(page, /Revisar \{needsReviewCount\}/)
   assert.match(page, /rounded-3xl/)
   assert.match(page, /fixed inset-x-0 bottom-0/)
+  assert.match(page, /result\.duplicate[\s\S]*setScreen\("duplicate"\)[\s\S]*return/)
+  assert.match(page, /Documento duplicado/)
+  assert.match(page, /No[\s\S]{0,120}se ha creado una nueva entrada ni se ha modificado el stock/)
   assert.match(page, /Cambios de coste/)
+  assert.match(page, /options=\{packageUnitOptions\}/)
+  assert.match(page, /packageUnitId: draft\.packageUnitId/)
+  assert.doesNotMatch(page, /packageUnitSymbol: event\.target\.value/)
   assert.match(page, /Mantener \{formatCost\(previous\)\}/)
   assert.match(page, /Actualizar a \{formatCost\(line\.normalizedUnitCost\)\}/)
   assert.match(page, /confirmSupplierDocument\(detail\.document\.id\)/)
@@ -213,7 +284,28 @@ test('la Edge Function mantiene IA y OCR sin autoridad sobre stock', () => {
   assert.match(edgeFunction, /OpenAiSupplierDocumentProvider/)
   assert.match(edgeFunction, /MockDocumentOcrProvider/)
   assert.match(edgeFunction, /validateProposedProfile/)
+  assert.match(edgeFunction, /documentTypeCorrected/)
+  assert.doesNotMatch(edgeFunction, /SUPPLIER_DOCUMENT_TYPE_MISMATCH/)
   assert.match(edgeFunction, /status: 'review'/)
   assert.doesNotMatch(edgeFunction, /confirm_supplier_document/)
   assert.doesNotMatch(edgeFunction, /inventory_stock_levels.*(?:insert|update)/i)
+  assert.doesNotMatch(edgeFunction, /allowGlobalCreation/)
+  assert.match(edgeFunction, /if \(!globalSupplier\) \{[\s\S]*global_suppliers/)
+  assert.match(identityBackfillMigration, /insert into public\.global_suppliers/i)
+  assert.match(identityBackfillMigration, /update public\.supplier_documents/i)
+})
+
+test('la IA distingue al emisor del cliente y no copia el NIF del destinatario', () => {
+  assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /emisor, vendedor o proveedor/)
+  assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /no reutilices el NIF\/CIF del destinatario/)
+})
+
+test('la UI muestra el error de la Edge Function y la función valida la sesión internamente', () => {
+  assert.match(service, /getFunctionInvokeErrorMessage/)
+  assert.match(service, /No se pudo procesar el documento/)
+  assert.match(service, /created\.duplicate[\s\S]*created\.status === 'error'[\s\S]*processDocument\(created\.documentId\)/)
+  assert.match(page, /workspace\.document\.status === "error"[\s\S]*extractionMetadata\.message/)
+  assert.match(supabaseConfig, /\[functions\.process-supplier-document\][\s\S]*?verify_jwt = false/)
+  assert.match(edgeFunction, /request\.headers\.get\('Authorization'\)/)
+  assert.match(edgeFunction, /authClient\.auth\.getUser\(\)/)
 })
