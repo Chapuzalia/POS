@@ -118,6 +118,24 @@ test('ticket report totals expose subtotal, fiscal snapshots and discounted tota
   })
 })
 
+test('CRM sales tickets use server-side pagination and refetch filters', () => {
+  const page = readFileSync(new URL('../src/features/crm/sales/pages/SalesReportsPage.tsx', import.meta.url), 'utf8')
+  const service = readFileSync(new URL('../src/features/crm/sales/services/salesReportsService.ts', import.meta.url), 'utf8')
+  const migration = readFileSync(new URL('../supabase/migrations/20260901130000_paginate_crm_sales_reports.sql', import.meta.url), 'utf8')
+
+  assert.match(service, /rpc\(\s*['"]crm_sales_report_ticket_page['"]/)
+  assert.match(service, /p_product_query:\s*filters\.productQuery/)
+  assert.match(service, /p_category_query:\s*filters\.categoryQuery/)
+  assert.match(service, /p_page:\s*page/)
+  assert.match(service, /p_page_size:\s*pageSize/)
+  assert.match(page, /loadCrmSalesReportPage\([\s\S]*reportFilters[\s\S]*CRM_PAGE_SIZE/)
+  assert.doesNotMatch(page, /sortedTickets\.slice\(/)
+  assert.match(migration, /limit least\(greatest\(coalesce\(p_page_size/)
+  assert.match(migration, /matching_line\.product_name/)
+  assert.match(migration, /matching_line\.category_name_snapshot/)
+  assert.match(migration, /tickets_venue_local_created_idx|ticket_lines_ticket_id_id_idx/)
+})
+
 test('venue settings persist the three fiscal ticket fields per venue', () => {
   const settings = readFileSync(new URL('../src/features/crm/venues/pages/VenueSettingsPage.tsx', import.meta.url), 'utf8')
   const service = readFileSync(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8')

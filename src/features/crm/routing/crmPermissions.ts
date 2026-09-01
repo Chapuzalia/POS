@@ -9,6 +9,7 @@ const SECTION_FEATURES: Partial<Record<CrmSection, TenantFeatureKey | TenantFeat
   discounts: 'discounts',
   tables: 'restaurant',
   production: 'production',
+  'inventory-receipts': 'inventory',
   'inventory-stock': 'inventory',
   'inventory-items': 'inventory',
   'inventory-preparations': ['inventory', 'inventory_recipes'],

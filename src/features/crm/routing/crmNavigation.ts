@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Beaker, Boxes, ChefHat, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PlugZap, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
+import { Armchair, BarChart3, Beaker, Boxes, ChefHat, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PlugZap, Puzzle, Ruler, ScanLine, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'inventory-receipts' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -19,6 +19,7 @@ export const reportNavItems: CrmNavItem[] = [
 ]
 
 export const inventoryNavItems: CrmNavItem[] = [
+  { id: 'inventory-receipts', label: 'Entradas', icon: ScanLine },
   { id: 'inventory-stock', label: 'Stock', icon: Package },
   { id: 'inventory-items', label: 'Artículos', icon: PackageOpen },
   { id: 'inventory-preparations', label: 'Elaboraciones', icon: Beaker },
@@ -59,6 +60,7 @@ export function getSectionTitle(section: CrmSection) {
     reports: 'Tickets',
     'x-reports': 'Informes Z',
     'inventory-stock': 'Stock del local',
+    'inventory-receipts': 'Recepción de mercancía',
     'inventory-items': 'Artículos de inventario',
     'inventory-preparations': 'Elaboraciones de inventario',
     'inventory-warehouses': 'Almacenes del local',
