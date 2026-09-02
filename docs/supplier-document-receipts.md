@@ -39,6 +39,56 @@ Todos leen configuración exclusivamente en la Edge Function. Ninguna clave se
 expone al navegador o se guarda en tablas. `extraction_metadata` conserva
 `ocrProvider` (`azure`, `mistral` o `mock`) y `ocrModel` para comparar ejecuciones.
 
+## Calidad OCR y fallback Mistral → Azure
+
+Mantener `SUPPLIER_DOCUMENT_OCR_PROVIDER=mistral` para usar Mistral como principal.
+La selección configurada no se cambia permanentemente. El default histórico de
+la factoría cuando falta la variable sigue siendo Azure.
+
+`validateOcrSanity` valida el contenido antes de guardar `ocr_snapshot` o ejecutar
+GPT, el parser, matching o generación de perfiles. Es determinista y no consulta
+IA. La confianza se guarda como métrica, pero nunca basta para aceptar un OCR.
+
+Los umbrales conservadores detectan corrupción evidente, no validan todos los
+datos de la factura:
+
+| Check | Umbral |
+| --- | --- |
+| Vacío/casi vacío | Menos de 20 caracteres alfanuméricos. |
+| Casi solo símbolos | Al menos 100 caracteres y menos del 5 % alfanuméricos. |
+| Líneas repetidas | Al menos 1.000 caracteres; líneas con 8 o más alfanuméricos repetidas al menos 12 veces ocupan el 80 % del texto. |
+| Diversidad extremadamente baja | Al menos 1.000 caracteres y 30 líneas relevantes; como máximo 10 % únicas, 80 % de texto duplicado y alguna línea alcanza 12 repeticiones. |
+| Secuencias/párrafos sin saltos de línea | Al menos 1.500 caracteres; secuencias de 8 palabras con 12 apariciones no solapadas cubren el 85 % de las palabras. |
+| Detecciones visuales serializadas | Al menos 3 objetos con `box_2d`, `label` y `caption` ocupan el 60 % del texto. Llaves aisladas no bastan. |
+
+Se normalizan espacios y mayúsculas. El texto agregado y sus páginas no se suman
+como si fueran contenido distinto. En documentos multipágina, el mínimo global
+de repeticiones es `max(12, 4 × páginas)`; también se comprueba cada página para
+que otras páginas válidas no oculten una página corrupta. Una página final vacía
+o una cabecera repetida 2–3 veces no invalidan por sí solas el documento.
+
+Si Mistral pasa, no se construye ni llama a Azure. Si es rechazado por contenido o
+devuelve una estructura ilegible, se realiza un único intento Azure usando las
+variables existentes y `prebuilt-layout` por defecto. Azure pasa exactamente el
+mismo sanity check. No hay un tercer intento ni fallback inverso. Errores de
+disponibilidad/autenticación no se confunden con corrupción ni generan una
+llamada adicional a Azure; se registra un código interno sin cuerpo HTTP ni
+secretos. Si el fallback falla, tampoco se expone su error técnico al usuario.
+
+Solo el OCR aceptado se guarda en `ocr_snapshot`. `extraction_metadata` conserva
+`ocrProvider` (o `null` si ninguno fue aceptado), `ocrFallbackUsed`,
+`ocrSanityVersion` y `ocrAttempts`. Cada intento contiene `provider`, `accepted`,
+`sanityReasons` y métricas numéricas de tamaño, diversidad, repeticiones y
+estructura, incluidas las páginas sospechosas. No se guarda el texto rechazado
+en esos diagnósticos. Estos datos sobreviven también a un error posterior del
+parser.
+
+Si no se obtiene OCR aceptable, el documento queda en `status=error`, con
+`code=OCR_QUALITY_TOO_LOW` y sin snapshot utilizable. No se ejecutan las etapas
+posteriores. La revisión muestra un mensaje de nueva captura y **Volver a
+escanear**, que abre la captura existente sin reenviar automáticamente la misma
+imagen. No requiere migraciones adicionales.
+
 ## Comprobación al conectar providers
 
 1. Subir una imagen o PDF real desde móvil.

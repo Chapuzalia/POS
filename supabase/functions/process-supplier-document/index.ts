@@ -29,8 +29,10 @@ import {
   OpenAiSupplierDocumentProvider,
   ProviderConfigurationError,
   type DocumentBinaryInput,
+  type NativePdfTextExtractor,
   type SupplierDocumentAiProvider,
 } from '../_shared/supplier-documents/providers.ts'
+import { analyzeOcrWithQuality, ocrAttemptMetadata, OcrQualityError } from '../_shared/supplier-documents/ocrQuality.ts'
 
 type UntypedSupabaseClient = ReturnType<typeof createClient<any>>
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
@@ -365,6 +367,7 @@ async function processSupplierDocumentRequest(request: Request) {
   let authorizedDocumentId = ''
   let admin: UntypedSupabaseClient | null = null
   let isLineReparse = false
+  let ocrDiagnostics: ReturnType<typeof ocrAttemptMetadata> | null = null
   try {
     const env = requiredEnvironment()
     const authorization = request.headers.get('Authorization')
@@ -393,10 +396,11 @@ async function processSupplierDocumentRequest(request: Request) {
     const mockMode = Deno.env.get('SUPPLIER_DOCUMENT_MOCK_MODE') === 'true'
     if (fixtureId && !mockMode) return json({ error: 'Los fixtures solo están disponibles con SUPPLIER_DOCUMENT_MOCK_MODE=true' }, 403)
     const binary = fixtureId ? { bytes: new Uint8Array(), contentType: 'application/mock', fileName: `${fixtureId}.mock` } : await loadBinary(admin, document)
+    const nativeExtractor: NativePdfTextExtractor = new NoopNativePdfTextExtractor()
     const nativePdf = binary.contentType === 'application/pdf'
-      ? await new NoopNativePdfTextExtractor().extract(binary)
+      ? await nativeExtractor.extract(binary)
       : null
-    const ocrProvider = createDocumentOcrProvider({
+    const ocrSelection = {
       provider: Deno.env.get('SUPPLIER_DOCUMENT_OCR_PROVIDER') ?? undefined,
       mockFixtureId: fixtureId,
       azure: {
@@ -409,9 +413,16 @@ async function processSupplierDocumentRequest(request: Request) {
         apiKey: Deno.env.get('MISTRAL_API_KEY') ?? '',
         model: Deno.env.get('MISTRAL_OCR_MODEL') ?? undefined,
       },
-    })
-    const ocr = nativePdf ?? await ocrProvider.analyze(binary)
-    const { error: snapshotError } = await admin.from('supplier_documents').update({ ocr_snapshot: ocr }).eq('id', document.id)
+    }
+    const { ocr, attempts } = await analyzeOcrWithQuality(binary, {
+      name: nativePdf?.provider ?? (fixtureId ? 'mock' : ocrSelection.provider?.trim().toLowerCase() || 'azure'),
+      create: () => nativePdf ? { name: nativePdf.provider, analyze: async () => nativePdf } : createDocumentOcrProvider(ocrSelection),
+    }, () => createDocumentOcrProvider({ ...ocrSelection, mockFixtureId: null, provider: 'azure' }))
+    ocrDiagnostics = ocrAttemptMetadata(attempts)
+    const { error: snapshotError } = await admin.from('supplier_documents').update({
+      ocr_snapshot: ocr,
+      extraction_metadata: { ...document.extraction_metadata, ...ocrDiagnostics, hasStoredOcr: true },
+    }).eq('id', document.id).neq('status', 'confirmed')
     if (snapshotError) throw snapshotError
     const [knowledge, supplierCandidates] = await Promise.all([
       loadGlobalKnowledge(admin),
@@ -514,7 +525,7 @@ async function processSupplierDocumentRequest(request: Request) {
       if (duplicate) {
         await admin.from('supplier_documents').update({
           status: 'error',
-          extraction_metadata: { code: 'SUPPLIER_DOCUMENT_DUPLICATE_NUMBER', duplicateDocumentId: duplicate.id },
+          extraction_metadata: { ...ocrDiagnostics, code: 'SUPPLIER_DOCUMENT_DUPLICATE_NUMBER', duplicateDocumentId: duplicate.id },
         }).eq('id', document.id)
         return json({ error: 'Ya existe un documento de este proveedor con el mismo número', duplicateDocumentId: duplicate.id }, 409)
       }
@@ -535,6 +546,7 @@ async function processSupplierDocumentRequest(request: Request) {
       document_date: dateValue(extraction.document.date),
       status: 'review',
       extraction_metadata: {
+        ...ocrDiagnostics,
         parserMode,
         ocrProvider: ocr.provider,
         ocrModel: typeof ocr.metadata.model === 'string'
@@ -578,20 +590,23 @@ async function processSupplierDocumentRequest(request: Request) {
     })
   } catch (error) {
     console.error('process-supplier-document failed', error)
+    const qualityError = error instanceof OcrQualityError ? error : null
+    const code = qualityError?.code ?? (error instanceof ProviderConfigurationError ? error.code : 'SUPPLIER_DOCUMENT_PROCESSING_FAILED')
+    const message = error instanceof Error ? error.message : 'Error interno'
     if (admin && authorizedDocumentId && !isLineReparse) {
       await admin.from('supplier_documents').update({
         status: 'error',
+        ...(qualityError ? { ocr_snapshot: null } : {}),
         extraction_metadata: {
-          code: error instanceof ProviderConfigurationError ? error.code : 'SUPPLIER_DOCUMENT_PROCESSING_FAILED',
-          message: error instanceof Error ? error.message : 'Error interno',
+          ...(qualityError ? ocrAttemptMetadata(qualityError.attempts) : ocrDiagnostics),
+          ...(qualityError ? { hasStoredOcr: false } : {}),
+          code,
+          message,
         },
       }).eq('id', authorizedDocumentId).neq('status', 'confirmed')
     }
-    const status = error instanceof ProviderConfigurationError ? 503 : 500
-    return json({
-      error: error instanceof Error ? error.message : 'Error interno',
-      code: error instanceof ProviderConfigurationError ? error.code : 'SUPPLIER_DOCUMENT_PROCESSING_FAILED',
-    }, status)
+    const status = qualityError ? 422 : error instanceof ProviderConfigurationError ? 503 : 500
+    return json({ error: message, code }, status)
   }
 }
 

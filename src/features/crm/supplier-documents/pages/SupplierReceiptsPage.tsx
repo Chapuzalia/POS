@@ -49,6 +49,7 @@ import type {
   SupplierDocumentType,
 } from "../types";
 import { PROVISIONAL_SUPPLIER, requiresLineReparseConfirmation, supplierReviewState } from "../supplierReview";
+import { OCR_QUALITY_MESSAGE, OCR_QUALITY_TOO_LOW } from "../../../../../supabase/functions/_shared/supplier-documents/ocrQuality";
 
 type Props = {
   disabled: boolean;
@@ -190,6 +191,7 @@ export function SupplierReceiptsCrm({
   const [deliveryNoteIds, setDeliveryNoteIds] = useState<string[]>([]);
   const [reparseConfirmation, setReparseConfirmation] = useState(false);
   const supplierReview = detail ? supplierReviewState(detail.document) : null;
+  const ocrQualityFailed = detail?.document.extractionMetadata.code === OCR_QUALITY_TOO_LOW;
 
   const editingLine =
     detail?.lines.find((line) => line.id === editingLineId) ?? null;
@@ -244,6 +246,7 @@ export function SupplierReceiptsCrm({
     else if (workspace.document.status === "error") {
       const processingError = workspace.document.extractionMetadata.message;
       setError(
+        workspace.document.extractionMetadata.code === OCR_QUALITY_TOO_LOW ? OCR_QUALITY_MESSAGE :
         typeof processingError === "string" && processingError.trim()
           ? processingError
           : "No se pudo procesar el documento.",
@@ -753,29 +756,37 @@ export function SupplierReceiptsCrm({
   if (screen === "processing") {
     return (
       <section
-        aria-busy="true"
+        aria-busy={!error}
         className="mx-auto grid min-h-[55dvh] w-full max-w-xl place-items-center rounded-3xl bg-[var(--crm-surface)] p-8 text-center shadow-[var(--crm-shadow-card)]"
         role="status"
       >
         <div>
           <span className="mx-auto grid size-16 place-items-center rounded-3xl bg-[var(--crm-blue-soft)] text-[var(--crm-blue)]">
-            <RefreshCw className="size-8 animate-spin" />
+            {error ? <AlertTriangle className="size-8" /> : <RefreshCw className="size-8 animate-spin" />}
           </span>
-          {processingMessages.map((message, index) => (
+          {!error ? processingMessages.map((message, index) => (
             <p
               className={`${index === 0 ? "mt-6 text-xl font-black" : "mt-2 text-sm text-[var(--crm-text-muted)]"}`}
               key={message}
             >
               {message}
             </p>
-          ))}
+          )) : <h2 className="mt-6 text-xl font-black">No se pudo leer el documento</h2>}
           {error ? (
             <>
               <p className="mt-6 rounded-2xl bg-[var(--crm-red-soft)] p-4 text-sm font-semibold text-[var(--crm-red)]">
-                {error}
+                {ocrQualityFailed ? OCR_QUALITY_MESSAGE : error}
               </p>
               <div className="mt-4 flex flex-wrap justify-center gap-2">
-                {detail?.document.status === "error" ? (
+                {ocrQualityFailed ? (
+                  <Button disabled={busy} onClick={() => {
+                    setDetail(null);
+                    setError(null);
+                    setScreen("capture");
+                  }} type="button" variant="primary">
+                    Volver a escanear
+                  </Button>
+                ) : detail?.document.status === "error" ? (
                   <Button
                     disabled={busy}
                     onClick={() => void run(async () => {
