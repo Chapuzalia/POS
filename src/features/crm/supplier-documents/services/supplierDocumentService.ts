@@ -6,6 +6,7 @@ import type {
   SupplierDocumentDetail,
   SupplierDocumentLine,
   SupplierDocumentLineDraft,
+  SupplierDocumentLinkCandidate,
   SupplierDocumentMockFixtureOption,
   SupplierDocumentStatus,
   SupplierDocumentType,
@@ -35,6 +36,9 @@ function mapDocument(row: DbRow, supplierName: string | null): SupplierDocument 
     supplierId: text(row.supplier_id), supplierName,
     documentType: row.document_type === 'invoice' ? 'invoice' : 'delivery_note',
     documentNumber: text(row.document_number), documentDate: text(row.document_date),
+    affectsStock: row.affects_stock !== false, stockAppliedAt: text(row.stock_applied_at),
+    storageBucket: text(row.storage_bucket), storagePath: text(row.storage_path),
+    originalFileName: text(row.original_file_name),
     status: row.status as SupplierDocumentStatus,
     extractionMetadata: (row.extraction_metadata ?? {}) as Record<string, unknown>,
     createdAt: String(row.created_at), confirmedAt: text(row.confirmed_at),
@@ -50,6 +54,7 @@ function mapLine(row: DbRow): SupplierDocumentLine {
     packageCount: number(row.package_count), packageUnitQuantity: number(row.package_unit_quantity),
     packageUnitSymbol: text(row.package_unit_symbol), unitPrice: number(row.unit_price),
     discountAmount: Number(row.discount_amount), grossCost: number(row.gross_cost),
+    chargesAmount: Number(row.charges_amount ?? 0),
     netCost: number(row.net_cost), lineTotal: number(row.line_total), taxRate: number(row.tax_rate),
     inventoryItemId: text(row.inventory_item_id), warehouseId: text(row.warehouse_id),
     baseQuantity: number(row.base_quantity), normalizedUnitCost: number(row.normalized_unit_cost),
@@ -76,19 +81,25 @@ async function processDocument(documentId: string, fixtureId?: string) {
       'No se pudo procesar el documento.',
     ))
   }
-  return data as { documentId: string; status: string; lineCount: number; needsReviewCount: number }
+  return data as { documentId: string; status: SupplierDocumentStatus; lineCount?: number; needsReviewCount?: number }
+}
+
+export function retrySupplierDocumentProcessing(documentId: string) {
+  return processDocument(documentId)
 }
 
 export async function uploadSupplierDocument(
   venueId: string,
   documentType: SupplierDocumentType,
   file: File,
+  affectsStock: boolean,
 ) {
   const client = requireSupabase()
   const fileHash = await sha256(file)
   const { data, error } = await client.rpc('create_supplier_document', {
     p_venue_id: venueId,
     p_document_type: documentType,
+    p_affects_stock: affectsStock,
     p_original_file_name: file.name,
     p_original_mime_type: file.type || 'application/octet-stream',
     p_file_hash: fileHash,
@@ -109,12 +120,13 @@ export async function uploadSupplierDocument(
   return created
 }
 
-export async function createMockSupplierDocument(venueId: string, fixtureId: string) {
+export async function createMockSupplierDocument(venueId: string, fixtureId: string, affectsStock: boolean) {
   if (!supplierDocumentMockEnabled) throw new Error('El modo mock no está habilitado en este entorno.')
   if (!supplierDocumentMockFixtures.some((fixture) => fixture.id === fixtureId)) throw new Error('Fixture no válido.')
   const { data, error } = await requireSupabase().rpc('create_supplier_document', {
     p_venue_id: venueId,
     p_document_type: 'delivery_note',
+    p_affects_stock: affectsStock,
     p_original_file_name: null,
     p_original_mime_type: null,
     p_file_hash: null,
@@ -133,7 +145,7 @@ export async function loadSupplierDocument(
 ): Promise<SupplierDocumentDetail> {
   const client = requireSupabase()
   const [documentResult, linesResult] = await Promise.all([
-    client.from('supplier_documents').select('id, tenant_id, venue_id, supplier_id, document_type, document_number, document_date, status, extraction_metadata, created_at, confirmed_at')
+    client.from('supplier_documents').select('id, tenant_id, venue_id, supplier_id, document_type, document_number, document_date, affects_stock, stock_applied_at, storage_bucket, storage_path, original_file_name, status, extraction_metadata, created_at, confirmed_at')
       .eq('tenant_id', context.tenantId).eq('venue_id', venueId).eq('id', documentId).single(),
     client.from('supplier_document_lines').select('*').eq('tenant_id', context.tenantId).eq('venue_id', venueId)
       .eq('supplier_document_id', documentId).order('line_number'),
@@ -198,8 +210,55 @@ export async function createInventoryItemFromSupplierDocument(input: {
   return String(data)
 }
 
-export async function confirmSupplierDocument(documentId: string) {
-  const { data, error } = await requireSupabase().rpc('confirm_supplier_document', { p_document_id: documentId })
+export async function loadDeliveryNoteCandidates(
+  context: Pick<TenantContext, 'tenantId'>,
+  venueId: string,
+): Promise<SupplierDocumentLinkCandidate[]> {
+  const client = requireSupabase()
+  const { data: documents, error } = await client.from('supplier_documents')
+    .select('id, supplier_id, document_number, document_date')
+    .eq('tenant_id', context.tenantId).eq('venue_id', venueId)
+    .eq('document_type', 'delivery_note').eq('status', 'confirmed')
+    .not('document_date', 'is', null).order('document_date', { ascending: false })
   if (error) throw error
-  return data as { documentId: string; confirmedAt: string; lineCount?: number; duplicate: boolean }
+  const rows = (documents ?? []) as DbRow[]
+  if (!rows.length) return []
+  const ids = rows.map((row) => String(row.id))
+  const supplierIds = [...new Set(rows.map((row) => text(row.supplier_id)).filter((id): id is string => Boolean(id)))]
+  const [lineResult, supplierResult, linkResult] = await Promise.all([
+    client.from('supplier_document_lines').select('supplier_document_id, line_total, net_cost').in('supplier_document_id', ids),
+    supplierIds.length ? client.from('suppliers').select('id, name').in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
+    client.from('supplier_document_links').select('delivery_note_document_id').in('delivery_note_document_id', ids),
+  ])
+  if (lineResult.error) throw lineResult.error
+  if (supplierResult.error) throw supplierResult.error
+  if (linkResult.error) throw linkResult.error
+  const linked = new Set(((linkResult.data ?? []) as DbRow[]).map((row) => String(row.delivery_note_document_id)))
+  const names = new Map(((supplierResult.data ?? []) as DbRow[]).map((row) => [String(row.id), String(row.name)]))
+  const totals = new Map<string, number>()
+  for (const line of (lineResult.data ?? []) as DbRow[]) {
+    const id = String(line.supplier_document_id)
+    totals.set(id, (totals.get(id) ?? 0) + Number(line.line_total ?? line.net_cost ?? 0))
+  }
+  return rows.filter((row) => !linked.has(String(row.id))).map((row) => ({
+    id: String(row.id), supplierName: names.get(String(row.supplier_id)) ?? null,
+    documentNumber: text(row.document_number), documentDate: String(row.document_date),
+    total: totals.get(String(row.id)) ?? 0,
+  }))
+}
+
+export async function confirmSupplierDocument(input: {
+  documentId: string
+  documentDate: string
+  affectsStock: boolean
+  deliveryNoteIds?: string[]
+}) {
+  const { data, error } = await requireSupabase().rpc('confirm_supplier_document', {
+    p_document_id: input.documentId,
+    p_document_date: input.documentDate,
+    p_affects_stock: input.affectsStock,
+    p_delivery_note_ids: input.deliveryNoteIds ?? [],
+  })
+  if (error) throw error
+  return data as { documentId: string; confirmedAt: string; lineCount?: number; affectsStock: boolean; duplicate: boolean }
 }

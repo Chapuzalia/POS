@@ -14,6 +14,8 @@ import {
   getSectionTitle,
   inventoryNavItems,
   inventorySections,
+  purchaseNavItems,
+  purchaseSections,
 } from '../src/features/crm/routing/crmNavigation.ts'
 
 const migrationPath = new URL(
@@ -78,11 +80,10 @@ const warehousesPage = readFileSync(new URL('../src/features/crm/inventory/pages
 const settingsPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventorySettingsPage.tsx', import.meta.url), 'utf8')
 const formatsPage = readFileSync(new URL('../src/features/crm/catalog/pages/CatalogFormatsPage.tsx', import.meta.url), 'utf8')
 
-test('expone los conceptos del inventario y la recepción de mercancía en el submenu', () => {
+test('separa inventario físico de la gestión documental de compras', () => {
   assert.deepEqual(
     inventoryNavItems.map(({ id, label }) => ({ id, label })),
     [
-      { id: 'inventory-receipts', label: 'Entradas' },
       { id: 'inventory-stock', label: 'Stock' },
       { id: 'inventory-items', label: 'Artículos' },
       { id: 'inventory-preparations', label: 'Elaboraciones' },
@@ -92,11 +93,17 @@ test('expone los conceptos del inventario y la recepción de mercancía en el su
     ],
   )
   assert.deepEqual([...inventorySections], inventoryNavItems.map((item) => item.id))
+  assert.deepEqual(purchaseNavItems.map(({ id, label }) => ({ id, label })), [
+    { id: 'purchases-summary', label: 'Resumen' },
+    { id: 'purchases-invoices', label: 'Facturas' },
+  ])
+  assert.deepEqual([...purchaseSections], purchaseNavItems.map((item) => item.id))
   assert.equal(getSectionTitle('inventory-stock'), 'Stock del local')
   assert.match(shell, /label="Inventario"/)
   assert.match(shell, /inventoryNavItems/)
   assert.match(routes, /case 'inventory-stock':/)
-  assert.match(routes, /case 'inventory-receipts':/)
+  assert.match(routes, /case 'purchases-summary':/)
+  assert.match(routes, /case 'purchases-invoices':/)
   assert.match(routes, /case 'inventory-items':/)
   assert.match(routes, /case 'inventory-preparations':/)
   assert.match(routes, /case 'inventory-warehouses':/)

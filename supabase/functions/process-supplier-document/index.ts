@@ -28,6 +28,7 @@ import {
 } from '../_shared/supplier-documents/providers.ts'
 
 type UntypedSupabaseClient = ReturnType<typeof createClient<any>>
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
 const corsHeaders = {
   'Access-Control-Allow-Origin': '*',
@@ -227,7 +228,7 @@ async function loadInventoryContext(
   }
 }
 
-Deno.serve(async (request) => {
+async function processSupplierDocumentRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return json({ error: 'Método no permitido' }, 405)
   let documentId = ''
@@ -382,7 +383,9 @@ Deno.serve(async (request) => {
         units: inventory.units,
       }) : null
       const warehouseId = item ? chooseDefaultWarehouse(item.id, inventory.routes, inventory.warehouses) : null
-      const netCost = line.netCost ?? line.lineTotal ?? (line.unitPrice === null ? null : line.quantity * line.unitPrice - line.discountAmount)
+      const netCost = line.netCost ?? line.lineTotal ?? (
+        line.unitPrice === null ? null : line.quantity * line.unitPrice - line.discountAmount + line.chargesAmount
+      )
       const normalizedUnitCost = normalized && netCost !== null ? Math.round((netCost / normalized.baseQuantity) * 1_000_000) / 1_000_000 : null
       const requiresReview = !item || !normalized || !warehouseId || normalizedUnitCost === null
         || !math.coherent || math.invalidLineIndexes.includes(index)
@@ -402,6 +405,7 @@ Deno.serve(async (request) => {
         package_unit_symbol: normalized?.packaging?.unitSymbol ?? null,
         unit_price: line.unitPrice,
         discount_amount: line.discountAmount,
+        charges_amount: line.chargesAmount,
         gross_cost: line.grossCost,
         net_cost: netCost,
         line_total: line.lineTotal,
@@ -481,5 +485,47 @@ Deno.serve(async (request) => {
       error: error instanceof Error ? error.message : 'Error interno',
       code: error instanceof ProviderConfigurationError ? error.code : 'SUPPLIER_DOCUMENT_PROCESSING_FAILED',
     }, status)
+  }
+}
+
+Deno.serve(async (request) => {
+  if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
+  if (request.method !== 'POST') return json({ error: 'Método no permitido' }, 405)
+  const backgroundRequest = request.clone()
+  try {
+    const env = requiredEnvironment()
+    const authorization = request.headers.get('Authorization')
+    if (!authorization) return json({ error: 'Autorización requerida' }, 401)
+    const authClient = createClient<any>(env.supabaseUrl, env.anonKey, {
+      global: { headers: { Authorization: authorization } },
+      auth: { persistSession: false },
+    })
+    const { data: authData, error: authError } = await authClient.auth.getUser()
+    if (authError || !authData.user) return json({ error: 'Sesión no válida' }, 401)
+    const body = await request.json() as Record<string, unknown>
+    const documentId = String(body.documentId ?? '')
+    const fixtureId = typeof body.fixtureId === 'string' ? body.fixtureId : null
+    if (!documentId) return json({ error: 'documentId es obligatorio' }, 400)
+    const { data: accessibleDocument, error: documentError } = await authClient.from('supplier_documents')
+      .select('id, status').eq('id', documentId).maybeSingle()
+    if (documentError) throw documentError
+    if (!accessibleDocument) return json({ error: 'Documento no encontrado o sin acceso' }, 404)
+    if (accessibleDocument.status === 'confirmed') return json({ error: 'El documento ya está confirmado' }, 409)
+    if (fixtureId && Deno.env.get('SUPPLIER_DOCUMENT_MOCK_MODE') !== 'true') {
+      return json({ error: 'Los fixtures solo están disponibles con SUPPLIER_DOCUMENT_MOCK_MODE=true' }, 403)
+    }
+    if (accessibleDocument.status === 'error') {
+      const admin = createClient<any>(env.supabaseUrl, env.serviceRoleKey, { auth: { autoRefreshToken: false, persistSession: false } })
+      const { error } = await admin.from('supplier_documents').update({ status: 'processing' })
+        .eq('id', documentId).eq('status', 'error')
+      if (error) throw error
+    }
+    EdgeRuntime.waitUntil(processSupplierDocumentRequest(backgroundRequest).then(async (response) => {
+      if (!response.ok) console.error('background supplier document processing failed', response.status, await response.text())
+    }))
+    return json({ documentId, status: 'processing' }, 202)
+  } catch (error) {
+    console.error('could not start supplier document processing', error)
+    return json({ error: error instanceof Error ? error.message : 'Error interno' }, 500)
   }
 })

@@ -19,6 +19,7 @@ const defaultRules: SupplierProfileRules = {
   thousandsSeparator: '.',
   documentNumberLabel: 'Nº',
   documentDateLabel: 'Fecha',
+  lineGroup: null,
   columns: [
     { field: 'supplierReference', headerAliases: ['Código', 'Referencia'], required: true },
     { field: 'description', headerAliases: ['Descripción', 'Producto'], required: true },
@@ -119,6 +120,7 @@ function makeFixture(input: {
       purchaseUnit: line.purchaseUnit,
       unitPrice: line.unitPrice,
       discountAmount: 0,
+      chargesAmount: 0,
       grossCost: line.quantity * line.unitPrice,
       netCost: line.quantity * line.unitPrice,
       lineTotal: line.quantity * line.unitPrice,
@@ -139,6 +141,92 @@ function makeFixture(input: {
     ocr,
     extraction,
     knownProfile: input.knownProfile ? { ...defaultRules, requiredTexts: [input.supplierName, 'Código', 'Descripción'] } : null,
+  }
+}
+
+function makeMultiRowFixture(): SupplierDocumentMockFixture {
+  const headers = ['Código', 'Descripción', 'Cantidad', 'Unidad', 'Precio', 'Importe']
+  const rows = [
+    ['MP-01', 'PRODUCTO MULTIFILA', '3', 'caja', '58,80', '176,40'],
+    ['', 'DESCUENTO COMERCIAL', '', '', '', '-79,38'],
+    ['', 'CARGO LOGÍSTICO', '', '', '', '2,70'],
+    ['', 'TASA RECICLAJE', '', '', '', '0,22'],
+    ['', 'TOTAL NETO LÍNEA', '', '', '', '99,94'],
+  ]
+  const profile: SupplierProfileRules = {
+    ...defaultRules,
+    requiredTexts: ['PROVEEDOR MULTIFILA', 'Código', 'Descripción'],
+    tableEndText: null,
+    lineGroup: {
+      endAliases: ['TOTAL NETO LÍNEA'],
+      discountAliases: ['DESCUENTO COMERCIAL'],
+      chargeAliases: ['CARGO LOGÍSTICO', 'TASA RECICLAJE'],
+      netTotalFromEndRow: true,
+      maxContinuationRows: 6,
+    },
+  }
+  const text = [
+    'PROVEEDOR MULTIFILA',
+    'NIF: B11223344',
+    'Albarán Nº MP-1001',
+    'Fecha 01/09/2026',
+    headers.join(' | '),
+    ...rows.map((row) => row.join(' | ')),
+    'Total documento 99,94 €',
+  ].join('\n')
+  const cells = [headers, ...rows].flatMap((row, rowIndex) => row.map((cellText, columnIndex) => ({
+    rowIndex,
+    columnIndex,
+    rowSpan: 1,
+    columnSpan: 1,
+    text: cellText,
+    confidence: 0.98,
+  })))
+  const ocr: OcrDocument = {
+    provider: 'mock',
+    confidence: 0.98,
+    text,
+    metadata: { fixtureId: 'multi-row-product' },
+    pages: [{
+      pageNumber: 1,
+      width: 600,
+      height: 850,
+      unit: 'pixel',
+      text,
+      words: text.split(/\s+/).map((word) => ({ text: word, confidence: 0.98 })),
+      tables: [{ rowCount: rows.length + 1, columnCount: headers.length, cells }],
+      confidence: 0.98,
+    }],
+  }
+  const extraction: SupplierDocumentExtraction = {
+    document: { type: 'delivery_note', number: 'MP-1001', date: '2026-09-01', total: 99.94 },
+    supplier: { name: 'PROVEEDOR MULTIFILA', taxId: 'B11223344' },
+    lines: [{
+      supplierReference: 'MP-01',
+      description: 'PRODUCTO MULTIFILA',
+      barcode: null,
+      quantity: 3,
+      purchaseUnit: 'caja',
+      unitPrice: 58.8,
+      discountAmount: 79.38,
+      chargesAmount: 2.92,
+      grossCost: 176.4,
+      netCost: 99.94,
+      lineTotal: 99.94,
+      taxRate: null,
+      packageExpression: null,
+      confidence: 0.98,
+    }],
+    proposedProfile: profile,
+    confidence: 0.98,
+  }
+  return {
+    id: 'multi-row-product',
+    label: 'Producto en bloque multipfila',
+    description: 'Agrupa descuento, cargos y total neto sin crear líneas auxiliares.',
+    ocr,
+    extraction,
+    knownProfile: profile,
   }
 }
 
@@ -216,6 +304,7 @@ export const supplierDocumentMockFixtures: SupplierDocumentMockFixture[] = [
     documentNumber: 'ALB-1007',
     lines: [{ reference: 'OIL-5', description: 'ACEITE OLIVA 4X5L', quantity: 2, purchaseUnit: 'caja', unitPrice: 89.5 }],
   }),
+  makeMultiRowFixture(),
 ]
 
 export function getSupplierDocumentMockFixture(id: string) {

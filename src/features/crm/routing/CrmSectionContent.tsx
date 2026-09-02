@@ -16,7 +16,8 @@ const DashboardCrm = lazy(() => import('../dashboard/pages/DashboardPage').then(
 const DiscountsCrm = lazy(() => import('../discounts/pages/DiscountsPage').then((module) => ({ default: module.DiscountsCrm })))
 const PlanCrm = lazy(() => import('../plan/pages/PlanPage').then((module) => ({ default: module.PlanCrm })))
 const InventoryStockCrm = lazy(() => import('../inventory/pages/InventoryStockPage').then((module) => ({ default: module.InventoryStockCrm })))
-const SupplierReceiptsCrm = lazy(() => import('../supplier-documents/pages/SupplierReceiptsPage').then((module) => ({ default: module.SupplierReceiptsCrm })))
+const PurchasesOverviewCrm = lazy(() => import('../purchases/pages/PurchasesOverviewPage').then((module) => ({ default: module.PurchasesOverviewCrm })))
+const PurchasesInvoicesCrm = lazy(() => import('../purchases/pages/PurchasesInvoicesPage').then((module) => ({ default: module.PurchasesInvoicesCrm })))
 const InventoryWarehousesCrm = lazy(() => import('../inventory/pages/InventoryWarehousesPage').then((module) => ({ default: module.InventoryWarehousesCrm })))
 const InventorySettingsCrm = lazy(() => import('../inventory/pages/InventorySettingsPage').then((module) => ({ default: module.InventorySettingsCrm })))
 const InventoryItemsCrm = lazy(() => import('../inventory/pages/InventoryItemsPage').then((module) => ({ default: module.InventoryItemsCrm })))
@@ -105,8 +106,10 @@ export function CrmSectionContent({
       return <ProductionCrm catalog={catalog} context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} />
     case 'inventory-stock':
       return <InventoryStockCrm disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
-    case 'inventory-receipts':
-      return <SupplierReceiptsCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'purchases-summary':
+      return <PurchasesOverviewCrm selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'purchases-invoices':
+      return <PurchasesInvoicesCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-items':
       return <InventoryItemsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-preparations':

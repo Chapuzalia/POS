@@ -6,13 +6,14 @@ import {
   CheckCircle2,
   ChevronRight,
   FileText,
+  Link2,
   PackagePlus,
   RefreshCw,
   Upload,
   Warehouse,
   X,
 } from "lucide-react";
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Button, Chip, Input } from "../../../../components/ui";
 import type { TenantContext } from "../../../../types";
 import { getReadableError } from "../../../../utils/errors";
@@ -29,7 +30,9 @@ import {
   confirmSupplierDocument,
   createInventoryItemFromSupplierDocument,
   createMockSupplierDocument,
+  loadDeliveryNoteCandidates,
   loadSupplierReceiptWorkspace,
+  retrySupplierDocumentProcessing,
   saveSupplierDocumentLine,
   supplierDocumentMockEnabled,
   supplierDocumentMockFixtures,
@@ -39,11 +42,14 @@ import type {
   SupplierDocumentDetail,
   SupplierDocumentLine,
   SupplierDocumentLineDraft,
+  SupplierDocumentLinkCandidate,
   SupplierDocumentType,
 } from "../types";
 
 type Props = {
   disabled: boolean;
+  initialDocumentId?: string | null;
+  onExit?: () => void;
   selectedVenueId: string;
   tenantContext: TenantContext;
 };
@@ -149,6 +155,8 @@ function LineStatus({
 
 export function SupplierReceiptsCrm({
   disabled,
+  initialDocumentId = null,
+  onExit,
   selectedVenueId,
   tenantContext,
 }: Props) {
@@ -171,6 +179,10 @@ export function SupplierReceiptsCrm({
   });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [documentDate, setDocumentDate] = useState("");
+  const [affectsStock, setAffectsStock] = useState(true);
+  const [linkCandidates, setLinkCandidates] = useState<SupplierDocumentLinkCandidate[] | null>(null);
+  const [deliveryNoteIds, setDeliveryNoteIds] = useState<string[]>([]);
 
   const editingLine =
     detail?.lines.find((line) => line.id === editingLineId) ?? null;
@@ -202,6 +214,7 @@ export function SupplierReceiptsCrm({
   const allCostsDecided = costChanges.every(
     ({ line }) => line.referenceCostDecided,
   );
+  const isConfirmedDocument = detail?.document.status === "confirmed";
 
   async function refresh(documentId: string) {
     const workspace = await loadSupplierReceiptWorkspace(
@@ -211,11 +224,15 @@ export function SupplierReceiptsCrm({
     );
     setDetail({ document: workspace.document, lines: workspace.lines });
     setInventory(workspace.inventory);
+    setDocumentDate(workspace.document.documentDate ?? "");
+    setAffectsStock(workspace.document.affectsStock);
     setShowAll(
-      !workspace.lines.some((line) => line.matchStatus === "needs_review"),
+      workspace.document.status === "confirmed" ||
+        !workspace.lines.some((line) => line.matchStatus === "needs_review"),
     );
-    if (workspace.document.status === "confirmed") setScreen("confirmed");
+    if (workspace.document.status === "confirmed") setScreen("review");
     else if (workspace.document.status === "review") setScreen("review");
+    else if (workspace.document.status === "processing") setScreen("processing");
     else if (workspace.document.status === "error") {
       const processingError = workspace.document.extractionMetadata.message;
       setError(
@@ -226,6 +243,13 @@ export function SupplierReceiptsCrm({
       setScreen("processing");
     }
   }
+
+  useEffect(() => {
+    if (!initialDocumentId) return;
+    void run(async () => refresh(initialDocumentId));
+    // The requested document changes only when the parent opens another row.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [initialDocumentId, selectedVenueId]);
 
   async function run(action: () => Promise<void>) {
     setBusy(true);
@@ -247,6 +271,7 @@ export function SupplierReceiptsCrm({
         selectedVenueId,
         documentType,
         file,
+        affectsStock,
       );
       if (result.duplicate) {
         setDetail(null);
@@ -264,6 +289,7 @@ export function SupplierReceiptsCrm({
       const result = await createMockSupplierDocument(
         selectedVenueId,
         fixtureId,
+        affectsStock,
       );
       await refresh(result.documentId);
     });
@@ -512,9 +538,14 @@ export function SupplierReceiptsCrm({
   }
 
   async function confirm() {
-    if (!detail || needsReviewCount || !allCostsDecided) return;
+    if (!detail || !documentDate || (affectsStock && needsReviewCount) || !allCostsDecided) return;
     await run(async () => {
-      await confirmSupplierDocument(detail.document.id);
+      await confirmSupplierDocument({
+        documentId: detail.document.id,
+        documentDate,
+        affectsStock,
+        deliveryNoteIds,
+      });
       await refresh(detail.document.id);
       setScreen("confirmed");
     });
@@ -528,10 +559,10 @@ export function SupplierReceiptsCrm({
             <span className="mb-4 grid size-12 place-items-center rounded-2xl bg-[var(--crm-blue-soft)] text-[var(--crm-blue)]">
               <FileText className="size-6" />
             </span>
-            <h2 className="text-2xl font-black">Recibir mercancía</h2>
+            <h2 className="text-2xl font-black">Subir documento</h2>
             <p className="mt-2 max-w-xl text-sm text-[var(--crm-text-muted)]">
-              Fotografía o sube el documento. Solo tendrás que revisar las
-              líneas dudosas antes de sumar el stock.
+              Fotografía o sube una factura o un albarán para extraer sus datos
+              y revisarlos antes de confirmar.
             </p>
           </header>
           <div className="grid gap-4 p-5 sm:p-7">
@@ -559,6 +590,20 @@ export function SupplierReceiptsCrm({
                 Factura
               </Button>
             </div>
+            <label className="flex min-h-16 cursor-pointer items-center gap-3 rounded-2xl border border-[var(--crm-border-subtle)] bg-[var(--crm-surface-soft)] px-4 py-3">
+              <input
+                checked={affectsStock}
+                className="size-5 shrink-0 accent-[var(--crm-blue)]"
+                onChange={(event) => setAffectsStock(event.target.checked)}
+                type="checkbox"
+              />
+              <span>
+                <strong className="block text-sm">Actualizar stock al confirmar</strong>
+                <span className="mt-0.5 block text-xs text-[var(--crm-text-muted)]">
+                  Desactívalo si solo quieres registrar la compra y el gasto.
+                </span>
+              </span>
+            </label>
             <input
               accept="image/*"
               capture="environment"
@@ -655,15 +700,30 @@ export function SupplierReceiptsCrm({
               <p className="mt-6 rounded-2xl bg-[var(--crm-red-soft)] p-4 text-sm font-semibold text-[var(--crm-red)]">
                 {error}
               </p>
-              <Button
-                className="mt-4"
-                onClick={() => setScreen("capture")}
-                type="button"
-                variant="secondary"
-              >
-                Volver
-              </Button>
+              <div className="mt-4 flex flex-wrap justify-center gap-2">
+                {detail?.document.status === "error" ? (
+                  <Button
+                    disabled={busy}
+                    onClick={() => void run(async () => {
+                      await retrySupplierDocumentProcessing(detail.document.id);
+                      await refresh(detail.document.id);
+                    })}
+                    type="button"
+                    variant="primary"
+                  >
+                    Reintentar procesamiento
+                  </Button>
+                ) : null}
+                <Button onClick={() => onExit ? onExit() : setScreen("capture")} type="button" variant="secondary">
+                  Volver
+                </Button>
+              </div>
             </>
+          ) : null}
+          {!error && onExit ? (
+            <Button className="mt-6" onClick={onExit} type="button" variant="secondary">
+              Volver a facturas
+            </Button>
           ) : null}
         </div>
       </section>
@@ -692,7 +752,7 @@ export function SupplierReceiptsCrm({
             type="button"
             variant="primary"
           >
-            Recibir otro documento
+            Subir otro documento
           </Button>
         </div>
       </section>
@@ -708,22 +768,24 @@ export function SupplierReceiptsCrm({
           <span className="mx-auto grid size-20 place-items-center rounded-full bg-emerald-500/15 text-emerald-600">
             <CheckCircle2 className="size-10" />
           </span>
-          <h2 className="mt-6 text-2xl font-black">Entrada confirmada</h2>
+          <h2 className="mt-6 text-2xl font-black">Documento confirmado</h2>
           <p className="mt-2 text-sm text-[var(--crm-text-muted)]">
-            El stock y el histórico de compra se han actualizado en una única
-            operación.
+            {detail.document.affectsStock
+              ? "La compra y el stock se han actualizado en una única operación."
+              : "La compra se ha registrado sin modificar el stock."}
           </p>
           <Button
             className="mt-6"
             onClick={() => {
               setDetail(null);
               setInventory(null);
-              setScreen("capture");
+              if (onExit) onExit();
+              else setScreen("capture");
             }}
             type="button"
             variant="primary"
           >
-            Recibir otro documento
+            {onExit ? "Volver a facturas" : "Subir otro documento"}
           </Button>
         </div>
       </section>
@@ -856,12 +918,12 @@ export function SupplierReceiptsCrm({
           <div className="mx-auto max-w-3xl">
             <Button
               className="!min-h-14 !w-full !rounded-2xl !text-base !font-black"
-              disabled={disabled || busy || !allCostsDecided}
+              disabled={disabled || busy || !documentDate || (affectsStock && needsReviewCount > 0) || !allCostsDecided}
               onClick={() => void confirm()}
               type="button"
               variant="primary"
             >
-              <CheckCircle2 className="size-5" /> Confirmar entrada
+              <CheckCircle2 className="size-5" /> Confirmar documento
             </Button>
           </div>
         </div>
@@ -870,7 +932,7 @@ export function SupplierReceiptsCrm({
   }
 
   return (
-    <section className="mx-auto grid w-full max-w-3xl gap-4 pb-28">
+    <section className={`mx-auto grid w-full max-w-3xl gap-4 ${isConfirmedDocument ? "pb-8" : "pb-28"}`}>
       <header className="rounded-3xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]">
         <div className="flex items-start justify-between gap-3">
           <div>
@@ -879,25 +941,86 @@ export function SupplierReceiptsCrm({
                 ? "Factura"
                 : "Albarán"}
             </p>
+            {isConfirmedDocument ? (
+              <div className="mt-2"><Chip icon={CheckCircle2} tone="success">Confirmado</Chip></div>
+            ) : null}
             <h2 className="mt-1 text-xl font-black">
               {detail.document.supplierName ?? "Proveedor por revisar"}
             </h2>
             <p className="mt-1 text-sm text-[var(--crm-text-muted)]">
-              {detail.document.documentNumber ?? "Sin número"} ·{" "}
-              {detail.document.documentDate ?? "Sin fecha"}
+              {detail.document.documentNumber ?? "Sin número"}
             </p>
           </div>
           <Button
             aria-label="Cerrar documento"
             onClick={() => {
               setDetail(null);
-              setScreen("capture");
+              if (onExit) onExit();
+              else setScreen("capture");
             }}
             type="button"
             variant="tertiary"
           >
             <X className="size-4" />
           </Button>
+        </div>
+        <div className="mt-5 grid gap-4 rounded-2xl bg-[var(--crm-surface-soft)] p-4">
+          <label className="grid gap-1.5 text-sm font-bold">
+            Fecha real del documento
+            <Input
+              aria-label="Fecha real del documento"
+              disabled={isConfirmedDocument}
+              onChange={(event) => setDocumentDate(event.target.value)}
+              required
+              type="date"
+              value={documentDate}
+            />
+          </label>
+          <label className={`flex min-h-12 items-center gap-3 rounded-xl bg-[var(--crm-surface)] px-4 py-3 text-sm font-bold ${isConfirmedDocument ? "cursor-default" : "cursor-pointer"}`}>
+            <input
+              checked={affectsStock}
+              className="size-5 accent-[var(--crm-blue)]"
+              disabled={isConfirmedDocument}
+              onChange={(event) => setAffectsStock(event.target.checked)}
+              type="checkbox"
+            />
+            {isConfirmedDocument
+              ? affectsStock ? "Este documento actualizó el stock" : "Este documento no actualizó el stock"
+              : "Actualizar stock con este documento"}
+          </label>
+          <p className="text-xs text-[var(--crm-text-muted)]">
+            Confirmar siempre registra la compra. El stock solo cambia si esta opción está activada.
+          </p>
+          {!isConfirmedDocument && detail.document.documentType === "invoice" ? (
+            <div>
+              <Button
+                className="!px-0"
+                disabled={busy}
+                onClick={() => void run(async () => setLinkCandidates(await loadDeliveryNoteCandidates(tenantContext, selectedVenueId)))}
+                type="button"
+                variant="tertiary"
+              >
+                <Link2 className="size-4" /> Vincular a albaranes existentes
+              </Button>
+              {linkCandidates ? (
+                <div className="mt-2 grid gap-2">
+                  {linkCandidates.length ? linkCandidates.map((candidate) => (
+                    <label className="flex cursor-pointer items-center gap-3 rounded-xl border border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] p-3 text-sm" key={candidate.id}>
+                      <input
+                        checked={deliveryNoteIds.includes(candidate.id)}
+                        onChange={(event) => setDeliveryNoteIds((current) => event.target.checked ? [...current, candidate.id] : current.filter((id) => id !== candidate.id))}
+                        type="checkbox"
+                      />
+                      <span className="min-w-0 flex-1">
+                        <strong className="block truncate">{candidate.supplierName ?? "Sin proveedor"}</strong>
+                        <span className="text-xs text-[var(--crm-text-muted)]">{candidate.documentDate} · {candidate.documentNumber ?? "Sin número"} · {formatCost(candidate.total)}</span>
+                      </span>
+                    </label>
+                  )) : <p className="text-xs text-[var(--crm-text-muted)]">No hay albaranes disponibles para vincular.</p>}
+                </div>
+              ) : null}
+            </div>
+          ) : null}
         </div>
         <div className="mt-5 grid grid-cols-2 gap-3">
           <div className="rounded-2xl bg-[var(--crm-surface-soft)] p-3">
@@ -953,7 +1076,8 @@ export function SupplierReceiptsCrm({
           );
           return (
             <button
-              className="w-full rounded-3xl bg-[var(--crm-surface)] p-5 text-left shadow-[var(--crm-shadow-card)] transition-transform active:scale-[0.995]"
+              className={`w-full rounded-3xl bg-[var(--crm-surface)] p-5 text-left shadow-[var(--crm-shadow-card)] ${isConfirmedDocument ? "cursor-default" : "transition-transform active:scale-[0.995]"}`}
+              disabled={isConfirmedDocument}
               key={line.id}
               onClick={() => openEditor(line)}
               type="button"
@@ -971,7 +1095,7 @@ export function SupplierReceiptsCrm({
                       : ` · ${formatCost(line.unitPrice)}/${line.purchaseUnit ?? "ud"}`}
                   </p>
                 </div>
-                <ChevronRight className="mt-1 size-5 shrink-0 text-[var(--crm-text-muted)]" />
+                {!isConfirmedDocument ? <ChevronRight className="mt-1 size-5 shrink-0 text-[var(--crm-text-muted)]" /> : null}
               </div>
               {item && line.baseQuantity !== null ? (
                 <div className="mt-4 grid gap-2 rounded-2xl bg-[var(--crm-surface-soft)] p-3 sm:grid-cols-2">
@@ -1005,22 +1129,22 @@ export function SupplierReceiptsCrm({
           {error}
         </p>
       ) : null}
-      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--crm-border-subtle)] bg-[var(--crm-surface)]/95 p-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur xl:left-[var(--crm-sidebar-width)]">
+      {!isConfirmedDocument ? <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--crm-border-subtle)] bg-[var(--crm-surface)]/95 p-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur xl:left-[var(--crm-sidebar-width)]">
         <div className="mx-auto max-w-3xl">
           <Button
             className="!min-h-14 !w-full !rounded-2xl !text-base !font-black"
-            disabled={disabled || busy || needsReviewCount > 0}
+            disabled={disabled || busy || !documentDate || (affectsStock && needsReviewCount > 0)}
             onClick={() => setScreen("costs")}
             type="button"
             variant="primary"
           >
-            {needsReviewCount
+            {affectsStock && needsReviewCount
               ? `Resuelve ${needsReviewCount} ${needsReviewCount === 1 ? "línea" : "líneas"}`
               : "Revisar cambios de coste"}
             <ChevronRight className="size-5" />
           </Button>
         </div>
-      </div>
+      </div> : null}
 
       {editingLine && draft ? (
         <CrmModal

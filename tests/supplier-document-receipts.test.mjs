@@ -33,6 +33,7 @@ const edgeFunction = await readFile(new URL('../supabase/functions/process-suppl
 const ocrProviders = await readFile(new URL('../supabase/functions/_shared/supplier-documents/providers.ts', import.meta.url), 'utf8')
 const supabaseConfig = await readFile(new URL('../supabase/config.toml', import.meta.url), 'utf8')
 const identityBackfillMigration = await readFile(new URL('../supabase/migrations/20260901152330_backfill_supplier_global_identity.sql', import.meta.url), 'utf8')
+const lineChargesMigration = await readFile(new URL('../supabase/migrations/20260902002359_add_supplier_document_line_charges.sql', import.meta.url), 'utf8')
 
 const units = [
   { id: 'kg', name: 'Kilogramo', symbol: 'kg', contentQuantity: 1, contentUnitId: 'kg' },
@@ -43,6 +44,39 @@ const units = [
 const realOcrSelection = {
   azure: { endpoint: 'https://azure.example.test', apiKey: 'azure-key' },
   mistral: { apiKey: 'mistral-key' },
+}
+
+function groupedParserInput(rows, lineGroup = {}) {
+  const fixture = getSupplierDocumentMockFixture('multi-row-product')
+  assert.ok(fixture?.knownProfile)
+  const ocr = structuredClone(fixture.ocr)
+  const headers = ['Código', 'Descripción', 'Cantidad', 'Unidad', 'Precio', 'Importe']
+  ocr.text = ['PROVEEDOR MULTIFILA', headers.join(' | '), ...rows.map((row) => row.join(' | '))].join('\n')
+  ocr.pages[0].text = ocr.text
+  ocr.pages[0].tables = [{
+    rowCount: rows.length + 1,
+    columnCount: headers.length,
+    cells: [headers, ...rows].flatMap((row, rowIndex) => row.map((text, columnIndex) => ({
+      rowIndex, columnIndex, rowSpan: 1, columnSpan: 1, text, confidence: 0.98,
+    }))),
+  }]
+  return {
+    ocr,
+    rules: {
+      ...fixture.knownProfile,
+      lineGroup: { ...fixture.knownProfile.lineGroup, ...lineGroup },
+    },
+    defaults: {
+      documentType: 'delivery_note',
+      supplierName: fixture.extraction.supplier.name,
+      supplierTaxId: fixture.extraction.supplier.taxId,
+    },
+  }
+}
+
+function parseGroupedRows(rows, lineGroup = {}) {
+  const input = groupedParserInput(rows, lineGroup)
+  return runDeterministicParser(input.rules, input.ocr, input.defaults)
 }
 
 const mistralOcrFixture = {
@@ -137,6 +171,99 @@ test('el parser determinista usa la tabla OCR y el schema declarativo', () => {
   assert.equal(parsed.lines[0].quantity, 2)
   assert.equal(parsed.lines[0].lineTotal, 29)
   assert.equal(validateExtractionMath(parsed).coherent, true)
+})
+
+test('agrupa un producto multipfila y calcula 3×58,80−79,38+2,70+0,22=99,94', () => {
+  const fixture = getSupplierDocumentMockFixture('multi-row-product')
+  assert.ok(fixture?.knownProfile)
+  const parsed = runDeterministicParser(fixture.knownProfile, fixture.ocr, {
+    documentType: 'delivery_note',
+    supplierName: fixture.extraction.supplier.name,
+    supplierTaxId: fixture.extraction.supplier.taxId,
+  })
+  assert.equal(parsed.lines.length, 1)
+  assert.equal(parsed.lines[0].description, 'PRODUCTO MULTIFILA')
+  assert.equal(parsed.lines[0].quantity, 3)
+  assert.equal(parsed.lines[0].unitPrice, 58.8)
+  assert.equal(parsed.lines[0].grossCost, 176.4)
+  assert.equal(parsed.lines[0].discountAmount, 79.38)
+  assert.equal(parsed.lines[0].chargesAmount, 2.92)
+  assert.equal(parsed.lines[0].netCost, 99.94)
+  assert.equal(parsed.lines[0].lineTotal, 99.94)
+  assert.equal(validateExtractionMath(parsed).coherent, true)
+})
+
+test('separa productos consecutivos y no convierte descuentos, cargos, cierres o auxiliares en productos', () => {
+  const parsed = parseGroupedRows([
+    ['A-1', 'PRODUCTO A', '2', 'caja', '10,00', '20,00'],
+    ['', 'DESCUENTO COMERCIAL', '', '', '', '-2,00'],
+    ['', 'TEXTO AUXILIAR DESCONOCIDO', '', '', '', '777,00'],
+    ['', 'CARGO LOGÍSTICO', '', '', '', '1,00'],
+    ['', 'TOTAL NETO LÍNEA', '', '', '', '19,00'],
+    ['B-1', 'PRODUCTO B', '1', 'unidad', '5,00', '5,00'],
+    ['', 'TOTAL NETO LÍNEA', '', '', '', '5,00'],
+  ])
+  assert.deepEqual(parsed.lines.map((line) => line.description), ['PRODUCTO A', 'PRODUCTO B'])
+  assert.deepEqual(parsed.lines.map((line) => line.lineTotal), [19, 5])
+  assert.equal(parsed.lines[0].discountAmount, 2)
+  assert.equal(parsed.lines[0].chargesAmount, 1)
+  assert.equal(parsed.lines[1].discountAmount, 0)
+  assert.equal(parsed.lines[1].chargesAmount, 0)
+})
+
+test('acumula varios descuentos y cargos y deriva el neto cuando falta la fila final', () => {
+  const parsed = parseGroupedRows([
+    ['A-1', 'PRODUCTO A', '1', 'caja', '100,00', '100,00'],
+    ['', 'DESCUENTO COMERCIAL', '', '', '', '-10,00'],
+    ['', 'DESCUENTO COMERCIAL', '', '', '', '-5,00'],
+    ['', 'CARGO LOGÍSTICO', '', '', '', '2,00'],
+    ['', 'TASA RECICLAJE', '', '', '', '3,00'],
+  ])
+  assert.equal(parsed.lines.length, 1)
+  assert.equal(parsed.lines[0].discountAmount, 15)
+  assert.equal(parsed.lines[0].chargesAmount, 5)
+  assert.equal(parsed.lines[0].lineTotal, 90)
+  assert.equal(validateExtractionMath(parsed).coherent, true)
+})
+
+test('detiene un bloque ante el producto siguiente y respeta maxContinuationRows', () => {
+  const nextProduct = parseGroupedRows([
+    ['A-1', 'PRODUCTO A', '2', 'caja', '10,00', '20,00'],
+    ['B-1', 'PRODUCTO B', '1', 'unidad', '5,00', '5,00'],
+    ['', 'TOTAL NETO LÍNEA', '', '', '', '5,00'],
+  ])
+  assert.deepEqual(nextProduct.lines.map((line) => line.lineTotal), [20, 5])
+
+  const limited = parseGroupedRows([
+    ['A-1', 'PRODUCTO A', '1', 'caja', '100,00', '100,00'],
+    ['', 'DESCUENTO COMERCIAL', '', '', '', '-10,00'],
+    ['', 'CARGO LOGÍSTICO', '', '', '', '2,00'],
+    ['', 'DESCUENTO COMERCIAL', '', '', '', '-20,00'],
+    ['', 'TOTAL NETO LÍNEA', '', '', '', '72,00'],
+  ], { maxContinuationRows: 2 })
+  assert.equal(limited.lines.length, 1)
+  assert.equal(limited.lines[0].discountAmount, 10)
+  assert.equal(limited.lines[0].chargesAmount, 2)
+  assert.equal(limited.lines[0].lineTotal, 92)
+})
+
+test('sin lineGroup mantiene el parser de una fila y chargesAmount=0 por compatibilidad', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  assert.ok(fixture?.knownProfile)
+  const legacyRules = structuredClone(fixture.knownProfile)
+  delete legacyRules.lineGroup
+  const parsed = runDeterministicParser(legacyRules, fixture.ocr, {
+    documentType: 'delivery_note',
+    supplierName: fixture.extraction.supplier.name,
+    supplierTaxId: fixture.extraction.supplier.taxId,
+  })
+  assert.equal(parsed.lines.length, 1)
+  assert.equal(parsed.lines[0].lineTotal, 29)
+  assert.equal(parsed.lines[0].chargesAmount, 0)
+
+  const legacyExtraction = structuredClone(parsed)
+  delete legacyExtraction.lines[0].chargesAmount
+  assert.equal(validateExtractionMath(legacyExtraction).coherent, true)
 })
 
 test('el perfil exige descripción y cantidad, y el parser elige una tabla con líneas reales', () => {
@@ -248,10 +375,26 @@ test('solo acepta un perfil candidato si reproduce la interpretación y las mate
   assert.throws(() => supplierProfileRulesSchema.parse({ ...fixture.extraction.proposedProfile, columns: [] }))
 })
 
-test('los ocho fixtures cubren proveedor desconocido, producto nuevo, coste y almacenes', () => {
+test('valida perfiles multipfila por aliases OCR, descuentos, cargos, netos y matemáticas', () => {
+  const fixture = getSupplierDocumentMockFixture('multi-row-product')
+  assert.ok(fixture)
+  assert.equal(validateProposedProfile(fixture.ocr, fixture.extraction).candidate, true)
+
+  const wrongCharges = structuredClone(fixture.extraction)
+  wrongCharges.lines[0].chargesAmount = 0
+  assert.equal(validateProposedProfile(fixture.ocr, wrongCharges).candidate, false)
+
+  const inventedAlias = structuredClone(fixture.extraction)
+  inventedAlias.proposedProfile.lineGroup.chargeAliases.push('CARGO QUE NO EXISTE')
+  const rejected = validateProposedProfile(fixture.ocr, inventedAlias)
+  assert.equal(rejected.candidate, false)
+  assert.equal(rejected.reason, 'PROFILE_LINE_GROUP_ALIAS_NOT_IN_OCR')
+})
+
+test('los nueve fixtures incluyen el bloque multipfila junto a los casos previos', () => {
   const expected = [
     'known-supplier', 'unknown-supplier', 'known-product', 'new-product',
-    'unit-conversion', 'uncertain-line', 'cost-change', 'multiple-warehouses',
+    'unit-conversion', 'uncertain-line', 'cost-change', 'multiple-warehouses', 'multi-row-product',
   ]
   assert.deepEqual(supplierDocumentMockFixtures.map((fixture) => fixture.id), expected)
   assert.notEqual(getSupplierDocumentMockFixture('unknown-supplier')?.extraction.supplier.name, '')
@@ -263,7 +406,7 @@ test('los ocho fixtures cubren proveedor desconocido, producto nuevo, coste y al
 })
 
 test('los providers mock cubren OCR e IA sin secretos y los reales fallan de forma controlada', async () => {
-  assert.equal(supplierDocumentMockFixtures.length, 8)
+  assert.equal(supplierDocumentMockFixtures.length, 9)
   for (const fixture of supplierDocumentMockFixtures) {
     const ocr = await new MockDocumentOcrProvider(fixture.id).analyze({ bytes: new Uint8Array(), contentType: 'application/mock', fileName: 'mock' })
     const extraction = await new MockSupplierDocumentAiProvider(fixture.id).interpret({ ocr, documentType: 'delivery_note' })
@@ -366,6 +509,15 @@ test('guardar coste real, mantener referencia y actualizarla con histórico son 
   assert.doesNotMatch(migration, /else[\s\S]{0,120}set reference_cost/i)
 })
 
+test('persiste cargos de línea de forma incremental sin alterar las migraciones aplicadas', () => {
+  assert.match(lineChargesMigration, /add column if not exists charges_amount numeric\(18, 6\) not null default 0/i)
+  assert.match(lineChargesMigration, /check \(charges_amount >= 0\) not valid/i)
+  assert.match(lineChargesMigration, /validate constraint supplier_document_lines_charges_amount_check/i)
+  assert.match(edgeFunction, /charges_amount: line\.chargesAmount/)
+  assert.match(ocrProviders, /chargesAmount/)
+  assert.match(ocrProviders, /lineGroup solo cuando el OCR muestre bloques multipfila/i)
+})
+
 test('los aliases se aprenden al confirmar y siguen aislados por tenant, local y proveedor', () => {
   assert.match(migration, /unique \(tenant_id, venue_id, supplier_id, alias_type, alias_value\)/)
   assert.match(migration, /'ean'[\s\S]*on conflict \(tenant_id, venue_id, supplier_id, alias_type, alias_value\)/i)
@@ -398,7 +550,7 @@ test('la UI es mobile-first, revisa incidencias y confirma solo por la RPC globa
   assert.doesNotMatch(page, /packageUnitSymbol: event\.target\.value/)
   assert.match(page, /Mantener \{formatCost\(previous\)\}/)
   assert.match(page, /Actualizar a \{formatCost\(line\.normalizedUnitCost\)\}/)
-  assert.match(page, /confirmSupplierDocument\(detail\.document\.id\)/)
+  assert.match(page, /confirmSupplierDocument\(\{[\s\S]*documentId: detail\.document\.id[\s\S]*documentDate[\s\S]*affectsStock/)
   assert.doesNotMatch(page, /saveInventoryItemStock/)
 })
 

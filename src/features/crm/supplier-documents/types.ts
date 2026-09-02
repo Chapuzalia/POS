@@ -11,10 +11,28 @@ export type SupplierDocument = {
   documentType: SupplierDocumentType
   documentNumber: string | null
   documentDate: string | null
+  affectsStock: boolean
+  stockAppliedAt: string | null
+  storageBucket: string | null
+  storagePath: string | null
+  originalFileName: string | null
   status: SupplierDocumentStatus
   extractionMetadata: Record<string, unknown>
   createdAt: string
   confirmedAt: string | null
+}
+
+export type SupplierDocumentListItem = SupplierDocument & {
+  total: number
+  linkedDocumentCount: number
+}
+
+export type SupplierDocumentLinkCandidate = {
+  id: string
+  supplierName: string | null
+  documentNumber: string | null
+  documentDate: string
+  total: number
 }
 
 export type SupplierDocumentLine = {
@@ -31,6 +49,7 @@ export type SupplierDocumentLine = {
   packageUnitSymbol: string | null
   unitPrice: number | null
   discountAmount: number
+  chargesAmount: number
   grossCost: number | null
   netCost: number | null
   lineTotal: number | null

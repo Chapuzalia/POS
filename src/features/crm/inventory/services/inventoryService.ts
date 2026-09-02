@@ -37,6 +37,8 @@ function mapInventoryItem(row: DbRow): InventoryItem {
     id: string(row.id), tenantId: string(row.tenant_id), venueId: string(row.venue_id),
     name: string(row.name), description: string(row.description), baseUnitId: string(row.base_unit_id),
     referenceCost: row.reference_cost == null ? null : number(row.reference_cost),
+    lastPurchaseCost: row.last_purchase_cost == null ? null : number(row.last_purchase_cost),
+    averageCost: row.average_cost == null ? null : number(row.average_cost),
     active: Boolean(row.is_active), createdAt: string(row.created_at), updatedAt: string(row.updated_at),
   }
 }
@@ -86,7 +88,7 @@ export async function createInventoryWarehouse(context: TenantContext, venueId: 
 export async function loadInventorySnapshot(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventorySnapshot> {
   const [units, warehouses, itemRows, routeRows, levelRows, recipeRows, recipeLineRows, effectRows, productionRows, productionLineRows] = await Promise.all([
     loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
-    rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, is_active, created_at, updated_at', context, venueId),
+    rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
     rows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId),
     rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled', context, venueId),
     rows('inventory_recipes', 'id, variant_id, mode, is_active', context, venueId),

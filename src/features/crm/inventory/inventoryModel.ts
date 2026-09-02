@@ -1,5 +1,24 @@
 export const MAX_INVENTORY_DECIMAL_PLACES = 6
 
+export type InventoryCostSource = 'average' | 'last_purchase' | 'reference'
+
+export function getEffectiveInventoryItemCost(item: {
+  averageCost: number | null
+  lastPurchaseCost: number | null
+  referenceCost: number | null
+}): { cost: number; source: InventoryCostSource } | null {
+  if (item.averageCost !== null && Number.isFinite(item.averageCost) && item.averageCost >= 0) {
+    return { cost: item.averageCost, source: 'average' }
+  }
+  if (item.lastPurchaseCost !== null && Number.isFinite(item.lastPurchaseCost) && item.lastPurchaseCost >= 0) {
+    return { cost: item.lastPurchaseCost, source: 'last_purchase' }
+  }
+  if (item.referenceCost !== null && Number.isFinite(item.referenceCost) && item.referenceCost >= 0) {
+    return { cost: item.referenceCost, source: 'reference' }
+  }
+  return null
+}
+
 export function validateInventoryName(value: string, entityLabel: string) {
   const name = value.trim().replace(/\s+/g, ' ')
   if (!name) throw new Error(`Indica el nombre ${entityLabel}.`)

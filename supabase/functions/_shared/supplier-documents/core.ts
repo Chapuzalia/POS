@@ -71,6 +71,21 @@ const parserFieldSchema = z.enum([
   'taxRate',
 ])
 
+const lineGroupSchema = z.object({
+  endAliases: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+  discountAliases: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+  chargeAliases: z.array(z.string().trim().min(1).max(120)).max(20).default([]),
+  netTotalFromEndRow: z.boolean().default(false),
+  maxContinuationRows: z.number().int().min(1).max(20).default(6),
+}).strict().superRefine((rule, context) => {
+  if (rule.endAliases.length + rule.discountAliases.length + rule.chargeAliases.length === 0) {
+    context.addIssue({ code: 'custom', message: 'PROFILE_LINE_GROUP_ALIASES_MISSING' })
+  }
+  if (rule.netTotalFromEndRow && rule.endAliases.length === 0) {
+    context.addIssue({ code: 'custom', message: 'PROFILE_LINE_GROUP_END_ALIAS_MISSING', path: ['endAliases'] })
+  }
+})
+
 const supplierProfileRulesBaseSchema = z.object({
   version: z.literal(1),
   requiredTexts: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
@@ -81,6 +96,7 @@ const supplierProfileRulesBaseSchema = z.object({
   thousandsSeparator: z.enum([',', '.', ' ', 'none']).default('none'),
   documentNumberLabel: z.string().trim().max(80).nullable().default(null),
   documentDateLabel: z.string().trim().max(80).nullable().default(null),
+  lineGroup: lineGroupSchema.nullable().optional().default(null),
   columns: z.array(z.object({
     field: parserFieldSchema,
     headerAliases: z.array(z.string().trim().min(1).max(80)).min(1).max(12),
@@ -117,6 +133,7 @@ export const extractedLineSchema = z.object({
   purchaseUnit: nullableText,
   unitPrice: nullableMoney,
   discountAmount: z.number().finite().nonnegative().default(0),
+  chargesAmount: z.number().finite().nonnegative().default(0),
   grossCost: nullableMoney,
   netCost: nullableMoney,
   lineTotal: nullableMoney,
@@ -150,7 +167,7 @@ export const supplierProfileRulesJsonSchema = {
   required: [
     'version', 'requiredTexts', 'optionalTexts', 'tableStartText', 'tableEndText',
     'decimalSeparator', 'thousandsSeparator', 'documentNumberLabel',
-    'documentDateLabel', 'columns', 'normalizations',
+    'documentDateLabel', 'lineGroup', 'columns', 'normalizations',
   ],
   properties: {
     version: { type: 'number', enum: [1] },
@@ -162,6 +179,20 @@ export const supplierProfileRulesJsonSchema = {
     thousandsSeparator: { type: 'string', enum: [',', '.', ' ', 'none'] },
     documentNumberLabel: { type: ['string', 'null'] },
     documentDateLabel: { type: ['string', 'null'] },
+    lineGroup: {
+      anyOf: [{
+        type: 'object',
+        additionalProperties: false,
+        required: ['endAliases', 'discountAliases', 'chargeAliases', 'netTotalFromEndRow', 'maxContinuationRows'],
+        properties: {
+          endAliases: { type: 'array', items: { type: 'string' } },
+          discountAliases: { type: 'array', items: { type: 'string' } },
+          chargeAliases: { type: 'array', items: { type: 'string' } },
+          netTotalFromEndRow: { type: 'boolean' },
+          maxContinuationRows: { type: 'number', minimum: 1, maximum: 20 },
+        },
+      }, { type: 'null' }],
+    },
     columns: {
       type: 'array', minItems: 3,
       items: {
@@ -214,7 +245,7 @@ export const supplierDocumentExtractionJsonSchema = {
         type: 'object', additionalProperties: false,
         required: [
           'supplierReference', 'description', 'barcode', 'quantity', 'purchaseUnit',
-          'unitPrice', 'discountAmount', 'grossCost', 'netCost', 'lineTotal',
+          'unitPrice', 'discountAmount', 'chargesAmount', 'grossCost', 'netCost', 'lineTotal',
           'taxRate', 'packageExpression', 'confidence',
         ],
         properties: {
@@ -225,6 +256,7 @@ export const supplierDocumentExtractionJsonSchema = {
           purchaseUnit: { type: ['string', 'null'] },
           unitPrice: { type: ['number', 'null'], minimum: 0 },
           discountAmount: { type: 'number', minimum: 0 },
+          chargesAmount: { type: 'number', minimum: 0 },
           grossCost: { type: ['number', 'null'], minimum: 0 },
           netCost: { type: ['number', 'null'], minimum: 0 },
           lineTotal: { type: ['number', 'null'], minimum: 0 },
@@ -337,6 +369,14 @@ function extractLabelValue(text: string, label: string | null) {
   return match?.[1]?.trim() || null
 }
 
+function rowMatchesAliases(normalizedRow: string, aliases: string[]) {
+  return aliases.some((alias) => normalizedRow.includes(normalizeDocumentText(alias)))
+}
+
+function roundMoney(value: number) {
+  return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000
+}
+
 export function runDeterministicParser(
   inputRules: SupplierProfileRules | unknown,
   ocrInput: OcrDocument | unknown,
@@ -362,29 +402,72 @@ export function runDeterministicParser(
         if (!requiredColumns.every((column) => indexes.has(column.field))) continue
         matchedHeaders = true
         const lines: ExtractedLine[] = []
-        for (const row of matrix.slice(headerRowIndex + 1)) {
+        const dataRows = matrix.slice(headerRowIndex + 1)
+        let tableEnded = false
+        for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
+          const row = dataRows[rowIndex]
           const normalizedRow = normalizeDocumentText(row.join(' '))
           if (rules.tableEndText && normalizedRow.includes(normalizeDocumentText(rules.tableEndText))) break
-          const get = (field: z.infer<typeof parserFieldSchema>) => {
+          const get = (sourceRow: string[], field: z.infer<typeof parserFieldSchema>) => {
             const index = indexes.get(field)
-            return index === undefined ? '' : normalizeProfileField(row[index] ?? '', field, rules)
+            return index === undefined ? '' : normalizeProfileField(sourceRow[index] ?? '', field, rules)
           }
-          const description = get('description')
-          const quantity = parseProfileNumber(get('quantity'), rules)
+          const description = get(row, 'description')
+          const quantity = parseProfileNumber(get(row, 'quantity'), rules)
           if (!description || quantity === null || quantity <= 0) continue
-          const unitPrice = parseProfileNumber(get('unitPrice'), rules)
-          const discountAmount = parseProfileNumber(get('discountAmount'), rules) ?? 0
-          const lineTotal = parseProfileNumber(get('lineTotal'), rules)
-          const taxRate = parseProfileNumber(get('taxRate'), rules)
+          const unitPrice = parseProfileNumber(get(row, 'unitPrice'), rules)
+          let discountAmount = Math.abs(parseProfileNumber(get(row, 'discountAmount'), rules) ?? 0)
+          let chargesAmount = 0
+          const mainRowTotal = parseProfileNumber(get(row, 'lineTotal'), rules)
+          const grossCost = unitPrice === null ? mainRowTotal : roundMoney(quantity * unitPrice)
+          let groupedNetTotal: number | null = null
+
+          if (rules.lineGroup) {
+            const continuationLimit = Math.min(dataRows.length, rowIndex + 1 + rules.lineGroup.maxContinuationRows)
+            let continuationIndex = rowIndex + 1
+            for (; continuationIndex < continuationLimit; continuationIndex += 1) {
+              const continuationRow = dataRows[continuationIndex]
+              const continuationText = normalizeDocumentText(continuationRow.join(' '))
+              const continuationDescription = get(continuationRow, 'description')
+              const continuationQuantity = parseProfileNumber(get(continuationRow, 'quantity'), rules)
+              if (continuationDescription && continuationQuantity !== null && continuationQuantity > 0) break
+
+              const amount = parseProfileNumber(get(continuationRow, 'lineTotal'), rules)
+              if (rowMatchesAliases(continuationText, rules.lineGroup.endAliases)) {
+                if (rules.lineGroup.netTotalFromEndRow && amount !== null) groupedNetTotal = Math.abs(amount)
+                continuationIndex += 1
+                break
+              }
+              if (rules.tableEndText && continuationText.includes(normalizeDocumentText(rules.tableEndText))) {
+                tableEnded = true
+                break
+              }
+              if (rowMatchesAliases(continuationText, rules.lineGroup.discountAliases)) {
+                if (amount !== null) discountAmount = roundMoney(discountAmount + Math.abs(amount))
+                continue
+              }
+              if (rowMatchesAliases(continuationText, rules.lineGroup.chargeAliases)) {
+                if (amount !== null) chargesAmount = roundMoney(chargesAmount + Math.abs(amount))
+              }
+            }
+            rowIndex = continuationIndex - 1
+          }
+
+          const calculatedNetTotal = grossCost === null
+            ? mainRowTotal
+            : roundMoney(grossCost - discountAmount + chargesAmount)
+          const lineTotal = rules.lineGroup ? (groupedNetTotal ?? calculatedNetTotal) : mainRowTotal
+          const taxRate = parseProfileNumber(get(row, 'taxRate'), rules)
           const parsedLine = extractedLineSchema.safeParse({
-            supplierReference: get('supplierReference') || null,
+            supplierReference: get(row, 'supplierReference') || null,
             description,
-            barcode: get('barcode') || null,
+            barcode: get(row, 'barcode') || null,
             quantity,
-            purchaseUnit: get('purchaseUnit') || null,
+            purchaseUnit: get(row, 'purchaseUnit') || null,
             unitPrice,
             discountAmount,
-            grossCost: unitPrice === null ? lineTotal : quantity * unitPrice,
+            chargesAmount,
+            grossCost,
             netCost: lineTotal,
             lineTotal,
             taxRate,
@@ -392,6 +475,7 @@ export function runDeterministicParser(
             confidence: ocr.confidence,
           })
           if (parsedLine.success) lines.push(parsedLine.data)
+          if (tableEnded) break
         }
         if (lines.length === 0) continue
         const markerScore = [rules.tableStartText, rules.tableEndText]
@@ -431,7 +515,7 @@ export function validateExtractionMath(extractionInput: SupplierDocumentExtracti
   const invalidLineIndexes: number[] = []
   extraction.lines.forEach((line, index) => {
     if (line.unitPrice === null || line.lineTotal === null) return
-    const expected = line.quantity * line.unitPrice - line.discountAmount
+    const expected = line.quantity * line.unitPrice - line.discountAmount + line.chargesAmount
     const allowed = Math.max(0.02, Math.abs(line.lineTotal) * tolerance)
     if (Math.abs(expected - line.lineTotal) > allowed) invalidLineIndexes.push(index)
   })
@@ -461,6 +545,20 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
   if (!interpreted.proposedProfile) return { candidate: false, reason: 'PROFILE_NOT_PROPOSED' as const, parsed: null }
   try {
     const rules = supplierProfileRulesSchema.parse(interpreted.proposedProfile)
+    if (rules.lineGroup) {
+      const ocrText = normalizeDocumentText([
+        ocr.text,
+        ...ocr.pages.flatMap((page) => page.tables.flatMap((table) => table.cells.map((cell) => cell.text))),
+      ].join(' '))
+      const aliases = [
+        ...rules.lineGroup.endAliases,
+        ...rules.lineGroup.discountAliases,
+        ...rules.lineGroup.chargeAliases,
+      ]
+      if (aliases.some((alias) => !ocrText.includes(normalizeDocumentText(alias)))) {
+        return { candidate: false, reason: 'PROFILE_LINE_GROUP_ALIAS_NOT_IN_OCR' as const, parsed: null }
+      }
+    }
     const parsed = runDeterministicParser(rules, ocr, {
       documentType: interpreted.document.type,
       supplierName: interpreted.supplier.name,
@@ -471,9 +569,16 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
     const sameLineCount = parsed.lines.length === interpreted.lines.length
     const comparable = sameLineCount && parsed.lines.every((line, index) => {
       const expected = interpreted.lines[index]
+      const sameMoney = (actual: number | null, target: number | null) => (
+        actual === null || target === null ? actual === target : Math.abs(actual - target) <= 0.02
+      )
       return normalizeDocumentText(line.description) === normalizeDocumentText(expected.description)
         && Math.abs(line.quantity - expected.quantity) <= 0.000001
-        && (line.lineTotal === null || expected.lineTotal === null || Math.abs(line.lineTotal - expected.lineTotal) <= 0.02)
+        && Math.abs(line.discountAmount - expected.discountAmount) <= 0.02
+        && Math.abs(line.chargesAmount - expected.chargesAmount) <= 0.02
+        && sameMoney(line.grossCost, expected.grossCost)
+        && sameMoney(line.netCost, expected.netCost)
+        && sameMoney(line.lineTotal, expected.lineTotal)
     })
     return {
       candidate: parserMath.coherent && interpretationMath.coherent && comparable,
