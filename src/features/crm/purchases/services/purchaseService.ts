@@ -69,7 +69,8 @@ export async function loadPurchaseDocuments(
     client.from('supplier_document_lines')
       .select('supplier_document_id, inventory_item_id, description_raw, line_total, net_cost, normalized_unit_cost, inventory_items(name)')
       .in('supplier_document_id', documentIds),
-    supplierIds.length ? client.from('suppliers').select('id, name').in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
+    supplierIds.length ? client.from('suppliers').select('id, name')
+      .eq('tenant_id', context.tenantId).eq('venue_id', venueId).in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
     client.from('supplier_document_links').select('invoice_document_id, delivery_note_document_id')
       .or(`invoice_document_id.in.(${documentIds.join(',')}),delivery_note_document_id.in.(${documentIds.join(',')})`),
   ])

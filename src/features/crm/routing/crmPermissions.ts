@@ -11,6 +11,7 @@ const SECTION_FEATURES: Partial<Record<CrmSection, TenantFeatureKey | TenantFeat
   production: 'production',
   'purchases-summary': 'inventory',
   'purchases-invoices': 'inventory',
+  'purchases-suppliers': 'inventory',
   'inventory-stock': 'inventory',
   'inventory-items': 'inventory',
   'inventory-preparations': ['inventory', 'inventory_recipes'],

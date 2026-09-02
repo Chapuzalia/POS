@@ -96,6 +96,7 @@ test('separa inventario físico de la gestión documental de compras', () => {
   assert.deepEqual(purchaseNavItems.map(({ id, label }) => ({ id, label })), [
     { id: 'purchases-summary', label: 'Resumen' },
     { id: 'purchases-invoices', label: 'Facturas' },
+    { id: 'purchases-suppliers', label: 'Proveedores' },
   ])
   assert.deepEqual([...purchaseSections], purchaseNavItems.map((item) => item.id))
   assert.equal(getSectionTitle('inventory-stock'), 'Stock del local')
@@ -103,6 +104,7 @@ test('separa inventario físico de la gestión documental de compras', () => {
   assert.match(shell, /inventoryNavItems/)
   assert.match(routes, /case 'inventory-stock':/)
   assert.match(routes, /case 'purchases-summary':/)
+  assert.match(routes, /case 'purchases-suppliers':/)
   assert.match(routes, /case 'purchases-invoices':/)
   assert.match(routes, /case 'inventory-items':/)
   assert.match(routes, /case 'inventory-preparations':/)

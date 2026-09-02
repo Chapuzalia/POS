@@ -18,6 +18,7 @@ const PlanCrm = lazy(() => import('../plan/pages/PlanPage').then((module) => ({ 
 const InventoryStockCrm = lazy(() => import('../inventory/pages/InventoryStockPage').then((module) => ({ default: module.InventoryStockCrm })))
 const PurchasesOverviewCrm = lazy(() => import('../purchases/pages/PurchasesOverviewPage').then((module) => ({ default: module.PurchasesOverviewCrm })))
 const PurchasesInvoicesCrm = lazy(() => import('../purchases/pages/PurchasesInvoicesPage').then((module) => ({ default: module.PurchasesInvoicesCrm })))
+const PurchasesSuppliersCrm = lazy(() => import('../purchases/pages/PurchasesSuppliersPage').then((module) => ({ default: module.PurchasesSuppliersCrm })))
 const InventoryWarehousesCrm = lazy(() => import('../inventory/pages/InventoryWarehousesPage').then((module) => ({ default: module.InventoryWarehousesCrm })))
 const InventorySettingsCrm = lazy(() => import('../inventory/pages/InventorySettingsPage').then((module) => ({ default: module.InventorySettingsCrm })))
 const InventoryItemsCrm = lazy(() => import('../inventory/pages/InventoryItemsPage').then((module) => ({ default: module.InventoryItemsCrm })))
@@ -110,6 +111,8 @@ export function CrmSectionContent({
       return <PurchasesOverviewCrm selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'purchases-invoices':
       return <PurchasesInvoicesCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'purchases-suppliers':
+      return <PurchasesSuppliersCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-items':
       return <InventoryItemsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-preparations':

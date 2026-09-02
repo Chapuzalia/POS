@@ -27,3 +27,15 @@ export type PurchaseDocument = {
   excludedFromSpend: boolean
   lines: PurchaseLine[]
 }
+
+export type VenueSupplier = {
+  id: string
+  name: string
+  taxId: string | null
+}
+
+export type VenueSupplierInput = {
+  id?: string
+  name: string
+  taxId: string | null
+}

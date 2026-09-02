@@ -147,12 +147,14 @@ function tryKnownProfiles(
 async function loadSupplierCandidates(
   admin: UntypedSupabaseClient,
   tenantId: string,
+  venueId: string,
 ) : Promise<SupplierCandidate[]> {
   const [suppliersResult, identitiesResult] = await Promise.all([
-    admin.from('suppliers').select('id, name, tax_id, global_supplier_id').eq('tenant_id', tenantId),
+    admin.from('suppliers').select('id, name, tax_id, global_supplier_id')
+      .eq('tenant_id', tenantId).eq('venue_id', venueId),
     admin.from('supplier_identity_aliases')
       .select('supplier_id, identity_type, normalized_value, source')
-      .eq('tenant_id', tenantId),
+      .eq('tenant_id', tenantId).eq('venue_id', venueId),
   ])
   if (suppliersResult.error) throw suppliersResult.error
   if (identitiesResult.error) throw identitiesResult.error
@@ -270,7 +272,7 @@ async function processSupplierDocumentRequest(request: Request) {
     const ocr = nativePdf ?? await ocrProvider.analyze(binary)
     const [knowledge, supplierCandidates] = await Promise.all([
       loadGlobalKnowledge(admin),
-      loadSupplierCandidates(admin, document.tenant_id),
+      loadSupplierCandidates(admin, document.tenant_id, document.venue_id),
     ])
     const fixture = fixtureId ? getSupplierDocumentMockFixture(fixtureId) : null
     let extraction: SupplierDocumentExtraction

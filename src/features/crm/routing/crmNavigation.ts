@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Beaker, Boxes, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PlugZap, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
+import { Armchair, BarChart3, Beaker, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PlugZap, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-invoices' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-invoices' | 'purchases-suppliers' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -30,6 +30,7 @@ export const inventoryNavItems: CrmNavItem[] = [
 export const purchaseNavItems: CrmNavItem[] = [
   { id: 'purchases-summary', label: 'Resumen', icon: BarChart3 },
   { id: 'purchases-invoices', label: 'Facturas', icon: FileText },
+  { id: 'purchases-suppliers', label: 'Proveedores', icon: Building2 },
 ]
 
 export const navItems: CrmNavItem[] = [
@@ -67,6 +68,7 @@ export function getSectionTitle(section: CrmSection) {
     'inventory-stock': 'Stock del local',
     'purchases-summary': 'Resumen de compras',
     'purchases-invoices': 'Facturas y albaranes',
+    'purchases-suppliers': 'Proveedores del local',
     'inventory-items': 'Artículos de inventario',
     'inventory-preparations': 'Elaboraciones de inventario',
     'inventory-warehouses': 'Almacenes del local',

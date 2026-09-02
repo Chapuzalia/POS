@@ -1,6 +1,7 @@
 import type { TenantContext } from '../../../../types'
 import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
 import { loadInventorySnapshot } from '../../inventory/services/inventoryService'
+import { loadVenueSuppliers } from '../../purchases/services/supplierService'
 import type {
   SupplierDocument,
   SupplierDocumentDetail,
@@ -157,7 +158,7 @@ export async function loadSupplierDocument(
   let supplierName: string | null = null
   if (documentRow.supplier_id) {
     const { data, error } = await client.from('suppliers').select('name').eq('tenant_id', context.tenantId)
-      .eq('id', documentRow.supplier_id).single()
+      .eq('venue_id', venueId).eq('id', documentRow.supplier_id).single()
     if (error) throw error
     supplierName = String(data.name)
   }
@@ -168,24 +169,16 @@ export async function loadSupplierReceiptWorkspace(context: TenantContext, venue
   const [detail, inventory, suppliers] = await Promise.all([
     loadSupplierDocument(context, venueId, documentId),
     loadInventorySnapshot(context, venueId),
-    loadSupplierOptions(context),
+    loadSupplierOptions(context, venueId),
   ])
   return { ...detail, inventory, suppliers }
 }
 
 export async function loadSupplierOptions(
   context: Pick<TenantContext, 'tenantId'>,
+  venueId: string,
 ): Promise<SupplierOption[]> {
-  const { data, error } = await requireSupabase().from('suppliers')
-    .select('id, name, tax_id')
-    .eq('tenant_id', context.tenantId)
-    .order('name')
-  if (error) throw error
-  return ((data ?? []) as DbRow[]).map((row) => ({
-    id: String(row.id),
-    name: String(row.name),
-    taxId: text(row.tax_id),
-  }))
+  return loadVenueSuppliers(context, venueId)
 }
 
 export async function updateSupplierDocumentSupplier(documentId: string, supplierId: string) {
@@ -253,7 +246,8 @@ export async function loadDeliveryNoteCandidates(
   const supplierIds = [...new Set(rows.map((row) => text(row.supplier_id)).filter((id): id is string => Boolean(id)))]
   const [lineResult, supplierResult, linkResult] = await Promise.all([
     client.from('supplier_document_lines').select('supplier_document_id, line_total, net_cost').in('supplier_document_id', ids),
-    supplierIds.length ? client.from('suppliers').select('id, name').in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
+    supplierIds.length ? client.from('suppliers').select('id, name')
+      .eq('tenant_id', context.tenantId).eq('venue_id', venueId).in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
     client.from('supplier_document_links').select('delivery_note_document_id').in('delivery_note_document_id', ids),
   ])
   if (lineResult.error) throw lineResult.error
