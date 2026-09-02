@@ -300,6 +300,7 @@ export const supplierDocumentExtractionJsonSchema = {
     },
     lines: {
       type: 'array', minItems: 1,
+      description: 'Contiene únicamente productos reales comprados; descuentos, cargos, impuestos, subtotales y filas auxiliares se integran en el producto anterior o se omiten.',
       items: {
         type: 'object', additionalProperties: false,
         required: [
@@ -309,7 +310,7 @@ export const supplierDocumentExtractionJsonSchema = {
         ],
         properties: {
           supplierReference: { type: ['string', 'null'] },
-          description: { type: 'string' },
+          description: { type: 'string', description: 'Descripción no vacía de un producto real, nunca de una fila auxiliar.' },
           barcode: { type: ['string', 'null'] },
           quantity: { type: 'number', exclusiveMinimum: 0 },
           purchaseUnit: { type: ['string', 'null'] },
@@ -341,6 +342,120 @@ export function normalizeDocumentText(value: string) {
 
 export function normalizeAlias(value: string) {
   return normalizeDocumentText(value)
+}
+
+type AuxiliaryLineKind = 'discount' | 'charge' | 'net' | 'ignore'
+
+function auxiliaryLineKind(description: string): AuxiliaryLineKind | null {
+  const normalized = normalizeDocumentText(description)
+  if (/^(?:dto|descuento|bonificacion|rappel)(?:\s|$)/.test(normalized)) return 'discount'
+  if (/^(?:ibee|punto verde|ecotasa|canon|cargo|tasa)(?:\s|$)/.test(normalized)) return 'charge'
+  if (/^(?:subunidades(?: neto)?|neto|total neto(?: linea)?)(?:\s|$)/.test(normalized)) return 'net'
+  if (/^(?:iva|igic|ipsi|impuestos?|bases? imponibles?|subtotal(?:es)?|total (?:factura|documento))\b/.test(normalized)) return 'ignore'
+  return null
+}
+
+function nonEmptyText(value: unknown) {
+  return typeof value === 'string' && value.trim().length > 0
+}
+
+function nonnegativeNumber(value: unknown) {
+  return typeof value === 'number' && Number.isFinite(value) && value >= 0 ? value : null
+}
+
+function firstPositiveMoney(line: Record<string, unknown>, fields: string[]) {
+  for (const field of fields) {
+    const value = nonnegativeNumber(line[field])
+    if (value !== null && value > 0) return value
+  }
+  const quantity = nonnegativeNumber(line.quantity)
+  const unitPrice = nonnegativeNumber(line.unitPrice)
+  return quantity !== null && unitPrice !== null && quantity * unitPrice > 0
+    ? roundMoney(quantity * unitPrice)
+    : null
+}
+
+type SanitizedProductLine = {
+  line: Record<string, unknown>
+  initialDiscount: number
+  initialCharges: number
+  auxiliaryDiscount: number
+  auxiliaryCharges: number
+}
+
+function mergeAuxiliaryLine(product: SanitizedProductLine, auxiliary: Record<string, unknown>, kind: AuxiliaryLineKind) {
+  if (kind === 'discount') {
+    const amount = firstPositiveMoney(auxiliary, ['discountAmount', 'lineTotal', 'netCost', 'grossCost', 'unitPrice'])
+    if (amount !== null) product.auxiliaryDiscount = roundMoney(product.auxiliaryDiscount + amount)
+    product.line.discountAmount = Math.max(product.initialDiscount, product.auxiliaryDiscount)
+    return
+  }
+  if (kind === 'charge') {
+    const amount = firstPositiveMoney(auxiliary, ['chargesAmount', 'lineTotal', 'netCost', 'grossCost', 'unitPrice'])
+    if (amount !== null) product.auxiliaryCharges = roundMoney(product.auxiliaryCharges + amount)
+    product.line.chargesAmount = Math.max(product.initialCharges, product.auxiliaryCharges)
+    return
+  }
+  if (kind === 'net') {
+    const net = firstPositiveMoney(auxiliary, ['lineTotal', 'netCost'])
+    if (net !== null) {
+      product.line.lineTotal = net
+      product.line.netCost = net
+    }
+    if (!nonEmptyText(product.line.packageExpression) && nonEmptyText(auxiliary.packageExpression)) {
+      product.line.packageExpression = (auxiliary.packageExpression as string).trim()
+    }
+    return
+  }
+  const taxRate = nonnegativeNumber(auxiliary.taxRate)
+  if (taxRate !== null && nonnegativeNumber(product.line.taxRate) === null) product.line.taxRate = taxRate
+}
+
+/**
+ * Removes invalid/auxiliary model rows before the strict extraction schema runs.
+ * It intentionally does not manufacture missing product fields: Zod remains the
+ * final authority for every retained product line.
+ */
+export function sanitizeSupplierDocumentExtraction(input: unknown): unknown {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input
+  const source = input as Record<string, unknown>
+  if (!Array.isArray(source.lines)) return input
+
+  const products: SanitizedProductLine[] = []
+  for (const candidate of source.lines) {
+    if (!candidate || typeof candidate !== 'object' || Array.isArray(candidate)) continue
+    const raw = candidate as Record<string, unknown>
+    const description = typeof raw.description === 'string' ? raw.description.trim() : ''
+    if (!description) continue
+
+    const kind = auxiliaryLineKind(description)
+    if (kind) {
+      const previous = products.at(-1)
+      if (previous) mergeAuxiliaryLine(previous, raw, kind)
+      continue
+    }
+
+    const line: Record<string, unknown> = { ...raw, description }
+    products.push({
+      line,
+      initialDiscount: nonnegativeNumber(line.discountAmount) ?? 0,
+      initialCharges: nonnegativeNumber(line.chargesAmount) ?? 0,
+      auxiliaryDiscount: 0,
+      auxiliaryCharges: 0,
+    })
+  }
+  return { ...source, lines: products.map((product) => product.line) }
+}
+
+export function parseSupplierDocumentExtraction(input: unknown): SupplierDocumentExtraction {
+  const sanitized = sanitizeSupplierDocumentExtraction(input)
+  const lines = sanitized && typeof sanitized === 'object' && !Array.isArray(sanitized)
+    ? (sanitized as Record<string, unknown>).lines
+    : null
+  if (Array.isArray(lines) && lines.length === 0) {
+    throw new Error('SUPPLIER_DOCUMENT_LINES_NOT_FOUND: No se encontraron líneas de producto válidas.')
+  }
+  return supplierDocumentExtractionSchema.parse(sanitized)
 }
 
 const supplierLegalFormTokens = new Set([
@@ -541,8 +656,10 @@ function tableMatrix(table: OcrTable) {
 function parseProfileNumber(rawValue: string, rules: SupplierProfileRules) {
   const raw = rawValue.replace(/[^\d,.-]/g, '').trim()
   if (!raw) return null
+  const accountingNegative = raw.endsWith('-') && !raw.startsWith('-')
+  const signedRaw = accountingNegative ? `-${raw.slice(0, -1)}` : raw
   const thousands = rules.thousandsSeparator === 'none' ? '' : rules.thousandsSeparator
-  const normalized = (thousands ? raw.split(thousands).join('') : raw)
+  const normalized = (thousands ? signedRaw.split(thousands).join('') : signedRaw)
     .replace(rules.decimalSeparator, '.')
   if (!/^-?\d+(?:\.\d+)?$/.test(normalized)) return null
   const value = Number(normalized)

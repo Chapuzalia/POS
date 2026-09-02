@@ -1,7 +1,7 @@
 import {
   ocrDocumentSchema,
+  parseSupplierDocumentExtraction,
   supplierDocumentExtractionJsonSchema,
-  supplierDocumentExtractionSchema,
   supplierProfileRulesJsonSchema,
   supplierProfileRulesSchema,
   type OcrDocument,
@@ -505,6 +505,8 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
           'Prioriza identificador fiscal exacto, después email o dominio, teléfono, dirección y por último nombre o razón social. Un nombre parecido por sí solo no basta para forzar una asociación.',
           'En supplierResolution.signals enumera únicamente las señales realmente observadas y en reasons resume por qué propones o descartas la asociación.',
           'No inventes líneas ni valores. Devuelve importes como números decimales.',
+          'lines[] debe contener exclusivamente productos reales comprados, una entrada por producto. Nunca crees productos independientes para líneas vacías, separadores, descuentos, IBEE, Punto Verde, impuestos, bases imponibles, subtotales, SUBUNIDADES/NETO u otros conceptos auxiliares.',
+          'Cuando una fila principal de producto vaya seguida de Dto. Fijo, otros descuentos, IBEE, Punto Verde, tasas, cargos o SUBUNIDADES/NETO, consolida todo el bloque en la línea principal: conserva la cantidad comprada y agrega descuento, cargos, bruto y neto en los campos disponibles. No copies las filas auxiliares a lines[].',
           'En cada línea, chargesAmount es la suma de cargos positivos y vale 0 si no hay cargos. La coherencia esperada es quantity * unitPrice - discountAmount + chargesAmount = lineTotal.',
           'Propón solo reglas declarativas compatibles con el schema, nunca código, SQL ni expresiones ejecutables.',
           'Usa lineGroup solo cuando el OCR muestre bloques multipfila repetibles: una fila principal de producto y filas auxiliares reconocibles de descuento, cargo o cierre. Todos sus aliases deben aparecer literalmente en el OCR; si no, deja lineGroup en null.',
@@ -526,7 +528,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
     const payload = await response.json() as Record<string, unknown>
     const outputText = responseOutputText(payload)
     if (!outputText) throw new Error('OPENAI_DOCUMENT_EXTRACTION_EMPTY')
-    return supplierDocumentExtractionSchema.parse(JSON.parse(outputText))
+    return parseSupplierDocumentExtraction(JSON.parse(outputText))
   }
 
   async proposeProfile(input: {
@@ -545,7 +547,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
           'Las columnas description y quantity deben aparecer exactamente una vez y tener required=true.',
           'Cada field debe aparecer como máximo una vez. Los headerAliases deben ser textos reales de una misma fila de cabecera del OCR, nunca valores de productos.',
           'Usa requiredTexts estables del emisor y del diseño; no uses número, fecha, cliente, destinatario ni importes de este documento.',
-          'Las reglas deben localizar la tabla de productos y reproducir las líneas objetivo. Las filas auxiliares de descuentos, impuestos, subtotales o envases no son productos.',
+          'Las reglas deben localizar la tabla de productos y reproducir las líneas objetivo. Las filas auxiliares de descuentos, IBEE, Punto Verde, impuestos, bases imponibles, subtotales, SUBUNIDADES/NETO o envases no son productos.',
           'Incluye lineGroup únicamente si el OCR contiene bloques multipfila repetibles. Copia endAliases, discountAliases y chargeAliases de textos que aparezcan literalmente en las filas OCR; no inventes aliases.',
           'Cuando una fila final contiene el neto del producto, usa netTotalFromEndRow=true. Ajusta maxContinuationRows al bloque observado sin abarcar el producto siguiente.',
           'El perfil debe reproducir cantidad, descripción, descuento, cargos y total neto, cumpliendo quantity * unitPrice - discountAmount + chargesAmount = lineTotal.',
@@ -588,7 +590,7 @@ export class MockSupplierDocumentAiProvider implements SupplierDocumentAiProvide
   async interpret() {
     const fixture = getSupplierDocumentMockFixture(this.fixtureId)
     if (!fixture) throw new Error('MOCK_FIXTURE_NOT_FOUND')
-    return supplierDocumentExtractionSchema.parse(structuredClone(fixture.extraction))
+    return parseSupplierDocumentExtraction(structuredClone(fixture.extraction))
   }
 
   async proposeProfile() {

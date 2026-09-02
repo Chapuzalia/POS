@@ -7,9 +7,11 @@ import {
   normalizePurchaseToBase,
   normalizeSupplierName,
   normalizeSupplierTaxId,
+  parseSupplierDocumentExtraction,
   parsePackagingExpression,
   resolveSupplierCandidate,
   runDeterministicParser,
+  sanitizeSupplierDocumentExtraction,
   supplierIdentityMatches,
   supplierProfileRulesSchema,
   validateExtractionMath,
@@ -79,6 +81,35 @@ function groupedParserInput(rows, lineGroup = {}) {
 function parseGroupedRows(rows, lineGroup = {}) {
   const input = groupedParserInput(rows, lineGroup)
   return runDeterministicParser(input.rules, input.ocr, input.defaults)
+}
+
+function modelLine(description, overrides = {}) {
+  return {
+    supplierReference: null,
+    description,
+    barcode: null,
+    quantity: 1,
+    purchaseUnit: null,
+    unitPrice: null,
+    discountAmount: 0,
+    chargesAmount: 0,
+    grossCost: null,
+    netCost: null,
+    lineTotal: null,
+    taxRate: null,
+    packageExpression: null,
+    confidence: 0.9,
+    ...overrides,
+  }
+}
+
+function modelExtraction(lines) {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  return {
+    ...structuredClone(fixture.extraction),
+    lines,
+    proposedProfile: null,
+  }
 }
 
 const mistralOcrFixture = {
@@ -243,6 +274,79 @@ test('el parser determinista usa la tabla OCR y el schema declarativo', () => {
   assert.equal(parsed.lines[0].quantity, 2)
   assert.equal(parsed.lines[0].lineTotal, 29)
   assert.equal(validateExtractionMath(parsed).coherent, true)
+})
+
+test('filtra description vacía antes de ejecutar la validación final de Zod', () => {
+  const sanitized = sanitizeSupplierDocumentExtraction(modelExtraction([
+    modelLine('   ', { quantity: 2, lineTotal: 10 }),
+  ]))
+  assert.deepEqual(sanitized.lines, [])
+})
+
+test('varias líneas válidas y una vacía mantienen procesable el documento', () => {
+  const parsed = parseSupplierDocumentExtraction(modelExtraction([
+    modelLine('Agua mineral', { supplierReference: 'A-1', quantity: 2, unitPrice: 3, grossCost: 6, netCost: 6, lineTotal: 6 }),
+    modelLine('   ', { lineTotal: 999 }),
+    modelLine('Zumo de naranja', { supplierReference: 'Z-1', quantity: 1, unitPrice: 4, grossCost: 4, netCost: 4, lineTotal: 4 }),
+  ]))
+  assert.deepEqual(parsed.lines.map((line) => line.description), ['Agua mineral', 'Zumo de naranja'])
+})
+
+test('agrupa producto, Dto. Fijo, IBEE, Punto Verde y SUBUNIDADES/NETO en un único producto', () => {
+  const parsed = parseSupplierDocumentExtraction(modelExtraction([
+    modelLine('COCACOLA VR237 C24.', {
+      supplierReference: 'CC-237', quantity: 2, purchaseUnit: 'caja', unitPrice: 25.44,
+      grossCost: 50.88, netCost: 50.88, lineTotal: 50.88,
+    }),
+    modelLine('Dto. Fijo', { supplierReference: 'CC-237', lineTotal: 11.45 }),
+    modelLine('IBEE', { lineTotal: 1.71 }),
+    modelLine('Punto Verde', { lineTotal: 0.05 }),
+    modelLine('SUBUNIDADES/NETO 48', { netCost: 41.19, lineTotal: 41.19 }),
+  ]))
+  assert.equal(parsed.lines.length, 1)
+  assert.equal(parsed.lines[0].description, 'COCACOLA VR237 C24.')
+  assert.equal(parsed.lines[0].quantity, 2)
+  assert.equal(parsed.lines[0].grossCost, 50.88)
+  assert.equal(parsed.lines[0].discountAmount, 11.45)
+  assert.equal(parsed.lines[0].chargesAmount, 1.76)
+  assert.equal(parsed.lines[0].netCost, 41.19)
+  assert.equal(parsed.lines[0].lineTotal, 41.19)
+})
+
+test('una factura sencilla de una fila conserva exactamente su producto', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const parsed = parseSupplierDocumentExtraction(structuredClone(fixture.extraction))
+  assert.deepEqual(parsed.lines, fixture.extraction.lines)
+})
+
+test('todas las líneas inválidas producen un error global controlado y entendible', () => {
+  assert.throws(
+    () => parseSupplierDocumentExtraction(modelExtraction([
+      modelLine(''),
+      modelLine('Dto. Fijo', { lineTotal: 4 }),
+      modelLine('SUBTOTAL', { lineTotal: 100 }),
+    ])),
+    /SUPPLIER_DOCUMENT_LINES_NOT_FOUND: No se encontraron líneas de producto válidas/,
+  )
+})
+
+test('el parser determinista admite descuento con signo contable final', () => {
+  const parsed = parseGroupedRows([
+    ['CC-237', 'COCACOLA VR237 C24.', '2', 'caja', '25,44', '50,88'],
+    ['', 'Dto. Fijo', '', '', '', '11,45-'],
+    ['', 'IBEE', '', '', '', '1,71'],
+    ['', 'Punto Verde', '', '', '', '0,05'],
+    ['', 'SUBUNIDADES/NETO 48', '', '', '', '41,19'],
+  ], {
+    discountAliases: ['Dto. Fijo'],
+    chargeAliases: ['IBEE', 'Punto Verde'],
+    endAliases: ['SUBUNIDADES/NETO'],
+    netTotalFromEndRow: true,
+  })
+  assert.equal(parsed.lines.length, 1)
+  assert.equal(parsed.lines[0].discountAmount, 11.45)
+  assert.equal(parsed.lines[0].chargesAmount, 1.76)
+  assert.equal(parsed.lines[0].lineTotal, 41.19)
 })
 
 test('agrupa un producto multipfila y calcula 3×58,80−79,38+2,70+0,22=99,94', () => {
@@ -675,10 +779,14 @@ test('la Edge Function mantiene IA y OCR sin autoridad sobre stock', () => {
 })
 
 test('la IA distingue al emisor del cliente y no copia el NIF del destinatario', () => {
-  assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /emisor, vendedor o proveedor/)
-  assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /no reutilices el NIF\/CIF del destinatario/)
-  assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /supplierCandidates son referencias existentes/)
-  assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /Un nombre parecido por sí solo no basta/)
+  const instructions = OpenAiSupplierDocumentProvider.prototype.interpret.toString()
+  assert.match(instructions, /emisor, vendedor o proveedor/)
+  assert.match(instructions, /no reutilices el NIF\/CIF del destinatario/)
+  assert.match(instructions, /supplierCandidates son referencias existentes/)
+  assert.match(instructions, /Un nombre parecido por sí solo no basta/)
+  assert.match(instructions, /lines\[\] debe contener exclusivamente productos reales comprados/)
+  assert.match(instructions, /Nunca crees productos independientes.*IBEE.*Punto Verde.*SUBUNIDADES\/NETO/)
+  assert.match(instructions, /consolida todo el bloque en la línea principal/)
 })
 
 test('la UI muestra el error de la Edge Function y la función valida la sesión internamente', () => {

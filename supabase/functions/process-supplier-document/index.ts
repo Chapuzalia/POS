@@ -4,10 +4,10 @@ import {
   matchInventoryItem,
   normalizeAlias,
   normalizePurchaseToBase,
+  parseSupplierDocumentExtraction,
   profileMatchesOcr,
   resolveSupplierCandidate,
   runDeterministicParser,
-  supplierDocumentExtractionSchema,
   supplierIdentitiesFromExtraction,
   supplierProfileRulesSchema,
   validateExtractionMath,
@@ -314,7 +314,7 @@ async function processSupplierDocumentRequest(request: Request) {
         parserMode = 'ai'
       }
     }
-    extraction = supplierDocumentExtractionSchema.parse(extraction)
+    extraction = parseSupplierDocumentExtraction(extraction)
     const requestedDocumentType = document.document_type
     const documentTypeCorrected = extraction.document.type !== requestedDocumentType
     const math = validateExtractionMath(extraction)
@@ -329,7 +329,7 @@ async function processSupplierDocumentRequest(request: Request) {
           documentType: extraction.document.type,
           extraction,
         })
-        extraction = supplierDocumentExtractionSchema.parse({ ...extraction, proposedProfile })
+        extraction = parseSupplierDocumentExtraction({ ...extraction, proposedProfile })
         profileValidation = validateProposedProfile(ocr, extraction)
       } catch (error) {
         profileGenerationError = error instanceof Error ? error.message : 'PROFILE_GENERATION_FAILED'
