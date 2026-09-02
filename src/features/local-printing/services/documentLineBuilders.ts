@@ -3,6 +3,7 @@ import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import type { CashClosingRecord, SaleCreatedPayload } from '../../../types/index.ts'
 import { getCashClosingAmounts } from '../../cash-registers/services/cashClosingAmounts.ts'
 import type { PrintElement, PrinterLayout } from '../types.ts'
+import type { PrintTemplateContext } from '../../print-templates/types.ts'
 import {
   centerReceiptText,
   createSeparator,
@@ -351,4 +352,170 @@ export function buildClosingReportLines(
     '',
   )
   return finalizeReceiptLines(lines, printerLayout)
+}
+
+export function buildSalePrintTemplateContext(
+  sale: SaleCreatedPayload,
+  establishment: PrintEstablishment,
+  options: SaleTicketLineOptions = {},
+): PrintTemplateContext {
+  const locale = establishment.locale || 'es-ES'
+  const currency = establishment.currency || 'EUR'
+  const timezone = establishment.timezone || 'Europe/Madrid'
+  const money = (amountCents: number) => formatMoneyForReceipt(amountCents, { currency, locale })
+  const fiscal = fiscalBreakdown(sale)
+  const invoice = sale.ticket.invoice
+  const invoiceLabel = invoice?.series && invoice.number ? `${invoice.series}-${invoice.number}` : null
+  const isInvoicePreview = Boolean(invoice && options.label === 'PRE-TICKET')
+  const datetime = dateParts(invoice?.issuedAt ?? sale.sale.createdAt, timezone)
+  const totalTaxCents = fiscal?.reduce((total, item) => total + item.taxCents, 0) ?? 0
+  const taxableBaseCents = fiscal?.reduce((total, item) => total + item.baseCents, 0)
+  const totalRows: Array<{ label: string; value: string }> = []
+  totalRows.push({ label: 'Subtotal', value: money(sale.ticket.subtotalCents) })
+  if (sale.ticket.discountAmountCents > 0) {
+    totalRows.push({ label: 'Descuento', value: money(-sale.ticket.discountAmountCents) })
+  }
+  if (taxableBaseCents !== undefined) totalRows.push({ label: 'Base imponible', value: money(taxableBaseCents) })
+  for (const tax of fiscal ?? []) totalRows.push({ label: `IVA ${formatQuantity(tax.rate, locale)} %`, value: money(tax.taxCents) })
+  totalRows.push({ label: 'TOTAL', value: money(sale.sale.totalCents) })
+
+  const paymentRows: Array<{ label: string; value: string }> = []
+  if (sale.payment && options.label !== 'PRE-TICKET') {
+    paymentRows.push({ label: paymentLabels[sale.payment.method] ?? sale.payment.method, value: money(sale.payment.amountCents) })
+    if (sale.payment.receivedCents !== null) {
+      paymentRows.push({ label: 'Entregado', value: money(sale.payment.receivedCents) })
+      paymentRows.push({ label: 'Cambio', value: money(sale.payment.changeCents) })
+    }
+  }
+  const fiscalError = summarizeFiscalError(sale.fiscal?.errorMessage ?? sale.fiscal?.errorCode)
+  const verificationUrl = options.label === 'PRE-TICKET' ? '' : sale.fiscal?.verificationUrl ?? ''
+
+  return {
+    venue: {
+      name: establishment.name,
+      legal_name: establishment.legalName ?? '',
+      tax_id: establishment.taxId ?? '',
+      address: establishment.address ?? '',
+    },
+    document: {
+      title: invoice ? (isInvoicePreview ? 'FACTURA (BORRADOR)' : 'FACTURA') : '',
+      label: options.label ?? '',
+      number_label: invoice ? 'Factura' : 'Ticket',
+      date_label: invoice ? 'Fecha expedición' : 'Fecha',
+    },
+    ticket: {
+      number: invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.id),
+      ...datetime,
+    },
+    cash_register: { name: establishment.cashRegisterName ?? '' },
+    employee: { name: establishment.employeeName ?? '' },
+    customer: invoice ? {
+      name: invoice.customer.legalName,
+      tax_id: invoice.customer.taxId,
+      address: invoice.customer.address,
+      postal_city: `${invoice.customer.postalCode} ${invoice.customer.city}`.trim(),
+      province: invoice.customer.province,
+      country: invoice.customer.country,
+      show_country: invoice.customer.country.toLocaleLowerCase('es-ES') !== 'españa',
+    } : {},
+    items: sale.lines.map((item) => ({
+      quantity: formatQuantity(item.quantity, locale),
+      name: saleLineName(item),
+      total: money(item.netTotalCents ?? item.lineTotalCents),
+      details: [
+        ...saleLineAdditions(item).map((addition) => ({ text: `  + ${addition}` })),
+        ...(item.note?.trim() ? [{ text: `  Nota: ${item.note.trim()}` }] : []),
+      ],
+    })),
+    totals: {
+      subtotal: money(sale.ticket.subtotalCents),
+      tax: money(totalTaxCents),
+      total: money(sale.sale.totalCents),
+      rows: totalRows,
+    },
+    payment: { method: sale.payment ? paymentLabels[sale.payment.method] ?? sale.payment.method : '', rows: paymentRows },
+    fiscal: sale.fiscal && options.label !== 'PRE-TICKET' ? {
+      title: sale.fiscal.provider === 'ticketbai' ? 'TICKETBAI' : 'VERIFACTU',
+      external_code: sale.fiscal.externalCode ?? '',
+      verification_url: verificationUrl,
+      show_qr: sale.fiscal.provider === 'verifactu' && Boolean(verificationUrl),
+      show_url: sale.fiscal.provider !== 'verifactu' && Boolean(verificationUrl),
+      error: verificationUrl ? '' : fiscalError ?? '',
+    } : {},
+    footer: { text: establishment.footer?.trim() ?? '' },
+  }
+}
+
+export function buildCashClosingPrintTemplateContext(
+  closing: CashClosingRecord,
+  establishment: PrintEstablishment,
+  options: ClosingReportLineOptions = {},
+): PrintTemplateContext {
+  const snapshot = closing.printSnapshot
+  const locale = snapshot.locale || establishment.locale || 'es-ES'
+  const currency = snapshot.currency || establishment.currency || 'EUR'
+  const timezone = snapshot.timezone || establishment.timezone || 'Europe/Madrid'
+  const money = (amountCents: number) => formatMoneyForReceipt(amountCents, { currency, locale, symbol: options.moneySymbol })
+  const amounts = getCashClosingAmounts(snapshot)
+  const payments = (options.includeZeroPaymentMethods ? snapshot.payments : snapshot.payments.filter((payment) => payment.amountCents !== 0))
+    .map((payment) => ({ label: payment.label, value: money(payment.amountCents) }))
+  if (options.includeTotalPayments && payments.length) {
+    payments.push({ label: 'Total pagos', value: money(snapshot.payments.reduce((total, payment) => total + payment.amountCents, 0)) })
+  }
+  const cashRows = [
+    { label: 'Fondo inicial', value: money(snapshot.cashFund.openingCashFundCents) },
+    { label: 'Entradas', value: money(snapshot.cashMovements.cashEntriesCents) },
+    { label: 'Salidas', value: money(snapshot.cashMovements.cashExitsCents) },
+    { label: 'Tarjeta por efectivo', value: money(snapshot.cashMovements.cardCashbackCents) },
+    { label: 'Efectivo esperado', value: money(snapshot.expectedAndCounted.expectedCashCents) },
+    ...(options.includeExpectedAndCountedAmounts ? [
+      { label: 'Efectivo contado', value: money(snapshot.expectedAndCounted.countedCashCents) },
+      { label: 'Tarjeta esperada', value: money(snapshot.expectedAndCounted.expectedCardCents) },
+      { label: 'Tarjeta declarada', value: money(snapshot.expectedAndCounted.countedCardCents) },
+    ] : []),
+    { label: 'Diferencia efectivo', value: money(snapshot.differences.cashDifferenceCents) },
+    { label: 'Diferencia tarjeta', value: money(snapshot.differences.cardDifferenceCents) },
+    { label: 'Fondo final', value: money(snapshot.cashFund.finalCashFundCents) },
+  ]
+  return {
+    venue: {
+      name: establishment.name || snapshot.companyName,
+      legal_name: establishment.legalName ?? '',
+      tax_id: establishment.taxId ?? '',
+      address: establishment.address ?? '',
+    },
+    document: {
+      title: snapshot.reportTitle,
+      label: options.copyLabel ?? '',
+      id: closing.id,
+      generated_at: dateParts(closing.closedAt, timezone).datetime,
+    },
+    ticket: dateParts(snapshot.closedAt, timezone),
+    cash_register: { name: snapshot.registerName },
+    cash_session: {
+      number: snapshot.shiftLabel,
+      opened_at: dateParts(snapshot.openedAt, timezone).datetime,
+      closed_at: dateParts(snapshot.closedAt, timezone).datetime,
+      show_times: options.includeOpeningAndClosingTimes === true,
+    },
+    employee: { name: options.includeUserNames ? snapshot.closedBy ?? '' : '' },
+    summary: { rows: [
+      { label: 'Operaciones', value: String(snapshot.summary.salesCount) },
+      { label: 'Ventas netas', value: money(snapshot.summary.totalSalesCents) },
+      { label: 'Media por venta', value: money(snapshot.summary.averageSaleCents) },
+    ] },
+    payment: { rows: payments },
+    cash: { rows: cashRows },
+    operations: { rows: [
+      { label: 'Efectivo facturado', value: money(amounts.billedCashCents) },
+      { label: 'Datáfono esperado', value: money(amounts.cardTerminalExpectedCents) },
+      { label: amounts.cashToWithdrawCents >= 0 ? 'Retirar de caja' : 'Añadir a caja', value: money(Math.abs(amounts.cashToWithdrawCents)) },
+    ] },
+  }
+}
+
+function dateParts(value: string, timezone: string) {
+  const datetime = formatReceiptDate(value, timezone)
+  const [date = '', time = ''] = datetime.split(' ')
+  return { date, time, datetime }
 }

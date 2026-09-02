@@ -4,6 +4,7 @@ import { buildPreTicketPayload } from '../../quick-sale/services/salePayload'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
 import { loadSelectedPrinterLayout } from './selectedPrinterLayout'
 import { mapSaleToPrintRequest } from './ticketPrintMapper'
+import { resolvePrintTemplate } from '../../print-templates/service.ts'
 
 type PreTicketInput = {
   cashSession: CashSession
@@ -21,6 +22,7 @@ async function executePreTicketPrint(input: PreTicketInput) {
   if (!state.token) throw new Error('No hay ninguna impresora configurada.')
   const { printer, layout } = await loadSelectedPrinterLayout()
   const preview = buildPreTicketPayload(input.context, input.cashSession, input.lines, input.discount, input.invoiceCustomer)
+  const template = await resolvePrintTemplate(input.context, preview.ticket.invoice ? 'invoice' : 'simplified_invoice')
   const request = mapSaleToPrintRequest({
     sale: preview,
     establishment: {
@@ -37,6 +39,7 @@ async function executePreTicketPrint(input: PreTicketInput) {
     footer: state.preferences.footer,
     cut: state.preferences.cut,
     isPreTicket: true,
+    template: template.definition,
   })
   return state.printTicket(request)
 }

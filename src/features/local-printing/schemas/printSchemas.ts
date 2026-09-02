@@ -9,7 +9,13 @@ const printLineSchema = z.string().max(1000).refine(
 )
 
 const printElementSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('text'), value: printLineSchema }).strict(),
+  z.object({
+    type: z.literal('text'),
+    value: printLineSchema,
+    align: z.enum(['left', 'center', 'right']).optional(),
+    bold: z.boolean().optional(),
+    size: z.enum(['normal', 'large']).optional(),
+  }).strict(),
   z.object({
     type: z.literal('qr'),
     data: z.string().min(1).max(4096).refine(

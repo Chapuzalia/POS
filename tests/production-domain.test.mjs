@@ -4,6 +4,7 @@ import test from 'node:test'
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const migration = read('../supabase/migrations/20260825120000_add_production_domain.sql')
+const groupedDispatchMigration = read('../supabase/migrations/20260902151000_group_production_dispatches_by_printer.sql')
 
 test('production is opt-in at tenant and venue level', () => {
   assert.match(migration, /'production'.*false, 150/s)
@@ -31,6 +32,32 @@ test('production snapshots, readiness, split lineage and durable dispatches are 
   assert.doesNotMatch(read('../src/features/production/service.ts'), /mark_order_line_units_served/)
 })
 
+test('physical dispatches group batch destinations by printer without changing logical routing', () => {
+  assert.match(groupedDispatchMigration, /group by scoped\.tenant_id, scoped\.venue_id, scoped\.agent_id, scoped\.printer_id/)
+  assert.match(groupedDispatchMigration, /destination_ids uuid\[\]/)
+  assert.match(groupedDispatchMigration, /'name', upper\(destination_row\.name\)/)
+  assert.match(groupedDispatchMigration, /print_render_template/)
+  assert.doesNotMatch(groupedDispatchMigration, /update public\.production_items[\s\S]*set destination_id/i)
+  assert.doesNotMatch(groupedDispatchMigration, /production_product_routes[\s\S]*delete/i)
+})
+
+test('two destinations on the same physical printer become one dispatch', () => {
+  const dispatches = groupPhysicalTargets([
+    { agentId: 'agent-a', printerId: 'epson-kitchen', destinationId: 'kitchen' },
+    { agentId: 'agent-a', printerId: 'epson-kitchen', destinationId: 'grill' },
+  ])
+  assert.deepEqual(dispatches, [{ agentId: 'agent-a', printerId: 'epson-kitchen', destinationIds: ['kitchen', 'grill'] }])
+})
+
+test('destinations on different printers remain separate physical dispatches', () => {
+  const dispatches = groupPhysicalTargets([
+    { agentId: 'agent-a', printerId: 'epson-kitchen', destinationId: 'kitchen' },
+    { agentId: 'agent-a', printerId: 'epson-bar', destinationId: 'bar' },
+  ])
+  assert.equal(dispatches.length, 2)
+  assert.deepEqual(dispatches.map((dispatch) => dispatch.destinationIds), [['kitchen'], ['bar']])
+})
+
 test('KDS is a real online-only non-cash device and Realtime consumer', () => {
   const shell = read('../src/app/AppShell.tsx')
   const kds = read('../src/features/production/components/KdsPage.tsx')
@@ -41,4 +68,15 @@ test('KDS is a real online-only non-cash device and Realtime consumer', () => {
   assert.match(kds, /subscribeToKds/)
   assert.match(kds, /Todo listo/)
 })
+
+function groupPhysicalTargets(targets) {
+  const grouped = new Map()
+  for (const target of targets) {
+    const key = `${target.agentId}:${target.printerId}`
+    const current = grouped.get(key) ?? { agentId: target.agentId, printerId: target.printerId, destinationIds: [] }
+    current.destinationIds.push(target.destinationId)
+    grouped.set(key, current)
+  }
+  return [...grouped.values()]
+}
 

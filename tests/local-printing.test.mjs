@@ -204,7 +204,7 @@ test('mapea cubatas, extras, efectivo e importes enteros con idempotencia establ
   assert.match(text, /Entregado[ ]+20,00 €/)
   assert.match(text, /Cambio[ ]+4,00 €/)
   assert.equal(payload.options.openCashDrawer, true)
-  assert.deepEqual(Object.keys(printRequestSchema.parse(payload)).sort(), ['force', 'lines', 'options', 'printerId', 'requestId'])
+  assert.deepEqual(Object.keys(printRequestSchema.parse(payload)).sort(), ['elements', 'force', 'lines', 'options', 'printerId', 'requestId'])
 })
 
 test('un ticket normal sin VeriFactu no añade QR', () => {
@@ -213,7 +213,7 @@ test('un ticket normal sin VeriFactu no añade QR', () => {
     sale: normalSale, establishment: { name: 'MESS' },
     printerId: 'main-bar', printerLayout: layout80,
   })
-  assert.equal(payload.elements, undefined)
+  assert.ok(payload.elements.every((element) => element.type === 'text'))
   assert.equal(payload.lines.join('').includes('prewww2.aeat.es'), false)
 })
 

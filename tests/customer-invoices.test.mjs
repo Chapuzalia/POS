@@ -229,7 +229,7 @@ test('un rechazo de VeriFactu imprime un resumen breve en lugar del QR', () => {
   assert.match(text, /QR no disponible\./)
   assert.match(text, /Motivo:[\s\S]*El NIF\/NOMBRE[\s\S]*no se encuentra registrado[\s\S]*Agencia Tributaria\./)
   assert.doesNotMatch(text, /Para personas jurídicas/)
-  assert.equal(request.elements, undefined)
+  assert.ok(request.elements.every((element) => element.type === 'text'))
   assert.match(fiscalService, /error_code, error_message/)
   assert.match(restaurantHook, /loadFiscalReceiptData/)
 })

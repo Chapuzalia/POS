@@ -3,10 +3,12 @@ import type { PrinterLayout, PrintRequest } from '../types.ts'
 import { printRequestSchema } from '../schemas/printSchemas.ts'
 import { shouldOpenCashDrawer } from './cashDrawerRules.ts'
 import {
-  buildSaleTicketElements,
-  buildSaleTicketLines,
+  buildSalePrintTemplateContext,
   type PrintEstablishment,
 } from './documentLineBuilders.ts'
+import { renderPrintTemplateWithFallback } from '../../print-templates/renderer.ts'
+import { getSafeDefaultPrintTemplate } from '../../print-templates/defaults.ts'
+import type { PrintTemplateDefinition } from '../../print-templates/types.ts'
 
 type MapperOptions = {
   sale: SaleCreatedPayload
@@ -20,6 +22,7 @@ type MapperOptions = {
   autoOpenCashDrawer?: boolean
   cashlogyConfigured?: boolean
   cut?: boolean
+  template?: PrintTemplateDefinition
 }
 
 export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
@@ -31,21 +34,21 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }]
     : []
   const label = isPreTicket ? 'PRE-TICKET' : isReprint ? 'COPIA' : undefined
-  const lines = buildSaleTicketLines(
-    sale,
-    { ...options.establishment, footer: options.footer },
+  const templateType = sale.ticket.invoice ? 'invoice' : 'simplified_invoice'
+  const rendered = renderPrintTemplateWithFallback(
+    options.template ?? getSafeDefaultPrintTemplate(templateType),
+    getSafeDefaultPrintTemplate(templateType),
+    buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
     options.printerLayout,
-    { label },
   )
-  const elements = buildSaleTicketElements(sale, options.printerLayout, lines, { label })
   return printRequestSchema.parse({
     requestId: isPreTicket
       ? `pre-ticket:${sale.sale.id}`
       : isReprint ? `print:${sale.sale.id}:copy:${copyNumber}` : `print:${sale.sale.id}:original`,
     printerId: options.printerId,
     force: isReprint,
-    lines,
-    ...(elements ? { elements } : {}),
+    lines: rendered.lines,
+    elements: rendered.elements,
     options: {
       cut: options.cut !== false,
       openCashDrawer: isPreTicket ? false : shouldOpenCashDrawer({

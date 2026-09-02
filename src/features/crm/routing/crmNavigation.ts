@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Beaker, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PlugZap, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
+import { Armchair, BarChart3, Beaker, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PlugZap, Printer, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-invoices' | 'purchases-suppliers' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-invoices' | 'purchases-suppliers' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'print-templates' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -42,6 +42,7 @@ export const navItems: CrmNavItem[] = [
   { id: 'stats', label: 'Estadísticas', icon: BarChart3 },
   { id: 'integrations', label: 'Integraciones', icon: PlugZap },
   { id: 'plan', label: 'Mi Plan', icon: Gauge },
+  { id: 'print-templates', label: 'Plantillas de impresión', icon: Printer },
   { id: 'settings', label: 'Configuración', icon: Settings },
 ]
 
@@ -76,6 +77,7 @@ export function getSectionTitle(section: CrmSection) {
     'inventory-settings': 'Configuración de inventario',
     stats: 'Analítica comercial',
     integrations: 'Integraciones',
+    'print-templates': 'Configuración · Impresión · Plantillas',
     settings: 'Configuración de locales',
     plan: 'Mi Plan',
   }

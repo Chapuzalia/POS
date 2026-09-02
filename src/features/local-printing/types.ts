@@ -389,7 +389,7 @@ export type PrintRequest = {
 }
 
 export type PrintElement =
-  | { type: 'text'; value: string }
+  | { type: 'text'; value: string; align?: 'left' | 'center' | 'right'; bold?: boolean; size?: 'normal' | 'large' }
   | { type: 'qr'; data: string; size?: number; errorCorrection?: 'L' | 'M' | 'Q' | 'H' }
 
 export type PrinterLayout = {

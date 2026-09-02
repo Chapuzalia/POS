@@ -30,6 +30,7 @@ const CashClosingReportsCrm = lazy(() => import('../sales/pages/CashClosingRepor
 const VenueSettingsCrm = lazy(() => import('../venues/pages/VenueSettingsPage').then((module) => ({ default: module.VenueSettingsCrm })))
 const TableManagementPage = lazy(() => import('../../table-management/TableManagementPage').then((module) => ({ default: module.TableManagementPage })))
 const ProductionCrm = lazy(() => import('../production/pages/ProductionPage').then((module) => ({ default: module.ProductionCrm })))
+const PrintTemplatesCrm = lazy(() => import('../printing/pages/PrintTemplatesPage').then((module) => ({ default: module.PrintTemplatesCrm })))
 
 type Props = {
   activeSection: CrmSection
@@ -153,6 +154,8 @@ export function CrmSectionContent({
       />
     case 'integrations':
       return <IntegrationsCrm disabled={disabled} runAction={runAction} tenantContext={context} />
+    case 'print-templates':
+      return <PrintTemplatesCrm context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} />
     case 'settings':
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':
