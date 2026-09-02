@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import {
   chooseDefaultWarehouse,
+  groundSupplierExtractionInOcr,
   matchInventoryItem,
   normalizePurchaseToBase,
   normalizeSupplierName,
@@ -110,6 +111,16 @@ function modelExtraction(lines) {
     lines,
     proposedProfile: null,
   }
+}
+
+function ocrWithSupplierText(text) {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const ocr = structuredClone(fixture.ocr)
+  ocr.text = text
+  ocr.pages[0].text = text
+  ocr.pages[0].words = []
+  ocr.pages[0].tables = []
+  return ocr
 }
 
 const mistralOcrFixture = {
@@ -274,6 +285,123 @@ test('el parser determinista usa la tabla OCR y el schema declarativo', () => {
   assert.equal(parsed.lines[0].quantity, 2)
   assert.equal(parsed.lines[0].lineTotal, 29)
   assert.equal(validateExtractionMath(parsed).coherent, true)
+})
+
+test('headerAliases con un string vacío se sanea a un array vacío válido', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  profile.columns[0].headerAliases = ['']
+  const parsed = supplierProfileRulesSchema.parse(profile)
+  assert.deepEqual(parsed.columns[0].headerAliases, [])
+})
+
+test('headerAliases elimina espacios, vacíos y duplicados antes de validar', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  profile.columns[1].headerAliases = ['', 'DESCRIPCIÓN', '  ', ' descripción ']
+  const parsed = supplierProfileRulesSchema.parse(profile)
+  assert.deepEqual(parsed.columns[1].headerAliases, ['DESCRIPCIÓN'])
+})
+
+test('varias columnas sin aliases no invalidan el perfil completo', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  for (const index of [0, 1, 3, 4]) profile.columns[index].headerAliases = ['', '  ']
+  const parsed = supplierProfileRulesSchema.parse(profile)
+  assert.deepEqual(parsed.columns.map((column) => column.headerAliases.length), [0, 0, 2, 0, 0, 2])
+})
+
+test('un campo realmente obligatorio vacío sigue fallando', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  assert.throws(() => supplierProfileRulesSchema.parse({
+    ...structuredClone(fixture.knownProfile),
+    requiredTexts: ['   '],
+  }))
+})
+
+test('la extracción de una marca conocida elimina teléfono, dirección y razón social no presentes en OCR', () => {
+  const ocr = ocrWithSupplierText('Coca-Cola Europacific Partners\nAlbarán 123')
+  const extraction = modelExtraction([modelLine('COCACOLA VR237 C24.')])
+  extraction.supplier = {
+    name: 'Coca-Cola Europacific Partners',
+    legalName: 'Coca-Cola Corporation',
+    taxId: null,
+    email: null,
+    phone: '(415) 661-1001',
+    address: 'San Francisco, California',
+  }
+  const parsed = parseSupplierDocumentExtraction(groundSupplierExtractionInOcr(extraction, ocr))
+  assert.deepEqual(parsed.supplier, {
+    name: 'Coca-Cola Europacific Partners',
+    legalName: null,
+    taxId: null,
+    email: null,
+    phone: null,
+    address: null,
+  })
+})
+
+test('un teléfono explícito del proveedor se conserva en la extracción', () => {
+  const ocr = ocrWithSupplierText('Coca-Cola Europacific Partners\nAtención al cliente: 900 246 500')
+  const extraction = modelExtraction([modelLine('COCACOLA VR237 C24.')])
+  extraction.supplier = {
+    name: 'Coca-Cola Europacific Partners',
+    legalName: null,
+    taxId: null,
+    email: null,
+    phone: '900 246 500',
+    address: null,
+  }
+  const parsed = parseSupplierDocumentExtraction(groundSupplierExtractionInOcr(extraction, ocr))
+  assert.equal(parsed.supplier.phone, '900 246 500')
+})
+
+test('los datos objetivos extraídos siguen resolviendo un candidato existente', () => {
+  const ocr = ocrWithSupplierText('Coca-Cola Europacific Partners Iberia, S.L.U.\nNIF: ES B-123.456-78')
+  const extraction = modelExtraction([modelLine('COCACOLA VR237 C24.')])
+  extraction.supplier = {
+    name: 'Coca-Cola Europacific Partners Iberia, S.L.U.',
+    legalName: null,
+    taxId: 'ES B-123.456-78',
+    email: null,
+    phone: null,
+    address: null,
+  }
+  const parsed = parseSupplierDocumentExtraction(groundSupplierExtractionInOcr(extraction, ocr))
+  const resolution = resolveSupplierCandidate(parsed.supplier, [
+    { supplierId: 'coca-cola', name: 'Coca-Cola', taxId: 'ESB12345678' },
+  ])
+  assert.equal(resolution.supplierId, 'coca-cola')
+  assert.equal(resolution.confidence, 'high')
+  assert.deepEqual(resolution.signals, ['tax_id'])
+})
+
+test('un perfil Coca-Cola con aliases saneados llega al parser y extrae cinco productos', () => {
+  const products = [
+    'RBLISS SIG TON WTR VR20 C24',
+    'RBLISS LEM MIXER VR20 C24 HT',
+    'COCACOLA VR237 C24',
+    'MINUTE MAID PIN VNR20 C24',
+    'AQUABONA PET35 C24',
+  ]
+  const rows = products.flatMap((description, index) => [
+    [`CC-${index + 1}`, description, '2', 'C24', '25,44', '50,88'],
+    ['', 'Dto. Fijo', '', '', '', '11,45-'],
+    ['', 'IBEE', '', '', '', '1,71'],
+    ['', 'Punto Verde', '', '', '', '0,05'],
+    ['', 'SUBUNIDADES/NETO 48', '', '', '', '41,19'],
+  ])
+  const input = groupedParserInput(rows, {
+    discountAliases: ['Dto. Fijo'],
+    chargeAliases: ['IBEE', 'Punto Verde'],
+    endAliases: ['SUBUNIDADES/NETO'],
+    netTotalFromEndRow: true,
+  })
+  for (const column of input.rules.columns) column.headerAliases = ['', '  ']
+  const parsed = runDeterministicParser(input.rules, input.ocr, input.defaults)
+  assert.deepEqual(parsed.lines.map((line) => line.description), products)
+  assert.equal(parsed.lines.every((line) => line.discountAmount === 11.45), true)
+  assert.equal(parsed.lines.every((line) => line.chargesAmount === 1.76), true)
 })
 
 test('filtra description vacía antes de ejecutar la validación final de Zod', () => {
@@ -782,8 +910,10 @@ test('la IA distingue al emisor del cliente y no copia el NIF del destinatario',
   const instructions = OpenAiSupplierDocumentProvider.prototype.interpret.toString()
   assert.match(instructions, /emisor, vendedor o proveedor/)
   assert.match(instructions, /no reutilices el NIF\/CIF del destinatario/)
-  assert.match(instructions, /supplierCandidates son referencias existentes/)
-  assert.match(instructions, /Un nombre parecido por sí solo no basta/)
+  assert.match(instructions, /fuente exclusiva para todos los valores de supplier/)
+  assert.match(instructions, /No uses conocimiento previo sobre marcas o empresas/)
+  assert.match(instructions, /No recibes candidatos durante la extracción/)
+  assert.match(instructions, /groundSupplierExtractionInOcr/)
   assert.match(instructions, /lines\[\] debe contener exclusivamente productos reales comprados/)
   assert.match(instructions, /Nunca crees productos independientes.*IBEE.*Punto Verde.*SUBUNIDADES\/NETO/)
   assert.match(instructions, /consolida todo el bloque en la línea principal/)

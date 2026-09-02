@@ -1,4 +1,5 @@
 import {
+  groundSupplierExtractionInOcr,
   ocrDocumentSchema,
   parseSupplierDocumentExtraction,
   supplierDocumentExtractionJsonSchema,
@@ -472,22 +473,9 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
     imageDataUrl?: string | null
     supplierCandidates: SupplierCandidate[]
   }) {
-    const supplierCandidates = input.supplierCandidates.map((candidate) => ({
-      supplierId: candidate.supplierId,
-      name: candidate.name,
-      legalName: candidate.legalName ?? null,
-      taxId: candidate.taxId ?? null,
-      email: candidate.email ?? null,
-      phone: candidate.phone ?? null,
-      address: candidate.address ?? null,
-      identities: (candidate.identities ?? []).map((identity) => ({
-        type: identity.type,
-        value: identity.value,
-      })),
-    }))
     const content: Array<Record<string, unknown>> = [{
       type: 'input_text',
-      text: JSON.stringify({ ...structuredOcr(input), supplierCandidates }),
+      text: JSON.stringify({ supplierExtractionSource: structuredOcr(input) }),
     }]
     if (input.imageDataUrl) content.push({ type: 'input_image', image_url: input.imageDataUrl, detail: 'high' })
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -499,11 +487,10 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
         instructions: [
           'Interpreta un albarán o factura de proveedor a partir del OCR estructurado.',
           'En supplier identifica siempre al emisor, vendedor o proveedor que expide el documento; nunca uses el cliente, comprador, destinatario, punto de venta ni dirección de entrega.',
-          'supplier.taxId debe ser exclusivamente el identificador fiscal del emisor; si no aparece o no es inequívoco devuelve null y no reutilices el NIF/CIF del destinatario.',
-          'Extrae en supplier los datos que realmente aparezcan en el documento; no copies datos del candidato para completar campos ausentes.',
-          'supplierCandidates son referencias existentes, no una lista obligatoria. En supplierResolution devuelve supplierId solo si existe una coincidencia razonable y deja confidence=unresolved y supplierId=null ante cualquier duda.',
-          'Prioriza identificador fiscal exacto, después email o dominio, teléfono, dirección y por último nombre o razón social. Un nombre parecido por sí solo no basta para forzar una asociación.',
-          'En supplierResolution.signals enumera únicamente las señales realmente observadas y en reasons resume por qué propones o descartas la asociación.',
+          'supplierExtractionSource es la fuente exclusiva para todos los valores de supplier. No uses conocimiento previo sobre marcas o empresas, contexto general, memoria ni información externa.',
+          'No completes ni inventes razón social, NIF/CIF/VAT, email, teléfono o dirección por reconocer una marca. Cada valor debe aparecer explícitamente en el texto OCR recibido; si falta, es dudoso o solo puede inferirse, devuelve null.',
+          'supplier.taxId debe ser exclusivamente el identificador fiscal explícito del emisor; si no aparece o no es inequívoco devuelve null y no reutilices el NIF/CIF del destinatario.',
+          'No recibes candidatos durante la extracción. La comparación con proveedores existentes se realiza después y fuera de esta respuesta; devuelve supplierResolution con supplierId=null, confidence=unresolved, signals=[] y reasons=[].',
           'No inventes líneas ni valores. Devuelve importes como números decimales.',
           'lines[] debe contener exclusivamente productos reales comprados, una entrada por producto. Nunca crees productos independientes para líneas vacías, separadores, descuentos, IBEE, Punto Verde, impuestos, bases imponibles, subtotales, SUBUNIDADES/NETO u otros conceptos auxiliares.',
           'Cuando una fila principal de producto vaya seguida de Dto. Fijo, otros descuentos, IBEE, Punto Verde, tasas, cargos o SUBUNIDADES/NETO, consolida todo el bloque en la línea principal: conserva la cantidad comprada y agrega descuento, cargos, bruto y neto en los campos disponibles. No copies las filas auxiliares a lines[].',
@@ -528,7 +515,8 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
     const payload = await response.json() as Record<string, unknown>
     const outputText = responseOutputText(payload)
     if (!outputText) throw new Error('OPENAI_DOCUMENT_EXTRACTION_EMPTY')
-    return parseSupplierDocumentExtraction(JSON.parse(outputText))
+    const grounded = groundSupplierExtractionInOcr(JSON.parse(outputText), input.ocr)
+    return parseSupplierDocumentExtraction(grounded)
   }
 
   async proposeProfile(input: {
@@ -545,7 +533,8 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
         instructions: [
           'Genera exclusivamente un perfil declarativo reutilizable para interpretar documentos con el mismo diseño que este OCR.',
           'Las columnas description y quantity deben aparecer exactamente una vez y tener required=true.',
-          'Cada field debe aparecer como máximo una vez. Los headerAliases deben ser textos reales de una misma fila de cabecera del OCR, nunca valores de productos.',
+          'Cada field debe aparecer como máximo una vez y las columnas deben conservar el orden físico de la tabla OCR. Los headerAliases deben ser textos reales de una misma fila de cabecera del OCR, nunca valores de productos.',
+          'Si una cabecera no existe o no puede leerse con certeza, conserva el field semántico y devuelve headerAliases=[]; nunca uses [""] ni inventes un alias.',
           'Usa requiredTexts estables del emisor y del diseño; no uses número, fecha, cliente, destinatario ni importes de este documento.',
           'Las reglas deben localizar la tabla de productos y reproducir las líneas objetivo. Las filas auxiliares de descuentos, IBEE, Punto Verde, impuestos, bases imponibles, subtotales, SUBUNIDADES/NETO o envases no son productos.',
           'Incluye lineGroup únicamente si el OCR contiene bloques multipfila repetibles. Copia endAliases, discountAliases y chargeAliases de textos que aparezcan literalmente en las filas OCR; no inventes aliases.',

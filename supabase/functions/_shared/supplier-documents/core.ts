@@ -86,6 +86,25 @@ const lineGroupSchema = z.object({
   }
 })
 
+const headerAliasesSchema = z.preprocess((input) => {
+  if (!Array.isArray(input)) return input
+  const sanitized: unknown[] = []
+  const seen = new Set<string>()
+  for (const alias of input) {
+    if (typeof alias !== 'string') {
+      sanitized.push(alias)
+      continue
+    }
+    const trimmed = alias.trim()
+    if (!trimmed) continue
+    const key = trimmed.toLocaleLowerCase('es')
+    if (seen.has(key)) continue
+    seen.add(key)
+    sanitized.push(trimmed)
+  }
+  return sanitized
+}, z.array(z.string().min(1).max(80)).max(12))
+
 const supplierProfileRulesBaseSchema = z.object({
   version: z.literal(1),
   requiredTexts: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
@@ -99,7 +118,7 @@ const supplierProfileRulesBaseSchema = z.object({
   lineGroup: lineGroupSchema.nullable().optional().default(null),
   columns: z.array(z.object({
     field: parserFieldSchema,
-    headerAliases: z.array(z.string().trim().min(1).max(80)).min(1).max(12),
+    headerAliases: headerAliasesSchema,
     required: z.boolean().default(false),
   }).strict()).min(3).max(16),
   normalizations: z.array(z.object({
@@ -242,7 +261,7 @@ export const supplierProfileRulesJsonSchema = {
         required: ['field', 'headerAliases', 'required'],
         properties: {
           field: { type: 'string', enum: parserFieldSchema.options },
-          headerAliases: { type: 'array', minItems: 1, items: { type: 'string' } },
+          headerAliases: { type: 'array', maxItems: 12, items: { type: 'string' } },
           required: { type: 'boolean' },
         },
       },
@@ -505,6 +524,77 @@ export function normalizeSupplierAddress(value: string | null | undefined) {
   return normalized.length >= 8 ? normalized : null
 }
 
+type SupplierExtractionField = 'name' | 'legalName' | 'taxId' | 'email' | 'phone' | 'address'
+
+function supplierOcrEvidence(ocr: OcrDocument) {
+  const fragments = [
+    ocr.text,
+    ...ocr.pages.flatMap((page) => [
+      page.text,
+      ...page.words.map((word) => word.text),
+      ...page.tables.flatMap((table) => table.cells.map((cell) => cell.text)),
+    ]),
+  ].flatMap((fragment) => fragment.split(/\r?\n/)).map((fragment) => fragment.trim()).filter(Boolean)
+  return {
+    normalizedText: fragments.map(normalizeDocumentText),
+    lowerText: fragments.map((fragment) => fragment.toLocaleLowerCase('es')),
+    compactAlphanumeric: fragments.map((fragment) => fragment.normalize('NFD')
+      .replace(accentPattern, '').toUpperCase().replace(/[^A-Z0-9]/g, '')),
+    compactDigits: fragments.map((fragment) => fragment.replace(/[^0-9]/g, '')),
+  }
+}
+
+function supplierValueAppearsInOcr(
+  field: SupplierExtractionField,
+  value: string,
+  evidence: ReturnType<typeof supplierOcrEvidence>,
+) {
+  if (field === 'phone') {
+    const normalized = normalizeSupplierPhone(value)
+    return Boolean(normalized && evidence.compactDigits.some((fragment) => fragment.includes(normalized)))
+  }
+  if (field === 'taxId') {
+    const normalized = normalizeSupplierTaxId(value)
+    return Boolean(normalized && evidence.compactAlphanumeric.some((fragment) => fragment.includes(normalized)))
+  }
+  if (field === 'email') {
+    const normalized = normalizeSupplierEmail(value)
+    return Boolean(normalized && evidence.lowerText.some((fragment) => fragment.includes(normalized)))
+  }
+  const normalized = normalizeDocumentText(value)
+  return Boolean(normalized && evidence.normalizedText.some((fragment) => fragment.includes(normalized)))
+}
+
+/**
+ * Keeps supplier extraction grounded in the OCR only. Candidate suppliers are
+ * deliberately not evidence: they are handled later by resolveSupplierCandidate.
+ */
+export function groundSupplierExtractionInOcr(input: unknown, ocrInput: OcrDocument | unknown): unknown {
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return input
+  const source = input as Record<string, unknown>
+  if (!source.supplier || typeof source.supplier !== 'object' || Array.isArray(source.supplier)) return input
+  const ocr = ocrDocumentSchema.parse(ocrInput)
+  const supplier = source.supplier as Record<string, unknown>
+  const evidence = supplierOcrEvidence(ocr)
+  const grounded: Record<SupplierExtractionField, string | null> = {
+    name: null,
+    legalName: null,
+    taxId: null,
+    email: null,
+    phone: null,
+    address: null,
+  }
+  for (const field of Object.keys(grounded) as SupplierExtractionField[]) {
+    const value = typeof supplier[field] === 'string' ? supplier[field].trim() : ''
+    grounded[field] = value && supplierValueAppearsInOcr(field, value, evidence) ? value : null
+  }
+  if (!grounded.name && grounded.legalName) grounded.name = grounded.legalName
+  if (!grounded.name) {
+    throw new Error('SUPPLIER_EXTRACTION_NOT_GROUNDED: El nombre del proveedor no aparece explícitamente en el OCR.')
+  }
+  return { ...source, supplier: grounded }
+}
+
 export function normalizeSupplierIdentity(type: SupplierIdentityType, value: string | null | undefined) {
   if (type === 'tax_id') return normalizeSupplierTaxId(value)
   if (type === 'email') return normalizeSupplierEmail(value)
@@ -711,9 +801,16 @@ export function runDeterministicParser(
         const headers = matrix[headerRowIndex]?.map(normalizeDocumentText) ?? []
         const indexes = new Map<z.infer<typeof parserFieldSchema>, number>()
         for (const column of rules.columns) {
+          if (column.headerAliases.length === 0) continue
           const index = headers.findIndex((header) => column.headerAliases.some((alias) => header.includes(normalizeDocumentText(alias))))
           if (index >= 0) indexes.set(column.field, index)
         }
+        const matchesTableStart = Boolean(rules.tableStartText
+          && headers.join(' ').includes(normalizeDocumentText(rules.tableStartText)))
+        if (indexes.size === 0 && !matchesTableStart) continue
+        rules.columns.forEach((column, declaredIndex) => {
+          if (column.headerAliases.length === 0 && declaredIndex < headers.length) indexes.set(column.field, declaredIndex)
+        })
         const requiredColumns = rules.columns.filter((column) => column.required)
         if (!requiredColumns.every((column) => indexes.has(column.field))) continue
         matchedHeaders = true
