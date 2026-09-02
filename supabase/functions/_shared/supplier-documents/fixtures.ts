@@ -111,7 +111,15 @@ function makeFixture(input: {
   }
   const extraction: SupplierDocumentExtraction = {
     document: { type: 'delivery_note', number: input.documentNumber, date: '2026-09-01', total },
-    supplier: { name: input.supplierName, taxId: input.taxId },
+    supplier: {
+      name: input.supplierName,
+      legalName: null,
+      taxId: input.taxId,
+      email: null,
+      phone: null,
+      address: null,
+    },
+    supplierResolution: { supplierId: null, confidence: 'unresolved', signals: [], reasons: [] },
     lines: input.lines.map((line) => ({
       supplierReference: line.reference,
       description: line.description,
@@ -200,7 +208,15 @@ function makeMultiRowFixture(): SupplierDocumentMockFixture {
   }
   const extraction: SupplierDocumentExtraction = {
     document: { type: 'delivery_note', number: 'MP-1001', date: '2026-09-01', total: 99.94 },
-    supplier: { name: 'PROVEEDOR MULTIFILA', taxId: 'B11223344' },
+    supplier: {
+      name: 'PROVEEDOR MULTIFILA',
+      legalName: null,
+      taxId: 'B11223344',
+      email: null,
+      phone: null,
+      address: null,
+    },
+    supplierResolution: { supplierId: null, confidence: 'unresolved', signals: [], reasons: [] },
     lines: [{
       supplierReference: 'MP-01',
       description: 'PRODUCTO MULTIFILA',

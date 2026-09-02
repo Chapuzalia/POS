@@ -5,6 +5,7 @@ import {
   supplierProfileRulesJsonSchema,
   supplierProfileRulesSchema,
   type OcrDocument,
+  type SupplierCandidate,
   type SupplierDocumentExtraction,
   type SupplierProfileRules,
 } from './core.ts'
@@ -27,6 +28,7 @@ export interface SupplierDocumentAiProvider {
     ocr: OcrDocument
     documentType: 'invoice' | 'delivery_note'
     imageDataUrl?: string | null
+    supplierCandidates: SupplierCandidate[]
   }): Promise<SupplierDocumentExtraction>
   proposeProfile(input: {
     ocr: OcrDocument
@@ -464,8 +466,29 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
     this.config = config
   }
 
-  async interpret(input: { ocr: OcrDocument; documentType: 'invoice' | 'delivery_note'; imageDataUrl?: string | null }) {
-    const content: Array<Record<string, unknown>> = [{ type: 'input_text', text: JSON.stringify(structuredOcr(input)) }]
+  async interpret(input: {
+    ocr: OcrDocument
+    documentType: 'invoice' | 'delivery_note'
+    imageDataUrl?: string | null
+    supplierCandidates: SupplierCandidate[]
+  }) {
+    const supplierCandidates = input.supplierCandidates.map((candidate) => ({
+      supplierId: candidate.supplierId,
+      name: candidate.name,
+      legalName: candidate.legalName ?? null,
+      taxId: candidate.taxId ?? null,
+      email: candidate.email ?? null,
+      phone: candidate.phone ?? null,
+      address: candidate.address ?? null,
+      identities: (candidate.identities ?? []).map((identity) => ({
+        type: identity.type,
+        value: identity.value,
+      })),
+    }))
+    const content: Array<Record<string, unknown>> = [{
+      type: 'input_text',
+      text: JSON.stringify({ ...structuredOcr(input), supplierCandidates }),
+    }]
     if (input.imageDataUrl) content.push({ type: 'input_image', image_url: input.imageDataUrl, detail: 'high' })
     const response = await fetch('https://api.openai.com/v1/responses', {
       method: 'POST',
@@ -477,6 +500,10 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
           'Interpreta un albarán o factura de proveedor a partir del OCR estructurado.',
           'En supplier identifica siempre al emisor, vendedor o proveedor que expide el documento; nunca uses el cliente, comprador, destinatario, punto de venta ni dirección de entrega.',
           'supplier.taxId debe ser exclusivamente el identificador fiscal del emisor; si no aparece o no es inequívoco devuelve null y no reutilices el NIF/CIF del destinatario.',
+          'Extrae en supplier los datos que realmente aparezcan en el documento; no copies datos del candidato para completar campos ausentes.',
+          'supplierCandidates son referencias existentes, no una lista obligatoria. En supplierResolution devuelve supplierId solo si existe una coincidencia razonable y deja confidence=unresolved y supplierId=null ante cualquier duda.',
+          'Prioriza identificador fiscal exacto, después email o dominio, teléfono, dirección y por último nombre o razón social. Un nombre parecido por sí solo no basta para forzar una asociación.',
+          'En supplierResolution.signals enumera únicamente las señales realmente observadas y en reasons resume por qué propones o descartas la asociación.',
           'No inventes líneas ni valores. Devuelve importes como números decimales.',
           'En cada línea, chargesAmount es la suma de cargos positivos y vale 0 si no hay cargos. La coherencia esperada es quantity * unitPrice - discountAmount + chargesAmount = lineTotal.',
           'Propón solo reglas declarativas compatibles con el schema, nunca código, SQL ni expresiones ejecutables.',

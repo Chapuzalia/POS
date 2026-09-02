@@ -36,6 +36,7 @@ import {
   saveSupplierDocumentLine,
   supplierDocumentMockEnabled,
   supplierDocumentMockFixtures,
+  updateSupplierDocumentSupplier,
   uploadSupplierDocument,
 } from "../services/supplierDocumentService";
 import type {
@@ -43,6 +44,7 @@ import type {
   SupplierDocumentLine,
   SupplierDocumentLineDraft,
   SupplierDocumentLinkCandidate,
+  SupplierOption,
   SupplierDocumentType,
 } from "../types";
 
@@ -167,6 +169,7 @@ export function SupplierReceiptsCrm({
     useState<SupplierDocumentType>("delivery_note");
   const [detail, setDetail] = useState<SupplierDocumentDetail | null>(null);
   const [inventory, setInventory] = useState<InventorySnapshot | null>(null);
+  const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([]);
   const [showAll, setShowAll] = useState(false);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
@@ -224,6 +227,7 @@ export function SupplierReceiptsCrm({
     );
     setDetail({ document: workspace.document, lines: workspace.lines });
     setInventory(workspace.inventory);
+    setSupplierOptions(workspace.suppliers);
     setDocumentDate(workspace.document.documentDate ?? "");
     setAffectsStock(workspace.document.affectsStock);
     setShowAll(
@@ -538,7 +542,14 @@ export function SupplierReceiptsCrm({
   }
 
   async function confirm() {
-    if (!detail || !documentDate || (affectsStock && needsReviewCount) || !allCostsDecided) return;
+    if (
+      !detail ||
+      !detail.document.supplierId ||
+      !documentDate ||
+      (affectsStock && needsReviewCount) ||
+      !allCostsDecided
+    )
+      return;
     await run(async () => {
       await confirmSupplierDocument({
         documentId: detail.document.id,
@@ -548,6 +559,43 @@ export function SupplierReceiptsCrm({
       });
       await refresh(detail.document.id);
       setScreen("confirmed");
+    });
+  }
+
+  async function changeSupplier(supplierId: string) {
+    if (
+      !detail ||
+      isConfirmedDocument ||
+      supplierId === detail.document.supplierId
+    )
+      return;
+    const supplier = supplierOptions.find(
+      (candidate) => candidate.id === supplierId,
+    );
+    if (!supplier) return;
+    await run(async () => {
+      await updateSupplierDocumentSupplier(detail.document.id, supplierId);
+      setDetail((current) =>
+        current
+          ? {
+              ...current,
+              document: {
+                ...current.document,
+                supplierId,
+                supplierName: supplier.name,
+                extractionMetadata: {
+                  ...current.document.extractionMetadata,
+                  supplierResolution: {
+                    supplierId,
+                    confidence: "high",
+                    signals: [],
+                    reasons: ["manual_selection"],
+                  },
+                },
+              },
+            }
+          : current,
+      );
     });
   }
 
@@ -918,7 +966,7 @@ export function SupplierReceiptsCrm({
           <div className="mx-auto max-w-3xl">
             <Button
               className="!min-h-14 !w-full !rounded-2xl !text-base !font-black"
-              disabled={disabled || busy || !documentDate || (affectsStock && needsReviewCount > 0) || !allCostsDecided}
+              disabled={disabled || busy || !detail.document.supplierId || !documentDate || (affectsStock && needsReviewCount > 0) || !allCostsDecided}
               onClick={() => void confirm()}
               type="button"
               variant="primary"
@@ -944,9 +992,28 @@ export function SupplierReceiptsCrm({
             {isConfirmedDocument ? (
               <div className="mt-2"><Chip icon={CheckCircle2} tone="success">Confirmado</Chip></div>
             ) : null}
-            <h2 className="mt-1 text-xl font-black">
-              {detail.document.supplierName ?? "Proveedor por revisar"}
-            </h2>
+            <div className="mt-3 min-w-64">
+              <label className="mb-1.5 block text-xs font-black uppercase tracking-wide text-[var(--crm-text-muted)]">
+                Proveedor
+              </label>
+              <CrmSelect
+                ariaLabel="Proveedor del documento"
+                disabled={isConfirmedDocument || busy}
+                emptyMessage="No hay proveedores existentes."
+                onChange={(value) => void changeSupplier(value)}
+                options={supplierOptions.map((supplier) => ({
+                  label: supplier.name,
+                  value: supplier.id,
+                  description: supplier.taxId
+                    ? `NIF/CIF ${supplier.taxId}`
+                    : undefined,
+                }))}
+                placeholder="Selecciona un proveedor"
+                searchable
+                searchPlaceholder="Buscar proveedor..."
+                value={detail.document.supplierId ?? ""}
+              />
+            </div>
             <p className="mt-1 text-sm text-[var(--crm-text-muted)]">
               {detail.document.documentNumber ?? "Sin número"}
             </p>
@@ -1133,12 +1200,14 @@ export function SupplierReceiptsCrm({
         <div className="mx-auto max-w-3xl">
           <Button
             className="!min-h-14 !w-full !rounded-2xl !text-base !font-black"
-            disabled={disabled || busy || !documentDate || (affectsStock && needsReviewCount > 0)}
+            disabled={disabled || busy || !detail.document.supplierId || !documentDate || (affectsStock && needsReviewCount > 0)}
             onClick={() => setScreen("costs")}
             type="button"
             variant="primary"
           >
-            {affectsStock && needsReviewCount
+            {!detail.document.supplierId
+              ? "Selecciona un proveedor"
+              : affectsStock && needsReviewCount
               ? `Resuelve ${needsReviewCount} ${needsReviewCount === 1 ? "línea" : "líneas"}`
               : "Revisar cambios de coste"}
             <ChevronRight className="size-5" />

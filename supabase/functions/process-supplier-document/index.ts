@@ -4,15 +4,16 @@ import {
   matchInventoryItem,
   normalizeAlias,
   normalizePurchaseToBase,
-  normalizeSupplierTaxId,
   profileMatchesOcr,
+  resolveSupplierCandidate,
   runDeterministicParser,
-  supplierIdentityMatches,
   supplierDocumentExtractionSchema,
+  supplierIdentitiesFromExtraction,
   supplierProfileRulesSchema,
   validateExtractionMath,
   validateProposedProfile,
   type InventoryUnitDefinition,
+  type SupplierCandidate,
   type SupplierDocumentExtraction,
 } from '../_shared/supplier-documents/core.ts'
 import { getSupplierDocumentMockFixture } from '../_shared/supplier-documents/fixtures.ts'
@@ -143,65 +144,54 @@ function tryKnownProfiles(
   return null
 }
 
-async function ensureSupplier(
+async function loadSupplierCandidates(
   admin: UntypedSupabaseClient,
   tenantId: string,
-  extraction: SupplierDocumentExtraction,
-  globals: DbRow[],
-) {
-  const identity = { name: extraction.supplier.name, taxId: extraction.supplier.taxId }
-  const normalizedTaxId = normalizeSupplierTaxId(extraction.supplier.taxId)
-  const { data: locals, error: localError } = await admin.from('suppliers')
-    .select('id, name, tax_id, global_supplier_id')
-    .eq('tenant_id', tenantId)
-  if (localError) throw localError
-  let localSupplier = ((locals ?? []) as DbRow[]).find((candidate) => supplierIdentityMatches(identity, {
-    name: String(candidate.name), taxId: candidate.tax_id == null ? null : String(candidate.tax_id),
-  })) ?? null
-  let globalSupplier = localSupplier?.global_supplier_id
-    ? globals.find((candidate) => candidate.id === localSupplier?.global_supplier_id) ?? null
-    : null
-  globalSupplier ??= globals.find((candidate) => supplierIdentityMatches(identity, {
-    name: String(candidate.name), taxId: candidate.tax_id == null ? null : String(candidate.tax_id),
-  })) ?? null
-  if (!globalSupplier) {
-    const { data, error } = await admin.from('global_suppliers').insert({
-      name: extraction.supplier.name,
-      tax_id: normalizedTaxId,
-    }).select('id, name, tax_id').single()
-    if (error) throw error
-    globalSupplier = data as DbRow
+) : Promise<SupplierCandidate[]> {
+  const [suppliersResult, identitiesResult] = await Promise.all([
+    admin.from('suppliers').select('id, name, tax_id, global_supplier_id').eq('tenant_id', tenantId),
+    admin.from('supplier_identity_aliases')
+      .select('supplier_id, identity_type, normalized_value, source')
+      .eq('tenant_id', tenantId),
+  ])
+  if (suppliersResult.error) throw suppliersResult.error
+  if (identitiesResult.error) throw identitiesResult.error
+  const identitiesBySupplier = new Map<string, SupplierCandidate['identities']>()
+  for (const row of (identitiesResult.data ?? []) as DbRow[]) {
+    const supplierId = String(row.supplier_id)
+    const identities = identitiesBySupplier.get(supplierId) ?? []
+    identities.push({
+      type: row.identity_type as NonNullable<SupplierCandidate['identities']>[number]['type'],
+      value: String(row.normalized_value),
+      source: row.source === 'user_confirmed' ? 'user_confirmed' : 'extracted',
+    })
+    identitiesBySupplier.set(supplierId, identities)
   }
-  if (!localSupplier) {
-    const { data, error } = await admin.from('suppliers').insert({
-      tenant_id: tenantId,
-      global_supplier_id: globalSupplier?.id ?? null,
-      name: extraction.supplier.name,
-      tax_id: normalizedTaxId,
-    }).select('id, name, tax_id, global_supplier_id').single()
-    if (error) throw error
-    localSupplier = data as DbRow
-  } else if (!localSupplier.global_supplier_id && globalSupplier?.id) {
-    const { error } = await admin.from('suppliers').update({ global_supplier_id: globalSupplier.id })
-      .eq('tenant_id', tenantId).eq('id', localSupplier.id)
-    if (error) throw error
-    localSupplier.global_supplier_id = globalSupplier.id
-  }
-  return { globalSupplier, localSupplier }
+  return ((suppliersResult.data ?? []) as DbRow[]).map((row) => ({
+    supplierId: String(row.id),
+    name: String(row.name),
+    taxId: row.tax_id == null ? null : String(row.tax_id),
+    globalSupplierId: row.global_supplier_id == null ? null : String(row.global_supplier_id),
+    identities: identitiesBySupplier.get(String(row.id)) ?? [],
+  }))
 }
 
 async function loadInventoryContext(
   admin: UntypedSupabaseClient,
   tenantId: string,
   venueId: string,
-  supplierId: string,
+  supplierId: string | null,
 ) {
+  const aliasesPromise = supplierId
+    ? admin.from('supplier_item_aliases').select('alias_type, alias_value, inventory_item_id, packaging_json')
+      .eq('tenant_id', tenantId).eq('venue_id', venueId).eq('supplier_id', supplierId)
+    : Promise.resolve({ data: [], error: null })
   const [itemsResult, unitsResult, routesResult, warehousesResult, aliasesResult] = await Promise.all([
     admin.from('inventory_items').select('id, name, base_unit_id, reference_cost, is_active').eq('tenant_id', tenantId).eq('venue_id', venueId),
     admin.from('inventory_units').select('id, name, symbol, content_quantity, content_unit_id, is_active').eq('tenant_id', tenantId).eq('venue_id', venueId),
     admin.from('inventory_item_warehouse_routes').select('inventory_item_id, warehouse_id, priority, is_enabled').eq('tenant_id', tenantId).eq('venue_id', venueId),
     admin.from('inventory_warehouses').select('id, is_active, sort_order').eq('tenant_id', tenantId).eq('venue_id', venueId),
-    admin.from('supplier_item_aliases').select('alias_type, alias_value, inventory_item_id, packaging_json').eq('tenant_id', tenantId).eq('venue_id', venueId).eq('supplier_id', supplierId),
+    aliasesPromise,
   ])
   for (const result of [itemsResult, unitsResult, routesResult, warehousesResult, aliasesResult]) if (result.error) throw result.error
   return {
@@ -278,7 +268,10 @@ async function processSupplierDocumentRequest(request: Request) {
       },
     })
     const ocr = nativePdf ?? await ocrProvider.analyze(binary)
-    const knowledge = await loadGlobalKnowledge(admin)
+    const [knowledge, supplierCandidates] = await Promise.all([
+      loadGlobalKnowledge(admin),
+      loadSupplierCandidates(admin, document.tenant_id),
+    ])
     const fixture = fixtureId ? getSupplierDocumentMockFixture(fixtureId) : null
     let extraction: SupplierDocumentExtraction
     let parserMode: 'deterministic' | 'ai'
@@ -314,6 +307,7 @@ async function processSupplierDocumentRequest(request: Request) {
           ocr,
           documentType: document.document_type,
           imageDataUrl: needsImage ? bytesToDataUrl(binary.bytes, binary.contentType) : null,
+          supplierCandidates,
         })
         parserMode = 'ai'
       }
@@ -339,10 +333,17 @@ async function processSupplierDocumentRequest(request: Request) {
         profileGenerationError = error instanceof Error ? error.message : 'PROFILE_GENERATION_FAILED'
       }
     }
-    const supplierResult = await ensureSupplier(
-      admin, document.tenant_id, extraction, knowledge.suppliers,
-    )
-    globalSupplierId ??= supplierResult.globalSupplier?.id ? String(supplierResult.globalSupplier.id) : null
+    const modelSupplierResolution = extraction.supplierResolution
+    const supplierResolution = resolveSupplierCandidate(extraction.supplier, supplierCandidates, {
+      preferredGlobalSupplierId: globalSupplierId,
+    })
+    const supplierId = supplierResolution.confidence === 'high'
+      ? supplierResolution.supplierId
+      : null
+    const resolvedSupplier = supplierId
+      ? supplierCandidates.find((candidate) => candidate.supplierId === supplierId) ?? null
+      : null
+    globalSupplierId ??= resolvedSupplier?.globalSupplierId ?? null
     if (!globalProfileId && profileValidation?.candidate && globalSupplierId && extraction.proposedProfile) {
       const { data, error } = await admin.from('global_supplier_document_profiles').insert({
         global_supplier_id: globalSupplierId,
@@ -354,8 +355,7 @@ async function processSupplierDocumentRequest(request: Request) {
       if (error) throw error
       globalProfileId = String(data.id)
     }
-    const supplierId = String(supplierResult.localSupplier.id)
-    if (extraction.document.number) {
+    if (supplierId && extraction.document.number) {
       const { data: duplicate, error } = await admin.from('supplier_documents')
         .select('id, status').eq('tenant_id', document.tenant_id).eq('venue_id', document.venue_id)
         .eq('supplier_id', supplierId).eq('document_type', extraction.document.type)
@@ -458,6 +458,13 @@ async function processSupplierDocumentRequest(request: Request) {
         requestedDocumentType,
         detectedDocumentType: extraction.document.type,
         documentTypeCorrected,
+        supplierExtraction: {
+          ...extraction.supplier,
+          identities: supplierIdentitiesFromExtraction(extraction.supplier),
+        },
+        modelSupplierResolution,
+        supplierResolution,
+        supplierCandidateCount: supplierCandidates.length,
       },
     }).eq('id', document.id)
     if (updateError) throw updateError
@@ -467,6 +474,7 @@ async function processSupplierDocumentRequest(request: Request) {
       parserMode,
       lineCount: lineRows.length,
       needsReviewCount,
+      supplierResolution,
       profileCandidateCreated: Boolean(profileValidation?.candidate && globalProfileId),
     })
   } catch (error) {

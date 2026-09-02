@@ -142,6 +142,17 @@ export const extractedLineSchema = z.object({
   confidence: z.number().min(0).max(1),
 }).strict()
 
+export const supplierIdentityTypeSchema = z.enum([
+  'tax_id', 'email', 'email_domain', 'phone', 'address', 'name',
+])
+
+export const supplierResolutionSchema = z.object({
+  supplierId: nullableText,
+  confidence: z.enum(['high', 'probable', 'unresolved']),
+  signals: z.array(supplierIdentityTypeSchema).max(10),
+  reasons: z.array(z.string().trim().min(1).max(200)).max(10),
+}).strict()
+
 export const supplierDocumentExtractionSchema = z.object({
   document: z.object({
     type: z.enum(['invoice', 'delivery_note']),
@@ -151,8 +162,13 @@ export const supplierDocumentExtractionSchema = z.object({
   }).strict(),
   supplier: z.object({
     name: z.string().trim().min(1).max(160),
+    legalName: nullableText,
     taxId: nullableText,
+    email: nullableText,
+    phone: nullableText,
+    address: nullableText,
   }).strict(),
+  supplierResolution: supplierResolutionSchema,
   lines: z.array(extractedLineSchema).min(1).max(500),
   proposedProfile: supplierProfileRulesBaseSchema.nullable(),
   confidence: z.number().min(0).max(1),
@@ -160,6 +176,32 @@ export const supplierDocumentExtractionSchema = z.object({
 
 export type SupplierDocumentExtraction = z.infer<typeof supplierDocumentExtractionSchema>
 export type ExtractedLine = z.infer<typeof extractedLineSchema>
+export type SupplierIdentityType = z.infer<typeof supplierIdentityTypeSchema>
+export type SupplierResolution = z.infer<typeof supplierResolutionSchema>
+
+export type SupplierCandidateIdentity = {
+  type: SupplierIdentityType
+  value: string
+  source: 'registered' | 'user_confirmed' | 'extracted'
+}
+
+export type SupplierCandidate = {
+  supplierId: string
+  name: string
+  legalName?: string | null
+  taxId?: string | null
+  email?: string | null
+  phone?: string | null
+  address?: string | null
+  globalSupplierId?: string | null
+  identities?: SupplierCandidateIdentity[]
+}
+
+export type NormalizedSupplierIdentity = {
+  type: SupplierIdentityType
+  value: string
+  normalizedValue: string
+}
 
 export const supplierProfileRulesJsonSchema = {
   type: 'object',
@@ -222,7 +264,7 @@ export const supplierProfileRulesJsonSchema = {
 export const supplierDocumentExtractionJsonSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['document', 'supplier', 'lines', 'proposedProfile', 'confidence'],
+  required: ['document', 'supplier', 'supplierResolution', 'lines', 'proposedProfile', 'confidence'],
   properties: {
     document: {
       type: 'object', additionalProperties: false,
@@ -236,8 +278,25 @@ export const supplierDocumentExtractionJsonSchema = {
     },
     supplier: {
       type: 'object', additionalProperties: false,
-      required: ['name', 'taxId'],
-      properties: { name: { type: 'string' }, taxId: { type: ['string', 'null'] } },
+      required: ['name', 'legalName', 'taxId', 'email', 'phone', 'address'],
+      properties: {
+        name: { type: 'string' },
+        legalName: { type: ['string', 'null'] },
+        taxId: { type: ['string', 'null'] },
+        email: { type: ['string', 'null'] },
+        phone: { type: ['string', 'null'] },
+        address: { type: ['string', 'null'] },
+      },
+    },
+    supplierResolution: {
+      type: 'object', additionalProperties: false,
+      required: ['supplierId', 'confidence', 'signals', 'reasons'],
+      properties: {
+        supplierId: { type: ['string', 'null'] },
+        confidence: { type: 'string', enum: ['high', 'probable', 'unresolved'] },
+        signals: { type: 'array', maxItems: 10, items: { type: 'string', enum: supplierIdentityTypeSchema.options } },
+        reasons: { type: 'array', maxItems: 10, items: { type: 'string' } },
+      },
     },
     lines: {
       type: 'array', minItems: 1,
@@ -303,6 +362,146 @@ export function normalizeSupplierName(value: string) {
     }
   }
   return tokens.filter((token) => !supplierLegalFormTokens.has(token)).join(' ')
+}
+
+export function normalizeSupplierEmail(value: string | null | undefined) {
+  const normalized = value?.trim().toLowerCase() ?? ''
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(normalized) ? normalized : null
+}
+
+const publicEmailDomains = new Set([
+  'gmail.com', 'hotmail.com', 'hotmail.es', 'outlook.com', 'outlook.es',
+  'yahoo.com', 'yahoo.es', 'icloud.com', 'proton.me', 'protonmail.com',
+])
+
+export function normalizeSupplierEmailDomain(value: string | null | undefined) {
+  const email = normalizeSupplierEmail(value)
+  const domain = email?.split('@')[1] ?? ''
+  return domain && !publicEmailDomains.has(domain) ? domain : null
+}
+
+export function normalizeSupplierPhone(value: string | null | undefined) {
+  const normalized = value?.replace(/[^0-9]/g, '') ?? ''
+  return normalized.length >= 7 ? normalized : null
+}
+
+export function normalizeSupplierAddress(value: string | null | undefined) {
+  const normalized = value ? normalizeDocumentText(value) : ''
+  return normalized.length >= 8 ? normalized : null
+}
+
+export function normalizeSupplierIdentity(type: SupplierIdentityType, value: string | null | undefined) {
+  if (type === 'tax_id') return normalizeSupplierTaxId(value)
+  if (type === 'email') return normalizeSupplierEmail(value)
+  if (type === 'email_domain') {
+    const normalized = value?.trim().toLowerCase() ?? ''
+    return normalized.includes('@')
+      ? normalizeSupplierEmailDomain(normalized)
+      : normalized && normalized.includes('.') && !publicEmailDomains.has(normalized) ? normalized : null
+  }
+  if (type === 'phone') return normalizeSupplierPhone(value)
+  if (type === 'address') return normalizeSupplierAddress(value)
+  const normalized = value ? normalizeSupplierName(value) : ''
+  return normalized || null
+}
+
+export function supplierIdentitiesFromExtraction(
+  supplier: SupplierDocumentExtraction['supplier'],
+): NormalizedSupplierIdentity[] {
+  const raw: Array<[SupplierIdentityType, string | null | undefined]> = [
+    ['tax_id', supplier.taxId],
+    ['email', supplier.email],
+    ['email_domain', supplier.email],
+    ['phone', supplier.phone],
+    ['address', supplier.address],
+    ['name', supplier.legalName],
+    ['name', supplier.name],
+  ]
+  const seen = new Set<string>()
+  return raw.flatMap(([type, value]) => {
+    const normalizedValue = type === 'email_domain'
+      ? normalizeSupplierEmailDomain(value)
+      : normalizeSupplierIdentity(type, value)
+    if (!value || !normalizedValue) return []
+    const key = `${type}:${normalizedValue}`
+    if (seen.has(key)) return []
+    seen.add(key)
+    return [{ type, value, normalizedValue }]
+  })
+}
+
+function candidateIdentities(candidate: SupplierCandidate) {
+  const raw: Array<SupplierCandidateIdentity> = [
+    { type: 'tax_id', value: candidate.taxId ?? '', source: 'registered' },
+    { type: 'email', value: candidate.email ?? '', source: 'registered' },
+    { type: 'email_domain', value: candidate.email ?? '', source: 'registered' },
+    { type: 'phone', value: candidate.phone ?? '', source: 'registered' },
+    { type: 'address', value: candidate.address ?? '', source: 'registered' },
+    { type: 'name', value: candidate.legalName ?? '', source: 'registered' },
+    { type: 'name', value: candidate.name, source: 'registered' },
+    ...(candidate.identities ?? []),
+  ]
+  return raw.flatMap((identity) => {
+    const normalizedValue = identity.type === 'email_domain' && identity.value.includes('@')
+      ? normalizeSupplierEmailDomain(identity.value)
+      : normalizeSupplierIdentity(identity.type, identity.value)
+    return normalizedValue ? [{ ...identity, normalizedValue }] : []
+  })
+}
+
+export function resolveSupplierCandidate(
+  supplier: SupplierDocumentExtraction['supplier'],
+  candidates: SupplierCandidate[],
+  options: { preferredGlobalSupplierId?: string | null } = {},
+): SupplierResolution {
+  const extracted = supplierIdentitiesFromExtraction(supplier)
+  const indexed = candidates.map((candidate) => ({ candidate, identities: candidateIdentities(candidate) }))
+  const confirmedMatches = new Map<string, Set<SupplierIdentityType>>()
+  for (const identity of extracted) {
+    for (const entry of indexed) {
+      if (entry.identities.some((known) => known.source === 'user_confirmed'
+        && known.type === identity.type && known.normalizedValue === identity.normalizedValue)) {
+        const signals = confirmedMatches.get(entry.candidate.supplierId) ?? new Set<SupplierIdentityType>()
+        signals.add(identity.type)
+        confirmedMatches.set(entry.candidate.supplierId, signals)
+      }
+    }
+  }
+  if (confirmedMatches.size === 1) {
+    const [supplierId, signals] = [...confirmedMatches.entries()][0]
+    return { supplierId, confidence: 'high', signals: [...signals], reasons: ['user_confirmed_alias'] }
+  }
+  if (confirmedMatches.size > 1) {
+    return { supplierId: null, confidence: 'unresolved', signals: [], reasons: ['ambiguous_user_confirmed_alias'] }
+  }
+
+  if (options.preferredGlobalSupplierId) {
+    const preferred = candidates.filter((candidate) => candidate.globalSupplierId === options.preferredGlobalSupplierId)
+    if (preferred.length === 1) {
+      return { supplierId: preferred[0].supplierId, confidence: 'high', signals: [], reasons: ['known_supplier_profile'] }
+    }
+  }
+
+  const priorities: SupplierIdentityType[] = ['tax_id', 'email', 'email_domain', 'phone', 'address', 'name']
+  for (const type of priorities) {
+    const values = new Set(extracted.filter((identity) => identity.type === type).map((identity) => identity.normalizedValue))
+    if (!values.size) continue
+    const matches = indexed.filter((entry) => entry.identities.some((identity) =>
+      identity.type === type && values.has(identity.normalizedValue),
+    ))
+    if (matches.length === 1) {
+      return {
+        supplierId: matches[0].candidate.supplierId,
+        confidence: type === 'tax_id' || type === 'email' ? 'high' : 'probable',
+        signals: [type],
+        reasons: [`exact_${type}`],
+      }
+    }
+    if (matches.length > 1) {
+      return { supplierId: null, confidence: 'unresolved', signals: [type], reasons: [`ambiguous_${type}`] }
+    }
+  }
+  return { supplierId: null, confidence: 'unresolved', signals: [], reasons: ['no_reliable_match'] }
 }
 
 export function supplierIdentityMatches(
@@ -497,7 +696,15 @@ export function runDeterministicParser(
         ? lines.reduce((sum, line) => sum + (line.lineTotal ?? 0), 0)
         : null,
     },
-    supplier: { name: defaults.supplierName, taxId: defaults.supplierTaxId ?? null },
+    supplier: {
+      name: defaults.supplierName,
+      legalName: null,
+      taxId: defaults.supplierTaxId ?? null,
+      email: null,
+      phone: null,
+      address: null,
+    },
+    supplierResolution: { supplierId: null, confidence: 'unresolved', signals: [], reasons: [] },
     lines,
     proposedProfile: null,
     confidence: ocr.confidence,

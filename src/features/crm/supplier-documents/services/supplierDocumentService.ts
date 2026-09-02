@@ -10,6 +10,7 @@ import type {
   SupplierDocumentMockFixtureOption,
   SupplierDocumentStatus,
   SupplierDocumentType,
+  SupplierOption,
 } from '../types'
 
 type DbRow = Record<string, unknown>
@@ -21,7 +22,7 @@ export const supplierDocumentMockEnabled = import.meta.env.DEV
 
 export const supplierDocumentMockFixtures: SupplierDocumentMockFixtureOption[] = [
   { id: 'known-supplier', label: 'Proveedor conocido', description: 'Parser determinista sin IA.' },
-  { id: 'unknown-supplier', label: 'Proveedor desconocido', description: 'Crea proveedor y perfil candidato.' },
+  { id: 'unknown-supplier', label: 'Proveedor desconocido', description: 'Procesa el documento sin forzar una vinculación.' },
   { id: 'known-product', label: 'Producto conocido', description: 'Prioriza EAN y alias aprendido.' },
   { id: 'new-product', label: 'Producto nuevo', description: 'Obliga a seleccionar o crear artículo.' },
   { id: 'unit-conversion', label: 'Conversión 24x33 cl', description: '2 cajas se normalizan a 15,84 L.' },
@@ -164,11 +165,36 @@ export async function loadSupplierDocument(
 }
 
 export async function loadSupplierReceiptWorkspace(context: TenantContext, venueId: string, documentId: string) {
-  const [detail, inventory] = await Promise.all([
+  const [detail, inventory, suppliers] = await Promise.all([
     loadSupplierDocument(context, venueId, documentId),
     loadInventorySnapshot(context, venueId),
+    loadSupplierOptions(context),
   ])
-  return { ...detail, inventory }
+  return { ...detail, inventory, suppliers }
+}
+
+export async function loadSupplierOptions(
+  context: Pick<TenantContext, 'tenantId'>,
+): Promise<SupplierOption[]> {
+  const { data, error } = await requireSupabase().from('suppliers')
+    .select('id, name, tax_id')
+    .eq('tenant_id', context.tenantId)
+    .order('name')
+  if (error) throw error
+  return ((data ?? []) as DbRow[]).map((row) => ({
+    id: String(row.id),
+    name: String(row.name),
+    taxId: text(row.tax_id),
+  }))
+}
+
+export async function updateSupplierDocumentSupplier(documentId: string, supplierId: string) {
+  const { data, error } = await requireSupabase().rpc('update_supplier_document_supplier', {
+    p_document_id: documentId,
+    p_supplier_id: supplierId,
+  })
+  if (error) throw error
+  return data as { documentId: string; supplierId: string; supplierName: string }
 }
 
 export async function saveSupplierDocumentLine(documentId: string, lineId: string, draft: SupplierDocumentLineDraft) {

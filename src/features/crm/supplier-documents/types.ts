@@ -35,6 +35,12 @@ export type SupplierDocumentLinkCandidate = {
   total: number
 }
 
+export type SupplierOption = {
+  id: string
+  name: string
+  taxId: string | null
+}
+
 export type SupplierDocumentLine = {
   id: string
   lineNumber: number

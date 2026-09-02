@@ -8,6 +8,7 @@ import {
   normalizeSupplierName,
   normalizeSupplierTaxId,
   parsePackagingExpression,
+  resolveSupplierCandidate,
   runDeterministicParser,
   supplierIdentityMatches,
   supplierProfileRulesSchema,
@@ -34,6 +35,7 @@ const ocrProviders = await readFile(new URL('../supabase/functions/_shared/suppl
 const supabaseConfig = await readFile(new URL('../supabase/config.toml', import.meta.url), 'utf8')
 const identityBackfillMigration = await readFile(new URL('../supabase/migrations/20260901152330_backfill_supplier_global_identity.sql', import.meta.url), 'utf8')
 const lineChargesMigration = await readFile(new URL('../supabase/migrations/20260902002359_add_supplier_document_line_charges.sql', import.meta.url), 'utf8')
+const supplierIdentityMigration = await readFile(new URL('../supabase/migrations/20260902005509_improve_supplier_identity_resolution.sql', import.meta.url), 'utf8')
 
 const units = [
   { id: 'kg', name: 'Kilogramo', symbol: 'kg', contentQuantity: 1, contentUnitId: 'kg' },
@@ -119,6 +121,76 @@ test('normaliza la identidad del proveedor sin confundir NIF distintos', () => {
     { name: 'Proveedor Uno, S.L.', taxId: 'B12345678' },
     { name: 'Proveedor Uno SL', taxId: 'B87654321' },
   ), false)
+})
+
+const extractedSupplier = (overrides = {}) => ({
+  name: 'Emisor no identificado',
+  legalName: null,
+  taxId: null,
+  email: null,
+  phone: null,
+  address: null,
+  ...overrides,
+})
+
+test('resuelve por NIF exacto aunque la razón social sea distinta', () => {
+  const resolution = resolveSupplierCandidate(
+    extractedSupplier({
+      name: 'COCA-COLA EUROPACIFIC PARTNERS IBERIA, S.L.U.',
+      taxId: 'ES B-123.456-78',
+    }),
+    [
+      { supplierId: 'coca-cola', name: 'Coca-Cola', taxId: 'ESB12345678' },
+      { supplierId: 'otro', name: 'Distribuidor Coca-Cola', taxId: 'B87654321' },
+    ],
+  )
+  assert.deepEqual(resolution, {
+    supplierId: 'coca-cola',
+    confidence: 'high',
+    signals: ['tax_id'],
+    reasons: ['exact_tax_id'],
+  })
+})
+
+test('un nombre solo parecido no fuerza asociación y varios nombres iguales quedan ambiguos', () => {
+  assert.equal(resolveSupplierCandidate(
+    extractedSupplier({ name: 'Coca-Cola Iberia Distribución' }),
+    [{ supplierId: 'coca-cola', name: 'Coca-Cola' }],
+  ).supplierId, null)
+
+  const ambiguous = resolveSupplierCandidate(
+    extractedSupplier({ name: 'Distribuciones Norte, S.L.' }),
+    [
+      { supplierId: 'norte-1', name: 'Distribuciones Norte SL' },
+      { supplierId: 'norte-2', name: 'Distribuciones Norte, S.L.U.' },
+    ],
+  )
+  assert.equal(ambiguous.supplierId, null)
+  assert.deepEqual(ambiguous.reasons, ['ambiguous_name'])
+
+  const exactNameOnly = resolveSupplierCandidate(
+    extractedSupplier({ name: 'Distribuciones Norte, S.L.' }),
+    [{ supplierId: 'norte', name: 'Distribuciones Norte SL' }],
+  )
+  assert.equal(exactNameOnly.supplierId, 'norte')
+  assert.equal(exactNameOnly.confidence, 'probable')
+})
+
+test('un alias confirmado por usuario tiene prioridad sobre el nombre registrado', () => {
+  const resolution = resolveSupplierCandidate(
+    extractedSupplier({ name: 'Distribuciones Norte, S.L.' }),
+    [
+      { supplierId: 'nombre-directo', name: 'Distribuciones Norte' },
+      {
+        supplierId: 'corregido',
+        name: 'Proveedor confirmado',
+        identities: [{ type: 'name', value: 'distribuciones norte', source: 'user_confirmed' }],
+      },
+    ],
+  )
+  assert.equal(resolution.supplierId, 'corregido')
+  assert.equal(resolution.confidence, 'high')
+  assert.deepEqual(resolution.reasons, ['user_confirmed_alias'])
 })
 
 test('normaliza formatos de compra seguros y rechaza abreviaturas ambiguas', () => {
@@ -527,6 +599,26 @@ test('los aliases se aprenden al confirmar y siguen aislados por tenant, local y
   assert.match(edgeFunction, /packageExpression: match\.packageExpression \?\? line\.packageExpression/)
 })
 
+test('las correcciones manuales de proveedor crean identidades reutilizables sin reparsear', () => {
+  assert.match(supplierIdentityMigration, /create table public\.supplier_identity_aliases/i)
+  assert.match(supplierIdentityMigration, /unique \(tenant_id, identity_type, normalized_value\)/i)
+  assert.match(supplierIdentityMigration, /source in \('user_confirmed', 'extracted'\)/i)
+  assert.match(supplierIdentityMigration, /create function public\.update_supplier_document_supplier/i)
+  assert.match(supplierIdentityMigration, /supplierExtraction,identities/i)
+  assert.match(supplierIdentityMigration, /v_existing_alias\.source = 'user_confirmed'[\s\S]*v_existing_alias\.supplier_id <> v_supplier\.id[\s\S]*delete from public\.supplier_identity_aliases/i)
+  assert.match(service, /updateSupplierDocumentSupplier[\s\S]*update_supplier_document_supplier/)
+  const manualUpdate = service.match(/export async function updateSupplierDocumentSupplier[\s\S]*?\n}/)?.[0] ?? ''
+  assert.doesNotMatch(manualUpdate, /processDocument|process-supplier-document|functions\.invoke/)
+  assert.match(page, /changeSupplier[\s\S]*updateSupplierDocumentSupplier[\s\S]*setDetail/)
+})
+
+test('el documento sin proveedor resuelto sigue en revisión con selector vacío', () => {
+  assert.match(edgeFunction, /supplier_id: supplierId[\s\S]*status: 'review'/)
+  assert.match(page, /placeholder="Selecciona un proveedor"/)
+  assert.match(page, /value=\{detail\.document\.supplierId \?\? ""\}/)
+  assert.match(page, /!detail\.document\.supplierId[\s\S]*Selecciona un proveedor/)
+})
+
 test('el bucket privado exige el path exacto reservado para un documento accesible', () => {
   assert.match(migration, /'supplier-documents'[\s\S]*false,[\s\S]*20971520/)
   assert.match(migration, /array_length\(v_parts, 1\), 0\) <> 3/)
@@ -570,7 +662,11 @@ test('la Edge Function mantiene IA y OCR sin autoridad sobre stock', () => {
   assert.doesNotMatch(edgeFunction, /confirm_supplier_document/)
   assert.doesNotMatch(edgeFunction, /inventory_stock_levels.*(?:insert|update)/i)
   assert.doesNotMatch(edgeFunction, /allowGlobalCreation/)
-  assert.match(edgeFunction, /if \(!globalSupplier\) \{[\s\S]*global_suppliers/)
+  assert.doesNotMatch(edgeFunction, /from\('global_suppliers'\)\.insert/)
+  assert.match(edgeFunction, /loadSupplierCandidates[\s\S]*supplier_identity_aliases/)
+  assert.match(edgeFunction, /supplierCandidates,/)
+  assert.match(edgeFunction, /resolveSupplierCandidate/)
+  assert.match(edgeFunction, /supplierResolution\.confidence === 'high'[\s\S]*supplierResolution\.supplierId[\s\S]*: null/)
   assert.match(edgeFunction, /aiProvider\.proposeProfile/)
   assert.match(edgeFunction, /profileGenerationRetried/)
   assert.match(edgeFunction, /rejectedProfile/)
@@ -581,6 +677,8 @@ test('la Edge Function mantiene IA y OCR sin autoridad sobre stock', () => {
 test('la IA distingue al emisor del cliente y no copia el NIF del destinatario', () => {
   assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /emisor, vendedor o proveedor/)
   assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /no reutilices el NIF\/CIF del destinatario/)
+  assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /supplierCandidates son referencias existentes/)
+  assert.match(OpenAiSupplierDocumentProvider.prototype.interpret.toString(), /Un nombre parecido por sí solo no basta/)
 })
 
 test('la UI muestra el error de la Edge Function y la función valida la sesión internamente', () => {
