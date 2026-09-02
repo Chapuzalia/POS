@@ -1,14 +1,18 @@
 import { createClient } from 'https://esm.sh/@supabase/supabase-js@2.110.0'
 import {
   chooseDefaultWarehouse,
+  groundSupplierExtractionInOcr,
   matchInventoryItem,
   normalizeAlias,
   normalizePurchaseToBase,
+  ocrDocumentSchema,
   parseSupplierDocumentExtraction,
   profileMatchesOcr,
   resolveSupplierCandidate,
   runDeterministicParser,
-  supplierIdentitiesFromExtraction,
+  runDeterministicLineParser,
+  supplierExtractionMetadata,
+  supplierSelection,
   supplierProfileRulesSchema,
   validateExtractionMath,
   validateProposedProfile,
@@ -47,6 +51,9 @@ type DocumentRow = DbRow & {
   original_file_name: string | null
   original_mime_type: string | null
   status: string
+  supplier_id: string | null
+  ocr_snapshot: unknown
+  extraction_metadata: Record<string, unknown>
 }
 
 function json(body: unknown, status = 200) {
@@ -150,7 +157,7 @@ async function loadSupplierCandidates(
   venueId: string,
 ) : Promise<SupplierCandidate[]> {
   const [suppliersResult, identitiesResult] = await Promise.all([
-    admin.from('suppliers').select('id, name, tax_id, global_supplier_id')
+    admin.from('suppliers').select('id, name, legal_name, tax_id, email, phone, address, global_supplier_id')
       .eq('tenant_id', tenantId).eq('venue_id', venueId),
     admin.from('supplier_identity_aliases')
       .select('supplier_id, identity_type, normalized_value, source')
@@ -173,6 +180,10 @@ async function loadSupplierCandidates(
     supplierId: String(row.id),
     name: String(row.name),
     taxId: row.tax_id == null ? null : String(row.tax_id),
+    legalName: row.legal_name == null ? null : String(row.legal_name),
+    email: row.email == null ? null : String(row.email),
+    phone: row.phone == null ? null : String(row.phone),
+    address: row.address == null ? null : String(row.address),
     globalSupplierId: row.global_supplier_id == null ? null : String(row.global_supplier_id),
     identities: identitiesBySupplier.get(String(row.id)) ?? [],
   }))
@@ -220,12 +231,140 @@ async function loadInventoryContext(
   }
 }
 
+function buildLineRows(
+  extraction: SupplierDocumentExtraction,
+  document: DocumentRow,
+  inventory: Awaited<ReturnType<typeof loadInventoryContext>>,
+) {
+  const math = validateExtractionMath(extraction)
+  return extraction.lines.map((line, index) => {
+    const match = matchInventoryItem(line, inventory.items, inventory.aliases)
+    const item = inventory.items.find((candidate) => candidate.id === match.inventoryItemId) ?? null
+    const baseUnit = inventory.units.find((unit) => unit.id === item?.baseUnitId) ?? null
+    const normalized = baseUnit ? normalizePurchaseToBase({
+      purchaseQuantity: line.quantity,
+      purchaseUnit: line.purchaseUnit,
+      packageExpression: match.packageExpression ?? line.packageExpression,
+      description: line.description,
+      baseUnit,
+      units: inventory.units,
+    }) : null
+    const warehouseId = item ? chooseDefaultWarehouse(item.id, inventory.routes, inventory.warehouses) : null
+    const netCost = line.netCost ?? line.lineTotal ?? (
+      line.unitPrice === null ? null : line.quantity * line.unitPrice - line.discountAmount + line.chargesAmount
+    )
+    const normalizedUnitCost = normalized && netCost !== null ? Math.round((netCost / normalized.baseQuantity) * 1_000_000) / 1_000_000 : null
+    const requiresReview = !item || !normalized || !warehouseId || normalizedUnitCost === null
+      || !math.coherent || math.invalidLineIndexes.includes(index)
+    return {
+      supplier_document_id: document.id,
+      tenant_id: document.tenant_id,
+      venue_id: document.venue_id,
+      line_number: index + 1,
+      supplier_reference: line.supplierReference,
+      description_raw: line.description,
+      description_normalized: normalizeAlias(line.description),
+      barcode: line.barcode,
+      quantity: line.quantity,
+      purchase_unit: line.purchaseUnit,
+      package_count: normalized?.packaging?.packageCount ?? null,
+      package_unit_quantity: normalized?.packaging?.unitQuantity ?? null,
+      package_unit_symbol: normalized?.packaging?.unitSymbol ?? null,
+      unit_price: line.unitPrice,
+      discount_amount: line.discountAmount,
+      charges_amount: line.chargesAmount,
+      gross_cost: line.grossCost,
+      net_cost: netCost,
+      line_total: line.lineTotal,
+      tax_rate: line.taxRate,
+      inventory_item_id: item?.id ?? null,
+      warehouse_id: warehouseId,
+      base_quantity: normalized?.baseQuantity ?? null,
+      normalized_unit_cost: normalizedUnitCost,
+      match_status: requiresReview ? 'needs_review' : match.status,
+      extraction_confidence: line.confidence,
+      raw_extraction_metadata: {
+        matchReason: match.reason,
+        matchScore: match.score,
+        packageExpression: line.packageExpression,
+        learnedPackageExpression: match.packageExpression ?? null,
+        originalInventoryItemId: item?.id ?? null,
+        originalWarehouseId: warehouseId,
+      },
+    }
+  })
+}
+
+async function reparseLinesWithSelectedSupplier(admin: UntypedSupabaseClient, document: DocumentRow, allowOverwrite: boolean) {
+  if (document.status !== 'review' || !document.supplier_id) throw new Error('Selecciona un proveedor existente antes de actualizar las líneas.')
+  if (!document.ocr_snapshot) throw new Error('Este documento no conserva el OCR. No se puede actualizar solo las líneas sin volver a procesarlo.')
+  const ocr = ocrDocumentSchema.parse(document.ocr_snapshot)
+  const [supplierResult, linesResult, previousDocuments] = await Promise.all([
+    admin.from('suppliers').select('id, name, global_supplier_id').eq('id', document.supplier_id)
+      .eq('tenant_id', document.tenant_id).eq('venue_id', document.venue_id).single(),
+    admin.from('supplier_document_lines').select('id, updated_at, was_corrected, reference_cost_decided, update_reference_cost')
+      .eq('supplier_document_id', document.id).order('id'),
+    admin.from('supplier_documents').select('extraction_metadata')
+      .eq('tenant_id', document.tenant_id).eq('venue_id', document.venue_id)
+      .eq('supplier_id', document.supplier_id).eq('status', 'confirmed')
+      .eq('document_type', document.document_type)
+      .order('confirmed_at', { ascending: false }).limit(20),
+  ])
+  for (const result of [supplierResult, linesResult, previousDocuments]) if (result.error) throw result.error
+  if (!supplierResult.data) throw new Error('El proveedor seleccionado ya no está disponible.')
+  if (!allowOverwrite && linesResult.data?.some((line: DbRow) => line.was_corrected || line.reference_cost_decided || line.update_reference_cost)) {
+    return json({ code: 'SUPPLIER_DOCUMENT_REPARSE_CONFIRMATION_REQUIRED', error: 'Las líneas tienen correcciones. Confirma que quieres recalcularlas.' }, 409)
+  }
+  const profiles: Array<{ id: string | null; rules: unknown }> = []
+  if (supplierResult.data.global_supplier_id) {
+    const { data, error } = await admin.from('global_supplier_document_profiles').select('id, rules_json')
+      .eq('global_supplier_id', supplierResult.data.global_supplier_id).eq('document_type', document.document_type)
+      .in('status', ['verified', 'candidate']).order('success_count', { ascending: false })
+    if (error) throw error
+    profiles.push(...(data ?? []).map((profile: DbRow) => ({ id: String(profile.id), rules: profile.rules_json })))
+  }
+  for (const previous of previousDocuments.data ?? []) {
+    const rules = previous.extraction_metadata?.lineParserProfile
+    if (rules) profiles.push({ id: null, rules })
+  }
+  let selected: { id: string | null; rules: unknown; lines: SupplierDocumentExtraction['lines'] } | null = null
+  for (const profile of profiles) {
+    try {
+      const lines = runDeterministicLineParser(profile.rules, ocr)
+      if (!selected || lines.length > selected.lines.length) selected = { ...profile, lines }
+    } catch {
+      // A profile for another layout must not block a later compatible one.
+    }
+  }
+  if (!selected) throw new Error('Este proveedor no tiene un perfil de líneas compatible con el OCR almacenado.')
+  const extraction = parseSupplierDocumentExtraction({
+    document: { type: document.document_type, number: null, date: null, total: null },
+    supplier: { name: null, legalName: null, taxId: null, email: null, phone: null, address: null },
+    supplierResolution: { supplierId: null, confidence: 'unresolved', signals: [], reasons: [] },
+    lines: selected.lines, proposedProfile: null, confidence: ocr.confidence,
+  })
+  const inventory = await loadInventoryContext(admin, document.tenant_id, document.venue_id, document.supplier_id)
+  const { error } = await admin.rpc('replace_supplier_document_lines_from_ocr', {
+    p_document_id: document.id, p_supplier_id: document.supplier_id,
+    p_expected_lines: linesResult.data ?? [], p_allow_overwrite: allowOverwrite,
+    p_lines: buildLineRows(extraction, document, inventory), p_profile_id: selected.id,
+    p_profile_rules: selected.rules,
+  })
+  if (error) {
+    if (error.message.includes('REPARSE_STALE')) throw new Error('Las líneas o el proveedor han cambiado. Recarga el documento antes de actualizar las líneas.')
+    if (error.message.includes('REPARSE_CONFIRMATION_REQUIRED')) throw new Error('Las líneas tienen nuevas correcciones. Recarga el documento y confirma antes de recalcularlas.')
+    throw new Error(error.message)
+  }
+  return json({ documentId: document.id, status: 'review', lineCount: extraction.lines.length })
+}
+
 async function processSupplierDocumentRequest(request: Request) {
   if (request.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (request.method !== 'POST') return json({ error: 'Método no permitido' }, 405)
   let documentId = ''
   let authorizedDocumentId = ''
   let admin: UntypedSupabaseClient | null = null
+  let isLineReparse = false
   try {
     const env = requiredEnvironment()
     const authorization = request.headers.get('Authorization')
@@ -238,17 +377,19 @@ async function processSupplierDocumentRequest(request: Request) {
     const { data: authData, error: authError } = await authClient.auth.getUser()
     if (authError || !authData.user) return json({ error: 'Sesión no válida' }, 401)
     const body = await request.json() as Record<string, unknown>
+    isLineReparse = body.action === 'reparse_lines'
     documentId = String(body.documentId ?? '')
     const fixtureId = typeof body.fixtureId === 'string' ? body.fixtureId : null
     if (!documentId) return json({ error: 'documentId es obligatorio' }, 400)
     const { data: accessibleDocument, error: documentError } = await authClient.from('supplier_documents')
-      .select('id, tenant_id, venue_id, document_type, storage_bucket, storage_path, original_file_name, original_mime_type, status')
+      .select('id, tenant_id, venue_id, supplier_id, document_type, storage_bucket, storage_path, original_file_name, original_mime_type, status, ocr_snapshot, extraction_metadata')
       .eq('id', documentId).maybeSingle()
     if (documentError) throw documentError
     if (!accessibleDocument) return json({ error: 'Documento no encontrado o sin acceso' }, 404)
     authorizedDocumentId = documentId
     const document = accessibleDocument as DocumentRow
     if (document.status === 'confirmed') return json({ error: 'El documento ya está confirmado' }, 409)
+    if (isLineReparse) return await reparseLinesWithSelectedSupplier(admin, document, body.allowOverwrite === true)
     const mockMode = Deno.env.get('SUPPLIER_DOCUMENT_MOCK_MODE') === 'true'
     if (fixtureId && !mockMode) return json({ error: 'Los fixtures solo están disponibles con SUPPLIER_DOCUMENT_MOCK_MODE=true' }, 403)
     const binary = fixtureId ? { bytes: new Uint8Array(), contentType: 'application/mock', fileName: `${fixtureId}.mock` } : await loadBinary(admin, document)
@@ -270,6 +411,8 @@ async function processSupplierDocumentRequest(request: Request) {
       },
     })
     const ocr = nativePdf ?? await ocrProvider.analyze(binary)
+    const { error: snapshotError } = await admin.from('supplier_documents').update({ ocr_snapshot: ocr }).eq('id', document.id)
+    if (snapshotError) throw snapshotError
     const [knowledge, supplierCandidates] = await Promise.all([
       loadGlobalKnowledge(admin),
       loadSupplierCandidates(admin, document.tenant_id, document.venue_id),
@@ -314,7 +457,13 @@ async function processSupplierDocumentRequest(request: Request) {
         parserMode = 'ai'
       }
     }
-    extraction = parseSupplierDocumentExtraction(extraction)
+    if (parserMode === 'deterministic' && !fixture) {
+      const supplierProvider = new OpenAiSupplierDocumentProvider({
+        apiKey: Deno.env.get('OPENAI_API_KEY') ?? '', model: Deno.env.get('OPENAI_SUPPLIER_DOCUMENT_MODEL') ?? '',
+      })
+      extraction = { ...extraction, ...await supplierProvider.extractSupplier(ocr) }
+    }
+    extraction = parseSupplierDocumentExtraction(groundSupplierExtractionInOcr(extraction, ocr))
     const requestedDocumentType = document.document_type
     const documentTypeCorrected = extraction.document.type !== requestedDocumentType
     const math = validateExtractionMath(extraction)
@@ -336,12 +485,11 @@ async function processSupplierDocumentRequest(request: Request) {
       }
     }
     const modelSupplierResolution = extraction.supplierResolution
-    const supplierResolution = resolveSupplierCandidate(extraction.supplier, supplierCandidates, {
-      preferredGlobalSupplierId: globalSupplierId,
-    })
+    const supplierResolution = resolveSupplierCandidate(extraction.supplier, supplierCandidates)
     const supplierId = supplierResolution.confidence === 'high'
       ? supplierResolution.supplierId
       : null
+    const selection = supplierSelection(extraction, supplierResolution)
     const resolvedSupplier = supplierId
       ? supplierCandidates.find((candidate) => candidate.supplierId === supplierId) ?? null
       : null
@@ -372,62 +520,7 @@ async function processSupplierDocumentRequest(request: Request) {
       }
     }
     const inventory = await loadInventoryContext(admin, document.tenant_id, document.venue_id, supplierId)
-    const lineRows = extraction.lines.map((line, index) => {
-      const match = matchInventoryItem(line, inventory.items, inventory.aliases)
-      const item = inventory.items.find((candidate) => candidate.id === match.inventoryItemId) ?? null
-      const baseUnit = inventory.units.find((unit) => unit.id === item?.baseUnitId) ?? null
-      const normalized = baseUnit ? normalizePurchaseToBase({
-        purchaseQuantity: line.quantity,
-        purchaseUnit: line.purchaseUnit,
-        packageExpression: match.packageExpression ?? line.packageExpression,
-        description: line.description,
-        baseUnit,
-        units: inventory.units,
-      }) : null
-      const warehouseId = item ? chooseDefaultWarehouse(item.id, inventory.routes, inventory.warehouses) : null
-      const netCost = line.netCost ?? line.lineTotal ?? (
-        line.unitPrice === null ? null : line.quantity * line.unitPrice - line.discountAmount + line.chargesAmount
-      )
-      const normalizedUnitCost = normalized && netCost !== null ? Math.round((netCost / normalized.baseQuantity) * 1_000_000) / 1_000_000 : null
-      const requiresReview = !item || !normalized || !warehouseId || normalizedUnitCost === null
-        || !math.coherent || math.invalidLineIndexes.includes(index)
-      return {
-        supplier_document_id: document.id,
-        tenant_id: document.tenant_id,
-        venue_id: document.venue_id,
-        line_number: index + 1,
-        supplier_reference: line.supplierReference,
-        description_raw: line.description,
-        description_normalized: normalizeAlias(line.description),
-        barcode: line.barcode,
-        quantity: line.quantity,
-        purchase_unit: line.purchaseUnit,
-        package_count: normalized?.packaging?.packageCount ?? null,
-        package_unit_quantity: normalized?.packaging?.unitQuantity ?? null,
-        package_unit_symbol: normalized?.packaging?.unitSymbol ?? null,
-        unit_price: line.unitPrice,
-        discount_amount: line.discountAmount,
-        charges_amount: line.chargesAmount,
-        gross_cost: line.grossCost,
-        net_cost: netCost,
-        line_total: line.lineTotal,
-        tax_rate: line.taxRate,
-        inventory_item_id: item?.id ?? null,
-        warehouse_id: warehouseId,
-        base_quantity: normalized?.baseQuantity ?? null,
-        normalized_unit_cost: normalizedUnitCost,
-        match_status: requiresReview ? 'needs_review' : match.status,
-        extraction_confidence: line.confidence,
-        raw_extraction_metadata: {
-          matchReason: match.reason,
-          matchScore: match.score,
-          packageExpression: line.packageExpression,
-          learnedPackageExpression: match.packageExpression ?? null,
-          originalInventoryItemId: item?.id ?? null,
-          originalWarehouseId: warehouseId,
-        },
-      }
-    })
+    const lineRows = buildLineRows(extraction, document, inventory)
     const { error: deleteError } = await admin.from('supplier_document_lines').delete().eq('supplier_document_id', document.id)
     if (deleteError) throw deleteError
     const { error: insertError } = await admin.from('supplier_document_lines').insert(lineRows)
@@ -455,15 +548,19 @@ async function processSupplierDocumentRequest(request: Request) {
         profileGenerationRetried,
         profileGenerationError,
         profileParsedLineCount: profileValidation?.parsed?.lines.length ?? null,
+        hasStoredOcr: true,
+        linesSupplierId: supplierId,
+        linesNeedReparse: false,
+        lineParserProfile: profileValidation?.candidate ? extraction.proposedProfile
+          : globalProfileId ? knowledge.profiles.find((profile) => profile.id === globalProfileId)?.rules_json ?? null
+          : fixture?.knownProfile ?? null,
         rejectedProfile: profileValidation && !profileValidation.candidate ? extraction.proposedProfile : null,
         mockFixtureId: fixtureId,
         requestedDocumentType,
         detectedDocumentType: extraction.document.type,
         documentTypeCorrected,
-        supplierExtraction: {
-          ...extraction.supplier,
-          identities: supplierIdentitiesFromExtraction(extraction.supplier),
-        },
+        supplierExtraction: supplierExtractionMetadata(extraction),
+        supplierSelection: selection,
         modelSupplierResolution,
         supplierResolution,
         supplierCandidateCount: supplierCandidates.length,
@@ -481,7 +578,7 @@ async function processSupplierDocumentRequest(request: Request) {
     })
   } catch (error) {
     console.error('process-supplier-document failed', error)
-    if (admin && authorizedDocumentId) {
+    if (admin && authorizedDocumentId && !isLineReparse) {
       await admin.from('supplier_documents').update({
         status: 'error',
         extraction_metadata: {
@@ -513,6 +610,7 @@ Deno.serve(async (request) => {
     const { data: authData, error: authError } = await authClient.auth.getUser()
     if (authError || !authData.user) return json({ error: 'Sesión no válida' }, 401)
     const body = await request.json() as Record<string, unknown>
+    if (body.action === 'reparse_lines') return await processSupplierDocumentRequest(backgroundRequest)
     const documentId = String(body.documentId ?? '')
     const fixtureId = typeof body.fixtureId === 'string' ? body.fixtureId : null
     if (!documentId) return json({ error: 'documentId es obligatorio' }, 400)

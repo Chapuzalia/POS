@@ -3,6 +3,7 @@ import {
   ocrDocumentSchema,
   parseSupplierDocumentExtraction,
   supplierDocumentExtractionJsonSchema,
+  supplierDocumentExtractionSchema,
   supplierProfileRulesJsonSchema,
   supplierProfileRulesSchema,
   type OcrDocument,
@@ -489,6 +490,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
           'En supplier identifica siempre al emisor, vendedor o proveedor que expide el documento; nunca uses el cliente, comprador, destinatario, punto de venta ni dirección de entrega.',
           'supplierExtractionSource es la fuente exclusiva para todos los valores de supplier. No uses conocimiento previo sobre marcas o empresas, contexto general, memoria ni información externa.',
           'No completes ni inventes razón social, NIF/CIF/VAT, email, teléfono o dirección por reconocer una marca. Cada valor debe aparecer explícitamente en el texto OCR recibido; si falta, es dudoso o solo puede inferirse, devuelve null.',
+          'Para cada campo de supplier devuelve en supplierEvidence la cita literal y breve del OCR que lo acredita. La cita debe contener el valor; solo normaliza espacios, puntuación o formato de teléfono/CIF. Si no hay evidencia literal segura, tanto el valor como la evidencia deben ser null, incluido name. No uses la imagen para completar datos del proveedor ausentes del OCR.',
           'supplier.taxId debe ser exclusivamente el identificador fiscal explícito del emisor; si no aparece o no es inequívoco devuelve null y no reutilices el NIF/CIF del destinatario.',
           'No recibes candidatos durante la extracción. La comparación con proveedores existentes se realiza después y fuera de esta respuesta; devuelve supplierResolution con supplierId=null, confidence=unresolved, signals=[] y reasons=[].',
           'No inventes líneas ni valores. Devuelve importes como números decimales.',
@@ -517,6 +519,35 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
     if (!outputText) throw new Error('OPENAI_DOCUMENT_EXTRACTION_EMPTY')
     const grounded = groundSupplierExtractionInOcr(JSON.parse(outputText), input.ocr)
     return parseSupplierDocumentExtraction(grounded)
+  }
+
+  async extractSupplier(ocr: OcrDocument) {
+    const response = await fetch('https://api.openai.com/v1/responses', {
+      method: 'POST',
+      headers: { Authorization: `Bearer ${this.config.apiKey}`, 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        model: this.config.model, store: false,
+        instructions: [
+          'Extrae únicamente la identidad del emisor/vendedor del documento OCR, nunca del cliente o destinatario.',
+          'No uses conocimiento previo, contexto de marcas ni datos externos. No inventes razón social, CIF/NIF/VAT, teléfono, email o dirección.',
+          'Cada valor de supplier debe tener una cita literal breve en supplierEvidence que esté presente en el OCR y contenga el valor. Solo permite normalizaciones de formato, espacios o puntuación.',
+          'Si un campo no aparece o es dudoso devuelve null en valor y evidencia, incluido name. No interpretes productos, fechas ni totales. La resolución con proveedores existentes sucede después.',
+        ].join(' '),
+        input: [{ role: 'user', content: [{ type: 'input_text', text: JSON.stringify({ text: ocr.text, pages: ocr.pages }) }] }],
+        text: { format: { type: 'json_schema', name: 'supplier_identity_extraction', strict: true, schema: {
+          type: 'object', additionalProperties: false, required: ['supplier', 'supplierEvidence'],
+          properties: {
+            supplier: supplierDocumentExtractionJsonSchema.properties.supplier,
+            supplierEvidence: supplierDocumentExtractionJsonSchema.properties.supplierEvidence,
+          },
+        } } },
+      }),
+    })
+    if (!response.ok) throw new Error(`OPENAI_SUPPLIER_EXTRACTION_FAILED:${response.status}`)
+    const output = responseOutputText(await response.json() as Record<string, unknown>)
+    if (!output) throw new Error('OPENAI_SUPPLIER_EXTRACTION_EMPTY')
+    return supplierDocumentExtractionSchema.pick({ supplier: true, supplierEvidence: true })
+      .parse(groundSupplierExtractionInOcr(JSON.parse(output), ocr))
   }
 
   async proposeProfile(input: {

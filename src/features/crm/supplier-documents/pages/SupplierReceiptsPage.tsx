@@ -33,6 +33,7 @@ import {
   loadDeliveryNoteCandidates,
   loadSupplierReceiptWorkspace,
   retrySupplierDocumentProcessing,
+  reparseSupplierDocumentLines,
   saveSupplierDocumentLine,
   supplierDocumentMockEnabled,
   supplierDocumentMockFixtures,
@@ -47,6 +48,7 @@ import type {
   SupplierOption,
   SupplierDocumentType,
 } from "../types";
+import { PROVISIONAL_SUPPLIER, requiresLineReparseConfirmation, supplierReviewState } from "../supplierReview";
 
 type Props = {
   disabled: boolean;
@@ -186,6 +188,8 @@ export function SupplierReceiptsCrm({
   const [affectsStock, setAffectsStock] = useState(true);
   const [linkCandidates, setLinkCandidates] = useState<SupplierDocumentLinkCandidate[] | null>(null);
   const [deliveryNoteIds, setDeliveryNoteIds] = useState<string[]>([]);
+  const [reparseConfirmation, setReparseConfirmation] = useState(false);
+  const supplierReview = detail ? supplierReviewState(detail.document) : null;
 
   const editingLine =
     detail?.lines.find((line) => line.id === editingLineId) ?? null;
@@ -544,7 +548,7 @@ export function SupplierReceiptsCrm({
   async function confirm() {
     if (
       !detail ||
-      !detail.document.supplierId ||
+      !supplierReview?.hasSupplier ||
       !documentDate ||
       (affectsStock && needsReviewCount) ||
       !allCostsDecided
@@ -566,28 +570,32 @@ export function SupplierReceiptsCrm({
     if (
       !detail ||
       isConfirmedDocument ||
-      supplierId === detail.document.supplierId
+      supplierId === supplierReview?.selectedValue
     )
       return;
+    const provisional = supplierId === PROVISIONAL_SUPPLIER && supplierReview?.detectedName;
     const supplier = supplierOptions.find(
       (candidate) => candidate.id === supplierId,
     );
-    if (!supplier) return;
+    if (!supplier && !provisional) return;
+    const selectedSupplierId = provisional ? null : supplierId;
     await run(async () => {
-      await updateSupplierDocumentSupplier(detail.document.id, supplierId);
+      await updateSupplierDocumentSupplier(detail.document.id, selectedSupplierId);
       setDetail((current) =>
         current
           ? {
               ...current,
               document: {
                 ...current.document,
-                supplierId,
-                supplierName: supplier.name,
+                supplierId: selectedSupplierId,
+                supplierName: supplier?.name ?? supplierReview?.detectedName ?? null,
                 extractionMetadata: {
                   ...current.document.extractionMetadata,
+                  supplierSelection: { kind: provisional ? "provisional" : "existing", supplierId: selectedSupplierId, manual: true },
+                  linesNeedReparse: (current.document.extractionMetadata.linesSupplierId ?? null) !== selectedSupplierId,
                   supplierResolution: {
-                    supplierId,
-                    confidence: "high",
+                    supplierId: selectedSupplierId,
+                    confidence: provisional ? "unresolved" : "high",
                     signals: [],
                     reasons: ["manual_selection"],
                   },
@@ -596,6 +604,24 @@ export function SupplierReceiptsCrm({
             }
           : current,
       );
+    });
+  }
+
+  async function updateLinesWithSupplier(allowOverwrite = false) {
+    if (!detail || !supplierReview?.canReparseLines || isConfirmedDocument) return;
+    if (!allowOverwrite && requiresLineReparseConfirmation(detail.lines, Boolean(editingLineId && draft))) {
+      setReparseConfirmation(true);
+      return;
+    }
+    setReparseConfirmation(false);
+    await run(async () => {
+      await reparseSupplierDocumentLines(detail.document.id, allowOverwrite);
+      const workspace = await loadSupplierReceiptWorkspace(tenantContext, selectedVenueId, detail.document.id);
+      setDetail({ document: workspace.document, lines: workspace.lines });
+      setInventory(workspace.inventory);
+      setEditingLineId(null);
+      setDraft(null);
+      // Keep the user's date/stock choices; only the line review was refreshed.
     });
   }
 
@@ -966,7 +992,7 @@ export function SupplierReceiptsCrm({
           <div className="mx-auto max-w-3xl">
             <Button
               className="!min-h-14 !w-full !rounded-2xl !text-base !font-black"
-              disabled={disabled || busy || !detail.document.supplierId || !documentDate || (affectsStock && needsReviewCount > 0) || !allCostsDecided}
+              disabled={disabled || busy || !supplierReview?.hasSupplier || !documentDate || (affectsStock && needsReviewCount > 0) || !allCostsDecided}
               onClick={() => void confirm()}
               type="button"
               variant="primary"
@@ -1001,18 +1027,30 @@ export function SupplierReceiptsCrm({
                 disabled={isConfirmedDocument || busy}
                 emptyMessage="No hay proveedores existentes."
                 onChange={(value) => void changeSupplier(value)}
-                options={supplierOptions.map((supplier) => ({
+                options={[...(supplierReview?.detectedName ? [{
+                  label: `${supplierReview.detectedName} · Nuevo proveedor`,
+                  value: PROVISIONAL_SUPPLIER,
+                  description: "Se creará al confirmar si mantienes esta selección.",
+                }] : []), ...supplierOptions.map((supplier) => ({
                   label: supplier.name,
                   value: supplier.id,
                   description: supplier.taxId
                     ? `NIF/CIF ${supplier.taxId}`
                     : undefined,
-                }))}
+                }))]}
                 placeholder="Selecciona un proveedor"
                 searchable
                 searchPlaceholder="Buscar proveedor..."
-                value={detail.document.supplierId ?? ""}
+                value={supplierReview?.selectedValue ?? ""}
               />
+              {supplierReview?.isProvisional ? (
+                <p className="mt-2 text-xs text-[var(--crm-text-muted)]">Nuevo proveedor detectado. Se creará únicamente al confirmar.</p>
+              ) : null}
+              {!isConfirmedDocument && supplierReview?.canReparseLines ? (
+                <Button className="mt-3" disabled={busy || disabled} onClick={() => void updateLinesWithSupplier()} type="button" variant="secondary">
+                  <RefreshCw className="size-4" /> Actualizar líneas con este proveedor
+                </Button>
+              ) : null}
             </div>
             <p className="mt-1 text-sm text-[var(--crm-text-muted)]">
               {detail.document.documentNumber ?? "Sin número"}
@@ -1200,12 +1238,12 @@ export function SupplierReceiptsCrm({
         <div className="mx-auto max-w-3xl">
           <Button
             className="!min-h-14 !w-full !rounded-2xl !text-base !font-black"
-            disabled={disabled || busy || !detail.document.supplierId || !documentDate || (affectsStock && needsReviewCount > 0)}
+            disabled={disabled || busy || !supplierReview?.hasSupplier || !documentDate || (affectsStock && needsReviewCount > 0)}
             onClick={() => setScreen("costs")}
             type="button"
             variant="primary"
           >
-            {!detail.document.supplierId
+            {!supplierReview?.hasSupplier
               ? "Selecciona un proveedor"
               : affectsStock && needsReviewCount
               ? `Resuelve ${needsReviewCount} ${needsReviewCount === 1 ? "línea" : "líneas"}`
@@ -1215,6 +1253,18 @@ export function SupplierReceiptsCrm({
         </div>
       </div> : null}
 
+      {reparseConfirmation ? (
+        <CrmModal label="Actualizar líneas con este proveedor" onClose={() => setReparseConfirmation(false)}>
+          <div className="grid gap-4 p-5">
+            <h3 className="text-lg font-bold">Recalcular las líneas</h3>
+            <p className="text-sm text-[var(--crm-text-muted)]">Hay correcciones manuales. Las líneas detectadas se recalcularán con el proveedor seleccionado y pueden sobrescribir los cambios no confirmados.</p>
+            <div className="flex justify-end gap-2">
+              <Button disabled={busy} onClick={() => setReparseConfirmation(false)} type="button" variant="tertiary">Cancelar</Button>
+              <Button disabled={busy} onClick={() => void updateLinesWithSupplier(true)} type="button" variant="primary">Recalcular líneas</Button>
+            </div>
+          </div>
+        </CrmModal>
+      ) : null}
       {editingLine && draft ? (
         <CrmModal
           label={`Revisar ${editingLine.descriptionRaw}`}

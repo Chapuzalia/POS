@@ -172,6 +172,13 @@ export const supplierResolutionSchema = z.object({
   reasons: z.array(z.string().trim().min(1).max(200)).max(10),
 }).strict()
 
+export const supplierExtractionFields = ['name', 'legalName', 'taxId', 'email', 'phone', 'address'] as const
+type SupplierExtractionField = typeof supplierExtractionFields[number]
+const supplierEvidenceSchema = z.object({
+  name: nullableText, legalName: nullableText, taxId: nullableText,
+  email: nullableText, phone: nullableText, address: nullableText,
+}).strict()
+
 export const supplierDocumentExtractionSchema = z.object({
   document: z.object({
     type: z.enum(['invoice', 'delivery_note']),
@@ -180,13 +187,14 @@ export const supplierDocumentExtractionSchema = z.object({
     total: nullableMoney,
   }).strict(),
   supplier: z.object({
-    name: z.string().trim().min(1).max(160),
+    name: z.string().trim().min(1).max(160).nullable(),
     legalName: nullableText,
     taxId: nullableText,
     email: nullableText,
     phone: nullableText,
     address: nullableText,
   }).strict(),
+  supplierEvidence: supplierEvidenceSchema.optional(),
   supplierResolution: supplierResolutionSchema,
   lines: z.array(extractedLineSchema).min(1).max(500),
   proposedProfile: supplierProfileRulesBaseSchema.nullable(),
@@ -283,7 +291,7 @@ export const supplierProfileRulesJsonSchema = {
 export const supplierDocumentExtractionJsonSchema = {
   type: 'object',
   additionalProperties: false,
-  required: ['document', 'supplier', 'supplierResolution', 'lines', 'proposedProfile', 'confidence'],
+  required: ['document', 'supplier', 'supplierEvidence', 'supplierResolution', 'lines', 'proposedProfile', 'confidence'],
   properties: {
     document: {
       type: 'object', additionalProperties: false,
@@ -299,13 +307,20 @@ export const supplierDocumentExtractionJsonSchema = {
       type: 'object', additionalProperties: false,
       required: ['name', 'legalName', 'taxId', 'email', 'phone', 'address'],
       properties: {
-        name: { type: 'string' },
+        name: { type: ['string', 'null'] },
         legalName: { type: ['string', 'null'] },
         taxId: { type: ['string', 'null'] },
         email: { type: ['string', 'null'] },
         phone: { type: ['string', 'null'] },
         address: { type: ['string', 'null'] },
       },
+    },
+    supplierEvidence: {
+      type: 'object', additionalProperties: false,
+      required: supplierExtractionFields,
+      properties: Object.fromEntries(supplierExtractionFields.map((field) => [field, {
+        type: ['string', 'null'], description: 'Cita literal del OCR que justifica el valor de supplier; null si no hay evidencia.',
+      }])),
     },
     supplierResolution: {
       type: 'object', additionalProperties: false,
@@ -524,45 +539,38 @@ export function normalizeSupplierAddress(value: string | null | undefined) {
   return normalized.length >= 8 ? normalized : null
 }
 
-type SupplierExtractionField = 'name' | 'legalName' | 'taxId' | 'email' | 'phone' | 'address'
-
 function supplierOcrEvidence(ocr: OcrDocument) {
-  const fragments = [
+  return [
     ocr.text,
     ...ocr.pages.flatMap((page) => [
       page.text,
       ...page.words.map((word) => word.text),
       ...page.tables.flatMap((table) => table.cells.map((cell) => cell.text)),
     ]),
-  ].flatMap((fragment) => fragment.split(/\r?\n/)).map((fragment) => fragment.trim()).filter(Boolean)
-  return {
-    normalizedText: fragments.map(normalizeDocumentText),
-    lowerText: fragments.map((fragment) => fragment.toLocaleLowerCase('es')),
-    compactAlphanumeric: fragments.map((fragment) => fragment.normalize('NFD')
-      .replace(accentPattern, '').toUpperCase().replace(/[^A-Z0-9]/g, '')),
-    compactDigits: fragments.map((fragment) => fragment.replace(/[^0-9]/g, '')),
-  }
+  ].flatMap((fragment) => [fragment, ...fragment.split(/\r?\n/)]).map((fragment) => fragment.trim()).filter(Boolean)
 }
 
 function supplierValueAppearsInOcr(
   field: SupplierExtractionField,
   value: string,
-  evidence: ReturnType<typeof supplierOcrEvidence>,
+  evidence: string,
 ) {
   if (field === 'phone') {
     const normalized = normalizeSupplierPhone(value)
-    return Boolean(normalized && evidence.compactDigits.some((fragment) => fragment.includes(normalized)))
+    const numbers = evidence.match(/\+?\d[\d ()+./-]{5,}\d/g) ?? []
+    return Boolean(normalized && numbers.some((number) => normalizeSupplierPhone(number) === normalized))
   }
   if (field === 'taxId') {
     const normalized = normalizeSupplierTaxId(value)
-    return Boolean(normalized && evidence.compactAlphanumeric.some((fragment) => fragment.includes(normalized)))
+    return Boolean(normalized && new RegExp(`(?:^|[^a-z0-9])${normalized.split('').join('[ .-]*')}(?:$|[^a-z0-9])`, 'i').test(evidence))
   }
   if (field === 'email') {
     const normalized = normalizeSupplierEmail(value)
-    return Boolean(normalized && evidence.lowerText.some((fragment) => fragment.includes(normalized)))
+    const emails = evidence.match(/[^\s<>:]+@[^\s<>,;]+/g) ?? []
+    return Boolean(normalized && emails.some((email) => normalizeSupplierEmail(email) === normalized))
   }
   const normalized = normalizeDocumentText(value)
-  return Boolean(normalized && evidence.normalizedText.some((fragment) => fragment.includes(normalized)))
+  return Boolean(normalized && ` ${normalizeDocumentText(evidence)} `.includes(` ${normalized} `))
 }
 
 /**
@@ -576,6 +584,8 @@ export function groundSupplierExtractionInOcr(input: unknown, ocrInput: OcrDocum
   const ocr = ocrDocumentSchema.parse(ocrInput)
   const supplier = source.supplier as Record<string, unknown>
   const evidence = supplierOcrEvidence(ocr)
+  const suppliedEvidence = source.supplierEvidence && typeof source.supplierEvidence === 'object'
+    ? source.supplierEvidence as Record<string, unknown> : null
   const grounded: Record<SupplierExtractionField, string | null> = {
     name: null,
     legalName: null,
@@ -584,15 +594,43 @@ export function groundSupplierExtractionInOcr(input: unknown, ocrInput: OcrDocum
     phone: null,
     address: null,
   }
-  for (const field of Object.keys(grounded) as SupplierExtractionField[]) {
+  const verifiedEvidence = { ...grounded }
+  for (const field of supplierExtractionFields) {
     const value = typeof supplier[field] === 'string' ? supplier[field].trim() : ''
-    grounded[field] = value && supplierValueAppearsInOcr(field, value, evidence) ? value : null
+    // Legacy/deterministic results have no model evidence; find a literal OCR
+    // fragment. Supplied but invalid evidence must never be silently replaced.
+    const quote = suppliedEvidence
+      ? typeof suppliedEvidence[field] === 'string' ? suppliedEvidence[field].trim() : null
+      : evidence.find((fragment) => fragment.length <= 500 && value && supplierValueAppearsInOcr(field, value, fragment)) ?? null
+    const supported = value && quote && evidence.some((fragment) => fragment.includes(quote))
+      && supplierValueAppearsInOcr(field, value, quote)
+    grounded[field] = supported ? value : null
+    verifiedEvidence[field] = supported ? quote : null
   }
-  if (!grounded.name && grounded.legalName) grounded.name = grounded.legalName
-  if (!grounded.name) {
-    throw new Error('SUPPLIER_EXTRACTION_NOT_GROUNDED: El nombre del proveedor no aparece explícitamente en el OCR.')
+  if (!grounded.name && grounded.legalName) {
+    grounded.name = grounded.legalName
+    verifiedEvidence.name = verifiedEvidence.legalName
   }
-  return { ...source, supplier: grounded }
+  return { ...source, supplier: grounded, supplierEvidence: verifiedEvidence }
+}
+
+export function supplierExtractionMetadata(extraction: SupplierDocumentExtraction) {
+  const fields = Object.fromEntries(supplierExtractionFields.map((field) => [field, {
+    value: extraction.supplier[field], evidence: extraction.supplierEvidence?.[field] ?? null,
+  }]))
+  const identities = supplierIdentitiesFromExtraction(extraction.supplier).flatMap((identity) => {
+    const field = supplierExtractionFields.find((candidate) => extraction.supplier[candidate] === identity.value
+      && extraction.supplierEvidence?.[candidate])
+    return field ? [{ ...identity, evidence: extraction.supplierEvidence?.[field] }] : []
+  })
+  return { ...fields, groundingVersion: 1, identities }
+}
+
+export function supplierSelection(extraction: SupplierDocumentExtraction, resolution: SupplierResolution) {
+  if (resolution.supplierId && resolution.confidence === 'high') {
+    return { kind: 'existing' as const, supplierId: resolution.supplierId }
+  }
+  return { kind: extraction.supplier.name && extraction.supplierEvidence?.name ? 'provisional' as const : 'unresolved' as const, supplierId: null }
 }
 
 export function normalizeSupplierIdentity(type: SupplierIdentityType, value: string | null | undefined) {
@@ -657,10 +695,30 @@ function candidateIdentities(candidate: SupplierCandidate) {
 export function resolveSupplierCandidate(
   supplier: SupplierDocumentExtraction['supplier'],
   candidates: SupplierCandidate[],
-  options: { preferredGlobalSupplierId?: string | null } = {},
 ): SupplierResolution {
   const extracted = supplierIdentitiesFromExtraction(supplier)
-  const indexed = candidates.map((candidate) => ({ candidate, identities: candidateIdentities(candidate) }))
+  const taxId = normalizeSupplierTaxId(supplier.taxId)
+  const indexed = candidates.filter((candidate) => !taxId || !normalizeSupplierTaxId(candidate.taxId)
+    || normalizeSupplierTaxId(candidate.taxId) === taxId)
+    .map((candidate) => ({ candidate, identities: candidateIdentities(candidate).filter((identity) => identity.source !== 'extracted') }))
+  const matchesFor = (type: SupplierIdentityType) => {
+    const values = new Set(extracted.filter((identity) => identity.type === type).map((identity) => identity.normalizedValue))
+    return indexed.filter((entry) => entry.identities.some((identity) => identity.type === type && values.has(identity.normalizedValue)))
+  }
+  const strongMatches = new Map<string, SupplierIdentityType[]>()
+  for (const type of ['tax_id', 'email', 'phone'] as const) {
+    const matches = matchesFor(type)
+    if (matches.length > 1) return { supplierId: null, confidence: 'unresolved', signals: [type], reasons: [`ambiguous_${type}`] }
+    if (matches.length === 1) {
+      const id = matches[0].candidate.supplierId
+      strongMatches.set(id, [...(strongMatches.get(id) ?? []), type])
+    }
+  }
+  if (strongMatches.size > 1) return { supplierId: null, confidence: 'unresolved', signals: [], reasons: ['conflicting_identities'] }
+  if (strongMatches.size === 1) {
+    const [supplierId, signals] = [...strongMatches][0]
+    return { supplierId, confidence: 'high', signals, reasons: [`exact_${signals[0]}`] }
+  }
   const confirmedMatches = new Map<string, Set<SupplierIdentityType>>()
   for (const identity of extracted) {
     for (const entry of indexed) {
@@ -680,24 +738,13 @@ export function resolveSupplierCandidate(
     return { supplierId: null, confidence: 'unresolved', signals: [], reasons: ['ambiguous_user_confirmed_alias'] }
   }
 
-  if (options.preferredGlobalSupplierId) {
-    const preferred = candidates.filter((candidate) => candidate.globalSupplierId === options.preferredGlobalSupplierId)
-    if (preferred.length === 1) {
-      return { supplierId: preferred[0].supplierId, confidence: 'high', signals: [], reasons: ['known_supplier_profile'] }
-    }
-  }
-
-  const priorities: SupplierIdentityType[] = ['tax_id', 'email', 'email_domain', 'phone', 'address', 'name']
+  const priorities: SupplierIdentityType[] = ['name', 'address', 'email_domain']
   for (const type of priorities) {
-    const values = new Set(extracted.filter((identity) => identity.type === type).map((identity) => identity.normalizedValue))
-    if (!values.size) continue
-    const matches = indexed.filter((entry) => entry.identities.some((identity) =>
-      identity.type === type && values.has(identity.normalizedValue),
-    ))
+    const matches = matchesFor(type)
     if (matches.length === 1) {
       return {
         supplierId: matches[0].candidate.supplierId,
-        confidence: type === 'tax_id' || type === 'email' ? 'high' : 'probable',
+        confidence: type === 'name' ? 'high' : 'probable',
         signals: [type],
         reasons: [`exact_${type}`],
       }
@@ -783,11 +830,10 @@ function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000
 }
 
-export function runDeterministicParser(
+export function runDeterministicLineParser(
   inputRules: SupplierProfileRules | unknown,
   ocrInput: OcrDocument | unknown,
-  defaults: { documentType: 'invoice' | 'delivery_note'; supplierName: string; supplierTaxId?: string | null },
-): SupplierDocumentExtraction {
+): ExtractedLine[] {
   const rules = supplierProfileRulesSchema.parse(inputRules)
   const ocr = ocrDocumentSchema.parse(ocrInput)
   if (!profileMatchesOcr(rules, ocr)) throw new Error('PROFILE_FINGERPRINT_MISMATCH')
@@ -900,7 +946,17 @@ export function runDeterministicParser(
     }
   }
   if (!selected) throw new Error(matchedHeaders ? 'PROFILE_LINES_NOT_FOUND' : 'PROFILE_TABLE_NOT_FOUND')
-  const lines = selected.lines
+  return selected.lines
+}
+
+export function runDeterministicParser(
+  inputRules: SupplierProfileRules | unknown,
+  ocrInput: OcrDocument | unknown,
+  defaults: { documentType: 'invoice' | 'delivery_note'; supplierName: string | null; supplierTaxId?: string | null },
+): SupplierDocumentExtraction {
+  const rules = supplierProfileRulesSchema.parse(inputRules)
+  const ocr = ocrDocumentSchema.parse(ocrInput)
+  const lines = runDeterministicLineParser(rules, ocr)
   return supplierDocumentExtractionSchema.parse({
     document: {
       type: defaults.documentType,

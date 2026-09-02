@@ -215,7 +215,7 @@ test('un nombre solo parecido no fuerza asociación y varios nombres iguales que
     [{ supplierId: 'norte', name: 'Distribuciones Norte SL' }],
   )
   assert.equal(exactNameOnly.supplierId, 'norte')
-  assert.equal(exactNameOnly.confidence, 'probable')
+  assert.equal(exactNameOnly.confidence, 'high')
 })
 
 test('un alias confirmado por usuario tiene prioridad sobre el nombre registrado', () => {
@@ -844,11 +844,11 @@ test('las correcciones manuales de proveedor crean identidades reutilizables sin
   assert.match(page, /changeSupplier[\s\S]*updateSupplierDocumentSupplier[\s\S]*setDetail/)
 })
 
-test('el documento sin proveedor resuelto sigue en revisión con selector vacío', () => {
+test('el documento sin proveedor resuelto sigue en revisión con selector disponible', () => {
   assert.match(edgeFunction, /supplier_id: supplierId[\s\S]*status: 'review'/)
   assert.match(page, /placeholder="Selecciona un proveedor"/)
-  assert.match(page, /value=\{detail\.document\.supplierId \?\? ""\}/)
-  assert.match(page, /!detail\.document\.supplierId[\s\S]*Selecciona un proveedor/)
+  assert.match(page, /value=\{supplierReview\?\.selectedValue \?\? ""\}/)
+  assert.match(page, /!supplierReview\?\.hasSupplier[\s\S]*Selecciona un proveedor/)
 })
 
 test('el bucket privado exige el path exacto reservado para un documento accesible', () => {

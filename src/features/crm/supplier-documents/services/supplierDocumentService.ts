@@ -181,13 +181,21 @@ export async function loadSupplierOptions(
   return loadVenueSuppliers(context, venueId)
 }
 
-export async function updateSupplierDocumentSupplier(documentId: string, supplierId: string) {
+export async function updateSupplierDocumentSupplier(documentId: string, supplierId: string | null) {
   const { data, error } = await requireSupabase().rpc('update_supplier_document_supplier', {
     p_document_id: documentId,
     p_supplier_id: supplierId,
   })
   if (error) throw error
-  return data as { documentId: string; supplierId: string; supplierName: string }
+  return data as { documentId: string; supplierId: string | null; supplierName: string }
+}
+
+export async function reparseSupplierDocumentLines(documentId: string, allowOverwrite = false) {
+  const { data, error } = await requireSupabase().functions.invoke('process-supplier-document', {
+    body: { documentId, action: 'reparse_lines', allowOverwrite },
+  })
+  if (error) throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron actualizar las líneas con este proveedor.'))
+  return data as { documentId: string; lineCount: number }
 }
 
 export async function saveSupplierDocumentLine(documentId: string, lineId: string, draft: SupplierDocumentLineDraft) {
@@ -279,6 +287,10 @@ export async function confirmSupplierDocument(input: {
     p_affects_stock: input.affectsStock,
     p_delivery_note_ids: input.deliveryNoteIds ?? [],
   })
-  if (error) throw error
+  if (error) {
+    if (error.message.includes('SUPPLIER_DOCUMENT_SUPPLIER_AMBIGUOUS')) throw new Error('Hay varios proveedores equivalentes. Selecciona el correcto antes de confirmar.')
+    if (error.message.includes('SUPPLIER_DOCUMENT_PROVISIONAL_INVALID')) throw new Error('El proveedor detectado no tiene evidencia suficiente. Selecciona un proveedor existente.')
+    throw error
+  }
   return data as { documentId: string; confirmedAt: string; lineCount?: number; affectsStock: boolean; duplicate: boolean }
 }
