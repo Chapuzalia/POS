@@ -96,9 +96,59 @@ imagen. No requiere migraciones adicionales.
 3. Revisar `extraction_metadata`: provider OCR, confianza, tablas y modo parser.
 4. Probar un formato conocido para confirmar `parserMode=deterministic`.
 5. Probar uno desconocido para confirmar `parserMode=ai` y, si las validaciones
-   matemáticas coinciden, la creación de un perfil `candidate`.
+   matemáticas coinciden, un candidato pendiente en `lineParserProfile`.
 6. Resolver líneas, decidir costes y confirmar; repetir la confirmación para
    comprobar que devuelve `duplicate=true` sin volver a sumar stock.
+
+## Aprendizaje global al confirmar
+
+El procesamiento no inserta `global_suppliers` ni perfiles globales. Las reglas
+validadas permanecen privadas en `extraction_metadata.lineParserProfile`, junto
+con `profileValidation` y `profileParsedLineCount`, incluso cuando el proveedor
+local aún no tiene enlace global.
+
+La migración preparada `20260903110000_supplier_document_global_learning.sql`
+añade una capa a la RPC de confirmación existente. No copia ni cambia la lógica
+de stock, costes o vínculos. Dentro de la misma transacción:
+
+1. Se confirma el proveedor local definitivo (incluida la creación del provisional
+   cuando el usuario lo mantiene).
+2. Se reutiliza `suppliers.global_supplier_id` si ya existe. Si no, se busca por
+   CIF/NIF/VAT normalizado: mayúsculas y solo caracteres alfanuméricos.
+3. Con un identificador local confirmado de formato plausible (6–40 caracteres,
+   al menos un dígito), se reutiliza el global inequívoco o se crea con `name`,
+   `legal_name` y `tax_id` del proveedor local. No se consulta un registro fiscal
+   ni se copian campos de la detección descartada. Sin CIF/enlace no se crea un
+   global por similitud de nombre.
+4. Si hay reglas validadas que produjeron líneas, se asocia o crea un perfil
+   `candidate` del proveedor confirmado. Un cambio manual de A a B asigna el
+   aprendizaje a B, no al provisional A. También se conservan perfiles conocidos
+   usados por el parser determinista o por el reparseo explícito.
+5. La equivalencia de perfiles es igualdad de `rules_json` (JSONB, independiente
+   del orden de claves), dentro del mismo global y tipo de documento. El
+   fingerprint conserva `requiredTexts`. Se reutilizan `candidate`/`verified` y
+   no se reactivan reglas idénticas `deprecated`.
+6. Los contadores existentes de éxitos/correcciones aumentan una sola vez para el
+   perfil definitivo; repetir la confirmación no vuelve a incrementarlos. Un
+   fallo de aprendizaje revierte también los pasos anteriores de confirmación.
+
+El índice de CIF normalizado es único si el catálogo existente lo permite. Si
+hay duplicados históricos, la migración los conserva sin fusionar ni reasignar
+registros: instala el índice de búsqueda y un guard de nuevas escrituras. Las
+colisiones se diagnostican como `ambiguous_tax_id` y no se elige un global al azar.
+La resolución usa un bloqueo por CIF y la deduplicación de perfiles bloquea el
+global correspondiente durante la transacción.
+
+La metadata final añade `globalSupplierResolution` (`existing_link`,
+`existing_by_tax_id`, `created_by_tax_id` o `unresolved`) y
+`globalProfileResolution` (`existing`, `created` o `none`), con IDs y motivo.
+No se hacen backfills automáticos de documentos ya confirmados.
+
+La siguiente factura carga estos perfiles mediante `tryKnownProfiles`. Solo si
+coinciden fingerprint/estructura y se extraen líneas entra en
+`parserMode=deterministic`; de lo contrario conserva el camino IA. Esto se refiere
+al parser de líneas: la extracción de identidad del proveedor mantiene su flujo
+anterior. No cambia OCR ni el sanity check Mistral/Azure.
 
 La extracción de texto PDF nativo está abstraída mediante
 `NativePdfTextExtractor`. La implementación actual devuelve `null` y delega el

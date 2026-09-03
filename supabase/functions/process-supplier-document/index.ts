@@ -505,17 +505,8 @@ async function processSupplierDocumentRequest(request: Request) {
       ? supplierCandidates.find((candidate) => candidate.supplierId === supplierId) ?? null
       : null
     globalSupplierId ??= resolvedSupplier?.globalSupplierId ?? null
-    if (!globalProfileId && profileValidation?.candidate && globalSupplierId && extraction.proposedProfile) {
-      const { data, error } = await admin.from('global_supplier_document_profiles').insert({
-        global_supplier_id: globalSupplierId,
-        document_type: extraction.document.type,
-        fingerprint_json: { requiredTexts: extraction.proposedProfile.requiredTexts },
-        rules_json: extraction.proposedProfile,
-        status: 'candidate',
-      }).select('id').single()
-      if (error) throw error
-      globalProfileId = String(data.id)
-    }
+    // Keep validated rules private in lineParserProfile until confirmation.
+    // The final supplier selection, not OCR detection, owns global learning.
     if (supplierId && extraction.document.number) {
       const { data: duplicate, error } = await admin.from('supplier_documents')
         .select('id, status').eq('tenant_id', document.tenant_id).eq('venue_id', document.venue_id)
@@ -559,7 +550,7 @@ async function processSupplierDocumentRequest(request: Request) {
         profileValidation: profileValidation ? { candidate: profileValidation.candidate, reason: profileValidation.reason } : null,
         profileGenerationRetried,
         profileGenerationError,
-        profileParsedLineCount: profileValidation?.parsed?.lines.length ?? null,
+        profileParsedLineCount: profileValidation?.parsed?.lines.length ?? (parserMode === 'deterministic' ? extraction.lines.length : null),
         hasStoredOcr: true,
         linesSupplierId: supplierId,
         linesNeedReparse: false,
@@ -586,7 +577,8 @@ async function processSupplierDocumentRequest(request: Request) {
       lineCount: lineRows.length,
       needsReviewCount,
       supplierResolution,
-      profileCandidateCreated: Boolean(profileValidation?.candidate && globalProfileId),
+      profileCandidateCreated: false,
+      profileCandidatePending: Boolean(profileValidation?.candidate),
     })
   } catch (error) {
     console.error('process-supplier-document failed', error)

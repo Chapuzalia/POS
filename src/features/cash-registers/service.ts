@@ -187,12 +187,19 @@ export async function loadCashClosing(context: TenantContext, closingId: string)
   return mapClosing(data as ClosingRow)
 }
 
-export async function loadCashClosingHistory(context: TenantContext, limit = 50) {
-  const { data, error } = await client().from('cash_sessions').select(closingColumns)
-    .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'closed')
-    .not('print_snapshot', 'is', null).order('closed_at', { ascending: false }).limit(limit)
-  if (error) throw error
-  return ((data ?? []) as ClosingRow[]).map(mapClosing)
+export async function loadCashClosingHistory(context: TenantContext, limit: number | null = 50) {
+  const closings: CashClosingRecord[] = []
+  while (limit === null || closings.length < limit) {
+    const size = limit === null ? 500 : Math.min(500, limit - closings.length)
+    const { data, error } = await client().from('cash_sessions').select(closingColumns)
+      .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'closed')
+      .not('print_snapshot', 'is', null).order('closed_at', { ascending: false }).order('id')
+      .range(closings.length, closings.length + size - 1)
+    if (error) throw error
+    closings.push(...((data ?? []) as ClosingRow[]).map(mapClosing))
+    if (!data || data.length < size) break
+  }
+  return closings
 }
 
 export async function updateCashClosingCounts(context: TenantContext, input: {

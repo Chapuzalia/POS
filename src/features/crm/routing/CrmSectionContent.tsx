@@ -135,6 +135,7 @@ export function CrmSectionContent({
       />
     case 'x-reports':
       return <CashClosingReportsCrm
+        venues={venues}
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
         disabled={disabled}
         runAction={runAction}
