@@ -6,6 +6,7 @@ import * as core from '../supabase/functions/_shared/supplier-documents/core.ts'
 import * as providers from '../supabase/functions/_shared/supplier-documents/providers.ts'
 import * as fixtures from '../supabase/functions/_shared/supplier-documents/fixtures.ts'
 import * as quality from '../supabase/functions/_shared/supplier-documents/ocrQuality.ts'
+import * as metadata from '../supabase/functions/_shared/supplier-documents/documentMetadata.ts'
 
 const { analyzeOcrWithQuality, validateOcrSanity, OcrQualityError, OCR_QUALITY_MESSAGE } = quality
 const fixture = fixtures.getSupplierDocumentMockFixture('known-supplier')
@@ -304,6 +305,7 @@ async function processWithOcr(mistral, azure, interpretationError = null) {
     '../_shared/supplier-documents/providers.ts': wrappedProviders,
     '../_shared/supplier-documents/fixtures.ts': fixtures,
     '../_shared/supplier-documents/ocrQuality.ts': quality,
+    '../_shared/supplier-documents/documentMetadata.ts': metadata,
   }
   let handler
   const tasks = []

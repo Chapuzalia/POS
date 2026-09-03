@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { extractProfileMetadata } from './documentMetadata.ts'
 
 const nullableText = z.string().trim().max(500).nullable()
 const nullableMoney = z.number().finite().nonnegative().nullable()
@@ -815,13 +816,6 @@ function normalizeProfileField(value: string, field: z.infer<typeof parserFieldS
   return result.trim()
 }
 
-function extractLabelValue(text: string, label: string | null) {
-  if (!label) return null
-  const normalizedLabel = label.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
-  const match = text.match(new RegExp(`${normalizedLabel}\\s*[:#-]?\\s*([^\\n|]+)`, 'i'))
-  return match?.[1]?.trim() || null
-}
-
 function rowMatchesAliases(normalizedRow: string, aliases: string[]) {
   return aliases.some((alias) => normalizedRow.includes(normalizeDocumentText(alias)))
 }
@@ -957,11 +951,12 @@ export function runDeterministicParser(
   const rules = supplierProfileRulesSchema.parse(inputRules)
   const ocr = ocrDocumentSchema.parse(ocrInput)
   const lines = runDeterministicLineParser(rules, ocr)
+  const metadata = extractProfileMetadata(ocr, rules)
   return supplierDocumentExtractionSchema.parse({
     document: {
       type: defaults.documentType,
-      number: extractLabelValue(ocr.text, rules.documentNumberLabel),
-      date: extractLabelValue(ocr.text, rules.documentDateLabel),
+      number: metadata.number.value,
+      date: metadata.date.value,
       total: lines.every((line) => line.lineTotal !== null)
         ? lines.reduce((sum, line) => sum + (line.lineTotal ?? 0), 0)
         : null,

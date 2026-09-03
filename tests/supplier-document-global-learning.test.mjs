@@ -7,10 +7,12 @@ import * as core from '../supabase/functions/_shared/supplier-documents/core.ts'
 import * as providers from '../supabase/functions/_shared/supplier-documents/providers.ts'
 import * as fixtures from '../supabase/functions/_shared/supplier-documents/fixtures.ts'
 import * as quality from '../supabase/functions/_shared/supplier-documents/ocrQuality.ts'
+import * as metadata from '../supabase/functions/_shared/supplier-documents/documentMetadata.ts'
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 const migration = await read('supabase/migrations/20260903110000_supplier_document_global_learning.sql')
 const localMigration = await read('supabase/migrations/20260903090000_supplier_document_provisional_flow.sql')
+const metadataMigration = await read('supabase/migrations/20260903120000_supplier_document_metadata_learning.sql')
 const edgeSource = await read('supabase/functions/process-supplier-document/index.ts')
 const compiledEdge = ts.transpileModule(edgeSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 } }).outputText
 const tenant = '00000000-0000-0000-0000-000000000010'
@@ -367,11 +369,12 @@ test('catálogos antiguos con CIFs equivalentes se conservan sin romper registro
   await assert.rejects(helpers.addGlobal('B.12345678'), /GLOBAL_SUPPLIER_TAX_ID_DUPLICATE/)
 })
 
-async function processEdge(data, { globals = [], profiles = [], suppliers = [] } = {}) {
-  const document = { id: 'new-document', tenant_id: tenant, venue_id: venue, supplier_id: null, document_type: 'delivery_note', status: 'processing', storage_bucket: 'documents', storage_path: 'image', original_mime_type: 'image/jpeg', extraction_metadata: {} }
-  const calls = { interpret: 0, supplier: 0, globalWrites: 0 }
-  const rows = { supplier_documents: [document], global_suppliers: globals, global_supplier_document_profiles: profiles, suppliers }
+async function processEdge(data, { globals = [], profiles = [], suppliers = [], reparse = null } = {}) {
+  const document = reparse?.document ?? { id: 'new-document', tenant_id: tenant, venue_id: venue, supplier_id: null, document_type: 'delivery_note', status: 'processing', storage_bucket: 'documents', storage_path: 'image', original_mime_type: 'image/jpeg', extraction_metadata: {} }
+  const calls = { interpret: 0, supplier: 0, globalWrites: 0, ocr: 0, metadata: 0, proposeProfile: 0 }
+  const rows = { supplier_documents: [document, ...(reparse?.previous ?? [])], supplier_document_lines: reparse?.lines ?? [], global_suppliers: globals, global_supplier_document_profiles: profiles, suppliers }
   const client = {
+    rpc: reparse?.rpc,
     auth: { getUser: async () => ({ data: { user: { id: 'user' } }, error: null }) },
     storage: { from: () => ({ download: async () => ({ data: new Blob(['image']), error: null }) }) },
     from(table) {
@@ -379,7 +382,7 @@ async function processEdge(data, { globals = [], profiles = [], suppliers = [] }
       let single = false
       let write
       return {
-        select() { return this }, order() { return this },
+        select() { return this }, order() { return this }, limit() { return this },
         eq(key, value) { filters.push((row) => row[key] === value); return this },
         neq(key, value) { filters.push((row) => row[key] !== value); return this },
         in(key, values) { filters.push((row) => values.includes(row[key])); return this },
@@ -400,13 +403,15 @@ async function processEdge(data, { globals = [], profiles = [], suppliers = [] }
     '../_shared/supplier-documents/core.ts': core,
     '../_shared/supplier-documents/fixtures.ts': fixtures,
     '../_shared/supplier-documents/ocrQuality.ts': quality,
+    '../_shared/supplier-documents/documentMetadata.ts': metadata,
     '../_shared/supplier-documents/providers.ts': {
       ...providers,
-      createDocumentOcrProvider: () => ({ name: 'mistral', analyze: async () => data.ocr }),
+      createDocumentOcrProvider: () => ({ name: 'mistral', analyze: async () => { calls.ocr++; return data.ocr } }),
       OpenAiSupplierDocumentProvider: class {
         async interpret() { calls.interpret++; return data.extraction }
         async extractSupplier() { calls.supplier++; return { supplier: data.extraction.supplier, supplierEvidence: data.extraction.supplierEvidence } }
-        async proposeProfile() { return data.rules }
+        async proposeProfile() { calls.proposeProfile++; return data.rules }
+        async extractDocumentMetadata() { calls.metadata++; return {} }
       },
     },
   }
@@ -417,11 +422,11 @@ async function processEdge(data, { globals = [], profiles = [], suppliers = [] }
     (name) => modules[name], {}, { env: { get: (key) => env[key] }, serve: (callback) => { handler = callback } },
     { waitUntil: (task) => tasks.push(task) }, { error() {} },
   )
-  const response = await handler(new Request('https://example.test/process', { method: 'POST', headers: { Authorization: 'Bearer test' }, body: JSON.stringify({ documentId: document.id }) }))
-  assert.equal(response.status, 202)
+  const response = await handler(new Request('https://example.test/process', { method: 'POST', headers: { Authorization: 'Bearer test' }, body: JSON.stringify({ documentId: document.id, ...(reparse ? { action: 'reparse_lines' } : {}) }) }))
+  if (!reparse) assert.equal(response.status, 202)
   await Promise.all(tasks)
   assert.equal(calls.globalWrites, 0, 'processing/review nunca crea entidades globales')
-  return { document, calls }
+  return { document, calls, response }
 }
 
 test('OCR conserva el candidato validado en metadata aunque falte global, sin crearlo tampoco si ya existe', async () => {
@@ -434,4 +439,290 @@ test('OCR conserva el candidato validado en metadata aunque falte global, sin cr
     assert.ok(result.document.extraction_metadata.profileParsedLineCount > 0)
     assert.deepEqual(result.document.extraction_metadata.lineParserProfile, detection().rules)
   }
+})
+
+test('metadata incremental y selección global exacta (PostgreSQL efímero, sin base del proyecto)', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  await db.exec(bootstrap)
+  await db.exec(localMigration)
+  await db.exec(migration)
+  await db.exec(metadataMigration)
+  const h = dbHelpers(db)
+  const { query, reset, addGlobal, addSupplier, addProfile, addDocument, document } = h
+  const setup = async (labels = {}) => {
+    await reset()
+    const globalId = await addGlobal()
+    const supplierId = await addSupplier({ globalId })
+    const rules = { ...detection().rules, documentDateLabel: null, documentNumberLabel: null, ...labels }
+    const profileId = await addProfile(globalId, { rules })
+    return { globalId, supplierId, profileId, rules }
+  }
+  const makeDoc = async (context, { date = '07/05/2026', number = '1001', dateLabel = 'FECHA ALBARÁN', extra = '', manual = false, override = {}, type = 'delivery_note' } = {}) => {
+    const ocr = detection().ocr
+    ocr.text = `DISPOCH S.L.\n${dateLabel} ${date}\nNº ALBARÁN ${number}\n${extra}`
+    ocr.pages[0].text = ocr.text
+    const meta = metadata.extractGenericDocumentMetadata(ocr, context.rules).metadata
+    if (manual) meta.date = { ...meta.date, value: null, evidence: null, labelCandidate: null }
+    const id = await addDocument({ ...context, type, number, metadata: { parserMode: 'deterministic', lineParserProfile: context.rules,
+      profileValidation: null, metadataExtraction: { ...meta, ...override } } })
+    await query('update supplier_documents set ocr_snapshot=$2 where id=$1', [id, JSON.stringify(ocr)])
+    return id
+  }
+  const confirm = (id, date = '2026-05-07', number = null) => query("select confirm_supplier_document($1,$2,false,'{}',$3)", [id, date, number])
+  const profile = async (id) => (await query('select * from global_supplier_document_profiles where id=$1', [id]))[0]
+
+  await t.test('manual grounded guarda candidato; una confirmación no aprende y repetirla no suma evidencia', async () => {
+    const context = await setup()
+    const id = await makeDoc(context, { manual: true })
+    await confirm(id)
+    const entry = (await document(id)).extraction_metadata.metadataExtraction.date
+    assert.equal(entry.source, 'manual')
+    assert.equal(entry.labelCandidate, 'FECHA ALBARÁN')
+    assert.equal(entry.learningEligible, true)
+    assert.equal(entry.userModified, true)
+    assert.equal((await profile(context.profileId)).rules_json.documentDateLabel, null)
+    await confirm(id)
+    assert.equal((await profile(context.profileId)).rules_json.documentDateLabel, null)
+    assert.equal((await profile(context.profileId)).success_count, 1)
+  })
+
+  await t.test('manual + generic confirmados aprenden fecha y número; tercer documento usa profile; reglas de líneas intactas', async () => {
+    const context = await setup()
+    await confirm(await makeDoc(context, { manual: true }))
+    const second = await makeDoc(context, { date: '14/05/2026', number: '1002' })
+    // Another review remains open while the second invoice patches metadata.
+    const stale = await makeDoc(context, { date: '21/05/2026', number: '1003' })
+    await confirm(second, '2026-05-14')
+    const learned = await profile(context.profileId)
+    assert.deepEqual(learned.rules_json, { ...context.rules, documentDateLabel: 'FECHA ALBARÁN', documentNumberLabel: 'Nº ALBARÁN' })
+    assert.deepEqual(learned.fingerprint_json, { requiredTexts: context.rules.requiredTexts })
+    const trace = (await document(second)).extraction_metadata.profileMetadataLearning
+    assert.deepEqual(trace.map((entry) => [entry.field, entry.evidenceCount]), [['documentDateLabel', 2], ['documentNumberLabel', 2]])
+    const thirdOcr = (await document(stale)).ocr_snapshot
+    const third = metadata.extractGenericDocumentMetadata(thirdOcr, learned.rules_json).metadata
+    assert.equal(third.date.source, 'profile')
+    assert.equal(third.number.source, 'profile')
+    const nextData = { ...detection(), ocr: { ...thirdOcr, text: `${thirdOcr.text}\n${context.rules.requiredTexts.join(' ')}` } }
+    const edge = await processEdge(nextData, { globals: await query('select * from global_suppliers'),
+      profiles: await query('select * from global_supplier_document_profiles'), suppliers: await query('select * from suppliers') })
+    assert.equal(edge.document.extraction_metadata.parserMode, 'deterministic')
+    assert.equal(edge.document.extraction_metadata.metadataExtraction.date.source, 'profile')
+    assert.equal(edge.calls.interpret, 0)
+    assert.equal(edge.calls.metadata, 0)
+    await confirm(stale, '2026-05-21')
+    assert.equal((await document(stale)).global_profile_id, context.profileId)
+    assert.equal((await query('select * from global_supplier_document_profiles')).length, 1)
+  })
+
+  await t.test('generic + generic y ai grounded + generic también aportan dos evidencias', async () => {
+    for (const source of ['generic', 'ai']) {
+      const context = await setup()
+      const first = await makeDoc(context)
+      await query("update supplier_documents set extraction_metadata=jsonb_set(extraction_metadata,'{metadataExtraction,date,source}',$2) where id=$1", [first, JSON.stringify(source)])
+      await confirm(first)
+      await confirm(await makeDoc(context, { date: '14/05/2026', number: '1002' }), '2026-05-14')
+      assert.equal((await profile(context.profileId)).rules_json.documentDateLabel, 'FECHA ALBARÁN')
+    }
+  })
+
+  await t.test('manual ausente del OCR, generic corregido y evidencia inventada no cuentan', async () => {
+    for (const mode of ['manual-missing', 'generic-modified', 'invented-evidence']) {
+      const context = await setup()
+      const first = await makeDoc(context, { manual: mode === 'manual-missing', extra: mode === 'generic-modified' ? 'OTRA FECHA 08/05/2026' : '' })
+      if (mode === 'invented-evidence') await query("update supplier_documents set extraction_metadata=jsonb_set(extraction_metadata,'{metadataExtraction,date,evidence}','\"INVENTADO 07/05/2026\"') where id=$1", [first])
+      if (mode === 'generic-modified') await query("update supplier_documents set extraction_metadata=jsonb_set(extraction_metadata,'{metadataExtraction,date,value}','\"07/05/2026\"') where id=$1", [first])
+      await confirm(first, mode === 'invented-evidence' ? '2026-05-07' : '2026-05-08')
+      assert.equal((await document(first)).extraction_metadata.metadataExtraction.date.learningEligible, false, mode)
+      await confirm(await makeDoc(context, { date: '14/05/2026', number: '1002' }), '2026-05-14')
+      assert.equal((await profile(context.profileId)).rules_json.documentDateLabel, null, mode)
+    }
+  })
+
+  await t.test('valor repetido bajo etiquetas diferentes o etiqueta con fechas distintas no aprende', async () => {
+    for (const extra of ['FECHA FACTURA 07/05/2026', 'FECHA ALBARÁN 08/05/2026']) {
+      const context = await setup()
+      const id = await makeDoc(context, { extra, manual: true })
+      await confirm(id)
+      assert.equal((await document(id)).extraction_metadata.metadataExtraction.date.learningEligible, false)
+      assert.equal((await profile(context.profileId)).rules_json.documentDateLabel, null)
+    }
+  })
+
+  await t.test('regla de fecha buena no cambia; una mala requiere dos fallos confirmados con nueva etiqueta', async () => {
+    const good = await setup({ documentDateLabel: 'FECHA FACTURA' })
+    for (const number of ['1001', '1002']) await confirm(await makeDoc(good, { number, dateLabel: 'FECHA FACTURA', extra: 'FECHA ALBARÁN 08/05/2026' }))
+    assert.equal((await profile(good.profileId)).rules_json.documentDateLabel, 'FECHA FACTURA')
+    const bad = await setup({ documentDateLabel: 'FECHA ANTIGUA' })
+    await confirm(await makeDoc(bad))
+    assert.equal((await profile(bad.profileId)).rules_json.documentDateLabel, 'FECHA ANTIGUA')
+    await confirm(await makeDoc(bad, { number: '1002' }))
+    assert.equal((await profile(bad.profileId)).rules_json.documentDateLabel, 'FECHA ALBARÁN')
+  })
+
+  await t.test('mismo proveedor con perfiles/tipos distintos no mezcla evidencias', async () => {
+    const first = await setup()
+    const rules = { ...first.rules, optionalTexts: ['OTRA PLANTILLA'] }
+    const second = { ...first, rules, profileId: await addProfile(first.globalId, { rules }) }
+    await confirm(await makeDoc(first))
+    await confirm(await makeDoc(second, { number: '1002' }))
+    assert.equal((await profile(first.profileId)).rules_json.documentDateLabel, null)
+    assert.equal((await profile(second.profileId)).rules_json.documentDateLabel, null)
+    const invoice = { ...first, profileId: await addProfile(first.globalId, { rules: first.rules, type: 'invoice' }) }
+    await confirm(await makeDoc(invoice, { number: '1003', type: 'invoice' }))
+    assert.equal((await profile(invoice.profileId)).rules_json.documentDateLabel, null)
+  })
+
+  await t.test('número manual grounded aprende solo etiquetas y un fallo revierte también las correcciones', async () => {
+    const context = await setup()
+    const first = await makeDoc(context, { override: { number: { value: null, source: 'generic', profileFailed: true } } })
+    await confirm(first, '2026-05-07', '1001')
+    const second = await makeDoc(context, { number: '1002' })
+    await confirm(second, '2026-05-07', '1002')
+    assert.equal((await profile(context.profileId)).rules_json.documentNumberLabel, 'Nº ALBARÁN')
+    const failed = await makeDoc(context, { number: '1003' })
+    await assert.rejects(confirm(failed, '2026-05-07', 'FAIL'), /LEGACY_CONFIRMATION_FAILED/)
+    assert.equal((await document(failed)).document_number, '1003')
+    assert.equal((await document(failed)).status, 'review')
+  })
+
+  await t.test('confirmación admite evidencia en líneas/celdas cercanas, sin aprender de etiquetas distintas al perfil usado', async () => {
+    const context = await setup()
+    for (const separator of ['\n', '\r\n', '|']) {
+      const ocr = detection().ocr
+      ocr.text = `FECHA ALBARÁN${separator}03/09/2026`
+      ocr.pages[0].text = ocr.text
+      const [result] = await query("select supplier_metadata_confirmed_candidate($1,'date','2026-09-03') candidate", [JSON.stringify(ocr)])
+      assert.equal(result.candidate.labelCandidate, 'FECHA ALBARÁN', separator)
+    }
+    const first = await makeDoc(context)
+    await query("update supplier_documents set extraction_metadata=jsonb_set(extraction_metadata,'{metadataExtraction,date,globalProfileId}','\"00000000-0000-0000-0000-000000000088\"') where id=$1", [first])
+    await confirm(first)
+    assert.equal((await document(first)).extraction_metadata.metadataExtraction.date.learningEligible, false)
+    await confirm(await makeDoc(context, { number: '1002' }))
+    assert.equal((await profile(context.profileId)).rules_json.documentDateLabel, null)
+  })
+
+  await t.test('un provisional abierto con perfil antiguo reutiliza su revisión de metadata al confirmar', async () => {
+    const context = await setup()
+    await confirm(await makeDoc(context))
+    await confirm(await makeDoc(context, { number: '1002' }))
+    // Another venue has not created its local supplier yet; its OCR predates the patch.
+    const provisional = await addDocument({ profileId: context.profileId, globalId: context.globalId, tenantId: otherTenant, venueId: otherVenue, metadata: {
+      parserMode: 'deterministic', profileValidation: null, lineParserProfile: context.rules,
+    } })
+    await confirm(provisional)
+    assert.equal((await document(provisional)).global_profile_id, context.profileId)
+    assert.equal((await query('select * from global_supplier_document_profiles')).length, 1)
+  })
+
+  await t.test('selección reutiliza global existente, incluso sin CIF, y el nombre local no se sustituye', async () => {
+    const context = await setup()
+    await query('update suppliers set tax_id=null,name=$2 where id=$1', [context.supplierId, 'cola'])
+    const id = await addDocument()
+    await query('select update_supplier_document_supplier($1,$2)', [id, context.supplierId])
+    assert.equal((await document(id)).global_supplier_id, context.globalId)
+    assert.equal((await query('select name from suppliers'))[0].name, 'cola')
+  })
+
+  await t.test('selección exacta por CIF normalizado persiste enlace local y documento; confirmación usa existing_link', async () => {
+    await reset()
+    const globalId = await addGlobal('B12345678', 'Coca-Cola global')
+    const supplierId = await addSupplier({ name: 'cola', taxId: 'b-123.45678' })
+    const id = await addDocument()
+    await query('select update_supplier_document_supplier($1,$2)', [id, supplierId])
+    assert.equal((await document(id)).global_supplier_id, globalId)
+    assert.equal((await query('select global_supplier_id from suppliers'))[0].global_supplier_id, globalId)
+    await confirm(id)
+    assert.equal((await document(id)).extraction_metadata.globalSupplierResolution.mode, 'existing_link')
+    assert.equal((await query('select * from global_suppliers')).length, 1)
+  })
+
+  await t.test('sin global coincidente o sin CIF no crea ni busca por nombre; respeta tenant/venue', async () => {
+    await reset()
+    await addGlobal('B87654321', 'cola')
+    for (const taxId of [null, 'B12345678']) {
+      const supplierId = await addSupplier({ name: 'cola', taxId })
+      const id = await addDocument()
+      await query('select update_supplier_document_supplier($1,$2)', [id, supplierId])
+      assert.equal((await document(id)).global_supplier_id, null)
+      assert.equal((await query('select * from global_suppliers')).length, 1)
+    }
+    const foreign = await addSupplier({ tenantId: otherTenant, venueId: otherVenue })
+    await assert.rejects(query('select update_supplier_document_supplier($1,$2)', [await addDocument(), foreign]), /SUPPLIER_INVALID/)
+    const [permissions] = await query("select has_function_privilege('authenticated','resolve_supplier_document_existing_global(uuid,uuid)','execute') resolver, has_function_privilege('authenticated','learn_confirmed_supplier_document_metadata(uuid)','execute') learning")
+    assert.equal(permissions.resolver, false)
+    assert.equal(permissions.learning, false)
+  })
+
+  const reparse = async (id, previous = []) => {
+    const row = await document(id)
+    return processEdge(detection(), {
+      globals: await query('select * from global_suppliers'), profiles: await query('select * from global_supplier_document_profiles'), suppliers: await query('select * from suppliers'),
+      reparse: { document: row, lines: await query('select * from supplier_document_lines where supplier_document_id=$1', [id]), previous,
+        rpc: async (name, args) => {
+          try {
+            if (name === 'resolve_supplier_document_existing_global') return { data: (await query('select resolve_supplier_document_existing_global($1,$2) id', [args.p_document_id, args.p_supplier_id]))[0].id }
+            assert.equal(name, 'replace_supplier_document_lines_from_ocr')
+            await query('select replace_supplier_document_lines_from_ocr($1,$2,$3,$4,$5,$6,$7)', [args.p_document_id, args.p_supplier_id, JSON.stringify(args.p_expected_lines), args.p_allow_overwrite, JSON.stringify(args.p_lines), args.p_profile_id, JSON.stringify(args.p_profile_rules)])
+            return { data: null, error: null }
+          } catch (error) { return { data: null, error: { message: error.message } } }
+        } },
+    })
+  }
+  await t.test('reparse tras selección y reparse defensivo enlazan por CIF y usan perfil global sin OCR ni GPT', async () => {
+    for (const selected of [true, false, 'existing-link']) {
+      const context = await setup()
+      if (selected !== 'existing-link') await query('update suppliers set global_supplier_id=null where id=$1', [context.supplierId])
+      const id = await addDocument({ supplierId: context.supplierId, metadata: { supplierExtraction: {} } })
+      const snapshot = (await document(id)).ocr_snapshot
+      snapshot.text = snapshot.text.replaceAll('B12345678', '')
+      snapshot.pages[0].text = snapshot.text
+      await query('update supplier_documents set ocr_snapshot=$2 where id=$1', [id, JSON.stringify(snapshot)])
+      if (selected === true) await query('select update_supplier_document_supplier($1,$2)', [id, context.supplierId])
+      const result = await reparse(id)
+      assert.equal(result.response.status, 200, await result.response.text())
+      assert.equal((await document(id)).global_profile_id, context.profileId)
+      assert.equal((await document(id)).global_supplier_id, context.globalId)
+      assert.equal(result.calls.ocr, 0)
+      assert.equal(result.calls.interpret, 0)
+      assert.equal(result.calls.supplier, 0)
+      assert.equal(result.calls.metadata, 0)
+      assert.equal(result.calls.proposeProfile, 0)
+    }
+  })
+
+  await t.test('perfil global incompatible conserva fallback local; sin compatible deja las líneas intactas', async () => {
+    const context = await setup()
+    await query("update global_supplier_document_profiles set rules_json=jsonb_set(rules_json,'{requiredTexts}','[\"INCOMPATIBLE\"]')")
+    const id = await addDocument({ supplierId: context.supplierId })
+    const previous = [{ id: 'previous', tenant_id: tenant, venue_id: venue, supplier_id: context.supplierId, document_type: 'delivery_note', status: 'confirmed', extraction_metadata: { lineParserProfile: context.rules } }]
+    const result = await reparse(id, previous)
+    assert.equal(result.response.status, 200, await result.response.text())
+    assert.equal((await document(id)).global_profile_id, null)
+    const before = await query('select * from supplier_document_lines where supplier_document_id=$1', [id])
+    const failed = await reparse(id)
+    assert.equal(failed.response.status, 500)
+    assert.match((await failed.response.json()).error, /perfil de líneas compatible/)
+    assert.deepEqual(await query('select * from supplier_document_lines where supplier_document_id=$1', [id]), before)
+    assert.equal(failed.calls.ocr, 0)
+    assert.equal(failed.calls.interpret, 0)
+  })
+})
+
+test('selección manual no elige entre CIFs globales duplicados históricos', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  await db.exec(bootstrap)
+  await db.exec(localMigration)
+  const h = dbHelpers(db)
+  await h.addGlobal('B-12345678')
+  await h.addGlobal('B12345678')
+  await db.exec(migration)
+  await db.exec(metadataMigration)
+  const supplier = await h.addSupplier()
+  const id = await h.addDocument()
+  await h.query('select update_supplier_document_supplier($1,$2)', [id, supplier])
+  assert.equal((await h.document(id)).global_supplier_id, null)
+  assert.equal((await h.query('select * from global_suppliers')).length, 2)
 })

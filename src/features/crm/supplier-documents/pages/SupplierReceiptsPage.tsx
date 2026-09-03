@@ -186,6 +186,7 @@ export function SupplierReceiptsCrm({
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [documentDate, setDocumentDate] = useState("");
+  const [documentNumber, setDocumentNumber] = useState("");
   const [affectsStock, setAffectsStock] = useState(true);
   const [linkCandidates, setLinkCandidates] = useState<SupplierDocumentLinkCandidate[] | null>(null);
   const [deliveryNoteIds, setDeliveryNoteIds] = useState<string[]>([]);
@@ -235,6 +236,7 @@ export function SupplierReceiptsCrm({
     setInventory(workspace.inventory);
     setSupplierOptions(workspace.suppliers);
     setDocumentDate(workspace.document.documentDate ?? "");
+    setDocumentNumber(workspace.document.documentNumber ?? "");
     setAffectsStock(workspace.document.affectsStock);
     setShowAll(
       workspace.document.status === "confirmed" ||
@@ -561,6 +563,7 @@ export function SupplierReceiptsCrm({
       await confirmSupplierDocument({
         documentId: detail.document.id,
         documentDate,
+        documentNumber,
         affectsStock,
         deliveryNoteIds,
       });
@@ -1063,9 +1066,9 @@ export function SupplierReceiptsCrm({
                 </Button>
               ) : null}
             </div>
-            <p className="mt-1 text-sm text-[var(--crm-text-muted)]">
-              {detail.document.documentNumber ?? "Sin número"}
-            </p>
+            <Input className="mt-1" aria-label="Número del documento" placeholder="Sin número"
+              disabled={isConfirmedDocument} maxLength={80} value={documentNumber}
+              onChange={(event) => setDocumentNumber(event.target.value)} />
           </div>
           <Button
             aria-label="Cerrar documento"

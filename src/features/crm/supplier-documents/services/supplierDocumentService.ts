@@ -278,12 +278,14 @@ export async function loadDeliveryNoteCandidates(
 export async function confirmSupplierDocument(input: {
   documentId: string
   documentDate: string
+  documentNumber?: string
   affectsStock: boolean
   deliveryNoteIds?: string[]
 }) {
   const { data, error } = await requireSupabase().rpc('confirm_supplier_document', {
     p_document_id: input.documentId,
     p_document_date: input.documentDate,
+    p_document_number: input.documentNumber ?? null,
     p_affects_stock: input.affectsStock,
     p_delivery_note_ids: input.deliveryNoteIds ?? [],
   })

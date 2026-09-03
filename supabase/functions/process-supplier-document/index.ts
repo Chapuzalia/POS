@@ -33,6 +33,7 @@ import {
   type SupplierDocumentAiProvider,
 } from '../_shared/supplier-documents/providers.ts'
 import { analyzeOcrWithQuality, ocrAttemptMetadata, OcrQualityError } from '../_shared/supplier-documents/ocrQuality.ts'
+import { normalizeMetadataValue, resolveDocumentMetadata } from '../_shared/supplier-documents/documentMetadata.ts'
 
 type UntypedSupabaseClient = ReturnType<typeof createClient<any>>
 declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
@@ -74,11 +75,7 @@ function requiredEnvironment() {
 }
 
 function dateValue(value: string | null) {
-  if (!value) return null
-  if (/^\d{4}-\d{2}-\d{2}$/.test(value)) return value
-  const match = value.match(/^(\d{1,2})[/-](\d{1,2})[/-](\d{4})$/)
-  if (!match) return null
-  return `${match[3]}-${match[2].padStart(2, '0')}-${match[1].padStart(2, '0')}`
+  return normalizeMetadataValue('date', value)
 }
 
 function learnedPackageExpression(value: unknown) {
@@ -317,6 +314,11 @@ async function reparseLinesWithSelectedSupplier(admin: UntypedSupabaseClient, do
   if (!allowOverwrite && linesResult.data?.some((line: DbRow) => line.was_corrected || line.reference_cost_decided || line.update_reference_cost)) {
     return json({ code: 'SUPPLIER_DOCUMENT_REPARSE_CONFIRMATION_REQUIRED', error: 'Las líneas tienen correcciones. Confirma que quieres recalcularlas.' }, 409)
   }
+  const globalResolution = await admin.rpc('resolve_supplier_document_existing_global', {
+    p_document_id: document.id, p_supplier_id: document.supplier_id,
+  })
+  if (globalResolution.error) throw globalResolution.error
+  supplierResult.data.global_supplier_id = globalResolution.data
   const profiles: Array<{ id: string | null; rules: unknown }> = []
   if (supplierResult.data.global_supplier_id) {
     const { data, error } = await admin.from('global_supplier_document_profiles').select('id, rules_json')
@@ -331,7 +333,9 @@ async function reparseLinesWithSelectedSupplier(admin: UntypedSupabaseClient, do
   }
   let selected: { id: string | null; rules: unknown; lines: SupplierDocumentExtraction['lines'] } | null = null
   for (const profile of profiles) {
+    if (selected?.id && !profile.id) break // Local history is only a fallback after global profiles.
     try {
+      if (!profileMatchesOcr(supplierProfileRulesSchema.parse(profile.rules), ocr)) continue
       const lines = runDeterministicLineParser(profile.rules, ocr)
       if (!selected || lines.length > selected.lines.length) selected = { ...profile, lines }
     } catch {
@@ -495,6 +499,23 @@ async function processSupplierDocumentRequest(request: Request) {
         profileGenerationError = error instanceof Error ? error.message : 'PROFILE_GENERATION_FAILED'
       }
     }
+    const lineParserProfile = profileValidation?.candidate ? extraction.proposedProfile
+      : globalProfileId ? knowledge.profiles.find((profile) => profile.id === globalProfileId)?.rules_json ?? null
+      : fixture?.knownProfile ?? null
+    const parsedRules = supplierProfileRulesSchema.safeParse(lineParserProfile)
+    const documentMetadata = await resolveDocumentMetadata({
+      ocr, rules: parsedRules.success ? parsedRules.data : null,
+      extract: fixture ? undefined : async (input) => {
+        const provider = aiProvider ?? new OpenAiSupplierDocumentProvider({
+          apiKey: Deno.env.get('OPENAI_API_KEY') ?? '', model: Deno.env.get('OPENAI_SUPPLIER_DOCUMENT_MODEL') ?? '',
+        })
+        return provider.extractDocumentMetadata ? provider.extractDocumentMetadata(input) : {}
+      },
+    })
+    const metadataExtraction = Object.fromEntries(Object.entries(documentMetadata.metadata)
+      .map(([field, entry]) => [field, { ...entry, globalProfileId }]))
+    extraction = { ...extraction, document: { ...extraction.document,
+      date: documentMetadata.metadata.date.value, number: documentMetadata.metadata.number.value } }
     const modelSupplierResolution = extraction.supplierResolution
     const supplierResolution = resolveSupplierCandidate(extraction.supplier, supplierCandidates)
     const supplierId = supplierResolution.confidence === 'high'
@@ -550,13 +571,13 @@ async function processSupplierDocumentRequest(request: Request) {
         profileValidation: profileValidation ? { candidate: profileValidation.candidate, reason: profileValidation.reason } : null,
         profileGenerationRetried,
         profileGenerationError,
+        metadataExtraction,
+        metadataAiError: documentMetadata.aiError,
         profileParsedLineCount: profileValidation?.parsed?.lines.length ?? (parserMode === 'deterministic' ? extraction.lines.length : null),
         hasStoredOcr: true,
         linesSupplierId: supplierId,
         linesNeedReparse: false,
-        lineParserProfile: profileValidation?.candidate ? extraction.proposedProfile
-          : globalProfileId ? knowledge.profiles.find((profile) => profile.id === globalProfileId)?.rules_json ?? null
-          : fixture?.knownProfile ?? null,
+        lineParserProfile,
         rejectedProfile: profileValidation && !profileValidation.candidate ? extraction.proposedProfile : null,
         mockFixtureId: fixtureId,
         requestedDocumentType,

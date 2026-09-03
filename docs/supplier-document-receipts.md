@@ -150,6 +150,56 @@ coinciden fingerprint/estructura y se extraen líneas entra en
 al parser de líneas: la extracción de identidad del proveedor mantiene su flujo
 anterior. No cambia OCR ni el sanity check Mistral/Azure.
 
+## Metadata incremental y selección manual
+
+La migración preparada `20260903120000_supplier_document_metadata_learning.sql`
+no se aplica automáticamente. Añade aprendizaje de etiquetas a la confirmación
+y resolución exacta de globals existentes al seleccionar/reparsear un proveedor.
+
+Fecha y número tienen una cadena independiente de las líneas: **profile → generic
+→ IA de metadata, solo si sigue ambiguo → usuario**. Un fallo de metadata no
+reinterpreta las líneas ni genera otro perfil. Generic busca pares etiqueta/valor
+en texto, líneas contiguas y filas OCR; admite fechas con `/`, `-` o `.`, comprueba
+el calendario y conserva prefijos del número. Descarta vencimiento, entrega,
+pedido, pago e identificadores fiscales. Varias alternativas no se eligen al azar.
+La llamada IA puntual usa el modelo ya configurado y solo solicita fecha/número;
+su respuesta vuelve a comprobarse contra el OCR. No recibe autoridad para cambiar
+líneas, proveedor o reglas.
+
+`extraction_metadata.metadataExtraction` conserva valor, source, evidence literal,
+labelCandidate, confidence, userModified, etiqueta/ID del perfil usado y si falló.
+Al confirmar, la RPC vuelve a buscar el valor definitivo en `ocr_snapshot` y
+comprueba también la cita. Una entrada manual solo tiene candidato cuando hay un
+par inequívoco. Cambiar una propuesta generic/AI la excluye como evidencia positiva.
+El número se puede corregir en su campo actual de revisión; no hay nueva pantalla.
+
+Solo documentos confirmados del mismo global, **mismo ID de perfil** y tipo de
+documento aportan evidencias. Hacen falta al menos dos documentos con la misma
+etiqueta normalizada, fallo de la regla anterior y ninguna etiqueta competidora.
+No basta repetir la confirmación. Una regla que funciona no cambia. El aprendizaje
+usa únicamente `jsonb_set` sobre `documentDateLabel` o `documentNumberLabel`: no
+modifica columnas, grupos, packaging, normalizaciones, fingerprint ni contadores
+fuera de la confirmación habitual. `profileMetadataLearning` registra campo,
+anterior/nueva etiqueta, perfil y número de evidencias. Nunca aprende fechas o
+números concretos como reglas. Las evidencias siguen en documentos, sin tabla nueva.
+Los reviews anteriores a un patch conservan el perfil conocido bajo bloqueo,
+incluidos los provisionales; una revisión de metadata no duplica el perfil.
+
+Seleccionar un supplier existente reutiliza su enlace global o busca **solo por
+su CIF registrado y normalizado**, nunca por el OCR ni por el nombre local. Una
+coincidencia persiste el enlace en supplier y documento inmediatamente; cero,
+varias o ausencia de CIF dejan el enlace sin resolver. No crea globals ni perfiles.
+El reparse llama defensivamente al mismo helper y prioriza perfiles globales
+compatibles antes del histórico local. Usa exclusivamente `ocr_snapshot` y parser
+de líneas: no OCR, extracción de proveedor, IA de metadata ni generación de perfiles.
+Sin perfil compatible mantiene el error recuperable y las líneas intactas. La
+creación global sigue reservada a confirmación, que reutiliza enlaces resueltos.
+
+La RPC de confirmación acepta ahora `p_document_number` opcional; omitirlo conserva
+el valor previo y enviar cadena vacía lo limpia. El resto del contrato y la
+transacción de stock/costes/vínculos se delegan sin cambios. Desplegar esta migración
+antes que los clientes/Edge que usan el nuevo parámetro/helper.
+
 La extracción de texto PDF nativo está abstraída mediante
 `NativePdfTextExtractor`. La implementación actual devuelve `null` y delega el
 PDF completo en el provider OCR seleccionado hasta que se seleccione una
