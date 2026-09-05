@@ -779,7 +779,10 @@ export function supplierIdentityMatches(
 }
 
 export function profileMatchesOcr(rules: SupplierProfileRules, ocr: OcrDocument) {
-  const haystack = normalizeDocumentText(ocr.text)
+  const haystack = normalizeDocumentText([
+    ocr.text,
+    ...ocr.pages.flatMap((page) => page.tables.flatMap((table) => table.cells.map((cell) => cell.text))),
+  ].join(' '))
   return rules.requiredTexts.every((text) => haystack.includes(normalizeDocumentText(text)))
 }
 
@@ -834,7 +837,8 @@ export function runDeterministicLineParser(
   let selected: { lines: ExtractedLine[]; score: number } | null = null
   let matchedHeaders = false
   for (const page of ocr.pages) {
-    for (const table of page.tables) {
+    for (let tableIndex = 0; tableIndex < page.tables.length; tableIndex += 1) {
+      const table = page.tables[tableIndex]
       const matrix = tableMatrix(table)
       const normalizedTableText = normalizeDocumentText(matrix.flat().join(' '))
       for (let headerRowIndex = 0; headerRowIndex < matrix.length; headerRowIndex += 1) {
@@ -854,88 +858,100 @@ export function runDeterministicLineParser(
         const requiredColumns = rules.columns.filter((column) => column.required)
         if (!requiredColumns.every((column) => indexes.has(column.field))) continue
         matchedHeaders = true
-        const lines: ExtractedLine[] = []
-        const dataRows = matrix.slice(headerRowIndex + 1)
-        let tableEnded = false
-        for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
-          const row = dataRows[rowIndex]
-          const normalizedRow = normalizeDocumentText(row.join(' '))
-          if (rules.tableEndText && normalizedRow.includes(normalizeDocumentText(rules.tableEndText))) break
-          const get = (sourceRow: string[], field: z.infer<typeof parserFieldSchema>) => {
-            const index = indexes.get(field)
-            return index === undefined ? '' : normalizeProfileField(sourceRow[index] ?? '', field, rules)
-          }
-          const description = get(row, 'description')
-          const quantity = parseProfileNumber(get(row, 'quantity'), rules)
-          if (!description || quantity === null || quantity <= 0) continue
-          const unitPrice = parseProfileNumber(get(row, 'unitPrice'), rules)
-          let discountAmount = Math.abs(parseProfileNumber(get(row, 'discountAmount'), rules) ?? 0)
-          let chargesAmount = 0
-          const mainRowTotal = parseProfileNumber(get(row, 'lineTotal'), rules)
-          const grossCost = unitPrice === null ? mainRowTotal : roundMoney(quantity * unitPrice)
-          let groupedNetTotal: number | null = null
-
-          if (rules.lineGroup) {
-            const continuationLimit = Math.min(dataRows.length, rowIndex + 1 + rules.lineGroup.maxContinuationRows)
-            let continuationIndex = rowIndex + 1
-            for (; continuationIndex < continuationLimit; continuationIndex += 1) {
-              const continuationRow = dataRows[continuationIndex]
-              const continuationText = normalizeDocumentText(continuationRow.join(' '))
-              const continuationDescription = get(continuationRow, 'description')
-              const continuationQuantity = parseProfileNumber(get(continuationRow, 'quantity'), rules)
-              if (continuationDescription && continuationQuantity !== null && continuationQuantity > 0) break
-
-              const amount = parseProfileNumber(get(continuationRow, 'lineTotal'), rules)
-              if (rowMatchesAliases(continuationText, rules.lineGroup.endAliases)) {
-                if (rules.lineGroup.netTotalFromEndRow && amount !== null) groupedNetTotal = Math.abs(amount)
-                continuationIndex += 1
-                break
-              }
-              if (rules.tableEndText && continuationText.includes(normalizeDocumentText(rules.tableEndText))) {
-                tableEnded = true
-                break
-              }
-              if (rowMatchesAliases(continuationText, rules.lineGroup.discountAliases)) {
-                if (amount !== null) discountAmount = roundMoney(discountAmount + Math.abs(amount))
-                continue
-              }
-              if (rowMatchesAliases(continuationText, rules.lineGroup.chargeAliases)) {
-                if (amount !== null) chargesAmount = roundMoney(chargesAmount + Math.abs(amount))
-              }
+        let dataRows = matrix.slice(headerRowIndex + 1)
+        let usedFollowingTable = false
+        while (true) {
+          const lines: ExtractedLine[] = []
+          let tableEnded = false
+          for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
+            const row = dataRows[rowIndex]
+            const normalizedRow = normalizeDocumentText(row.join(' '))
+            if (rules.tableEndText && normalizedRow.includes(normalizeDocumentText(rules.tableEndText))) break
+            const get = (sourceRow: string[], field: z.infer<typeof parserFieldSchema>) => {
+              const index = indexes.get(field)
+              return index === undefined ? '' : normalizeProfileField(sourceRow[index] ?? '', field, rules)
             }
-            rowIndex = continuationIndex - 1
-          }
+            const description = get(row, 'description')
+            const quantity = parseProfileNumber(get(row, 'quantity'), rules)
+            if (!description || quantity === null || quantity <= 0) continue
+            const unitPrice = parseProfileNumber(get(row, 'unitPrice'), rules)
+            let discountAmount = Math.abs(parseProfileNumber(get(row, 'discountAmount'), rules) ?? 0)
+            let chargesAmount = 0
+            const mainRowTotal = parseProfileNumber(get(row, 'lineTotal'), rules)
+            const grossCost = unitPrice === null ? mainRowTotal : roundMoney(quantity * unitPrice)
+            let groupedNetTotal: number | null = null
 
-          const calculatedNetTotal = grossCost === null
-            ? mainRowTotal
-            : roundMoney(grossCost - discountAmount + chargesAmount)
-          const lineTotal = rules.lineGroup ? (groupedNetTotal ?? calculatedNetTotal) : mainRowTotal
-          const taxRate = parseProfileNumber(get(row, 'taxRate'), rules)
-          const parsedLine = extractedLineSchema.safeParse({
-            supplierReference: get(row, 'supplierReference') || null,
-            description,
-            barcode: get(row, 'barcode') || null,
-            quantity,
-            purchaseUnit: get(row, 'purchaseUnit') || null,
-            unitPrice,
-            discountAmount,
-            chargesAmount,
-            grossCost,
-            netCost: lineTotal,
-            lineTotal,
-            taxRate,
-            packageExpression: packagingPattern.exec(description)?.[0] ?? null,
-            confidence: ocr.confidence,
-          })
-          if (parsedLine.success) lines.push(parsedLine.data)
-          if (tableEnded) break
+            if (rules.lineGroup) {
+              const continuationLimit = Math.min(dataRows.length, rowIndex + 1 + rules.lineGroup.maxContinuationRows)
+              let continuationIndex = rowIndex + 1
+              for (; continuationIndex < continuationLimit; continuationIndex += 1) {
+                const continuationRow = dataRows[continuationIndex]
+                const continuationText = normalizeDocumentText(continuationRow.join(' '))
+                const continuationDescription = get(continuationRow, 'description')
+                const continuationQuantity = parseProfileNumber(get(continuationRow, 'quantity'), rules)
+                if (continuationDescription && continuationQuantity !== null && continuationQuantity > 0) break
+
+                const amount = parseProfileNumber(get(continuationRow, 'lineTotal'), rules)
+                if (rowMatchesAliases(continuationText, rules.lineGroup.endAliases)) {
+                  if (rules.lineGroup.netTotalFromEndRow && amount !== null) groupedNetTotal = Math.abs(amount)
+                  continuationIndex += 1
+                  break
+                }
+                if (rules.tableEndText && continuationText.includes(normalizeDocumentText(rules.tableEndText))) {
+                  tableEnded = true
+                  break
+                }
+                if (rowMatchesAliases(continuationText, rules.lineGroup.discountAliases)) {
+                  if (amount !== null) discountAmount = roundMoney(discountAmount + Math.abs(amount))
+                  continue
+                }
+                if (rowMatchesAliases(continuationText, rules.lineGroup.chargeAliases)) {
+                  if (amount !== null) chargesAmount = roundMoney(chargesAmount + Math.abs(amount))
+                }
+              }
+              rowIndex = continuationIndex - 1
+            }
+
+            const calculatedNetTotal = grossCost === null
+              ? mainRowTotal
+              : roundMoney(grossCost - discountAmount + chargesAmount)
+            const lineTotal = rules.lineGroup ? (groupedNetTotal ?? calculatedNetTotal) : mainRowTotal
+            const taxRate = parseProfileNumber(get(row, 'taxRate'), rules)
+            const parsedLine = extractedLineSchema.safeParse({
+              supplierReference: get(row, 'supplierReference') || null,
+              description,
+              barcode: get(row, 'barcode') || null,
+              quantity,
+              purchaseUnit: get(row, 'purchaseUnit') || null,
+              unitPrice,
+              discountAmount,
+              chargesAmount,
+              grossCost,
+              netCost: lineTotal,
+              lineTotal,
+              taxRate,
+              packageExpression: packagingPattern.exec(description)?.[0] ?? null,
+              confidence: ocr.confidence,
+            })
+            if (parsedLine.success) lines.push(parsedLine.data)
+            if (tableEnded) break
+          }
+          if (lines.length === 0 && !usedFollowingTable) {
+            const followingTable = page.tables[tableIndex + 1]
+            if (followingTable?.columnCount === table.columnCount) {
+              dataRows = tableMatrix(followingTable)
+              usedFollowingTable = true
+              continue
+            }
+          }
+          if (lines.length === 0) break
+          const markerScore = [rules.tableStartText, rules.tableEndText]
+            .filter((marker): marker is string => Boolean(marker))
+            .filter((marker) => normalizedTableText.includes(normalizeDocumentText(marker))).length
+          const score = lines.length * 1_000 + indexes.size * 10 + markerScore * 100 - headerRowIndex
+          if (!selected || score > selected.score) selected = { lines, score }
+          break
         }
-        if (lines.length === 0) continue
-        const markerScore = [rules.tableStartText, rules.tableEndText]
-          .filter((marker): marker is string => Boolean(marker))
-          .filter((marker) => normalizedTableText.includes(normalizeDocumentText(marker))).length
-        const score = lines.length * 1_000 + indexes.size * 10 + markerScore * 100 - headerRowIndex
-        if (!selected || score > selected.score) selected = { lines, score }
       }
     }
   }

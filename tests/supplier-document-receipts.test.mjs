@@ -10,7 +10,9 @@ import {
   normalizeSupplierTaxId,
   parseSupplierDocumentExtraction,
   parsePackagingExpression,
+  profileMatchesOcr,
   resolveSupplierCandidate,
+  runDeterministicLineParser,
   runDeterministicParser,
   sanitizeSupplierDocumentExtraction,
   supplierIdentityMatches,
@@ -285,6 +287,69 @@ test('el parser determinista usa la tabla OCR y el schema declarativo', () => {
   assert.equal(parsed.lines[0].quantity, 2)
   assert.equal(parsed.lines[0].lineTotal, 29)
   assert.equal(validateExtractionMath(parsed).coherent, true)
+})
+
+test('el fingerprint encuentra requiredTexts presentes únicamente en celdas de tablas', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  assert.ok(fixture?.knownProfile)
+  const ocr = structuredClone(fixture.ocr)
+  ocr.text = 'DISTRIBUCIONES DEMO'
+  ocr.pages[0].text = ocr.text
+  ocr.pages[0].tables[0].cells[0].text = 'Codi'
+  ocr.pages[0].tables[0].cells[1].text = 'Descripció'
+  const rules = { ...fixture.knownProfile, requiredTexts: ['DISTRIBUCIONES DEMO', 'Codi', 'Descripció'] }
+
+  assert.equal(profileMatchesOcr(rules, ocr), true)
+})
+
+test('el parser reutiliza la cabecera cuando Mistral separa los productos en la tabla consecutiva', () => {
+  const headers = ['Codi', 'Descripció', 'IBEE', 'QUAN', 'PREU', 'TOT.DTES.', 'IMPORT', 'IVA']
+  const product = ['A-100', 'Aigua mineral 1L', '0,05', '2', '10,00', '0,00', '20,00', '21']
+  const cells = (rows) => rows.flatMap((row, rowIndex) => row.map((text, columnIndex) => ({
+    rowIndex, columnIndex, rowSpan: 1, columnSpan: 1, text, confidence: 0.98,
+  })))
+  const ocr = {
+    provider: 'mistral', confidence: 0.98, text: 'PROVEÏDOR CATALÀ', metadata: {},
+    pages: [{
+      pageNumber: 1, width: 1200, height: 1600, unit: 'pixel', text: 'PROVEÏDOR CATALÀ',
+      words: [], confidence: 0.98,
+      tables: [
+        { rowCount: 1, columnCount: 8, cells: cells([headers]) },
+        { rowCount: 1, columnCount: 8, cells: cells([product]) },
+      ],
+    }],
+  }
+  const rules = {
+    version: 1,
+    requiredTexts: ['PROVEÏDOR CATALÀ', 'Codi', 'Descripció'],
+    optionalTexts: [],
+    tableStartText: 'Codi',
+    tableEndText: null,
+    decimalSeparator: ',',
+    thousandsSeparator: '.',
+    documentNumberLabel: null,
+    documentDateLabel: null,
+    lineGroup: null,
+    columns: [
+      { field: 'supplierReference', headerAliases: ['Codi'], required: true },
+      { field: 'description', headerAliases: ['Descripció'], required: true },
+      { field: 'quantity', headerAliases: ['QUAN'], required: true },
+      { field: 'unitPrice', headerAliases: ['PREU'], required: true },
+      { field: 'discountAmount', headerAliases: ['TOT.DTES.'], required: false },
+      { field: 'lineTotal', headerAliases: ['IMPORT'], required: true },
+      { field: 'taxRate', headerAliases: ['IVA'], required: false },
+    ],
+    normalizations: [],
+  }
+
+  const lines = runDeterministicLineParser(rules, ocr)
+  assert.equal(lines.length, 1)
+  assert.equal(lines[0].supplierReference, 'A-100')
+  assert.equal(lines[0].description, 'Aigua mineral 1L')
+  assert.equal(lines[0].quantity, 2)
+  assert.equal(lines[0].unitPrice, 10)
+  assert.equal(lines[0].lineTotal, 20)
+  assert.equal(lines[0].taxRate, 21)
 })
 
 test('headerAliases con un string vacío se sanea a un array vacío válido', () => {
