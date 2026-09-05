@@ -238,7 +238,7 @@ test('adaptadores reales: markdown aberrante de Mistral activa Azure prebuilt-la
 const edgeSource = await readFile(new URL('../supabase/functions/process-supplier-document/index.ts', import.meta.url), 'utf8')
 const compiledEdge = ts.transpileModule(edgeSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 } }).outputText
 
-async function processWithOcr(mistral, azure, interpretationError = null) {
+async function processWithOcr(mistral, azure, interpretationError = null, scanningEnabled = true) {
   const document = {
     id: 'document', tenant_id: 'tenant', venue_id: 'venue', supplier_id: null,
     document_type: 'delivery_note', status: 'processing', storage_bucket: 'documents', storage_path: 'document.jpg',
@@ -250,6 +250,10 @@ async function processWithOcr(mistral, azure, interpretationError = null) {
   const tablesRead = []
   const lineRows = []
   const client = {
+    rpc: async (name) => {
+      assert.equal(name, 'assert_supplier_document_scanning')
+      return { error: scanningEnabled ? null : { message: 'SUPPLIER_DOCUMENT_SCANNING_DISABLED' } }
+    },
     auth: { getUser: async () => ({ data: { user: { id: 'user' } }, error: null }) },
     storage: { from: () => ({ download: async () => ({ data: new Blob([binary.bytes]), error: null }) }) },
     from(table) {
@@ -318,7 +322,7 @@ async function processWithOcr(mistral, azure, interpretationError = null) {
   const response = await handler(new Request('https://example.test/process', {
     method: 'POST', headers: { Authorization: 'Bearer test', 'Content-Type': 'application/json' }, body: JSON.stringify({ documentId: document.id }),
   }))
-  assert.equal(response.status, 202)
+  assert.equal(response.status, scanningEnabled ? 202 : 403)
   await Promise.all(tasks)
   return { document, writes, calls, tablesRead, lineRows }
 }
@@ -375,4 +379,11 @@ test('UI de calidad usa mensaje seguro y Volver a escanear abre captura sin rein
   assert.match(button, /setDetail\(null\)/)
   assert.match(button, /setScreen\("capture"\)/)
   assert.doesNotMatch(button, /retrySupplierDocumentProcessing/)
+})
+
+test('addon desactivado: rechaza la Edge antes de OCR, IA, procesamiento en segundo plano o escrituras', async () => {
+  const result = await processWithOcr(normal(), null, null, false)
+  assert.deepEqual(result.calls, { ocr: [], ai: 0, parser: 0, matching: 0, profiles: 0 })
+  assert.equal(result.writes.length, 0)
+  assert.equal(result.lineRows.length, 0)
 })

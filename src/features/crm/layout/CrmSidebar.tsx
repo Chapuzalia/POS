@@ -125,6 +125,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
   }, [activeSection])
 
   const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features))
+  const allowedPurchaseItems = allowed(purchaseNavItems)
   const allowedInventoryItems = allowed(inventoryNavItems)
     .filter((item) => inventoryEnabled || item.id === 'inventory-stock')
   const navigate = (section: CrmSection) => {
@@ -179,7 +180,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
             <div className="!grid !gap-[3px]">
               <SidebarCollapsible activeSection={activeSection} icon={Boxes} isOpen={isProductsOpen} items={allowed(productNavItems)} label="Productos" onNavigate={navigate} onToggle={() => setIsProductsOpen((value) => !value)} sections={productSections} />
               {allowedInventoryItems.length ? <SidebarCollapsible activeSection={activeSection} icon={Package} isOpen={isInventoryOpen} items={allowedInventoryItems} label="Inventario" onNavigate={navigate} onToggle={() => setIsInventoryOpen((value) => !value)} sections={inventorySections} /> : null}
-              <SidebarCollapsible activeSection={activeSection} icon={ShoppingCart} isOpen={isPurchasesOpen} items={allowed(purchaseNavItems)} label="Compras" onNavigate={navigate} onToggle={() => setIsPurchasesOpen((value) => !value)} sections={purchaseSections} />
+              {allowedPurchaseItems.length ? <SidebarCollapsible activeSection={activeSection} icon={ShoppingCart} isOpen={isPurchasesOpen} items={allowedPurchaseItems} label="Compras" onNavigate={navigate} onToggle={() => setIsPurchasesOpen((value) => !value)} sections={purchaseSections} /> : null}
               {allowed(navItems.slice(2, 3)).map((item) => (
                 <SidebarNavItem activeSection={activeSection} item={item} key={item.id} onNavigate={navigate} />
               ))}

@@ -374,7 +374,8 @@ async function processEdge(data, { globals = [], profiles = [], suppliers = [], 
   const calls = { interpret: 0, supplier: 0, globalWrites: 0, ocr: 0, metadata: 0, proposeProfile: 0 }
   const rows = { supplier_documents: [document, ...(reparse?.previous ?? [])], supplier_document_lines: reparse?.lines ?? [], global_suppliers: globals, global_supplier_document_profiles: profiles, suppliers }
   const client = {
-    rpc: reparse?.rpc,
+    rpc: async (name, args) => name === 'assert_supplier_document_scanning'
+      ? { error: null } : reparse.rpc(name, args),
     auth: { getUser: async () => ({ data: { user: { id: 'user' } }, error: null }) },
     storage: { from: () => ({ download: async () => ({ data: new Blob(['image']), error: null }) }) },
     from(table) {

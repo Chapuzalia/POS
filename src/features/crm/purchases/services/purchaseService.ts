@@ -50,11 +50,11 @@ export async function loadPurchaseDocuments(
   venueId: string,
   startDate: string,
   endDate: string,
-  options: { includeUnconfirmed?: boolean } = {},
+  options: { includeUnconfirmed?: boolean; includeLines?: boolean } = {},
 ): Promise<PurchaseDocument[]> {
   const client = requireSupabase()
   let query = client.from('supplier_documents')
-    .select('id, supplier_id, document_type, document_number, document_date, status, affects_stock, storage_bucket, storage_path, original_file_name, original_mime_type')
+    .select('id, supplier_id, document_type, document_number, document_date, status, processing_mode, affects_stock, storage_bucket, storage_path, original_file_name, original_mime_type')
     .eq('tenant_id', context.tenantId).eq('venue_id', venueId)
   query = options.includeUnconfirmed
     ? query.or(`and(document_date.gte.${startDate},document_date.lte.${endDate}),document_date.is.null`)
@@ -66,12 +66,12 @@ export async function loadPurchaseDocuments(
   const documentIds = documents.map((row) => String(row.id))
   const supplierIds = [...new Set(documents.map((row) => row.supplier_id == null ? null : String(row.supplier_id)).filter((id): id is string => Boolean(id)))]
   const [linesResult, suppliersResult, linksResult] = await Promise.all([
-    client.from('supplier_document_lines')
+    options.includeLines === false ? Promise.resolve({ data: [], error: null }) : client.from('supplier_document_lines')
       .select('supplier_document_id, inventory_item_id, description_raw, line_total, net_cost, normalized_unit_cost, inventory_items(name)')
       .in('supplier_document_id', documentIds),
     supplierIds.length ? client.from('suppliers').select('id, name')
       .eq('tenant_id', context.tenantId).eq('venue_id', venueId).in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
-    client.from('supplier_document_links').select('invoice_document_id, delivery_note_document_id')
+    options.includeLines === false ? Promise.resolve({ data: [], error: null }) : client.from('supplier_document_links').select('invoice_document_id, delivery_note_document_id')
       .or(`invoice_document_id.in.(${documentIds.join(',')}),delivery_note_document_id.in.(${documentIds.join(',')})`),
   ])
   if (linesResult.error) throw linesResult.error
@@ -110,6 +110,7 @@ export async function loadPurchaseDocuments(
       documentType: row.document_type === 'invoice' ? 'invoice' : 'delivery_note',
       documentNumber: row.document_number == null ? null : String(row.document_number),
       documentDate: row.document_date == null ? null : String(row.document_date), status: row.status as PurchaseDocument['status'],
+      processingMode: row.processing_mode === 'archive' ? 'archive' : 'scan',
       affectsStock: row.affects_stock !== false,
       storageBucket: row.storage_bucket == null ? null : String(row.storage_bucket),
       storagePath: row.storage_path == null ? null : String(row.storage_path),
@@ -162,7 +163,7 @@ export async function exportPurchaseDocuments(documents: PurchaseDocument[], sta
     ['fecha', 'tipo', 'numero', 'proveedor', 'importe', 'id', 'fichero_disponible'],
     ...documents.map((document) => [
       document.documentDate, document.documentType, document.documentNumber,
-      document.supplierName, document.total.toFixed(2), document.id,
+      document.supplierName, document.lines.length ? document.total.toFixed(2) : '', document.id,
       failures.includes(document.id) ? 'no' : 'si',
     ]),
   ].map((row) => row.map(csvCell).join(',')).join('\r\n')

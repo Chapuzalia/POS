@@ -393,6 +393,8 @@ async function processSupplierDocumentRequest(request: Request) {
       .eq('id', documentId).maybeSingle()
     if (documentError) throw documentError
     if (!accessibleDocument) return json({ error: 'Documento no encontrado o sin acceso' }, 404)
+    const { error: featureError } = await authClient.rpc('assert_supplier_document_scanning', { p_document_id: documentId })
+    if (featureError) return json({ error: 'El escaneo de documentos no está habilitado para este documento o negocio.' }, 403)
     authorizedDocumentId = documentId
     const document = accessibleDocument as DocumentRow
     if (document.status === 'confirmed') return json({ error: 'El documento ya está confirmado' }, 409)
@@ -646,6 +648,8 @@ Deno.serve(async (request) => {
       .select('id, status').eq('id', documentId).maybeSingle()
     if (documentError) throw documentError
     if (!accessibleDocument) return json({ error: 'Documento no encontrado o sin acceso' }, 404)
+    const { error: featureError } = await authClient.rpc('assert_supplier_document_scanning', { p_document_id: documentId })
+    if (featureError) return json({ error: 'El escaneo de documentos no está habilitado para este documento o negocio.' }, 403)
     if (accessibleDocument.status === 'confirmed') return json({ error: 'El documento ya está confirmado' }, 409)
     if (fixtureId && Deno.env.get('SUPPLIER_DOCUMENT_MOCK_MODE') !== 'true') {
       return json({ error: 'Los fixtures solo están disponibles con SUPPLIER_DOCUMENT_MOCK_MODE=true' }, 403)

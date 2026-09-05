@@ -19,7 +19,7 @@ function previousPeriod(start: string, end: string) {
   return { start: iso(previousStart), end: iso(previousEnd) }
 }
 
-function economic(documents: PurchaseDocument[]) { return documents.filter((document) => !document.excludedFromSpend) }
+function economic(documents: PurchaseDocument[]) { return documents.filter((document) => document.processingMode !== 'archive' && !document.excludedFromSpend) }
 function total(documents: PurchaseDocument[]) { return economic(documents).reduce((sum, document) => sum + document.total, 0) }
 function grouped(entries: Array<[string, number]>) {
   const values = new Map<string, number>()

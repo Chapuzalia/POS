@@ -29,7 +29,7 @@ export const inventoryNavItems: CrmNavItem[] = [
 
 export const purchaseNavItems: CrmNavItem[] = [
   { id: 'purchases-summary', label: 'Resumen', icon: BarChart3 },
-  { id: 'purchases-invoices', label: 'Facturas', icon: FileText },
+  { id: 'purchases-invoices', label: 'Archivo de documentos', icon: FileText },
   { id: 'purchases-suppliers', label: 'Proveedores', icon: Building2 },
 ]
 

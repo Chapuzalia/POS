@@ -289,11 +289,17 @@ export function useRestaurantController(options: Options) {
       guestCount,
       cashSessionId: options.cashSession.id,
       deviceId: options.context.deviceId,
+    }).catch(async (error: unknown) => {
+      if (/mesas? ya no est[áa] disponible/i.test(getReadableError(error))) {
+        // Keep the RPC error even if the map cannot be reloaded (e.g. offline).
+        await realtime.refreshMap().catch(() => undefined)
+      }
+      throw error
     })
     await refreshState(orderId)
     options.setAppliedDiscount(null)
     setPosView({ type: 'table_order', orderId })
-  }), [options, refreshState, runBusy])
+  }), [options, realtime, refreshState, runBusy])
 
   const createVirtualTable = useCallback(async (input: { areaId: string | null; name: string; capacity: number; shape: RestaurantTableShape }) => {
     if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline || options.isBusy) return false

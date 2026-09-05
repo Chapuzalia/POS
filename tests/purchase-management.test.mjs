@@ -56,7 +56,7 @@ test('los estados que requieren acción destacan en el listado de facturas', () 
 test('una factura vinculada excluye el albarán del gasto y una independiente contabiliza normalmente', () => {
   assert.match(migration, /create table public\.supplier_document_links/)
   assert.match(service, /excludedDeliveryNotes\.has\(id\)/)
-  assert.match(overview, /filter\(\(document\) => !document\.excludedFromSpend\)/)
+  assert.match(overview, /filter\(\(document\) => document\.processingMode !== 'archive' && !document\.excludedFromSpend\)/)
 })
 
 test('document_date es obligatorio y gobierna estadísticas y exportación', () => {

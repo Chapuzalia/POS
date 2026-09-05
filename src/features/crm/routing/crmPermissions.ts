@@ -1,6 +1,6 @@
 import type { TenantRole } from '../../../types'
 import type { CrmSection } from './crmNavigation'
-import type { TenantFeatureKey } from '../../platform/tenantFeatureAccess'
+import { hasTenantFeature, type TenantFeatureKey } from '../../platform/tenantFeatureAccess.ts'
 
 const CRM_ROLES = new Set<TenantRole>(['owner', 'manager'])
 const OWNER_ONLY_SECTIONS = new Set<CrmSection>(['plan'])
@@ -9,9 +9,9 @@ const SECTION_FEATURES: Partial<Record<CrmSection, TenantFeatureKey | TenantFeat
   discounts: 'discounts',
   tables: 'restaurant',
   production: 'production',
-  'purchases-summary': 'inventory',
-  'purchases-invoices': 'inventory',
-  'purchases-suppliers': 'inventory',
+  'purchases-summary': 'supplier_document_scanning',
+  'purchases-invoices': 'supplier_documents',
+  'purchases-suppliers': 'supplier_documents',
   'inventory-stock': 'inventory',
   'inventory-items': 'inventory',
   'inventory-preparations': ['inventory', 'inventory_recipes'],
@@ -27,7 +27,7 @@ export function canAccessCrm(role: TenantRole) {
 export function canAccessCrmSection(role: TenantRole, section: CrmSection, features?: string[]) {
   const requirement = SECTION_FEATURES[section]
   const requiredFeatures = requirement ? (Array.isArray(requirement) ? requirement : [requirement]) : []
-  const hasRequiredFeatures = features === undefined || requiredFeatures.every((feature) => features.includes(feature))
+  const hasRequiredFeatures = requiredFeatures.every((feature) => hasTenantFeature({ features }, feature))
   return canAccessCrm(role) && hasRequiredFeatures && (role === 'owner' || !OWNER_ONLY_SECTIONS.has(section))
 }
 
