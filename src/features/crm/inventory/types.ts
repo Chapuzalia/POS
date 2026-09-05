@@ -32,6 +32,9 @@ export type InventoryItem = {
   name: string
   description: string
   baseUnitId: string
+  referenceCost: number | null
+  lastPurchaseCost: number | null
+  averageCost: number | null
   active: boolean
   createdAt: string
   updatedAt: string

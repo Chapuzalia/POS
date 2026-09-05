@@ -7,7 +7,7 @@ import { CrmModal } from '../../shared/components/CrmModal'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { EmptyList } from '../../shared/components/EmptyList'
 import type { RunAction } from '../../shared/types'
-import { formatInventoryQuantity } from '../inventoryModel'
+import { formatInventoryQuantity, getEffectiveInventoryItemCost } from '../inventoryModel'
 import { loadInventorySnapshot, saveInventoryItem } from '../services/inventoryService'
 import type { InventoryItem, InventorySnapshot } from '../types'
 
@@ -66,6 +66,7 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
           <th className="!min-w-[240px] !px-5 !py-3">Artículo</th>
           <th className="!min-w-[130px] !px-3 !py-3">Unidad</th>
           <th className="!min-w-[140px] !px-3 !py-3">Stock</th>
+          <th className="!min-w-[150px] !px-3 !py-3">Coste efectivo</th>
           <th className="!min-w-[170px] !px-3 !py-3">Ruta principal</th>
           <th className="!min-w-[120px] !px-3 !py-3">Vínculos</th>
           <th className="!min-w-[120px] !px-3 !py-3">Tipo</th>
@@ -79,10 +80,13 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
           const primary = snapshot.warehouses.find((warehouse) => warehouse.id === routes[0]?.warehouseId)
           const linkedVariants = snapshot.recipes.filter((recipe) => snapshot.recipeLines.some((line) => line.recipeId === recipe.id && line.inventoryItemId === item.id)).length
           const preparation = snapshot.productionRecipes.some((recipe) => recipe.inventoryItemId === item.id && recipe.active)
+          const effectiveCost = getEffectiveInventoryItemCost(item)
+          const costSource = effectiveCost?.source === 'average' ? 'Coste medio' : effectiveCost?.source === 'last_purchase' ? 'Última compra' : 'Referencia'
           return <tr className="!border-b !border-[var(--crm-border-subtle)] last:!border-0" key={item.id}>
             <td className="!px-5 !py-3"><span className="flex items-center gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--crm-blue-soft)] text-[var(--crm-blue)]"><PackagePlus className="size-4" /></span><span className="min-w-0"><strong className="block">{item.name}</strong><small className="block max-w-[320px] truncate text-[var(--crm-text-muted)]">{item.description || 'Sin descripción'} · {item.active ? 'Activo' : 'Inactivo'}</small></span></span></td>
             <td className="!px-3 !py-3"><strong className="block">{unit?.name ?? 'Sin unidad'}</strong><small className="text-[var(--crm-text-muted)]">{unit?.symbol}</small></td>
             <td className="!whitespace-nowrap !px-3 !py-3" data-sort-value={stock(item.id)}><strong className="font-mono">{formatInventoryQuantity(stock(item.id), unit?.decimalPlaces ?? 6)} {unit?.symbol}</strong></td>
+            <td className="!whitespace-nowrap !px-3 !py-3" data-sort-value={effectiveCost?.cost ?? -1}>{effectiveCost ? <><strong className="block font-mono">{effectiveCost.cost.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 4 })}/{unit?.symbol}</strong><small className="text-[var(--crm-text-muted)]">{costSource}</small></> : <span className="text-[var(--crm-text-muted)]">Sin coste</span>}</td>
             <td className="!px-3 !py-3">{primary?.name ?? 'Sin ruta'}</td>
             <td className="!px-3 !py-3" data-sort-value={linkedVariants}>{linkedVariants} {linkedVariants === 1 ? 'variante' : 'variantes'}</td>
             <td className="!px-3 !py-3">{preparation ? 'Elaboración' : 'Artículo'}</td>

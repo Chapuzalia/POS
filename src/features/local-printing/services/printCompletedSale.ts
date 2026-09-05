@@ -1,4 +1,5 @@
-import type { SaleCreatedPayload } from '../../../types'
+import type { SaleCreatedPayload, TenantContext } from '../../../types'
+import { resolvePrintTemplate } from '../../print-templates/service.ts'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
 import type { PrintEstablishment } from './documentLineBuilders'
 import { loadSelectedPrinterLayout } from './selectedPrinterLayout'
@@ -9,9 +10,11 @@ export async function printCompletedSale(input: {
   establishment: PrintEstablishment
   isReprint?: boolean
   copyNumber?: number
+  context: Pick<TenantContext, 'tenantId' | 'venueId'>
 }) {
   const state = usePrintAgentStore.getState()
   const { printer, layout } = await loadSelectedPrinterLayout()
+  const template = await resolvePrintTemplate(input.context, input.sale.ticket.invoice ? 'invoice' : 'simplified_invoice')
   const payload = mapSaleToPrintRequest({
     ...input,
     printerId: printer.id,
@@ -20,6 +23,7 @@ export async function printCompletedSale(input: {
     autoOpenCashDrawer: state.preferences.autoOpenCashDrawer,
     cashlogyConfigured: state.cashlogyConfigured,
     cut: state.preferences.cut,
+    template: template.definition,
   })
   return state.printTicket(payload)
 }

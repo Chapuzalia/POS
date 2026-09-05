@@ -139,10 +139,12 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
     let realtimeTimer: ReturnType<typeof window.setTimeout> | null = null
     let fallbackTimer: ReturnType<typeof window.setInterval> | null = null
     const scheduleRefresh = () => {
+      if (!active) return
       if (realtimeTimer) window.clearTimeout(realtimeTimer)
       realtimeTimer = window.setTimeout(() => {
         void (async () => {
           await refresh()
+          if (!active) return
           const current = latestRef.current
           if (current.posView.type !== 'table_order' || current.saveState !== 'saved') return
           try {
@@ -168,14 +170,24 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
       }, 250)
     }
 
+    // Realtime can remain subscribed after missing changes while the app sleeps.
+    const safetyTimer = window.setInterval(scheduleRefresh, 18000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'visible') scheduleRefresh()
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    window.addEventListener('focus', scheduleRefresh)
+    window.addEventListener('online', scheduleRefresh)
+
     const unsubscribe = subscribeToRestaurantMap(context, scheduleRefresh, (status, channelError) => {
+      if (!active) return
       if (status === 'SUBSCRIBED') {
         if (fallbackTimer) window.clearInterval(fallbackTimer)
         fallbackTimer = null
         scheduleRefresh()
         return
       }
-      if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT') && !fallbackTimer) {
+      if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && !fallbackTimer) {
         console.warn('Realtime de comandas no disponible; se activa la resincronizacion periodica.', channelError)
         fallbackTimer = window.setInterval(scheduleRefresh, 3000)
       }
@@ -186,6 +198,10 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
 
     return () => {
       active = false
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+      window.removeEventListener('focus', scheduleRefresh)
+      window.removeEventListener('online', scheduleRefresh)
+      window.clearInterval(safetyTimer)
       if (realtimeTimer) window.clearTimeout(realtimeTimer)
       if (fallbackTimer) window.clearInterval(fallbackTimer)
       unsubscribe()

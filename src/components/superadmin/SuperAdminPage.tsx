@@ -179,6 +179,11 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       const next = new Set(current)
       if (enabled) next.add(feature)
       else next.delete(feature)
+      if (enabled && feature === 'supplier_document_scanning') {
+        next.add('supplier_documents')
+        next.add('inventory')
+      }
+      if (!enabled && (feature === 'supplier_documents' || feature === 'inventory')) next.delete('supplier_document_scanning')
       return platformFeatures.filter((candidate) => !candidate.isCore && next.has(candidate.key)).map((candidate) => candidate.key)
     })
   }

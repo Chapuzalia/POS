@@ -777,7 +777,7 @@ export function ReservationFormModal(props: Props) {
                       <div className="grid h-12 grid-cols-[3rem_minmax(3rem,1fr)_3rem] overflow-hidden rounded-xl border border-[var(--field-border)] bg-[var(--background)] shadow-[inset_0_1px_2px_rgba(17,24,39,0.06)] md:bg-[var(--surface)]">
                         <UiButton
                           aria-label="Quitar una persona"
-                          className="grid min-h-12 place-items-center border-0 border-r border-[var(--separator)] bg-[var(--surface-secondary)] text-[var(--foreground)] disabled:opacity-40"
+                          className="grid min-h-12 bg-transparent border-none place-items-center border-0 border-r border-[var(--separator)] bg-[var(--surface-secondary)] text-[var(--foreground)] disabled:opacity-40"
                           disabled={partySize <= 1}
                           onClick={() => {
                             setPartySize((current) => Math.max(1, current - 1));
@@ -798,7 +798,7 @@ export function ReservationFormModal(props: Props) {
                         </output>
                         <UiButton
                           aria-label="Añadir una persona"
-                          className="grid min-h-12 place-items-center border-0 border-l border-[var(--separator)] bg-[var(--surface-secondary)] text-[var(--foreground)]"
+                          className="grid bg-transparent border-none min-h-12 place-items-center border-0 border-l border-[var(--separator)] bg-[var(--surface-secondary)] text-[var(--foreground)]"
                           onClick={() => {
                             setPartySize((current) => current + 1);
                             setErrors((current) => ({

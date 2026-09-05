@@ -1,0 +1,206 @@
+# Recepción de documentos de proveedor
+
+La recepción de albaranes y facturas vive en `Inventario → Entradas`. Los datos
+de compra, mappings y documentos son privados del tenant/venue; únicamente la
+identidad global del proveedor y las reglas declarativas de lectura se comparten.
+
+## Desarrollo con fixtures
+
+1. Configurar `VITE_SUPPLIER_DOCUMENT_MOCK_MODE=true` en `.env.local`.
+2. Configurar el secreto de Edge Functions `SUPPLIER_DOCUMENT_MOCK_MODE=true`.
+3. Aplicar la migración y desplegar `process-supplier-document`.
+4. Abrir `Inventario → Entradas` y elegir uno de los ocho escenarios.
+
+El flag de frontend está condicionado además por `import.meta.env.DEV`, por lo
+que los controles de fixtures no aparecen en una build de producción. La Edge
+Function rechaza cualquier `fixtureId` si su propio flag no está habilitado.
+
+## Providers reales
+
+Configurar los siguientes secretos de Supabase Edge Functions:
+
+- `SUPPLIER_DOCUMENT_OCR_PROVIDER`: `azure` o `mistral`. Si no existe, se usa
+  `azure` para mantener el comportamiento anterior.
+- `AZURE_DOCUMENT_INTELLIGENCE_ENDPOINT`: endpoint del recurso Azure.
+- `AZURE_DOCUMENT_INTELLIGENCE_API_KEY`: clave del recurso Azure.
+- `AZURE_DOCUMENT_INTELLIGENCE_API_VERSION`: opcional; por defecto `2024-11-30`.
+- `AZURE_DOCUMENT_INTELLIGENCE_MODEL_ID`: opcional; por defecto `prebuilt-layout`.
+- `MISTRAL_API_KEY`: clave del proyecto Mistral, obligatoria cuando el provider es
+  `mistral`.
+- `MISTRAL_OCR_MODEL`: opcional; por defecto `mistral-ocr-latest`.
+- `OPENAI_API_KEY`: API key del proyecto OpenAI.
+- `OPENAI_SUPPLIER_DOCUMENT_MODEL`: modelo habilitado para Responses API y Structured Outputs.
+- `OPENAI_SUPPLIER_DOCUMENT_IMAGE_FALLBACK`: opcional, `true` para adjuntar imagen
+  únicamente cuando el OCR tenga baja confianza o no detecte tablas.
+
+Azure se consume mediante `AzureDocumentOcrProvider`, Mistral mediante
+`MistralDocumentOcrProvider` y OpenAI mediante `OpenAiSupplierDocumentProvider`.
+Todos leen configuración exclusivamente en la Edge Function. Ninguna clave se
+expone al navegador o se guarda en tablas. `extraction_metadata` conserva
+`ocrProvider` (`azure`, `mistral` o `mock`) y `ocrModel` para comparar ejecuciones.
+
+## Calidad OCR y fallback Mistral → Azure
+
+Mantener `SUPPLIER_DOCUMENT_OCR_PROVIDER=mistral` para usar Mistral como principal.
+La selección configurada no se cambia permanentemente. El default histórico de
+la factoría cuando falta la variable sigue siendo Azure.
+
+`validateOcrSanity` valida el contenido antes de guardar `ocr_snapshot` o ejecutar
+GPT, el parser, matching o generación de perfiles. Es determinista y no consulta
+IA. La confianza se guarda como métrica, pero nunca basta para aceptar un OCR.
+
+Los umbrales conservadores detectan corrupción evidente, no validan todos los
+datos de la factura:
+
+| Check | Umbral |
+| --- | --- |
+| Vacío/casi vacío | Menos de 20 caracteres alfanuméricos. |
+| Casi solo símbolos | Al menos 100 caracteres y menos del 5 % alfanuméricos. |
+| Líneas repetidas | Al menos 1.000 caracteres; líneas con 8 o más alfanuméricos repetidas al menos 12 veces ocupan el 80 % del texto. |
+| Diversidad extremadamente baja | Al menos 1.000 caracteres y 30 líneas relevantes; como máximo 10 % únicas, 80 % de texto duplicado y alguna línea alcanza 12 repeticiones. |
+| Secuencias/párrafos sin saltos de línea | Al menos 1.500 caracteres; secuencias de 8 palabras con 12 apariciones no solapadas cubren el 85 % de las palabras. |
+| Detecciones visuales serializadas | Al menos 3 objetos con `box_2d`, `label` y `caption` ocupan el 60 % del texto. Llaves aisladas no bastan. |
+
+Se normalizan espacios y mayúsculas. El texto agregado y sus páginas no se suman
+como si fueran contenido distinto. En documentos multipágina, el mínimo global
+de repeticiones es `max(12, 4 × páginas)`; también se comprueba cada página para
+que otras páginas válidas no oculten una página corrupta. Una página final vacía
+o una cabecera repetida 2–3 veces no invalidan por sí solas el documento.
+
+Si Mistral pasa, no se construye ni llama a Azure. Si es rechazado por contenido o
+devuelve una estructura ilegible, se realiza un único intento Azure usando las
+variables existentes y `prebuilt-layout` por defecto. Azure pasa exactamente el
+mismo sanity check. No hay un tercer intento ni fallback inverso. Errores de
+disponibilidad/autenticación no se confunden con corrupción ni generan una
+llamada adicional a Azure; se registra un código interno sin cuerpo HTTP ni
+secretos. Si el fallback falla, tampoco se expone su error técnico al usuario.
+
+Solo el OCR aceptado se guarda en `ocr_snapshot`. `extraction_metadata` conserva
+`ocrProvider` (o `null` si ninguno fue aceptado), `ocrFallbackUsed`,
+`ocrSanityVersion` y `ocrAttempts`. Cada intento contiene `provider`, `accepted`,
+`sanityReasons` y métricas numéricas de tamaño, diversidad, repeticiones y
+estructura, incluidas las páginas sospechosas. No se guarda el texto rechazado
+en esos diagnósticos. Estos datos sobreviven también a un error posterior del
+parser.
+
+Si no se obtiene OCR aceptable, el documento queda en `status=error`, con
+`code=OCR_QUALITY_TOO_LOW` y sin snapshot utilizable. No se ejecutan las etapas
+posteriores. La revisión muestra un mensaje de nueva captura y **Volver a
+escanear**, que abre la captura existente sin reenviar automáticamente la misma
+imagen. No requiere migraciones adicionales.
+
+## Comprobación al conectar providers
+
+1. Subir una imagen o PDF real desde móvil.
+2. Verificar que el documento pasa de `processing` a `review`.
+3. Revisar `extraction_metadata`: provider OCR, confianza, tablas y modo parser.
+4. Probar un formato conocido para confirmar `parserMode=deterministic`.
+5. Probar uno desconocido para confirmar `parserMode=ai` y, si las validaciones
+   matemáticas coinciden, un candidato pendiente en `lineParserProfile`.
+6. Resolver líneas, decidir costes y confirmar; repetir la confirmación para
+   comprobar que devuelve `duplicate=true` sin volver a sumar stock.
+
+## Aprendizaje global al confirmar
+
+El procesamiento no inserta `global_suppliers` ni perfiles globales. Las reglas
+validadas permanecen privadas en `extraction_metadata.lineParserProfile`, junto
+con `profileValidation` y `profileParsedLineCount`, incluso cuando el proveedor
+local aún no tiene enlace global.
+
+La migración preparada `20260903110000_supplier_document_global_learning.sql`
+añade una capa a la RPC de confirmación existente. No copia ni cambia la lógica
+de stock, costes o vínculos. Dentro de la misma transacción:
+
+1. Se confirma el proveedor local definitivo (incluida la creación del provisional
+   cuando el usuario lo mantiene).
+2. Se reutiliza `suppliers.global_supplier_id` si ya existe. Si no, se busca por
+   CIF/NIF/VAT normalizado: mayúsculas y solo caracteres alfanuméricos.
+3. Con un identificador local confirmado de formato plausible (6–40 caracteres,
+   al menos un dígito), se reutiliza el global inequívoco o se crea con `name`,
+   `legal_name` y `tax_id` del proveedor local. No se consulta un registro fiscal
+   ni se copian campos de la detección descartada. Sin CIF/enlace no se crea un
+   global por similitud de nombre.
+4. Si hay reglas validadas que produjeron líneas, se asocia o crea un perfil
+   `candidate` del proveedor confirmado. Un cambio manual de A a B asigna el
+   aprendizaje a B, no al provisional A. También se conservan perfiles conocidos
+   usados por el parser determinista o por el reparseo explícito.
+5. La equivalencia de perfiles es igualdad de `rules_json` (JSONB, independiente
+   del orden de claves), dentro del mismo global y tipo de documento. El
+   fingerprint conserva `requiredTexts`. Se reutilizan `candidate`/`verified` y
+   no se reactivan reglas idénticas `deprecated`.
+6. Los contadores existentes de éxitos/correcciones aumentan una sola vez para el
+   perfil definitivo; repetir la confirmación no vuelve a incrementarlos. Un
+   fallo de aprendizaje revierte también los pasos anteriores de confirmación.
+
+El índice de CIF normalizado es único si el catálogo existente lo permite. Si
+hay duplicados históricos, la migración los conserva sin fusionar ni reasignar
+registros: instala el índice de búsqueda y un guard de nuevas escrituras. Las
+colisiones se diagnostican como `ambiguous_tax_id` y no se elige un global al azar.
+La resolución usa un bloqueo por CIF y la deduplicación de perfiles bloquea el
+global correspondiente durante la transacción.
+
+La metadata final añade `globalSupplierResolution` (`existing_link`,
+`existing_by_tax_id`, `created_by_tax_id` o `unresolved`) y
+`globalProfileResolution` (`existing`, `created` o `none`), con IDs y motivo.
+No se hacen backfills automáticos de documentos ya confirmados.
+
+La siguiente factura carga estos perfiles mediante `tryKnownProfiles`. Solo si
+coinciden fingerprint/estructura y se extraen líneas entra en
+`parserMode=deterministic`; de lo contrario conserva el camino IA. Esto se refiere
+al parser de líneas: la extracción de identidad del proveedor mantiene su flujo
+anterior. No cambia OCR ni el sanity check Mistral/Azure.
+
+## Metadata incremental y selección manual
+
+La migración preparada `20260903120000_supplier_document_metadata_learning.sql`
+no se aplica automáticamente. Añade aprendizaje de etiquetas a la confirmación
+y resolución exacta de globals existentes al seleccionar/reparsear un proveedor.
+
+Fecha y número tienen una cadena independiente de las líneas: **profile → generic
+→ IA de metadata, solo si sigue ambiguo → usuario**. Un fallo de metadata no
+reinterpreta las líneas ni genera otro perfil. Generic busca pares etiqueta/valor
+en texto, líneas contiguas y filas OCR; admite fechas con `/`, `-` o `.`, comprueba
+el calendario y conserva prefijos del número. Descarta vencimiento, entrega,
+pedido, pago e identificadores fiscales. Varias alternativas no se eligen al azar.
+La llamada IA puntual usa el modelo ya configurado y solo solicita fecha/número;
+su respuesta vuelve a comprobarse contra el OCR. No recibe autoridad para cambiar
+líneas, proveedor o reglas.
+
+`extraction_metadata.metadataExtraction` conserva valor, source, evidence literal,
+labelCandidate, confidence, userModified, etiqueta/ID del perfil usado y si falló.
+Al confirmar, la RPC vuelve a buscar el valor definitivo en `ocr_snapshot` y
+comprueba también la cita. Una entrada manual solo tiene candidato cuando hay un
+par inequívoco. Cambiar una propuesta generic/AI la excluye como evidencia positiva.
+El número se puede corregir en su campo actual de revisión; no hay nueva pantalla.
+
+Solo documentos confirmados del mismo global, **mismo ID de perfil** y tipo de
+documento aportan evidencias. Hacen falta al menos dos documentos con la misma
+etiqueta normalizada, fallo de la regla anterior y ninguna etiqueta competidora.
+No basta repetir la confirmación. Una regla que funciona no cambia. El aprendizaje
+usa únicamente `jsonb_set` sobre `documentDateLabel` o `documentNumberLabel`: no
+modifica columnas, grupos, packaging, normalizaciones, fingerprint ni contadores
+fuera de la confirmación habitual. `profileMetadataLearning` registra campo,
+anterior/nueva etiqueta, perfil y número de evidencias. Nunca aprende fechas o
+números concretos como reglas. Las evidencias siguen en documentos, sin tabla nueva.
+Los reviews anteriores a un patch conservan el perfil conocido bajo bloqueo,
+incluidos los provisionales; una revisión de metadata no duplica el perfil.
+
+Seleccionar un supplier existente reutiliza su enlace global o busca **solo por
+su CIF registrado y normalizado**, nunca por el OCR ni por el nombre local. Una
+coincidencia persiste el enlace en supplier y documento inmediatamente; cero,
+varias o ausencia de CIF dejan el enlace sin resolver. No crea globals ni perfiles.
+El reparse llama defensivamente al mismo helper y prioriza perfiles globales
+compatibles antes del histórico local. Usa exclusivamente `ocr_snapshot` y parser
+de líneas: no OCR, extracción de proveedor, IA de metadata ni generación de perfiles.
+Sin perfil compatible mantiene el error recuperable y las líneas intactas. La
+creación global sigue reservada a confirmación, que reutiliza enlaces resueltos.
+
+La RPC de confirmación acepta ahora `p_document_number` opcional; omitirlo conserva
+el valor previo y enviar cadena vacía lo limpia. El resto del contrato y la
+transacción de stock/costes/vínculos se delegan sin cambios. Desplegar esta migración
+antes que los clientes/Edge que usan el nuevo parámetro/helper.
+
+La extracción de texto PDF nativo está abstraída mediante
+`NativePdfTextExtractor`. La implementación actual devuelve `null` y delega el
+PDF completo en el provider OCR seleccionado hasta que se seleccione una
+librería/servicio de extracción de texto nativo para Edge Functions.

@@ -59,7 +59,7 @@ test('el cierre se compone exactamente en 48 columnas', () => {
   assert.deepEqual(lines, EXPECTED_48)
 })
 
-test('envía exclusivamente líneas y opciones físicas al endpoint idempotente', async () => {
+test('envía exclusivamente instrucciones resueltas y opciones físicas al endpoint idempotente', async () => {
   let sent
   const client = createPrintAgentClient({
     baseUrl: 'https://tpv-printer.local:8443',
@@ -74,7 +74,7 @@ test('envía exclusivamente líneas y opciones físicas al endpoint idempotente'
   assert.equal(new URL(sent.url).pathname, '/api/v1/print')
   assert.equal(sent.method, 'POST')
   assert.deepEqual(sent.body, request)
-  assert.deepEqual(Object.keys(sent.body).sort(), ['force', 'lines', 'options', 'printerId', 'requestId'])
+  assert.deepEqual(Object.keys(sent.body).sort(), ['elements', 'force', 'lines', 'options', 'printerId', 'requestId'])
   for (const legacy of ['ticket', 'items', 'products', 'prices', 'subtotal', 'total', 'payments']) {
     assert.equal(legacy in sent.body, false)
   }

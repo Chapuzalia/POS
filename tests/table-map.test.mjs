@@ -453,6 +453,15 @@ test('mobile abre las mesas directamente igual que iPad sin hoja de acciones int
   assert.doesNotMatch(mobileSheetsSource, /MobileTableActionSheet|Abrir comanda|Abrir mesa/)
 })
 
+test('el número de comensales puede vaciarse y bloquea la apertura hasta ser válido', () => {
+  assert.match(tableMapViewSource, /const \[guestCount, setGuestCount\] = useState\("2"\)/)
+  assert.match(tableMapViewSource, /onChange=\{\(event\) => setGuestCount\(event\.target\.value\)\}/)
+  assert.match(tableMapViewSource, /const hasValidGuestCount = Number\.isFinite\(parsedGuestCount\) && parsedGuestCount > 0/)
+  assert.match(tableMapViewSource, /disabled=\{isBusy \|\| !isOnline \|\| !canOpen \|\| !hasValidGuestCount\}/)
+  assert.match(tableMapViewSource, /await onOpen\(pendingIds, parsedGuestCount\)/)
+  assert.doesNotMatch(tableMapViewSource, /setGuestCount\(Math\.max\(1, Number\(event\.target\.value\)\)\)/)
+})
+
 test('el mapa TPV no muestra controles de zoom ni giro y reserva sus botones', () => {
   assert.doesNotMatch(tableMapViewSource, /<MapViewportControls|useMapViewport|onWheel=/)
   assert.match(tableMapViewSource, /MOBILE_MAP_TOP_INSET = 124/)

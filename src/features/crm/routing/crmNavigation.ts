@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Beaker, Boxes, ChefHat, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PlugZap, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
+import { Armchair, BarChart3, Beaker, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PlugZap, Printer, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-invoices' | 'purchases-suppliers' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'print-templates' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -27,6 +27,12 @@ export const inventoryNavItems: CrmNavItem[] = [
   { id: 'inventory-settings', label: 'Configuración', icon: Settings2 },
 ]
 
+export const purchaseNavItems: CrmNavItem[] = [
+  { id: 'purchases-summary', label: 'Resumen', icon: BarChart3 },
+  { id: 'purchases-invoices', label: 'Archivo de documentos', icon: FileText },
+  { id: 'purchases-suppliers', label: 'Proveedores', icon: Building2 },
+]
+
 export const navItems: CrmNavItem[] = [
   { id: 'dashboard', label: 'Dashboard', icon: LayoutDashboard },
   { id: 'access', label: 'Accesos', icon: Users },
@@ -36,13 +42,15 @@ export const navItems: CrmNavItem[] = [
   { id: 'stats', label: 'Estadísticas', icon: BarChart3 },
   { id: 'integrations', label: 'Integraciones', icon: PlugZap },
   { id: 'plan', label: 'Mi Plan', icon: Gauge },
+  { id: 'print-templates', label: 'Plantillas de impresión', icon: Printer },
   { id: 'settings', label: 'Configuración', icon: Settings },
 ]
 
-export const allNavItems = [...navItems, ...productNavItems, ...reportNavItems, ...inventoryNavItems]
+export const allNavItems = [...navItems, ...productNavItems, ...purchaseNavItems, ...reportNavItems, ...inventoryNavItems]
 export const productSections = new Set<CrmSection>(productNavItems.map((item) => item.id))
 export const reportSections = new Set<CrmSection>(reportNavItems.map((item) => item.id))
 export const inventorySections = new Set<CrmSection>(inventoryNavItems.map((item) => item.id))
+export const purchaseSections = new Set<CrmSection>(purchaseNavItems.map((item) => item.id))
 
 export function getSectionTitle(section: CrmSection) {
   const titles: Partial<Record<CrmSection, string>> = {
@@ -59,6 +67,9 @@ export function getSectionTitle(section: CrmSection) {
     reports: 'Tickets',
     'x-reports': 'Informes Z',
     'inventory-stock': 'Stock del local',
+    'purchases-summary': 'Resumen de compras',
+    'purchases-invoices': 'Facturas y albaranes',
+    'purchases-suppliers': 'Proveedores del local',
     'inventory-items': 'Artículos de inventario',
     'inventory-preparations': 'Elaboraciones de inventario',
     'inventory-warehouses': 'Almacenes del local',
@@ -66,6 +77,7 @@ export function getSectionTitle(section: CrmSection) {
     'inventory-settings': 'Configuración de inventario',
     stats: 'Analítica comercial',
     integrations: 'Integraciones',
+    'print-templates': 'Configuración · Impresión · Plantillas',
     settings: 'Configuración de locales',
     plan: 'Mi Plan',
   }

@@ -190,7 +190,9 @@ export function TableMapView(props: Props) {
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null);
   const [displayTables, setDisplayTables] = useState(map.tables);
   const [pendingIds, setPendingIds] = useState<string[] | null>(null);
-  const [guestCount, setGuestCount] = useState(2);
+  const [guestCount, setGuestCount] = useState("2");
+  const parsedGuestCount = Number(guestCount);
+  const hasValidGuestCount = Number.isFinite(parsedGuestCount) && parsedGuestCount > 0;
   const [dropTargetId, setDropTargetId] = useState<string | null>(null);
   const [joinPreview, setJoinPreview] =
     useState<JoinProposal<RestaurantTableMapItem> | null>(null);
@@ -407,7 +409,7 @@ export function TableMapView(props: Props) {
       : [table.id];
     setPendingIds(ids);
     setGuestCount(
-      Math.max(
+      String(Math.max(
         1,
         ids.reduce(
           (total, id) =>
@@ -415,7 +417,7 @@ export function TableMapView(props: Props) {
             (displayTables.find((item) => item.id === id)?.capacity ?? 0),
           0,
         ),
-      ),
+      )),
     );
   }
 
@@ -685,8 +687,8 @@ export function TableMapView(props: Props) {
   }
 
   async function confirmOpen() {
-    if (!pendingIds) return;
-    await onOpen(pendingIds, guestCount);
+    if (!pendingIds || !hasValidGuestCount) return;
+    await onOpen(pendingIds, parsedGuestCount);
     setPendingIds(null);
   }
 
@@ -1196,16 +1198,16 @@ export function TableMapView(props: Props) {
       ) : null}
       {pendingIds ? (
         <AppModal containerClassName={mobileLayout ? "!p-0" : "!p-4"} dialogClassName={mobileLayout ? "!rounded-b-none !rounded-t-[20px] !border-x-0 !border-b-0" : ""} maxWidth={448} dismissDisabled={isBusy} label="Abrir mesa" onClose={() => setPendingIds(null)} placement={mobileLayout ? "bottom" : "center"}>
-          <section className={`w-full max-w-[440px] bg-[var(--surface)] text-[var(--foreground)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 ${mobileLayout ? "rounded-t-[20px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5" : "rounded-[var(--radius)] border border-[var(--separator)] p-6 shadow-[var(--shadow)]"}`}>
-            <h2>
+          <section className={`w-full  max-w-[440px] bg-[var(--surface)] text-[var(--foreground)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 ${mobileLayout ? "rounded-t-[20px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5" : "rounded-[var(--radius)] border border-[var(--separator)] p-6 shadow-[var(--shadow)]"}`}>
+            <h2 className="font-extrabold">
               {pendingIds.length > 1
                 ? `Abrir ${pendingIds.length} mesas juntas`
                 : map.tables.find((table) => table.id === pendingIds[0])?.name}
             </h2>
-            <p>
+            <p className="!text-red-600">
               {pendingReservation
                 ? `Esta mesa tiene una reserva a las ${new Intl.DateTimeFormat("es", { hour: "2-digit", minute: "2-digit" }).format(new Date(pendingReservation.startsAt))} para ${pendingReservation.customerName}.`
-                : "La comanda se guardará automáticamente y quedará disponible para los dispositivos del local."}
+                : null}
             </p>
             {pendingReservation?.status === "arrived" ? (
               <UiButton
@@ -1219,14 +1221,12 @@ export function TableMapView(props: Props) {
                 Sentar reserva
               </UiButton>
             ) : null}
-            <label>
+            <label className="!font-normal">
               Número de comensales
               <UiInput
                 autoFocus
                 min="1"
-                onChange={(event) =>
-                  setGuestCount(Math.max(1, Number(event.target.value)))
-                }
+                onChange={(event) => setGuestCount(event.target.value)}
                 type="number"
                 value={guestCount}
               />
@@ -1241,7 +1241,7 @@ export function TableMapView(props: Props) {
               </UiButton>
               <UiButton
                 className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45"
-                disabled={isBusy || !isOnline || !canOpen}
+                disabled={isBusy || !isOnline || !canOpen || !hasValidGuestCount}
                 onClick={() => void confirmOpen()}
                 type="button"
               >

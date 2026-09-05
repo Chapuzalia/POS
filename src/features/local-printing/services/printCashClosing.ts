@@ -4,6 +4,7 @@ import { getPrintAgentErrorMessage } from '../api/PrintAgentError.ts'
 import { usePrintAgentStore } from '../store/usePrintAgentStore.ts'
 import { mapCashClosingToPrintRequest } from './cashClosingPrintMapper.ts'
 import { loadSelectedPrinterLayout } from './selectedPrinterLayout.ts'
+import { resolvePrintTemplate } from '../../print-templates/service.ts'
 
 export async function printCashClosing(input: {
   closing: CashClosingRecord
@@ -14,6 +15,7 @@ export async function printCashClosing(input: {
   const state = usePrintAgentStore.getState()
   if (!state.token) throw new Error('Servidor de impresión no configurado.')
   const { printer, layout } = await loadSelectedPrinterLayout()
+  const template = await resolvePrintTemplate(input.context, 'cash_closure')
   const payload = mapCashClosingToPrintRequest({
     closing: input.closing,
     establishment: {
@@ -28,6 +30,7 @@ export async function printCashClosing(input: {
     settings: state.preferences,
     isReprint: input.isReprint,
     copyNumber: input.copyNumber,
+    template: template.definition,
   })
   try {
     const job = await state.printTicket(payload)

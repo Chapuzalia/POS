@@ -1,5 +1,12 @@
 import { getOperationalDateKey, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
 import type { CashClosingPrintSnapshot, CashClosingRecord } from '../../../../types'
+import type { ImportedCashClosing } from '../../../../lib/revoCashClosings.ts'
+
+export type CashClosingReportRecord = CashClosingRecord | ImportedCashClosing
+
+export function isImportedCashClosing(closing: CashClosingReportRecord): closing is ImportedCashClosing {
+  return 'source' in closing && closing.source === 'revo'
+}
 
 export type CashClosingDailyValue = {
   closingCount: number
@@ -26,7 +33,8 @@ export function projectCashClosingCounts(
   }
 }
 
-export function getCashClosingDay(closing: CashClosingRecord, config: OperationalDayConfig) {
+export function getCashClosingDay(closing: CashClosingReportRecord, config: OperationalDayConfig) {
+  if (isImportedCashClosing(closing)) return closing.date
   try {
     return getOperationalDateKey(closing.closedAt, {
       dayChangeTime: config.dayChangeTime,
@@ -37,14 +45,14 @@ export function getCashClosingDay(closing: CashClosingRecord, config: Operationa
   }
 }
 
-export function buildCashClosingDailyValues(closings: readonly CashClosingRecord[], config: OperationalDayConfig) {
+export function buildCashClosingDailyValues(closings: readonly CashClosingReportRecord[], config: OperationalDayConfig) {
   const values = new Map<string, CashClosingDailyValue>()
 
   for (const closing of closings) {
     const date = getCashClosingDay(closing, config)
     const current = values.get(date) ?? { closingCount: 0, date, totalCents: 0 }
     current.closingCount += 1
-    current.totalCents += closing.printSnapshot.summary.totalSalesCents
+    current.totalCents += isImportedCashClosing(closing) ? closing.cashCents + closing.cardCents : closing.printSnapshot.summary.totalSalesCents
     values.set(date, current)
   }
 
@@ -52,7 +60,7 @@ export function buildCashClosingDailyValues(closings: readonly CashClosingRecord
 }
 
 export function filterCashClosingsByDate(
-  closings: readonly CashClosingRecord[],
+  closings: readonly CashClosingReportRecord[],
   dateFrom: string,
   dateTo: string,
   config: OperationalDayConfig,

@@ -58,6 +58,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
   try {
     const job = await printCompletedSale({
       sale: payload,
+      context,
       establishment: {
         name: context.venueName, address: context.venueAddress,
         legalName: context.venueLegalName, taxId: context.venueTaxId,

@@ -125,7 +125,12 @@ test('estadísticas permite año, mes, día, período y una comparación indepen
     readFile(new URL('../src/features/crm/analytics/services/analyticsService.ts', import.meta.url), 'utf8'),
   ])
 
-  for (const inputType of ['month', 'date']) assert.match(statsPage, new RegExp(`type="${inputType}"`))
+  assert.doesNotMatch(statsPage, /type="month"/)
+  assert.match(statsPage, /ariaLabel="Mes de las estadísticas"/)
+  assert.match(statsPage, /ariaLabel="Año del mes de las estadísticas"/)
+  assert.match(statsPage, /options=\{selectableMonthOptions\}/)
+  assert.match(statsPage, /onClick=\{openNativeDatePicker\}/)
+  assert.match(statsPage, /type="date"/)
   for (const kind of ['year', 'month', 'day', 'period']) assert.match(statsPage, new RegExp(`value: '${kind}'`))
   assert.match(statsPage, /type="checkbox"/)
   assert.match(statsPage, /Comparar con…/)

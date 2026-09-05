@@ -2,24 +2,29 @@ import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { CrmModal } from '../../shared/components/CrmModal'
-import { Pencil, RefreshCw, Save, X } from "lucide-react";
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { Pencil, RefreshCw, Save, Upload, X } from "lucide-react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
 import {
-  loadCashClosingHistory,
   updateCashClosingCounts,
 } from "../../../cash-registers/service";
 import { getCashClosingAmounts } from "../../../cash-registers/services/cashClosingAmounts";
 import { centsToInput, formatMoney } from "../../../../lib/format";
-import type { CashClosingRecord, TenantContext } from "../../../../types";
+import type { CashClosingRecord, CrmVenue, TenantContext } from "../../../../types";
 import type { RunAction } from "../../shared/types";
 import {
   buildCashClosingDailyValues,
   filterCashClosingsByDate,
   projectCashClosingCounts,
+  isImportedCashClosing,
+  type CashClosingReportRecord,
   type CashClosingDailyValue,
 } from "../services/cashClosingReportModel";
 import type { OperationalDayConfig } from "../../../../lib/operationalDay";
+import { loadCashClosingReports } from '../services/revoCashClosingService';
+import { RevoClosingImportModal } from '../components/RevoClosingImportModal';
+import { ImportedClosingDetail } from '../components/ImportedClosingDetail';
+import { formatRevoDate, type ImportedCashClosing } from '../../../../lib/revoCashClosings.ts';
 
 type Props = {
   dayChangeTime: string | null;
@@ -28,6 +33,7 @@ type Props = {
   selectedVenueId: string;
   tenantContext: TenantContext;
   timeZone: string;
+  venues: CrmVenue[];
 };
 
 const dateFormatter = new Intl.DateTimeFormat("es-ES", {
@@ -43,6 +49,20 @@ const dayFormatter = new Intl.DateTimeFormat("es-ES", {
 
 function formatDay(date: string) {
   return dayFormatter.format(new Date(`${date}T12:00:00Z`)).replace(".", "");
+}
+
+// DataTable reads literal <tr>/<td> elements from its children before rendering.
+function renderImportedClosingRow(closing: ImportedCashClosing, onSelect: () => void) {
+  return <tr key={closing.id} aria-label={`Ver cierre REVO del ${formatRevoDate(closing.date)}`} className="!cursor-pointer !border-b !border-[var(--crm-border-subtle)] hover:!bg-[var(--crm-surface-soft)] focus-visible:!bg-[var(--crm-surface-soft)]"
+    onClick={onSelect} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }} role="button" tabIndex={0}>
+    <td className="!px-[22px] !py-4 !text-[13px] !font-semibold" data-sort-value={Date.parse(`${closing.date}T12:00:00Z`)}>{formatRevoDate(closing.date)}</td>
+    <td className="!px-3 !py-4 !text-[13px]"><strong className="!block">REVO</strong><span className="!text-xs !text-[var(--crm-text-muted)]">Histórico importado · resumen diario</span></td>
+    <td className="!px-3 !py-4 !font-mono !text-[13px]" data-sort-value={closing.cashCents + closing.cardCents}>{formatMoney(closing.cashCents + closing.cardCents)}</td>
+    <td className="!px-3 !py-4 !font-mono !text-[13px]" data-sort-value={closing.cashCents}>{formatMoney(closing.cashCents)}</td>
+    <td className="!px-3 !py-4 !font-mono !text-[13px]" data-sort-value={closing.cardCents}>{formatMoney(closing.cardCents)}</td>
+    <td className="!px-3 !py-4 !text-xs !text-[var(--crm-text-muted)]">No disponible</td>
+    <td className="!px-[22px] !py-4 !text-xs !text-[var(--crm-text-muted)]">No disponible</td>
+  </tr>
 }
 
 function ClosingValuesChart({ values }: { values: CashClosingDailyValue[] }) {
@@ -64,6 +84,8 @@ function ClosingValuesChart({ values }: { values: CashClosingDailyValue[] }) {
   const chartWidth = width - padding.left - padding.right;
   const chartHeight = height - padding.top - padding.bottom;
   const maximum = Math.max(...values.map((value) => value.totalCents), 1);
+  const minimum = Math.min(...values.map((value) => value.totalCents), 0);
+  const valueRange = maximum - minimum;
   const point = (value: CashClosingDailyValue, index: number) => ({
     ...value,
     x:
@@ -71,13 +93,14 @@ function ClosingValuesChart({ values }: { values: CashClosingDailyValue[] }) {
       (values.length === 1
         ? chartWidth / 2
         : (index / (values.length - 1)) * chartWidth),
-    y: padding.top + chartHeight - (value.totalCents / maximum) * chartHeight,
+    y: padding.top + chartHeight - ((value.totalCents - minimum) / valueRange) * chartHeight,
   });
   const points = values.map(point);
   const hoveredPoint =
     hoveredPointIndex === null ? null : (points[hoveredPointIndex] ?? null);
   const linePoints = points.map(({ x, y }) => `${x},${y}`).join(" ");
-  const areaPoints = `${padding.left},${padding.top + chartHeight} ${linePoints} ${padding.left + chartWidth},${padding.top + chartHeight}`;
+  const baseline = padding.top + chartHeight - ((0 - minimum) / valueRange) * chartHeight;
+  const areaPoints = `${padding.left},${baseline} ${linePoints} ${padding.left + chartWidth},${baseline}`;
   const labelStep = Math.max(1, Math.ceil(values.length / 8));
 
   return (
@@ -138,7 +161,7 @@ function ClosingValuesChart({ values }: { values: CashClosingDailyValue[] }) {
                 x={padding.left - 12}
                 y={y + 4}
               >
-                {formatMoney(Math.round(maximum * ratio))}
+                {formatMoney(Math.round(minimum + valueRange * ratio))}
               </text>
             </g>
           );
@@ -674,24 +697,31 @@ export function CashClosingReportsCrm({
   selectedVenueId,
   tenantContext,
   timeZone,
+  venues,
 }: Props) {
-  const [closings, setClosings] = useState<CashClosingRecord[] | null>(null);
+  const [closings, setClosings] = useState<CashClosingReportRecord[] | null>(null);
   const [selectedClosing, setSelectedClosing] =
-    useState<CashClosingRecord | null>(null);
+    useState<CashClosingReportRecord | null>(null);
+  const [importOpen, setImportOpen] = useState(false);
+  const requestId = useRef(0);
+  const operationalDayConfig = useMemo<OperationalDayConfig>(
+    () => ({ dayChangeTime, timeZone }),
+    [dayChangeTime, timeZone],
+  );
   const [dateFrom, setDateFrom] = useState("");
   const [dateTo, setDateTo] = useState("");
   const refresh = useCallback(async () => {
+    const currentRequest = ++requestId.current;
     if (!selectedVenueId) {
       setClosings([]);
       return;
     }
-    setClosings(
-      await loadCashClosingHistory(
+    const next = await loadCashClosingReports(
         { ...tenantContext, venueId: selectedVenueId },
-        1000,
-      ),
+        operationalDayConfig,
     );
-  }, [selectedVenueId, tenantContext]);
+    if (currentRequest === requestId.current) setClosings(next);
+  }, [selectedVenueId, tenantContext, operationalDayConfig]);
 
   useEffect(() => {
     setClosings(null);
@@ -699,12 +729,8 @@ export function CashClosingReportsCrm({
     setDateFrom("");
     setDateTo("");
     void runAction(refresh);
+    return () => { requestId.current += 1; };
   }, [refresh, runAction]);
-
-  const operationalDayConfig = useMemo<OperationalDayConfig>(
-    () => ({ dayChangeTime, timeZone }),
-    [dayChangeTime, timeZone],
-  );
   const filteredClosings = useMemo(
     () => filterCashClosingsByDate(closings ?? [], dateFrom, dateTo, operationalDayConfig),
     [closings, dateFrom, dateTo, operationalDayConfig],
@@ -796,6 +822,9 @@ export function CashClosingReportsCrm({
                 : "Cargando cierres..."}
             </p>
           </div>
+          <UiButton disabled={disabled || !venues.length} onClick={() => setImportOpen(true)} type="button" variant="primary">
+            <Upload className="!size-4" /> Importar desde REVO
+          </UiButton>
         </div>
         <div className="!overflow-x-auto">
           <UiDataTable aria-label="Cierres de caja" className="!w-full !min-w-[1050px] !border-collapse" emptyContent={closings ? 'No hay cierres de caja para el período seleccionado.' : 'Cargando cierres…'} filterable={false}>
@@ -812,6 +841,7 @@ export function CashClosingReportsCrm({
             </thead>
             <tbody>
               {filteredClosings.map((closing) => {
+                if (isImportedCashClosing(closing)) return renderImportedClosingRow(closing, () => setSelectedClosing(closing));
                 const snapshot = closing.printSnapshot;
                 const amounts = getCashClosingAmounts(snapshot);
                 const difference =
@@ -900,7 +930,10 @@ export function CashClosingReportsCrm({
           </UiDataTable>
         </div>
       </section>
-      {selectedClosing ? (
+      {importOpen ? <RevoClosingImportModal disabled={disabled} onClose={() => setImportOpen(false)} onImported={async (venueId) => {
+        if (venueId === selectedVenueId) await runAction(refresh);
+      }} venues={venues} /> : null}
+      {selectedClosing && isImportedCashClosing(selectedClosing) ? <ImportedClosingDetail closing={selectedClosing} onClose={() => setSelectedClosing(null)} /> : selectedClosing ? (
         <CashClosingDetailModal
           closing={selectedClosing}
           disabled={disabled}

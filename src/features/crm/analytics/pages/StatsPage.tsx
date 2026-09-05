@@ -1,5 +1,5 @@
 import { RefreshCw } from 'lucide-react'
-import { useState } from 'react'
+import { useState, type MouseEvent as ReactMouseEvent } from 'react'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { formatMoney } from '../../../../lib/format'
@@ -26,11 +26,30 @@ const periodKindOptions = [
   { label: 'Período', value: 'period' },
 ]
 
+const monthOptions = [
+  { label: 'Enero', value: '01' },
+  { label: 'Febrero', value: '02' },
+  { label: 'Marzo', value: '03' },
+  { label: 'Abril', value: '04' },
+  { label: 'Mayo', value: '05' },
+  { label: 'Junio', value: '06' },
+  { label: 'Julio', value: '07' },
+  { label: 'Agosto', value: '08' },
+  { label: 'Septiembre', value: '09' },
+  { label: 'Octubre', value: '10' },
+  { label: 'Noviembre', value: '11' },
+  { label: 'Diciembre', value: '12' },
+]
+
 const periodInputClass = 'h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] !min-h-10 !min-w-0 !rounded-[10px] !px-3 !text-sm !font-semibold'
 const normalizedCountFormatter = new Intl.NumberFormat('es-ES', { maximumFractionDigits: 1 })
 const formatComparisonMoney = (value: number) => formatMoney(Math.round(value))
 const formatComparisonCount = (value: number) => normalizedCountFormatter.format(value)
 const normalizePerOpenDay = (total: number, openDayCount: number) => total / Math.max(1, openDayCount)
+
+function openNativeDatePicker(event: ReactMouseEvent<HTMLInputElement>) {
+  event.currentTarget.showPicker?.()
+}
 
 export type StatsCrmProps = {
   comparisonStats: CrmStats | null
@@ -56,10 +75,21 @@ function PeriodSelector({
 }) {
   const selectKind = (value: string) => onChange(getDefaultCrmStatsPeriod(value as CrmStatsPeriodKind, currentDay))
   const currentYear = Number(currentDay.slice(0, 4))
+  const currentMonth = currentDay.slice(5, 7)
+  const selectedYear = period.startDate.slice(0, 4)
+  const selectedMonth = period.startDate.slice(5, 7)
   const yearOptions = Array.from({ length: currentYear - 1999 }, (_, index) => {
     const year = String(currentYear - index)
     return { label: year, value: year }
   })
+  const selectableMonthOptions = monthOptions.map((option) => ({
+    ...option,
+    disabled: selectedYear === String(currentYear) && option.value > currentMonth,
+  }))
+  const selectMonth = (year: string, month: string) => {
+    const nextMonth = year === String(currentYear) && month > currentMonth ? currentMonth : month
+    onChange(createCrmStatsPeriod('month', `${year}-${nextMonth}`))
+  }
 
   return (
     <div className="!flex !min-w-0 !flex-1 !flex-wrap !items-end !gap-2">
@@ -88,18 +118,28 @@ function PeriodSelector({
         </div>
       ) : null}
       {period.kind === 'month' ? (
-        <UiInput
-          aria-label="Mes de las estadísticas"
-          className={periodInputClass}
-          disabled={disabled}
-          id={idPrefix + '-month'}
-          max={currentDay.slice(0, 7)}
-          onChange={(event) => {
-            if (event.target.value) onChange(createCrmStatsPeriod('month', event.target.value))
-          }}
-          type="month"
-          value={period.startDate.slice(0, 7)}
-        />
+        <>
+          <div className="!min-w-[140px] !flex-1 sm:!flex-none">
+            <CrmSelect
+              ariaLabel="Mes de las estadísticas"
+              compact
+              disabled={disabled}
+              onChange={(value) => selectMonth(selectedYear, value)}
+              options={selectableMonthOptions}
+              value={selectedMonth}
+            />
+          </div>
+          <div className="!min-w-[120px] !flex-1 sm:!flex-none">
+            <CrmSelect
+              ariaLabel="Año del mes de las estadísticas"
+              compact
+              disabled={disabled}
+              onChange={(value) => selectMonth(value, selectedMonth)}
+              options={yearOptions}
+              value={selectedYear}
+            />
+          </div>
+        </>
       ) : null}
       {period.kind === 'day' ? (
         <UiInput
@@ -111,6 +151,7 @@ function PeriodSelector({
           onChange={(event) => {
             if (event.target.value) onChange(createCrmStatsPeriod('day', event.target.value))
           }}
+          onClick={openNativeDatePicker}
           type="date"
           value={period.startDate}
         />
@@ -129,6 +170,7 @@ function PeriodSelector({
                 const endDate = event.target.value > period.endDate ? event.target.value : period.endDate
                 onChange(createCrmStatsPeriod('period', event.target.value, endDate))
               }}
+              onClick={openNativeDatePicker}
               type="date"
               value={period.startDate}
             />
@@ -145,6 +187,7 @@ function PeriodSelector({
                 const startDate = event.target.value < period.startDate ? event.target.value : period.startDate
                 onChange(createCrmStatsPeriod('period', startDate, event.target.value))
               }}
+              onClick={openNativeDatePicker}
               type="date"
               value={period.endDate}
             />

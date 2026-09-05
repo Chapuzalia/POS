@@ -2,6 +2,7 @@ import { lazy } from 'react'
 import type { RunAction } from '../shared/types'
 import type { CatalogData } from '../../catalog/domain/types.ts'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../../types'
+import { canAccessCrmSection } from './crmPermissions'
 import type { CrmSection } from './crmNavigation'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 
@@ -16,6 +17,9 @@ const DashboardCrm = lazy(() => import('../dashboard/pages/DashboardPage').then(
 const DiscountsCrm = lazy(() => import('../discounts/pages/DiscountsPage').then((module) => ({ default: module.DiscountsCrm })))
 const PlanCrm = lazy(() => import('../plan/pages/PlanPage').then((module) => ({ default: module.PlanCrm })))
 const InventoryStockCrm = lazy(() => import('../inventory/pages/InventoryStockPage').then((module) => ({ default: module.InventoryStockCrm })))
+const PurchasesOverviewCrm = lazy(() => import('../purchases/pages/PurchasesOverviewPage').then((module) => ({ default: module.PurchasesOverviewCrm })))
+const PurchasesInvoicesCrm = lazy(() => import('../purchases/pages/PurchasesInvoicesPage').then((module) => ({ default: module.PurchasesInvoicesCrm })))
+const PurchasesSuppliersCrm = lazy(() => import('../purchases/pages/PurchasesSuppliersPage').then((module) => ({ default: module.PurchasesSuppliersCrm })))
 const InventoryWarehousesCrm = lazy(() => import('../inventory/pages/InventoryWarehousesPage').then((module) => ({ default: module.InventoryWarehousesCrm })))
 const InventorySettingsCrm = lazy(() => import('../inventory/pages/InventorySettingsPage').then((module) => ({ default: module.InventorySettingsCrm })))
 const InventoryItemsCrm = lazy(() => import('../inventory/pages/InventoryItemsPage').then((module) => ({ default: module.InventoryItemsCrm })))
@@ -27,6 +31,7 @@ const CashClosingReportsCrm = lazy(() => import('../sales/pages/CashClosingRepor
 const VenueSettingsCrm = lazy(() => import('../venues/pages/VenueSettingsPage').then((module) => ({ default: module.VenueSettingsCrm })))
 const TableManagementPage = lazy(() => import('../../table-management/TableManagementPage').then((module) => ({ default: module.TableManagementPage })))
 const ProductionCrm = lazy(() => import('../production/pages/ProductionPage').then((module) => ({ default: module.ProductionCrm })))
+const PrintTemplatesCrm = lazy(() => import('../printing/pages/PrintTemplatesPage').then((module) => ({ default: module.PrintTemplatesCrm })))
 
 type Props = {
   activeSection: CrmSection
@@ -71,6 +76,8 @@ export function CrmSectionContent({
   stats,
   venues,
 }: Props) {
+  if (!canAccessCrmSection(context.role, activeSection, context.features)) return null
+
   if (catalogSections.has(activeSection) && !catalog) {
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
   }
@@ -104,6 +111,12 @@ export function CrmSectionContent({
       return <ProductionCrm catalog={catalog} context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} />
     case 'inventory-stock':
       return <InventoryStockCrm disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'purchases-summary':
+      return <PurchasesOverviewCrm selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'purchases-invoices':
+      return <PurchasesInvoicesCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'purchases-suppliers':
+      return <PurchasesSuppliersCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-items':
       return <InventoryItemsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-preparations':
@@ -125,6 +138,7 @@ export function CrmSectionContent({
       />
     case 'x-reports':
       return <CashClosingReportsCrm
+        venues={venues}
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
         disabled={disabled}
         runAction={runAction}
@@ -144,6 +158,8 @@ export function CrmSectionContent({
       />
     case 'integrations':
       return <IntegrationsCrm disabled={disabled} runAction={runAction} tenantContext={context} />
+    case 'print-templates':
+      return <PrintTemplatesCrm context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} />
     case 'settings':
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':

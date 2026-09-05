@@ -1,5 +1,5 @@
 import { Button as UiButton } from '../../../components/ui/Button'
-import { Boxes, ChevronDown, LogOut, Moon, Package, ReceiptText, Store, Sun, X, type LucideIcon } from 'lucide-react'
+import { Boxes, ChevronDown, LogOut, Moon, Package, ReceiptText, ShoppingCart, Store, Sun, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { TenantContext } from '../../../types'
 import {
@@ -8,6 +8,8 @@ import {
   navItems,
   productNavItems,
   productSections,
+  purchaseNavItems,
+  purchaseSections,
   reportNavItems,
   reportSections,
   type CrmNavItem,
@@ -104,6 +106,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
   const [isProductsOpen, setIsProductsOpen] = useState(productSections.has(activeSection))
   const [isInventoryOpen, setIsInventoryOpen] = useState(inventorySections.has(activeSection))
   const [isReportsOpen, setIsReportsOpen] = useState(reportSections.has(activeSection))
+  const [isPurchasesOpen, setIsPurchasesOpen] = useState(purchaseSections.has(activeSection))
 
   useEffect(() => {
     if (!isOpen) return undefined
@@ -118,9 +121,11 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
     if (productSections.has(activeSection)) setIsProductsOpen(true)
     if (inventorySections.has(activeSection)) setIsInventoryOpen(true)
     if (reportSections.has(activeSection)) setIsReportsOpen(true)
+    if (purchaseSections.has(activeSection)) setIsPurchasesOpen(true)
   }, [activeSection])
 
   const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features))
+  const allowedPurchaseItems = allowed(purchaseNavItems)
   const allowedInventoryItems = allowed(inventoryNavItems)
     .filter((item) => inventoryEnabled || item.id === 'inventory-stock')
   const navigate = (section: CrmSection) => {
@@ -175,6 +180,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
             <div className="!grid !gap-[3px]">
               <SidebarCollapsible activeSection={activeSection} icon={Boxes} isOpen={isProductsOpen} items={allowed(productNavItems)} label="Productos" onNavigate={navigate} onToggle={() => setIsProductsOpen((value) => !value)} sections={productSections} />
               {allowedInventoryItems.length ? <SidebarCollapsible activeSection={activeSection} icon={Package} isOpen={isInventoryOpen} items={allowedInventoryItems} label="Inventario" onNavigate={navigate} onToggle={() => setIsInventoryOpen((value) => !value)} sections={inventorySections} /> : null}
+              {allowedPurchaseItems.length ? <SidebarCollapsible activeSection={activeSection} icon={ShoppingCart} isOpen={isPurchasesOpen} items={allowedPurchaseItems} label="Compras" onNavigate={navigate} onToggle={() => setIsPurchasesOpen((value) => !value)} sections={purchaseSections} /> : null}
               {allowed(navItems.slice(2, 3)).map((item) => (
                 <SidebarNavItem activeSection={activeSection} item={item} key={item.id} onNavigate={navigate} />
               ))}
