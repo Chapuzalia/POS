@@ -1,3 +1,4 @@
+import { reportOperationError } from '../../../lib/observability.ts'
 import { create } from 'zustand'
 import { recordCashlogyStackerCollection } from '../../cash-registers/service'
 import { createPrintAgentClient } from '../api/printAgentClient'
@@ -130,11 +131,13 @@ async function recordCompletedStackerCollection(operation: CashlogyCashManagemen
     await recordCashlogyStackerCollection({ ...collection, deviceId: state.scope.terminalId })
     useCashlogyManagementStore.setState({ stackerCollectionPending: false, error: null })
   } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
     useCashlogyManagementStore.setState({ stackerCollectionPending: true })
     throw new CashlogyError({
       code: 'CASHLOGY_NETWORK_ERROR',
       message: 'Cashlogy ha retirado el stacker, pero el importe aún no se ha podido registrar en la caja. Consulta el estado de nuevo antes de cerrar.',
       details: error,
+      cause: error,
     })
   } finally {
     useCashlogyManagementStore.setState({ isRecordingStackerCollection: false })
@@ -142,6 +145,8 @@ async function recordCompletedStackerCollection(operation: CashlogyCashManagemen
 }
 
 async function resolveObservedOperation(operation: CashlogyCashManagementOperation) {
+  const failure = operationError(operation)
+  if (failure) reportOperationError(failure, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: operation.id, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: operation.status })
   identifyOperation(operation)
   if (!shouldPoll(operation)) await recordCompletedStackerCollection(operation)
 }
@@ -182,6 +187,7 @@ function startPolling(operation: CashlogyCashManagementOperation) {
     if (generation === operationPollingGeneration) await resolveObservedOperation(terminal)
   }).catch((error) => {
     if (controller.signal.aborted || generation !== operationPollingGeneration) return
+    reportOperationError(error, { operation: 'cashlogy.management', operationId: operation.requestId, integration: 'cashlogy', step: 'poll' })
     useCashlogyManagementStore.setState({ error: toCashlogyError(error) })
   }).finally(() => {
     if (generation === operationPollingGeneration) {
@@ -196,6 +202,7 @@ function uncertainOperationError(error: unknown) {
     code: 'CASHLOGY_STATUS_UNKNOWN',
     originalCode: error instanceof Error && 'code' in error ? String(error.code) : null,
     details: error,
+    cause: error,
   })
 }
 
@@ -233,6 +240,7 @@ async function createOperation(
     try {
       operation = (await createRequest(intent.requestId)).operation
     } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
       if (!isUncertainCashlogyError(error)) {
         persistIntent(null)
         useCashlogyManagementStore.setState({ intent: null })
@@ -244,6 +252,7 @@ async function createOperation(
     startPolling(operation)
     return operation
   } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
     const mapped = toCashlogyError(error, isUncertainCashlogyError(error) ? 'CASHLOGY_STATUS_UNKNOWN' : 'CASHLOGY_OPERATION_FAILED')
     useCashlogyManagementStore.setState({ error: mapped })
     throw mapped
@@ -264,6 +273,7 @@ async function mutateOperation(
     try {
       operation = (await mutate(current)).operation
     } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
       if (!isUncertainCashlogyError(error)) throw error
       operation = await recoverAfterUncertainResult(current.requestId, error)
     }
@@ -271,6 +281,7 @@ async function mutateOperation(
     startPolling(operation)
     return operation
   } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
     const mapped = toCashlogyError(error, isUncertainCashlogyError(error) ? 'CASHLOGY_STATUS_UNKNOWN' : 'CASHLOGY_OPERATION_FAILED')
     useCashlogyManagementStore.setState({ error: mapped })
     throw mapped
@@ -392,6 +403,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
       startPolling(operation)
       return operation
     } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
       const mapped = toCashlogyError(error)
       set({ error: mapped })
       const operation = get().operation
@@ -414,6 +426,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
         startPolling(operation)
         return operation
       } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
         const mapped = toCashlogyError(error)
         set({ error: mapped })
         throw mapped

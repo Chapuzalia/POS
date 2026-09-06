@@ -1,3 +1,5 @@
+import { reportOperationError } from '../../lib/observability.ts'
+import { UserFacingError } from '../../utils/UserFacingError.ts'
 import { supabase } from '../../lib/supabase'
 
 export type FiscalReceiptData = {
@@ -15,17 +17,18 @@ export type FiscalReceiptData = {
 export async function invokeFiscalBackend<T>(body: Record<string, unknown>, fallback: string): Promise<T> {
   if (!supabase) throw new Error('Supabase no está configurado.')
   const { data, error } = await supabase.functions.invoke<T & { error?: string }>('verifacti-api', { body })
-  if (data?.error) throw new Error(data.error)
-  if (error) {
-    if (typeof error === 'object' && error !== null && 'context' in error && error.context instanceof Response) {
-      try {
-        const responseBody = await error.context.clone().json() as { error?: unknown }
-        if (typeof responseBody.error === 'string') throw new Error(responseBody.error)
-      } catch (contextError) {
-        if (contextError instanceof Error && contextError.message !== 'Unexpected end of JSON input') throw contextError
-      }
-    }
-    throw new Error(error.message || fallback)
+  if (error || data?.error) {
+    const original = error ?? new Error(data!.error)
+    reportOperationError(original, { operation: 'fiscal.invoke', integration: 'verifacti', step: typeof body.action === 'string' ? body.action : 'invoke', ticketId: typeof body.ticketId === 'string' ? body.ticketId : undefined })
+    throw new UserFacingError(fallback, { cause: original })
+  }
+  const fiscal = (data as { fiscal?: FiscalReceiptData } | null)?.fiscal
+  if (fiscal && ['rejected', 'error'].includes(fiscal.status)) {
+    reportOperationError(new Error(fiscal.errorMessage || 'Fiscal submission rejected'), {
+      operation: 'fiscal.result', integration: 'verifacti', operationId: fiscal.invoiceId,
+      ticketId: typeof body.ticketId === 'string' ? body.ticketId : undefined,
+      step: fiscal.status,
+    })
   }
   return data as T
 }

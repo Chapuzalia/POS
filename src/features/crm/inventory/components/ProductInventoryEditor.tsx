@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import { Plus, Save, Trash2 } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Checkbox, Input } from '../../../../components/ui'
@@ -68,7 +69,7 @@ export function ProductInventoryEditor({ catalog, disabled, inventoryRecipesEnab
   async function ensureDirectItem() {
     if (directItemId) return directItemId
     const warehouse = snapshot.warehouses.find((candidate) => candidate.active)
-    if (!warehouse || !autoUnitId) throw new Error('Selecciona una unidad y asegúrate de tener un almacén activo.')
+    if (!warehouse || !autoUnitId) throw new UserFacingError('Selecciona una unidad y asegúrate de tener un almacén activo.')
     return saveInventoryItem(catalog.venueId, {
       name: product.name, description: product.description ?? '', baseUnitId: autoUnitId, active: true,
       routes: [{ warehouseId: warehouse.id, priority: 1, enabled: true }],

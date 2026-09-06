@@ -34,14 +34,16 @@ const messages: Record<CashlogyErrorCode, string> = {
 export class CashlogyError extends Error {
   readonly code: CashlogyErrorCode
   readonly originalCode: string | null
+  override readonly cause?: unknown
   readonly details?: unknown
 
-  constructor(input: { code: CashlogyErrorCode; message?: string | null; originalCode?: string | null; details?: unknown }) {
+  constructor(input: { code: CashlogyErrorCode; message?: string | null; originalCode?: string | null; details?: unknown; cause?: unknown }) {
     super(input.message || messages[input.code])
     this.name = 'CashlogyError'
     this.code = input.code
     this.originalCode = input.originalCode ?? null
     this.details = input.details
+    this.cause = input.cause
   }
 }
 
@@ -60,6 +62,7 @@ export function toCashlogyError(error: unknown, fallback: CashlogyErrorCode = 'C
       ? remote.originalCode
       : typeof remote?.code === 'string' && !(remote.code in messages) ? remote.code : null,
     details,
+    cause: error,
   })
 }
 

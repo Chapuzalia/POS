@@ -13,7 +13,7 @@ if (
   import.meta.env.VITE_SENTRY_ENABLED === 'true'
   && Boolean(import.meta.env.VITE_SENTRY_DSN)
 ) {
-  window.setTimeout(() => void import('./sentry.ts'), 0)
+  await import('./sentry.ts').catch(() => { /* The POS remains usable if telemetry cannot load. */ })
 }
 
 const appleStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true
@@ -30,7 +30,7 @@ const sentryFallback = (
     </h1>
 
     <p className="max-w-md text-sm text-gray-500">
-      El error ha sido registrado. Recarga el TPV para continuar.
+      Recarga el TPV para continuar. Si el problema persiste, contacta con el responsable.
     </p>
 
     <button

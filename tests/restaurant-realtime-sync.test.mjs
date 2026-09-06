@@ -1,3 +1,5 @@
+import { UserFacingError } from '../src/utils/UserFacingError.ts'
+import * as observability from '../src/lib/observability.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -46,7 +48,7 @@ function hookRunner(name, modules, globals = {}) {
   const exports = {}
   vm.runInNewContext(sources[name], {
     exports,
-    require: (id) => id === 'react' ? react : id === '../../../utils/errors' ? { getReadableError } : modules[id] ?? {},
+    require: (id) => id === 'react' ? react : id === '../../../utils/errors' ? { getReadableError } : (id.endsWith('/UserFacingError.ts') ? { UserFacingError } : id.endsWith('/observability.ts') ? observability : modules[id] ?? {}),
     ...globals,
   })
   return {
@@ -243,7 +245,9 @@ for (const [message, refreshFails, expectedRefreshes] of [
     })
     await result.openTableOrder(['table'], 2)
     assert.equal(refreshes, expectedRefreshes)
-    assert.deepEqual(errors, [null, `${message} - Código: P0001`])
+    assert.equal(errors[0], null)
+    assert.ok(!errors[1].includes('P0001'))
+    assert.ok(!errors[1].includes(message))
     assert.deepEqual(busy, [true, false])
     runner.unmount()
   })

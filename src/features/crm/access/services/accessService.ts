@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import { isValidTaxRate } from "../../../../lib/tax";
 import { normalizeDayChangeTime } from "../../../../lib/operationalDay";
 import {
@@ -186,7 +187,7 @@ export async function createCrmVenue(
   });
 
   if (error || data?.error) {
-    throw new Error(await getFunctionInvokeErrorMessage(
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(
       data,
       error,
       "No se pudo crear el local.",
@@ -294,7 +295,7 @@ export async function createCrmDevice(
   });
 
   if (error || data?.error || !data?.credentials) {
-    throw new Error(
+    throw new UserFacingError(
       await getFunctionInvokeErrorMessage(
         data,
         error,
@@ -316,7 +317,7 @@ export async function createCrmUser(
 ) {
   const email = input.email.trim().toLowerCase();
   if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-    throw new Error("Introduce un email válido.");
+    throw new UserFacingError("Introduce un email válido.");
   }
   if (
     input.password.length < CRM_USER_PASSWORD_MIN_LENGTH ||
@@ -327,7 +328,7 @@ export async function createCrmUser(
     );
   }
   if (!["owner", "manager"].includes(input.role)) {
-    throw new Error("Selecciona un rol válido.");
+    throw new UserFacingError("Selecciona un rol válido.");
   }
 
   const client = requireSupabase();
@@ -346,7 +347,7 @@ export async function createCrmUser(
   });
 
   if (error || data?.error || !data?.user) {
-    throw new Error(
+    throw new UserFacingError(
       await getFunctionInvokeErrorMessage(
         data,
         error,
@@ -363,7 +364,7 @@ export async function updateManagerVenueAssignments(
   venueIds: string[],
 ) {
   if (context.role !== "owner") throw new Error("Solo el owner puede asignar locales a managers.");
-  if (!venueIds.length) throw new Error("Selecciona al menos un local.");
+  if (!venueIds.length) throw new UserFacingError("Selecciona al menos un local.");
 
   const { data, error } = await requireSupabase().functions.invoke<{ error?: string; venueIds?: string[] }>(
     "manage-pos-users",
@@ -377,7 +378,7 @@ export async function updateManagerVenueAssignments(
     },
   );
   if (error || data?.error) {
-    throw new Error(await getFunctionInvokeErrorMessage(data, error, "No se pudieron actualizar los locales del manager."));
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, "No se pudieron actualizar los locales del manager."));
   }
   return data?.venueIds ?? venueIds;
 }
@@ -410,7 +411,7 @@ export async function updateCrmDevice(
   );
 
   if (error || data?.error) {
-    throw new Error(
+    throw new UserFacingError(
       await getFunctionInvokeErrorMessage(
         data,
         error,
@@ -434,7 +435,7 @@ export async function deleteCrmDevice(
   );
 
   if (error || data?.error) {
-    throw new Error(
+    throw new UserFacingError(
       await getFunctionInvokeErrorMessage(
         data,
         error,

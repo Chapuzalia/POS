@@ -1,5 +1,7 @@
 import { createClient, type SupabaseClient } from '@supabase/supabase-js'
 import { getAppRoute, type AppRoute } from '../app/app-routes'
+import { hasPersistedSessionForUser } from '../features/session/services/sessionValidity'
+import { backendFetch } from './backendFetch'
 
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? ''
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() ?? ''
@@ -34,6 +36,7 @@ export const supabaseConfig = {
 
 export const supabase: SupabaseClient | null = supabaseConfig.isReady
   ? createClient(supabaseUrl, supabaseAnonKey, {
+      global: { fetch: backendFetch },
       auth: {
         autoRefreshToken: true,
         detectSessionInUrl: true,
@@ -42,6 +45,14 @@ export const supabase: SupabaseClient | null = supabaseConfig.isReady
       },
     })
   : null
+
+export function hasLocalSupabaseSession(userId: string) {
+  try {
+    return hasPersistedSessionForUser(window.localStorage.getItem(authStorageKey(initialAppRoute)), userId)
+  } catch {
+    return false
+  }
+}
 
 export function moveSupabaseSessionToRoute(route: AppRoute) {
   if (route === initialAppRoute || typeof window === 'undefined') return

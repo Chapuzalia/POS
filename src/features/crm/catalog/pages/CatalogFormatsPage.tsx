@@ -1,3 +1,5 @@
+import { notifyOperationalError } from '../../../../utils/notifications.ts'
+import { getReadableError } from '../../../../utils/errors.ts'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { ArrowDown, ArrowUp, Eye, EyeOff, Pencil, Plus, Save, Trash2, X } from 'lucide-react'
@@ -102,7 +104,7 @@ export function CatalogFormatsCrm({ catalog, disabled, inventoryFeatureEnabled, 
         inventoryConsumptionUnitId: unit.id,
       }))
     } catch (error) {
-      window.alert(error instanceof Error ? error.message : 'El consumo no es válido.')
+      notifyOperationalError(getReadableError(error, { operation: 'features.crm.catalog.pages.CatalogFormatsPage' }, 'El consumo no es válido.'))
     }
   }
 

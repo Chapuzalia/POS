@@ -110,7 +110,6 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
 
       {state.error ? <div className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm">
         <p className="font-bold text-red-700 dark:text-red-300">{state.error.message}</p>
-        <p className="mt-1 font-mono text-xs text-[var(--muted)]">{state.error.code}{state.error.originalCode ? ` · ${state.error.originalCode}` : ''}</p>
       </div> : null}
 
       <div className="mt-5 flex flex-wrap justify-end gap-2">

@@ -1,3 +1,5 @@
+import { reportOperationError, operationBreadcrumb } from '../../../lib/observability.ts'
+import { getReadableError } from '../../../utils/errors.ts'
 import { useCallback, useRef } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
@@ -72,7 +74,7 @@ export function useQuickSalePayment(options: Options) {
           throw new Error('El cobro confirmado en Cashlogy no coincide con esta venta.')
         }
       } catch (error) {
-        options.onError(error instanceof Error ? error.message : 'No se pudo completar el cobro con Cashlogy.')
+        options.onError(getReadableError(error, { operation: 'sale.payment', saleId: preview.sale.id, cashSessionId: cashSession.id, integration: 'cashlogy', step: 'settle' }, 'No se pudo completar el cobro con Cashlogy.'))
         return
       }
     }
@@ -91,12 +93,19 @@ export function useQuickSalePayment(options: Options) {
       : preview
     const saleRecord: SaleRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt }
     const ticketRecord: SessionTicketRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt, status: 'active', payload, printStatus: 'not_requested', printAttempts: 0 }
-    enqueueOfflineEvent({ id: createId(), kind: 'sale_created', tenantId: context.tenantId, createdAt: payload.sale.createdAt, attempts: 0, payload })
-    options.persistLedger([...options.ledger, saleRecord])
-    options.persistTickets([ticketRecord, ...options.tickets])
-    options.mergeProductStats(lines)
-    options.persistLines([])
-    options.refreshPendingCount()
+    operationBreadcrumb({ operation: 'sale.payment', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'persist' })
+    try {
+      enqueueOfflineEvent({ id: createId(), kind: 'sale_created', tenantId: context.tenantId, createdAt: payload.sale.createdAt, attempts: 0, payload })
+      options.persistLedger([...options.ledger, saleRecord])
+      options.persistTickets([ticketRecord, ...options.tickets])
+      options.mergeProductStats(lines)
+      options.persistLines([])
+      options.refreshPendingCount()
+    } catch (error) {
+      reportOperationError(error, { operation: 'sale.payment', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'local_persistence' })
+      options.onError('No se ha podido guardar completamente la venta. Comprueba las ventas pendientes y el cobro antes de repetirlo.')
+      return
+    }
     options.resetUi(paymentMethod)
     finishCashlogyPayment(cashlogyTransaction)
     let printPayload = payload
@@ -119,7 +128,7 @@ export function useQuickSalePayment(options: Options) {
           options.persistTickets([{ ...ticketRecord, payload: printPayload }, ...options.tickets])
         }
       } catch (fiscalError) {
-        console.error('Could not load fiscal QR before printing', fiscalError)
+        reportOperationError(fiscalError, { operation: 'sale.fiscal_receipt', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'before_print' })
         if (options.invoiceCustomer) {
           options.onError('No se ha podido confirmar el número de factura. Revisa la sincronización antes de imprimir.')
           return

@@ -27,7 +27,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
   const [comparisonStats, setComparisonStats] = useState<CrmStats | null>(null)
   const [venues, setVenues] = useState<CrmVenue[]>([])
   const [selectedVenueId, setSelectedVenueId] = useState('')
-  const handleCatalogLoadError = useCallback((loadError: unknown) => onError(getReadableError(loadError)), [onError])
+  const handleCatalogLoadError = useCallback((loadError: unknown) => onError(getReadableError(loadError, { operation: 'components.crm.CrmPage' })), [onError])
   const { catalog, isLoading: isCatalogLoading, refresh: refreshAdminCatalog } = useCatalogAdmin(selectedVenueId, isOnline, handleCatalogLoadError)
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
@@ -36,7 +36,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     try {
       await action()
     } catch (actionError) {
-      onError(getReadableError(actionError))
+      onError(getReadableError(actionError, { operation: 'components.crm.CrmPage' }))
     } finally {
       setIsBusy(false)
     }
@@ -55,7 +55,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
       await Promise.all([refreshAdminCatalog(true), refreshCurrentProjectedCatalog()])
       return true
     } catch (actionError) {
-      onError(getReadableError(actionError))
+      onError(getReadableError(actionError, { operation: 'components.crm.CrmPage' }))
       return false
     } finally {
       setIsBusy(false)
@@ -73,7 +73,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
       if (targetVenueId === selectedVenueId) await refreshAdminCatalog(true)
       return true
     } catch (actionError) {
-      onError(getReadableError(actionError))
+      onError(getReadableError(actionError, { operation: 'components.crm.CrmPage' }))
       return false
     } finally {
       setIsBusy(false)
@@ -130,7 +130,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
       setComparisonStats(nextComparisonStats)
     }
     if (options.silent) {
-      try { await loadStats() } catch (statsError) { onError(getReadableError(statsError)) }
+      try { await loadStats() } catch (statsError) { onError(getReadableError(statsError, { operation: 'components.crm.CrmPage' })) }
       return
     }
     await runAction(loadStats)
@@ -171,7 +171,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
           })
         }
       } catch (salesError) {
-        if (active) onError(getReadableError(salesError))
+        if (active) onError(getReadableError(salesError, { operation: 'components.crm.CrmPage' }))
       }
     }
     const scheduleSalesRefresh = () => {

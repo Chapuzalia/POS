@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import { useId, useRef, useState } from 'react'
 import { Upload, X } from 'lucide-react'
 import { Button } from '../../../../components/ui/Button'
@@ -32,10 +33,10 @@ export function RevoClosingImportModal({ venues, disabled, onClose, onImported }
     if (!file) return
     setReading(true)
     try {
-      if (!file.name.toLowerCase().endsWith('.csv')) throw new Error('Selecciona el archivo .csv fiscal exportado desde REVO.')
+      if (!file.name.toLowerCase().endsWith('.csv')) throw new UserFacingError('Selecciona el archivo .csv fiscal exportado desde REVO.')
       if (file.size > REVO_CLOSING_MAX_BYTES) throw new Error('El archivo supera los 10 MB.')
       setPreview(parseRevoClosingsCsv(await file.text()))
-    } catch (cause) { setError(getReadableError(cause)) }
+    } catch (cause) { setError(getReadableError(cause, { operation: 'features.crm.sales.components.RevoClosingImportModal' })) }
     finally { setReading(false) }
   }
 
@@ -47,7 +48,7 @@ export function RevoClosingImportModal({ venues, disabled, onClose, onImported }
       const imported = await importRevoCashClosings(venue.id, fileName, preview.days)
       setResult({ ...imported, venueName: venue.name })
       await onImported(venue.id)
-    } catch (cause) { setError(getReadableError(cause)) }
+    } catch (cause) { setError(getReadableError(cause, { operation: 'features.crm.sales.components.RevoClosingImportModal' })) }
     finally { importPending.current = false; setImporting(false) }
   }
 

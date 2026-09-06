@@ -16,7 +16,7 @@ export async function loadSessionTableLayout(_context: TenantContext, cashSessio
 
 export async function saveSessionTableLayout(cashSessionId: string, expectedRevision: number, tables: Record<string, TableLayoutEntry>): Promise<SessionTableLayout> {
   const { data, error } = await client().rpc('save_cash_session_table_layout', { p_cash_session_id: cashSessionId, p_expected_revision: expectedRevision, p_tables: tables })
-  if (error) throw new Error(getReadableError(error))
+  if (error) throw new Error(getReadableError(error, { operation: 'features.tables.layout-service' }))
   return data as SessionTableLayout
 }
 

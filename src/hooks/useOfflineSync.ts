@@ -1,3 +1,4 @@
+import { reportOperationError, operationBreadcrumb, isTransportError } from '../lib/observability.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import {
   forgetOfflineEvent,
@@ -12,11 +13,11 @@ import { isClosedCashSaleRejection } from '../features/offline/services/cashSess
 
 type RejectedSaleEvent = Extract<OfflineEvent, { kind: 'sale_created' }>
 
-export function useOfflineSync(isOnline: boolean) {
+export function useOfflineSync(isOnline: boolean, sessionReady = true) {
   const initialQueue = getOfflineQueue()
   const [pendingCount, setPendingCount] = useState(() => initialQueue.length)
   const [lastSyncError, setLastSyncError] = useState<string | null>(
-    () => initialQueue.find((event) => event.lastError)?.lastError ?? null,
+    () => initialQueue.some((event) => event.lastError) ? 'Hay operaciones pendientes de sincronizar. Revisa su estado.' : null,
   )
   const [rejectedSaleEvent, setRejectedSaleEvent] = useState<RejectedSaleEvent | null>(null)
   const syncInFlightRef = useRef<Promise<void> | null>(null)
@@ -24,7 +25,7 @@ export function useOfflineSync(isOnline: boolean) {
   const refreshPendingCount = useCallback(() => {
     const events = getOfflineQueue()
     setPendingCount(events.length)
-    setLastSyncError(events.find((event) => event.lastError)?.lastError ?? null)
+    setLastSyncError(events.some((event) => event.lastError) ? 'Hay operaciones pendientes de sincronizar. Revisa su estado.' : null)
   }, [])
 
   const clearRejectedSaleEvent = useCallback(() => {
@@ -60,16 +61,19 @@ export function useOfflineSync(isOnline: boolean) {
       // no debe bloquear las ventas posteriores de la misma cola.
       for (const event of events) {
         try {
+          operationBreadcrumb({ operation: 'offline.sync', operationId: event.id, saleId: event.kind === 'sale_created' ? event.payload.sale.id : undefined, step: event.kind })
           await syncEvent(event)
           forgetOfflineEvent(event.id)
         } catch (syncError) {
+          const incident = { operation: 'offline.sync', operationId: event.id, saleId: event.kind === 'sale_created' ? event.payload.sale.id : undefined, step: event.kind, syncStatus: 'failed', recoverable: true }
+          reportOperationError(syncError, incident)
           if (isClosedCashSaleRejection(event, syncError)) {
             forgetOfflineEvent(event.id)
             setRejectedSaleEvent(event)
             continue
           }
 
-          markOfflineEventFailed(event.id, getReadableError(syncError))
+          markOfflineEventFailed(event.id, isTransportError(syncError) ? 'Sin conexión. La operación sigue pendiente de sincronizar.' : getReadableError(syncError, incident, 'No se ha podido sincronizar la operación. Revisa las operaciones pendientes.'))
         }
       }
 
@@ -88,10 +92,10 @@ export function useOfflineSync(isOnline: boolean) {
   }, [isOnline, refreshPendingCount])
 
   useEffect(() => {
-    if (isOnline) {
+    if (isOnline && sessionReady) {
       void syncPendingEvents()
     }
-  }, [isOnline, syncPendingEvents])
+  }, [isOnline, sessionReady, syncPendingEvents])
 
   return {
     clearRejectedSaleEvent,

@@ -1,3 +1,5 @@
+import { notifyOperationalError } from '../utils/notifications.ts'
+import { getReadableError } from '../utils/errors.ts'
 import { Button as UiButton } from '../components/ui/Button'
 import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
@@ -78,32 +80,7 @@ type AddFeedback = {
   successId: string | null
 }
 
-function ErrorCountdownIndicator() {
-  return <svg aria-hidden="true" className="h-4 w-4 shrink-0" viewBox="0 0 20 20">
-    <circle cx="10" cy="10" fill="none" opacity="0.25" r="8" stroke="currentColor" strokeWidth="2.5" />
-    <circle
-      cx="10"
-      cy="10"
-      fill="none"
-      pathLength={100}
-      r="8"
-      stroke="currentColor"
-      strokeDasharray="100"
-      strokeDashoffset="0"
-      strokeLinecap="round"
-      strokeWidth="2.5"
-      transform="rotate(-90 10 10)"
-    >
-      <animate
-        attributeName="stroke-dashoffset"
-        dur={`${POS_TRANSIENT_ERROR_DURATION_MS}ms`}
-        fill="freeze"
-        from="0"
-        to="100"
-      />
-    </circle>
-  </svg>
-}
+
 
 type Props = {
   addFeedback: AddFeedback
@@ -184,6 +161,7 @@ export function PosPage(props: Props) {
   })
   useEffect(() => {
     if (!displayedError || activeCashlogyError) return undefined
+    notifyOperationalError(displayedError)
     const timer = window.setTimeout(() => clearDisplayedError(null), POS_TRANSIENT_ERROR_DURATION_MS)
     return () => window.clearTimeout(timer)
   }, [activeCashlogyError, clearDisplayedError, displayedError, displayedErrorId])
@@ -268,7 +246,7 @@ export function PosPage(props: Props) {
     try {
       await cash.refreshLedger()
     } catch (error) {
-      setShiftSummaryError(error instanceof Error ? error.message : 'No se ha podido actualizar el resumen del turno.')
+      setShiftSummaryError(getReadableError(error, { operation: 'app.PosPage' }, 'No se ha podido actualizar el resumen del turno.'))
     } finally {
       setShiftSummaryLoading(false)
     }
@@ -485,9 +463,8 @@ export function PosPage(props: Props) {
         /> : null}
         themeMode={props.themes.find((theme) => theme.id === props.selectedThemeId)?.mode ?? 'light'}
       />
-      {props.error ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
+      {props.error && activeCashlogyError ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
         <div className="flex items-center gap-2.5 rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
-          {!activeCashlogyError ? <ErrorCountdownIndicator key={displayedErrorId} /> : null}
           <span>{props.error}</span>
         </div>
       </div> : null}

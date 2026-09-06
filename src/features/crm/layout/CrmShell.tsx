@@ -1,6 +1,7 @@
+import { notifyOperationalError } from '../../../utils/notifications.ts'
 import { Button as UiButton } from '../../../components/ui/Button'
 import { ChevronRight, LayoutDashboard, Menu, UserRound } from 'lucide-react'
-import { useState, type ReactNode } from 'react'
+import { useEffect, useState, type ReactNode } from 'react'
 import type { CrmVenue, TenantContext } from '../../../types'
 import { CrmVenueSelector } from '../../../components/crm/CrmVenueSelector'
 import { allNavItems, getSectionTitle, type CrmSection } from '../routing/crmNavigation'
@@ -23,6 +24,7 @@ type Props = {
 }
 
 export function CrmShell({ activeSection, children, context, disabled, error, inventoryEnabled, isOnline, onLogout, onSectionChange, onVenueChange, selectedVenueId, venues }: Props) {
+  useEffect(() => { if (error) notifyOperationalError(error) }, [error])
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [crmTheme, setCrmTheme] = useState<CrmTheme>(getInitialCrmTheme)
 
@@ -89,11 +91,6 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
           </div>
         </header>
 
-        {error ? (
-          <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-red-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-red)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">
-            {error}
-          </div>
-        ) : null}
         {!isOnline ? (
           <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">
             El CRM requiere conexión para guardar cambios en Supabase.

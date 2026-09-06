@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../utils/UserFacingError.ts'
 import { supabase } from '../../lib/supabase'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import { normalizeCatalogSnapshot } from '../catalog/services/catalogSnapshots'
@@ -184,7 +185,7 @@ export async function updateDiningArea(context: TenantContext, areaId: string, i
 }
 export async function deleteDiningArea(context: TenantContext, areaId: string) {
   const { error } = await requireSupabase().from('dining_areas').delete().eq('tenant_id', context.tenantId).eq('id', areaId)
-  if (error?.code === '23503') throw new Error('No se puede eliminar la zona porque todavía contiene mesas. Elimina sus mesas primero.')
+  if (error?.code === '23503') throw new UserFacingError('No se puede eliminar la zona porque todavía contiene mesas. Elimina sus mesas primero.')
   if (error) throw error
 }
 export async function createRestaurantTable(context: TenantContext, input: RestaurantTableCreateInput) {
@@ -238,10 +239,10 @@ export async function deleteVirtualRestaurantTable(input: VirtualRestaurantTable
     p_table_id: input.tableId,
   })
   if (!error) return
-  if (error.message.includes('VIRTUAL_TABLE_HAS_PAYMENTS')) throw new Error('No se puede eliminar esta mesa temporal porque su comanda ya tiene cobros.')
-  if (error.message.includes('VIRTUAL_TABLE_JOINED')) throw new Error('Separa la mesa temporal antes de eliminarla.')
-  if (error.message.includes('VIRTUAL_TABLE_HAS_ACTIVE_RESERVATION')) throw new Error('No se puede eliminar esta mesa temporal porque tiene una reserva vigente.')
-  if (error.message.includes('VIRTUAL_TABLE_SESSION_MISMATCH')) throw new Error('La mesa temporal pertenece a otro turno.')
+  if (error.message.includes('VIRTUAL_TABLE_HAS_PAYMENTS')) throw new UserFacingError('No se puede eliminar esta mesa temporal porque su comanda ya tiene cobros.')
+  if (error.message.includes('VIRTUAL_TABLE_JOINED')) throw new UserFacingError('Separa la mesa temporal antes de eliminarla.')
+  if (error.message.includes('VIRTUAL_TABLE_HAS_ACTIVE_RESERVATION')) throw new UserFacingError('No se puede eliminar esta mesa temporal porque tiene una reserva vigente.')
+  if (error.message.includes('VIRTUAL_TABLE_SESSION_MISMATCH')) throw new UserFacingError('La mesa temporal pertenece a otro turno.')
   throw error
 }
 export async function updateRestaurantTable(context: TenantContext, tableId: string, input: RestaurantTableUpdateInput) {
@@ -251,8 +252,8 @@ export async function updateRestaurantTable(context: TenantContext, tableId: str
 export async function deleteRestaurantTable(_context: TenantContext, tableId: string) {
   const { error } = await requireSupabase().rpc('delete_restaurant_table', { p_table_id: tableId })
   if (!error) return
-  if (error.message.includes('TABLE_HAS_OPEN_ORDER')) throw new Error('No se puede eliminar la mesa mientras tenga una comanda abierta.')
-  if (error.message.includes('TABLE_HAS_ACTIVE_RESERVATION')) throw new Error('No se puede eliminar la mesa mientras tenga una reserva vigente.')
+  if (error.message.includes('TABLE_HAS_OPEN_ORDER')) throw new UserFacingError('No se puede eliminar la mesa mientras tenga una comanda abierta.')
+  if (error.message.includes('TABLE_HAS_ACTIVE_RESERVATION')) throw new UserFacingError('No se puede eliminar la mesa mientras tenga una reserva vigente.')
   throw error
 }
 

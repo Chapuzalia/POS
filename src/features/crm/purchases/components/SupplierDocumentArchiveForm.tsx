@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import { useEffect, useState, type FormEvent } from 'react'
 import { Button, Input } from '../../../../components/ui'
 import type { TenantContext } from '../../../../types'
@@ -27,7 +28,7 @@ export function SupplierDocumentArchiveForm({ document, disabled, onExit, select
   useEffect(() => {
     let active = true
     void loadVenueSuppliers(tenantContext, selectedVenueId).then((rows) => { if (active) setSuppliers(rows) })
-      .catch((cause) => { if (active) setError(getReadableError(cause)) })
+      .catch((cause) => { if (active) setError(getReadableError(cause, { operation: 'features.crm.purchases.components.SupplierDocumentArchiveForm' })) })
     return () => { active = false }
   }, [selectedVenueId, tenantContext])
   async function save(event: FormEvent) {
@@ -39,11 +40,11 @@ export function SupplierDocumentArchiveForm({ document, disabled, onExit, select
       const metadata = { supplierId: supplierId || null, documentDate, documentNumber }
       if (document) await saveDocumentArchive(document.id, metadata)
       else {
-        if (!file) throw new Error('Selecciona una foto o un PDF.')
+        if (!file) throw new UserFacingError('Selecciona una foto o un PDF.')
         await uploadDocumentArchive(selectedVenueId, documentType, file, metadata)
       }
       onExit()
-    } catch (cause) { setError(getReadableError(cause)) }
+    } catch (cause) { setError(getReadableError(cause, { operation: 'features.crm.purchases.components.SupplierDocumentArchiveForm' })) }
     finally { setBusy(false) }
   }
   return <form className="grid max-w-2xl gap-5 rounded-3xl bg-[var(--crm-surface)] p-6 shadow-[var(--crm-shadow-card)]" onSubmit={(event) => void save(event)}>

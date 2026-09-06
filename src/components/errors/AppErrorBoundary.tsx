@@ -23,7 +23,7 @@ export class AppErrorBoundary extends Component<Props, State> {
     ) {
       void import('../../sentry.ts').then((module) => {
         module.captureException(error, errorInfo)
-      })
+      }).catch(() => { /* Preserve the recovery screen if telemetry cannot load. */ })
     }
   }
 

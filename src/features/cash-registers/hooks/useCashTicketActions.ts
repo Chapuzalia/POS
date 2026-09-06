@@ -44,7 +44,7 @@ export function useCashTicketActions(options: Options) {
       const tickets = options.mergeRemotePrintStates(await loadSessionTicketsFromSupabase(context, cashSession.id))
       options.persistTickets(tickets)
       options.setHistoryOpen(true)
-    } catch (error) { options.setError(getReadableError(error)) } finally { options.setBusy(false) }
+    } catch (error) { options.setError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' })) } finally { options.setBusy(false) }
   }, [options])
 
   const reprint = useCallback(async (ticket: SessionTicketRecord) => {
@@ -123,11 +123,11 @@ export function useCashTicketActions(options: Options) {
       }
     } catch (error) {
       if (requiresCashlogyConfirmation && !cashlogyConfirmationFinished) {
-        options.setError(`${getReadableError(error)} El ticket continúa pagado con tarjeta.`)
+        options.setError(`${getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' })} El ticket continúa pagado con tarjeta.`)
       } else if (cashlogyTransaction) {
-        options.setError(`${getReadableError(error)} El cobro está confirmado en Cashlogy, pero no se pudo guardar el cambio del ticket. Revisa el histórico antes de repetir la operación.`)
+        options.setError(`${getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' })} El cobro está confirmado en Cashlogy, pero no se pudo guardar el cambio del ticket. Revisa el histórico antes de repetir la operación.`)
       } else {
-        options.setError(getReadableError(error))
+        options.setError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' }))
       }
     } finally {
       options.setBusy(false)
@@ -165,7 +165,7 @@ export function useCashTicketActions(options: Options) {
       options.subtractProductSalesStats(ticket.payload.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, lineTotalCents: line.lineTotalCents })))
       options.refreshPendingCount()
     } catch (error) {
-      options.setError(getReadableError(error))
+      options.setError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' }))
     } finally {
       options.setBusy(false)
     }

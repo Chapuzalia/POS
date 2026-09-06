@@ -29,7 +29,7 @@ export function useActiveCashSession(options: Options) {
         const previous = getCachedCashSession(context)
         if (next?.id !== previous?.id) await latestRef.current.onChanged(next, previous)
       } catch (error) {
-        if (active && requestVersion === refreshVersion) latestRef.current.onError(getReadableError(error))
+        if (active && requestVersion === refreshVersion) latestRef.current.onError(getReadableError(error, { operation: 'features.cash-registers.hooks.useActiveCashSession' }))
       }
     }
     const unsubscribe = subscribeToCashSessionChanges(context, () => void refresh())

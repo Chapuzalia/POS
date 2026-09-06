@@ -40,7 +40,7 @@ export function CashlogyConnectorList(props: {
               <Status active={connector.initialized} label={connector.initialized ? 'Inicializada' : 'Sin inicializar'} />
             </div>
             {connector.protocolVersion ? <p className="mt-2 text-xs text-[var(--muted)]">Versión: {connector.protocolVersion}</p> : null}
-            {connector.lastError ? <p className="mt-2 text-sm font-semibold text-red-600 dark:text-red-300">{connector.lastError.message || connector.lastError.code}</p> : null}
+            {connector.lastError ? <p className="mt-2 text-sm font-semibold text-red-600 dark:text-red-300">No se ha podido conectar con Cashlogy. Comprueba el servidor local.</p> : null}
           </div>
         </div>
         <div className="flex flex-wrap gap-2">

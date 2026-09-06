@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import { supabase } from '../../../../lib/supabase'
 import type { ImportedCashClosing, RevoClosingDay } from '../../../../lib/revoCashClosings.ts'
 import type { TenantContext } from '../../../../types'
@@ -36,7 +37,7 @@ export async function loadCashClosingReports(context: TenantContext, config: Ope
 }
 
 export async function importRevoCashClosings(venueId: string, fileName: string, days: RevoClosingDay[]) {
-  if (!venueId) throw new Error('Selecciona el local de destino.')
+  if (!venueId) throw new UserFacingError('Selecciona el local de destino.')
   const { data, error } = await client().rpc('import_revo_cash_closings', {
     p_venue_id: venueId, p_file_name: fileName, p_days: days,
   })

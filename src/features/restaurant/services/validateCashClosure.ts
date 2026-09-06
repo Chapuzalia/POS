@@ -26,6 +26,6 @@ export async function getRestaurantCashClosureError(options: Options) {
       `${detail.tables.map((table) => table.name).join(' + ')} (${(detail.totalCents / 100).toFixed(2)} EUR, abierta ${new Date(detail.order.openedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}, ${getOrderPendingUnits(detail.lines)} por servir)`
     ).join('; ')}`
   } catch (error) {
-    return getReadableError(error)
+    return getReadableError(error, { operation: 'features.restaurant.services.validateCashClosure' })
   }
 }

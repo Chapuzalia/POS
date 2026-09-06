@@ -93,12 +93,12 @@ export function useRestaurantDraft({ context, isOnline, onError }: UseRestaurant
             onError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
           } catch (reloadError) {
             updateSaveState('error')
-            onError(getReadableError(reloadError))
+            onError(getReadableError(reloadError, { operation: 'features.restaurant.hooks.useRestaurantDraft' }))
           }
           return null
         }
         updateSaveState('error')
-        onError(getReadableError(saveError))
+        onError(getReadableError(saveError, { operation: 'features.restaurant.hooks.useRestaurantDraft' }))
         return null
       }
     })()

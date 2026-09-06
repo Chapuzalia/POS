@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../utils/UserFacingError.ts'
 export type CatalogErrorCode =
   | 'CATALOG_PRODUCT_NOT_FOUND'
   | 'CATALOG_VARIANT_NOT_FOUND'
@@ -17,12 +18,12 @@ export type CatalogErrorCode =
   | 'CATALOG_NESTED_MENU'
   | 'CATALOG_UNKNOWN'
 
-export class CatalogDomainError extends Error {
+export class CatalogDomainError extends UserFacingError {
   readonly code: CatalogErrorCode
   readonly details: Readonly<Record<string, unknown>>
 
   constructor(code: CatalogErrorCode, message: string, details: Record<string, unknown> = {}, options?: ErrorOptions) {
-    super(message, options)
+    super(message, { ...options, expected: ['CATALOG_SELECTION_OUT_OF_BOUNDS', 'CATALOG_REFERENCED_ENTITY', 'CATALOG_FORBIDDEN', 'CATALOG_MENU_INCOMPLETE', 'CATALOG_NESTED_MENU'].includes(code) })
     this.name = 'CatalogDomainError'
     this.code = code
     this.details = Object.freeze({ ...details })
@@ -74,15 +75,11 @@ export function toCatalogDomainError(error: unknown, fallback = 'No se pudo comp
   const source = error as { code?: string; message?: string; details?: string; hint?: string } | null
   const message = source?.message ?? fallback
   const matched = Object.entries(postgresCodeMap).find(([token]) => source?.code === token || message.includes(token))
-  const readableMessage = matched
-    ? postgresMessageMap[matched[0]] ?? `${fallback} Detalle: ${matched[0]}`
-    : message && message !== fallback
-      ? `${fallback} Detalle: ${message}`
-      : fallback
+  const readableMessage = matched ? postgresMessageMap[matched[0]] ?? fallback : fallback
   return new CatalogDomainError(matched?.[1] ?? 'CATALOG_UNKNOWN', readableMessage, {
     databaseCode: source?.code ?? null,
     databaseMessage: message,
     databaseDetails: source?.details ?? null,
     databaseHint: source?.hint ?? null,
-  }, error instanceof Error ? { cause: error } : undefined)
+  }, { cause: error })
 }

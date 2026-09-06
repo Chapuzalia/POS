@@ -17,7 +17,7 @@ export function InventoryPreparationsPanel({ context, isOnline, onClose }: { con
   const refresh = useCallback(async () => {
     if (!isOnline) return
     try { const next = await loadInventoryPreparations(context.venueId); setItems(next); setSelected((current) => next.find((item) => item.inventoryItemId === current?.inventoryItemId) ?? null); setError(null) }
-    catch (cause) { setError(getReadableError(cause)) }
+    catch (cause) { setError(getReadableError(cause, { operation: 'features.inventory.InventoryPreparationsPanel' })) }
   }, [context.venueId, isOnline])
   useEffect(() => { void refresh() }, [refresh])
 
@@ -27,7 +27,7 @@ export function InventoryPreparationsPanel({ context, isOnline, onClose }: { con
     if (!(parsed > 0)) return setError('Indica una cantidad positiva.')
     setBusy(true); setError(null); setSuccess(null)
     try { setPreview(await previewInventoryPreparation(selected.inventoryItemId, parsed, selected.referenceUnitId)) }
-    catch (cause) { setError(getReadableError(cause)) }
+    catch (cause) { setError(getReadableError(cause, { operation: 'features.inventory.InventoryPreparationsPanel' })) }
     finally { setBusy(false) }
   }
 
@@ -37,7 +37,7 @@ export function InventoryPreparationsPanel({ context, isOnline, onClose }: { con
     try {
       await recordInventoryPreparation({ inventoryItemId: selected.inventoryItemId, quantity: preview.quantity, unitId: preview.unitId, deviceId: context.deviceId, requestId: crypto.randomUUID() })
       setSuccess(`${selected.name}: preparación registrada correctamente.`); setPreview(null); setQuantity(''); await refresh()
-    } catch (cause) { setError(getReadableError(cause)) }
+    } catch (cause) { setError(getReadableError(cause, { operation: 'features.inventory.InventoryPreparationsPanel' })) }
     finally { setBusy(false) }
   }
 

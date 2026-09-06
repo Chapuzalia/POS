@@ -583,7 +583,7 @@ export function TableMapView(props: Props) {
       );
     } catch (error) {
       setDisplayTables(map.tables);
-      onError(getReadableError(error));
+      onError(getReadableError(error, { operation: 'features.tables.components.TableMapView' }));
     } finally {
       setSavingLayout(false);
     }

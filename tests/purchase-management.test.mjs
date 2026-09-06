@@ -14,7 +14,7 @@ const supplierService = await readFile(new URL('../src/features/crm/supplier-doc
 const edgeFunction = await readFile(new URL('../supabase/functions/process-supplier-document/index.ts', import.meta.url), 'utf8')
 const stockChoiceMigration = await readFile(new URL('../supabase/migrations/20260902004127_persist_supplier_document_stock_choice.sql', import.meta.url), 'utf8')
 
-const confirmation = migration.match(/create function public\.confirm_supplier_document\([\s\S]*?\nend;\n\$\$;/i)?.[0] ?? ''
+const confirmation = migration.replace(/\r\n/g, '\n').match(/create function public\.confirm_supplier_document\([\s\S]*?\nend;\n\$\$;/i)?.[0] ?? ''
 
 test('factura o albarán con stock activado registra compra y aplica una entrada', () => {
   assert.match(confirmation, /coalesce\(p_affects_stock, true\)[\s\S]*perform public\.increment_inventory_item_stock/)

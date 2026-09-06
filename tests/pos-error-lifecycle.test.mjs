@@ -23,10 +23,7 @@ test('los errores Cashlogy siguen fijos solo mientras el estado continúa activo
   assert.match(page, /if \(!displayedError \|\| activeCashlogyError\) return undefined/)
 })
 
-test('la tarjeta temporal muestra un temporizador circular a la izquierda del mensaje', () => {
-  assert.match(page, /!activeCashlogyError \? <ErrorCountdownIndicator key=\{displayedErrorId\}/)
-  assert.match(page, /attributeName="stroke-dashoffset"/)
-  assert.match(page, /dur=\{`\$\{POS_TRANSIENT_ERROR_DURATION_MS\}ms`\}/)
-  assert.doesNotMatch(page, /animate-spin/)
-  assert.match(page, /<ErrorCountdownIndicator[\s\S]*<span>\{props\.error\}<\/span>/)
+test('los avisos transitorios usan Sileo y conservan la recuperacion Cashlogy', () => {
+  assert.match(page, /notifyOperationalError\(displayedError\)/)
+  assert.match(page, /props.error && activeCashlogyError/)
 })

@@ -1,3 +1,4 @@
+import { reportOperationError, operationBreadcrumb } from '../../../lib/observability.ts'
 import { sileo } from 'sileo'
 import type { CashSession, SessionTicketRecord, TenantContext } from '../../../types'
 import { getPrintAgentErrorMessage } from '../api/PrintAgentError'
@@ -20,6 +21,7 @@ type PrintTicketOptions = {
 export async function printTicket({ cashSession, context, payload, tickets, updateTicketPrintState, options = {} }: PrintTicketOptions) {
   const printState = usePrintAgentStore.getState()
   const requestId = options.isReprint ? `print:${payload.sale.id}:copy:${options.copyNumber || 1}` : `print:${payload.sale.id}:original`
+  operationBreadcrumb({ operation: 'sale.print', saleId: payload.sale.id, ticketId: payload.ticket.id, operationId: requestId, step: 'requested' })
   const payments = payload.payment ? [{ method: payload.payment.method, amountCents: payload.payment.amountCents }] : []
   const hardwareAction = getAutomaticSaleHardwareAction({
     payments,
@@ -42,6 +44,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
       })
       sileo.success({ title: 'Cajón abierto' })
     } catch (error) {
+    reportOperationError(error, { operation: 'sale.print', integration: 'print-agent', operationId: requestId, saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession?.id, step: 'drawer' })
       sileo.warning({ title: 'La venta se ha completado, pero el cajón no se ha podido abrir', description: getPrintAgentErrorMessage(error) })
     }
     return
@@ -74,6 +77,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
     })
     sileo.success({ title: options.isReprint ? 'Copia impresa correctamente' : payload.ticket.invoice ? 'Factura impresa correctamente' : 'Ticket impreso correctamente' })
   } catch (error) {
+    reportOperationError(error, { operation: 'sale.print', integration: 'print-agent', operationId: requestId, saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession?.id, step: hardwareAction === 'print' ? 'ticket' : 'drawer' })
     const code = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'PRINT_FAILED'
     updateTicketPrintState(payload.sale.id, getPrintFailurePatch(code, requestId))
     sileo.warning({ title: 'La venta se ha completado, pero el ticket no se ha podido imprimir', description: getPrintAgentErrorMessage(error) })

@@ -71,7 +71,7 @@ export function PurchasesOverviewCrm({ selectedVenueId, tenantContext }: Props) 
         .flatMap((document) => document.lines.flatMap((line) => line.inventoryItemId ? [line.inventoryItemId] : [])))
       if (active) { setDocuments(current); setPrevious(prior); setItemCategories(categoryNames) }
     })
-      .catch((cause) => { if (active) setError(getReadableError(cause)) })
+      .catch((cause) => { if (active) setError(getReadableError(cause, { operation: 'features.crm.purchases.pages.PurchasesOverviewPage' })) })
     return () => { active = false }
   }, [endDate, selectedVenueId, startDate, tenantContext])
   const stats = useMemo(() => {

@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
 import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
 import { loadInventorySnapshot } from '../../inventory/services/inventoryService'
@@ -77,7 +78,7 @@ async function processDocument(documentId: string, fixtureId?: string) {
     body: { documentId, ...(fixtureId ? { fixtureId } : {}) },
   })
   if (error) {
-    throw new Error(await getFunctionInvokeErrorMessage(
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(
       data,
       error,
       'No se pudo procesar el documento.',
@@ -194,7 +195,7 @@ export async function reparseSupplierDocumentLines(documentId: string, allowOver
   const { data, error } = await requireSupabase().functions.invoke('process-supplier-document', {
     body: { documentId, action: 'reparse_lines', allowOverwrite },
   })
-  if (error) throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron actualizar las líneas con este proveedor.'))
+  if (error) throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron actualizar las líneas con este proveedor.'))
   return data as { documentId: string; lineCount: number }
 }
 

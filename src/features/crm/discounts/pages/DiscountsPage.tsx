@@ -1,3 +1,4 @@
+import { getReadableError } from '../../../../utils/errors.ts'
 import { Input as UiInput } from "../../../../components/ui/Input";
 import { Checkbox as UiCheckbox } from "../../../../components/ui/Checkbox";
 import { Button as UiButton } from "../../../../components/ui/Button";
@@ -500,9 +501,7 @@ export function DiscountEditor({
         throw new Error("Configura un PIN de entre 4 y 8 dígitos.");
     } catch (error) {
       setValidationError(
-        error instanceof Error
-          ? error.message
-          : "Revisa los datos de la regla.",
+        getReadableError(error, { operation: 'features.crm.discounts.pages.DiscountsPage' }, "Revisa los datos de la regla."),
       );
       return;
     }

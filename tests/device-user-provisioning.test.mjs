@@ -54,14 +54,14 @@ test('el owner puede crear cuentas CRM con email, contrasena y rol desde Accesos
   assert.match(edgeFunction, /auth\.admin\.deleteUser\(userId, true\)/)
 })
 
-test('el crm muestra el detalle devuelto por la edge function en vez del error non-2xx genérico', async () => {
+test('el crm captura el error original y devuelve un mensaje local', async () => {
   const service = await readFile(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8')
   const support = await readFile(new URL('../src/features/crm/shared/services/crmServiceSupport.ts', import.meta.url), 'utf8')
 
   assert.match(service, /getFunctionInvokeErrorMessage/)
-  assert.match(support, /context instanceof Response/)
-  assert.match(support, /await context\.json\(\)/)
-  assert.match(support, /non-2xx status code/)
+  assert.match(support, /reportOperationError\(error \?\? data/)
+  assert.match(support, /return fallback/)
+  assert.doesNotMatch(support, /return error.message/)
 })
 
 test('accesos integra las credenciales y la edición dentro de cada dispositivo', async () => {

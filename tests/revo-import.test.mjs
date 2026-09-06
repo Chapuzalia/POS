@@ -237,9 +237,10 @@ test('la importación materializa formatos y divide catálogos grandes en lotes 
   assert.match(service, /Guardando catálogo REVO \(\$\{index \+ 1\}\/\$\{chunks\.length\}\)/)
 })
 
-test('los errores de catálogo desconocidos conservan el detalle útil de Supabase', () => {
+test('los errores de catalogo ocultan detalles de Supabase y conservan la causa', () => {
   const unknown = toCatalogDomainError({ code: '23505', message: 'duplicate key value violates unique constraint' })
-  assert.match(unknown.message, /Detalle: duplicate key value/)
+  assert.doesNotMatch(unknown.message, /duplicate key|23505/)
+  assert.equal(unknown.cause.message, 'duplicate key value violates unique constraint')
   assert.equal(unknown.details.databaseCode, '23505')
 
   const known = toCatalogDomainError({ message: 'CATALOG_SALE_FORMAT_NOT_FOUND' })

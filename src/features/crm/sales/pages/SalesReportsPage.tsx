@@ -648,7 +648,7 @@ export function SalesReportTicketModal({
 
             <div className="!grid !grid-cols-1 !gap-2 sm:!grid-cols-2">
               <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">UUID</span><code className="!mt-1 !block !break-all !text-xs !text-[var(--crm-text)]">{ticket.fiscal.externalUuid ?? 'Pendiente de asignación'}</code></div>
-              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Último error</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.fiscal.errorMessage ?? 'Sin errores'}{ticket.fiscal.errorCode ? ` (${ticket.fiscal.errorCode})` : ''}</p></div>
+              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Último error</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.fiscal.errorMessage || ticket.fiscal.errorCode ? 'No se ha podido completar el envío fiscal. Revisa el estado antes de repetirlo.' : 'Sin errores'}</p></div>
             </div>
 
             <div>
@@ -658,7 +658,7 @@ export function SalesReportTicketModal({
                   <div className="!flex !flex-wrap !items-center !justify-between !gap-2 !rounded-lg !bg-[var(--crm-surface)] !px-3 !py-2 !text-xs" key={event.id}>
                     <span className="!font-semibold !text-[var(--crm-text)]">{event.event_type.replaceAll('_', ' ')}</span>
                     <span className="!text-[var(--crm-text-muted)]">{event.source} · {event.http_status ?? '—'} · {crmReportDateTimeFormatter.format(new Date(event.created_at))}</span>
-                    {event.error_message ? <span className="!basis-full !text-[var(--crm-red)]">{event.error_message}</span> : null}
+                    {event.error_message ? <span className="!basis-full !text-[var(--crm-red)]">No se ha podido completar esta operación fiscal.</span> : null}
                   </div>
                 ))}
                 {!events.length ? <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">Todavía no hay comunicaciones registradas.</p> : null}

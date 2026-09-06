@@ -1,3 +1,4 @@
+import { sanitizeDiagnosticData } from './lib/observabilityPrivacy.ts'
 import * as Sentry from '@sentry/react'
 import type { ErrorInfo } from 'react'
 
@@ -29,11 +30,13 @@ function removeQueryString(rawUrl?: string) {
 
   try {
     const url = new URL(rawUrl, window.location.origin)
+    url.username = ''
+    url.password = ''
     url.search = ''
     url.hash = ''
     return url.toString()
   } catch {
-    return rawUrl
+    return '[invalid-url]'
   }
 }
 
@@ -55,7 +58,18 @@ Sentry.init({
   tracesSampleRate: 0.05,
   replaysSessionSampleRate: 0,
   replaysOnErrorSampleRate: 1.0,
+  beforeSendTransaction(event) {
+    delete event.user
+    delete event.extra
+    if (event.request) {
+      delete event.request.data
+      delete event.request.cookies
+    }
+    return sanitizeDiagnosticData(event) as typeof event
+  },
+  sendDefaultPii: false,
   beforeBreadcrumb(breadcrumb) {
+    if (breadcrumb.category === 'console' || breadcrumb.category?.startsWith('ui.')) return null
     if (
       breadcrumb.category === 'fetch'
       || breadcrumb.category === 'xhr'
@@ -65,9 +79,16 @@ Sentry.init({
       }
     }
 
-    return breadcrumb
+    return sanitizeDiagnosticData(breadcrumb) as typeof breadcrumb
   },
-  beforeSend(event) {
+  beforeSend(event, hint) {
+    // Supabase returns plain objects. Preserve their diagnostic message before
+    // removing Sentry's serialized extras, which can contain response payloads.
+    const original = hint.originalException
+    if (original && typeof original === 'object' && !(original instanceof Error) && 'message' in original && typeof original.message === 'string') {
+      const exception = event.exception?.values?.at(-1)
+      if (exception) exception.value = original.message
+    }
     if (event.request) {
       delete event.request.cookies
       delete event.request.data
@@ -81,7 +102,9 @@ Sentry.init({
       }
     }
 
-    return event
+    delete event.user
+    delete event.extra
+    return sanitizeDiagnosticData(event) as typeof event
   },
 })
 

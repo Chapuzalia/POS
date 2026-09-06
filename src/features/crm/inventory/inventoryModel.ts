@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../utils/UserFacingError.ts'
 export const MAX_INVENTORY_DECIMAL_PLACES = 6
 
 export type InventoryCostSource = 'average' | 'last_purchase' | 'reference'
@@ -21,21 +22,21 @@ export function getEffectiveInventoryItemCost(item: {
 
 export function validateInventoryName(value: string, entityLabel: string) {
   const name = value.trim().replace(/\s+/g, ' ')
-  if (!name) throw new Error(`Indica el nombre ${entityLabel}.`)
-  if (name.length > 80) throw new Error(`El nombre ${entityLabel} no puede superar 80 caracteres.`)
+  if (!name) throw new UserFacingError(`Indica el nombre ${entityLabel}.`)
+  if (name.length > 80) throw new UserFacingError(`El nombre ${entityLabel} no puede superar 80 caracteres.`)
   return name
 }
 
 export function validateInventoryUnitSymbol(value: string) {
   const symbol = value.trim().replace(/\s+/g, ' ')
-  if (!symbol) throw new Error('Indica la abreviatura de la unidad.')
-  if (symbol.length > 12) throw new Error('La abreviatura no puede superar 12 caracteres.')
+  if (!symbol) throw new UserFacingError('Indica la abreviatura de la unidad.')
+  if (symbol.length > 12) throw new UserFacingError('La abreviatura no puede superar 12 caracteres.')
   return symbol
 }
 
 export function validateInventoryDecimalPlaces(value: number) {
   if (!Number.isInteger(value) || value < 0 || value > MAX_INVENTORY_DECIMAL_PLACES) {
-    throw new Error(`Los decimales deben estar entre 0 y ${MAX_INVENTORY_DECIMAL_PLACES}.`)
+    throw new UserFacingError(`Los decimales deben estar entre 0 y ${MAX_INVENTORY_DECIMAL_PLACES}.`)
   }
   return value
 }
@@ -52,18 +53,18 @@ function parseInventoryQuantityValue(value: string, decimalPlaces: number, allow
   validateInventoryDecimalPlaces(decimalPlaces)
   const normalized = value.trim().replace(',', '.')
   const pattern = allowNegative ? /^-?(?:\d+|\d*\.\d+)$/ : /^(?:\d+|\d*\.\d+)$/
-  if (!pattern.test(normalized)) throw new Error('Indica una cantidad válida.')
+  if (!pattern.test(normalized)) throw new UserFacingError('Indica una cantidad válida.')
   const quantity = Number(normalized)
-  if (!Number.isFinite(quantity) || (!allowNegative && quantity < 0)) throw new Error('La cantidad no puede ser negativa.')
+  if (!Number.isFinite(quantity) || (!allowNegative && quantity < 0)) throw new UserFacingError('La cantidad no puede ser negativa.')
   const scale = 10 ** decimalPlaces
   if (Math.abs(quantity * scale - Math.round(quantity * scale)) > 1e-7) {
-    throw new Error(`Esta unidad admite como máximo ${decimalPlaces} decimales.`)
+    throw new UserFacingError(`Esta unidad admite como máximo ${decimalPlaces} decimales.`)
   }
   return Math.round(quantity * scale) / scale
 }
 
 export function addInventoryStockQuantity(currentQuantity: number, value: string, decimalPlaces: number) {
-  if (!Number.isFinite(currentQuantity)) throw new Error('El stock actual no es válido.')
+  if (!Number.isFinite(currentQuantity)) throw new UserFacingError('El stock actual no es válido.')
   const addition = parseInventoryQuantity(value, decimalPlaces)
   const scale = 10 ** decimalPlaces
   return Math.round((currentQuantity + addition) * scale) / scale
@@ -71,7 +72,7 @@ export function addInventoryStockQuantity(currentQuantity: number, value: string
 
 export function parsePositiveInventoryQuantity(value: string, decimalPlaces: number, label: string) {
   const quantity = parseInventoryQuantity(value, decimalPlaces)
-  if (quantity <= 0) throw new Error(`${label} debe ser mayor que cero.`)
+  if (quantity <= 0) throw new UserFacingError(`${label} debe ser mayor que cero.`)
   return quantity
 }
 
@@ -103,7 +104,7 @@ export function calculateStockUnitConsumption(
     || contentQuantityPerStockUnit <= 0
     || contentQuantityPerFormatUnit <= 0
   ) {
-    throw new Error('Los datos de consumo deben ser mayores que cero.')
+    throw new UserFacingError('Los datos de consumo deben ser mayores que cero.')
   }
   return Math.round((
     formatConsumptionQuantity

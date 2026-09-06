@@ -270,7 +270,7 @@ export function SupplierReceiptsCrm({
     try {
       await action();
     } catch (cause) {
-      setError(getReadableError(cause));
+      setError(getReadableError(cause, { operation: 'features.crm.supplier-documents.pages.SupplierReceiptsPage' }));
     } finally {
       setBusy(false);
     }

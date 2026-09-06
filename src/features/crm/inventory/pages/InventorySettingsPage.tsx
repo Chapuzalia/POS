@@ -1,3 +1,4 @@
+import { getReadableError } from '../../../../utils/errors.ts'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { DataTable } from '../../../../components/ui/DataTable'
@@ -121,7 +122,7 @@ function InventoryUnitEditor({ disabled, onClose, onSaved, runAction, selectedVe
         'La equivalencia',
       )
     } catch (error) {
-      setValidationError(error instanceof Error ? error.message : 'La equivalencia no es válida.')
+      setValidationError(getReadableError(error, { operation: 'features.crm.inventory.pages.InventorySettingsPage' }, 'La equivalencia no es válida.'))
       return
     }
     await runAction(async () => {

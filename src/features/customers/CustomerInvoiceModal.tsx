@@ -63,7 +63,7 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
       void searchCustomers(tenantId, query).then((customers) => {
         if (request === requestRef.current) setResults(customers)
       }).catch((searchError) => {
-        if (request === requestRef.current) setError(getReadableError(searchError))
+        if (request === requestRef.current) setError(getReadableError(searchError, { operation: 'features.customers.CustomerInvoiceModal' }))
       }).finally(() => {
         if (request === requestRef.current) setLoading(false)
       })
@@ -88,7 +88,7 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
       const customer = await createCustomer(tenantId, form)
       onSelect(customer)
     } catch (saveError) {
-      setError(getReadableError(saveError))
+      setError(getReadableError(saveError, { operation: 'features.customers.CustomerInvoiceModal' }))
     } finally {
       setSaving(false)
     }
@@ -126,7 +126,7 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
       setCustomerPendingDeletion(null)
       setMode('search')
     } catch (deleteError) {
-      setError(getReadableError(deleteError))
+      setError(getReadableError(deleteError, { operation: 'features.customers.CustomerInvoiceModal' }))
     } finally {
       setSaving(false)
     }

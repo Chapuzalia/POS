@@ -1,3 +1,4 @@
+import { getReadableError } from '../../utils/errors.ts'
 import { NativeSelect as UiNativeSelect } from '../../components/ui/NativeSelect'
 import { Input as UiInput } from '../../components/ui/Input'
 import { Checkbox as UiCheckbox } from '../../components/ui/Checkbox'
@@ -33,7 +34,7 @@ export function TableManagementPage({ context, disabled, venueId, onError }: Pro
     const [nextEnabled, nextAreas, nextTables] = await Promise.all([loadVenueTablesEnabled(context, venueId), loadDiningAreas(context, venueId, true), loadRestaurantTables(context, venueId, true)])
     setEnabled(nextEnabled); setAreas(nextAreas); setTables(nextTables); setSelectedAreaId((current) => nextAreas.some((area) => area.id === current) ? current : (nextAreas[0]?.id ?? ''))
   }, [context, venueId])
-  useEffect(() => { setSelectedTableId(null); void refresh().catch((error: unknown) => onError(error instanceof Error ? error.message : 'No se pudo cargar la configuración de mesas.')) }, [onError, refresh])
+  useEffect(() => { setSelectedTableId(null); void refresh().catch((error: unknown) => onError(getReadableError(error, { operation: 'features.table-management.TableManagementPage' }, 'No se pudo cargar la configuración de mesas.'))) }, [onError, refresh])
   const selectedArea = areas.find((area) => area.id === selectedAreaId), selectedTable = tables.find((table) => table.id === selectedTableId)
   const selectedElement = selectedArea?.mapElements.find((element) => element.id === selectedElementId)
   const areaTables = useMemo(() => tables.filter((table) => table.areaId === selectedAreaId), [selectedAreaId, tables])
@@ -57,7 +58,7 @@ export function TableManagementPage({ context, disabled, venueId, onError }: Pro
     return { left: bounds.left, top: bounds.top, ...getMapPlaneSize(bounds.width, bounds.height, selectedArea?.canvasWidth ?? 1200, selectedArea?.canvasHeight ?? 800) }
   }
 
-  async function run(action: () => Promise<void>) { setBusy(true); onError(null); try { await action() } catch (error) { onError(error instanceof Error ? error.message : 'No se pudo guardar la configuración.') } finally { setBusy(false) } }
+  async function run(action: () => Promise<void>) { setBusy(true); onError(null); try { await action() } catch (error) { onError(getReadableError(error, { operation: 'features.table-management.TableManagementPage' }, 'No se pudo guardar la configuración.')) } finally { setBusy(false) } }
   async function addArea() { const name = areaName.trim(); if (!name) return; await run(async () => { const area = await createDiningArea(context, { venueId, name, sortOrder: areas.length }); setAreaName(''); await refresh(); setSelectedAreaId(area.id) }) }
   async function addTable(source?: RestaurantTable) { if (!selectedArea) return; await run(async () => { const created = await createRestaurantTable(context, { venueId, areaId: selectedArea.id, name: source ? `${source.name} copia` : `Mesa ${areaTables.length + 1}`, capacity: source?.capacity ?? 2, shape: source?.shape ?? 'square', positionX: Math.min((source?.positionX ?? 6) + (source ? 3 : 0), 84), positionY: Math.min((source?.positionY ?? 8) + (source ? 3 : 0), 84), width: source?.width ?? 12, height: source?.height ?? 12, sortOrder: tables.length }); await refresh(); setSelectedTableId(created.id) }) }
   async function saveSelectedTable() { if (selectedTable) await run(async () => { await updateRestaurantTable(context, selectedTable.id, selectedTable); await refresh() }) }
