@@ -133,7 +133,7 @@ export function CashMovementModal({
         });
       }
     } catch (submitError) {
-      setError(getReadableError(submitError));
+      setError(getReadableError(submitError, { operation: 'components.modals.CashMovementModal' }));
     } finally {
       setSubmitting(false);
     }

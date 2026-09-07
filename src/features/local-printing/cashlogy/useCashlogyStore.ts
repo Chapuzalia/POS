@@ -1,3 +1,4 @@
+import { reportOperationError, operationBreadcrumb } from '../../../lib/observability.ts'
 import { create } from 'zustand'
 import { createPrintAgentClient } from '../api/printAgentClient'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
@@ -80,7 +81,7 @@ function terminalError(transaction: CashlogyTransaction) {
   })
   return new CashlogyError({
     code: 'CASHLOGY_INVALID_STATE',
-    message: transaction.error?.message || 'Cashlogy ha confirmado que el cobro ha fallado.',
+    message: 'Cashlogy ha confirmado que el cobro ha fallado.',
     originalCode: transaction.normalizedErrorCode ?? transaction.error?.code,
     details: transaction,
   })
@@ -98,6 +99,8 @@ async function resolveTransaction(transaction: CashlogyTransaction, signal?: Abo
     }
     return terminal
   } catch (error) {
+    const state = useCashlogyStore.getState()
+    reportOperationError(error, { operation: 'cashlogy.payment', integration: 'cashlogy', operationId: state.intent?.requestId, saleId: state.intent?.saleId, step: state.transaction?.status ?? (state.intent?.chargeRequestedAt ? 'charge_requested' : 'health') })
     const mapped = toCashlogyError(error)
     useCashlogyStore.setState({ error: mapped, isPolling: false })
     throw mapped
@@ -148,6 +151,8 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
       const health = await usePrintAgentStore.getState().checkCashlogyHealth(signal)
       return health
     } catch (error) {
+      const state = useCashlogyStore.getState()
+      reportOperationError(error, { operation: 'cashlogy.payment', integration: 'cashlogy', operationId: state.intent?.requestId, saleId: state.intent?.saleId, step: state.transaction?.status ?? (state.intent?.chargeRequestedAt ? 'charge_requested' : 'health') })
       const mapped = toCashlogyError(error)
       set({ error: mapped })
       throw mapped
@@ -188,6 +193,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
       chargeRequestedAt: null,
       createdAt: new Date().toISOString(),
     }
+    operationBreadcrumb({ operation: 'cashlogy.payment', operationId: intent.requestId, saleId, step: 'intent' })
     persistIntent(intent)
     set({ intent, transaction: null, levels: [], error: null, modalOpen: true, isStarting: true })
     settlementPromise = (async () => {
@@ -196,7 +202,6 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
         if (!(health.enabled && health.ok && health.sessionState === 'ready')) {
           throw new CashlogyError({
             code: health.enabled ? 'CASHLOGY_NOT_READY' : 'CASHLOGY_DISABLED',
-            message: health.lastError?.message || undefined,
             originalCode: health.lastError?.code,
             details: health,
           })
@@ -234,6 +239,8 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
         set({ intent: identified, transaction })
         return await resolveTransaction(transaction, signal)
       } catch (error) {
+        const state = useCashlogyStore.getState()
+        reportOperationError(error, { operation: 'cashlogy.payment', integration: 'cashlogy', operationId: state.intent?.requestId, saleId: state.intent?.saleId, step: state.transaction?.status ?? (state.intent?.chargeRequestedAt ? 'charge_requested' : 'health') })
         const mapped = toCashlogyError(error)
         set({ error: mapped })
         throw mapped
@@ -259,6 +266,8 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
         }
         return await resolveTransaction(transaction, signal)
       } catch (error) {
+        const state = useCashlogyStore.getState()
+        reportOperationError(error, { operation: 'cashlogy.payment', integration: 'cashlogy', operationId: state.intent?.requestId, saleId: state.intent?.saleId, step: state.transaction?.status ?? (state.intent?.chargeRequestedAt ? 'charge_requested' : 'health') })
         const mapped = toCashlogyError(error)
         set({ error: mapped, modalOpen: true })
         throw mapped
@@ -282,6 +291,8 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
       if (terminal.status !== 'cancelled') throw terminalError(terminal)
       return terminal
     } catch (error) {
+      const state = useCashlogyStore.getState()
+      reportOperationError(error, { operation: 'cashlogy.payment', integration: 'cashlogy', operationId: state.intent?.requestId, saleId: state.intent?.saleId, step: state.transaction?.status ?? (state.intent?.chargeRequestedAt ? 'charge_requested' : 'health') })
       const mapped = toCashlogyError(error)
       set({ error: mapped })
       throw mapped

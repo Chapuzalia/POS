@@ -1,3 +1,5 @@
+import { reportOperationError } from '../../../lib/observability.ts'
+import { getReadableError } from '../../../utils/errors.ts'
 import {
   ArrowDownToLine,
   Ban,
@@ -124,8 +126,11 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
       ])
       setAccounting(nextAccounting)
       setDeviceErrors(errors.errors)
+      for (const fault of errors.errors) {
+        if (fault.requiresTechnicalIntervention) reportOperationError(new Error(fault.mainMessage || 'Cashlogy requires attention'), { operation: 'cashlogy.device', integration: 'cashlogy', step: 'technical_intervention' })
+      }
     } catch (error) {
-      setDashboardError(error instanceof Error ? error.message : 'No se ha podido consultar Cashlogy.')
+      setDashboardError(getReadableError(error, { operation: 'features.local-printing.components.CashlogyMachineModal' }, 'No se ha podido consultar Cashlogy.'))
     } finally {
       setLoadingDashboard(false)
     }
@@ -466,7 +471,7 @@ function AccountingPanel({ accounting, deviceErrors, disabled, loading, onRefres
     </div>
     <DenominationTable denominations={accounting?.denominations ?? null} loading={loading} showStacker={showStacker} />
     {accounting?.levels.levels.length ? <CashlogyLevelCards levels={accounting.levels.levels} variant="accounting" /> : null}
-    {deviceErrors.length ? <div className="border-t border-[var(--separator)] p-4"><h4 className="font-black">Avisos de Cashlogy</h4><div className="mt-2 grid gap-2">{deviceErrors.map((error) => <div className="rounded-[var(--radius)] border border-amber-500/30 bg-amber-500/10 p-3 text-sm" key={`${error.code}-${error.mainMessage}`}><p className="font-bold">{error.title || error.mainMessage || error.code}</p>{error.additionalMessage ? <p className="mt-1 text-[var(--muted)]">{error.additionalMessage}</p> : null}{error.requiresTechnicalIntervention ? <p className="mt-1 font-semibold">Requiere intervención técnica.</p> : null}</div>)}</div></div> : null}
+    {deviceErrors.length ? <div className="border-t border-[var(--separator)] p-4"><h4 className="font-black">Avisos de Cashlogy</h4><div className="mt-2 grid gap-2">{deviceErrors.map((error) => <div className="rounded-[var(--radius)] border border-amber-500/30 bg-amber-500/10 p-3 text-sm" key={`${error.code}-${error.mainMessage}`}><p className="font-bold">Cashlogy necesita atención. Revisa la pantalla de la máquina.</p>{error.requiresTechnicalIntervention ? <p className="mt-1 font-semibold">Requiere intervención técnica.</p> : null}</div>)}</div></div> : null}
   </section>
 }
 

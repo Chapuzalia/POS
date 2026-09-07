@@ -79,7 +79,6 @@ export function CashlogyOperationStatus({
 
     {error ? <div className="rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm" role="alert">
       <p className="font-bold text-red-700 dark:text-red-300">{error.message}</p>
-      <p className="mt-1 font-mono text-xs text-[var(--muted)]">{error.code}{error.originalCode ? ` · ${error.originalCode}` : ''}</p>
     </div> : null}
   </div>
 }

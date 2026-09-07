@@ -12,6 +12,11 @@ type LoginIdentity = {
 let activeIdentity: LoginIdentity | null = null
 let fallbackDeviceId: string | null = null
 
+function leaseResult(data: unknown) {
+  if (typeof data !== 'boolean') throw new Error('No se ha podido comprobar la sesión del dispositivo.')
+  return data
+}
+
 function createId() {
   return crypto.randomUUID()
 }
@@ -73,7 +78,7 @@ export async function claimLoginLease(allowSameDevice = true) {
     throw error
   }
 
-  return data === true
+  return leaseResult(data)
 }
 
 export async function forceClaimLoginLease() {
@@ -91,41 +96,39 @@ export async function forceClaimLoginLease() {
     throw error
   }
 
-  return data === true
+  return leaseResult(data)
 }
 
 export async function heartbeatLoginLease() {
-  if (!supabase || !activeIdentity) {
-    return false
-  }
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const identity = getLoginIdentity()
 
   const { data, error } = await supabase.rpc('heartbeat_user_login', {
-    p_client_id: activeIdentity.instanceId,
-    p_device_id: activeIdentity.deviceId,
+    p_client_id: identity.instanceId,
+    p_device_id: identity.deviceId,
   })
 
   if (error) {
     throw error
   }
 
-  return data === true
+  return leaseResult(data)
 }
 
 export async function checkLoginLease() {
-  if (!supabase || !activeIdentity) {
-    return false
-  }
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const identity = getLoginIdentity()
 
   const { data, error } = await supabase.rpc('check_user_login', {
-    p_client_id: activeIdentity.instanceId,
-    p_device_id: activeIdentity.deviceId,
+    p_client_id: identity.instanceId,
+    p_device_id: identity.deviceId,
   })
 
   if (error) {
     throw error
   }
 
-  return data === true
+  return leaseResult(data)
 }
 
 export async function releaseLoginLease() {

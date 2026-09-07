@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
 import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
 
@@ -93,7 +94,7 @@ export async function createKdsDevice(context: TenantContext, venueId: string, d
   const { data, error } = await requireSupabase().functions.invoke<{ credentials?: { email: string; password: string }; error?: string }>('manage-pos-users', {
     body: { action: 'create-kds-device', tenantId: context.tenantId, venueId, productionDestinationId: destinationId, deviceName: deviceName.trim() },
   })
-  if (error || data?.error) throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudo crear el KDS.'))
+  if (error || data?.error) throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudo crear el KDS.'))
   if (!data?.credentials) throw new Error('No se recibieron las credenciales del KDS.')
   return data.credentials
 }
@@ -102,7 +103,7 @@ export async function updateKdsDevice(context: TenantContext, deviceId: string, 
   const { data, error } = await requireSupabase().functions.invoke<{ credentials?: { email: string }; error?: string }>('manage-pos-users', {
     body: { action: 'update-kds-device', tenantId: context.tenantId, deviceId, deviceName: deviceName.trim(), password: password ?? '' },
   })
-  if (error || data?.error) throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudo actualizar el KDS.'))
+  if (error || data?.error) throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudo actualizar el KDS.'))
   return data?.credentials
 }
 
@@ -110,7 +111,7 @@ export async function deleteKdsDevice(context: TenantContext, deviceId: string) 
   const { data, error } = await requireSupabase().functions.invoke<{ error?: string }>('manage-pos-users', {
     body: { action: 'delete-device', tenantId: context.tenantId, deviceId },
   })
-  if (error || data?.error) throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudo eliminar el KDS.'))
+  if (error || data?.error) throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudo eliminar el KDS.'))
 }
 
 export async function createAgentPairingCode(venueId: string) {

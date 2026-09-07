@@ -5,7 +5,16 @@ import tailwindcss from '@tailwindcss/vite'
 
 // https://vite.dev/config/
 export default defineConfig({
-  plugins: [react(), tailwindcss(), sentryVitePlugin({
+  plugins: [react(), tailwindcss(), {
+    name: 'offline-app-assets',
+    generateBundle(_options, bundle) {
+      this.emitFile({
+        type: 'asset',
+        fileName: 'offline-assets.json',
+        source: JSON.stringify(Object.keys(bundle).filter((file) => /\.(js|css|woff2?)$/.test(file)).map((file) => `/${file}`)),
+      })
+    },
+  }, sentryVitePlugin({
     org: "alteil-solutions",
     project: "tpv-pos"
   })],

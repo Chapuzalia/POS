@@ -1,3 +1,4 @@
+import { getReadableError } from '../../../utils/errors.ts'
 import { Input as UiInput } from '../../../components/ui/Input'
 import { Button as UiButton } from '../../../components/ui/Button'
 import { AppModal } from '../../../components/ui/AppModal'
@@ -155,9 +156,7 @@ export function SplitOrderModal({
       window.setTimeout(() => setFeedback(null), 900)
     } catch (error) {
       setLocalError(
-        error instanceof Error
-          ? error.message
-          : 'No se pudo registrar el cobro.',
+        getReadableError(error, { operation: 'features.tables.components.SplitOrderModal' }, 'No se pudo registrar el cobro.'),
       )
     } finally {
       setPaying(false)

@@ -28,7 +28,7 @@ export function PurchasesSuppliersCrm({ disabled, selectedVenueId, tenantContext
     setError(null)
     void loadVenueSuppliers(tenantContext, selectedVenueId)
       .then((next) => { if (active) setSuppliers(next) })
-      .catch((cause) => { if (active) setError(getReadableError(cause)) })
+      .catch((cause) => { if (active) setError(getReadableError(cause, { operation: 'features.crm.purchases.pages.PurchasesSuppliersPage' })) })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
   }, [selectedVenueId, tenantContext])
@@ -76,7 +76,7 @@ export function PurchasesSuppliersCrm({ disabled, selectedVenueId, tenantContext
       setEditingSupplier(null)
       setDraft(emptyDraft)
     } catch (cause) {
-      setError(getReadableError(cause))
+      setError(getReadableError(cause, { operation: 'features.crm.purchases.pages.PurchasesSuppliersPage' }))
     } finally {
       setSaving(false)
     }

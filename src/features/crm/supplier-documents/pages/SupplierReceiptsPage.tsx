@@ -32,6 +32,7 @@ import {
   createMockSupplierDocument,
   loadDeliveryNoteCandidates,
   loadSupplierReceiptWorkspace,
+  loadSupplierDocument,
   retrySupplierDocumentProcessing,
   reparseSupplierDocumentLines,
   saveSupplierDocumentLine,
@@ -264,13 +265,37 @@ export function SupplierReceiptsCrm({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [initialDocumentId, selectedVenueId]);
 
+  useEffect(() => {
+    const documentId = detail?.document.id;
+    if (!documentId || detail.document.status !== "processing" || screen !== "processing") return;
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout>;
+    const poll = async () => {
+      try {
+        const current = await loadSupplierDocument(tenantContext, selectedVenueId, documentId);
+        if (cancelled) return;
+        if (current.document.status !== "processing") {
+          await refresh(documentId);
+          return;
+        }
+      } catch (cause) {
+        if (!cancelled) setError(getReadableError(cause, { operation: 'supplier-document-processing' }));
+      }
+      if (!cancelled) timer = setTimeout(poll, 2000);
+    };
+    timer = setTimeout(poll, 1000);
+    return () => { cancelled = true; clearTimeout(timer); };
+    // Poll only during processing; review edits must never be overwritten by polling.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [detail?.document.id, detail?.document.status, screen, selectedVenueId, tenantContext]);
+
   async function run(action: () => Promise<void>) {
     setBusy(true);
     setError(null);
     try {
       await action();
     } catch (cause) {
-      setError(getReadableError(cause));
+      setError(getReadableError(cause, { operation: 'features.crm.supplier-documents.pages.SupplierReceiptsPage' }));
     } finally {
       setBusy(false);
     }

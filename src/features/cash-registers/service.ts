@@ -1,3 +1,4 @@
+import { reportOperationError } from '../../lib/observability.ts'
 import { supabase } from '../../lib/supabase'
 import type { CashClosedPayload, CashClosingPrintSnapshot, CashClosingRecord, CashMovement, CashMovementType, CashRegister, CashSession, TenantContext } from '../../types'
 import { cashClosingPrintDocumentSchema } from '../local-printing/schemas/printSchemas'
@@ -136,7 +137,10 @@ export async function recordCashlogyStackerCollection(input: {
 
 export async function closeCashRegisterSession(context: TenantContext, sessionId: string, payload: CashClosedPayload) {
   const { error } = await client().rpc('close_cash_register_session', { p_cash_session_id: sessionId, p_device_id: context.deviceId, p_payload: payload })
-  if (error) throw error
+  if (error) {
+    reportOperationError(error, { operation: 'cash.close', cashSessionId: sessionId, step: 'persist' })
+    throw error
+  }
   return loadCashClosing(context, sessionId)
 }
 

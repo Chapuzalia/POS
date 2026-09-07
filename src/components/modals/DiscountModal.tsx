@@ -1,3 +1,4 @@
+import { getReadableError } from '../../utils/errors.ts'
 import { Tags, X } from "lucide-react";
 import { useState } from "react";
 
@@ -133,7 +134,7 @@ export function DiscountModal({
       onSelect(nextDiscount);
     } catch (error) {
       setValidationError(
-        error instanceof Error ? error.message : "El descuento no es válido.",
+        getReadableError(error, { operation: 'components.modals.DiscountModal' }, "El descuento no es válido."),
       );
     }
   }

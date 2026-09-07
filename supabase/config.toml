@@ -10,3 +10,7 @@ verify_jwt = false
 verify_jwt = false
 import_map = "./functions/deno.json"
 
+[functions.repair-supplier-document-profile]
+verify_jwt = false
+import_map = "./functions/deno.json"
+

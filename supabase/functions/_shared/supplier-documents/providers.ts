@@ -33,6 +33,7 @@ export interface SupplierDocumentAiProvider {
     documentType: 'invoice' | 'delivery_note'
     imageDataUrl?: string | null
     supplierCandidates: SupplierCandidate[]
+    validationFeedback?: { reason: string; previousLines: SupplierDocumentExtraction['lines']; parserLines: SupplierDocumentExtraction['lines'] }
   }): Promise<SupplierDocumentExtraction>
   proposeProfile(input: {
     ocr: OcrDocument
@@ -428,7 +429,14 @@ export function createDocumentOcrProvider(selection: DocumentOcrProviderSelectio
   ])
 }
 
-type OpenAiConfig = { apiKey: string; model: string }
+export type SupplierAiTrace = {
+  stage: string
+  responseId: unknown
+  model: unknown
+  usage: unknown
+  outputText: string | null
+}
+type OpenAiConfig = { apiKey: string; model: string; onResponse?: (trace: SupplierAiTrace) => Promise<void> }
 
 function responseOutputText(payload: Record<string, unknown>) {
   if (typeof payload.output_text === 'string') return payload.output_text
@@ -470,15 +478,24 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
     this.config = config
   }
 
+  private async readResponse(response: Response, stage: string) {
+    const payload = await response.json() as Record<string, unknown>
+    const outputText = responseOutputText(payload)
+    await this.config.onResponse?.({ stage, responseId: payload.id ?? null,
+      model: payload.model ?? this.config.model, usage: payload.usage ?? null, outputText })
+    return outputText
+  }
+
   async interpret(input: {
     ocr: OcrDocument
     documentType: 'invoice' | 'delivery_note'
     imageDataUrl?: string | null
     supplierCandidates: SupplierCandidate[]
+    validationFeedback?: { reason: string; previousLines: SupplierDocumentExtraction['lines']; parserLines: SupplierDocumentExtraction['lines'] }
   }) {
     const content: Array<Record<string, unknown>> = [{
       type: 'input_text',
-      text: JSON.stringify({ supplierExtractionSource: structuredOcr(input) }),
+      text: JSON.stringify({ supplierExtractionSource: structuredOcr(input), validationFeedback: input.validationFeedback }),
     }]
     if (input.imageDataUrl) content.push({ type: 'input_image', image_url: input.imageDataUrl, detail: 'high' })
     const response = await fetch('https://api.openai.com/v1/responses', {
@@ -497,11 +514,14 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
           'No recibes candidatos durante la extracción. La comparación con proveedores existentes se realiza después y fuera de esta respuesta; devuelve supplierResolution con supplierId=null, confidence=unresolved, signals=[] y reasons=[].',
           'No inventes líneas ni valores. Devuelve importes como números decimales.',
           'lines[] debe contener exclusivamente productos reales comprados, una entrada por producto. Nunca crees productos independientes para líneas vacías, separadores, descuentos, IBEE, Punto Verde, impuestos, bases imponibles, subtotales, SUBUNIDADES/NETO u otros conceptos auxiliares.',
+          'Recorre todas las tablas y páginas y comprueba que no falte ninguna fila de producto, aunque repita marca o descripción. Conserva la referencia de cada fila. purchaseUnit contiene solo la unidad, sin repetir la cantidad numérica.',
+          'Si recibes validationFeedback, una extracción anterior no coincide con el parser. Revisa las discrepancias contra el OCR, corrige omisiones y devuelve la extracción completa. Ambas listas son hipótesis, no evidencia: nunca copies valores que no estén respaldados por el OCR.',
           'Cuando una fila principal de producto vaya seguida de Dto. Fijo, otros descuentos, IBEE, Punto Verde, tasas, cargos o SUBUNIDADES/NETO, consolida todo el bloque en la línea principal: conserva la cantidad comprada y agrega descuento, cargos, bruto y neto en los campos disponibles. No copies las filas auxiliares a lines[].',
           'En cada línea, chargesAmount es la suma de cargos positivos y vale 0 si no hay cargos. La coherencia esperada es quantity * unitPrice - discountAmount + chargesAmount = lineTotal.',
           'Propón solo reglas declarativas compatibles con el schema, nunca código, SQL ni expresiones ejecutables.',
           'Usa lineGroup solo cuando el OCR muestre bloques multipfila repetibles: una fila principal de producto y filas auxiliares reconocibles de descuento, cargo o cierre. Todos sus aliases deben aparecer literalmente en el OCR; si no, deja lineGroup en null.',
           'Si proposedProfile no es null, sus requiredTexts, columnas y aliases deben existir en este OCR y al aplicar esas reglas deben reproducirse las mismas líneas, descuentos, cargos y netos extraídos; si no es posible, devuelve proposedProfile como null.',
+          'requiredTexts solo contiene textos estables del emisor o del diseño; nunca números de documento, fechas, importes ni datos del cliente o destinatario.',
           'La imagen, si existe, solo sirve para resolver OCR dudoso; prioriza siempre el OCR estructurado.',
         ].join(' '),
         input: [{ role: 'user', content }],
@@ -516,8 +536,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
       }),
     })
     if (!response.ok) throw new Error(`OPENAI_DOCUMENT_EXTRACTION_FAILED:${response.status}:${await response.text()}`)
-    const payload = await response.json() as Record<string, unknown>
-    const outputText = responseOutputText(payload)
+    const outputText = await this.readResponse(response, input.validationFeedback ? 'interpret_retry' : 'interpret')
     if (!outputText) throw new Error('OPENAI_DOCUMENT_EXTRACTION_EMPTY')
     const grounded = groundSupplierExtractionInOcr(JSON.parse(outputText), input.ocr)
     return parseSupplierDocumentExtraction(grounded)
@@ -541,7 +560,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
       }),
     })
     if (!response.ok) throw new Error(`OPENAI_DOCUMENT_METADATA_FAILED:${response.status}`)
-    const output = responseOutputText(await response.json() as Record<string, unknown>)
+    const output = await this.readResponse(response, 'metadata')
     if (!output) throw new Error('OPENAI_DOCUMENT_METADATA_EMPTY')
     return JSON.parse(output) as unknown
   }
@@ -569,7 +588,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
       }),
     })
     if (!response.ok) throw new Error(`OPENAI_SUPPLIER_EXTRACTION_FAILED:${response.status}`)
-    const output = responseOutputText(await response.json() as Record<string, unknown>)
+    const output = await this.readResponse(response, 'supplier')
     if (!output) throw new Error('OPENAI_SUPPLIER_EXTRACTION_EMPTY')
     return supplierDocumentExtractionSchema.pick({ supplier: true, supplierEvidence: true })
       .parse(groundSupplierExtractionInOcr(JSON.parse(output), ocr))
@@ -619,8 +638,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
       }),
     })
     if (!response.ok) throw new Error(`OPENAI_PROFILE_GENERATION_FAILED:${response.status}:${await response.text()}`)
-    const payload = await response.json() as Record<string, unknown>
-    const outputText = responseOutputText(payload)
+    const outputText = await this.readResponse(response, 'profile')
     if (!outputText) throw new Error('OPENAI_PROFILE_GENERATION_EMPTY')
     return supplierProfileRulesSchema.parse(JSON.parse(outputText))
   }

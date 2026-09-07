@@ -1,4 +1,6 @@
-import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
+import { ClosingValuesChart } from '../components/ClosingValuesChart';
+import { DataTable as UiDataTable, type DataTableSortDescriptor } from '../../../../components/ui/DataTable'
+import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { CrmModal } from '../../shared/components/CrmModal'
@@ -14,11 +16,12 @@ import type { CashClosingRecord, CrmVenue, TenantContext } from "../../../../typ
 import type { RunAction } from "../../shared/types";
 import {
   buildCashClosingDailyValues,
+  getDefaultClosingDateRange,
+  sortCashClosings,
   filterCashClosingsByDate,
   projectCashClosingCounts,
   isImportedCashClosing,
   type CashClosingReportRecord,
-  type CashClosingDailyValue,
 } from "../services/cashClosingReportModel";
 import type { OperationalDayConfig } from "../../../../lib/operationalDay";
 import { loadCashClosingReports } from '../services/revoCashClosingService';
@@ -41,16 +44,6 @@ const dateFormatter = new Intl.DateTimeFormat("es-ES", {
   timeStyle: "short",
 });
 
-const dayFormatter = new Intl.DateTimeFormat("es-ES", {
-  day: "2-digit",
-  month: "short",
-  timeZone: "UTC",
-});
-
-function formatDay(date: string) {
-  return dayFormatter.format(new Date(`${date}T12:00:00Z`)).replace(".", "");
-}
-
 // DataTable reads literal <tr>/<td> elements from its children before rendering.
 function renderImportedClosingRow(closing: ImportedCashClosing, onSelect: () => void) {
   return <tr key={closing.id} aria-label={`Ver cierre REVO del ${formatRevoDate(closing.date)}`} className="!cursor-pointer !border-b !border-[var(--crm-border-subtle)] hover:!bg-[var(--crm-surface-soft)] focus-visible:!bg-[var(--crm-surface-soft)]"
@@ -63,209 +56,6 @@ function renderImportedClosingRow(closing: ImportedCashClosing, onSelect: () => 
     <td className="!px-3 !py-4 !text-xs !text-[var(--crm-text-muted)]">No disponible</td>
     <td className="!px-[22px] !py-4 !text-xs !text-[var(--crm-text-muted)]">No disponible</td>
   </tr>
-}
-
-function ClosingValuesChart({ values }: { values: CashClosingDailyValue[] }) {
-  const [hoveredPointIndex, setHoveredPointIndex] = useState<number | null>(
-    null,
-  );
-
-  if (!values.length) {
-    return (
-      <div className="!grid !min-h-64 !place-items-center !rounded-xl !bg-[var(--crm-surface-soft)] !px-6 !text-center !text-sm !font-semibold !text-[var(--crm-text-muted)]">
-        No hay cierres en el período seleccionado.
-      </div>
-    );
-  }
-
-  const width = 1000;
-  const height = 280;
-  const padding = { bottom: 42, left: 86, right: 24, top: 24 };
-  const chartWidth = width - padding.left - padding.right;
-  const chartHeight = height - padding.top - padding.bottom;
-  const maximum = Math.max(...values.map((value) => value.totalCents), 1);
-  const minimum = Math.min(...values.map((value) => value.totalCents), 0);
-  const valueRange = maximum - minimum;
-  const point = (value: CashClosingDailyValue, index: number) => ({
-    ...value,
-    x:
-      padding.left +
-      (values.length === 1
-        ? chartWidth / 2
-        : (index / (values.length - 1)) * chartWidth),
-    y: padding.top + chartHeight - ((value.totalCents - minimum) / valueRange) * chartHeight,
-  });
-  const points = values.map(point);
-  const hoveredPoint =
-    hoveredPointIndex === null ? null : (points[hoveredPointIndex] ?? null);
-  const linePoints = points.map(({ x, y }) => `${x},${y}`).join(" ");
-  const baseline = padding.top + chartHeight - ((0 - minimum) / valueRange) * chartHeight;
-  const areaPoints = `${padding.left},${baseline} ${linePoints} ${padding.left + chartWidth},${baseline}`;
-  const labelStep = Math.max(1, Math.ceil(values.length / 8));
-
-  return (
-    <div className="!overflow-x-auto">
-      <svg
-        aria-label="Valor diario de los cierres de caja"
-        className="!h-auto !min-w-[680px] !w-full"
-        role="img"
-        viewBox={`0 0 ${width} ${height}`}
-      >
-        <defs>
-          <linearGradient
-            id="cash-closing-chart-area"
-            x1="0"
-            x2="0"
-            y1="0"
-            y2="1"
-          >
-            <stop offset="0%" stopColor="var(--crm-blue)" stopOpacity="0.24" />
-            <stop
-              offset="100%"
-              stopColor="var(--crm-blue)"
-              stopOpacity="0.02"
-            />
-          </linearGradient>
-          <filter
-            height="160%"
-            id="cash-closing-tooltip-shadow"
-            width="140%"
-            x="-20%"
-            y="-30%"
-          >
-            <feDropShadow
-              dx="0"
-              dy="4"
-              floodColor="#000000"
-              floodOpacity="0.22"
-              stdDeviation="6"
-            />
-          </filter>
-        </defs>
-        {[0, 0.25, 0.5, 0.75, 1].map((ratio) => {
-          const y = padding.top + chartHeight - ratio * chartHeight;
-          return (
-            <g key={ratio}>
-              <line
-                stroke="var(--crm-border-subtle)"
-                strokeWidth="1"
-                x1={padding.left}
-                x2={padding.left + chartWidth}
-                y1={y}
-                y2={y}
-              />
-              <text
-                fill="var(--crm-text-muted)"
-                fontSize="12"
-                textAnchor="end"
-                x={padding.left - 12}
-                y={y + 4}
-              >
-                {formatMoney(Math.round(minimum + valueRange * ratio))}
-              </text>
-            </g>
-          );
-        })}
-        <polygon fill="url(#cash-closing-chart-area)" points={areaPoints} />
-        {values.length > 1 ? (
-          <polyline
-            fill="none"
-            points={linePoints}
-            stroke="var(--crm-blue)"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-            strokeWidth="4"
-          />
-        ) : null}
-        {points.map((value, index) => (
-          <g key={value.date}>
-            <circle
-              cx={value.x}
-              cy={value.y}
-              fill="var(--crm-surface)"
-              r="6"
-              stroke="var(--crm-blue)"
-              strokeWidth="4"
-            />
-            <circle
-              aria-label={`${formatDay(value.date)}, ${formatMoney(value.totalCents)}, ${value.closingCount} ${value.closingCount === 1 ? "cierre" : "cierres"}`}
-              className="!cursor-pointer !outline-none"
-              cx={value.x}
-              cy={value.y}
-              fill="transparent"
-              onBlur={() => setHoveredPointIndex(null)}
-              onFocus={() => setHoveredPointIndex(index)}
-              onMouseEnter={() => setHoveredPointIndex(index)}
-              onMouseLeave={() => setHoveredPointIndex(null)}
-              r="18"
-              tabIndex={0}
-            />
-            {index % labelStep === 0 || index === points.length - 1 ? (
-              <text
-                fill="var(--crm-text-muted)"
-                fontSize="12"
-                textAnchor="middle"
-                x={value.x}
-                y={height - 12}
-              >
-                {formatDay(value.date)}
-              </text>
-            ) : null}
-          </g>
-        ))}
-        {hoveredPoint
-          ? (() => {
-              const tooltipWidth = 190;
-              const tooltipHeight = 66;
-              const tooltipX = Math.min(
-                width - padding.right - tooltipWidth,
-                Math.max(padding.left, hoveredPoint.x - tooltipWidth / 2),
-              );
-              const tooltipY =
-                hoveredPoint.y > padding.top + tooltipHeight + 18
-                  ? hoveredPoint.y - tooltipHeight - 16
-                  : hoveredPoint.y + 16;
-              return (
-                <g
-                  filter="url(#cash-closing-tooltip-shadow)"
-                  pointerEvents="none"
-                  role="status"
-                >
-                  <rect
-                    fill="var(--crm-surface)"
-                    height={tooltipHeight}
-                    rx="10"
-                    stroke="var(--crm-border)"
-                    width={tooltipWidth}
-                    x={tooltipX}
-                    y={tooltipY}
-                  />
-                  <text
-                    fill="var(--crm-text-muted)"
-                    fontSize="12"
-                    fontWeight="600"
-                    x={tooltipX + 14}
-                    y={tooltipY + 22}
-                  >
-                    {formatDay(hoveredPoint.date)} · {hoveredPoint.closingCount}{" "}
-                    {hoveredPoint.closingCount === 1 ? "cierre" : "cierres"}
-                  </text>
-                  <text
-                    fill="var(--crm-text)"
-                    fontSize="18"
-                    fontWeight="800"
-                    x={tooltipX + 14}
-                    y={tooltipY + 49}
-                  >
-                    {formatMoney(hoveredPoint.totalCents)}
-                  </text>
-                </g>
-              );
-            })()
-          : null}
-      </svg>
-    </div>
-  );
 }
 
 function DetailValue({
@@ -703,13 +493,21 @@ export function CashClosingReportsCrm({
   const [selectedClosing, setSelectedClosing] =
     useState<CashClosingReportRecord | null>(null);
   const [importOpen, setImportOpen] = useState(false);
+  const [currentPage, setCurrentPage] = useState(1);
+  const [sortDescriptor, setSortDescriptor] = useState<DataTableSortDescriptor>({ column: 'column-0', direction: 'descending' });
   const requestId = useRef(0);
   const operationalDayConfig = useMemo<OperationalDayConfig>(
     () => ({ dayChangeTime, timeZone }),
     [dayChangeTime, timeZone],
   );
-  const [dateFrom, setDateFrom] = useState("");
-  const [dateTo, setDateTo] = useState("");
+  const [initialDateRange] = useState(() => getDefaultClosingDateRange(timeZone));
+  const [dateFrom, setDateFrom] = useState(initialDateRange.dateFrom);
+  const [dateTo, setDateTo] = useState(initialDateRange.dateTo);
+  useEffect(() => {
+    const range = getDefaultClosingDateRange(timeZone);
+    setDateFrom(range.dateFrom);
+    setDateTo(range.dateTo);
+  }, [selectedVenueId, timeZone]);
   const refresh = useCallback(async () => {
     const currentRequest = ++requestId.current;
     if (!selectedVenueId) {
@@ -726,8 +524,6 @@ export function CashClosingReportsCrm({
   useEffect(() => {
     setClosings(null);
     setSelectedClosing(null);
-    setDateFrom("");
-    setDateTo("");
     void runAction(refresh);
     return () => { requestId.current += 1; };
   }, [refresh, runAction]);
@@ -735,6 +531,17 @@ export function CashClosingReportsCrm({
     () => filterCashClosingsByDate(closings ?? [], dateFrom, dateTo, operationalDayConfig),
     [closings, dateFrom, dateTo, operationalDayConfig],
   );
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [dateFrom, dateTo, selectedVenueId, timeZone, dayChangeTime]);
+  const sortedClosings = useMemo(
+    () => sortCashClosings(filteredClosings, sortDescriptor.column, sortDescriptor.direction),
+    [filteredClosings, sortDescriptor],
+  );
+  const totalPages = Math.max(1, Math.ceil(sortedClosings.length / CRM_PAGE_SIZE));
+  const visiblePage = Math.min(currentPage, totalPages);
+  const pageStart = (visiblePage - 1) * CRM_PAGE_SIZE;
+  const visibleClosings = sortedClosings.slice(pageStart, pageStart + CRM_PAGE_SIZE);
   const dailyValues = useMemo(
     () => buildCashClosingDailyValues(filteredClosings, operationalDayConfig),
     [filteredClosings, operationalDayConfig],
@@ -773,7 +580,7 @@ export function CashClosingReportsCrm({
         <div className="flex min-h-11 items-center justify-between gap-2.5 border-b border-[var(--crm-border-subtle)] px-4 py-3 text-[var(--crm-text)] [&_h2]:m-0 [&_p]:m-0 [&_p]:mt-1 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)] !flex !min-h-[60px] !flex-wrap !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 md:!px-[22px]">
           <div>
             <h2 className="!text-base !font-bold">Evolución de cierres</h2>
-            <p>Valor total de los cierres agrupado por día operativo</p>
+            <p>Importes de los cierres por periodo, según el día operativo</p>
           </div>
           <div className="!flex !flex-wrap !items-end !gap-2">
             <label className="!grid !gap-1 !text-[11px] !font-semibold !text-[var(--crm-text-muted)]">
@@ -797,7 +604,7 @@ export function CashClosingReportsCrm({
               />
             </label>
             <UiButton
-              aria-label="Actualizar informes X"
+              aria-label="Actualizar informes Z"
               className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
               disabled={disabled}
               onClick={() => void runAction(refresh)}
@@ -827,7 +634,8 @@ export function CashClosingReportsCrm({
           </UiButton>
         </div>
         <div className="!overflow-x-auto">
-          <UiDataTable aria-label="Cierres de caja" className="!w-full !min-w-[1050px] !border-collapse" emptyContent={closings ? 'No hay cierres de caja para el período seleccionado.' : 'Cargando cierres…'} filterable={false}>
+          <UiDataTable aria-label="Cierres de caja" className="!w-full !min-w-[1050px] !border-collapse" emptyContent={closings ? 'No hay cierres de caja para el período seleccionado.' : 'Cargando cierres…'} filterable={false}
+            sortDescriptor={sortDescriptor} onSortChange={(descriptor) => { setSortDescriptor(descriptor); setCurrentPage(1); }}>
             <thead>
               <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
                 <th className="!px-[22px] !py-3">Fecha Cierre</th>
@@ -840,7 +648,7 @@ export function CashClosingReportsCrm({
               </tr>
             </thead>
             <tbody>
-              {filteredClosings.map((closing) => {
+              {visibleClosings.map((closing) => {
                 if (isImportedCashClosing(closing)) return renderImportedClosingRow(closing, () => setSelectedClosing(closing));
                 const snapshot = closing.printSnapshot;
                 const amounts = getCashClosingAmounts(snapshot);
@@ -929,6 +737,7 @@ export function CashClosingReportsCrm({
             </tbody>
           </UiDataTable>
         </div>
+        <CrmPagination currentPage={visiblePage} onPageChange={setCurrentPage} totalResults={filteredClosings.length} />
       </section>
       {importOpen ? <RevoClosingImportModal disabled={disabled} onClose={() => setImportOpen(false)} onImported={async (venueId) => {
         if (venueId === selectedVenueId) await runAction(refresh);

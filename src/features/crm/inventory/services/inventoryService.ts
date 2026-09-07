@@ -1,3 +1,4 @@
+import { reportOperationError } from '../../../../lib/observability.ts'
 import type { TenantContext } from '../../../../types'
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
 import { validateInventoryDecimalPlaces, validateInventoryName, validateInventoryUnitSymbol } from '../inventoryModel'
@@ -149,7 +150,10 @@ export async function saveInventoryItemStock(context: TenantContext, venueId: st
     p_tenant_id: context.tenantId, p_venue_id: venueId, p_inventory_item_id: inventoryItemId,
     p_levels: levels.map((level) => ({ enabled: level.enabled, warehouseId: level.warehouseId, quantity: level.quantity })),
   })
-  if (error) throw error
+  if (error) {
+    reportOperationError(error, { operation: 'inventory.stock', operationId: inventoryItemId, step: 'set_stock' })
+    throw error
+  }
 }
 
 export async function saveVariantInventoryRecipe(variantId: string, mode: 'none' | 'direct' | 'recipe', lines: Array<{

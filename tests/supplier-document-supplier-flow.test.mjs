@@ -126,14 +126,15 @@ test('cambiar proveedor no dispara OCR ni reemplaza las líneas desde la UI', ()
   assert.match(change, /\.\.\.current,[\s\S]*document:/)
 })
 
-test('reparsear usa OCR almacenado y únicamente el parser de líneas', () => {
+test('reparsear usa OCR almacenado y valida el resultado determinista sin OCR ni GPT nuevos', () => {
   const fixture = getSupplierDocumentMockFixture('multi-row-product')
   const lines = runDeterministicLineParser(fixture.knownProfile, fixture.ocr)
   assert.equal(lines.length, 1)
   assert.equal(lines[0].lineTotal, 99.94)
   const reparse = edge.match(/async function reparseLinesWithSelectedSupplier[\s\S]*?\n}/)?.[0] ?? ''
   assert.match(reparse, /ocrDocumentSchema\.parse\(document\.ocr_snapshot\)/)
-  assert.match(reparse, /runDeterministicLineParser/)
+  assert.match(reparse, /runDeterministicParser/)
+  assert.match(reparse, /validateExtractionMath/)
   assert.doesNotMatch(reparse, /\.analyze\(|\.interpret\(|extractSupplier\(|loadBinary\(/)
   assert.match(reparse, /replace_supplier_document_lines_from_ocr/)
 })

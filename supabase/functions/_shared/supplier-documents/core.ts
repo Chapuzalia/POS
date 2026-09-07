@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { extractProfileMetadata } from './documentMetadata.ts'
+import { reconstructMergedTables } from './tableGeometry.ts'
 
 const nullableText = z.string().trim().max(500).nullable()
 const nullableMoney = z.number().finite().nonnegative().nullable()
@@ -819,8 +820,25 @@ function normalizeProfileField(value: string, field: z.infer<typeof parserFieldS
   return result.trim()
 }
 
-function rowMatchesAliases(normalizedRow: string, aliases: string[]) {
-  return aliases.some((alias) => normalizedRow.includes(normalizeDocumentText(alias)))
+// Only labels use this matcher; identifiers and numeric values remain exact.
+export function labelMatchDistance(value: string, alias: string): number {
+  const clean = (text: string) => normalizeDocumentText(text).replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const actual = clean(value)
+  const expected = clean(alias)
+  if (!expected) return Infinity
+  if (` ${actual} `.includes(` ${expected} `)) return 0
+  if (expected.replaceAll(' ', '').length < 6 || /\d/.test(actual + expected)) return Infinity
+  // Whole-label edit distance of at most one: substitution, insertion or deletion.
+  if (Math.abs(actual.length - expected.length) > 1) return Infinity
+  let left = 0, right = 0, edits = 0
+  while (left < actual.length && right < expected.length) {
+    if (actual[left] === expected[right]) { left++; right++; continue }
+    if (++edits > 1) return Infinity
+    if (actual.length >= expected.length) left++
+    if (expected.length >= actual.length) right++
+  }
+  edits += actual.length - left + expected.length - right
+  return edits <= 1 ? edits : Infinity
 }
 
 function roundMoney(value: number) {
@@ -832,9 +850,12 @@ export function runDeterministicLineParser(
   ocrInput: OcrDocument | unknown,
 ): ExtractedLine[] {
   const rules = supplierProfileRulesSchema.parse(inputRules)
-  const ocr = ocrDocumentSchema.parse(ocrInput)
-  if (!profileMatchesOcr(rules, ocr)) throw new Error('PROFILE_FINGERPRINT_MISMATCH')
-  let selected: { lines: ExtractedLine[]; score: number } | null = null
+  const originalOcr = ocrDocumentSchema.parse(ocrInput)
+  if (!profileMatchesOcr(rules, originalOcr)) throw new Error('PROFILE_FINGERPRINT_MISMATCH')
+  const ocr = reconstructMergedTables(originalOcr, rules, labelMatchDistance)
+  // Choose the best header interpretation per physical data table, then retain
+  // every table/page. A header-only table may describe the following table.
+  const selectedTables = new Map<OcrTable, { lines: ExtractedLine[]; score: number }>()
   let matchedHeaders = false
   for (const page of ocr.pages) {
     for (let tableIndex = 0; tableIndex < page.tables.length; tableIndex += 1) {
@@ -846,8 +867,11 @@ export function runDeterministicLineParser(
         const indexes = new Map<z.infer<typeof parserFieldSchema>, number>()
         for (const column of rules.columns) {
           if (column.headerAliases.length === 0) continue
-          const index = headers.findIndex((header) => column.headerAliases.some((alias) => header.includes(normalizeDocumentText(alias))))
-          if (index >= 0) indexes.set(column.field, index)
+          const scores = headers.map((header) => Math.min(...column.headerAliases.map((alias) => labelMatchDistance(header, alias))))
+          const best = Math.min(...scores)
+          if (Number.isFinite(best) && scores.filter((score) => score === best).length === 1) {
+            indexes.set(column.field, scores.indexOf(best))
+          }
         }
         const matchesTableStart = Boolean(rules.tableStartText
           && headers.join(' ').includes(normalizeDocumentText(rules.tableStartText)))
@@ -857,6 +881,7 @@ export function runDeterministicLineParser(
         })
         const requiredColumns = rules.columns.filter((column) => column.required)
         if (!requiredColumns.every((column) => indexes.has(column.field))) continue
+        if (new Set(indexes.values()).size !== indexes.size) continue
         matchedHeaders = true
         let dataRows = matrix.slice(headerRowIndex + 1)
         let usedFollowingTable = false
@@ -873,13 +898,14 @@ export function runDeterministicLineParser(
             }
             const description = get(row, 'description')
             const quantity = parseProfileNumber(get(row, 'quantity'), rules)
-            if (!description || quantity === null || quantity <= 0) continue
+            if (!description || auxiliaryLineKind(description) || quantity === null || quantity <= 0) continue
             const unitPrice = parseProfileNumber(get(row, 'unitPrice'), rules)
             let discountAmount = Math.abs(parseProfileNumber(get(row, 'discountAmount'), rules) ?? 0)
             let chargesAmount = 0
             const mainRowTotal = parseProfileNumber(get(row, 'lineTotal'), rules)
             const grossCost = unitPrice === null ? mainRowTotal : roundMoney(quantity * unitPrice)
             let groupedNetTotal: number | null = null
+            let fuzzyGroup = false
 
             if (rules.lineGroup) {
               const continuationLimit = Math.min(dataRows.length, rowIndex + 1 + rules.lineGroup.maxContinuationRows)
@@ -889,10 +915,19 @@ export function runDeterministicLineParser(
                 const continuationText = normalizeDocumentText(continuationRow.join(' '))
                 const continuationDescription = get(continuationRow, 'description')
                 const continuationQuantity = parseProfileNumber(get(continuationRow, 'quantity'), rules)
-                if (continuationDescription && continuationQuantity !== null && continuationQuantity > 0) break
-
                 const amount = parseProfileNumber(get(continuationRow, 'lineTotal'), rules)
-                if (rowMatchesAliases(continuationText, rules.lineGroup.endAliases)) {
+                const kinds = ['end', 'discount', 'charge'] as const
+                const scores = [rules.lineGroup.endAliases, rules.lineGroup.discountAliases, rules.lineGroup.chargeAliases]
+                  .map((aliases) => Math.min(...aliases.map((alias) => labelMatchDistance(continuationDescription, alias))))
+                const best = Math.min(...scores)
+                const kind = Number.isFinite(best) && scores.filter((score) => score === best).length === 1
+                  ? kinds[scores.indexOf(best)] : null
+                const hasIdentity = Boolean(get(continuationRow, 'supplierReference') || get(continuationRow, 'barcode'))
+                const structuralMatch = !hasIdentity && amount !== null
+                  && (kind === 'end' || continuationQuantity === null)
+                const matchedKind = structuralMatch ? kind : null
+                if (matchedKind && best === 1) fuzzyGroup = true
+                if (matchedKind === 'end') {
                   if (rules.lineGroup.netTotalFromEndRow && amount !== null) groupedNetTotal = Math.abs(amount)
                   continuationIndex += 1
                   break
@@ -901,13 +936,15 @@ export function runDeterministicLineParser(
                   tableEnded = true
                   break
                 }
-                if (rowMatchesAliases(continuationText, rules.lineGroup.discountAliases)) {
+                if (matchedKind === 'discount') {
                   if (amount !== null) discountAmount = roundMoney(discountAmount + Math.abs(amount))
                   continue
                 }
-                if (rowMatchesAliases(continuationText, rules.lineGroup.chargeAliases)) {
+                if (matchedKind === 'charge') {
                   if (amount !== null) chargesAmount = roundMoney(chargesAmount + Math.abs(amount))
+                  continue
                 }
+                if (continuationDescription && continuationQuantity !== null && continuationQuantity > 0) break
               }
               rowIndex = continuationIndex - 1
             }
@@ -916,13 +953,17 @@ export function runDeterministicLineParser(
               ? mainRowTotal
               : roundMoney(grossCost - discountAmount + chargesAmount)
             const lineTotal = rules.lineGroup ? (groupedNetTotal ?? calculatedNetTotal) : mainRowTotal
+            if (fuzzyGroup && (groupedNetTotal === null || calculatedNetTotal === null
+              || Math.abs(groupedNetTotal - calculatedNetTotal) > 0.02)) {
+              throw new Error('PROFILE_FUZZY_LABEL_UNVERIFIED')
+            }
             const taxRate = parseProfileNumber(get(row, 'taxRate'), rules)
             const parsedLine = extractedLineSchema.safeParse({
               supplierReference: get(row, 'supplierReference') || null,
               description,
               barcode: get(row, 'barcode') || null,
               quantity,
-              purchaseUnit: get(row, 'purchaseUnit') || null,
+              purchaseUnit: get(row, 'purchaseUnit').replace(/^\s*[+-]?[\d.,]+\s+(?=\p{L})/u, '') || null,
               unitPrice,
               discountAmount,
               chargesAmount,
@@ -949,14 +990,16 @@ export function runDeterministicLineParser(
             .filter((marker): marker is string => Boolean(marker))
             .filter((marker) => normalizedTableText.includes(normalizeDocumentText(marker))).length
           const score = lines.length * 1_000 + indexes.size * 10 + markerScore * 100 - headerRowIndex
-          if (!selected || score > selected.score) selected = { lines, score }
+          const dataTable = usedFollowingTable ? page.tables[tableIndex + 1] : table
+          const selected = selectedTables.get(dataTable)
+          if (!selected || score > selected.score) selectedTables.set(dataTable, { lines, score })
           break
         }
       }
     }
   }
-  if (!selected) throw new Error(matchedHeaders ? 'PROFILE_LINES_NOT_FOUND' : 'PROFILE_TABLE_NOT_FOUND')
-  return selected.lines
+  if (!selectedTables.size) throw new Error(matchedHeaders ? 'PROFILE_LINES_NOT_FOUND' : 'PROFILE_TABLE_NOT_FOUND')
+  return [...selectedTables.values()].flatMap((table) => table.lines)
 }
 
 export function runDeterministicParser(
@@ -1033,6 +1076,13 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
   if (!interpreted.proposedProfile) return { candidate: false, reason: 'PROFILE_NOT_PROPOSED' as const, parsed: null }
   try {
     const rules = supplierProfileRulesSchema.parse(interpreted.proposedProfile)
+    const documentNumber = normalizeDocumentText(interpreted.document.number ?? '')
+    if (rules.requiredTexts.some((text) => {
+      const marker = normalizeDocumentText(text)
+      return /\b\d{1,4}[./-]\d{1,2}[./-]\d{2,4}\b/.test(text)
+        || (documentNumber.length >= 4 && /\d/.test(documentNumber)
+          && marker.includes(documentNumber))
+    })) return { candidate: false, reason: 'PROFILE_DOCUMENT_SPECIFIC_FINGERPRINT' as const, parsed: null }
     if (rules.lineGroup) {
       const ocrText = normalizeDocumentText([
         ocr.text,
@@ -1064,6 +1114,8 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
         && Math.abs(line.quantity - expected.quantity) <= 0.000001
         && Math.abs(line.discountAmount - expected.discountAmount) <= 0.02
         && Math.abs(line.chargesAmount - expected.chargesAmount) <= 0.02
+        && sameMoney(line.unitPrice, expected.unitPrice)
+        && normalizeDocumentText(line.purchaseUnit ?? '') === normalizeDocumentText(expected.purchaseUnit ?? '')
         && sameMoney(line.grossCost, expected.grossCost)
         && sameMoney(line.netCost, expected.netCost)
         && sameMoney(line.lineTotal, expected.lineTotal)

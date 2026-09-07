@@ -1,3 +1,4 @@
+import { reportOperationError } from '../../../lib/observability.ts'
 import { create } from 'zustand'
 import { createPrintAgentClient } from '../api/printAgentClient'
 import { PrintAgentError, toPrintAgentError } from '../api/PrintAgentError'
@@ -434,8 +435,10 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
           } catch { /* el resultado sigue siendo incierto */ }
           const unknown = new PrintAgentError({ code: 'PRINT_STATUS_UNKNOWN', cause: mapped })
           set({ lastConnectionError: unknown, currentJob: { requestId: payload.requestId, status: 'unknown' } })
+          reportOperationError(unknown, { operation: 'print.ticket', operationId: payload.requestId, integration: 'print-agent', step: 'reconcile_unknown' })
           throw unknown
         }
+        reportOperationError(mapped, { operation: 'print.ticket', operationId: payload.requestId, integration: 'print-agent', step: 'print' })
         set({ lastConnectionError: mapped })
         throw mapped
       } finally { set({ isPrintingTicket: false }) }
@@ -454,7 +457,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
       })
       set({ isOpeningCashDrawer: true, lastConnectionError: null })
       try { return await client().openCashDrawer(payload, signal) }
-      catch (error) { const mapped = toPrintAgentError(error, 'CASH_DRAWER_FAILED'); set({ lastConnectionError: mapped }); throw mapped }
+      catch (error) { reportOperationError(error, { operation: 'print.drawer', operationId: payload.requestId, integration: 'print-agent', step: 'open' }); const mapped = toPrintAgentError(error, 'CASH_DRAWER_FAILED'); set({ lastConnectionError: mapped }); throw mapped }
       finally { set({ isOpeningCashDrawer: false }) }
     },
 

@@ -7,6 +7,20 @@ import { OpenAiSupplierDocumentProvider } from '../supabase/functions/_shared/su
 
 const ocr = (text) => ({ provider: 'mock', text, confidence: 1, metadata: {}, pages: [{ pageNumber: 1, text, words: [], tables: [] }] })
 
+test('cabecera vertical de albarán prevalece sobre factura resumen y el número no se trunca', () => {
+  const input = ocr('ALBARÁN: 26/ 1.915\nFRA. RESUM 05/06/2026')
+  input.pages[0].tables = [{ rowCount: 2, columnCount: 2, cells: [
+    { rowIndex: 0, columnIndex: 0, text: 'Data' }, { rowIndex: 0, columnIndex: 1, text: 'Client' },
+    { rowIndex: 1, columnIndex: 0, text: '04/06/2026' }, { rowIndex: 1, columnIndex: 1, text: '9035' },
+  ] }]
+  const result = extractGenericDocumentMetadata(input, { documentDateLabel: 'Data', documentNumberLabel: 'ALBARÁN:' })
+  assert.equal(result.metadata.date.value, '04/06/2026')
+  assert.equal(result.metadata.date.source, 'profile')
+  assert.equal(normalizeMetadataValue('number', result.metadata.number.value), '26/1.915')
+  assert.equal(result.metadata.number.value, '26/ 1.915')
+  assert.equal(extractGenericDocumentMetadata(ocr('FRA. RESUM 05/06/2026')).metadata.date.value, null)
+})
+
 test('sin etiqueta de fecha el parser de líneas sigue determinista, sin regenerar reglas', () => {
   const fixture = getSupplierDocumentMockFixture('known-supplier')
   const rules = { ...fixture.knownProfile, documentDateLabel: null }

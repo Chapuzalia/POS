@@ -115,7 +115,7 @@ export function useReservationsController(options: Options) {
       }
     } catch (error) {
       if (requestId === refreshSequenceRef.current) {
-        latestRef.current.onError(getReadableError(error))
+        latestRef.current.onError(getReadableError(error, { operation: 'features.reservations.hooks.useReservationsController' }))
       }
     } finally {
       if (requestId === refreshSequenceRef.current) setIsLoading(false)
@@ -151,7 +151,7 @@ export function useReservationsController(options: Options) {
           const rank = rankSearchResult(first, today, timeZone) - rankSearchResult(second, today, timeZone)
           return rank || new Date(first.startsAt).getTime() - new Date(second.startsAt).getTime()
         }))
-      }).catch((error) => latestRef.current.onError(getReadableError(error)))
+      }).catch((error) => latestRef.current.onError(getReadableError(error, { operation: 'features.reservations.hooks.useReservationsController' })))
     }, 300)
     return () => {
       active = false
@@ -207,7 +207,7 @@ export function useReservationsController(options: Options) {
         setPendingConflictDraft(draft)
         return false
       }
-      latestRef.current.onError(getReadableError(error))
+      latestRef.current.onError(getReadableError(error, { operation: 'features.reservations.hooks.useReservationsController' }))
       return false
     } finally {
       setIsLoading(false)
@@ -251,7 +251,7 @@ export function useReservationsController(options: Options) {
       await Promise.all([refresh(updated.id), latestRef.current.refreshOperationalMap()])
       sileo.success({ title: status === 'cancelled' ? 'Reserva cancelada' : 'Reserva actualizada' })
     } catch (error) {
-      latestRef.current.onError(getReadableError(error))
+      latestRef.current.onError(getReadableError(error, { operation: 'features.reservations.hooks.useReservationsController' }))
     } finally {
       setIsLoading(false)
     }
@@ -280,7 +280,7 @@ export function useReservationsController(options: Options) {
       sileo.success({ title: 'Reserva sentada' })
       return orderId
     } catch (error) {
-      latestRef.current.onError(getReadableError(error))
+      latestRef.current.onError(getReadableError(error, { operation: 'features.reservations.hooks.useReservationsController' }))
       return null
     } finally {
       setIsLoading(false)
@@ -331,7 +331,7 @@ export function useReservationsController(options: Options) {
       const { context, isOnline } = latestRef.current
       if (!context || !isOnline) return
       try { setCurrentDetail(await loadReservation(context, reservationId)) }
-      catch (error) { latestRef.current.onError(getReadableError(error)) }
+      catch (error) { latestRef.current.onError(getReadableError(error, { operation: 'features.reservations.hooks.useReservationsController' })) }
     },
     pendingConflictDraft,
     query,

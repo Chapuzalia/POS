@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
+import vm from 'node:vm'
 
 const projectRoot = new URL('../', import.meta.url)
 
@@ -58,4 +59,38 @@ test('la pagina enlaza el manifest y registra un service worker con soporte offl
   assert.match(serviceWorker, /addEventListener\('install'/)
   assert.match(serviceWorker, /addEventListener\('fetch'/)
   assert.match(serviceWorker, /request\.mode === 'navigate'/)
+})
+
+test('primera instalación cachea shell, JS y CSS antes de abrir la PWA offline', async () => {
+  const listeners = new Map()
+  const responses = new Map()
+  let online = true
+  const assets = ['/assets/index-build.js', '/assets/PosPage-build.js', '/assets/PosPage-build.css']
+  const key = (request) => new URL(typeof request === 'string' ? request : request.url, 'https://pos.test').pathname
+  const fetch = async (request) => {
+    if (!online) throw new TypeError('Failed to fetch')
+    const path = key(request)
+    return new Response(path === '/offline-assets.json' ? JSON.stringify(assets) : path.endsWith('.js') ? '/* POS chunk */' : 'app shell')
+  }
+  const cache = {
+    addAll: async (requests) => { for (const request of requests) responses.set(key(request), await fetch(request)) },
+    put: async (request, response) => responses.set(key(request), response),
+    match: async (request) => responses.get(key(request))?.clone(),
+  }
+  vm.runInNewContext(await readProjectFile('public/sw.js'), {
+    self: { location: { origin: 'https://pos.test' }, addEventListener: (type, callback) => listeners.set(type, callback), skipWaiting: async () => {} },
+    caches: { open: async () => cache, match: cache.match }, fetch, URL, Response,
+  })
+  let installed
+  listeners.get('install')({ waitUntil: (promise) => { installed = promise } })
+  await installed
+  online = false
+  for (const [url, mode, destination] of [['/pos', 'navigate', 'document'], ...assets.map((asset) => [asset, 'cors', asset.endsWith('.css') ? 'style' : 'script'])]) {
+    let result
+    listeners.get('fetch')({ request: { url: `https://pos.test${url}`, method: 'GET', mode, destination }, respondWith: (promise) => { result = promise } })
+    assert.equal((await result).ok, true, `${url} must be available without a second online visit`)
+  }
+  let intercepted = false
+  listeners.get('fetch')({ request: { url: 'https://supabase.test/auth/v1/token', method: 'GET' }, respondWith: () => { intercepted = true } })
+  assert.equal(intercepted, false, 'Auth responses must not be served from the PWA cache')
 })

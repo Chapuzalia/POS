@@ -1,3 +1,4 @@
+import { operationBreadcrumb } from '../../../lib/observability.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { applySessionLayout, loadSessionTableLayout, subscribeToSessionTableLayout } from '../../tables/layout-service'
 import {
@@ -122,7 +123,7 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
       } catch (mapError) {
         if (!active) return
         setConfigLoaded(true)
-        latestRef.current.onError(getReadableError(mapError))
+        latestRef.current.onError(getReadableError(mapError, { operation: 'restaurant.refresh', recoverable: true }))
       } finally {
         if (instrumentConfigLoad) {
           addDiagnosticBreadcrumb(finishedBreadcrumb, {
@@ -164,7 +165,7 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
             if (current.equalSplitOpen) current.setEqualSplit(await loadRestaurantEqualSplit(context, detail.order.id))
             if (current.splitOrderGroup) current.setSplitOrderGroup(await loadRestaurantOrderGroup(context, detail.order.id))
           } catch (orderError) {
-            if (active) latestRef.current.onError(getReadableError(orderError))
+            if (active) latestRef.current.onError(getReadableError(orderError, { operation: 'restaurant.refresh', recoverable: true }))
           }
         })()
       }, 250)
@@ -179,7 +180,7 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
     window.addEventListener('focus', scheduleRefresh)
     window.addEventListener('online', scheduleRefresh)
 
-    const unsubscribe = subscribeToRestaurantMap(context, scheduleRefresh, (status, channelError) => {
+    const unsubscribe = subscribeToRestaurantMap(context, scheduleRefresh, (status) => {
       if (!active) return
       if (status === 'SUBSCRIBED') {
         if (fallbackTimer) window.clearInterval(fallbackTimer)
@@ -188,7 +189,7 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
         return
       }
       if ((status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') && !fallbackTimer) {
-        console.warn('Realtime de comandas no disponible; se activa la resincronizacion periodica.', channelError)
+        operationBreadcrumb({ operation: 'restaurant.realtime', step: 'polling_fallback', syncStatus: status })
         fallbackTimer = window.setInterval(scheduleRefresh, 3000)
       }
     })

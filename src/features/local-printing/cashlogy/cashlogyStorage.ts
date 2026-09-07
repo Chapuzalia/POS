@@ -1,3 +1,4 @@
+import { reportOperationError } from '../../../lib/observability.ts'
 import { getPrintAgentStorageKey } from '../services/printAgentStorage.ts'
 import type { CashlogyIntent, CashlogyManagementIntent, PrintAgentScope } from '../types.ts'
 
@@ -16,7 +17,8 @@ export function loadCashlogyIntent(scope: PrintAgentScope): CashlogyIntent | nul
     if (!raw) return null
     const parsed = JSON.parse(raw) as CashlogyIntent
     return parsed.requestId && Number.isInteger(parsed.amountCents) && parsed.amountCents > 0 ? parsed : null
-  } catch {
+  } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.storage', integration: 'cashlogy', step: 'read_intent' })
     return null
   }
 }
@@ -24,8 +26,13 @@ export function loadCashlogyIntent(scope: PrintAgentScope): CashlogyIntent | nul
 export function saveCashlogyIntent(scope: PrintAgentScope, intent: CashlogyIntent | null) {
   if (typeof window === 'undefined') return
   const key = getCashlogyIntentStorageKey(scope)
-  if (intent) window.localStorage.setItem(key, JSON.stringify(intent))
-  else window.localStorage.removeItem(key)
+  try {
+    if (intent) window.localStorage.setItem(key, JSON.stringify(intent))
+    else window.localStorage.removeItem(key)
+  } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.storage', integration: 'cashlogy', operationId: intent?.requestId, step: intent ? 'save_intent' : 'clear_intent' })
+    throw error
+  }
 }
 
 export function loadCashlogyManagementIntent(scope: PrintAgentScope): CashlogyManagementIntent | null {
@@ -37,7 +44,8 @@ export function loadCashlogyManagementIntent(scope: PrintAgentScope): CashlogyMa
     return parsed.requestId && ['refill', 'give_change', 'withdraw', 'empty', 'remove_stacker'].includes(parsed.type)
       ? parsed
       : null
-  } catch {
+  } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.storage', integration: 'cashlogy', step: 'read_intent' })
     return null
   }
 }
@@ -45,6 +53,11 @@ export function loadCashlogyManagementIntent(scope: PrintAgentScope): CashlogyMa
 export function saveCashlogyManagementIntent(scope: PrintAgentScope, intent: CashlogyManagementIntent | null) {
   if (typeof window === 'undefined') return
   const key = getCashlogyManagementIntentStorageKey(scope)
-  if (intent) window.localStorage.setItem(key, JSON.stringify(intent))
-  else window.localStorage.removeItem(key)
+  try {
+    if (intent) window.localStorage.setItem(key, JSON.stringify(intent))
+    else window.localStorage.removeItem(key)
+  } catch (error) {
+    reportOperationError(error, { operation: 'cashlogy.storage', integration: 'cashlogy', operationId: intent?.requestId, step: intent ? 'save_intent' : 'clear_intent' })
+    throw error
+  }
 }

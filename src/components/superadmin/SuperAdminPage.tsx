@@ -1,3 +1,4 @@
+import { notifyOperationalError } from '../../utils/notifications.ts'
 import { Input as UiInput } from '../ui/Input'
 import { Button as UiButton } from '../ui/Button'
 import { Checkbox as UiCheckbox } from '../ui/Checkbox'
@@ -69,6 +70,7 @@ function SuperAdminModal({ children, label, onClose, size = 'compact' }: SuperAd
 }
 
 export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: SuperAdminPageProps) {
+  useEffect(() => { if (error) notifyOperationalError(error) }, [error])
   const [tenants, setTenants] = useState<PlatformTenant[]>([])
   const [platformFeatures, setPlatformFeatures] = useState<PlatformFeature[]>([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
@@ -103,7 +105,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
     try {
       await action()
     } catch (actionError) {
-      onError(getReadableError(actionError))
+      onError(getReadableError(actionError, { operation: 'components.superadmin.SuperAdminPage' }))
     } finally {
       setIsBusy(false)
     }
@@ -316,7 +318,6 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
           </div>
         </header>
 
-        {error ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-red-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-red)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">{error}</div> : null}
         {success ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-green-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-green)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">{success}</div> : null}
         {!isOnline ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">La administración global requiere conexión.</div> : null}
 

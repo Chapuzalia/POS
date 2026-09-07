@@ -262,6 +262,7 @@ async function processWithOcr(mistral, azure, interpretationError = null, scanni
       const query = {
         select() { tablesRead.push(table); return this },
         eq() { return this }, neq() { return this }, in() { return this }, order() { return this }, ilike() { return this },
+        range() { return this },
         update(value) { write = value; return this },
         insert(value) { insert = value; return this },
         delete() { return this },

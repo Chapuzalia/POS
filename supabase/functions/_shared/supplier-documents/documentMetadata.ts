@@ -16,8 +16,8 @@ export type MetadataEvidence = {
 export type DocumentMetadata = Record<MetadataField, MetadataEvidence>
 type Candidate = { value: string; evidence: string; labelCandidate: string }
 const fields: MetadataField[] = ['date', 'number']
-const datePattern = /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.\-]\d{1,2}[/.\-]\d{4})\b/g
-const excludedLabel = /\b(vencimiento|entrega|pedido|pago|caducidad|cliente|cif|nif|vat|telefono|iban|total|importe|referencia)\b/i
+const datePattern = /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{4})\b/g
+const excludedLabel = /\b(vencimiento|entrega|pedido|pago|caducidad|cliente|cif|nif|vat|telefono|iban|total|importe|referencia|resum|resumen)\b/i
 
 export function normalizeMetadataLabel(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
@@ -26,8 +26,8 @@ export function normalizeMetadataLabel(value: string) {
 
 export function normalizeMetadataValue(field: MetadataField, value: unknown): string | null {
   if (typeof value !== 'string' || !value.trim()) return null
-  if (field === 'number') return value.trim().length <= 80 ? value.trim() : null
-  const match = value.trim().match(/^(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})[/.\-](\d{1,2})[/.\-](\d{4}))$/)
+  if (field === 'number') return value.trim().length <= 80 ? value.trim().replace(/\s*([/_.-])\s*/g, '$1') : null
+  const match = value.trim().match(/^(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}))$/)
   if (!match) return null
   const year = Number(match[1] ?? match[6]), month = Number(match[2] ?? match[5]), day = Number(match[3] ?? match[4])
   const date = new Date(Date.UTC(year, month - 1, day))
@@ -42,7 +42,14 @@ export function metadataOcrTexts(ocr: OcrDocument): string[] {
     ...ocr.pages.flatMap((page) => page.tables.flatMap((table) => {
       const rows = new Map<number, typeof table.cells>()
       for (const cell of table.cells) rows.set(cell.rowIndex, [...(rows.get(cell.rowIndex) ?? []), cell])
-      return [...rows.values()].map((row) => row.sort((a, b) => a.columnIndex - b.columnIndex).map((cell) => cell.text).join(' | '))
+      const horizontal = [...rows.values()].map((row) => row.sort((a, b) => a.columnIndex - b.columnIndex).map((cell) => cell.text).join(' | '))
+      const vertical = table.cells.flatMap((cell) => {
+        if (!cleanLabel(cell.text)) return []
+        const below = table.cells.find((other) => other.rowIndex === cell.rowIndex + (cell.rowSpan ?? 1)
+          && other.columnIndex === cell.columnIndex)
+        return below ? [`${cell.text} | ${below.text}`] : []
+      })
+      return [...horizontal, ...vertical]
     })),
   ].filter(Boolean))]
 }
@@ -67,8 +74,9 @@ function candidatesFor(ocr: OcrDocument, field: MetadataField, label?: string | 
       for (let index = 0; index < segments.length; index++) {
         const segment = segments[index].trim()
         const source = segments[index + 1] ? `${segment} | ${segments[index + 1].trim()}` : segment
-        const pattern = field === 'date' ? new RegExp(datePattern) : /\b(?=[A-Za-z0-9/_.-]*\d)[A-Za-z0-9]+(?:[/_.-][A-Za-z0-9]+)*\b/g
+        const pattern = field === 'date' ? new RegExp(datePattern) : /\b(?=[A-Za-z0-9/_. -]*\d)[A-Za-z0-9]+(?:[ \t]*[/_.-][ \t]*[A-Za-z0-9]+)*\b/g
         for (const match of source.matchAll(pattern)) {
+          if (field === 'number' && !/\d/.test(match[0])) continue
           const value = normalizeMetadataValue(field, match[0])
           if (!value || (field === 'number' && normalizeMetadataValue('date', match[0]))) continue
           const prefix = source.slice(0, match.index).replace(/\|\s*$/, '')
@@ -111,7 +119,8 @@ export function extractGenericDocumentMetadata(ocr: OcrDocument, rules: Pick<Sup
   for (const field of fields) {
     if (metadata[field].value) continue
     const found = candidates[field]
-    if (found.length === 1) Object.assign(metadata[field], found[0], { source: 'generic', confidence: 0.95, ambiguous: false })
+    if (found.length && new Set(found.map((candidate) => normalizeMetadataValue(field, candidate.value))).size === 1)
+      Object.assign(metadata[field], found[0], { source: 'generic', confidence: 0.95, ambiguous: false })
     else metadata[field].ambiguous ||= found.length > 1
   }
   return { metadata, candidates }

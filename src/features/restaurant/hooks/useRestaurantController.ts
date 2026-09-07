@@ -1,3 +1,5 @@
+import { reportOperationError } from '../../../lib/observability.ts'
+import { UserFacingError } from '../../../utils/UserFacingError.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { createId, getLineSignature } from '../../../lib/format'
 import { calculateDiscountForLines } from '../../../lib/discounts'
@@ -82,11 +84,11 @@ async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string)
   try {
     return (await autoIssueFiscalTicket(context.tenantId, ticketId)).fiscal
   } catch (error) {
-    console.error('Automatic fiscal submission failed before restaurant print', error)
+    reportOperationError(error, { operation: 'restaurant.fiscal', ticketId, step: 'before_print' })
     try {
       return await loadFiscalReceiptData(context.tenantId, ticketId) ?? undefined
     } catch (receiptError) {
-      console.error('Could not load fiscal rejection before restaurant print', receiptError)
+      reportOperationError(receiptError, { operation: 'restaurant.fiscal', ticketId, step: 'load_rejection' })
       return undefined
     }
   }
@@ -194,9 +196,9 @@ export function useRestaurantController(options: Options) {
       setProductionState(null)
       return undefined
     }
-    void refreshProduction(invoiceOrderId).catch((cause) => options.onError(getReadableError(cause)))
+    void refreshProduction(invoiceOrderId).catch((cause) => options.onError(getReadableError(cause, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId })))
     return subscribeToOrderProduction(options.context, invoiceOrderId, () => {
-      void refreshProduction(invoiceOrderId).catch(() => undefined)
+      void refreshProduction(invoiceOrderId).catch((error) => reportOperationError(error, { operation: 'restaurant.refresh', recoverable: true }))
     })
   }, [invoiceOrderId, options, productionAvailable, refreshProduction])
 
@@ -263,10 +265,10 @@ export function useRestaurantController(options: Options) {
       const removed = await cleanupVirtualRoomRestaurantTable({ cashSessionId, deviceId, tableId: table.id, closeAsPaid })
       return removed ? table.areaId : null
     } catch (error) {
-      reportError(`La comanda se ha actualizado, pero no se pudo retirar la mesa de la sala Virtual: ${getReadableError(error)}`)
+      reportError(`La comanda se ha actualizado, pero no se pudo retirar la mesa de la sala Virtual: ${getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'cleanupVirtualRoomTable' })}`)
       return null
     }
-  }, [cashSessionId, deviceId, reportError])
+  }, [cashSessionId, deviceId, reportError, invoiceOrderId, options.cashSession?.id])
 
   const runBusy = useCallback(async (action: () => Promise<void>) => {
     if (options.isBusy) return
@@ -275,11 +277,11 @@ export function useRestaurantController(options: Options) {
     try {
       await action()
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'runBusy' }))
     } finally {
       options.setBusy(false)
     }
-  }, [options])
+  }, [options, invoiceOrderId])
 
   const openTableOrder = useCallback((tableIds: string[], guestCount: number) => runBusy(async () => {
     if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline) return
@@ -290,9 +292,9 @@ export function useRestaurantController(options: Options) {
       cashSessionId: options.cashSession.id,
       deviceId: options.context.deviceId,
     }).catch(async (error: unknown) => {
-      if (/mesas? ya no est[áa] disponible/i.test(getReadableError(error))) {
+      if (/mesas? ya no est[áa] disponible/i.test(error && typeof error === 'object' && 'message' in error ? String(error.message) : '')) {
         // Keep the RPC error even if the map cannot be reloaded (e.g. offline).
-        await realtime.refreshMap().catch(() => undefined)
+        await realtime.refreshMap().catch((error) => reportOperationError(error, { operation: 'restaurant.refresh', recoverable: true }))
       }
       throw error
     })
@@ -318,12 +320,12 @@ export function useRestaurantController(options: Options) {
       })
       return true
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'createVirtualTable' }))
       return false
     } finally {
       options.setBusy(false)
     }
-  }, [options, realtime])
+  }, [options, realtime, invoiceOrderId])
 
   const createVirtualTableFromQuickSale = useCallback(async (
     input: { areaId: string | null; name: string; capacity: number; shape: RestaurantTableShape },
@@ -342,7 +344,7 @@ export function useRestaurantController(options: Options) {
         discount,
       })
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'createVirtualTableFromQuickSale' }))
       options.setBusy(false)
       return false
     }
@@ -354,12 +356,12 @@ export function useRestaurantController(options: Options) {
       const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
       realtime.setMap(nextMap)
     } catch (error) {
-      options.onError(`La mesa se ha guardado, pero el mapa no se ha podido actualizar: ${getReadableError(error)}`)
+      options.onError(`La mesa se ha guardado, pero el mapa no se ha podido actualizar: ${getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'createVirtualTableFromQuickSale' })}`)
     } finally {
       options.setBusy(false)
     }
     return true
-  }, [draft, options, realtime])
+  }, [draft, options, realtime, invoiceOrderId])
 
   const saveQuickSaleToExistingTable = useCallback(async (
     tableId: string,
@@ -378,7 +380,7 @@ export function useRestaurantController(options: Options) {
         discount,
       })
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'saveQuickSaleToExistingTable' }))
       options.setBusy(false)
       return false
     }
@@ -387,12 +389,12 @@ export function useRestaurantController(options: Options) {
       const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
       realtime.setMap(nextMap)
     } catch (error) {
-      options.onError(`La comanda se ha guardado, pero el mapa no se ha podido actualizar: ${getReadableError(error)}`)
+      options.onError(`La comanda se ha guardado, pero el mapa no se ha podido actualizar: ${getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'saveQuickSaleToExistingTable' })}`)
     } finally {
       options.setBusy(false)
     }
     return true
-  }, [options, realtime])
+  }, [options, realtime, invoiceOrderId])
 
   const deleteVirtualTable = useCallback(async (tableId: string) => {
     if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline || options.isBusy) return false
@@ -408,12 +410,12 @@ export function useRestaurantController(options: Options) {
       realtime.setMap(nextMap)
       return true
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'deleteVirtualTable' }))
       return false
     } finally {
       options.setBusy(false)
     }
-  }, [options, realtime])
+  }, [options, realtime, invoiceOrderId])
 
   const openExistingOrder = useCallback((orderId: string) => runBusy(async () => {
     if (!options.context || !options.isOnline) return
@@ -441,9 +443,9 @@ export function useRestaurantController(options: Options) {
       realtime.setMap(nextMap)
       setPosView({ type: 'table_map', areaId: nextMap.areas[0]?.id })
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'returnToMap' }))
     }
-  }, [draft, options, posView, realtime])
+  }, [draft, options, posView, realtime, invoiceOrderId])
 
   const cancelEmptyOrder = useCallback(() => runBusy(async () => {
     const current = draft.getCurrentOrder()
@@ -558,7 +560,7 @@ export function useRestaurantController(options: Options) {
 
   const configureEqualSplit = useCallback(async (partCount: number) => {
     const current = draft.getCurrentOrder()
-    if (!current) throw new Error('No hay una comanda abierta.')
+    if (!current) throw new UserFacingError('No hay una comanda abierta.')
     options.setBusy(true)
     options.onError(null)
     try {
@@ -571,12 +573,12 @@ export function useRestaurantController(options: Options) {
       setEqualSplit(configured)
       return configured
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'configureEqualSplit' }))
       throw error
     } finally {
       options.setBusy(false)
     }
-  }, [draft, options])
+  }, [draft, options, invoiceOrderId])
 
   const refreshSales = useCallback(async (saleId: string, missingTicketTitle: string, shouldPrint = true) => {
     await Promise.all([
@@ -593,8 +595,8 @@ export function useRestaurantController(options: Options) {
     useDefaultDiscount: boolean,
   ): Promise<PayRestaurantEqualPartResult> => {
     const current = draft.getCurrentOrder()
-    if (!options.context || !options.cashSession || !equalSplit || !current) throw new Error('No hay una división activa.')
-    if (paymentLockRef.current) throw new Error('Ya hay un cobro en curso.')
+    if (!options.context || !options.cashSession || !equalSplit || !current) throw new UserFacingError('No hay una división activa.')
+    if (paymentLockRef.current) throw new UserFacingError('Ya hay un cobro en curso.')
     paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
@@ -652,13 +654,13 @@ export function useRestaurantController(options: Options) {
       }
       return result
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'payEqualSplitPart' }))
       throw error
     } finally {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [cleanupVirtualRoomTable, draft, equalSplit, options, realtime, refreshSales, settlePayment])
+  }, [cleanupVirtualRoomTable, draft, equalSplit, options, realtime, refreshSales, settlePayment, invoiceOrderId])
 
   const paySelectedOrderItems = useCallback(async (
     moves: RestaurantOrderLineMove[],
@@ -668,8 +670,8 @@ export function useRestaurantController(options: Options) {
     discount: AppliedDiscount | null,
   ): Promise<PayRestaurantOrderItemsResult> => {
     const current = draft.getCurrentOrder()
-    if (!options.context || !options.cashSession || !options.isOnline || !current) throw new Error('No hay una comanda abierta.')
-    if (paymentLockRef.current) throw new Error('Ya hay un cobro en curso.')
+    if (!options.context || !options.cashSession || !options.isOnline || !current) throw new UserFacingError('No hay una comanda abierta.')
+    if (paymentLockRef.current) throw new UserFacingError('Ya hay un cobro en curso.')
     paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
@@ -731,17 +733,17 @@ export function useRestaurantController(options: Options) {
           draft.replaceOrder(await loadRestaurantOrder(options.context, current.order.id))
           options.onError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
         } catch (reloadError) {
-          options.onError(getReadableError(reloadError))
+          options.onError(getReadableError(reloadError, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'paySelectedOrderItems' }))
         }
       } else {
-        options.onError(getReadableError(error))
+        options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'paySelectedOrderItems' }))
       }
       throw error
     } finally {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [cleanupVirtualRoomTable, draft, options, realtime, refreshSales, settlePayment])
+  }, [cleanupVirtualRoomTable, draft, options, realtime, refreshSales, settlePayment, invoiceOrderId])
   const splitOrder = useCallback(async (
     sourceOrderId: string,
     targetOrderId: string | null,
@@ -783,16 +785,16 @@ export function useRestaurantController(options: Options) {
           if (current) draft.replaceOrder(current)
           options.onError('Las comandas cambiaron en otro dispositivo. Se ha recargado la versión más reciente.')
         } catch (reloadError) {
-          options.onError(getReadableError(reloadError))
+          options.onError(getReadableError(reloadError, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'splitOrder' }))
         }
       } else {
-        options.onError(getReadableError(error))
+        options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'splitOrder' }))
       }
       return null
     } finally {
       options.setBusy(false)
     }
-  }, [draft, options, realtime, splitOrderGroup])
+  }, [draft, options, realtime, splitOrderGroup, invoiceOrderId])
 
   const openOrderFromSplit = useCallback((orderId: string) => {
     const detail = splitOrderGroup?.orders.find((candidate) => candidate.order.id === orderId && candidate.order.status === 'open')
@@ -913,16 +915,16 @@ export function useRestaurantController(options: Options) {
       void Promise.allSettled([refreshMapTask, refreshSalesTask, printTask]).then((tasks) => {
         const failures = tasks
           .filter((task): task is PromiseRejectedResult => task.status === 'rejected')
-          .map((task) => getReadableError(task.reason))
+          .map((task) => getReadableError(task.reason, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
         if (failures.length > 0) options.onError(failures.join(' '))
       })
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
     } finally {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, pendingPayment, realtime, refreshSales, settlePayment])
+  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, pendingPayment, realtime, refreshSales, settlePayment, invoiceOrderId])
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false

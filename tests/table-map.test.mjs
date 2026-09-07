@@ -344,9 +344,11 @@ test('mantiene etiquetas dentro del canvas y evita la zona reservada de controle
   assert.equal(rectsOverlap(label.rect, controls, 8), false)
 })
 
-test('los errores de Supabase conservan mensaje, detalle y codigo al guardar el mapa', () => {
+test('los errores de Supabase no exponen mensaje, detalle ni codigo', () => {
   const message = getReadableError({ message: 'La distribucion no es valida', details: 'Mesa 2', code: '23514' })
-  assert.equal(message, 'La distribucion no es valida - Mesa 2 - Código: 23514')
+  assert.ok(!message.includes('Mesa 2'))
+  assert.ok(!message.includes('23514'))
+  assert.ok(!message.includes('La distribucion'))
 })
 
 test('las mesas ocupadas usan naranja con pendientes y rojo cuando todo esta servido', () => {

@@ -34,12 +34,12 @@ export class PrintAgentError extends Error {
   override readonly cause?: unknown
 
   constructor(input: { code: PrintAgentErrorCode; message?: string; status?: number; details?: unknown; cause?: unknown }) {
-    super(input.message || messages[input.code] || 'Error del servidor de impresión.')
+    super(messages[input.code] || 'No se ha podido completar la operación de impresión.')
     this.name = 'PrintAgentError'
     this.code = input.code
     this.status = input.status
     this.details = input.details
-    this.cause = input.cause
+    this.cause = input.cause ?? (input.message ? new Error(input.message) : undefined)
   }
 }
 

@@ -1,3 +1,4 @@
+import { UserFacingError } from '../utils/UserFacingError.ts'
 import { supabase } from '../lib/supabase'
 import { getFunctionInvokeErrorMessage } from '../features/crm/shared/services/crmServiceSupport'
 
@@ -80,7 +81,7 @@ export async function loadPlatformTenants(): Promise<{ features: PlatformFeature
   )
   const functionError = getFunctionError(data)
   if (error || functionError) {
-    throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron cargar los negocios.'))
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron cargar los negocios.'))
   }
   const features = data?.features ?? []
   const tenants = (data?.tenants ?? []).map((tenant) => ({
@@ -102,7 +103,7 @@ export async function createPlatformTenant(input: CreatePlatformTenantInput) {
   )
   const functionError = getFunctionError(data)
   if (error || functionError) {
-    throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudo crear el negocio.'))
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudo crear el negocio.'))
   }
   if (!data?.tenant) {
     throw new Error('La funcion no devolvio el negocio creado.')
@@ -118,7 +119,7 @@ async function invokePlatformAction<T>(body: Record<string, unknown>, fallbackEr
   )
   const functionError = getFunctionError(data)
   if (error || functionError) {
-    throw new Error(await getFunctionInvokeErrorMessage(data, error, fallbackError))
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, fallbackError))
   }
   return data
 }

@@ -1,7 +1,10 @@
+import { reportOperationError } from '../lib/observability.ts'
+import { UserFacingError } from '../utils/UserFacingError.ts'
 import { loadPosCatalog } from '../features/catalog/data/load-pos-catalog.ts'
 import { normalizeCatalogSnapshot } from '../features/catalog/services/catalogSnapshots.ts'
 import { autoIssueFiscalTicket, voidTicketWithFiscalCancellation } from '../features/fiscal/service.ts'
-import { supabase } from '../lib/supabase'
+import { hasLocalSupabaseSession, supabase } from '../lib/supabase'
+import { isInvalidAuthError } from '../features/session/services/sessionValidity'
 export { summarizeSales } from '../features/cash-registers/services/cashSummary.ts'
 export { buildSalePayload } from '../features/quick-sale/services/salePayload.ts'
 import type {
@@ -28,7 +31,6 @@ import type {
   UserMembershipRow,
   VenueRow,
 } from '../types/supabase'
-import { getReadableError } from '../utils/errors'
 import { normalizeTenantFeatures } from '../features/platform/tenantFeatureAccess'
 import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
 async function requireExclusiveLogin(context: TenantContext) {
@@ -64,7 +66,7 @@ export async function loadTenantFeatures(tenantId: string) {
   if (error) {
     // Keep deployments compatible while the feature migration and PostgREST schema cache propagate.
     if (['42883', 'PGRST202'].includes(error.code ?? '')) return undefined
-    throw new Error(`No se pudieron cargar las features del negocio: ${getReadableError(error)}`)
+    throw error
   }
   return normalizeTenantFeatures(data)
 }
@@ -96,7 +98,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     .maybeSingle<{ full_name: string | null; is_superadmin: boolean }>()
 
   if (profileError) {
-    throw new Error(`No se pudo comprobar el perfil global: ${getReadableError(profileError)}`)
+    throw profileError
   }
 
   if (profile?.is_superadmin) {
@@ -122,7 +124,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     .limit(2)
 
   if (membershipError) {
-    throw new Error(`No se pudo cargar la membresia del usuario: ${getReadableError(membershipError)}`)
+    throw membershipError
   }
 
   const activeMemberships = (memberships ?? []) as UserMembershipRow[]
@@ -132,7 +134,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   }
 
   if (activeMemberships.length > 1) {
-    throw new Error('Este usuario pertenece a más de un negocio. Usa una cuenta diferente para cada negocio.')
+    throw new UserFacingError('Este usuario pertenece a más de un negocio. Usa una cuenta diferente para cada negocio.')
   }
 
   const membership = activeMemberships[0]
@@ -143,7 +145,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     .single<TenantRow>()
 
   if (tenantError || !tenant || tenant.is_active === false) {
-    throw new Error(`No se pudo cargar el negocio asignado: ${getReadableError(tenantError)}`)
+    throw tenantError
   }
 
   const features = await loadTenantFeatures(tenant.id)
@@ -165,7 +167,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   }
 
   if (membership.role !== 'cashier') {
-    throw new Error('Este usuario no tiene acceso al CRM ni una cuenta de caja compatible.')
+    throw new UserFacingError('Este usuario no tiene acceso al CRM ni una cuenta de caja compatible.')
   }
 
   const { data: assignment, error: assignmentError } = await supabase
@@ -177,11 +179,11 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     .maybeSingle<DeviceAssignmentRow>()
 
   if (assignmentError) {
-    throw new Error(`No se pudo cargar la asignación del TPV: ${getReadableError(assignmentError)}`)
+    throw assignmentError
   }
 
   if (!assignment) {
-    throw new Error('Este usuario no tiene ningún dispositivo activo asignado. Contacta con el propietario.')
+    throw new UserFacingError('Este usuario no tiene ningún dispositivo activo asignado. Contacta con el propietario.')
   }
 
   const [{ data: venue, error: venueError }, { data: device, error: deviceError }] = await Promise.all([
@@ -203,11 +205,11 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   ])
 
   if (venueError) {
-    throw new Error(`No se pudo cargar el local: ${getReadableError(venueError)}`)
+    throw venueError
   }
 
   if (deviceError) {
-    throw new Error(`No se pudo cargar el dispositivo asignado: ${getReadableError(deviceError)}`)
+    throw deviceError
   }
 
   if (!venue || !device) {
@@ -242,7 +244,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   })
 }
 
-export class TenantSessionError extends Error {
+export class TenantSessionError extends UserFacingError {
   constructor(message: string) {
     super(message)
     this.name = 'TenantSessionError'
@@ -264,11 +266,19 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new Error('Supabase no está configurado.')
   }
 
+  // Refresh first: an expired access token is not evidence of a revoked session.
+  const { data: refreshed, error: refreshError } = await supabase.auth.refreshSession()
+  if (refreshError) {
+    if (isInvalidAuthError(refreshError)) throw new TenantSessionError('La sesión ha caducado. Inicia sesión de nuevo.')
+    throw refreshError
+  }
+  if (!refreshed.session || refreshed.session.user.id !== cachedContext.userId) {
+    throw new TenantSessionError('La sesión guardada no pertenece al usuario de este TPV.')
+  }
   const { data: authData, error: authError } = await supabase.auth.getUser()
 
   if (authError) {
-    const authStatus = (authError as { status?: number }).status
-    if (authError.name === 'AuthSessionMissingError' || authStatus === 401 || authStatus === 403) {
+    if (isInvalidAuthError(authError)) {
       throw new TenantSessionError('La sesión ha caducado. Inicia sesión de nuevo.')
     }
 
@@ -418,15 +428,9 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
 }
 
 export async function hasValidOfflineSession(context: TenantContext) {
-  if (!supabase) {
-    return false
-  }
-
-  const { data, error } = await supabase.auth.getSession()
-  const session = data.session
-  const expiresAtMs = session?.expires_at ? session.expires_at * 1000 : 0
-
-  return !error && Boolean(session && session.user.id === context.userId && expiresAtMs > Date.now())
+  // getSession may perform network refresh. Access-token expiry alone must not
+  // discard a previously authenticated POS while its refresh token is offline.
+  return Boolean(supabase && hasLocalSupabaseSession(context.userId))
 }
 
 export async function logoutTenant() {
@@ -971,7 +975,7 @@ export async function syncEvent(event: OfflineEvent) {
     } catch (fiscalError) {
       // The sale is already immutable and synchronized. Fiscal errors are persisted
       // by the backend and must not cause the sale event itself to be replayed.
-      console.error('Automatic fiscal submission failed', fiscalError)
+      reportOperationError(fiscalError, { operation: 'sale.fiscal_submission', integration: 'verifacti', ticketId: event.payload.ticket.id, saleId: event.payload.sale.id })
     }
 
     return

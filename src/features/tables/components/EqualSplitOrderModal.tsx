@@ -1,3 +1,4 @@
+import { getReadableError } from '../../../utils/errors.ts'
 import { Input as UiInput } from '../../../components/ui/Input'
 import { Button as UiButton } from '../../../components/ui/Button'
 import { AppModal } from '../../../components/ui/AppModal'
@@ -83,7 +84,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSched
       window.setTimeout(() => setFeedback(null), 900)
       if (result.completed) onCompleted()
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : 'No se pudo registrar el cobro.')
+      setLocalError(getReadableError(error, { operation: 'features.tables.components.EqualSplitOrderModal' }, 'No se pudo registrar el cobro.'))
     } finally {
       setPaying(false)
     }
@@ -95,7 +96,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSched
     try {
       await onConfigure(partCount)
     } catch (error) {
-      setLocalError(error instanceof Error ? error.message : 'No se pudo iniciar la división.')
+      setLocalError(getReadableError(error, { operation: 'features.tables.components.EqualSplitOrderModal' }, 'No se pudo iniciar la división.'))
     } finally {
       setPaying(false)
     }

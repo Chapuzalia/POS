@@ -38,7 +38,7 @@ export function KdsPage({ context, isOnline, onLogout }: Props) {
       setQueue(next)
       setError(null)
     } catch (cause) {
-      setError(getReadableError(cause))
+      setError(getReadableError(cause, { operation: 'features.production.components.KdsPage' }))
     }
   }, [context.deviceId, isOnline])
 
@@ -61,7 +61,7 @@ export function KdsPage({ context, isOnline, onLogout }: Props) {
       await markKdsItemReady(context.deviceId, itemId, quantity)
       await refresh()
     } catch (cause) {
-      setError(getReadableError(cause))
+      setError(getReadableError(cause, { operation: 'features.production.components.KdsPage' }))
     } finally {
       setBusyId(null)
     }

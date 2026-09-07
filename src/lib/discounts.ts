@@ -1,3 +1,4 @@
+import { UserFacingError } from '../utils/UserFacingError.ts'
 import type {
   AppliedDiscount,
   Discount,
@@ -36,7 +37,7 @@ export function calculateDiscount(
   roundingIncrementCents?: DiscountRoundingIncrementCents | null,
 ): DiscountCalculation {
   if (!Number.isInteger(subtotalCents) || subtotalCents < 0) {
-    throw new Error('El subtotal debe expresarse en céntimos enteros.')
+    throw new UserFacingError('El subtotal debe expresarse en céntimos enteros.')
   }
 
   if (!calculationType || value === null || value === undefined) {
@@ -44,19 +45,19 @@ export function calculateDiscount(
   }
 
   if (!Number.isFinite(value)) {
-    throw new Error('El valor del descuento no es válido.')
+    throw new UserFacingError('El valor del descuento no es válido.')
   }
 
   let requestedAmountCents: number
 
   if (calculationType === 'percentage') {
     if (value <= 0 || value > 100) {
-      throw new Error('El porcentaje debe ser mayor que 0 y como máximo 100.')
+      throw new UserFacingError('El porcentaje debe ser mayor que 0 y como máximo 100.')
     }
     requestedAmountCents = Math.round((subtotalCents * value) / 100)
   } else {
     if (!Number.isInteger(value) || value <= 0) {
-      throw new Error('El importe fijo debe ser mayor que 0 y expresarse en céntimos.')
+      throw new UserFacingError('El importe fijo debe ser mayor que 0 y expresarse en céntimos.')
     }
     requestedAmountCents = value
   }
@@ -66,7 +67,7 @@ export function calculateDiscount(
 
   if (roundingIncrementCents !== null && roundingIncrementCents !== undefined) {
     if (!validRoundingIncrements.has(roundingIncrementCents)) {
-      throw new Error('El incremento de redondeo no es válido.')
+      throw new UserFacingError('El incremento de redondeo no es válido.')
     }
     totalCents = Math.min(subtotalCents, Math.round(totalCents / roundingIncrementCents) * roundingIncrementCents)
   }
@@ -78,15 +79,15 @@ export function calculateDiscount(
 }
 export function allocateNetTotalToLines(grossLineCents: number[], netTotalCents: number) {
   if (!grossLineCents.every((value) => Number.isInteger(value) && value >= 0)) {
-    throw new Error('Los importes de línea deben expresarse en céntimos enteros.')
+    throw new UserFacingError('Los importes de línea deben expresarse en céntimos enteros.')
   }
   if (!Number.isInteger(netTotalCents) || netTotalCents < 0) {
-    throw new Error('El total neto debe expresarse en céntimos enteros.')
+    throw new UserFacingError('El total neto debe expresarse en céntimos enteros.')
   }
 
   let remainingGrossCents = grossLineCents.reduce((total, value) => total + value, 0)
   if (netTotalCents > remainingGrossCents) {
-    throw new Error('El total neto no puede superar el subtotal.')
+    throw new UserFacingError('El total neto no puede superar el subtotal.')
   }
 
   let remainingNetCents = netTotalCents
@@ -112,13 +113,13 @@ function allocateAdjustedNetToLines(baseNetCents: number[], grossLineCents: numb
 
 export function assertValidTicketPayment(totalCents: number, paymentMethod: PaymentMethod | null) {
   if (!Number.isInteger(totalCents) || totalCents < 0) {
-    throw new Error('El total debe expresarse en céntimos enteros.')
+    throw new UserFacingError('El total debe expresarse en céntimos enteros.')
   }
   if (totalCents === 0 && paymentMethod !== null) {
-    throw new Error('Un ticket a cero no requiere método de pago.')
+    throw new UserFacingError('Un ticket a cero no requiere método de pago.')
   }
   if (totalCents > 0 && paymentMethod === null) {
-    throw new Error('Selecciona Efectivo o Tarjeta.')
+    throw new UserFacingError('Selecciona Efectivo o Tarjeta.')
   }
 }
 
@@ -130,7 +131,7 @@ export function getActiveVenueDiscounts(discounts: Discount[], venueId: string) 
 
 export function validateDiscountDefinition(name: string, type: DiscountCalculationType, value: number) {
   const normalizedName = name.trim()
-  if (!normalizedName) throw new Error('El nombre es obligatorio.')
+  if (!normalizedName) throw new UserFacingError('El nombre es obligatorio.')
   calculateDiscount(100, type, value)
   return normalizedName
 }
@@ -212,7 +213,7 @@ export function calculateDiscountForLines(
   const eligibleGross: number[] = []
   lines.forEach((line, index) => {
     if (!Number.isInteger(line.grossCents) || line.grossCents < 0) {
-      throw new Error('Los importes de línea deben expresarse en céntimos enteros.')
+      throw new UserFacingError('Los importes de línea deben expresarse en céntimos enteros.')
     }
     if (discount && isLineEligibleForDiscount(line, discount.scope ?? 'general', discount.targets ?? [])) {
       eligibleIndexes.push(index)
@@ -226,12 +227,12 @@ export function calculateDiscountForLines(
   if (fixedPerUnit) {
     const fixedValueCents = discount.value
     if (!Number.isInteger(fixedValueCents) || fixedValueCents <= 0) {
-      throw new Error('El importe fijo debe ser mayor que 0 y expresarse en céntimos.')
+      throw new UserFacingError('El importe fijo debe ser mayor que 0 y expresarse en céntimos.')
     }
     const baseEligibleNet = eligibleIndexes.map((lineIndex, position) => {
       const quantity = lines[lineIndex].quantity ?? 1
       if (!Number.isInteger(quantity) || quantity <= 0) {
-        throw new Error('La cantidad debe ser un número entero mayor que 0.')
+        throw new UserFacingError('La cantidad debe ser un número entero mayor que 0.')
       }
       return Math.max(0, eligibleGross[position] - fixedValueCents * quantity)
     })
@@ -422,20 +423,20 @@ export function validateDiscountRule(input: Pick<DiscountCreateInput,
 >) {
   const name = validateDiscountDefinition(input.name, input.type, input.value)
   if (input.type === 'fixed' && input.fixedApplication !== 'ticket' && input.fixedApplication !== 'unit') {
-    throw new Error('Selecciona si el importe fijo se aplica por ticket o por unidad.')
+    throw new UserFacingError('Selecciona si el importe fijo se aplica por ticket o por unidad.')
   }
-  if (input.scope === 'specific' && !input.targets.length) throw new Error('Selecciona al menos un producto o variante.')
-  if (input.autoApply && input.requiresPin) throw new Error('Una promoción automática no puede requerir PIN.')
+  if (input.scope === 'specific' && !input.targets.length) throw new UserFacingError('Selecciona al menos un producto o variante.')
+  if (input.autoApply && input.requiresPin) throw new UserFacingError('Una promoción automática no puede requerir PIN.')
   if (input.requiresPin && input.pin !== null && !/^\d{4,8}$/.test(input.pin)) {
-    throw new Error('El PIN debe contener entre 4 y 8 dígitos.')
+    throw new UserFacingError('El PIN debe contener entre 4 y 8 dígitos.')
   }
   if (input.ruleKind === 'promotion') {
     if (!input.activeWeekdays.length || input.activeWeekdays.some((day) => !Number.isInteger(day) || day < 1 || day > 7)) {
-      throw new Error('Selecciona al menos un día válido para la promoción.')
+      throw new UserFacingError('Selecciona al menos un día válido para la promoción.')
     }
     const start = timeToMinutes(input.startsAt)
     const end = timeToMinutes(input.endsAt)
-    if (start === null || end === null || start === end) throw new Error('Indica una franja horaria válida y no vacía.')
+    if (start === null || end === null || start === end) throw new UserFacingError('Indica una franja horaria válida y no vacía.')
   }
   return name
 }

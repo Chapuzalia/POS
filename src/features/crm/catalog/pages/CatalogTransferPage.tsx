@@ -87,7 +87,7 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
       if (file.size > MAX_CATALOG_FILE_BYTES) throw new Error('El catálogo supera el máximo de 100 MB.')
       setOwnDocument(parseCatalogExportJson(await file.text()))
     } catch (readError) {
-      setOwnError(getReadableError(readError))
+      setOwnError(getReadableError(readError, { operation: 'features.crm.catalog.pages.CatalogTransferPage' }))
     }
   }
 
@@ -104,7 +104,7 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
       setRevoError(parsed.products.length ? null : 'No se encontraron productos importables.')
     } catch (readError) {
       setRevoParseResult(null)
-      setRevoError(getReadableError(readError))
+      setRevoError(getReadableError(readError, { operation: 'features.crm.catalog.pages.CatalogTransferPage' }))
     }
   }
 

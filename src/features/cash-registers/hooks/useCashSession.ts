@@ -1,3 +1,5 @@
+import { reportOperationError } from '../../../lib/observability.ts'
+import { UserFacingError } from '../../../utils/UserFacingError.ts'
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { sileo } from 'sileo'
 import {
@@ -102,7 +104,7 @@ export function useCashSession(options: Options) {
         if (!active || requestVersion !== refreshVersion) return
         setMovements(next)
       } catch (error) {
-        if (active && requestVersion === refreshVersion) reportError(getReadableError(error))
+        if (active && requestVersion === refreshVersion) reportError(getReadableError(error, { operation: 'cash.session' }))
       }
     }
     void refresh()
@@ -282,7 +284,7 @@ export function useCashSession(options: Options) {
       throw new Error('Los movimientos de caja requieren una caja abierta y conexión.')
     }
     if (!context.canManageCash && !['manager', 'owner'].includes(context.role)) {
-      throw new Error('No tienes permiso para gestionar movimientos de caja.')
+      throw new UserFacingError('No tienes permiso para gestionar movimientos de caja.')
     }
     setMovementSaving(true)
     try {
@@ -317,7 +319,7 @@ export function useCashSession(options: Options) {
       saveSessionTickets(options.context, nextSession.id, [])
       await cashOptions.refresh(options.context)
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'cash.session', step: 'open' }))
     } finally {
       options.setBusy(false)
     }
@@ -333,7 +335,7 @@ export function useCashSession(options: Options) {
       setTickets(joined.tickets)
       saveSessionTickets(options.context, nextSession.id, joined.tickets)
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'cash.session', step: 'join' }))
     } finally {
       options.setBusy(false)
     }
@@ -392,7 +394,7 @@ export function useCashSession(options: Options) {
         const refreshed = await loadCashClosing(options.context, closing.id)
         setCompletedClosing((current) => current?.id === refreshed.id ? refreshed : current)
         setCashClosings((current) => current.map((item) => item.id === refreshed.id ? refreshed : item))
-      } catch { /* el fallo de auditoria no cambia el cierre ya guardado */ }
+      } catch (auditError) { reportOperationError(auditError, { operation: 'cash.closing.print_audit', operationId: requestId, cashSessionId: closing.id, step: 'record_result' }) }
       return false
     } finally {
       setPrintingClosingId(null)
@@ -409,7 +411,7 @@ export function useCashSession(options: Options) {
       setCashClosings(await loadCashClosingHistory(options.context))
       setClosingHistoryOpen(true)
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'cash.session', step: 'openClosingHistory' }))
     } finally {
       options.setBusy(false)
     }
@@ -445,7 +447,7 @@ export function useCashSession(options: Options) {
       }
       return true
     } catch (error) {
-      options.onError(getReadableError(error))
+      options.onError(getReadableError(error, { operation: 'cash.session', step: 'close' }))
       return false
     } finally {
       options.setBusy(false)
@@ -462,7 +464,7 @@ export function useCashSession(options: Options) {
       setCloseModalOpen(true)
       return true
     } catch (error) {
-      reportError(getReadableError(error))
+      reportError(getReadableError(error, { operation: 'cash.session', step: 'openCloseModal' }))
       return false
     } finally {
       setGlobalBusy(false)

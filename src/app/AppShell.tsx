@@ -67,8 +67,10 @@ const defaultThemeId = themes[0]?.id ?? 'hero-minimal'
 
 export function AppShell() {
   const { selectedTheme, setThemeId, themeId } = useThemeTokens(themes, defaultThemeId)
-  const isOnline = useOnlineStatus()
-  const offline = useOfflineController(isOnline)
+  const networkOnline = useOnlineStatus()
+  const [sessionReady, setSessionReady] = useState(false)
+  const isOnline = networkOnline && sessionReady
+  const offline = useOfflineController(networkOnline, sessionReady)
   const [context, setContext] = useState<TenantContext | null>(null)
   const [catalog, setCatalog] = useState<CatalogData | null>(null)
   const [discounts, setDiscounts] = useState<Discount[]>([])
@@ -319,7 +321,9 @@ export function AppShell() {
     quickSale.hydrate(getCachedTicket(cachedContext))
   }
   const session = useTenantSession({
-    isOnline,
+    context,
+    isOnline: networkOnline,
+    setSessionReady,
     loginLeaseBlocked,
     pendingLoginContext,
     loadTenantState,
@@ -352,7 +356,7 @@ export function AppShell() {
       persistProductSalesStats(nextStats)
       saveCachedCatalog(activeContext, nextCatalog)
     } catch (refreshError) {
-      setGeneralError(getReadableError(refreshError))
+      setGeneralError(getReadableError(refreshError, { operation: 'app.AppShell' }))
     } finally {
       setIsLoading(false)
     }
@@ -390,7 +394,7 @@ export function AppShell() {
     conflictAccountName={pendingLoginContext?.userName ?? null}
     error={error}
     isBusy={isBusy}
-    isOnline={isOnline}
+    isOnline={networkOnline}
     onCancelLoginConflict={() => void session.cancelPendingLogin()}
     onForceLoginConflict={() => void session.forceLogin()}
     onLogin={session.login}

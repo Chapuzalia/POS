@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
 import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
 import { loadInventorySnapshot } from '../../inventory/services/inventoryService'
@@ -77,7 +78,7 @@ async function processDocument(documentId: string, fixtureId?: string) {
     body: { documentId, ...(fixtureId ? { fixtureId } : {}) },
   })
   if (error) {
-    throw new Error(await getFunctionInvokeErrorMessage(
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(
       data,
       error,
       'No se pudo procesar el documento.',
@@ -194,7 +195,7 @@ export async function reparseSupplierDocumentLines(documentId: string, allowOver
   const { data, error } = await requireSupabase().functions.invoke('process-supplier-document', {
     body: { documentId, action: 'reparse_lines', allowOverwrite },
   })
-  if (error) throw new Error(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron actualizar las líneas con este proveedor.'))
+  if (error) throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron actualizar las líneas con este proveedor.'))
   return data as { documentId: string; lineCount: number }
 }
 
@@ -294,5 +295,12 @@ export async function confirmSupplierDocument(input: {
     if (error.message.includes('SUPPLIER_DOCUMENT_PROVISIONAL_INVALID')) throw new Error('El proveedor detectado no tiene evidencia suficiente. Selecciona un proveedor existente.')
     throw error
   }
+  // Confirmation is already committed. A learning failure must never make the
+  // purchase look unconfirmed or invite the user to repeat its stock movement.
+  void requireSupabase().functions.invoke('repair-supplier-document-profile', {
+    body: { documentId: input.documentId },
+  }).then(({ error }) => {
+    if (error) console.warn('Supplier profile repair could not be scheduled', error)
+  }).catch((error: unknown) => console.warn('Supplier profile repair could not be scheduled', error))
   return data as { documentId: string; confirmedAt: string; lineCount?: number; affectsStock: boolean; duplicate: boolean }
 }

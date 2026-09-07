@@ -1,7 +1,8 @@
+import { UserFacingError } from '../../utils/UserFacingError.ts'
 import { supabase } from '../../lib/supabase'
 import type { Customer, CustomerCreateInput, CustomerFiscalSnapshot, TicketInvoice } from '../../types'
 import type { CustomerRow } from '../../types/supabase'
-import { normalizeCustomerTaxId, validateCustomerCreateInput } from './customerValidation'
+import { validateCustomerCreateInput } from './customerValidation'
 
 function client() {
   if (!supabase) throw new Error('Supabase no está configurado.')
@@ -54,7 +55,7 @@ export async function createCustomer(tenantId: string, input: CustomerCreateInpu
   }).single()
   if (error) {
     if (error.code === '23505' || error.message.includes('CUSTOMER_TAX_ID_DUPLICATE')) {
-      throw new Error(`Ya existe un cliente con el NIF/CIF ${normalizeCustomerTaxId(value.taxId)}.`)
+      throw new UserFacingError('Ya existe un cliente con ese NIF/CIF.', { cause: error })
     }
     throw error
   }
@@ -76,7 +77,7 @@ export async function updateCustomer(tenantId: string, customerId: string, input
   }).eq('tenant_id', tenantId).eq('id', customerId).select('*').single()
   if (error) {
     if (error.code === '23505' || error.message.includes('CUSTOMER_TAX_ID_DUPLICATE')) {
-      throw new Error(`Ya existe un cliente con el NIF/CIF ${normalizeCustomerTaxId(value.taxId)}.`)
+      throw new UserFacingError('Ya existe un cliente con ese NIF/CIF.', { cause: error })
     }
     throw error
   }
@@ -90,7 +91,7 @@ export async function deleteCustomer(tenantId: string, customerId: string): Prom
   })
   if (error) {
     if (error.code === '23503' || error.message.includes('CUSTOMER_HAS_INVOICES')) {
-      throw new Error('No se puede eliminar este cliente porque ya está asociado a una factura.')
+      throw new UserFacingError('No se puede eliminar este cliente porque ya está asociado a una factura.')
     }
     throw error
   }

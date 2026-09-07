@@ -1,3 +1,4 @@
+import { reportOperationError } from '../../lib/observability.ts'
 import { supabase } from '../../lib/supabase'
 import type { TenantContext } from '../../types'
 import type {
@@ -17,7 +18,7 @@ function readNumber(value: unknown) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-function mapOrderState(value: unknown): OrderProductionState {
+function mapOrderState(value: unknown, orderId: string): OrderProductionState {
   const row = (value ?? {}) as Record<string, unknown>
   return {
     effective: Boolean(row.effective),
@@ -32,10 +33,11 @@ function mapOrderState(value: unknown): OrderProductionState {
     }) : [],
     warnings: Array.isArray(row.warnings) ? row.warnings.map((entry) => {
       const warning = entry as Record<string, unknown>
+      reportOperationError(new Error(typeof warning.message === 'string' ? warning.message : 'Production dispatch failed'), { operation: 'production.dispatch', operationId: orderId, step: warning.status === 'unknown' ? 'uncertain' : 'failed', integration: 'print-agent' })
       return {
         destinationId: String(warning.destinationId ?? ''),
         status: warning.status === 'unknown' ? 'unknown' as const : 'failed' as const,
-        message: String(warning.message ?? 'No se puede confirmar la impresión.'),
+        message: 'No se puede confirmar la impresión. Comprueba la impresora antes de repetirla.',
       }
     }) : [],
   }
@@ -44,7 +46,7 @@ function mapOrderState(value: unknown): OrderProductionState {
 export async function loadOrderProductionState(orderId: string) {
   const { data, error } = await client().rpc('get_order_production_state', { p_order_id: orderId })
   if (error) throw error
-  return mapOrderState(data)
+  return mapOrderState(data, orderId)
 }
 
 export async function sendProductionBatch(input: {
@@ -61,7 +63,10 @@ export async function sendProductionBatch(input: {
     p_request_id: input.requestId,
     p_selection: input.selection ?? null,
   })
-  if (error) throw error
+  if (error) {
+    reportOperationError(error, { operation: 'production.send', operationId: input.requestId, step: 'persist_batch' })
+    throw error
+  }
   return data as ProductionBatchResult
 }
 

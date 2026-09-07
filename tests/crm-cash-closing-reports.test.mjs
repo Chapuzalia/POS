@@ -5,6 +5,8 @@ import { reportNavItems, reportSections } from '../src/features/crm/routing/crmN
 import { getCashClosingAmounts } from '../src/features/cash-registers/services/cashClosingAmounts.ts'
 import {
   buildCashClosingDailyValues,
+  getDefaultClosingDateRange,
+  sortCashClosings,
   filterCashClosingsByDate,
   projectCashClosingCounts,
 } from '../src/features/crm/sales/services/cashClosingReportModel.ts'
@@ -24,6 +26,18 @@ const madridAtFour = {
   dayChangeTime: '04:00',
   timeZone: 'Europe/Madrid',
 }
+
+test('default closing range covers three calendar months through today in the venue timezone', () => {
+  assert.deepEqual(getDefaultClosingDateRange('Europe/Madrid', new Date('2026-09-07T12:00:00Z')), {
+    dateFrom: '2026-06-07', dateTo: '2026-09-07',
+  })
+  assert.deepEqual(getDefaultClosingDateRange('Europe/Madrid', new Date('2026-05-30T23:30:00Z')), {
+    dateFrom: '2026-02-28', dateTo: '2026-05-31',
+  })
+  assert.deepEqual(getDefaultClosingDateRange('Europe/Madrid', new Date('2026-01-07T12:00:00Z')), {
+    dateFrom: '2025-10-07', dateTo: '2026-01-07',
+  })
+})
 
 test('sales reports navigation exposes Tickets and the cash-closing report as child pages', () => {
   assert.deepEqual(reportNavItems.map(({ id }) => id), ['reports', 'x-reports'])
@@ -71,6 +85,19 @@ test('cash-closing reports separate invoicing, card cashback and the cash to wit
   })
 })
 
+test('closing rows are sorted across the complete result set before pagination', () => {
+  const closings = Array.from({ length: 25 }, (_, index) => ({
+    id: String(index), source: 'revo', date: `2026-09-${String(index + 1).padStart(2, '0')}`,
+    cashCents: index * 100, cardCents: 0,
+  }))
+  const sorted = sortCashClosings(closings, 'column-0', 'descending')
+  assert.deepEqual(sorted.slice(0, 12).map(row => row.id), Array.from({ length: 12 }, (_, i) => String(24 - i)))
+  assert.equal(sorted.slice(24, 36)[0].id, '0')
+  assert.equal(sortCashClosings(closings, 'column-2', 'descending')[0].cashCents, 2400)
+  assert.equal(sortCashClosings(closings, 'column-2', 'ascending')[0].cashCents, 0)
+  assert.equal(closings[0].id, '0')
+})
+
 test('editing final counts recalculates both differences without mutating the original snapshot', () => {
   const snapshot = {
     expectedAndCounted: {
@@ -98,9 +125,16 @@ test('editing final counts recalculates both differences without mutating the or
 
 test('cash-closing reports render the chart and the detailed table', async () => {
   const source = await readFile(new URL('../src/features/crm/sales/pages/CashClosingReportsPage.tsx', import.meta.url), 'utf8')
+  const chart = await readFile(new URL('../src/features/crm/sales/components/ClosingValuesChart.tsx', import.meta.url), 'utf8')
   const cashRegisterService = await readFile(new URL('../src/features/cash-registers/service.ts', import.meta.url), 'utf8')
   assert.match(source, /ClosingValuesChart/)
-  assert.match(source, /Valor total de los cierres agrupado por día operativo/)
+  assert.match(source, /<CrmPagination currentPage=\{visiblePage\}/)
+  assert.match(source, /visibleClosings\.map/)
+  assert.match(source, /buildCashClosingDailyValues\(filteredClosings, operationalDayConfig\)/)
+  assert.doesNotMatch(source, /setDate(?:From|To)\(["']{2}\)/)
+  assert.match(source, /setDateFrom\(range.dateFrom\)/)
+  assert.match(source, /setDateTo\(range.dateTo\)/)
+  assert.match(source, /Importes de los cierres por periodo, según el día operativo/)
   assert.match(source, /Cierres de caja/)
   assert.match(source, /getCashClosingAmounts/)
   assert.match(source, /Facturado/)
@@ -117,9 +151,9 @@ test('cash-closing reports render the chart and the detailed table', async () =>
   assert.match(source, /border-\[var\(--crm-border-subtle\)\]/)
   assert.match(source, /bg-transparent/)
   assert.match(source, /text-\[var\(--crm-text\)\]/)
-  assert.match(source, /onMouseEnter=\{\(\) => setHoveredPointIndex\(index\)\}/)
-  assert.match(source, /cash-closing-tooltip-shadow/)
-  assert.match(source, /hoveredPoint\.totalCents/)
+  assert.match(chart, /onMouseEnter=\{\(\) => setSelectedDate\(period.date\)\}/)
+  assert.match(chart, /onFocus=\{\(\) => setSelectedDate\(period.date\)\}/)
+  assert.match(chart, /selected\.totalCents/)
   assert.match(source, /Editar conteos/)
   assert.match(source, /Conteo final datáfono/)
   assert.match(source, /Guardar conteos/)

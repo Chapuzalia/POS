@@ -1,3 +1,4 @@
+import { UserFacingError } from '../utils/UserFacingError.ts'
 export const PRODUCT_IMAGE_BUCKET = 'product-images'
 export const PRODUCT_IMAGE_SIZE = 512
 export const PRODUCT_IMAGE_TYPE = 'image/webp'
@@ -38,7 +39,7 @@ function loadImageWithElement(file: File): Promise<LoadedImage> {
 
 async function loadProductImage(file: File): Promise<LoadedImage> {
   if (!isImageFile(file)) {
-    throw new Error('Selecciona un archivo de imagen válido.')
+    throw new UserFacingError('Selecciona un archivo de imagen válido.')
   }
 
   if ('createImageBitmap' in window) {

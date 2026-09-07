@@ -1,3 +1,4 @@
+import { reportOperationError } from '../../lib/observability.ts'
 import { supabase } from '../../lib/supabase'
 
 export type InventoryPreparation = {
@@ -57,6 +58,9 @@ export async function recordInventoryPreparation(input: { inventoryItemId: strin
     p_inventory_item_id: input.inventoryItemId, p_quantity: input.quantity,
     p_unit_id: input.unitId, p_device_id: input.deviceId, p_request_id: input.requestId,
   })
-  if (error) throw error
+  if (error) {
+    reportOperationError(error, { operation: 'inventory.production', operationId: input.requestId, step: 'record_stock' })
+    throw error
+  }
   return data as { productionId: string; duplicate: boolean; preview?: InventoryPreparationPreview }
 }

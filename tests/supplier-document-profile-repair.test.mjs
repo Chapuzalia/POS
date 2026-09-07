@@ -1,0 +1,114 @@
+import assert from 'node:assert/strict'
+import test from 'node:test'
+import { readFile } from 'node:fs/promises'
+import ts from 'typescript'
+import { getSupplierDocumentMockFixture } from '../supabase/functions/_shared/supplier-documents/fixtures.ts'
+import { proposeConfirmedProfileRepair } from '../supabase/functions/_shared/supplier-documents/profileRepair.ts'
+import { runDeterministicParser } from '../supabase/functions/_shared/supplier-documents/core.ts'
+import * as repair from '../supabase/functions/_shared/supplier-documents/profileRepair.ts'
+
+function input() {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const extraction = runDeterministicParser(fixture.knownProfile, fixture.ocr, {
+    documentType: fixture.extraction.document.type, supplierName: fixture.extraction.supplier.name,
+    supplierTaxId: fixture.extraction.supplier.taxId,
+  })
+  return { document: { status: 'confirmed', extraction_metadata: {}, ocr_snapshot: fixture.ocr,
+    document_type: extraction.document.type, document_number: extraction.document.number,
+    document_date: extraction.document.date },
+  supplier: { name: extraction.supplier.name, legal_name: extraction.supplier.legalName, tax_id: extraction.supplier.taxId },
+  lines: extraction.lines.map((line) => ({
+    supplier_reference: line.supplierReference, description_raw: line.description, barcode: line.barcode,
+    quantity: line.quantity, purchase_unit: line.purchaseUnit, unit_price: line.unitPrice,
+    discount_amount: line.discountAmount, charges_amount: line.chargesAmount, gross_cost: line.grossCost,
+    net_cost: line.netCost, line_total: line.lineTotal, tax_rate: line.taxRate,
+  })), rules: fixture.knownProfile }
+}
+
+test('la reparación reproduce las líneas confirmadas usando solamente el OCR guardado', async () => {
+  const data = input()
+  let calls = 0
+  const rules = await proposeConfirmedProfileRepair({ ...data, propose: async (target) => {
+    calls++
+    assert.deepEqual(target.ocr, data.document.ocr_snapshot)
+    assert.equal(target.extraction.lines[0].quantity, data.lines[0].quantity)
+    return data.rules
+  } })
+  assert.equal(calls, 1)
+  assert.deepEqual(rules, data.rules)
+})
+
+test('una propuesta que ignora la corrección no se publica', async () => {
+  const data = input()
+  data.lines[0].quantity *= 2
+  data.lines[0].gross_cost *= 2
+  data.lines[0].discount_amount *= 2
+  data.lines[0].charges_amount *= 2
+  data.lines[0].line_total *= 2
+  data.lines[0].net_cost *= 2
+  await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async () => data.rules }), /PROFILE_OUTPUT_MISMATCH/)
+})
+
+test('selección manual, documentos sin confirmar y cantidades incoherentes no consumen GPT', async () => {
+  for (const mode of ['manual', 'reparsed', 'review', 'math']) {
+    const data = input()
+    if (mode === 'manual') data.document.extraction_metadata.learningExcluded = true
+    if (mode === 'reparsed') data.document.extraction_metadata.linesReparsedAt = '2026-09-07'
+    if (mode === 'review') data.document.status = 'review'
+    if (mode === 'math') data.lines[0].line_total += 100
+    let calls = 0
+    await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async () => { calls++; return data.rules } }))
+    assert.equal(calls, 0)
+  }
+})
+
+test('un identificador corregido tampoco puede ser ignorado por el perfil', async () => {
+  const data = input()
+  data.lines[0].barcode = '9999999999999'
+  await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async () => data.rules }), /PROFILE_REPAIR_IDENTITY_OR_TAX_MISMATCH/)
+})
+
+test('endpoint autentica, respeta RLS y termina el trabajo antes de publicar', async () => {
+  const source = await readFile(new URL('../supabase/functions/repair-supplier-document-profile/index.ts', import.meta.url), 'utf8')
+  const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
+  for (const mode of ['unauthorized', 'forbidden', 'not_pending', 'valid']) {
+    const data = input()
+    let handler
+    const tasks = []
+    const writes = []
+    let aiCalls = 0
+    const user = {
+      auth: { getUser: async () => ({ data: { user: mode === 'unauthorized' ? null : { id: 'user' } } }) },
+      from: () => ({ select() { return this }, eq() { return this },
+        maybeSingle: async () => ({ data: mode === 'forbidden' ? null : { id: 'doc' } }) }),
+      rpc: async () => ({ error: null }),
+    }
+    const admin = { rpc: async (name, args) => {
+      writes.push({ name, args })
+      return { data: name === 'claim_supplier_profile_repair' && mode !== 'not_pending'
+        ? { ...data, token: 'token' } : null, error: null }
+    } }
+    const modules = {
+      'https://esm.sh/@supabase/supabase-js@2.110.0': { createClient: (_url, key) => key === 'service' ? admin : user },
+      '../_shared/supplier-documents/profileRepair.ts': repair,
+      '../_shared/supplier-documents/providers.ts': { OpenAiSupplierDocumentProvider: class {
+        async proposeProfile() { aiCalls++; return data.rules }
+      } },
+    }
+    const env = { SUPABASE_URL: 'url', SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'service' }
+    new Function('require', 'exports', 'Deno', 'EdgeRuntime', 'console', compiled)(
+      (name) => modules[name], {}, { env: { get: (key) => env[key] }, serve: (callback) => { handler = callback } },
+      { waitUntil: (task) => tasks.push(task) }, { error() {} })
+    const response = await handler(new Request('https://example.test/repair', { method: 'POST',
+      headers: { Authorization: 'Bearer test' }, body: JSON.stringify({ documentId: 'doc' }) }))
+    await Promise.all(tasks)
+    assert.equal(response.status, { unauthorized: 401, forbidden: 404, not_pending: 200, valid: 202 }[mode])
+    assert.equal(aiCalls, mode === 'valid' ? 1 : 0)
+    if (mode === 'valid') {
+      assert.equal(writes[1].name, 'finish_supplier_profile_repair')
+      assert.deepEqual(writes[1].args.p_rules, data.rules)
+      assert.equal(writes[1].args.p_error, null)
+      assert.equal(writes[1].args.p_token, 'token')
+    } else assert.equal(writes.length, mode === 'not_pending' ? 1 : 0)
+  }
+})

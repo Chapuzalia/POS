@@ -1,5 +1,5 @@
 const CACHE_PREFIX = 'tickit-pos'
-const CACHE_VERSION = 'v1'
+const CACHE_VERSION = 'v2'
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`
 const APP_SHELL = [
   '/',
@@ -17,7 +17,14 @@ self.addEventListener('install', (event) => {
   event.waitUntil(
     caches
       .open(STATIC_CACHE)
-      .then((cache) => cache.addAll(APP_SHELL))
+      .then(async (cache) => {
+        // The first page loads before the worker controls it. Precache the
+        // build's chunks too, including the lazy POS screen and its styles.
+        const response = await fetch('/offline-assets.json', { cache: 'no-store' })
+        if (!response.ok) throw new Error('No se pudo cargar el manifiesto offline')
+        const assets = await response.json()
+        await cache.addAll([...APP_SHELL, ...assets])
+      })
       .then(() => self.skipWaiting()),
   )
 })
@@ -42,7 +49,8 @@ async function networkFirstNavigation(request) {
 
   try {
     const response = await fetch(request)
-    if (response.ok) await cache.put('/index.html', response.clone())
+    if (!response.ok) throw new Error('App shell unavailable')
+    await cache.put('/index.html', response.clone())
     return response
   } catch {
     return (await cache.match('/index.html')) || (await cache.match('/')) || Response.error()

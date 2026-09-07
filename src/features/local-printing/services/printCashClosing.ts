@@ -1,3 +1,4 @@
+import { reportOperationError } from '../../../lib/observability.ts'
 import { sileo } from 'sileo'
 import type { CashClosingRecord, TenantContext } from '../../../types/index.ts'
 import { getPrintAgentErrorMessage } from '../api/PrintAgentError.ts'
@@ -37,6 +38,7 @@ export async function printCashClosing(input: {
     sileo.success({ title: input.isReprint ? 'Copia del cierre impresa correctamente.' : 'Cierre de caja impreso correctamente.' })
     return { job, requestId: payload.requestId, printerId: printer.id }
   } catch (error) {
+    reportOperationError(error, { operation: 'cash.closing.print', integration: 'print-agent', operationId: payload.requestId, step: 'print' })
     sileo.warning({
       title: input.isReprint ? 'Error al reimprimir el cierre' : 'El cierre se ha guardado, pero no se ha podido imprimir.',
       description: getPrintAgentErrorMessage(error),

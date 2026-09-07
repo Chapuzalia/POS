@@ -63,17 +63,17 @@ export function PurchasesInvoicesCrm({ disabled, selectedVenueId, tenantContext 
   const [editorDocumentId, setEditorDocumentId] = useState<string | null | undefined>(undefined)
   const [error, setError] = useState<string | null>(null); const [busy, setBusy] = useState(false)
   const refresh = useCallback(async () => { setDocuments(await loadPurchaseDocuments(tenantContext, selectedVenueId, startDate, endDate, { includeUnconfirmed: true, includeLines: scanningEnabled })) }, [endDate, scanningEnabled, selectedVenueId, startDate, tenantContext])
-  useEffect(() => { let active = true; setError(null); void loadPurchaseDocuments(tenantContext, selectedVenueId, startDate, endDate, { includeUnconfirmed: true, includeLines: scanningEnabled }).then((next) => { if (active) setDocuments(next) }).catch((cause) => { if (active) setError(getReadableError(cause)) }); return () => { active = false } }, [endDate, scanningEnabled, selectedVenueId, startDate, tenantContext])
+  useEffect(() => { let active = true; setError(null); void loadPurchaseDocuments(tenantContext, selectedVenueId, startDate, endDate, { includeUnconfirmed: true, includeLines: scanningEnabled }).then((next) => { if (active) setDocuments(next) }).catch((cause) => { if (active) setError(getReadableError(cause, { operation: 'features.crm.purchases.pages.PurchasesInvoicesPage' })) }); return () => { active = false } }, [endDate, scanningEnabled, selectedVenueId, startDate, tenantContext])
   const hasProcessingDocuments = documents.some((document) => document.status === 'processing')
   useEffect(() => {
     if (!hasProcessingDocuments) return
-    const timer = window.setInterval(() => { void refresh().catch((cause) => setError(getReadableError(cause))) }, 5_000)
+    const timer = window.setInterval(() => { void refresh().catch((cause) => setError(getReadableError(cause, { operation: 'features.crm.purchases.pages.PurchasesInvoicesPage' }))) }, 5_000)
     return () => window.clearInterval(timer)
   }, [hasProcessingDocuments, refresh])
   const suppliers = useMemo(() => [...new Set(documents.map((document) => document.supplierName).filter((name): name is string => Boolean(name)))].sort(), [documents])
   const filtered = useMemo(() => documents.filter((document) => (type === 'all' || document.documentType === type) && (supplier === 'all' || document.supplierName === supplier) && (status === 'all' || document.status === status) && (!query.trim() || `${document.documentNumber ?? ''} ${document.supplierName ?? ''}`.toLowerCase().includes(query.toLowerCase()))), [documents, query, status, supplier, type])
   const exportable = filtered.filter((document) => document.status === 'confirmed' && document.documentDate && document.documentDate >= startDate && document.documentDate <= endDate)
-  async function run(action: () => Promise<void>) { setBusy(true); setError(null); try { await action() } catch (cause) { setError(getReadableError(cause)) } finally { setBusy(false) } }
+  async function run(action: () => Promise<void>) { setBusy(true); setError(null); try { await action() } catch (cause) { setError(getReadableError(cause, { operation: 'features.crm.purchases.pages.PurchasesInvoicesPage' })) } finally { setBusy(false) } }
   if (archiveDocument !== undefined) return <SupplierDocumentArchiveForm document={archiveDocument} disabled={disabled} onExit={() => { setArchiveDocument(undefined); void run(refresh) }} selectedVenueId={selectedVenueId} tenantContext={tenantContext}/>
   if (scanningEnabled && editorDocumentId !== undefined) return <SupplierReceiptsCrm disabled={disabled} initialDocumentId={editorDocumentId} onExit={() => { setEditorDocumentId(undefined); void run(refresh) }} selectedVenueId={selectedVenueId} tenantContext={tenantContext}/>
   return <section className="grid gap-5">

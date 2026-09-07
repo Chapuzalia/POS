@@ -30,8 +30,9 @@ test('cada sección pesada del CRM conserva su frontera de carga diferida', () =
   assert.match(crmSections, /lazy\(\(\) => import\('\.\.\/sales\/pages\/SalesReportsPage'\)/)
 })
 
-test('Sentry se inicializa después del primer render y mantiene un error boundary local', () => {
-  assert.match(main, /window\.setTimeout\(\(\) => void import\('\.\/sentry\.ts'\), 0\)/)
+test('Sentry se inicializa antes de renderizar y mantiene un error boundary local', () => {
+  assert.ok(main.indexOf("await import('./sentry.ts')") >= 0)
+  assert.ok(main.indexOf("await import('./sentry.ts')") < main.indexOf('createRoot(document'))
   assert.match(main, /<AppErrorBoundary fallback=\{sentryFallback\}>/)
   assert.doesNotMatch(main, /import \* as Sentry/)
 })

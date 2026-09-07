@@ -1,3 +1,4 @@
+import { reportOperationError, operationBreadcrumb } from '../../../lib/observability.ts'
 import { useEffect, useRef } from 'react'
 import type { TenantContext } from '../../../types'
 import { claimLoginLease, checkLoginLease, heartbeatLoginLease } from '../../../services/loginLeaseService'
@@ -64,9 +65,11 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
           ownsLease = await claimLoginLease(false)
         }
         if (!ownsLease) {
+          operationBreadcrumb({ operation: 'auth.lease', step: 'ownership_lost' })
           await close('La sesión se ha cerrado porque la cuenta se ha liberado o se ha abierto en otro dispositivo.', true)
         }
-      } catch {
+      } catch (error) {
+        reportOperationError(error, { operation: 'auth.lease', step: heartbeatOnActivity ? 'heartbeat' : 'check', recoverable: true })
         // Network failures must not end a session that can continue offline.
       } finally {
         leaseRequestInFlight = false

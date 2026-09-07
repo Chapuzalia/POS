@@ -1,3 +1,4 @@
+import { reportOperationError } from './observability.ts'
 import type { PosCatalogState } from '../features/catalog/data/load-pos-catalog.ts'
 import { appendFrozenQueueEvent, recordQueueEventFailure } from '../features/offline/services/offlineQueueState.ts'
 import { getAppRoute, type AppRoute } from '../app/app-routes'
@@ -27,7 +28,8 @@ function readJson<T>(key: string, fallback: T): T {
   try {
     const raw = window.localStorage.getItem(key)
     return raw ? (JSON.parse(raw) as T) : fallback
-  } catch {
+  } catch (error) {
+    if (/:(queue|ledger|cash|session-tickets)(:|$)/.test(key)) reportOperationError(error, { operation: 'offline.storage', step: 'read', syncStatus: 'unreadable' })
     return fallback
   }
 }
@@ -37,7 +39,12 @@ function writeJson<T>(key: string, value: T) {
     return
   }
 
-  window.localStorage.setItem(key, JSON.stringify(value))
+  try {
+    window.localStorage.setItem(key, JSON.stringify(value))
+  } catch (error) {
+    reportOperationError(error, { operation: 'offline.storage', step: 'write' })
+    throw error
+  }
 }
 
 function removeKey(key: string) {

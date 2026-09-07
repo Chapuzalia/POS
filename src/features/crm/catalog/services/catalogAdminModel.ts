@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { CatalogBatchCommand } from '../../../catalog/data/commands.ts'
 import type {
   CatalogCategory,
@@ -224,7 +225,7 @@ export function buildProductDuplicationPlan(
       }
     })
 
-  if (!variants.length) throw new Error('No se puede duplicar un producto sin variantes.')
+  if (!variants.length) throw new UserFacingError('No se puede duplicar un producto sin variantes.')
 
   const batch: CatalogBatchCommand[] = [{
     command: 'create_product',
@@ -339,7 +340,7 @@ export function buildCrossVenueProductDuplicationPlan(
 ) {
   const source = sourceCatalog.products.find((product) => product.id === sourceProductId)
   if (!source) throw new Error('El producto que quieres duplicar ya no existe.')
-  if (sourceCatalog.tenantId !== targetCatalog.tenantId) throw new Error('No se puede duplicar un producto a otro negocio.')
+  if (sourceCatalog.tenantId !== targetCatalog.tenantId) throw new UserFacingError('No se puede duplicar un producto a otro negocio.')
 
   const productId = createId()
   const variantIdBySourceId = new Map<string, string>()
@@ -383,7 +384,7 @@ export function buildCrossVenueProductDuplicationPlan(
         sortOrder: variant.sortOrder,
       }
     })
-  if (!variants.length) throw new Error('No se puede duplicar un producto sin variantes.')
+  if (!variants.length) throw new UserFacingError('No se puede duplicar un producto sin variantes.')
 
   const batch: CatalogBatchCommand[] = [{
     command: 'create_product',

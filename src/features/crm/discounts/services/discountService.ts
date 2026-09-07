@@ -1,3 +1,4 @@
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
 import {
   type Discount,
@@ -78,7 +79,7 @@ export function serializeDiscountValue(type: DiscountCreateInput['type'], value:
   if (!Number.isFinite(value) || value <= 0 || (type === 'percentage' && value > 100)) {
     throw new Error(type === 'percentage' ? 'El porcentaje debe estar entre 0 y 100.' : 'El importe debe ser mayor que 0.')
   }
-  if (type === 'fixed' && !Number.isInteger(value)) throw new Error('El importe debe expresarse en céntimos.')
+  if (type === 'fixed' && !Number.isInteger(value)) throw new UserFacingError('El importe debe expresarse en céntimos.')
   return type === 'fixed' ? (value / 100).toFixed(2) : value
 }
 
