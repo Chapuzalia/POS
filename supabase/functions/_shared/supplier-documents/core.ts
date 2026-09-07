@@ -834,7 +834,9 @@ export function runDeterministicLineParser(
   const rules = supplierProfileRulesSchema.parse(inputRules)
   const ocr = ocrDocumentSchema.parse(ocrInput)
   if (!profileMatchesOcr(rules, ocr)) throw new Error('PROFILE_FINGERPRINT_MISMATCH')
-  let selected: { lines: ExtractedLine[]; score: number } | null = null
+  // Choose the best header interpretation per physical data table, then retain
+  // every table/page. A header-only table may describe the following table.
+  const selectedTables = new Map<OcrTable, { lines: ExtractedLine[]; score: number }>()
   let matchedHeaders = false
   for (const page of ocr.pages) {
     for (let tableIndex = 0; tableIndex < page.tables.length; tableIndex += 1) {
@@ -873,7 +875,7 @@ export function runDeterministicLineParser(
             }
             const description = get(row, 'description')
             const quantity = parseProfileNumber(get(row, 'quantity'), rules)
-            if (!description || quantity === null || quantity <= 0) continue
+            if (!description || auxiliaryLineKind(description) || quantity === null || quantity <= 0) continue
             const unitPrice = parseProfileNumber(get(row, 'unitPrice'), rules)
             let discountAmount = Math.abs(parseProfileNumber(get(row, 'discountAmount'), rules) ?? 0)
             let chargesAmount = 0
@@ -889,8 +891,6 @@ export function runDeterministicLineParser(
                 const continuationText = normalizeDocumentText(continuationRow.join(' '))
                 const continuationDescription = get(continuationRow, 'description')
                 const continuationQuantity = parseProfileNumber(get(continuationRow, 'quantity'), rules)
-                if (continuationDescription && continuationQuantity !== null && continuationQuantity > 0) break
-
                 const amount = parseProfileNumber(get(continuationRow, 'lineTotal'), rules)
                 if (rowMatchesAliases(continuationText, rules.lineGroup.endAliases)) {
                   if (rules.lineGroup.netTotalFromEndRow && amount !== null) groupedNetTotal = Math.abs(amount)
@@ -907,7 +907,9 @@ export function runDeterministicLineParser(
                 }
                 if (rowMatchesAliases(continuationText, rules.lineGroup.chargeAliases)) {
                   if (amount !== null) chargesAmount = roundMoney(chargesAmount + Math.abs(amount))
+                  continue
                 }
+                if (continuationDescription && continuationQuantity !== null && continuationQuantity > 0) break
               }
               rowIndex = continuationIndex - 1
             }
@@ -922,7 +924,7 @@ export function runDeterministicLineParser(
               description,
               barcode: get(row, 'barcode') || null,
               quantity,
-              purchaseUnit: get(row, 'purchaseUnit') || null,
+              purchaseUnit: get(row, 'purchaseUnit').replace(/^\s*[+-]?[\d.,]+\s+(?=\p{L})/u, '') || null,
               unitPrice,
               discountAmount,
               chargesAmount,
@@ -949,14 +951,16 @@ export function runDeterministicLineParser(
             .filter((marker): marker is string => Boolean(marker))
             .filter((marker) => normalizedTableText.includes(normalizeDocumentText(marker))).length
           const score = lines.length * 1_000 + indexes.size * 10 + markerScore * 100 - headerRowIndex
-          if (!selected || score > selected.score) selected = { lines, score }
+          const dataTable = usedFollowingTable ? page.tables[tableIndex + 1] : table
+          const selected = selectedTables.get(dataTable)
+          if (!selected || score > selected.score) selectedTables.set(dataTable, { lines, score })
           break
         }
       }
     }
   }
-  if (!selected) throw new Error(matchedHeaders ? 'PROFILE_LINES_NOT_FOUND' : 'PROFILE_TABLE_NOT_FOUND')
-  return selected.lines
+  if (!selectedTables.size) throw new Error(matchedHeaders ? 'PROFILE_LINES_NOT_FOUND' : 'PROFILE_TABLE_NOT_FOUND')
+  return [...selectedTables.values()].flatMap((table) => table.lines)
 }
 
 export function runDeterministicParser(
@@ -1033,6 +1037,13 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
   if (!interpreted.proposedProfile) return { candidate: false, reason: 'PROFILE_NOT_PROPOSED' as const, parsed: null }
   try {
     const rules = supplierProfileRulesSchema.parse(interpreted.proposedProfile)
+    const documentNumber = normalizeDocumentText(interpreted.document.number ?? '')
+    if (rules.requiredTexts.some((text) => {
+      const marker = normalizeDocumentText(text)
+      return /\b\d{1,4}[./-]\d{1,2}[./-]\d{2,4}\b/.test(text)
+        || (documentNumber.length >= 4 && /\d/.test(documentNumber)
+          && marker.includes(documentNumber))
+    })) return { candidate: false, reason: 'PROFILE_DOCUMENT_SPECIFIC_FINGERPRINT' as const, parsed: null }
     if (rules.lineGroup) {
       const ocrText = normalizeDocumentText([
         ocr.text,
@@ -1064,6 +1075,8 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
         && Math.abs(line.quantity - expected.quantity) <= 0.000001
         && Math.abs(line.discountAmount - expected.discountAmount) <= 0.02
         && Math.abs(line.chargesAmount - expected.chargesAmount) <= 0.02
+        && sameMoney(line.unitPrice, expected.unitPrice)
+        && normalizeDocumentText(line.purchaseUnit ?? '') === normalizeDocumentText(expected.purchaseUnit ?? '')
         && sameMoney(line.grossCost, expected.grossCost)
         && sameMoney(line.netCost, expected.netCost)
         && sameMoney(line.lineTotal, expected.lineTotal)

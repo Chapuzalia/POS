@@ -13,6 +13,11 @@ const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 const migration = await read('supabase/migrations/20260903110000_supplier_document_global_learning.sql')
 const localMigration = await read('supabase/migrations/20260903090000_supplier_document_provisional_flow.sql')
 const metadataMigration = await read('supabase/migrations/20260903120000_supplier_document_metadata_learning.sql')
+const learningGuardMigration = await read('supabase/migrations/20260907074855_isolate_manual_supplier_scan_learning.sql')
+const metadataEvidenceMigration = await read('supabase/migrations/20260907075508_improve_supplier_scan_metadata_evidence.sql')
+const stickyLearningMigration = await read('supabase/migrations/20260907081051_preserve_supplier_scan_learning_exclusion.sql')
+const correctedParserMigration = await read('supabase/migrations/20260907133000_guard_corrected_supplier_parser.sql')
+const repairMigration = await read('supabase/migrations/20260907140000_repair_confirmed_supplier_profiles.sql')
 const edgeSource = await read('supabase/functions/process-supplier-document/index.ts')
 const compiledEdge = ts.transpileModule(edgeSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 } }).outputText
 const tenant = '00000000-0000-0000-0000-000000000010'
@@ -372,6 +377,7 @@ test('catálogos antiguos con CIFs equivalentes se conservan sin romper registro
 async function processEdge(data, { globals = [], profiles = [], suppliers = [], reparse = null } = {}) {
   const document = reparse?.document ?? { id: 'new-document', tenant_id: tenant, venue_id: venue, supplier_id: null, document_type: 'delivery_note', status: 'processing', storage_bucket: 'documents', storage_path: 'image', original_mime_type: 'image/jpeg', extraction_metadata: {} }
   const calls = { interpret: 0, supplier: 0, globalWrites: 0, ocr: 0, metadata: 0, proposeProfile: 0 }
+  let insertedLines = []
   const rows = { supplier_documents: [document, ...(reparse?.previous ?? [])], supplier_document_lines: reparse?.lines ?? [], global_suppliers: globals, global_supplier_document_profiles: profiles, suppliers }
   const client = {
     rpc: async (name, args) => name === 'assert_supplier_document_scanning'
@@ -382,17 +388,24 @@ async function processEdge(data, { globals = [], profiles = [], suppliers = [], 
       const filters = []
       let single = false
       let write
+      let rangeStart = 0
+      let rangeEnd = 999
       return {
         select() { return this }, order() { return this }, limit() { return this },
+        range(from, to) { rangeStart = from; rangeEnd = to; return this },
         eq(key, value) { filters.push((row) => row[key] === value); return this },
         neq(key, value) { filters.push((row) => row[key] !== value); return this },
         in(key, values) { filters.push((row) => values.includes(row[key])); return this },
         ilike(key, value) { filters.push((row) => row[key]?.toLowerCase() === value.toLowerCase()); return this },
         single() { single = true; return this }, maybeSingle() { single = true; return this },
         update(value) { write = value; return this }, delete() { return this },
-        insert() { if (table.startsWith('global_')) calls.globalWrites++; return this },
+        insert(value) {
+          if (table.startsWith('global_')) calls.globalWrites++
+          if (table === 'supplier_document_lines') insertedLines = structuredClone(value)
+          return this
+        },
         then(resolve, reject) {
-          const selected = (rows[table] ?? []).filter((row) => filters.every((filter) => filter(row)))
+          const selected = (rows[table] ?? []).filter((row) => filters.every((filter) => filter(row))).slice(rangeStart, rangeEnd + 1)
           if (write) for (const row of selected) Object.assign(row, write)
           return Promise.resolve({ data: structuredClone(single ? selected[0] ?? null : selected), error: null }).then(resolve, reject)
         },
@@ -409,7 +422,8 @@ async function processEdge(data, { globals = [], profiles = [], suppliers = [], 
       ...providers,
       createDocumentOcrProvider: () => ({ name: 'mistral', analyze: async () => { calls.ocr++; return data.ocr } }),
       OpenAiSupplierDocumentProvider: class {
-        async interpret() { calls.interpret++; return data.extraction }
+        async interpret(input) { calls.interpret++; return input.validationFeedback && data.reinterpret
+          ? data.reinterpret(input) : data.extraction }
         async extractSupplier() { calls.supplier++; return { supplier: data.extraction.supplier, supplierEvidence: data.extraction.supplierEvidence } }
         async proposeProfile() { calls.proposeProfile++; return data.rules }
         async extractDocumentMetadata() { calls.metadata++; return {} }
@@ -427,7 +441,7 @@ async function processEdge(data, { globals = [], profiles = [], suppliers = [], 
   if (!reparse) assert.equal(response.status, 202)
   await Promise.all(tasks)
   assert.equal(calls.globalWrites, 0, 'processing/review nunca crea entidades globales')
-  return { document, calls, response }
+  return { document, calls, response, insertedLines }
 }
 
 test('OCR conserva el candidato validado en metadata aunque falte global, sin crearlo tampoco si ya existe', async () => {
@@ -461,7 +475,7 @@ test('metadata incremental y selección global exacta (PostgreSQL efímero, sin 
   }
   const makeDoc = async (context, { date = '07/05/2026', number = '1001', dateLabel = 'FECHA ALBARÁN', extra = '', manual = false, override = {}, type = 'delivery_note' } = {}) => {
     const ocr = detection().ocr
-    ocr.text = `DISPOCH S.L.\n${dateLabel} ${date}\nNº ALBARÁN ${number}\n${extra}`
+    ocr.text = `DISPOCH S.L.\nCIF B12345678\n${dateLabel} ${date}\nNº ALBARÁN ${number}\n${extra}`
     ocr.pages[0].text = ocr.text
     const meta = metadata.extractGenericDocumentMetadata(ocr, context.rules).metadata
     if (manual) meta.date = { ...meta.date, value: null, evidence: null, labelCandidate: null }
@@ -510,6 +524,7 @@ test('metadata incremental y selección global exacta (PostgreSQL efímero, sin 
     assert.equal(edge.document.extraction_metadata.parserMode, 'deterministic')
     assert.equal(edge.document.extraction_metadata.metadataExtraction.date.source, 'profile')
     assert.equal(edge.calls.interpret, 0)
+    assert.equal(edge.calls.supplier, 0)
     assert.equal(edge.calls.metadata, 0)
     await confirm(stale, '2026-05-21')
     assert.equal((await document(stale)).global_profile_id, context.profileId)
@@ -726,4 +741,226 @@ test('selección manual no elige entre CIFs globales duplicados históricos', as
   await h.query('select update_supplier_document_supplier($1,$2)', [id, supplier])
   assert.equal((await h.document(id)).global_supplier_id, null)
   assert.equal((await h.query('select * from global_suppliers')).length, 2)
+})
+
+test('la selección manual y el reparseo nunca entrenan globals, perfiles ni aliases', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  await db.exec(bootstrap)
+  await db.exec(localMigration)
+  await db.exec(migration)
+  await db.exec(metadataMigration)
+  await db.exec(learningGuardMigration)
+  await db.exec(metadataEvidenceMigration)
+  await db.exec(stickyLearningMigration)
+  const h = dbHelpers(db)
+  const verticalOcr = { text: 'ALBARÁN: 26/ 1.915\nFRA. RESUM 05/06/2026', pages: [{ tables: [{ cells: [
+    { text: 'Data', rowIndex: 0, columnIndex: 0 }, { text: '04/06/2026', rowIndex: 1, columnIndex: 0 },
+  ] }] }] }
+  const [evidence] = await h.query("select supplier_metadata_confirmed_candidate($1, 'date', '2026-06-04') as date, supplier_metadata_confirmed_candidate($1, 'number', '26/1.915') as number", [JSON.stringify(verticalOcr)])
+  assert.equal(evidence.date.labelCandidate, 'Data')
+  assert.equal(evidence.number.labelCandidate, 'ALBARÁN')
+  for (const mode of ['selection', 'reparse']) {
+    await h.reset()
+    const globalId = await h.addGlobal()
+    const profileId = await h.addProfile(globalId)
+    const supplierId = await h.addSupplier({ globalId })
+    const id = await h.addDocument({ supplierId, globalId, profileId, metadata: mode === 'reparse'
+      ? { linesReparsedAt: new Date().toISOString(), linesSupplierId: supplierId } : {} })
+    if (mode === 'selection') await h.query('select update_supplier_document_supplier($1,$2)', [id, supplierId])
+    // A rescan/late diagnostics callback may replace the entire JSON object.
+    const freshDiagnostics = detection().metadata
+    await h.query('update supplier_documents set extraction_metadata=$2 where id=$1', [id, JSON.stringify(freshDiagnostics)])
+    assert.equal((await h.document(id)).extraction_metadata.learningExcluded, true)
+    await h.query("update supplier_documents set extraction_metadata=jsonb_set(extraction_metadata,'{learningExcluded}','false') where id=$1", [id])
+    assert.equal((await h.document(id)).extraction_metadata.learningExcluded, true)
+    const before = await h.query('select * from global_supplier_document_profiles')
+    await h.query("select confirm_supplier_document($1,'2026-09-03',false,'{}',null)", [id])
+    assert.equal((await h.document(id)).status, 'confirmed')
+    assert.equal((await h.document(id)).extraction_metadata.learningExcluded, true)
+    assert.deepEqual(await h.query('select * from global_supplier_document_profiles'), before)
+    assert.equal((await h.query('select * from supplier_identity_aliases')).length, 0)
+    assert.equal((await h.query('select * from global_suppliers')).length, 1)
+  }
+  await h.reset()
+  const supplierId = await h.addSupplier({ taxId: 'A87654321' })
+  const id = await h.addDocument()
+  await h.query('select update_supplier_document_supplier($1,$2)', [id, supplierId])
+  await h.query("select confirm_supplier_document($1,'2026-09-03',false,'{}',null)", [id])
+  assert.equal((await h.query('select * from global_suppliers')).length, 0)
+  assert.equal((await h.query('select * from global_supplier_document_profiles')).length, 0)
+})
+
+test('CIF y resultado válido son obligatorios para saltarse GPT', async () => {
+  const data = detection()
+  const globals = [{ id: 'global', name: 'DISPOCH S.L.', tax_id: 'B12345678' }]
+  const profiles = [{ id: 'profile', global_supplier_id: 'global', status: 'candidate', document_type: 'delivery_note', rules_json: data.rules }]
+  const valid = await processEdge(data, { globals, profiles })
+  assert.equal(valid.calls.interpret, 0)
+  assert.equal(valid.calls.supplier, 0)
+  for (const taxId of ['B87654321', null]) {
+    const result = await processEdge(data, { globals: [{ ...globals[0], tax_id: taxId }], profiles })
+    assert.equal(result.calls.interpret, 1)
+  }
+  const ambiguous = await processEdge(data, { globals: [...globals, { ...globals[0], id: 'duplicate' }], profiles })
+  assert.equal(ambiguous.calls.interpret, 1)
+  const invalid = structuredClone(profiles)
+  invalid[0].rules_json.columns.find((column) => column.field === 'unitPrice').headerAliases = ['INEXISTENTE']
+  const result = await processEdge(data, { globals, profiles: invalid })
+  assert.equal(result.calls.interpret, 1)
+})
+
+test('una omisión detectada por el parser pide una única reconciliación con OCR y vuelve a validar', async () => {
+  for (const corrected of [true, false]) {
+    const data = detection()
+    data.ocr.pages.push(structuredClone(data.ocr.pages[0]))
+    data.reinterpret = (input) => {
+      assert.equal(input.validationFeedback.previousLines.length, 1)
+      assert.equal(input.validationFeedback.parserLines.length, 2)
+      return corrected ? { ...data.extraction,
+        document: { ...data.extraction.document, total: 58 },
+        lines: [...data.extraction.lines, ...data.extraction.lines] } : data.extraction
+    }
+    const result = await processEdge(data)
+    assert.equal(result.calls.interpret, 2)
+    assert.equal(result.document.extraction_metadata.interpretationRetried, true)
+    assert.equal(result.document.extraction_metadata.profileValidation.candidate, corrected)
+    assert.equal(result.document.extraction_metadata.profileParsedLineCount, 2)
+    assert.equal(result.document.status, 'review')
+  }
+})
+
+test('el catálogo global completo se consulta aunque supere el límite de una respuesta REST', async () => {
+  const data = detection()
+  const globals = Array.from({ length: 1001 }, (_, i) => ({ id: `global-${i}`, name: 'Otro emisor', tax_id: `B${90000000 + i}` }))
+  const profiles = globals.map((row) => ({ id: `profile-${row.id}`, global_supplier_id: row.id,
+    status: 'candidate', document_type: 'delivery_note', rules_json: data.rules }))
+  globals.push({ id: 'target', name: 'DISPOCH S.L.', tax_id: 'B12345678' })
+  profiles.push({ ...profiles[0], id: 'target-profile', global_supplier_id: 'target' })
+  const result = await processEdge(data, { globals, profiles })
+  assert.equal(result.calls.interpret, 0)
+  assert.equal(result.document.global_profile_id, 'target-profile')
+})
+
+test('correcciones de extracción invalidan la publicación; asignar inventario no la invalida', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  for (const sql of [bootstrap, localMigration, migration, metadataMigration, learningGuardMigration,
+    metadataEvidenceMigration, stickyLearningMigration, correctedParserMigration]) await db.exec(sql)
+  const h = dbHelpers(db)
+  const scanned = await processEdge(detection())
+  assert.equal(scanned.insertedLines.length, 1)
+  const original = scanned.insertedLines[0].raw_extraction_metadata.originalExtraction
+  assert.equal(original.quantity, detection().extraction.lines[0].quantity)
+  assert.equal(original.unit_price, detection().extraction.lines[0].unitPrice)
+  assert.equal(original.net_cost, scanned.insertedLines[0].net_cost)
+  for (const change of ['inventory', 'quantity', 'unit_price', 'discount_amount', 'missing_snapshot', 'manual']) {
+    await h.reset()
+    const globalId = await h.addGlobal()
+    const supplierId = await h.addSupplier({ globalId })
+    const profileId = await h.addProfile(globalId)
+    const id = await h.addDocument({ supplierId, globalId, profileId })
+    await h.query(`update supplier_document_lines l set raw_extraction_metadata=jsonb_build_object(
+      'originalExtraction', (select jsonb_object_agg(key,value) from jsonb_each(to_jsonb(l))
+        where key=any(array['supplier_reference','description_raw','barcode','quantity','purchase_unit',
+          'unit_price','discount_amount','charges_amount','gross_cost','net_cost','line_total','tax_rate'])))
+      where supplier_document_id=$1`, [id])
+    if (change === 'inventory') await h.query("update supplier_document_lines set was_corrected=true, inventory_item_id='00000000-0000-0000-0000-000000000099' where supplier_document_id=$1", [id])
+    else if (change === 'missing_snapshot') await h.query("update supplier_document_lines set was_corrected=true, raw_extraction_metadata='{}' where supplier_document_id=$1", [id])
+    else if (change === 'manual') {
+      await h.query('select update_supplier_document_supplier($1,$2)', [id, supplierId])
+      await h.query('update supplier_document_lines set quantity=3 where supplier_document_id=$1', [id])
+    } else await h.query(`update supplier_document_lines set ${change}=3 where supplier_document_id=$1`, [id])
+    await h.query("select confirm_supplier_document($1,'2026-09-03',false,'{}',null)", [id])
+    const result = await h.document(id)
+    const [profile] = await h.query('select success_count from global_supplier_document_profiles where id=$1', [profileId])
+    assert.equal(profile.success_count, change === 'inventory' ? 1 : 0)
+    if (!['inventory', 'manual'].includes(change)) {
+      assert.equal(result.global_profile_id, null)
+      assert.equal(result.extraction_metadata.profileRepairPending, true)
+      assert.equal(result.extraction_metadata.profileValidation.reason, 'CONFIRMED_EXTRACTION_CHANGED')
+    }
+    if (change === 'manual') assert.equal(result.extraction_metadata.profileRepairPending, undefined)
+  }
+})
+
+test('reparación confirmada publica una vez, protege la evidencia y excluye selección manual', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  for (const sql of [bootstrap, localMigration, migration, metadataMigration, learningGuardMigration,
+    metadataEvidenceMigration, stickyLearningMigration, correctedParserMigration, repairMigration]) await db.exec(sql)
+  const h = dbHelpers(db)
+  for (const mode of ['valid', 'changed', 'manual', 'rejected']) {
+    await h.reset()
+    const globalId = await h.addGlobal()
+    const supplierId = await h.addSupplier({ globalId })
+    const id = await h.addDocument({ supplierId, globalId })
+    await h.query('update supplier_document_lines set quantity=3,was_corrected=true where supplier_document_id=$1', [id])
+    if (mode === 'manual') await h.query('select update_supplier_document_supplier($1,$2)', [id, supplierId])
+    await h.query("select confirm_supplier_document($1,'2026-09-03',false,'{}',null)", [id])
+    const [claimed] = await h.query('select claim_supplier_profile_repair($1) result', [id])
+    if (mode === 'manual') { assert.equal(claimed.result, null); continue }
+    const claim = claimed.result
+    assert.equal(claim.document.status, 'confirmed')
+    assert.equal(claim.lines[0].quantity, 3)
+    assert.equal((await h.query('select claim_supplier_profile_repair($1) result', [id]))[0].result, null)
+    if (mode === 'changed') await h.query('update supplier_document_lines set quantity=4 where supplier_document_id=$1', [id])
+    const finish = () => h.query('select finish_supplier_profile_repair($1,$2,$3,$4,$5) id', [id, claim.token,
+      mode === 'rejected' ? null : JSON.stringify(detection().rules), mode === 'rejected' ? 'PROFILE_OUTPUT_MISMATCH' : null,
+      JSON.stringify([{ stage: 'profile', outputText: 'private trace' }])])
+    const result = (await finish())[0].id
+    if (mode === 'valid') {
+      assert.ok(result)
+      assert.equal((await h.query('select success_count from global_supplier_document_profiles where id=$1', [result]))[0].success_count, 1)
+      assert.equal((await finish())[0].id, null)
+      assert.equal((await h.query('select success_count from global_supplier_document_profiles where id=$1', [result]))[0].success_count, 1)
+      const repaired = await h.document(id)
+      assert.equal(repaired.extraction_metadata.profileRepair.status, 'completed')
+      assert.equal(repaired.extraction_metadata.profileRepair.aiResponses[0].outputText, 'private trace')
+    } else {
+      assert.equal(result, null)
+      assert.equal((await h.query('select * from global_supplier_document_profiles')).length, 0)
+      assert.equal((await h.document(id)).extraction_metadata.profileRepair.status, 'rejected')
+    }
+    assert.equal((await h.document(id)).extraction_metadata.profileRepairPending, false)
+  }
+  await db.exec('set role authenticated')
+  await assert.rejects(h.query("select claim_supplier_profile_repair('00000000-0000-0000-0000-000000000001')"), /permission denied/)
+  await db.exec('reset role')
+})
+
+test('dos correcciones humanas de propuestas AI/generic enseñan etiquetas verificadas en OCR', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  for (const sql of [bootstrap, localMigration, migration, metadataMigration, learningGuardMigration,
+    metadataEvidenceMigration, stickyLearningMigration]) await db.exec(sql)
+  const h = dbHelpers(db)
+  for (const source of ['ai', 'generic']) {
+    await h.reset()
+    const globalId = await h.addGlobal()
+    const supplierId = await h.addSupplier({ globalId })
+    const rules = { ...detection().rules, documentDateLabel: null, documentNumberLabel: null }
+    const profileId = await h.addProfile(globalId, { rules })
+    for (const [index, day] of ['04', '11'].entries()) {
+      const number = `26/${1915 + index}`
+      const id = await h.addDocument({ supplierId, globalId, profileId, number,
+        metadata: { lineParserProfile: rules, metadataExtraction: {
+          date: { source, value: '05/06/2026', evidence: 'FRA. RESUM 05/06/2026', labelCandidate: 'FRA. RESUM' },
+          number: { source, value: '26', evidence: `ALBARÁN: ${number}`, labelCandidate: 'ALBARÁN' },
+        } } })
+      const ocr = detection().ocr
+      ocr.text = `DISPOCH S.L.\nCIF B12345678\nData ${day}/06/2026\nALBARÁN: ${number}\nFRA. RESUM 05/06/2026`
+      ocr.pages[0].text = ocr.text
+      await h.query('update supplier_documents set ocr_snapshot=$2 where id=$1', [id, JSON.stringify(ocr)])
+      await h.query("select confirm_supplier_document($1,$2,false,'{}',$3)", [id, `2026-06-${day}`, number])
+      const entry = (await h.document(id)).extraction_metadata.metadataExtraction.date
+      assert.equal(entry.userModified, true)
+      assert.equal(entry.learningEligible, true)
+      assert.equal(entry.labelCandidate, 'Data')
+      const [profile] = await h.query('select rules_json from global_supplier_document_profiles where id=$1', [profileId])
+      assert.equal(profile.rules_json.documentDateLabel, index === 0 ? null : 'Data')
+      assert.equal(profile.rules_json.documentNumberLabel, index === 0 ? null : 'ALBARÁN')
+      assert.deepEqual(profile.rules_json.columns, rules.columns)
+    }
+  }
 })

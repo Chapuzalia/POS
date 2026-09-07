@@ -562,6 +562,65 @@ test('agrupa un producto multipfila y calcula 3×58,80−79,38+2,70+0,22=99,94',
   assert.equal(validateExtractionMath(parsed).coherent, true)
 })
 
+test('los cierres Coca-Cola con subunidades numéricas cierran el bloque sin crear productos', () => {
+  const parsed = parseGroupedRows([
+    ['544', 'COCACOLA VR237 C24.', '2', '', '25,44', '50,88'],
+    ['', 'Dto. Fijo', '', '', '', '11,45-'],
+    ['', 'IBEE', '', '', '', '1,71'],
+    ['', 'Punto Verde', '', '', '', '0,05'],
+    ['', 'SUBUNIDADES/NETO', '48', '', '', '41,19'],
+    ['2123', 'FANTA NAR VR35 C24', '1', '', '29,28', '29,28'],
+    ['', 'Dto. Fijo', '', '', '', '8,14-'],
+    ['', 'Punto Verde', '', '', '', '0,02'],
+    ['', 'SUBUNIDADES/NETO', '24', '', '', '21,16'],
+  ], { discountAliases: ['Dto. Fijo'], chargeAliases: ['IBEE', 'Punto Verde'],
+    endAliases: ['SUBUNIDADES/NETO'], netTotalFromEndRow: true, maxContinuationRows: 4 })
+  assert.deepEqual(parsed.lines.map((line) => [line.supplierReference, line.quantity, line.lineTotal]),
+    [['544', 2, 41.19], ['2123', 1, 21.16]])
+  assert.equal(validateExtractionMath(parsed).coherent, true)
+})
+
+test('una celda de unidad que contiene cantidad no duplica la cantidad de compra', () => {
+  const parsed = parseGroupedRows([['A', 'AGUA', '6', '6 UN', '2,00', '12,00']])
+  assert.equal(parsed.lines[0].quantity, 6)
+  assert.equal(parsed.lines[0].purchaseUnit, 'UN')
+})
+
+test('conserva las tablas de productos de todas las páginas, incluso con referencias repetidas', () => {
+  const fixture = structuredClone(getSupplierDocumentMockFixture('known-supplier'))
+  const secondPage = structuredClone(fixture.ocr.pages[0])
+  secondPage.pageNumber = 2
+  // A second occurrence of a purchased reference is a real separate row.
+  fixture.ocr.pages.push(secondPage)
+  assert.equal(runDeterministicLineParser(fixture.knownProfile, fixture.ocr).length, 2)
+  fixture.ocr.pages[0].tables.push(structuredClone(fixture.ocr.pages[0].tables[0]))
+  assert.equal(runDeterministicLineParser(fixture.knownProfile, fixture.ocr).length, 3)
+})
+
+test('registra la respuesta GPT incluso cuando su JSON es inválido', async (t) => {
+  const traces = []
+  t.mock.method(globalThis, 'fetch', async () => Response.json({ id: 'response-test', model: 'test-model',
+    output_text: '{broken json', usage: { output_tokens: 3 } }))
+  const provider = new OpenAiSupplierDocumentProvider({ apiKey: 'test', model: 'test-model',
+    onResponse: async (trace) => traces.push(trace) })
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  await assert.rejects(provider.interpret({ ocr: fixture.ocr, documentType: 'delivery_note', supplierCandidates: [] }))
+  assert.equal(traces.length, 1)
+  assert.equal(traces[0].outputText, '{broken json')
+  assert.equal(traces[0].stage, 'interpret')
+  assert.equal(traces[0].responseId, 'response-test')
+})
+
+test('un fingerprint que memoriza el número o la fecha de una factura no se publica', () => {
+  const fixture = structuredClone(getSupplierDocumentMockFixture('known-supplier'))
+  for (const marker of [fixture.extraction.document.number, 'Fecha 03/09/2026']) {
+    const extraction = structuredClone(fixture.extraction)
+    extraction.proposedProfile = structuredClone(fixture.knownProfile)
+    extraction.proposedProfile.requiredTexts.push(marker)
+    assert.equal(validateProposedProfile(fixture.ocr, extraction).reason, 'PROFILE_DOCUMENT_SPECIFIC_FINGERPRINT')
+  }
+})
+
 test('separa productos consecutivos y no convierte descuentos, cargos, cierres o auxiliares en productos', () => {
   const parsed = parseGroupedRows([
     ['A-1', 'PRODUCTO A', '2', 'caja', '10,00', '20,00'],

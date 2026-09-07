@@ -38,7 +38,8 @@ test('typecheck de la Edge Function y providers sin red ni runtime Deno', () => 
     name.startsWith('https://esm.sh/@supabase/supabase-js@') ? '@supabase/supabase-js' : name,
     containingFile, options, host,
   ).resolvedModule)
-  const program = ts.createProgram([entry, virtualGlobals], options, host)
+  const repairEntry = path.join(root, 'supabase/functions/repair-supplier-document-profile/index.ts')
+  const program = ts.createProgram([entry, repairEntry, virtualGlobals], options, host)
   const diagnostics = ts.getPreEmitDiagnostics(program)
   assert.equal(diagnostics.length, 0, ts.formatDiagnostics(diagnostics, {
     getCanonicalFileName: (file) => file, getCurrentDirectory: () => root, getNewLine: () => '\n',

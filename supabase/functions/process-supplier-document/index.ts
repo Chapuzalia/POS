@@ -4,13 +4,13 @@ import {
   groundSupplierExtractionInOcr,
   matchInventoryItem,
   normalizeAlias,
+  normalizeSupplierTaxId,
   normalizePurchaseToBase,
   ocrDocumentSchema,
   parseSupplierDocumentExtraction,
   profileMatchesOcr,
   resolveSupplierCandidate,
   runDeterministicParser,
-  runDeterministicLineParser,
   supplierExtractionMetadata,
   supplierSelection,
   supplierProfileRulesSchema,
@@ -31,6 +31,7 @@ import {
   type DocumentBinaryInput,
   type NativePdfTextExtractor,
   type SupplierDocumentAiProvider,
+  type SupplierAiTrace,
 } from '../_shared/supplier-documents/providers.ts'
 import { analyzeOcrWithQuality, ocrAttemptMetadata, OcrQualityError } from '../_shared/supplier-documents/ocrQuality.ts'
 import { normalizeMetadataValue, resolveDocumentMetadata } from '../_shared/supplier-documents/documentMetadata.ts'
@@ -107,18 +108,29 @@ async function loadBinary(admin: UntypedSupabaseClient, document: DocumentRow): 
   }
 }
 
+async function loadAllRows(page: (from: number, to: number) => PromiseLike<{ data: DbRow[] | null; error: unknown }>) {
+  const rows: DbRow[] = []
+  const pageSize = 200
+  for (let from = 0; ; from += pageSize) {
+    const result = await page(from, from + pageSize - 1)
+    if (result.error) throw result.error
+    const batch = result.data ?? []
+    rows.push(...batch)
+    if (batch.length < pageSize) return rows
+  }
+}
+
 async function loadGlobalKnowledge(admin: UntypedSupabaseClient) {
-  const [suppliersResult, profilesResult] = await Promise.all([
-    admin.from('global_suppliers').select('id, name, tax_id'),
-    admin.from('global_supplier_document_profiles')
+  const [suppliers, profiles] = await Promise.all([
+    loadAllRows((from, to) => admin.from('global_suppliers').select('id, name, tax_id')
+      .order('id').range(from, to)),
+    loadAllRows((from, to) => admin.from('global_supplier_document_profiles')
       .select('id, global_supplier_id, document_type, rules_json, status, success_count')
       .in('status', ['verified', 'candidate'])
       .order('status', { ascending: false })
-      .order('success_count', { ascending: false }),
+      .order('success_count', { ascending: false }).order('id').range(from, to)),
   ])
-  if (suppliersResult.error) throw suppliersResult.error
-  if (profilesResult.error) throw profilesResult.error
-  return { suppliers: (suppliersResult.data ?? []) as DbRow[], profiles: (profilesResult.data ?? []) as DbRow[] }
+  return { suppliers, profiles }
 }
 
 function tryKnownProfiles(
@@ -127,27 +139,40 @@ function tryKnownProfiles(
   suppliers: DbRow[],
   profiles: DbRow[],
 ) {
+  // An OCR fingerprint alone can match a different issuer. Require a single
+  // global fiscal identity grounded in this document before trying its layouts.
+  const matchingSuppliers = suppliers.filter((supplier) => {
+    if (!normalizeSupplierTaxId(String(supplier.tax_id ?? ''))) return false
+    const grounded = groundSupplierExtractionInOcr({ supplier: {
+      name: supplier.name, taxId: supplier.tax_id,
+    } }, ocr) as { supplier: { taxId: string | null } }
+    return Boolean(grounded.supplier.taxId)
+  })
+  if (matchingSuppliers.length !== 1) return null
+  const supplier = matchingSuppliers[0]
+  let selected: { extraction: SupplierDocumentExtraction; globalProfileId: string; globalSupplierId: string } | null = null
   for (const profile of profiles) {
+    if (profile.global_supplier_id !== supplier.id) continue
     if (profile.document_type !== documentType) continue
     try {
       const rules = supplierProfileRulesSchema.parse(profile.rules_json)
       if (!profileMatchesOcr(rules, ocr)) continue
-      const supplier = suppliers.find((candidate) => candidate.id === profile.global_supplier_id)
-      if (!supplier) continue
-      return {
-        extraction: runDeterministicParser(rules, ocr, {
+      const extraction = parseSupplierDocumentExtraction(groundSupplierExtractionInOcr(
+        runDeterministicParser(rules, ocr, {
           documentType,
           supplierName: String(supplier.name),
           supplierTaxId: supplier.tax_id == null ? null : String(supplier.tax_id),
-        }),
-        globalProfileId: String(profile.id),
-        globalSupplierId: String(supplier.id),
+        }), ocr))
+      if (!validateExtractionMath(extraction).coherent) continue
+      if (extraction.lines.some((line) => line.unitPrice === null || line.lineTotal === null)) continue
+      if (!selected || extraction.lines.length > selected.extraction.lines.length) selected = {
+        extraction, globalProfileId: String(profile.id), globalSupplierId: String(supplier.id),
       }
     } catch {
       // A malformed or non-matching candidate must never block later profiles.
     }
   }
-  return null
+  return selected
 }
 
 async function loadSupplierCandidates(
@@ -283,6 +308,20 @@ function buildLineRows(
       match_status: requiresReview ? 'needs_review' : match.status,
       extraction_confidence: line.confidence,
       raw_extraction_metadata: {
+        originalExtraction: {
+          supplier_reference: line.supplierReference,
+          description_raw: line.description,
+          barcode: line.barcode,
+          quantity: line.quantity,
+          purchase_unit: line.purchaseUnit,
+          unit_price: line.unitPrice,
+          discount_amount: line.discountAmount,
+          charges_amount: line.chargesAmount,
+          gross_cost: line.grossCost,
+          net_cost: netCost,
+          line_total: line.lineTotal,
+          tax_rate: line.taxRate,
+        },
         matchReason: match.reason,
         matchScore: match.score,
         packageExpression: line.packageExpression,
@@ -336,7 +375,12 @@ async function reparseLinesWithSelectedSupplier(admin: UntypedSupabaseClient, do
     if (selected?.id && !profile.id) break // Local history is only a fallback after global profiles.
     try {
       if (!profileMatchesOcr(supplierProfileRulesSchema.parse(profile.rules), ocr)) continue
-      const lines = runDeterministicLineParser(profile.rules, ocr)
+      const parsed = runDeterministicParser(profile.rules, ocr, {
+        documentType: document.document_type, supplierName: String(supplierResult.data.name),
+      })
+      if (!validateExtractionMath(parsed).coherent
+        || parsed.lines.some((line) => line.unitPrice === null || line.lineTotal === null)) continue
+      const lines = parsed.lines
       if (!selected || lines.length > selected.lines.length) selected = { ...profile, lines }
     } catch {
       // A profile for another layout must not block a later compatible one.
@@ -372,6 +416,7 @@ async function processSupplierDocumentRequest(request: Request) {
   let admin: UntypedSupabaseClient | null = null
   let isLineReparse = false
   let ocrDiagnostics: ReturnType<typeof ocrAttemptMetadata> | null = null
+  const aiResponses: SupplierAiTrace[] = []
   try {
     const env = requiredEnvironment()
     const authorization = request.headers.get('Authorization')
@@ -397,6 +442,19 @@ async function processSupplierDocumentRequest(request: Request) {
     if (featureError) return json({ error: 'El escaneo de documentos no está habilitado para este documento o negocio.' }, 403)
     authorizedDocumentId = documentId
     const document = accessibleDocument as DocumentRow
+    const aiConfig = {
+      apiKey: Deno.env.get('OPENAI_API_KEY') ?? '',
+      model: Deno.env.get('OPENAI_SUPPLIER_DOCUMENT_MODEL') ?? '',
+      onResponse: async (trace: SupplierAiTrace) => {
+        aiResponses.push(trace)
+        // Store model output before parsing/grounding, including malformed JSON.
+        // Diagnostics inherit the document's tenant access and never enter global rules.
+        const { error } = await admin!.from('supplier_documents').update({
+          extraction_metadata: { ...ocrDiagnostics, aiResponses, hasStoredOcr: true },
+        }).eq('id', document.id).neq('status', 'confirmed')
+        if (error) throw error
+      },
+    }
     if (document.status === 'confirmed') return json({ error: 'El documento ya está confirmado' }, 409)
     if (isLineReparse) return await reparseLinesWithSelectedSupplier(admin, document, body.allowOverwrite === true)
     const mockMode = Deno.env.get('SUPPLIER_DOCUMENT_MOCK_MODE') === 'true'
@@ -457,10 +515,7 @@ async function processSupplierDocumentRequest(request: Request) {
       } else {
         aiProvider = fixtureId
           ? new MockSupplierDocumentAiProvider(fixtureId)
-          : new OpenAiSupplierDocumentProvider({
-            apiKey: Deno.env.get('OPENAI_API_KEY') ?? '',
-            model: Deno.env.get('OPENAI_SUPPLIER_DOCUMENT_MODEL') ?? '',
-          })
+          : new OpenAiSupplierDocumentProvider(aiConfig)
         const needsImage = !fixtureId
           && binary.contentType.startsWith('image/')
           && Deno.env.get('OPENAI_SUPPLIER_DOCUMENT_IMAGE_FALLBACK') === 'true'
@@ -474,19 +529,15 @@ async function processSupplierDocumentRequest(request: Request) {
         parserMode = 'ai'
       }
     }
-    if (parserMode === 'deterministic' && !fixture) {
-      const supplierProvider = new OpenAiSupplierDocumentProvider({
-        apiKey: Deno.env.get('OPENAI_API_KEY') ?? '', model: Deno.env.get('OPENAI_SUPPLIER_DOCUMENT_MODEL') ?? '',
-      })
-      extraction = { ...extraction, ...await supplierProvider.extractSupplier(ocr) }
-    }
     extraction = parseSupplierDocumentExtraction(groundSupplierExtractionInOcr(extraction, ocr))
     const requestedDocumentType = document.document_type
     const documentTypeCorrected = extraction.document.type !== requestedDocumentType
-    const math = validateExtractionMath(extraction)
+    let math = validateExtractionMath(extraction)
     let profileValidation = parserMode === 'ai' ? validateProposedProfile(ocr, extraction) : null
     let profileGenerationRetried = false
     let profileGenerationError: string | null = null
+    let interpretationRetried = false
+    let interpretationRetryError: string | null = null
     if (parserMode === 'ai' && aiProvider && math.coherent && !profileValidation?.candidate) {
       profileGenerationRetried = true
       try {
@@ -501,6 +552,29 @@ async function processSupplierDocumentRequest(request: Request) {
         profileGenerationError = error instanceof Error ? error.message : 'PROFILE_GENERATION_FAILED'
       }
     }
+    // A valid declarative parser can reveal rows omitted by the first model
+    // pass. Request one OCR-grounded reconciliation, then validate again;
+    // never promote a profile merely because its own arithmetic adds up.
+    if (parserMode === 'ai' && aiProvider && profileValidation?.reason === 'PROFILE_OUTPUT_MISMATCH'
+      && profileValidation.parsed) {
+      interpretationRetried = true
+      try {
+        const revised = parseSupplierDocumentExtraction(groundSupplierExtractionInOcr(await aiProvider.interpret({
+          ocr, documentType: extraction.document.type, supplierCandidates,
+          validationFeedback: { reason: profileValidation.reason, previousLines: extraction.lines,
+            parserLines: profileValidation.parsed.lines },
+        }), ocr))
+        const candidate = { ...revised, proposedProfile: extraction.proposedProfile }
+        const validation = validateProposedProfile(ocr, candidate)
+        if (validation.candidate) {
+          extraction = candidate
+          profileValidation = validation
+          math = validateExtractionMath(extraction)
+        }
+      } catch (error) {
+        interpretationRetryError = error instanceof Error ? error.message : 'INTERPRETATION_RETRY_FAILED'
+      }
+    }
     const lineParserProfile = profileValidation?.candidate ? extraction.proposedProfile
       : globalProfileId ? knowledge.profiles.find((profile) => profile.id === globalProfileId)?.rules_json ?? null
       : fixture?.knownProfile ?? null
@@ -508,16 +582,14 @@ async function processSupplierDocumentRequest(request: Request) {
     const documentMetadata = await resolveDocumentMetadata({
       ocr, rules: parsedRules.success ? parsedRules.data : null,
       extract: fixture ? undefined : async (input) => {
-        const provider = aiProvider ?? new OpenAiSupplierDocumentProvider({
-          apiKey: Deno.env.get('OPENAI_API_KEY') ?? '', model: Deno.env.get('OPENAI_SUPPLIER_DOCUMENT_MODEL') ?? '',
-        })
+        const provider = aiProvider ?? new OpenAiSupplierDocumentProvider(aiConfig)
         return provider.extractDocumentMetadata ? provider.extractDocumentMetadata(input) : {}
       },
     })
     const metadataExtraction = Object.fromEntries(Object.entries(documentMetadata.metadata)
       .map(([field, entry]) => [field, { ...entry, globalProfileId }]))
     extraction = { ...extraction, document: { ...extraction.document,
-      date: documentMetadata.metadata.date.value, number: documentMetadata.metadata.number.value } }
+      date: documentMetadata.metadata.date.value, number: normalizeMetadataValue('number', documentMetadata.metadata.number.value) } }
     const modelSupplierResolution = extraction.supplierResolution
     const supplierResolution = resolveSupplierCandidate(extraction.supplier, supplierCandidates)
     const supplierId = supplierResolution.confidence === 'high'
@@ -539,7 +611,7 @@ async function processSupplierDocumentRequest(request: Request) {
       if (duplicate) {
         await admin.from('supplier_documents').update({
           status: 'error',
-          extraction_metadata: { ...ocrDiagnostics, code: 'SUPPLIER_DOCUMENT_DUPLICATE_NUMBER', duplicateDocumentId: duplicate.id },
+          extraction_metadata: { ...ocrDiagnostics, aiResponses, code: 'SUPPLIER_DOCUMENT_DUPLICATE_NUMBER', duplicateDocumentId: duplicate.id },
         }).eq('id', document.id)
         return json({ error: 'Ya existe un documento de este proveedor con el mismo número', duplicateDocumentId: duplicate.id }, 409)
       }
@@ -561,6 +633,7 @@ async function processSupplierDocumentRequest(request: Request) {
       status: 'review',
       extraction_metadata: {
         ...ocrDiagnostics,
+        aiResponses,
         parserMode,
         ocrProvider: ocr.provider,
         ocrModel: typeof ocr.metadata.model === 'string'
@@ -573,6 +646,8 @@ async function processSupplierDocumentRequest(request: Request) {
         profileValidation: profileValidation ? { candidate: profileValidation.candidate, reason: profileValidation.reason } : null,
         profileGenerationRetried,
         profileGenerationError,
+        interpretationRetried,
+        interpretationRetryError,
         metadataExtraction,
         metadataAiError: documentMetadata.aiError,
         profileParsedLineCount: profileValidation?.parsed?.lines.length ?? (parserMode === 'deterministic' ? extraction.lines.length : null),
@@ -614,6 +689,7 @@ async function processSupplierDocumentRequest(request: Request) {
         ...(qualityError ? { ocr_snapshot: null } : {}),
         extraction_metadata: {
           ...(qualityError ? ocrAttemptMetadata(qualityError.attempts) : ocrDiagnostics),
+          aiResponses,
           ...(qualityError ? { hasStoredOcr: false } : {}),
           code,
           message,

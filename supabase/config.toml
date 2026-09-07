@@ -8,5 +8,8 @@ verify_jwt = false
 
 [functions.process-supplier-document]
 verify_jwt = false
+
+[functions.repair-supplier-document-profile]
+verify_jwt = false
 import_map = "./functions/deno.json"
 

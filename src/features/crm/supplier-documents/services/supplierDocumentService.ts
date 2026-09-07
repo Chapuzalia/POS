@@ -295,5 +295,12 @@ export async function confirmSupplierDocument(input: {
     if (error.message.includes('SUPPLIER_DOCUMENT_PROVISIONAL_INVALID')) throw new Error('El proveedor detectado no tiene evidencia suficiente. Selecciona un proveedor existente.')
     throw error
   }
+  // Confirmation is already committed. A learning failure must never make the
+  // purchase look unconfirmed or invite the user to repeat its stock movement.
+  void requireSupabase().functions.invoke('repair-supplier-document-profile', {
+    body: { documentId: input.documentId },
+  }).then(({ error }) => {
+    if (error) console.warn('Supplier profile repair could not be scheduled', error)
+  }).catch((error: unknown) => console.warn('Supplier profile repair could not be scheduled', error))
   return data as { documentId: string; confirmedAt: string; lineCount?: number; affectsStock: boolean; duplicate: boolean }
 }
