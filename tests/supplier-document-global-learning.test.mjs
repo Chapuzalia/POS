@@ -718,7 +718,7 @@ test('metadata incremental y selección global exacta (PostgreSQL efímero, sin 
     assert.equal((await document(id)).global_profile_id, null)
     const before = await query('select * from supplier_document_lines where supplier_document_id=$1', [id])
     const failed = await reparse(id)
-    assert.equal(failed.response.status, 500)
+    assert.equal(failed.response.status, 422)
     assert.match((await failed.response.json()).error, /perfil de líneas compatible/)
     assert.deepEqual(await query('select * from supplier_document_lines where supplier_document_id=$1', [id]), before)
     assert.equal(failed.calls.ocr, 0)

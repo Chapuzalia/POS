@@ -386,7 +386,10 @@ async function reparseLinesWithSelectedSupplier(admin: UntypedSupabaseClient, do
       // A profile for another layout must not block a later compatible one.
     }
   }
-  if (!selected) throw new Error('Este proveedor no tiene un perfil de líneas compatible con el OCR almacenado.')
+  if (!selected) return json({
+    code: 'SUPPLIER_DOCUMENT_PROFILE_INCOMPATIBLE',
+    error: 'Este proveedor no tiene un perfil de líneas compatible con el OCR almacenado.',
+  }, 422)
   const extraction = parseSupplierDocumentExtraction({
     document: { type: document.document_type, number: null, date: null, total: null },
     supplier: { name: null, legalName: null, taxId: null, email: null, phone: null, address: null },

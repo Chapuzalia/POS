@@ -86,6 +86,69 @@ function parseGroupedRows(rows, lineGroup = {}) {
   return runDeterministicParser(input.rules, input.ocr, input.defaults)
 }
 
+test('tolera una errata de descuento solo con estructura auxiliar y neto independiente correcto', () => {
+  const rows = [
+    ['A', 'Producto', '2', 'UN', '25,44', '50,88'],
+    ['', 'Dto. Pijo', '', '', '', '11,45-'],
+    ['', 'Punto Verde', '', '', '', '1,76'],
+    ['', 'SUBUNIDADES/NETO', '48', '', '', '41,19'],
+  ]
+  const group = { discountAliases: ['Dto. Fijo'], chargeAliases: ['Punto Verde'],
+    endAliases: ['SUBUNIDADES/NETO'], netTotalFromEndRow: true, maxContinuationRows: 4 }
+  const parsed = parseGroupedRows(rows, group)
+  assert.equal(parsed.lines[0].discountAmount, 11.45)
+  assert.equal(parsed.lines[0].lineTotal, 41.19)
+  const wrong = structuredClone(rows)
+  wrong[3][5] = '40,00'
+  assert.throws(() => parseGroupedRows(wrong, group), /PROFILE_FUZZY_LABEL_UNVERIFIED/)
+  assert.throws(() => parseGroupedRows(rows.slice(0, 3), group), /PROFILE_FUZZY_LABEL_UNVERIFIED/)
+  const ambiguous = parseGroupedRows(rows, { ...group, chargeAliases: ['Punto Verde', 'Dto. Pijo'] })
+  assert.equal(ambiguous.lines[0].discountAmount, 0)
+  const tied = parseGroupedRows(rows, { ...group, chargeAliases: ['Punto Verde', 'Dto. Mijo'] })
+  assert.equal(tied.lines[0].discountAmount, 0)
+  assert.equal(tied.lines[0].chargesAmount, 1.76)
+})
+
+test('las cabeceras toleran una errata pero no eligen entre dos columnas igualmente probables', () => {
+  const input = groupedParserInput([['A', 'Producto', '2', 'UN', '10', '20']])
+  input.ocr.pages[0].tables[0].cells.find((cell) => cell.rowIndex === 0 && cell.columnIndex === 1).text = 'Descripcióm'
+  assert.equal(runDeterministicParser(input.rules, input.ocr, input.defaults).lines[0].quantity, 2)
+  input.ocr.pages[0].tables[0].cells.find((cell) => cell.rowIndex === 0 && cell.columnIndex === 0).text = 'Descripcióm'
+  assert.throws(() => runDeterministicParser(input.rules, input.ocr, input.defaults), /PROFILE_TABLE_NOT_FOUND/)
+})
+
+test('reconstruye columnas fusionadas de Azure usando la geometría de palabras', () => {
+  const input = groupedParserInput([['A', 'Producto', '2', 'UN', '10', '20']])
+  input.rules = {
+    version: 1, requiredTexts: ['PROVEEDOR MULTIFILA'], optionalTexts: [], tableStartText: null, tableEndText: null,
+    decimalSeparator: ',', thousandsSeparator: 'none', documentNumberLabel: null, documentDateLabel: null, lineGroup: null,
+    columns: [
+      { field: 'supplierReference', headerAliases: ['ART.'], required: false },
+      { field: 'description', headerAliases: ['DESCRIPCIÓN'], required: true },
+      { field: 'quantity', headerAliases: ['CANTIDAD'], required: true },
+      { field: 'unitPrice', headerAliases: ['PRECIO'], required: false },
+      { field: 'lineTotal', headerAliases: ['IMPORTE'], required: false },
+    ], normalizations: [],
+  }
+  const table = input.ocr.pages[0].tables[0]
+  const header = ['ART.', 'DESCRIPCIÓN', 'CANTIDAD', 'PRECIO', 'IMPORTE']
+  const spans = [[20, 60], [100, 260], [300, 380], [420, 500], [540, 620]]
+  table.columnCount = 3
+  table.cells = header.map((text, columnIndex) => ({ rowIndex: 0, columnIndex: Math.floor(columnIndex / 2),
+    rowSpan: 1, columnSpan: columnIndex === 0 ? 2 : 1, text, polygon: [spans[columnIndex][0], 0, spans[columnIndex][1], 0, spans[columnIndex][1], 20, spans[columnIndex][0], 20] }))
+  table.cells.push({ rowIndex: 1, columnIndex: 0, rowSpan: 1, columnSpan: 1, text: 'A Producto 2', polygon: [20, 20, 290, 20, 290, 40, 20, 40] })
+  table.cells.push({ rowIndex: 1, columnIndex: 1, rowSpan: 1, columnSpan: 2, text: '10 20', polygon: [300, 20, 620, 20, 620, 40, 300, 40] })
+  input.ocr.pages[0].words = [
+    ...header.map((text, i) => ({ text, confidence: 1, polygon: [spans[i][0], 2, spans[i][1], 2, spans[i][1], 18, spans[i][0], 18] })),
+    ...[['A', 25], ['Producto', 105], ['2', 310], ['10', 430], ['20', 550]].map(([text, left]) => ({ text, confidence: 1,
+      polygon: [left, 22, left + String(text).length * 8, 22, left + String(text).length * 8, 38, left, 38] })),
+  ]
+  const parsed = runDeterministicParser(input.rules, input.ocr, input.defaults)
+  assert.equal(parsed.lines.length, 1)
+  assert.equal(parsed.lines[0].description, 'Producto')
+  assert.equal(parsed.lines[0].quantity, 2)
+})
+
 function modelLine(description, overrides = {}) {
   return {
     supplierReference: null,
