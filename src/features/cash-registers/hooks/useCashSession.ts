@@ -1,11 +1,13 @@
 import { reportOperationError } from '../../../lib/observability.ts'
 import { UserFacingError } from '../../../utils/UserFacingError.ts'
+import { loadOpenRestaurantOrders } from '../../tables/service'
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
 import { sileo } from 'sileo'
 import {
   clearSaleLedger,
   clearSessionTickets,
   getSessionTickets,
+  getOfflineQueue,
   saveCachedCashSession,
   saveSaleLedger,
   saveSessionTickets,
@@ -71,6 +73,7 @@ export function useCashSession(options: Options) {
   const [tickets, setTicketsState] = useState<SessionTicketRecord[]>([])
   const ticketsRef = useRef<SessionTicketRecord[]>([])
   const [closeModalOpen, setCloseModalOpen] = useState(false)
+  const [openOrderCount, setOpenOrderCount] = useState(0)
   const [movementModalOpen, setMovementModalOpen] = useState(false)
   const [movementSaving, setMovementSaving] = useState(false)
   const [historyOpen, setHistoryOpen] = useState(false)
@@ -421,6 +424,10 @@ export function useCashSession(options: Options) {
     if (!options.context?.canCloseCashSession || !options.isOnline) return false
     options.setBusy(true)
     try {
+      await options.syncPendingEvents()
+      if (getOfflineQueue().some((event) => event.tenantId === options.context?.tenantId)) {
+        throw new UserFacingError('Quedan operaciones sin sincronizar en este dispositivo. Sincronízalas antes de cerrar.')
+      }
       const cashlogyBalance = await loadActiveCashlogyCashBalance()
       const effectivePayload = cashlogyBalance ? {
         ...payload,
@@ -459,6 +466,16 @@ export function useCashSession(options: Options) {
     setGlobalBusy(true)
     reportError(null)
     try {
+      await syncPendingEvents()
+      if (getOfflineQueue().some((event) => event.tenantId === cashContext.tenantId)) {
+        throw new UserFacingError('Quedan operaciones sin sincronizar en este dispositivo. Sincronízalas antes de cerrar.')
+      }
+      const [openOrders, nextLedger] = await Promise.all([
+        loadOpenRestaurantOrders(cashContext, session.id),
+        loadSalesLedgerFromSupabase(cashContext, session.id),
+      ])
+      setOpenOrderCount(openOrders.length)
+      persistLedger(nextLedger)
       const cashlogyBalance = await loadActiveCashlogyCashBalance()
       setCashlogyClosingCashCents(cashlogyBalance?.totalCents ?? null)
       setCloseModalOpen(true)
@@ -469,7 +486,7 @@ export function useCashSession(options: Options) {
     } finally {
       setGlobalBusy(false)
     }
-  }, [cashContext, reportError, session, setGlobalBusy])
+  }, [cashContext, reportError, session, setGlobalBusy, syncPendingEvents, persistLedger])
 
   const reset = useCallback(() => {
     const closed = getClosedCashState()
@@ -515,6 +532,7 @@ export function useCashSession(options: Options) {
     clearRejectedSession,
     close,
     closeModalOpen,
+    openOrderCount,
     closingHistoryOpen,
     cashClosings,
     cashlogyClosingCashCents,

@@ -22,6 +22,7 @@ import { AddProductFlyAnimation } from '../components/feedback/AddProductFlyAnim
 import { EqualSplitOrderModal } from '../features/tables/components/EqualSplitOrderModal'
 import { RemoveOrderLineModal } from '../features/tables/components/RemoveOrderLineModal'
 import { RestaurantOrderPanel } from '../features/tables/components/RestaurantOrderPanel'
+import { CarryoverNotice } from '../features/restaurant/components/CarryoverNotice'
 import { SplitOrderModal } from '../features/tables/components/SplitOrderModal'
 import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
@@ -426,6 +427,11 @@ export function PosPage(props: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
+      {restaurantEnabled && cash.session ? <CarryoverNotice
+        key={cash.session.id}
+        context={props.context} session={cash.session} isOnline={props.isOnline}
+        disabled={posInteractionBlocked} onRecovered={restaurant.returnToMap}
+      /> : null}
       <AppHeader
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true && !cashlogyPaymentLocked}
@@ -439,6 +445,10 @@ export function PosPage(props: Props) {
         isLoading={props.isLoading}
         isOnline={props.isOnline}
         onCloseCash={() => void (async () => {
+          if (restaurant.posView.type === 'quick_sale' && quickSale.lines.length) {
+            props.onSetError('Guarda la venta rápida en una mesa o cóbrala antes de cerrar el turno.')
+            return
+          }
           if (await restaurant.requestCloseCash()) await cash.openCloseModal()
         })()}
         onGenerateInvoice={() => setCustomerModalOpen(true)}
@@ -725,6 +735,7 @@ export function PosPage(props: Props) {
         sales={cash.ledger}
       /> : null}
       {cash.closeModalOpen && cash.session ? <CloseCashModal
+        openOrderCount={cash.openOrderCount}
         cashSession={cash.session}
         cashlogyCashCents={cash.cashlogyClosingCashCents}
         isBusy={props.isBusy}

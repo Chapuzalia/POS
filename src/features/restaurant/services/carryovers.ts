@@ -1,0 +1,29 @@
+import { supabase } from '../../../lib/supabase'
+import type { TenantContext } from '../../../types'
+
+export type RestaurantCarryover = {
+  id: string
+  order_group_id: string
+  order_ids: string[]
+  from_cash_session_id: string
+  carried_at: string
+}
+
+export async function loadRestaurantCarryovers(context: TenantContext): Promise<RestaurantCarryover[]> {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const { data, error } = await supabase.from('restaurant_order_carryovers')
+    .select('id, order_group_id, order_ids, from_cash_session_id, carried_at')
+    .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId)
+    .is('recovered_at', null).order('carried_at')
+  if (error) throw error
+  return data as RestaurantCarryover[]
+}
+
+export async function recoverRestaurantCarryovers(context: TenantContext, sessionId: string, ids: string[]) {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const { data, error } = await supabase.rpc('recover_restaurant_carryovers', {
+    p_cash_session_id: sessionId, p_device_id: context.deviceId, p_carryover_ids: ids,
+  })
+  if (error) throw error
+  return Number(data)
+}

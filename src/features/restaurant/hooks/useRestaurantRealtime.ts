@@ -151,6 +151,13 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
           try {
             const detail = await loadRestaurantOrder(context, current.posView.orderId)
             if (!active || latestRef.current.saveState !== 'saved') return
+            if (detail.order.status === 'carried_forward') {
+              current.replaceOrder(null)
+              current.setEqualSplit(null)
+              current.setSplitOrderGroup(null)
+              current.setPosView({ type: 'table_map', areaId: detail.tables[0]?.areaId })
+              return
+            }
             if (detail.order.status !== 'open') {
               const group = await loadRestaurantOrderGroup(context, detail.order.id)
               const nextOrder = group.orders.find((candidate) => candidate.order.status === 'open') ?? null
