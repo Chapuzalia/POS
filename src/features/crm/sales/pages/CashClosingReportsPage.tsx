@@ -4,7 +4,7 @@ import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPaginat
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { CrmModal } from '../../shared/components/CrmModal'
-import { Pencil, RefreshCw, Save, Upload, X } from "lucide-react";
+import { Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
 import {
@@ -12,20 +12,20 @@ import {
 } from "../../../cash-registers/service";
 import { getCashClosingAmounts } from "../../../cash-registers/services/cashClosingAmounts";
 import { centsToInput, formatMoney } from "../../../../lib/format";
-import type { CashClosingRecord, CrmVenue, TenantContext } from "../../../../types";
+import type { CashClosingRecord, TenantContext } from "../../../../types";
 import type { RunAction } from "../../shared/types";
 import {
   buildCashClosingDailyValues,
   getDefaultClosingDateRange,
   sortCashClosings,
   filterCashClosingsByDate,
+  getCashClosingDay,
   projectCashClosingCounts,
   isImportedCashClosing,
   type CashClosingReportRecord,
 } from "../services/cashClosingReportModel";
 import type { OperationalDayConfig } from "../../../../lib/operationalDay";
 import { loadCashClosingReports } from '../services/revoCashClosingService';
-import { RevoClosingImportModal } from '../components/RevoClosingImportModal';
 import { ImportedClosingDetail } from '../components/ImportedClosingDetail';
 import { formatRevoDate, type ImportedCashClosing } from '../../../../lib/revoCashClosings.ts';
 
@@ -36,19 +36,46 @@ type Props = {
   selectedVenueId: string;
   tenantContext: TenantContext;
   timeZone: string;
-  venues: CrmVenue[];
 };
 
 const dateFormatter = new Intl.DateTimeFormat("es-ES", {
   dateStyle: "medium",
   timeStyle: "short",
 });
+const operationalDateFormatter = new Intl.DateTimeFormat("es-ES", {
+  dateStyle: "medium",
+  timeZone: "UTC",
+});
+
+function formatOperationalDate(date: string) {
+  return operationalDateFormatter.format(new Date(`${date}T12:00:00Z`));
+}
+
+function renderClosingDate(
+  closing: CashClosingReportRecord,
+  operationalDayConfig: OperationalDayConfig,
+) {
+  const actualDate = isImportedCashClosing(closing)
+    ? formatRevoDate(closing.date)
+    : dateFormatter.format(new Date(closing.closedAt));
+
+  return (
+    <>
+      <span className="!block">{formatOperationalDate(getCashClosingDay(closing, operationalDayConfig))}</span>
+      <span className="!mt-0.5 !block !text-xs !font-normal !text-[var(--crm-text-muted)]">({actualDate})</span>
+    </>
+  );
+}
 
 // DataTable reads literal <tr>/<td> elements from its children before rendering.
-function renderImportedClosingRow(closing: ImportedCashClosing, onSelect: () => void) {
+function renderImportedClosingRow(
+  closing: ImportedCashClosing,
+  onSelect: () => void,
+  operationalDayConfig: OperationalDayConfig,
+) {
   return <tr key={closing.id} aria-label={`Ver cierre REVO del ${formatRevoDate(closing.date)}`} className="!cursor-pointer !border-b !border-[var(--crm-border-subtle)] hover:!bg-[var(--crm-surface-soft)] focus-visible:!bg-[var(--crm-surface-soft)]"
     onClick={onSelect} onKeyDown={(event) => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); onSelect() } }} role="button" tabIndex={0}>
-    <td className="!px-[22px] !py-4 !text-[13px] !font-semibold" data-sort-value={Date.parse(`${closing.date}T12:00:00Z`)}>{formatRevoDate(closing.date)}</td>
+    <td className="!px-[22px] !py-4 !text-[13px] !font-semibold" data-sort-value={Date.parse(`${closing.date}T12:00:00Z`)}>{renderClosingDate(closing, operationalDayConfig)}</td>
     <td className="!px-3 !py-4 !text-[13px]"><strong className="!block">REVO</strong><span className="!text-xs !text-[var(--crm-text-muted)]">Histórico importado · resumen diario</span></td>
     <td className="!px-3 !py-4 !font-mono !text-[13px]" data-sort-value={closing.cashCents + closing.cardCents}>{formatMoney(closing.cashCents + closing.cardCents)}</td>
     <td className="!px-3 !py-4 !font-mono !text-[13px]" data-sort-value={closing.cashCents}>{formatMoney(closing.cashCents)}</td>
@@ -487,12 +514,10 @@ export function CashClosingReportsCrm({
   selectedVenueId,
   tenantContext,
   timeZone,
-  venues,
 }: Props) {
   const [closings, setClosings] = useState<CashClosingReportRecord[] | null>(null);
   const [selectedClosing, setSelectedClosing] =
     useState<CashClosingReportRecord | null>(null);
-  const [importOpen, setImportOpen] = useState(false);
   const [currentPage, setCurrentPage] = useState(1);
   const [sortDescriptor, setSortDescriptor] = useState<DataTableSortDescriptor>({ column: 'column-0', direction: 'descending' });
   const requestId = useRef(0);
@@ -629,16 +654,13 @@ export function CashClosingReportsCrm({
                 : "Cargando cierres..."}
             </p>
           </div>
-          <UiButton disabled={disabled || !venues.length} onClick={() => setImportOpen(true)} type="button" variant="primary">
-            <Upload className="!size-4" /> Importar desde REVO
-          </UiButton>
         </div>
         <div className="!overflow-x-auto">
           <UiDataTable aria-label="Cierres de caja" className="!w-full !min-w-[1050px] !border-collapse" emptyContent={closings ? 'No hay cierres de caja para el período seleccionado.' : 'Cargando cierres…'} filterable={false}
             sortDescriptor={sortDescriptor} onSortChange={(descriptor) => { setSortDescriptor(descriptor); setCurrentPage(1); }}>
             <thead>
               <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
-                <th className="!px-[22px] !py-3">Fecha Cierre</th>
+                <th className="!px-[22px] !py-3" data-row-header="true">Fecha</th>
                 <th className="!px-3 !py-3">Caja / turno</th>
                 <th className="!px-3 !py-3">Ventas</th>
                 <th className="!px-3 !py-3">Efectivo</th>
@@ -649,7 +671,7 @@ export function CashClosingReportsCrm({
             </thead>
             <tbody>
               {visibleClosings.map((closing) => {
-                if (isImportedCashClosing(closing)) return renderImportedClosingRow(closing, () => setSelectedClosing(closing));
+                if (isImportedCashClosing(closing)) return renderImportedClosingRow(closing, () => setSelectedClosing(closing), operationalDayConfig);
                 const snapshot = closing.printSnapshot;
                 const amounts = getCashClosingAmounts(snapshot);
                 const difference =
@@ -671,7 +693,7 @@ export function CashClosingReportsCrm({
                     tabIndex={0}
                   >
                     <td className="!whitespace-nowrap !px-[22px] !py-4 !text-[13px] !font-semibold" data-sort-value={new Date(closing.closedAt).getTime()}>
-                      {dateFormatter.format(new Date(closing.closedAt))}
+                      {renderClosingDate(closing, operationalDayConfig)}
                     </td>
                     <td className="!px-3 !py-4">
                       <strong className="!block !text-[13px]">
@@ -739,9 +761,6 @@ export function CashClosingReportsCrm({
         </div>
         <CrmPagination currentPage={visiblePage} onPageChange={setCurrentPage} totalResults={filteredClosings.length} />
       </section>
-      {importOpen ? <RevoClosingImportModal disabled={disabled} onClose={() => setImportOpen(false)} onImported={async (venueId) => {
-        if (venueId === selectedVenueId) await runAction(refresh);
-      }} venues={venues} /> : null}
       {selectedClosing && isImportedCashClosing(selectedClosing) ? <ImportedClosingDetail closing={selectedClosing} onClose={() => setSelectedClosing(null)} /> : selectedClosing ? (
         <CashClosingDetailModal
           closing={selectedClosing}

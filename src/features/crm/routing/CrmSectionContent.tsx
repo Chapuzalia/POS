@@ -104,7 +104,7 @@ export function CrmSectionContent({
     case 'discounts':
       return <DiscountsCrm disabled={disabled} onCatalogChanged={onCatalogChanged} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'import':
-      return catalog ? <CatalogTransferCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} venueName={venues.find((venue) => venue.id === selectedVenueId)?.name ?? 'local'} /> : null
+      return catalog ? <CatalogTransferCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} venueName={venues.find((venue) => venue.id === selectedVenueId)?.name ?? 'local'} venues={venues} /> : null
     case 'tables':
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
     case 'production':
@@ -138,7 +138,6 @@ export function CrmSectionContent({
       />
     case 'x-reports':
       return <CashClosingReportsCrm
-        venues={venues}
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
         disabled={disabled}
         runAction={runAction}

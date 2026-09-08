@@ -3,10 +3,12 @@ import { Button as UiButton } from '../../../../components/ui/Button'
 import { AlertTriangle, Download, FileJson, Trash2, Upload, X } from 'lucide-react'
 import { useMemo, useState, type ChangeEvent } from 'react'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
+import type { CrmVenue } from '../../../../types'
 import { parseRevoItemsCsv, type RevoImportParseResult } from '../../../../lib/revoImport.ts'
 import { getReadableError } from '../../../../utils/errors.ts'
 import { CrmModal } from '../../shared/components/CrmModal.tsx'
 import { ProgressBar } from '../../shared/components/ProgressBar.tsx'
+import { RevoClosingImportModal } from '../../sales/components/RevoClosingImportModal.tsx'
 import {
   getCatalogImportSummary,
   parseCatalogExportJson,
@@ -27,6 +29,7 @@ type Props = {
   catalog: CatalogData
   disabled: boolean
   mutate: (action: () => Promise<unknown>) => Promise<boolean>
+  venues: CrmVenue[]
   venueName: string
 }
 
@@ -47,7 +50,7 @@ function ImportProgress({ progress }: { progress: CatalogImportProgress }) {
   </div>
 }
 
-export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Props) {
+export function CatalogTransferCrm({ catalog, disabled, mutate, venues, venueName }: Props) {
   const [ownFileName, setOwnFileName] = useState('')
   const [ownDocument, setOwnDocument] = useState<CatalogExportDocument | null>(null)
   const [ownError, setOwnError] = useState<string | null>(null)
@@ -62,6 +65,7 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
   const [revoResult, setRevoResult] = useState<FinalCatalogImportResult | null>(null)
   const [isRevoImporting, setIsRevoImporting] = useState(false)
   const [revoProgress, setRevoProgress] = useState<CatalogImportProgress | null>(null)
+  const [isRevoClosingImportOpen, setIsRevoClosingImportOpen] = useState(false)
 
   const [isConfirmingClear, setIsConfirmingClear] = useState(false)
   const [isClearingCatalog, setIsClearingCatalog] = useState(false)
@@ -153,57 +157,102 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
   }
 
   return <>
-    <div className="!grid !gap-4 xl:!grid-cols-2">
-      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-5 !shadow-[var(--crm-shadow-card)]">
-        <div className="!flex !items-start !gap-3">
-          <Download className="!mt-0.5 !size-5 !shrink-0 !text-[var(--crm-green)]" />
-          <div>
-            <h2 className="!text-lg !font-bold">Exportar catálogo completo</h2>
-            <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Descarga productos, formatos, variantes, pestañas, categorías, grupos, modificadores e imágenes en un único JSON portable.</p>
-          </div>
+    <div className="!grid !gap-6">
+      <section className="!min-w-0 !overflow-hidden !rounded-3xl !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-card)]">
+        <div>
+          <h2 className="!text-xl !font-bold">Catálogo</h2>
+          <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Importa o exporta el catálogo operativo del local.</p>
         </div>
-        <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !mt-4" disabled={disabled} onClick={() => void mutate(() => exportFinalCatalog(catalog.venueId, venueName))} type="button">
-          <Download className="!size-4" /> Exportar JSON
-        </UiButton>
+        <div className="!mt-4 !grid !gap-4 lg:!grid-cols-2">
+          <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface-soft)] text-[var(--crm-text)] shadow-none !rounded-2xl !bg-[var(--crm-surface-soft)] !p-5 !shadow-none">
+            <div className="!flex !items-start !gap-3">
+              <Upload className="!mt-0.5 !size-5 !shrink-0 !text-[var(--crm-green)]" />
+              <div>
+                <h3 className="!text-lg !font-bold">Importar catálogo</h3>
+                <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Añade o restaura el catálogo desde REVO o desde un JSON exportado por la aplicación.</p>
+              </div>
+            </div>
+            <div className="!mt-5 !grid !gap-5 xl:!grid-cols-2">
+              <div className="!min-w-0">
+                <h4 className="!text-sm !font-bold">Desde REVO</h4>
+                <p className="!mt-1 !text-xs !text-[var(--crm-text-muted)]">Importa productos, formatos, categorías, precios e IVA desde el CSV de REVO.</p>
+                <label className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !mt-4 !inline-flex !cursor-pointer">
+                  <Upload className="!size-4" /> Seleccionar CSV
+                  <UiInput accept=".csv,text/csv" className="!sr-only" disabled={disabled} onChange={readRevoFile} type="file" />
+                </label>
+                {revoFileName ? <p className="!mt-3 !text-sm">{revoFileName} · {revoParseResult?.products.length ?? 0} productos · {warningCount} avisos</p> : null}
+                {revoError ? <p className="!mt-3 !text-sm !text-red-500" role="alert">{revoError}</p> : null}
+                <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !mt-4" disabled={disabled || isRevoImporting || !revoParseResult?.products.length} onClick={() => void importRevoCatalog()} type="button">
+                  <Upload className="!size-4" /> {isRevoImporting ? 'Importando…' : 'Importar catálogo'}
+                </UiButton>
+                {isRevoImporting && revoProgress ? <ImportProgress progress={revoProgress} /> : null}
+                {revoResult ? <p className="!mt-3 !rounded-xl !bg-[var(--crm-green-soft)] !p-3 !text-sm !text-[var(--crm-green)]">
+                  {revoResult.products} productos y {revoResult.variants} variantes creados; {revoResult.productsUpdated} productos y {revoResult.variantsUpdated} variantes actualizados; {revoResult.tabs} pestañas, {revoResult.formats} formatos, {revoResult.categories} categorías y {revoResult.placements} apariciones nuevas.
+                </p> : null}
+              </div>
+              <div className="!min-w-0 !border-t !border-[var(--crm-border-subtle)] !pt-5 xl:!border-t-0 xl:!border-l xl:!pl-5 xl:!pt-0">
+                <h4 className="!text-sm !font-bold">Desde JSON</h4>
+                <p className="!mt-1 !text-xs !text-[var(--crm-text-muted)]">Importar catálogo de la app exportado previamente para restaurarlo en este local.</p>
+                <label className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !mt-4 !inline-flex !cursor-pointer">
+                  <FileJson className="!size-4" /> Seleccionar JSON
+                  <UiInput accept=".json,application/json" className="!sr-only" disabled={disabled} onChange={readOwnCatalog} type="file" />
+                </label>
+                {ownFileName ? <p className="!mt-3 !text-sm !font-medium">{ownFileName}</p> : null}
+                {ownSummary ? <Summary value={ownSummary} /> : null}
+                {ownError ? <p className="!mt-3 !text-sm !text-red-500" role="alert">{ownError}</p> : null}
+                <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !mt-4" disabled={disabled || !ownDocument} onClick={() => setIsConfirmingImport(true)} type="button">
+                  <Upload className="!size-4" /> Importar catálogo
+                </UiButton>
+                {ownResult ? <div className="!mt-3 !rounded-xl !bg-[var(--crm-green-soft)] !p-3 !text-sm !text-[var(--crm-green)]"><strong>Catálogo importado.</strong><Summary value={ownResult} /></div> : null}
+              </div>
+            </div>
+          </section>
+
+          <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface-soft)] text-[var(--crm-text)] shadow-none !rounded-2xl !bg-[var(--crm-surface-soft)] !p-5 !shadow-none">
+            <div className="!flex !items-start !gap-3">
+              <Download className="!mt-0.5 !size-5 !shrink-0 !text-[var(--crm-green)]" />
+              <div>
+                <h3 className="!text-lg !font-bold">Exportar catálogo</h3>
+                <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Descarga productos, formatos, variantes, pestañas, categorías, grupos, modificadores e imágenes en un único JSON portable.</p>
+              </div>
+            </div>
+            <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !mt-4" disabled={disabled} onClick={() => void mutate(() => exportFinalCatalog(catalog.venueId, venueName))} type="button">
+              <Download className="!size-4" /> Exportar JSON
+            </UiButton>
+          </section>
+        </div>
       </section>
 
-      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-5 !shadow-[var(--crm-shadow-card)]">
-        <div className="!flex !items-start !gap-3">
-          <FileJson className="!mt-0.5 !size-5 !shrink-0 !text-[var(--crm-green)]" />
-          <div>
-            <h2 className="!text-lg !font-bold">Importar catálogo de la app</h2>
-            <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Restaura en este local un JSON generado mediante «Exportar catálogo completo».</p>
-          </div>
+      <section className="!min-w-0 !overflow-hidden !rounded-3xl !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-card)]">
+        <div>
+          <h2 className="!text-xl !font-bold">Informes de caja</h2>
+          <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Gestiona los cierres e informes fiscales del local.</p>
         </div>
-        <label className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !mt-4 !inline-flex !cursor-pointer">
-          <FileJson className="!size-4" /> Seleccionar JSON
-          <UiInput accept=".json,application/json" className="!sr-only" disabled={disabled} onChange={readOwnCatalog} type="file" />
-        </label>
-        {ownFileName ? <p className="!mt-3 !text-sm !font-medium">{ownFileName}</p> : null}
-        {ownSummary ? <Summary value={ownSummary} /> : null}
-        {ownError ? <p className="!mt-3 !text-sm !text-red-500" role="alert">{ownError}</p> : null}
-        <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !mt-4" disabled={disabled || !ownDocument} onClick={() => setIsConfirmingImport(true)} type="button">
-          <Upload className="!size-4" /> Importar catálogo
-        </UiButton>
-        {ownResult ? <div className="!mt-3 !rounded-xl !bg-[var(--crm-green-soft)] !p-3 !text-sm !text-[var(--crm-green)]"><strong>Catálogo importado.</strong><Summary value={ownResult} /></div> : null}
-      </section>
+        <div className="!mt-4 !grid !gap-4 lg:!grid-cols-2">
+          <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface-soft)] text-[var(--crm-text)] shadow-none !rounded-2xl !bg-[var(--crm-surface-soft)] !p-5 !shadow-none">
+            <div className="!flex !items-start !gap-3">
+              <Upload className="!mt-0.5 !size-5 !shrink-0 !text-[var(--crm-green)]" />
+              <div>
+                <h3 className="!text-lg !font-bold">Importar Informes Z desde REVO</h3>
+                <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Revisa e importa el historial de cierres fiscales de REVO en el local seleccionado.</p>
+              </div>
+            </div>
+            <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !mt-4" disabled={disabled} onClick={() => setIsRevoClosingImportOpen(true)} type="button">
+              <Upload className="!size-4" /> Seleccionar CSV y revisar
+            </UiButton>
+          </section>
 
-      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-5 !shadow-[var(--crm-shadow-card)] xl:!col-span-2">
-        <h2 className="!text-lg !font-bold">Importar desde REVO</h2>
-        <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La importación conserva los grupos, categorías, formatos, precios e IVA de REVO y los adapta al catálogo actual en lotes transaccionales. Los artículos sin formato explícito usan «Unidad».</p>
-        <label className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !mt-4 !inline-flex !cursor-pointer">
-          <Upload className="!size-4" /> Seleccionar CSV
-          <UiInput accept=".csv,text/csv" className="!sr-only" disabled={disabled} onChange={readRevoFile} type="file" />
-        </label>
-        {revoFileName ? <p className="!mt-3 !text-sm">{revoFileName} · {revoParseResult?.products.length ?? 0} productos · {warningCount} avisos</p> : null}
-        {revoError ? <p className="!mt-3 !text-sm !text-red-500" role="alert">{revoError}</p> : null}
-        <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !mt-4" disabled={disabled || isRevoImporting || !revoParseResult?.products.length} onClick={() => void importRevoCatalog()} type="button">
-          <Upload className="!size-4" /> {isRevoImporting ? 'Importando…' : 'Importar desde REVO'}
-        </UiButton>
-        {isRevoImporting && revoProgress ? <ImportProgress progress={revoProgress} /> : null}
-        {revoResult ? <p className="!mt-3 !rounded-xl !bg-[var(--crm-green-soft)] !p-3 !text-sm !text-[var(--crm-green)]">
-          {revoResult.products} productos y {revoResult.variants} variantes creados; {revoResult.productsUpdated} productos y {revoResult.variantsUpdated} variantes actualizados; {revoResult.tabs} pestañas, {revoResult.formats} formatos, {revoResult.categories} categorías y {revoResult.placements} apariciones nuevas.
-        </p> : null}
+          <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface-soft)] text-[var(--crm-text)] shadow-none !rounded-2xl !bg-[var(--crm-surface-soft)] !p-5 !shadow-none">
+            <div className="!flex !items-start !gap-3">
+              <Download className="!mt-0.5 !size-5 !shrink-0 !text-[var(--crm-green)]" />
+              <div>
+                <h3 className="!text-lg !font-bold">Exportar Informes de caja</h3>
+                <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Exporta el historial de cierres e informes fiscales del local.</p>
+              </div>
+            </div>
+            <p className="!mt-4 !text-sm !font-semibold !text-[var(--crm-text-muted)]">Futura implementación</p>
+          </section>
+        </div>
       </section>
     </div>
 
@@ -277,5 +326,7 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venueName }: Pro
         <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-red-600 px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-red-700" disabled={disabled || isClearingCatalog || clearConfirmation !== `BORRAR ${venueName}`} onClick={() => void confirmCatalogClear()} type="button"><Trash2 className="!size-4" /> {isClearingCatalog ? 'Borrando…' : 'Borrar definitivamente'}</UiButton>
       </div>
     </CrmModal> : null}
+
+    {isRevoClosingImportOpen ? <RevoClosingImportModal disabled={disabled} onClose={() => setIsRevoClosingImportOpen(false)} onImported={() => Promise.resolve()} venues={venues} /> : null}
   </>
 }

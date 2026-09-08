@@ -130,7 +130,7 @@ export function CrmSelect({
           </span>
         </Select.Trigger>
         <Select.Popover
-          className="!z-[120] !flex !max-h-72 !min-w-[var(--trigger-width)] !flex-col !overflow-hidden !rounded-[12px] !border  !bg-[var(--crm-popover-bg)] !p-1 !text-[var(--crm-popover-text)]  !shadow-[var(--crm-shadow-floating)] !backdrop-blur-none [&_[role=listbox]]:!bg-[var(--crm-popover-bg)] [&_[role=listbox]]:!text-[var(--crm-popover-text)]"
+          className="!z-[120] !flex !max-h-72 !min-w-[var(--trigger-width)] !flex-col !overflow-hidden !rounded-[12px] !border-1 !border-[var(--crm-popover-border)] !bg-[var(--crm-popover-bg)] !p-1 !text-[var(--crm-popover-text)] !shadow-[var(--crm-shadow-floating)] !backdrop-blur-none [&_[role=listbox]]:!bg-[var(--crm-popover-bg)] [&_[role=listbox]]:!text-[var(--crm-popover-text)]"
           placement="bottom"
         >
           {searchable || filterOptions.length ? (
