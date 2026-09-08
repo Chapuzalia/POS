@@ -90,7 +90,7 @@ export function LoginScreen({
         <div className="mb-6 flex items-start justify-between gap-4">
           <div>
             <p className="text-sm font-bold uppercase tracking-normal text-[var(--accent)]">
-              TPV multi-tenant
+              Tickit
             </p>
             <h1 className="mt-2 text-3xl font-bold text-[var(--foreground)]">
               Acceso al negocio

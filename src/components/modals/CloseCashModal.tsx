@@ -91,9 +91,7 @@ export function CloseCashModal({
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-2xl font-bold">Cierre de caja</h2>
-              <p className="text-sm text-[var(--muted)]">
-                Revisa importes esperados y contado real.
-              </p>
+              
             </div>
             <Button
               disabled={isBusy}
