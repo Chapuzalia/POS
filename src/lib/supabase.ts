@@ -6,6 +6,18 @@ import { backendFetch } from './backendFetch'
 const supabaseUrl = import.meta.env.VITE_SUPABASE_URL?.trim() ?? ''
 const supabaseAnonKey = import.meta.env.VITE_SUPABASE_ANON_KEY?.trim() ?? ''
 const initialAppRoute = getAppRoute()
+const realtimeHeartbeatStaleMs = 60_000
+let lastRealtimeHeartbeatStatus: string | null = null
+let lastRealtimeHeartbeatOkAt = Date.now()
+let realtimeRecoveryPromise: Promise<void> | null = null
+
+function monitorRealtimeHeartbeat(status: string, latency?: number) {
+  lastRealtimeHeartbeatStatus = status
+  if (status === 'ok') lastRealtimeHeartbeatOkAt = Date.now()
+  if (status === 'error' || status === 'timeout' || status === 'disconnected') {
+    console.warn('Supabase Realtime heartbeat no disponible.', { latency, status })
+  }
+}
 
 function authStorageKey(route: AppRoute) {
   return `club-pos:supabase-auth:${route}`
@@ -43,8 +55,35 @@ export const supabase: SupabaseClient | null = supabaseConfig.isReady
         persistSession: true,
         storageKey: authStorageKey(initialAppRoute),
       },
+      realtime: {
+        heartbeatCallback: monitorRealtimeHeartbeat,
+        worker: true,
+      },
     })
   : null
+
+export function recoverSupabaseRealtimeConnection() {
+  const realtime = supabase?.realtime
+  if (!realtime || realtimeRecoveryPromise) return realtimeRecoveryPromise ?? Promise.resolve()
+
+  const connectionState = realtime.connectionState()
+  if (connectionState === 'closed') {
+    realtime.connect()
+    return Promise.resolve()
+  }
+
+  const heartbeatIsUnhealthy = lastRealtimeHeartbeatStatus === 'error'
+    || lastRealtimeHeartbeatStatus === 'timeout'
+    || lastRealtimeHeartbeatStatus === 'disconnected'
+    || Date.now() - lastRealtimeHeartbeatOkAt > realtimeHeartbeatStaleMs
+
+  if (connectionState !== 'open' || !heartbeatIsUnhealthy) return Promise.resolve()
+
+  realtimeRecoveryPromise = realtime.disconnect()
+    .then(() => realtime.connect())
+    .finally(() => { realtimeRecoveryPromise = null })
+  return realtimeRecoveryPromise
+}
 
 export function hasLocalSupabaseSession(userId: string) {
   try {
