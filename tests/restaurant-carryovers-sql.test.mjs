@@ -8,13 +8,49 @@ const baseline = await read('supabase/0.Complete_Database_24-07-26.sql')
 const virtual = await read('supabase/migrations/20260814120000_add_session_virtual_restaurant_tables.sql')
 const closing = await read('supabase/migrations/20260827120000_add_cashlogy_stacker_collections.sql')
 const migration = await read('supabase/migrations/20260907191602_carry_forward_restaurant_orders.sql')
+const autoRecovery = await read('supabase/migrations/20260908135354_auto_recover_restaurant_carryovers.sql')
+const releaseUnloadedTables = await read('supabase/migrations/20260908141159_release_unloaded_carryover_tables.sql')
 const fn = (source, name) => {
   const match = source.match(new RegExp(`create (?:or replace )?function public\\.${name}\\([\\s\\S]*?\\$\\$;`, 'i'))
   assert.ok(match, name)
   return match[0]
 }
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
-const [tenant, venue, user, device, register, origin, second, third, group, order, sibling, table] = Array.from({ length: 12 }, (_, n) => id(n + 1))
+const [tenant, venue, user, device, register, origin, second, third, group, order, sibling, table, physicalTable] = Array.from({ length: 13 }, (_, n) => id(n + 1))
+
+test('the automatic-recovery migration backfills carryovers recovered before its snapshot existed', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  await db.exec(`
+    create table orders(id uuid primary key, revision integer not null);
+    create table order_tables(order_group_id uuid not null, table_id uuid not null, released_at timestamptz);
+    create table restaurant_order_carryovers(
+      id uuid primary key,
+      order_group_id uuid not null,
+      order_ids uuid[] not null,
+      to_cash_session_id uuid,
+      recovered_at timestamptz,
+      recovered_by uuid,
+      recovered_by_device_id uuid
+    );
+    insert into orders values ('${order}', 7);
+    insert into order_tables values ('${group}', '${table}', null);
+    insert into restaurant_order_carryovers values (
+      '${id(40)}', '${group}', array['${order}'::uuid], '${second}', now() - interval '1 hour', '${user}', '${device}'
+    );
+  `)
+  const schemaUpgrade = autoRecovery.slice(0, autoRecovery.indexOf('create or replace function'))
+  await db.exec(schemaUpgrade)
+  const [upgraded] = (await db.query('select * from restaurant_order_carryovers')).rows
+  assert.equal(upgraded.recovery_undo_expires_at.toISOString(), upgraded.recovered_at.toISOString())
+  assert.deepEqual(upgraded.recovery_order_revisions, { [order]: 7 })
+  assert.deepEqual(upgraded.recovery_table_ids, [table])
+  assert.equal(upgraded.recovery_history[0].historical, true)
+  await assert.rejects(
+    db.query('update restaurant_order_carryovers set recovery_order_revisions=null'),
+    /restaurant_order_carryovers_recovery_snapshot_check/,
+  )
+})
 
 test('carryover executes against PostgreSQL with the existing close accounting and lifecycle triggers', async (t) => {
   const db = new PGlite()
@@ -66,6 +102,7 @@ test('carryover executes against PostgreSQL with the existing close accounting a
     create trigger deactivate_virtual after update of status on cash_sessions for each row execute function deactivate_closed_session_virtual_tables();
   `)
   await db.exec(migration)
+  await db.exec(autoRecovery)
   await query("select set_config('test.uid', $1, false)", [user])
   await db.exec(`
     insert into tenants values ('${tenant}'); insert into venues values ('${venue}', 'Local', 'Europe/Madrid', 'EUR');
@@ -79,8 +116,14 @@ test('carryover executes against PostgreSQL with the existing close accounting a
     insert into orders(id,tenant_id,venue_id,cash_session_id,cash_register_id,opened_by_user_id,opened_by_device_id,order_group_id,split_sequence)
       values ('${order}','${tenant}','${venue}','${origin}','${register}','${user}','${device}','${group}',1),
       ('${sibling}','${tenant}','${venue}','${origin}','${register}','${user}','${device}','${group}',2);
-    insert into restaurant_tables(id,tenant_id,venue_id,cash_session_id,name) values ('${table}','${tenant}','${venue}','${origin}','Virtual 1');
-    insert into order_tables(tenant_id,venue_id,order_id,order_group_id,table_id) values ('${tenant}','${venue}','${order}','${group}','${table}');
+    insert into restaurant_tables(id,tenant_id,venue_id,cash_session_id,name) values
+      ('${table}','${tenant}','${venue}','${origin}','Virtual 1'),
+      ('${physicalTable}','${tenant}','${venue}',null,'Mesa 1');
+    insert into order_tables(tenant_id,venue_id,order_id,order_group_id,table_id) values
+      ('${tenant}','${venue}','${order}','${group}','${table}'),
+      ('${tenant}','${venue}','${order}','${group}','${physicalTable}');
+    insert into order_tables(tenant_id,venue_id,order_id,order_group_id,table_id,joined_at,released_at)
+      values ('${tenant}','${venue}','${order}','${group}','${physicalTable}',now()-interval '2 days',now()-interval '1 day');
     select get_cash_session_table_layout('${origin}');
     insert into order_lines(tenant_id,venue_id,order_id,product_name,variant_name,unit_price_cents,quantity,served_quantity,modifiers,note)
       values ('${tenant}','${venue}','${order}','Cafe','Grande',250,4,2,'[{"name":"Leche","priceCents":50}]','Sin azucar');
@@ -96,6 +139,7 @@ test('carryover executes against PostgreSQL with the existing close accounting a
   `)
   const carry = (session = origin, payload = {}) => query('select carry_forward_and_close_cash_session($1,$2,$3::jsonb)', [session, device, JSON.stringify(payload)])
   const recover = (session, ids) => query('select recover_restaurant_carryovers($1,$2,$3::uuid[]) as count', [session, device, ids])
+  const unload = (session, ids) => query('select unload_restaurant_carryovers($1,$2,$3::uuid[]) as count', [session, device, ids])
   const newSession = async (session) => {
     await query(`insert into cash_sessions(id,tenant_id,venue_id,cash_register_id,opened_by,opened_by_device_id,opening_float_cents)
       values ($1,$2,$3,$4,$5,$6,0)`, [session,tenant,venue,register,user,device])
@@ -122,7 +166,7 @@ test('carryover executes against PostgreSQL with the existing close accounting a
     assert.deepEqual(await query('select * from sale_payments'), originalPayments)
     assert.deepEqual(await query('select * from restaurant_order_equal_splits'), originalSplit)
     assert.ok((await query('select status from orders')).every((r) => r.status === 'carried_forward'))
-    assert.equal((await query('select * from order_tables where released_at is null')).length, 1)
+    assert.equal((await query('select * from order_tables where released_at is null')).length, 2)
     ;[transfer] = await query('select * from restaurant_order_carryovers')
     assert.deepEqual(transfer.order_ids, [order, sibling])
     await carry()
@@ -138,12 +182,44 @@ test('carryover executes against PostgreSQL with the existing close accounting a
     assert.deepEqual(competing.map((rows) => rows[0].count).sort(), [0, 2])
     assert.equal((await recover(second, [transfer.id]))[0].count, 0)
     assert.deepEqual(await query('select * from order_lines'), originalLines)
-    const [virtualTable] = await query('select * from restaurant_tables')
+    const [virtualTable] = await query('select * from restaurant_tables where id=$1', [table])
     assert.equal(virtualTable.id, table)
     assert.equal(virtualTable.is_active, true)
     assert.equal(virtualTable.cash_session_id, second)
+    assert.equal((await query('select cash_session_id from restaurant_tables where id=$1', [physicalTable]))[0].cash_session_id, null)
     assert.ok((await query('select * from orders')).every((r) => r.status === 'open' && r.cash_session_id === second && r.revision === 2))
     assert.equal((await query('select cash_session_id from sales'))[0].cash_session_id, origin)
+  })
+  await t.test('the five-second undo returns untouched orders to pending and keeps its audit trail', async () => {
+    assert.equal((await unload(second, [transfer.id]))[0].count, 2)
+    assert.equal((await query('select * from order_tables where order_group_id=$1 and released_at is null', [group])).length, 2)
+    await db.exec(releaseUnloadedTables)
+    assert.equal((await unload(second, [transfer.id]))[0].count, 0)
+    const [pending] = await query('select * from restaurant_order_carryovers where id=$1', [transfer.id])
+    assert.equal(pending.recovered_at, null)
+    assert.equal(pending.to_cash_session_id, null)
+    assert.deepEqual(pending.recovery_history.map((event) => event.event), ['recovered', 'unloaded'])
+    assert.ok((await query('select * from orders')).every((row) => row.status === 'carried_forward' && row.cash_session_id === origin))
+    assert.equal((await query('select * from order_tables where order_group_id=$1 and released_at is null', [group])).length, 0)
+
+    // The old consumption remains pending while the physical table can host a
+    // new order. Automatic recovery skips it until every original table is free.
+    await query(`insert into order_tables(tenant_id,venue_id,order_id,order_group_id,table_id)
+      values ($1,$2,$3,$4,$5)`, [tenant, venue, id(42), id(41), physicalTable])
+    assert.equal((await recover(second, [transfer.id]))[0].count, 0)
+    assert.ok((await query('select * from orders')).every((row) => row.status === 'carried_forward'))
+    await query('update order_tables set released_at=now() where order_group_id=$1', [id(41)])
+    assert.equal((await recover(second, [transfer.id]))[0].count, 2)
+    assert.equal((await query('select * from order_tables where order_group_id=$1 and released_at is null', [group])).length, 2)
+    assert.equal((await query('select * from order_tables where order_group_id=$1 and released_at is not null', [group])).length, 1)
+  })
+  await t.test('undo expires on the server and refuses a recovered order that was already changed', async () => {
+    await query("update restaurant_order_carryovers set recovery_undo_expires_at=clock_timestamp()-interval '1 millisecond' where id=$1", [transfer.id])
+    assert.equal((await unload(second, [transfer.id]))[0].count, 0)
+    await query("update restaurant_order_carryovers set recovery_undo_expires_at=clock_timestamp()+interval '5 seconds' where id=$1", [transfer.id])
+    await query('update orders set revision=revision+1 where id=$1', [order])
+    await assert.rejects(unload(second, [transfer.id]), /ya se han modificado/)
+    await query("update restaurant_order_carryovers set recovery_order_revisions=jsonb_set(recovery_order_revisions, array[$1::text], to_jsonb((select revision from orders where id=$1::uuid))) where id=$2", [order, transfer.id])
   })
   await t.test('multiple shifts retain a full chain and an old recovery request cannot recover the new transfer', async () => {
     await carry(second)

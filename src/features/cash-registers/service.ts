@@ -43,7 +43,7 @@ export async function loadCashRegisterOptions(context: TenantContext) {
 }
 
 export async function openCashRegisterSession(context: TenantContext, cashRegisterId: string, openingFloatCents: number) {
-  const { data, error } = await client().rpc('open_cash_register_session', { p_cash_register_id: cashRegisterId, p_opening_float_cents: openingFloatCents, p_device_id: context.deviceId })
+  const { data, error } = await client().rpc('open_cash_register_session_with_carryovers', { p_cash_register_id: cashRegisterId, p_opening_float_cents: openingFloatCents, p_device_id: context.deviceId })
   if (error) throw error
   const state = await loadCashRegisterOptions(context)
   const session = state.sessions.find((item) => item.id === String(data))
