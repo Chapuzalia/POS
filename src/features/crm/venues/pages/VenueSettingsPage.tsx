@@ -80,6 +80,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
       legalName: String(formData.get('legalName') ?? ''),
       name,
       taxId: String(formData.get('taxId') ?? ''),
+      sortOrder: Number(formData.get('sortOrder')),
     }
 
     await runAction(async () => {
@@ -172,6 +173,12 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
               <Field label="Nombre del local">
                 <UiInput className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.name} disabled={disabled} maxLength={80} name="name" required />
               </Field>
+              <Field label="Orden en el selector">
+                <UiInput className="!h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !text-[var(--crm-text)]" defaultValue={venue.sortOrder} disabled={disabled} min={0} max={2147483647} name="sortOrder" required step={1} type="number" aria-describedby={`venue-order-help-${venue.id}`} />
+              </Field>
+              <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]" id={`venue-order-help-${venue.id}`}>
+                Los números más bajos aparecen primero. Al abrir el CRM se carga el primer local activo al que tengas acceso. Si hay empate, se mantiene el orden de creación.
+              </p>
               <Field label="Razón social">
                 <UiInput autoComplete="organization" className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.legalName} disabled={disabled} maxLength={80} name="legalName" placeholder="Empresa Ejemplo SL" />
               </Field>

@@ -8,6 +8,7 @@ import * as providers from '../supabase/functions/_shared/supplier-documents/pro
 import * as fixtures from '../supabase/functions/_shared/supplier-documents/fixtures.ts'
 import * as quality from '../supabase/functions/_shared/supplier-documents/ocrQuality.ts'
 import * as metadata from '../supabase/functions/_shared/supplier-documents/documentMetadata.ts'
+import * as profileRepair from '../supabase/functions/_shared/supplier-documents/profileRepair.ts'
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 const migration = await read('supabase/migrations/20260903110000_supplier_document_global_learning.sql')
@@ -18,6 +19,9 @@ const metadataEvidenceMigration = await read('supabase/migrations/20260907075508
 const stickyLearningMigration = await read('supabase/migrations/20260907081051_preserve_supplier_scan_learning_exclusion.sql')
 const correctedParserMigration = await read('supabase/migrations/20260907133000_guard_corrected_supplier_parser.sql')
 const repairMigration = await read('supabase/migrations/20260907140000_repair_confirmed_supplier_profiles.sql')
+const candidatePromotionMigration = await read('supabase/migrations/20260909114313_restore_supplier_parser_candidate_promotion.sql')
+const candidateAiConfirmationMigration = await read('supabase/migrations/20260909134337_record_supplier_parser_candidate_ai_confirmation.sql')
+const manualSupplierGlobalLearningMigration = await read('supabase/migrations/20260909142730_allow_manual_supplier_global_parser_learning.sql')
 const edgeSource = await read('supabase/functions/process-supplier-document/index.ts')
 const compiledEdge = ts.transpileModule(edgeSource, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 } }).outputText
 const tenant = '00000000-0000-0000-0000-000000000010'
@@ -346,7 +350,11 @@ test('aprendizaje global en la transacción de confirmación (PostgreSQL efímer
     assert.equal(compatible.document.extraction_metadata.parserMode, 'deterministic')
     assert.equal(compatible.document.global_supplier_id, globals[0].id)
     assert.equal(compatible.document.global_profile_id, profiles[0].id)
-    assert.equal(compatible.calls.interpret, 0, 'no vuelve a interpretar líneas con IA')
+    assert.equal(compatible.calls.interpret, 1, 'el candidate se contrasta una vez con IA')
+    assert.equal(compatible.calls.candidateEvidence, 1)
+    assert.deepEqual(compatible.document.extraction_metadata.candidateProfileValidation, {
+      profileId: profiles[0].id, aiConfirmed: true, reason: null,
+    })
     const incompatible = await processEdge(detection('OTRA PLANTILLA'), { globals, profiles, suppliers })
     assert.equal(incompatible.document.status, 'review')
     assert.equal(incompatible.document.extraction_metadata.parserMode, 'ai')
@@ -376,12 +384,24 @@ test('catálogos antiguos con CIFs equivalentes se conservan sin romper registro
 
 async function processEdge(data, { globals = [], profiles = [], suppliers = [], reparse = null } = {}) {
   const document = reparse?.document ?? { id: 'new-document', tenant_id: tenant, venue_id: venue, supplier_id: null, document_type: 'delivery_note', status: 'processing', storage_bucket: 'documents', storage_path: 'image', original_mime_type: 'image/jpeg', extraction_metadata: {} }
-  const calls = { interpret: 0, supplier: 0, globalWrites: 0, ocr: 0, metadata: 0, proposeProfile: 0 }
+  const calls = { interpret: 0, supplier: 0, globalWrites: 0, ocr: 0, metadata: 0, proposeProfile: 0, candidateEvidence: 0 }
   let insertedLines = []
   const rows = { supplier_documents: [document, ...(reparse?.previous ?? [])], supplier_document_lines: reparse?.lines ?? [], global_suppliers: globals, global_supplier_document_profiles: profiles, suppliers }
   const client = {
-    rpc: async (name, args) => name === 'assert_supplier_document_scanning'
-      ? { error: null } : reparse.rpc(name, args),
+    rpc: async (name, args) => {
+      if (name === 'assert_supplier_document_scanning') return { error: null }
+      if (name === 'record_supplier_parser_candidate_ai_confirmation') {
+        const profile = profiles.find((candidate) => candidate.id === args.p_profile_id)
+        if (!profile || !['candidate', 'verified'].includes(profile.status)) {
+          return { data: null, error: { message: 'SUPPLIER_PARSER_CANDIDATE_NOT_EXECUTABLE' } }
+        }
+        calls.candidateEvidence++
+        profile.success_count = Number(profile.success_count ?? 0) + 1
+        if (profile.status === 'candidate' && profile.success_count >= 3) profile.status = 'verified'
+        return { data: { profileId: profile.id, status: profile.status, successCount: profile.success_count }, error: null }
+      }
+      return reparse.rpc(name, args)
+    },
     auth: { getUser: async () => ({ data: { user: { id: 'user' } }, error: null }) },
     storage: { from: () => ({ download: async () => ({ data: new Blob(['image']), error: null }) }) },
     from(table) {
@@ -418,6 +438,7 @@ async function processEdge(data, { globals = [], profiles = [], suppliers = [], 
     '../_shared/supplier-documents/fixtures.ts': fixtures,
     '../_shared/supplier-documents/ocrQuality.ts': quality,
     '../_shared/supplier-documents/documentMetadata.ts': metadata,
+    '../_shared/supplier-documents/profileRepair.ts': profileRepair,
     '../_shared/supplier-documents/providers.ts': {
       ...providers,
       createDocumentOcrProvider: () => ({ name: 'mistral', analyze: async () => { calls.ocr++; return data.ocr } }),
@@ -523,7 +544,9 @@ test('metadata incremental y selección global exacta (PostgreSQL efímero, sin 
       profiles: await query('select * from global_supplier_document_profiles'), suppliers: await query('select * from suppliers') })
     assert.equal(edge.document.extraction_metadata.parserMode, 'deterministic')
     assert.equal(edge.document.extraction_metadata.metadataExtraction.date.source, 'profile')
-    assert.equal(edge.calls.interpret, 0)
+    assert.equal(edge.calls.interpret, 1)
+    assert.equal(edge.calls.candidateEvidence, 1)
+    assert.equal(edge.document.extraction_metadata.candidateProfileValidation.aiConfirmed, true)
     assert.equal(edge.calls.supplier, 0)
     assert.equal(edge.calls.metadata, 0)
     await confirm(stale, '2026-05-21')
@@ -743,7 +766,7 @@ test('selección manual no elige entre CIFs globales duplicados históricos', as
   assert.equal((await h.query('select * from global_suppliers')).length, 2)
 })
 
-test('la selección manual y el reparseo nunca entrenan globals, perfiles ni aliases', async (t) => {
+test('selección manual permite solo el aprendizaje global del parser; reparse sigue excluido', async (t) => {
   const db = new PGlite()
   t.after(() => db.close())
   await db.exec(bootstrap)
@@ -753,6 +776,8 @@ test('la selección manual y el reparseo nunca entrenan globals, perfiles ni ali
   await db.exec(learningGuardMigration)
   await db.exec(metadataEvidenceMigration)
   await db.exec(stickyLearningMigration)
+  await db.exec(correctedParserMigration)
+  await db.exec(manualSupplierGlobalLearningMigration)
   const h = dbHelpers(db)
   const verticalOcr = { text: 'ALBARÁN: 26/ 1.915\nFRA. RESUM 05/06/2026', pages: [{ tables: [{ cells: [
     { text: 'Data', rowIndex: 0, columnIndex: 0 }, { text: '04/06/2026', rowIndex: 1, columnIndex: 0 },
@@ -769,16 +794,21 @@ test('la selección manual y el reparseo nunca entrenan globals, perfiles ni ali
       ? { linesReparsedAt: new Date().toISOString(), linesSupplierId: supplierId } : {} })
     if (mode === 'selection') await h.query('select update_supplier_document_supplier($1,$2)', [id, supplierId])
     // A rescan/late diagnostics callback may replace the entire JSON object.
-    const freshDiagnostics = detection().metadata
+    const freshDiagnostics = { ...detection().metadata, ...(mode === 'reparse'
+      ? { linesReparsedAt: new Date().toISOString(), linesSupplierId: supplierId } : {}) }
     await h.query('update supplier_documents set extraction_metadata=$2 where id=$1', [id, JSON.stringify(freshDiagnostics)])
     assert.equal((await h.document(id)).extraction_metadata.learningExcluded, true)
     await h.query("update supplier_documents set extraction_metadata=jsonb_set(extraction_metadata,'{learningExcluded}','false') where id=$1", [id])
     assert.equal((await h.document(id)).extraction_metadata.learningExcluded, true)
-    const before = await h.query('select * from global_supplier_document_profiles')
+    const [before] = await h.query('select id,success_count from global_supplier_document_profiles')
     await h.query("select confirm_supplier_document($1,'2026-09-03',false,'{}',null)", [id])
-    assert.equal((await h.document(id)).status, 'confirmed')
-    assert.equal((await h.document(id)).extraction_metadata.learningExcluded, true)
-    assert.deepEqual(await h.query('select * from global_supplier_document_profiles'), before)
+    const confirmed = await h.document(id)
+    const [after] = await h.query('select id,success_count from global_supplier_document_profiles')
+    assert.equal(confirmed.status, 'confirmed')
+    assert.equal(confirmed.extraction_metadata.learningExcluded, true)
+    assert.equal(confirmed.extraction_metadata.profileMetadataLearning, undefined)
+    assert.equal(after.id, before.id)
+    assert.equal(after.success_count, before.success_count + (mode === 'selection' ? 1 : 0))
     assert.equal((await h.query('select * from supplier_identity_aliases')).length, 0)
     assert.equal((await h.query('select * from global_suppliers')).length, 1)
   }
@@ -787,27 +817,99 @@ test('la selección manual y el reparseo nunca entrenan globals, perfiles ni ali
   const id = await h.addDocument()
   await h.query('select update_supplier_document_supplier($1,$2)', [id, supplierId])
   await h.query("select confirm_supplier_document($1,'2026-09-03',false,'{}',null)", [id])
-  assert.equal((await h.query('select * from global_suppliers')).length, 0)
-  assert.equal((await h.query('select * from global_supplier_document_profiles')).length, 0)
+  const confirmed = await h.document(id)
+  const [global] = await h.query('select * from global_suppliers')
+  const [profile] = await h.query('select * from global_supplier_document_profiles')
+  assert.equal(global.tax_id, 'A87654321')
+  assert.equal(profile.global_supplier_id, global.id)
+  assert.equal(profile.success_count, 1)
+  assert.equal(confirmed.global_supplier_id, global.id)
+  assert.equal(confirmed.global_profile_id, profile.id)
+  assert.equal(confirmed.extraction_metadata.learningExcluded, true)
+  assert.equal(confirmed.extraction_metadata.profileMetadataLearning, undefined)
+  assert.equal((await h.query('select * from supplier_identity_aliases')).length, 0)
 })
 
-test('CIF y resultado válido son obligatorios para saltarse GPT', async () => {
+test('candidate se ejecuta, se compara con IA y solo suma evidencia cuando coincide', async () => {
   const data = detection()
   const globals = [{ id: 'global', name: 'DISPOCH S.L.', tax_id: 'B12345678' }]
-  const profiles = [{ id: 'profile', global_supplier_id: 'global', status: 'candidate', document_type: 'delivery_note', rules_json: data.rules }]
+  const profiles = [{ id: 'profile', global_supplier_id: 'global', status: 'candidate', success_count: 2, document_type: 'delivery_note', rules_json: data.rules }]
   const valid = await processEdge(data, { globals, profiles })
-  assert.equal(valid.calls.interpret, 0)
+  assert.equal(valid.calls.interpret, 1, JSON.stringify(valid.document.extraction_metadata))
   assert.equal(valid.calls.supplier, 0)
-  for (const taxId of ['B87654321', null]) {
-    const result = await processEdge(data, { globals: [{ ...globals[0], tax_id: taxId }], profiles })
-    assert.equal(result.calls.interpret, 1)
+  assert.equal(valid.calls.candidateEvidence, 1, JSON.stringify(valid.document.extraction_metadata))
+  assert.equal(valid.document.extraction_metadata.parserMode, 'deterministic')
+  assert.equal(valid.document.global_profile_id, 'profile')
+  assert.deepEqual(valid.document.extraction_metadata.candidateProfileValidation, {
+    profileId: 'profile', aiConfirmed: true, reason: null,
+  })
+  assert.equal(profiles[0].success_count, 3)
+  assert.equal(profiles[0].status, 'verified')
+  const mismatchData = detection()
+  mismatchData.extraction.lines[0].unitPrice = 15
+  mismatchData.extraction.lines[0].grossCost = 30
+  mismatchData.extraction.lines[0].netCost = 30
+  mismatchData.extraction.lines[0].lineTotal = 30
+  mismatchData.extraction.document.total = 30
+  const mismatchProfiles = [{ ...profiles[0], status: 'candidate', success_count: 2 }]
+  const result = await processEdge(mismatchData, { globals, profiles: mismatchProfiles })
+  assert.equal(result.calls.interpret, 2)
+  assert.equal(result.calls.candidateEvidence, 0)
+  assert.equal(result.document.extraction_metadata.parserMode, 'ai')
+  assert.equal(result.document.global_profile_id, null)
+  assert.equal(result.document.extraction_metadata.candidateProfileValidation.profileId, 'profile')
+  assert.equal(result.document.extraction_metadata.candidateProfileValidation.aiConfirmed, false)
+  assert.equal(mismatchProfiles[0].success_count, 2)
+})
+
+test('verified y active siguen ejecutándose sin IA', async () => {
+  const data = detection()
+  const globals = [{ id: 'global', name: 'DISPOCH S.L.', tax_id: 'B12345678' }]
+  for (const status of ['verified', 'active']) {
+    const profiles = [{ id: `profile-${status}`, global_supplier_id: 'global', status, success_count: 3, document_type: 'delivery_note', rules_json: data.rules }]
+    const result = await processEdge(data, { globals, profiles })
+    assert.equal(result.calls.interpret, 0)
+    assert.equal(result.calls.candidateEvidence, 0)
+    assert.equal(result.document.extraction_metadata.parserMode, 'deterministic')
+    assert.equal(result.document.global_profile_id, `profile-${status}`)
+    assert.equal(result.document.extraction_metadata.candidateProfileValidation, null)
   }
-  const ambiguous = await processEdge(data, { globals: [...globals, { ...globals[0], id: 'duplicate' }], profiles })
-  assert.equal(ambiguous.calls.interpret, 1)
-  const invalid = structuredClone(profiles)
-  invalid[0].rules_json.columns.find((column) => column.field === 'unitPrice').headerAliases = ['INEXISTENTE']
-  const result = await processEdge(data, { globals, profiles: invalid })
-  assert.equal(result.calls.interpret, 1)
+})
+
+test('la confirmación IA incrementa el candidate y el umbral existente lo promociona', async (t) => {
+  const db = new PGlite()
+  t.after(() => db.close())
+  await db.exec(`
+    create role anon; create role authenticated; create role service_role;
+    create table public.global_supplier_document_profiles (
+      id uuid primary key default gen_random_uuid(),
+      status text not null,
+      success_count integer not null default 0,
+      correction_count integer not null default 0,
+      updated_at timestamptz not null default now()
+    );
+  `)
+  await db.exec(candidatePromotionMigration)
+  await db.exec(candidateAiConfirmationMigration)
+  const [{ id }] = (await db.query(
+    "insert into global_supplier_document_profiles(status,success_count) values('candidate',2) returning id",
+  )).rows
+  const [{ result }] = (await db.query(
+    'select record_supplier_parser_candidate_ai_confirmation($1) result',
+    [id],
+  )).rows
+  assert.deepEqual(result, { profileId: id, status: 'verified', successCount: 3 })
+  const [profile] = (await db.query(
+    'select status,success_count from global_supplier_document_profiles where id=$1',
+    [id],
+  )).rows
+  assert.deepEqual(profile, { status: 'verified', success_count: 3 })
+  await db.exec('set role authenticated')
+  await assert.rejects(
+    db.query('select record_supplier_parser_candidate_ai_confirmation($1)', [id]),
+    /permission denied/,
+  )
+  await db.exec('reset role')
 })
 
 test('una omisión detectada por el parser pide una única reconciliación con OCR y vuelve a validar', async () => {
@@ -838,7 +940,8 @@ test('el catálogo global completo se consulta aunque supere el límite de una r
   globals.push({ id: 'target', name: 'DISPOCH S.L.', tax_id: 'B12345678' })
   profiles.push({ ...profiles[0], id: 'target-profile', global_supplier_id: 'target' })
   const result = await processEdge(data, { globals, profiles })
-  assert.equal(result.calls.interpret, 0)
+  assert.equal(result.calls.interpret, 1)
+  assert.equal(result.calls.candidateEvidence, 1)
   assert.equal(result.document.global_profile_id, 'target-profile')
 })
 
@@ -888,7 +991,8 @@ test('reparación confirmada publica una vez, protege la evidencia y excluye sel
   const db = new PGlite()
   t.after(() => db.close())
   for (const sql of [bootstrap, localMigration, migration, metadataMigration, learningGuardMigration,
-    metadataEvidenceMigration, stickyLearningMigration, correctedParserMigration, repairMigration]) await db.exec(sql)
+    metadataEvidenceMigration, stickyLearningMigration, correctedParserMigration, repairMigration,
+    manualSupplierGlobalLearningMigration]) await db.exec(sql)
   const h = dbHelpers(db)
   for (const mode of ['valid', 'changed', 'manual', 'rejected']) {
     await h.reset()

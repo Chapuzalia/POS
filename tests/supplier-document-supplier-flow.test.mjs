@@ -4,7 +4,7 @@ import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import {
   groundSupplierExtractionInOcr, parseSupplierDocumentExtraction, resolveSupplierCandidate,
-  runDeterministicLineParser, supplierExtractionMetadata, supplierSelection,
+  runDeterministicLineParser, supplierExtractionMetadata, supplierHintSelection, supplierSelection,
 } from '../supabase/functions/_shared/supplier-documents/core.ts'
 import { getSupplierDocumentMockFixture } from '../supabase/functions/_shared/supplier-documents/fixtures.ts'
 import { OpenAiSupplierDocumentProvider } from '../supabase/functions/_shared/supplier-documents/providers.ts'
@@ -72,6 +72,20 @@ test('DISPOCH claro sin match es provisional y la revisión permite confirmarlo'
   assert.equal(state.isProvisional, true)
   assert.equal(state.hasSupplier, true)
   assert.equal(state.selectedValue, PROVISIONAL_SUPPLIER)
+})
+
+test('premarca la detección y solo considera manual una selección distinta o sin sugerencia', () => {
+  const detected = supplierReviewState({ supplierId: null, extractionMetadata: {
+    supplierResolution: { supplierId: 'detected', confidence: 'probable' },
+  } })
+  assert.equal(detected.suggestedSupplierId, 'detected')
+  assert.deepEqual(supplierHintSelection('detected', detected.suggestedSupplierId), {
+    kind: 'detected_hint', supplierId: 'detected', source: 'system',
+  })
+  assert.deepEqual(supplierHintSelection('other', detected.suggestedSupplierId), {
+    kind: 'manual_hint', supplierId: 'other', source: 'manual',
+  })
+  assert.equal(supplierHintSelection('selected', null).source, 'manual')
 })
 
 test('email y teléfono exactos resuelven; los aliases no confirmados y señales contradictorias no', () => {

@@ -79,7 +79,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
   const [loadedAreas, tablesResult, linksResult, ordersResult, equalSplitsResult, reservationsResult] = await Promise.all([
     loadDiningAreas(context), tablesQuery,
     client.from('order_tables').select('order_id, order_group_id, table_id, joined_at, released_at').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).is('released_at', null),
-    client.from('orders').select(orderColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'open'),
+    client.from('orders').select(orderColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).in('status', ['open', 'carried_forward']),
     client.from('restaurant_order_equal_splits').select('order_group_id, paid_cents').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'open'),
     client.from('reservation_tables').select('table_id, reservations!inner(id, customer_name, customer_phone, party_size, starts_at, ends_at, status)').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).in('reservations.status', ['confirmed', 'arrived', 'seated']).gte('reservations.starts_at', reservationRange.from).lt('reservations.starts_at', reservationRange.to).gt('reservations.ends_at', new Date().toISOString()),
   ])

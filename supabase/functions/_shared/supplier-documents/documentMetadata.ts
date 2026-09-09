@@ -151,6 +151,7 @@ export async function resolveDocumentMetadata(input: {
   const result = extractGenericDocumentMetadata(input.ocr, input.rules)
   const unresolved = fields.filter((field) => !result.metadata[field].value && result.metadata[field].ambiguous)
   let aiError = false
+  let aiFailure: { stage: 'metadata'; code: string } | null = null
   if (unresolved.length && input.extract) {
     try {
       const proposed = await input.extract({ ocr: input.ocr, fields: unresolved }) as Record<string, unknown>
@@ -158,12 +159,14 @@ export async function resolveDocumentMetadata(input: {
         const grounded = groundAiDocumentMetadata(input.ocr, proposed?.[field], field)
         if (grounded) Object.assign(result.metadata[field], grounded, { source: 'ai', confidence: 0.8, ambiguous: false })
       }
-    } catch {
+    } catch (error) {
       // Metadata failure cannot turn successful deterministic lines into an error.
       aiError = true
+      aiFailure = { stage: 'metadata', code: error instanceof Error
+        ? error.message.match(/^[A-Z][A-Z_]+(?::\d{3})?/)?.[0] ?? error.name : 'METADATA_EXTRACTION_FAILED' }
     }
   }
-  return { ...result, aiError }
+  return { ...result, aiError, aiFailure }
 }
 
 export const documentMetadataJsonSchema = {

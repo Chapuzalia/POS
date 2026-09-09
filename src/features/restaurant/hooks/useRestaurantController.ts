@@ -423,6 +423,7 @@ export function useRestaurantController(options: Options) {
       loadRestaurantOrder(options.context, orderId),
       loadRestaurantEqualSplit(options.context, orderId),
     ])
+    if (detail.order.status === 'carried_forward') throw new UserFacingError('Recupera primero las mesas pendientes del turno anterior.')
     draft.replaceOrder(detail)
     options.setAppliedDiscount(detail.order.draftDiscount)
     setPosView({ type: 'table_order', orderId })
@@ -928,6 +929,7 @@ export function useRestaurantController(options: Options) {
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false
+    if (draft.getCurrentOrder() && !await draft.flush()) return false
     const closureError = await getRestaurantCashClosureError({
       cashSession: options.cashSession,
       context: options.context,
@@ -937,7 +939,7 @@ export function useRestaurantController(options: Options) {
     if (!closureError) return true
     options.onError(closureError)
     return false
-  }, [options, realtime.tablesEnabled])
+  }, [draft, options, realtime.tablesEnabled])
 
   const addLine = useCallback((
     sellable: ResolvedSellableProduct,

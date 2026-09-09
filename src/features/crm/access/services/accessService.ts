@@ -43,7 +43,7 @@ export async function loadCrmAccessData(
         "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, default_tax_rate, timezone, catalog_profile",
       )
       .eq("tenant_id", context.tenantId)
-      .order("sort_order"),
+      .order("sort_order").order("created_at").order("id"),
     client
       .from("devices")
       .select(
@@ -130,7 +130,7 @@ export async function loadCrmVenues(
         "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, default_tax_rate, timezone, catalog_profile",
       )
       .eq("tenant_id", context.tenantId)
-      .order("sort_order"),
+      .order("sort_order").order("created_at").order("id"),
     context.role === "manager"
       ? client
         .from("manager_venue_assignments")
@@ -226,6 +226,7 @@ export type CrmVenueSettingsInput = {
   defaultTaxRate: number;
   legalName: string;
   taxId: string;
+  sortOrder: number;
 };
 
 export async function updateCrmVenueSettings(
@@ -233,6 +234,9 @@ export async function updateCrmVenueSettings(
   venueId: string,
   input: CrmVenueSettingsInput,
 ) {
+  if (!Number.isInteger(input.sortOrder) || input.sortOrder < 0 || input.sortOrder > 2147483647) {
+    throw new Error("El orden debe ser un número entero entre 0 y 2147483647.");
+  }
   if (!isValidTaxRate(input.defaultTaxRate)) {
     throw new Error("El tipo de IVA debe estar entre 0 y 100.");
   }
@@ -265,6 +269,7 @@ export async function updateCrmVenueSettings(
       legal_name: legalName || null,
       name,
       tax_id: taxId || null,
+      sort_order: input.sortOrder,
     })
     .eq("tenant_id", context.tenantId)
     .eq("id", venueId);

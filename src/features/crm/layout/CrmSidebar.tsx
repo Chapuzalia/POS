@@ -1,5 +1,5 @@
 import { Button as UiButton } from '../../../components/ui/Button'
-import { Boxes, ChevronDown, LogOut, Moon, Package, ReceiptText, ShoppingCart, Store, Sun, X, type LucideIcon } from 'lucide-react'
+import { Boxes, ChevronDown, LogOut, Moon, Package, ReceiptText, ShoppingCart, Sun, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { TenantContext } from '../../../types'
 import {
@@ -144,16 +144,14 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
       />
       <aside
         aria-label="Sidebar del CRM"
-        className={`${isOpen ? '!translate-x-0' : '!-translate-x-[102%]'} !fixed !inset-y-0 !left-0 !z-40 !flex !h-full !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !flex-col !overflow-hidden !border-r !border-[var(--crm-sidebar-border)] !bg-[var(--crm-sidebar-bg)] !bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_34%)] !text-[var(--crm-sidebar-text)] !shadow-[var(--crm-shadow-floating)] !isolate !transition-transform !duration-200 [.pwa-standalone_&]:!pt-[env(safe-area-inset-top,0px)] xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none`}
+        className={`${isOpen ? '!translate-x-0' : '!-translate-x-[102%]'} !fixed !inset-y-0 !left-0 !z-40 !flex !h-full !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !flex-col !overflow-hidden !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !bg-[linear-gradient(180deg,rgba(255,255,255,0.025),transparent_34%)] !text-[var(--crm-sidebar-text)] !shadow-[var(--crm-shadow-floating)] !isolate !transition-transform !duration-200 [.pwa-standalone_&]:!pt-[env(safe-area-inset-top,0px)] xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none`}
         id="crm-sidebar"
       >
-        <header className="!flex !min-h-[88px] !items-center !gap-3 !border-b !border-[var(--crm-sidebar-border)] !px-5 !py-4">
-          <div className="!grid !size-11 !shrink-0 !place-items-center !rounded-xl !bg-[var(--crm-sidebar-accent)] !text-white !shadow-[0_8px_22px_rgba(20,120,237,0.28)]">
-            <Store className="!size-5" />
-          </div>
+        <header className="!flex !min-h-16 !shrink-0 !items-center !gap-3 !border-b !border-[var(--crm-sidebar-border)] !px-5 !py-4 md:!min-h-20">
+          <img alt="Tickit" className="!h-11 !w-11 rounded-l-field" src="\icons\apple-touch-icon.png" />
           <div className="!min-w-0 !flex-1">
             <p className="!m-0 !truncate !text-sm !leading-tight !font-semibold !text-[var(--crm-sidebar-text)]">{context.tenantName}</p>
-            <p className="!mt-1 !mb-0 !text-[10px] !font-semibold !tracking-[0.16em] !text-[var(--crm-sidebar-muted)] !uppercase">TICKIT CRM</p>
+            <p className="!mt-1 !mb-0 !text-[10px] !font-semibold !tracking-[0.16em] !text-[var(--crm-sidebar-muted)] !uppercase">Back Office</p>
           </div>
           <UiButton
             aria-label="Cerrar menú de navegación"

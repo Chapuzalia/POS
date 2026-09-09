@@ -8,6 +8,7 @@ import { AppModal, Button, Metric } from "../ui";
 import { NumericKeypadModal } from "../ui/NumericKeypadModal";
 
 type CloseCashModalProps = {
+  openOrderCount: number;
   cashSession: CashSession;
   cashlogyCashCents: number | null;
   isBusy: boolean;
@@ -18,6 +19,7 @@ type CloseCashModalProps = {
 };
 
 export function CloseCashModal({
+  openOrderCount,
   cashSession,
   cashlogyCashCents,
   isBusy,
@@ -46,6 +48,7 @@ export function CloseCashModal({
 
   function handleConfirm() {
     onConfirm({
+      carryForwardOpenOrders: openOrderCount > 0,
       sessionId: cashSession.id,
       tenantId: cashSession.tenantId,
       closedAt: nowIso(),
@@ -88,9 +91,7 @@ export function CloseCashModal({
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-2xl font-bold">Cierre de caja</h2>
-              <p className="text-sm text-[var(--muted)]">
-                Revisa importes esperados y contado real.
-              </p>
+              
             </div>
             <Button
               disabled={isBusy}
@@ -182,6 +183,10 @@ export function CloseCashModal({
             ) : null}
           </label>
 
+          {openOrderCount > 0 ? <div className="mt-4 rounded-[var(--radius)] border border-[var(--separator)] p-3">
+            <p className="text-sm">Hay {openOrderCount} pedidos abiertos. Se conservarán para el siguiente turno. El importe pendiente de cobro no se incluirá en este cierre.</p>
+            <Button className="mt-3" disabled={isBusy} onClick={onCancel} type="button" variant="tertiary">Volver y revisar</Button>
+          </div> : null}
           <Button
             className="mt-4"
             disabled={isBusy || notesRequired || finalCashFundCents < 0}
@@ -191,7 +196,7 @@ export function CloseCashModal({
             type="button"
             variant="danger"
           >
-            Cerrar caja
+            {openOrderCount > 0 ? 'Traspasar al siguiente turno y cerrar' : 'Cerrar caja'}
           </Button>
         </section>
       </AppModal>

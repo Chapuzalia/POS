@@ -1,5 +1,5 @@
 import { Minus, Plus, X } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState } from "react";
 import { resolveSellableProduct } from "../../features/catalog/domain/resolver";
 import type {
   CatalogData,
@@ -274,7 +274,6 @@ export function ProductDialog({
     !startsWithVariantSelection,
   );
   const [hasSubmitted, setHasSubmitted] = useState(false);
-  const [isClosing, setIsClosing] = useState(false);
   const submittedRef = useRef(false);
   const dialogRef = useRef<HTMLElement>(null);
   const isChoosingVariant = startsWithVariantSelection && !hasChosenVariant;
@@ -350,16 +349,6 @@ export function ProductDialog({
   );
   const missingSelections = groupProgress.filter((group) => !group.complete);
 
-  useEffect(() => {
-    if (!isClosing) return;
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) {
-      onCancel();
-      return;
-    }
-    const timeout = window.setTimeout(onCancel, 170);
-    return () => window.clearTimeout(timeout);
-  }, [isClosing, onCancel]);
-
   function completeAdd(
     sellable: ResolvedSellableProduct,
     nextSelection: ProductLineSelection,
@@ -375,7 +364,10 @@ export function ProductDialog({
     if (!wasAdded) return false;
     submittedRef.current = true;
     setHasSubmitted(true);
-    setIsClosing(true);
+    // Close synchronously after the line is accepted. Keeping the modal mounted
+    // for an animation leaves HeroUI's backdrop active while the table draft is
+    // being updated, which can make the POS look frozen after selecting a mixer.
+    onCancel();
     return true;
   }
 
@@ -590,8 +582,6 @@ export function ProductDialog({
       maxWidth={isChoosingMixer || menuAssignments.length ? 1024 : 576}
       dialogClassName={cx(
         isChoosingMixer && "!w-full",
-        isClosing &&
-          "animate-[product-dialog-backdrop-close_170ms_ease-out_forwards] motion-reduce:animate-none",
       )}
       dismissDisabled={isBusy || hasSubmitted}
       label="Configurar producto"
@@ -602,8 +592,6 @@ export function ProductDialog({
         className={cx(
           "max-h-[calc(100svh-32px)] w-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]",
           isChoosingMixer || menuAssignments.length ? "max-w-none" : "max-w-xl",
-          isClosing &&
-            "pointer-events-none animate-[product-dialog-close_170ms_ease-out_forwards] motion-reduce:animate-none",
         )}
       >
         <div className="flex items-start justify-between gap-4">

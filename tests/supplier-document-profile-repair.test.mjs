@@ -68,6 +68,8 @@ test('un identificador corregido tampoco puede ser ignorado por el perfil', asyn
   await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async () => data.rules }), /PROFILE_REPAIR_IDENTITY_OR_TAX_MISMATCH/)
 })
 
+
+
 test('endpoint autentica, respeta RLS y termina el trabajo antes de publicar', async () => {
   const source = await readFile(new URL('../supabase/functions/repair-supplier-document-profile/index.ts', import.meta.url), 'utf8')
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText

@@ -34,6 +34,7 @@ export type DataTableProps = Omit<ComponentProps<'table'>, 'children'> & {
 
 type HeaderCellProps = ComponentProps<'th'> & {
   'data-column-key'?: string
+  'data-row-header'?: boolean | 'true' | 'false'
   'data-sortable'?: boolean | 'true' | 'false'
 }
 
@@ -120,6 +121,16 @@ export function DataTable({
     const label = textValue(props.children).trim() || props['aria-label'] || ''
     return actionColumnPattern.test(label) ? [index] : []
   })
+  const declaredRowHeaderIndex = columns.findIndex((column) => {
+    const value = (column.props as HeaderCellProps)['data-row-header']
+    return value === true || value === 'true'
+  })
+  const firstDataColumnIndex = columns.findIndex((_, index) => !actionColumnIndexes.includes(index))
+  const rowHeaderIndex = declaredRowHeaderIndex >= 0
+    ? declaredRowHeaderIndex
+    : firstDataColumnIndex >= 0
+      ? firstDataColumnIndex
+      : columns.length ? 0 : -1
 
   const filteredRows = deferredFilter
     ? rows.filter((row) => {
@@ -202,7 +213,7 @@ export function DataTable({
                     allowsSorting={allowsSorting}
                     className={props.className}
                     id={columnKeys[columnIndex]}
-                    isRowHeader={columnIndex === 0}
+                    isRowHeader={columnIndex === rowHeaderIndex}
                     key={columnKeys[columnIndex]}
                     textValue={label}
                   >

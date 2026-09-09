@@ -140,7 +140,7 @@ export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicat
           actions={
             <div className="flex flex-wrap gap-2"><UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold text-[var(--crm-text-secondary)]" disabled={disabled} onClick={() => setEditorProductId('create')} type="button"><Plus className="!size-4" /> Añadir producto</UiButton><UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)]" disabled={disabled} onClick={() => setEditorProductId('create-menu')} type="button"><Plus className="!size-4" /> Añadir menú</UiButton></div>
           }
-          description={`${filtered.length} de ${catalog.products.length} productos · una única carga para todo el local`}
+          description={`${filtered.length} de ${catalog.products.length} productos`}
           title="Productos"
         >
           <div className="!grid !gap-2 sm:!grid-cols-2 lg:!grid-cols-[minmax(220px,1fr)_repeat(4,minmax(180px,auto))]">

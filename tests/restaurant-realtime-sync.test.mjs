@@ -82,6 +82,7 @@ async function realtimeHarness(overrides = {}) {
   window.clearTimeout = window.clearInterval = (id) => timers.delete(id)
   const calls = { maps: 0, orders: 0, errors: [], views: [], replaced: [] }
   let databaseMap = { areas: [{ id: 'area' }], tables: [{ id: 'table', occupied: false }], layoutRevision: 0 }
+  let databaseOrder = { order: { id: 'order', status: 'open' }, tables: [{ areaId: 'area' }] }
   const channels = []
   const options = {
     context: { tenantId: 'tenant', venueId: 'venue' }, enabled: true, isOnline: true,
@@ -89,13 +90,15 @@ async function realtimeHarness(overrides = {}) {
     onError: (error) => calls.errors.push(error),
     setPosView: (view) => calls.views.push(view),
     replaceOrder: (order) => calls.replaced.push(order),
+    setEqualSplit() {},
+    setSplitOrderGroup() {},
     ...overrides,
   }
   const runner = hookRunner('useRestaurantRealtime', {
     '../../tables/service': {
       loadVenueTablesEnabled: async () => true,
       loadRestaurantMap: async () => { calls.maps++; return databaseMap },
-      loadRestaurantOrder: async () => { calls.orders++; return { order: { id: 'order', status: 'open' } } },
+      loadRestaurantOrder: async () => { calls.orders++; return databaseOrder },
       subscribeToRestaurantMap: (_context, change, status) => {
         channels.push({ change, status })
         return () => status('CLOSED') // Supabase may emit CLOSED during cleanup.
@@ -109,6 +112,7 @@ async function realtimeHarness(overrides = {}) {
     calls, options, timers, channels, window, document,
     result: () => runner.render(options),
     occupy() { databaseMap = { ...databaseMap, tables: [{ id: 'table', occupied: true }] } },
+    carryForward() { databaseOrder = { ...databaseOrder, order: { ...databaseOrder.order, status: 'carried_forward' } } },
     async rerender(patch) { Object.assign(options, patch); runner.render(options); await flush() },
     async tick(ms) {
       const end = now + ms
@@ -148,6 +152,18 @@ for (const event of ['visibilitychange', 'focus', 'online']) {
     h.unmount()
   })
 }
+
+test('un traspaso remoto retira el pedido suspendido del editor sin abrir una cuenta hermana', async () => {
+  const h = await realtimeHarness({ posView: { type: 'table_order', orderId: 'order' } })
+  h.carryForward()
+  h.channels[0].change()
+  await h.tick(250)
+  assert.equal(h.calls.replaced.at(-1), null)
+  assert.equal(h.calls.views.at(-1).type, 'table_map')
+  assert.equal(h.calls.views.at(-1).areaId, 'area')
+  assert.deepEqual(h.calls.errors, [])
+  h.unmount()
+})
 
 test('SUBSCRIBED mantiene Realtime y polling de seguridad cada 18 segundos', async () => {
   const h = await realtimeHarness()

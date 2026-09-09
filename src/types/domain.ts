@@ -460,6 +460,7 @@ export type SaleCreatedPayload = {
 }
 
 export type CashClosedPayload = {
+  carryForwardOpenOrders?: boolean
   sessionId: string
   tenantId: string
   closedAt: string

@@ -8,6 +8,7 @@ import { applyCrmOpenCashSalesTotals, loadCrmDayActivity, loadCrmOpenCashSalesTo
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import { catalogAdminService } from '../../features/crm/catalog/services/catalogAdminService.ts'
+import { recoverSupabaseRealtimeConnection } from '../../lib/supabase'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 
@@ -27,6 +28,8 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
   const [comparisonStats, setComparisonStats] = useState<CrmStats | null>(null)
   const [venues, setVenues] = useState<CrmVenue[]>([])
   const [selectedVenueId, setSelectedVenueId] = useState('')
+  const selectedVenueIdRef = useRef(selectedVenueId)
+  selectedVenueIdRef.current = selectedVenueId
   const handleCatalogLoadError = useCallback((loadError: unknown) => onError(getReadableError(loadError, { operation: 'components.crm.CrmPage' })), [onError])
   const { catalog, isLoading: isCatalogLoading, refresh: refreshAdminCatalog } = useCatalogAdmin(selectedVenueId, isOnline, handleCatalogLoadError)
 
@@ -157,7 +160,7 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
     }
     const refreshOpenCashSales = async () => {
       const cashSessionIds = statsRef.current?.openCashSessions.map((session) => session.id) ?? []
-      const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
+      const selectedVenue = venues.find((venue) => venue.id === selectedVenueIdRef.current)
       if (!selectedVenue) return
       try {
         const [totals, dayActivity] = await Promise.all([
@@ -178,6 +181,12 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
       if (salesTimer) window.clearTimeout(salesTimer)
       salesTimer = window.setTimeout(() => void refreshOpenCashSales(), 250)
     }
+    const handleVisibilityChange = () => {
+      if (document.visibilityState !== 'visible') return
+      void recoverSupabaseRealtimeConnection()
+      void refreshStatsRef.current({ silent: true })
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
     const unsubscribers = venues.map((venue) => subscribeToCrmStatsChanges(
       context,
       venue.id,
@@ -203,9 +212,10 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
       if (cashSessionTimer) window.clearTimeout(cashSessionTimer)
       if (salesTimer) window.clearTimeout(salesTimer)
       if (fallbackTimer) window.clearInterval(fallbackTimer)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
       unsubscribers.forEach((unsubscribe) => unsubscribe())
     }
-  }, [activeSection, context, isOnline, onError, selectedVenueId, venues])
+  }, [activeSection, context, isOnline, onError, venues])
 
   if (!canAccessCrm(context.role)) return null
   const disabled = !isOnline || isBusy || isCatalogLoading

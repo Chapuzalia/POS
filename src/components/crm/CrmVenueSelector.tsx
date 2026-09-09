@@ -22,7 +22,7 @@ export function CrmVenueSelector({ disabled, onChange, value, venues }: Props) {
   return (
     <CrmSelect
       ariaLabel="Seleccionar local"
-      className="crm-custom-venue-selector !w-full md:!w-auto md:!min-w-[220px]"
+      className="crm-custom-venue-selector  !w-full md:!w-auto md:!min-w-[220px]"
       disabled={disabled}
       leadingIcon={<Building2 className="!hidden !size-4 !shrink-0 !text-[var(--crm-text-muted)] sm:!block" />}
       onChange={onChange}
