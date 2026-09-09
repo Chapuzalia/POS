@@ -635,6 +635,15 @@ export function supplierSelection(extraction: SupplierDocumentExtraction, resolu
   return { kind: extraction.supplier.name && extraction.supplierEvidence?.name ? 'provisional' as const : 'unresolved' as const, supplierId: null }
 }
 
+export function supplierHintSelection(supplierId: string, detectedSupplierId: unknown) {
+  const confirmsDetection = typeof detectedSupplierId === 'string' && supplierId === detectedSupplierId
+  return {
+    kind: confirmsDetection ? 'detected_hint' as const : 'manual_hint' as const,
+    supplierId,
+    source: confirmsDetection ? 'system' as const : 'manual' as const,
+  }
+}
+
 export function normalizeSupplierIdentity(type: SupplierIdentityType, value: string | null | undefined) {
   if (type === 'tax_id') return normalizeSupplierTaxId(value)
   if (type === 'email') return normalizeSupplierEmail(value)
@@ -692,6 +701,39 @@ function candidateIdentities(candidate: SupplierCandidate) {
       : normalizeSupplierIdentity(identity.type, identity.value)
     return normalizedValue ? [{ ...identity, normalizedValue }] : []
   })
+}
+
+/** Resolve routing from OCR before AI. Registered/confirmed aliases are lookup
+ * values only; a match must still appear independently in the document. */
+export function resolveSupplierFromOcr(ocr: OcrDocument, candidates: SupplierCandidate[]): SupplierResolution {
+  const evidence = supplierOcrEvidence(ocr)
+  const matches = candidates.map((candidate) => {
+    const signals = new Set<SupplierIdentityType>()
+    for (const identity of candidateIdentities(candidate)) {
+      if (identity.source === 'extracted') continue
+      const supported = evidence.some((fragment) => {
+        if (identity.type === 'email_domain') {
+          const emails = fragment.match(/[^\s<>:]+@[^\s<>,;]+/g) ?? []
+          return emails.some((email) => normalizeSupplierEmailDomain(email) === identity.normalizedValue)
+        }
+        if (identity.type === 'name') {
+          const name = identity.normalizedValue
+          return name.length >= 5 && ` ${normalizeSupplierName(fragment)} `.includes(` ${name} `)
+        }
+        return supplierValueAppearsInOcr(identity.type === 'tax_id' ? 'taxId' : identity.type, identity.value, fragment)
+      })
+      if (supported) signals.add(identity.type)
+    }
+    return { supplierId: candidate.supplierId, signals: [...signals] }
+  }).filter((match) => match.signals.length > 0)
+  const strong = matches.filter((match) => match.signals.some((signal) => ['tax_id', 'email', 'phone'].includes(signal)))
+  // Multiple issuers/recipient details in OCR must not be resolved by array order.
+  if (strong.length > 1) return { supplierId: null, confidence: 'unresolved', signals: [], reasons: ['conflicting_ocr_identities'] }
+  if (strong.length === 1) return { ...strong[0], confidence: 'high', reasons: ['ocr_strong_identity'] }
+  const corroborated = matches.filter((match) => match.signals.length >= 2)
+  if (corroborated.length === 1) return { ...corroborated[0], confidence: 'high', reasons: ['ocr_multiple_signals'] }
+  if (matches.length === 1) return { ...matches[0], confidence: 'probable', reasons: ['ocr_single_weak_signal'] }
+  return { supplierId: null, confidence: 'unresolved', signals: [], reasons: [matches.length ? 'ambiguous_ocr_identity' : 'no_reliable_match'] }
 }
 
 export function resolveSupplierCandidate(
@@ -780,11 +822,17 @@ export function supplierIdentityMatches(
 }
 
 export function profileMatchesOcr(rules: SupplierProfileRules, ocr: OcrDocument) {
+  return profileFingerprint(rules, ocr).missingRequiredTexts.length === 0
+}
+
+export function profileFingerprint(rules: SupplierProfileRules, ocr: OcrDocument) {
   const haystack = normalizeDocumentText([
     ocr.text,
     ...ocr.pages.flatMap((page) => page.tables.flatMap((table) => table.cells.map((cell) => cell.text))),
   ].join(' '))
-  return rules.requiredTexts.every((text) => haystack.includes(normalizeDocumentText(text)))
+  const requiredTexts = rules.requiredTexts.map((text) => ({ text, found: haystack.includes(normalizeDocumentText(text)) }))
+  return { requiredTexts, missingRequiredTexts: requiredTexts.filter((entry) => !entry.found).map((entry) => entry.text),
+    optionalTexts: rules.optionalTexts.map((text) => ({ text, found: haystack.includes(normalizeDocumentText(text)) })) }
 }
 
 function tableMatrix(table: OcrTable) {
@@ -845,17 +893,87 @@ function roundMoney(value: number) {
   return Math.round((value + Number.EPSILON) * 1_000_000) / 1_000_000
 }
 
+// Shared by execution and diagnostics so fuzzy matches, positional columns and
+// ambiguous headers are described using the same rules that actually run.
+export function inspectProfileHeader(rawHeaders: string[], rules: SupplierProfileRules) {
+  const headers = rawHeaders.map(normalizeDocumentText)
+  const columns = rules.columns.map((column) => {
+    const scores = headers.map((header) => Math.min(...column.headerAliases.map((alias) => labelMatchDistance(header, alias))))
+    const best = Math.min(...scores)
+    const ambiguous = Number.isFinite(best) && scores.filter((score) => score === best).length > 1
+    const index = Number.isFinite(best) && !ambiguous ? scores.indexOf(best) : null
+    return { field: column.field, required: column.required, aliases: column.headerAliases,
+      index, header: index === null ? null : rawHeaders[index], ambiguous, positional: false,
+      distance: Number.isFinite(best) ? best : null }
+  })
+  const matchesTableStart = Boolean(rules.tableStartText && headers.join(' ').includes(normalizeDocumentText(rules.tableStartText)))
+  const relevant = columns.some((column) => column.index !== null) || matchesTableStart
+  if (relevant) {
+    const claimedIndexes = new Set(
+      columns.flatMap((column) => column.index === null ? [] : [column.index]),
+    )
+
+    columns.forEach((column, index) => {
+      if (
+        !column.aliases.length &&
+        index < headers.length &&
+        !claimedIndexes.has(index)
+      ) {
+        Object.assign(column, {
+          index,
+          header: rawHeaders[index],
+          positional: true,
+        })
+        claimedIndexes.add(index)
+      }
+    })
+  }
+  const mapped = columns.flatMap((column) => column.index === null ? [] : [column.index])
+  const missingRequiredColumns = columns.filter((column) => column.required && column.index === null).map((column) => column.field)
+  const duplicateColumns = new Set(mapped).size !== mapped.length
+  return { headers: rawHeaders, columns, matchesTableStart, relevant, missingRequiredColumns, duplicateColumns,
+    usable: relevant && !missingRequiredColumns.length && !duplicateColumns }
+}
+
+export type ParserHeaderAttempt = ReturnType<typeof inspectProfileHeader> & {
+  pageNumber: number; tableIndex: number; headerRowIndex: number; selected: boolean
+  dataTableIndex: number; extractedLineCount: number; rejectedRows: Array<{ tableIndex: number; rowIndex: number; reason: string }>
+  rejectedRowCount: number
+}
+export type ParserExecutionTrace = {
+  headers: ParserHeaderAttempt[]; headerCount: number; headersTruncated: boolean
+  tableCount: number; partialLines: ExtractedLine[]
+}
+
+export function inspectParserTables(ocr: OcrDocument, rules: SupplierProfileRules): ParserExecutionTrace {
+  const trace: ParserExecutionTrace = { headers: [], headerCount: 0, headersTruncated: false,
+    tableCount: ocr.pages.reduce((sum, page) => sum + page.tables.length, 0), partialLines: [] }
+  for (const page of ocr.pages) page.tables.forEach((table, tableIndex) => {
+    tableMatrix(table).forEach((row, headerRowIndex) => {
+      const header = inspectProfileHeader(row, rules)
+      if (!header.relevant && !header.columns.some((column) => column.ambiguous) && headerRowIndex > 0) return
+      trace.headerCount++
+      if (trace.headers.length >= 200) { trace.headersTruncated = true; return }
+      trace.headers.push({ ...header, pageNumber: page.pageNumber, tableIndex, headerRowIndex, selected: false,
+        dataTableIndex: tableIndex, extractedLineCount: 0, rejectedRows: [], rejectedRowCount: 0 })
+    })
+  })
+  return trace
+}
+
 export function runDeterministicLineParser(
   inputRules: SupplierProfileRules | unknown,
   ocrInput: OcrDocument | unknown,
+  trace?: ParserExecutionTrace,
 ): ExtractedLine[] {
   const rules = supplierProfileRulesSchema.parse(inputRules)
   const originalOcr = ocrDocumentSchema.parse(ocrInput)
   if (!profileMatchesOcr(rules, originalOcr)) throw new Error('PROFILE_FINGERPRINT_MISMATCH')
   const ocr = reconstructMergedTables(originalOcr, rules, labelMatchDistance)
+  if (trace) Object.assign(trace, inspectParserTables(ocr, rules))
   // Choose the best header interpretation per physical data table, then retain
   // every table/page. A header-only table may describe the following table.
-  const selectedTables = new Map<OcrTable, { lines: ExtractedLine[]; score: number }>()
+  const selectedTables = new Map<OcrTable, { lines: ExtractedLine[]; score: number; attempt?: ParserHeaderAttempt }>()
   let matchedHeaders = false
   for (const page of ocr.pages) {
     for (let tableIndex = 0; tableIndex < page.tables.length; tableIndex += 1) {
@@ -863,32 +981,26 @@ export function runDeterministicLineParser(
       const matrix = tableMatrix(table)
       const normalizedTableText = normalizeDocumentText(matrix.flat().join(' '))
       for (let headerRowIndex = 0; headerRowIndex < matrix.length; headerRowIndex += 1) {
-        const headers = matrix[headerRowIndex]?.map(normalizeDocumentText) ?? []
-        const indexes = new Map<z.infer<typeof parserFieldSchema>, number>()
-        for (const column of rules.columns) {
-          if (column.headerAliases.length === 0) continue
-          const scores = headers.map((header) => Math.min(...column.headerAliases.map((alias) => labelMatchDistance(header, alias))))
-          const best = Math.min(...scores)
-          if (Number.isFinite(best) && scores.filter((score) => score === best).length === 1) {
-            indexes.set(column.field, scores.indexOf(best))
-          }
-        }
-        const matchesTableStart = Boolean(rules.tableStartText
-          && headers.join(' ').includes(normalizeDocumentText(rules.tableStartText)))
-        if (indexes.size === 0 && !matchesTableStart) continue
-        rules.columns.forEach((column, declaredIndex) => {
-          if (column.headerAliases.length === 0 && declaredIndex < headers.length) indexes.set(column.field, declaredIndex)
-        })
-        const requiredColumns = rules.columns.filter((column) => column.required)
-        if (!requiredColumns.every((column) => indexes.has(column.field))) continue
-        if (new Set(indexes.values()).size !== indexes.size) continue
+        const header = inspectProfileHeader(matrix[headerRowIndex] ?? [], rules)
+        if (!header.usable) continue
+        const indexes = new Map(header.columns.flatMap((column) => column.index === null ? [] : [[column.field, column.index] as const]))
+        const attempt = trace?.headers.find((entry) => entry.pageNumber === page.pageNumber && entry.tableIndex === tableIndex && entry.headerRowIndex === headerRowIndex)
         matchedHeaders = true
         let dataRows = matrix.slice(headerRowIndex + 1)
         let usedFollowingTable = false
         while (true) {
           const lines: ExtractedLine[] = []
+          const rejectRow = (rowIndex: number, reason: string) => {
+            if (!attempt) return
+            attempt.rejectedRowCount++
+            if (attempt.rejectedRows.length < 100) attempt.rejectedRows.push({
+              tableIndex: usedFollowingTable ? tableIndex + 1 : tableIndex,
+              rowIndex: usedFollowingTable ? rowIndex : headerRowIndex + 1 + rowIndex, reason,
+            })
+          }
           let tableEnded = false
           for (let rowIndex = 0; rowIndex < dataRows.length; rowIndex += 1) {
+            const sourceRowIndex = rowIndex
             const row = dataRows[rowIndex]
             const normalizedRow = normalizeDocumentText(row.join(' '))
             if (rules.tableEndText && normalizedRow.includes(normalizeDocumentText(rules.tableEndText))) break
@@ -896,9 +1008,28 @@ export function runDeterministicLineParser(
               const index = indexes.get(field)
               return index === undefined ? '' : normalizeProfileField(sourceRow[index] ?? '', field, rules)
             }
-            const description = get(row, 'description')
-            const quantity = parseProfileNumber(get(row, 'quantity'), rules)
-            if (!description || auxiliaryLineKind(description) || quantity === null || quantity <= 0) continue
+           const description = get(row, 'description')
+            const rawQuantity = get(row, 'quantity')
+            const quantity = parseProfileNumber(rawQuantity, rules)
+
+            const explicitPurchaseUnit = get(row, 'purchaseUnit')
+              .replace(/^\s*[+-]?[\d.,]+\s+(?=\p{L})/u, '')
+
+            const embeddedPurchaseUnit = explicitPurchaseUnit
+              ? ''
+              : normalizeProfileField(
+                  rawQuantity.match(
+                    /^\s*[+-]?[\d.,]+\s+(\p{L}[\p{L}\p{N}./-]*)\s*$/u,
+                  )?.[1] ?? '',
+                  'purchaseUnit',
+                  rules,
+                )
+
+            if (!description || auxiliaryLineKind(description) || quantity === null || quantity <= 0) {
+              rejectRow(rowIndex, !description ? 'DESCRIPTION_MISSING' : auxiliaryLineKind(description)
+                ? 'AUXILIARY_ROW' : quantity === null ? 'QUANTITY_UNREADABLE' : 'QUANTITY_NOT_POSITIVE')
+              continue
+            }
             const unitPrice = parseProfileNumber(get(row, 'unitPrice'), rules)
             let discountAmount = Math.abs(parseProfileNumber(get(row, 'discountAmount'), rules) ?? 0)
             let chargesAmount = 0
@@ -955,6 +1086,8 @@ export function runDeterministicLineParser(
             const lineTotal = rules.lineGroup ? (groupedNetTotal ?? calculatedNetTotal) : mainRowTotal
             if (fuzzyGroup && (groupedNetTotal === null || calculatedNetTotal === null
               || Math.abs(groupedNetTotal - calculatedNetTotal) > 0.02)) {
+              rejectRow(sourceRowIndex, 'PROFILE_FUZZY_LABEL_UNVERIFIED')
+              if (trace) trace.partialLines = [...selectedTables.values()].flatMap((table) => table.lines).concat(lines)
               throw new Error('PROFILE_FUZZY_LABEL_UNVERIFIED')
             }
             const taxRate = parseProfileNumber(get(row, 'taxRate'), rules)
@@ -963,7 +1096,7 @@ export function runDeterministicLineParser(
               description,
               barcode: get(row, 'barcode') || null,
               quantity,
-              purchaseUnit: get(row, 'purchaseUnit').replace(/^\s*[+-]?[\d.,]+\s+(?=\p{L})/u, '') || null,
+              purchaseUnit: explicitPurchaseUnit || embeddedPurchaseUnit || null,
               unitPrice,
               discountAmount,
               chargesAmount,
@@ -975,6 +1108,7 @@ export function runDeterministicLineParser(
               confidence: ocr.confidence,
             })
             if (parsedLine.success) lines.push(parsedLine.data)
+            else rejectRow(sourceRowIndex, `LINE_SCHEMA_INVALID:${parsedLine.error.issues.map((issue) => issue.path.join('.')).join(',')}`)
             if (tableEnded) break
           }
           if (lines.length === 0 && !usedFollowingTable) {
@@ -982,9 +1116,11 @@ export function runDeterministicLineParser(
             if (followingTable?.columnCount === table.columnCount) {
               dataRows = tableMatrix(followingTable)
               usedFollowingTable = true
+              if (attempt) attempt.dataTableIndex = tableIndex + 1
               continue
             }
           }
+          if (attempt) attempt.extractedLineCount = lines.length
           if (lines.length === 0) break
           const markerScore = [rules.tableStartText, rules.tableEndText]
             .filter((marker): marker is string => Boolean(marker))
@@ -992,24 +1128,31 @@ export function runDeterministicLineParser(
           const score = lines.length * 1_000 + indexes.size * 10 + markerScore * 100 - headerRowIndex
           const dataTable = usedFollowingTable ? page.tables[tableIndex + 1] : table
           const selected = selectedTables.get(dataTable)
-          if (!selected || score > selected.score) selectedTables.set(dataTable, { lines, score })
+          if (!selected || score > selected.score) {
+            if (selected?.attempt) selected.attempt.selected = false
+            if (attempt) attempt.selected = true
+            selectedTables.set(dataTable, { lines, score, attempt })
+          }
           break
         }
       }
     }
   }
   if (!selectedTables.size) throw new Error(matchedHeaders ? 'PROFILE_LINES_NOT_FOUND' : 'PROFILE_TABLE_NOT_FOUND')
-  return [...selectedTables.values()].flatMap((table) => table.lines)
+  const lines = [...selectedTables.values()].flatMap((table) => table.lines)
+  if (trace) trace.partialLines = lines
+  return lines
 }
 
 export function runDeterministicParser(
   inputRules: SupplierProfileRules | unknown,
   ocrInput: OcrDocument | unknown,
   defaults: { documentType: 'invoice' | 'delivery_note'; supplierName: string | null; supplierTaxId?: string | null },
+  trace?: ParserExecutionTrace,
 ): SupplierDocumentExtraction {
   const rules = supplierProfileRulesSchema.parse(inputRules)
   const ocr = ocrDocumentSchema.parse(ocrInput)
-  const lines = runDeterministicLineParser(rules, ocr)
+  const lines = runDeterministicLineParser(rules, ocr, trace)
   const metadata = extractProfileMetadata(ocr, rules)
   return supplierDocumentExtractionSchema.parse({
     document: {

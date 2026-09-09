@@ -73,9 +73,10 @@ async function sha256(file: File) {
   return [...new Uint8Array(digest)].map((value) => value.toString(16).padStart(2, '0')).join('')
 }
 
-async function processDocument(documentId: string, fixtureId?: string) {
+async function processDocument(documentId: string, fixtureId?: string, manualHintSupplierId?: string) {
   const { data, error } = await requireSupabase().functions.invoke('process-supplier-document', {
-    body: { documentId, ...(fixtureId ? { fixtureId } : {}) },
+    body: { documentId, ...(fixtureId ? { fixtureId } : {}),
+      ...(manualHintSupplierId ? { action: 'resume_with_supplier', manualHintSupplierId } : {}) },
   })
   if (error) {
     throw new UserFacingError(await getFunctionInvokeErrorMessage(
@@ -89,6 +90,10 @@ async function processDocument(documentId: string, fixtureId?: string) {
 
 export function retrySupplierDocumentProcessing(documentId: string) {
   return processDocument(documentId)
+}
+
+export function resumeSupplierDocumentWithHint(documentId: string, supplierId: string) {
+  return processDocument(documentId, undefined, supplierId)
 }
 
 export async function uploadSupplierDocument(

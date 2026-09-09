@@ -16,6 +16,7 @@ import {
   runDeterministicParser,
   sanitizeSupplierDocumentExtraction,
   supplierIdentityMatches,
+  inspectProfileHeader,
   supplierProfileRulesSchema,
   validateExtractionMath,
   validateProposedProfile,
@@ -115,6 +116,58 @@ test('las cabeceras toleran una errata pero no eligen entre dos columnas igualme
   assert.equal(runDeterministicParser(input.rules, input.ocr, input.defaults).lines[0].quantity, 2)
   input.ocr.pages[0].tables[0].cells.find((cell) => cell.rowIndex === 0 && cell.columnIndex === 0).text = 'Descripcióm'
   assert.throws(() => runDeterministicParser(input.rules, input.ocr, input.defaults), /PROFILE_TABLE_NOT_FOUND/)
+})
+
+test('los perfiles candidate se promocionan a verified tras suficiente evidencia', async () => {
+  const migration = await readFile(
+    new URL(
+      '../supabase/migrations/20260909114313_restore_supplier_parser_candidate_promotion.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(migration, /new\.status = 'candidate'/)
+  assert.match(migration, /new\.success_count >= 3/)
+  assert.match(migration, /new\.status := 'verified'/)
+  assert.match(migration, /before update of success_count, correction_count/)
+  assert.match(migration, /where status = 'candidate'[\s\S]*success_count >= 3/)
+})
+
+test('extrae la unidad sin duplicar la cantidad de compra', () => {
+  const separate = parseGroupedRows([
+    ['A', 'AGUA', '6', '6 UN', '2,00', '12,00'],
+  ])
+
+  assert.equal(separate.lines[0].quantity, 6)
+  assert.equal(separate.lines[0].purchaseUnit, 'UN')
+
+  const embedded = parseGroupedRows([
+    ['A', 'AGUA', '6 UN', '', '2,00', '12,00'],
+  ])
+
+  assert.equal(embedded.lines[0].quantity, 6)
+  assert.equal(embedded.lines[0].purchaseUnit, 'UN')
+})
+
+test('el aprendizaje del parser solo cuenta correcciones reales de extracción', async () => {
+  const migration = await readFile(
+    new URL(
+      '../supabase/migrations/20260909131458_fix_supplier_parser_correction_count.sql',
+      import.meta.url,
+    ),
+    'utf8',
+  )
+
+  assert.match(
+    migration,
+    /supplier_document_line_extraction_changed\(line\)/,
+  )
+
+  assert.doesNotMatch(
+    migration,
+    /count\(\*\)\s+filter\s*\(\s*where\s+was_corrected\s*\)/,
+  )
 })
 
 test('reconstruye columnas fusionadas de Azure usando la geometría de palabras', () => {
@@ -431,12 +484,51 @@ test('headerAliases elimina espacios, vacíos y duplicados antes de validar', ()
   assert.deepEqual(parsed.columns[1].headerAliases, ['DESCRIPCIÓN'])
 })
 
-test('varias columnas sin aliases no invalidan el perfil completo', () => {
+test('una columna opcional sin aliases no colisiona con una cabecera identificada por alias', () => {
   const fixture = getSupplierDocumentMockFixture('known-supplier')
   const profile = structuredClone(fixture.knownProfile)
-  for (const index of [0, 1, 3, 4]) profile.columns[index].headerAliases = ['', '  ']
+
+  profile.columns = [
+    {
+      field: 'supplierReference',
+      required: false,
+      headerAliases: ['Codi'],
+    },
+    {
+      field: 'description',
+      required: true,
+      headerAliases: ['Descripció'],
+    },
+    {
+      field: 'quantity',
+      required: true,
+      headerAliases: ['QUAN'],
+    },
+    {
+      field: 'purchaseUnit',
+      required: false,
+      headerAliases: [],
+    },
+  ]
+
   const parsed = supplierProfileRulesSchema.parse(profile)
-  assert.deepEqual(parsed.columns.map((column) => column.headerAliases.length), [0, 0, 2, 0, 0, 2])
+
+  const header = inspectProfileHeader(
+    ['Codi', 'Descripció', 'IBEE', 'QUAN'],
+    parsed,
+  )
+
+  assert.equal(header.usable, true)
+
+  const quantity = header.columns.find(
+    (column) => column.field === 'quantity',
+  )
+  const purchaseUnit = header.columns.find(
+    (column) => column.field === 'purchaseUnit',
+  )
+
+  assert.equal(quantity?.index, 3)
+  assert.notEqual(purchaseUnit?.index, 3)
 })
 
 test('un campo realmente obligatorio vacío sigue fallando', () => {

@@ -34,6 +34,7 @@ import {
   loadSupplierReceiptWorkspace,
   loadSupplierDocument,
   retrySupplierDocumentProcessing,
+  resumeSupplierDocumentWithHint,
   reparseSupplierDocumentLines,
   saveSupplierDocumentLine,
   supplierDocumentMockEnabled,
@@ -62,6 +63,7 @@ type Props = {
 type Screen =
   | "capture"
   | "processing"
+  | "supplier"
   | "review"
   | "costs"
   | "confirmed"
@@ -174,6 +176,7 @@ export function SupplierReceiptsCrm({
   const [detail, setDetail] = useState<SupplierDocumentDetail | null>(null);
   const [inventory, setInventory] = useState<InventorySnapshot | null>(null);
   const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([]);
+  const [manualHintSupplierId, setManualHintSupplierId] = useState("");
   const [showAll, setShowAll] = useState(false);
   const [editingLineId, setEditingLineId] = useState<string | null>(null);
   const [draft, setDraft] = useState<EditorDraft | null>(null);
@@ -245,7 +248,18 @@ export function SupplierReceiptsCrm({
     );
     if (workspace.document.status === "confirmed") setScreen("review");
     else if (workspace.document.status === "review") setScreen("review");
-    else if (workspace.document.status === "processing") setScreen("processing");
+    else if (workspace.document.status === "processing") {
+      const awaitingSupplier = workspace.document.extractionMetadata.processingPhase === "awaiting_supplier";
+      if (awaitingSupplier) {
+        const suggestedSupplierId = supplierReviewState(workspace.document).suggestedSupplierId;
+        setManualHintSupplierId(
+          workspace.suppliers.some((supplier) => supplier.id === suggestedSupplierId)
+            ? suggestedSupplierId ?? ""
+            : "",
+        );
+      }
+      setScreen(awaitingSupplier ? "supplier" : "processing");
+    }
     else if (workspace.document.status === "error") {
       const processingError = workspace.document.extractionMetadata.message;
       setError(
@@ -274,7 +288,7 @@ export function SupplierReceiptsCrm({
       try {
         const current = await loadSupplierDocument(tenantContext, selectedVenueId, documentId);
         if (cancelled) return;
-        if (current.document.status !== "processing") {
+        if (current.document.status !== "processing" || current.document.extractionMetadata.processingPhase === "awaiting_supplier") {
           await refresh(documentId);
           return;
         }
@@ -777,6 +791,39 @@ export function SupplierReceiptsCrm({
             {error}
           </p>
         ) : null}
+      </section>
+    );
+  }
+
+  if (screen === "supplier" && detail) {
+    return (
+      <section className="mx-auto grid w-full max-w-xl gap-5 rounded-3xl bg-[var(--crm-surface)] p-8 shadow-[var(--crm-shadow-card)]">
+        <h2 className="text-xl font-black">Selecciona el proveedor</h2>
+        <p className="text-sm text-[var(--crm-text-muted)]">
+          No hemos podido identificar el proveedor con suficiente confianza. Selecciónalo para continuar leyendo el documento.
+        </p>
+        <CrmSelect
+          ariaLabel="Proveedor para continuar el escaneo"
+          disabled={busy || disabled}
+          emptyMessage="No hay proveedores en este local. Añade el proveedor en Compras y vuelve a abrir este documento."
+          onChange={setManualHintSupplierId}
+          options={supplierOptions.map((supplier) => ({
+            label: supplier.name, value: supplier.id,
+            description: supplier.taxId ? `NIF/CIF ${supplier.taxId}` : undefined,
+          }))}
+          placeholder="Selecciona un proveedor"
+          searchable
+          searchPlaceholder="Buscar proveedor..."
+          value={manualHintSupplierId}
+        />
+        {error ? <p className="text-sm text-[var(--crm-red)]" role="alert">{error}</p> : null}
+        <div className="flex gap-2">
+          <Button disabled={busy || disabled || !manualHintSupplierId} onClick={() => void run(async () => {
+            await resumeSupplierDocumentWithHint(detail.document.id, manualHintSupplierId);
+            await refresh(detail.document.id);
+          })} type="button" variant="primary">Continuar</Button>
+          <Button disabled={busy} onClick={() => onExit ? onExit() : setScreen("capture")} type="button" variant="secondary">Volver</Button>
+        </div>
       </section>
     );
   }
