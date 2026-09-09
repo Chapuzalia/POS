@@ -482,7 +482,7 @@ export function PosPage(props: Props) {
         {cashlogyPendingNotice}
       </div> : null}
       <AddProductFlyAnimation feedback={props.addFeedback.flyFeedback} />
-      {reservationsEnabled && props.reservations.isOpen ? <Suspense fallback={<DeferredPanelFallback label="reservas" />}><ReservationsPage controller={props.reservations} isOnline={props.isOnline} onOpenOrder={(orderId) => void restaurant.openExistingOrder(orderId)} /></Suspense> : null}
+      {reservationsEnabled && props.reservations.isOpen ? <Suspense fallback={<DeferredPanelFallback label="reservas" />}><ReservationsPage controller={props.reservations} isOnline={props.isOnline} /></Suspense> : null}
 
       {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type !== 'table_map' ? <TableOrderBar
         invoiceSelected={Boolean(invoiceCustomer)}

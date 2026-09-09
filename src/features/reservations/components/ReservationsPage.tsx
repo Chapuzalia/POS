@@ -28,7 +28,6 @@ type ReservationFilter = "all" | "upcoming" | "arrived" | "late" | "unassigned";
 type Props = {
   controller: Controller;
   isOnline: boolean;
-  onOpenOrder: (orderId: string) => void;
 };
 
 function matchesFilter(reservation: Reservation, filter: ReservationFilter) {
@@ -49,7 +48,7 @@ function matchesFilter(reservation: Reservation, filter: ReservationFilter) {
   return true;
 }
 
-export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
+export function ReservationsPage({ controller, isOnline }: Props) {
   const [filter, setFilter] = useState<ReservationFilter>("all");
   const [areaId, setAreaId] = useState("all");
   const searching = Boolean(controller.query.trim());
@@ -343,10 +342,7 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
             disabled={!isOnline || controller.isLoading}
             onClose={() => controller.setDetail(null)}
             onEdit={() => controller.openEdit(controller.detail!)}
-            onOpenOrder={(orderId) => {
-              controller.close();
-              onOpenOrder(orderId);
-            }}
+            onOpenOrder={() => void controller.seat(controller.detail!)}
             onSeat={() => void controller.seat(controller.detail!)}
             onStatus={(status, reason) =>
               void controller.updateStatus(controller.detail!, status, reason)
