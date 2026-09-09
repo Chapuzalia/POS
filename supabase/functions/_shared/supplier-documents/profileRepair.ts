@@ -84,7 +84,7 @@ export function diagnoseParser(profile: ParserProfile, ocrInput: OcrDocument, do
     const ocr = parsedOcr.data
     result.ocrQuality = validateOcrSanity(ocr)
     result.fingerprint = profileFingerprint(rules, ocr)
-    result.layoutMatch = !result.fingerprint.missingRequiredTexts.length
+    result.layoutMatch = result.fingerprint.layoutMatch
     result.execution = inspectParserTables(ocr, rules)
     const tableHasContent = ocr.pages.some((page) => page.tables.some((table) => table.cells.some((cell) => cell.text.trim())))
     if (!result.ocrQuality.valid || !tableHasContent) {

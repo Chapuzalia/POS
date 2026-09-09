@@ -10,6 +10,7 @@ import {
   normalizeSupplierTaxId,
   parseSupplierDocumentExtraction,
   parsePackagingExpression,
+  profileFingerprint,
   profileMatchesOcr,
   resolveSupplierCandidate,
   runDeterministicLineParser,
@@ -418,6 +419,48 @@ test('el fingerprint encuentra requiredTexts presentes únicamente en celdas de 
   assert.equal(profileMatchesOcr(rules, ocr), true)
 })
 
+test('el fingerprint tolera variaciones OCR menores sin aceptar textos distintos', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  assert.ok(fixture?.knownProfile)
+
+  for (const [requiredText, ocrText] of [
+    ['PREU/PRECIO', 'PREG/PRECIO'],
+    ['DESCRIPCIÓ', 'DESCRIPCIÓN'],
+    ['CODI. BAR', 'CODI BAR'],
+  ]) {
+    const ocr = { ...structuredClone(fixture.ocr), text: `CABECERA ${ocrText} PIE`, pages: [] }
+    const rules = { ...fixture.knownProfile, requiredTexts: [requiredText] }
+    assert.deepEqual(profileFingerprint(rules, ocr).missingRequiredTexts, [])
+  }
+
+  const ocr = { ...structuredClone(fixture.ocr), text: 'CABECERA TOTAL/IMPORTE PIE', pages: [] }
+  const rules = { ...fixture.knownProfile, requiredTexts: ['PREU/PRECIO'] }
+  assert.deepEqual(profileFingerprint(rules, ocr).missingRequiredTexts, ['PREU/PRECIO'])
+})
+
+function assertRequiredTextCoverage(found, total, expected) {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const requiredTexts = Array.from({ length: total }, (_, index) => String.fromCharCode(65 + index).repeat(12))
+  const ocr = { ...structuredClone(fixture.ocr), text: requiredTexts.slice(0, found).join(' '), pages: [] }
+  const rules = { ...fixture.knownProfile, requiredTexts }
+  const fingerprint = profileFingerprint(rules, ocr)
+  assert.equal(fingerprint.requiredTexts.filter((entry) => entry.found).length, found)
+  assert.equal(fingerprint.layoutMatch, expected)
+  assert.equal(profileMatchesOcr(rules, ocr), expected)
+}
+
+test('fingerprint 7/8 es válido', () => {
+  assertRequiredTextCoverage(7, 8, true)
+})
+
+test('fingerprint 3/4 es válido', () => {
+  assertRequiredTextCoverage(3, 4, true)
+})
+
+test('fingerprint por debajo del 75% es inválido', () => {
+  assertRequiredTextCoverage(5, 8, false)
+})
+
 test('el parser reutiliza la cabecera cuando Mistral separa los productos en la tabla consecutiva', () => {
   const headers = ['Codi', 'Descripció', 'IBEE', 'QUAN', 'PREU', 'TOT.DTES.', 'IMPORT', 'IVA']
   const product = ['A-100', 'Aigua mineral 1L', '0,05', '2', '10,00', '0,00', '20,00', '21']
@@ -482,6 +525,47 @@ test('headerAliases elimina espacios, vacíos y duplicados antes de validar', ()
   profile.columns[1].headerAliases = ['', 'DESCRIPCIÓN', '  ', ' descripción ']
   const parsed = supplierProfileRulesSchema.parse(profile)
   assert.deepEqual(parsed.columns[1].headerAliases, ['DESCRIPCIÓN'])
+})
+
+test('solo description y quantity pueden quedar como columnas required', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  profile.columns = profile.columns.map((column) => ({ ...column, required: true }))
+
+  const parsed = supplierProfileRulesSchema.parse(profile)
+
+  assert.deepEqual(
+    parsed.columns.filter((column) => column.required).map((column) => column.field).sort(),
+    ['description', 'quantity'],
+  )
+})
+
+test('un headerAlias no puede quedar compartido entre dos campos distintos', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  const descriptionAlias = profile.columns.find((column) => column.field === 'description').headerAliases[0]
+  profile.columns.find((column) => column.field === 'quantity').headerAliases = [descriptionAlias]
+
+  assert.throws(
+    () => supplierProfileRulesSchema.parse(profile),
+    /PROFILE_DUPLICATE_HEADER_ALIAS/,
+  )
+})
+
+test('IMPORT/IMPORTE % no puede pertenecer a discountAmount y lineTotal simultáneamente', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  profile.columns.find((column) => column.field === 'lineTotal').headerAliases = ['IMPORT/IMPORTE %']
+  profile.columns.push({
+    field: 'discountAmount',
+    headerAliases: ['IMPORT/IMPORTE %'],
+    required: false,
+  })
+
+  assert.throws(
+    () => supplierProfileRulesSchema.parse(profile),
+    /PROFILE_DUPLICATE_HEADER_ALIAS:IMPORT\/IMPORTE %/,
+  )
 })
 
 test('una columna opcional sin aliases no colisiona con una cabecera identificada por alias', () => {

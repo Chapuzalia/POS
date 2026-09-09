@@ -645,8 +645,8 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
         store: false,
         instructions: [
           'Genera exclusivamente un perfil declarativo reutilizable para interpretar documentos con el mismo diseño que este OCR.',
-          'Las columnas description y quantity deben aparecer exactamente una vez y tener required=true.',
-          'Cada field debe aparecer como máximo una vez y las columnas deben conservar el orden físico de la tabla OCR. Los headerAliases deben ser textos reales de una misma fila de cabecera del OCR, nunca valores de productos.',
+          'Las columnas description y quantity deben aparecer exactamente una vez y tener required=true; todas las demás columnas deben tener required=false.',
+          'Cada field debe aparecer como máximo una vez, ningún headerAlias puede pertenecer a dos fields distintos y las columnas deben conservar el orden físico de la tabla OCR. Los headerAliases deben ser textos reales de una misma fila de cabecera del OCR, nunca valores de productos.',
           'Si una cabecera no existe o no puede leerse con certeza, conserva el field semántico y devuelve headerAliases=[]; nunca uses [""] ni inventes un alias.',
           'Usa requiredTexts estables del emisor y del diseño; no uses número, fecha, cliente, destinatario ni importes de este documento.',
           'Las reglas deben localizar la tabla de productos y reproducir las líneas objetivo. Las filas auxiliares de descuentos, IBEE, Punto Verde, impuestos, bases imponibles, subtotales, SUBUNIDADES/NETO o envases no son productos.',
