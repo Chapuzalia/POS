@@ -855,6 +855,26 @@ function fingerprintTextMatches(haystack: string, text: string) {
     && Number.isFinite(labelMatchDistance(words.slice(index, index + wordCount).join(' '), expected)))
 }
 
+export const MINIMUM_PROFILE_FINGERPRINT_WORD_CONFIDENCE = 0.90
+
+export function profileRequiredTextsMeetConfidence(rules: SupplierProfileRules, ocr: OcrDocument) {
+  const reliableSegments = ocr.pages.flatMap((page) => {
+    const segments: string[] = []
+    let words: string[] = []
+    const flush = () => {
+      if (words.length) segments.push(normalizeDocumentText(words.join(' ')))
+      words = []
+    }
+    for (const word of page.words) {
+      if (word.confidence >= MINIMUM_PROFILE_FINGERPRINT_WORD_CONFIDENCE) words.push(word.text)
+      else flush()
+    }
+    flush()
+    return segments
+  })
+  return rules.requiredTexts.every((text) => reliableSegments.some((segment) => fingerprintTextMatches(segment, text)))
+}
+
 export function profileFingerprint(rules: SupplierProfileRules, ocr: OcrDocument) {
   const haystack = normalizeDocumentText([
     ocr.text,
@@ -1258,6 +1278,9 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
         || (documentNumber.length >= 4 && /\d/.test(documentNumber)
           && marker.includes(documentNumber))
     })) return { candidate: false, reason: 'PROFILE_DOCUMENT_SPECIFIC_FINGERPRINT' as const, parsed: null }
+    if (!profileRequiredTextsMeetConfidence(rules, ocr)) {
+      return { candidate: false, reason: 'PROFILE_FINGERPRINT_WORD_CONFIDENCE_TOO_LOW' as const, parsed: null }
+    }
     if (rules.lineGroup) {
       const ocrText = normalizeDocumentText([
         ocr.text,

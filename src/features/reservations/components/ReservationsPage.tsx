@@ -226,11 +226,11 @@ export function ReservationsPage({ controller, isOnline }: Props) {
         aria-label="Herramientas de reservas"
         className="m-3 mb-0 flex lg:flex-row max-lg:flex-wrap shrink-0  items-center gap-2 rounded-xl border border-[var(--separator)] bg-[var(--surface)] p-2 md:m-0 md:rounded-2xl md:shadow-sm"
       >
-        <label className="flex min-h-11 w-full basis-full items-center gap-2 rounded-xl bg-[var(--surface-secondary)] px-3 text-[var(--muted)] focus-within:ring-2 focus-within:ring-[var(--accent)] md:min-w-60 md:flex-1 md:basis-auto">
+        <label className="flex min-h-11 w-full basis-full items-center gap-2 rounded-xl border-1 bg-[var(--surface-secondary)] px-3 text-[var(--muted)] focus-within:ring-2 focus-within:ring-[var(--accent)] md:min-w-60 md:flex-1 md:basis-auto">
           <Search aria-hidden="true" size={18} />
           <span className="sr-only">Buscar reservas</span>
           <UiInput
-            className="min-w-0 flex-1 !bg-transparent !p-0 !text-[var(--foreground)]"
+            className="min-w-0 flex-1 !border-none !bg-transparent !p-0 !text-[var(--foreground)]"
             onChange={(event) => {
               controller.setQuery(event.target.value);
               if (event.target.value) {
@@ -308,7 +308,7 @@ export function ReservationsPage({ controller, isOnline }: Props) {
         </UiButton>
       </section>
 
-      <section className="flex min-h-0 min-w-0 w-full max-w-full flex-none gap-3 p-3 md:min-h-105 md:flex-1 md:p-0">
+      <section className="relative flex min-h-0 min-w-0 w-full max-w-full flex-none gap-3 p-3 md:min-h-105 md:flex-1 md:p-0">
         {controller.view === "list" ? (
           <ReservationList
             onSelect={controller.openDetail}
@@ -338,6 +338,7 @@ export function ReservationsPage({ controller, isOnline }: Props) {
         )}
         {controller.detail ? (
           <ReservationDetailPanel
+            floating={controller.view === "timeline"}
             canManage={controller.canManage}
             disabled={!isOnline || controller.isLoading}
             onClose={() => controller.setDetail(null)}

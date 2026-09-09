@@ -1,5 +1,6 @@
 import {
   groundSupplierExtractionInOcr,
+  MINIMUM_PROFILE_FINGERPRINT_WORD_CONFIDENCE,
   ocrDocumentSchema,
   parseSupplierDocumentExtraction,
   supplierDocumentExtractionJsonSchema,
@@ -463,6 +464,8 @@ function structuredOcr(input: { ocr: OcrDocument; documentType: 'invoice' | 'del
       pageNumber: page.pageNumber,
       text: page.text,
       words: page.words,
+      fingerprintEligibleWords: page.words.filter((word) =>
+        word.confidence >= MINIMUM_PROFILE_FINGERPRINT_WORD_CONFIDENCE),
       tables: page.tables,
     })),
   }
@@ -527,7 +530,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
           'Si parserRepairPending=true, devuelve proposedProfile=null: existe un parser activo que se analizará por separado. Extrae los datos del OCR sin regenerar ese parser.',
           'Usa lineGroup solo cuando el OCR muestre bloques multipfila repetibles: una fila principal de producto y filas auxiliares reconocibles de descuento, cargo o cierre. Todos sus aliases deben aparecer literalmente en el OCR; si no, deja lineGroup en null.',
           'Si proposedProfile no es null, sus requiredTexts, columnas y aliases deben existir en este OCR y al aplicar esas reglas deben reproducirse las mismas líneas, descuentos, cargos y netos extraídos; si no es posible, devuelve proposedProfile como null.',
-          'requiredTexts solo contiene textos estables del emisor o del diseño; nunca números de documento, fechas, importes ni datos del cliente o destinatario.',
+          'requiredTexts solo contiene textos estables del emisor o del diseño formados íntegramente por fingerprintEligibleWords (confidence >= 0.90); nunca números de documento, fechas, importes, palabras de menor confianza ni datos del cliente o destinatario.',
           'La imagen, si existe, solo sirve para resolver OCR dudoso; prioriza siempre el OCR estructurado.',
         ].join(' '),
         input: [{ role: 'user', content }],
@@ -615,6 +618,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
           'Si faltan valores o señales en OCR, la corrección no está respaldada o no hay un cambio justificable, devuelve no_change, changes=[] y newRulesJson=null. No compenses errores OCR inventando reglas.',
           'Incluye reason explicando el fallo y evidence con citas literales del OCR que justifiquen los cambios o el layout distinto.',
           'Los aliases y etiquetas deben existir en OCR. Nunca incluyas valores variables de factura, datos de cliente, fechas o importes en fingerprints. No generes código, SQL ni regex ejecutables.',
+          'Si propones requiredTexts, usa únicamente secuencias completas de fingerprintEligibleWords (confidence >= 0.90); no uses ninguna palabra de menor confianza.',
           'La propuesta es un candidate pendiente: no afirmes que está validada ni que reemplaza al parser activo.',
         ].join(' '),
         input: [{ role: 'user', content: [{ type: 'input_text', text: JSON.stringify({
@@ -648,7 +652,7 @@ export class OpenAiSupplierDocumentProvider implements SupplierDocumentAiProvide
           'Las columnas description y quantity deben aparecer exactamente una vez y tener required=true; todas las demás columnas deben tener required=false.',
           'Cada field debe aparecer como máximo una vez, ningún headerAlias puede pertenecer a dos fields distintos y las columnas deben conservar el orden físico de la tabla OCR. Los headerAliases deben ser textos reales de una misma fila de cabecera del OCR, nunca valores de productos.',
           'Si una cabecera no existe o no puede leerse con certeza, conserva el field semántico y devuelve headerAliases=[]; nunca uses [""] ni inventes un alias.',
-          'Usa requiredTexts estables del emisor y del diseño; no uses número, fecha, cliente, destinatario ni importes de este documento.',
+          'Usa requiredTexts estables del emisor y del diseño formados íntegramente por fingerprintEligibleWords (confidence >= 0.90); no uses palabras de menor confianza, número, fecha, cliente, destinatario ni importes de este documento.',
           'Las reglas deben localizar la tabla de productos y reproducir las líneas objetivo. Las filas auxiliares de descuentos, IBEE, Punto Verde, impuestos, bases imponibles, subtotales, SUBUNIDADES/NETO o envases no son productos.',
           'Incluye lineGroup únicamente si el OCR contiene bloques multipfila repetibles. Copia endAliases, discountAliases y chargeAliases de textos que aparezcan literalmente en las filas OCR; no inventes aliases.',
           'Cuando una fila final contiene el neto del producto, usa netTotalFromEndRow=true. Ajusta maxContinuationRows al bloque observado sin abarcar el producto siguiente.',

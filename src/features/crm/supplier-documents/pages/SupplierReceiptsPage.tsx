@@ -230,7 +230,10 @@ export function SupplierReceiptsCrm({
   );
   const isConfirmedDocument = detail?.document.status === "confirmed";
 
-  async function refresh(documentId: string) {
+  async function refresh(
+    documentId: string,
+    { preserveDocumentFields = false }: { preserveDocumentFields?: boolean } = {},
+  ) {
     const workspace = await loadSupplierReceiptWorkspace(
       tenantContext,
       selectedVenueId,
@@ -239,9 +242,11 @@ export function SupplierReceiptsCrm({
     setDetail({ document: workspace.document, lines: workspace.lines });
     setInventory(workspace.inventory);
     setSupplierOptions(workspace.suppliers);
-    setDocumentDate(workspace.document.documentDate ?? "");
-    setDocumentNumber(workspace.document.documentNumber ?? "");
-    setAffectsStock(workspace.document.affectsStock);
+    if (!preserveDocumentFields) {
+      setDocumentDate(workspace.document.documentDate ?? "");
+      setDocumentNumber(workspace.document.documentNumber ?? "");
+      setAffectsStock(workspace.document.affectsStock);
+    }
     setShowAll(
       workspace.document.status === "confirmed" ||
         !workspace.lines.some((line) => line.matchStatus === "needs_review"),
@@ -502,7 +507,7 @@ export function SupplierReceiptsCrm({
         updateReferenceCost: false,
         referenceCostDecided: false,
       });
-      await refresh(detail.document.id);
+      await refresh(detail.document.id, { preserveDocumentFields: true });
       setEditingLineId(null);
       setDraft(null);
     });
@@ -563,7 +568,7 @@ export function SupplierReceiptsCrm({
         ...next,
         updateReferenceCost: update,
       });
-      await refresh(detail.document.id);
+      await refresh(detail.document.id, { preserveDocumentFields: true });
       setScreen("costs");
     });
   }
@@ -584,7 +589,7 @@ export function SupplierReceiptsCrm({
           });
         }),
       );
-      await refresh(detail.document.id);
+      await refresh(detail.document.id, { preserveDocumentFields: true });
       setScreen("costs");
     });
   }

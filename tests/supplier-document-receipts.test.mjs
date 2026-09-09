@@ -838,12 +838,21 @@ test('conserva las tablas de productos de todas las páginas, incluso con refere
 
 test('registra la respuesta GPT incluso cuando su JSON es inválido', async (t) => {
   const traces = []
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ id: 'response-test', model: 'test-model',
-    output_text: '{broken json', usage: { output_tokens: 3 } }))
+  let request
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    request = JSON.parse(init.body)
+    return Response.json({ id: 'response-test', model: 'test-model',
+      output_text: '{broken json', usage: { output_tokens: 3 } })
+  })
   const provider = new OpenAiSupplierDocumentProvider({ apiKey: 'test', model: 'test-model',
     onResponse: async (trace) => traces.push(trace) })
-  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const fixture = structuredClone(getSupplierDocumentMockFixture('known-supplier'))
+  fixture.ocr.pages[0].words[0].confidence = 0.20
   await assert.rejects(provider.interpret({ ocr: fixture.ocr, documentType: 'delivery_note', supplierCandidates: [] }))
+  const source = JSON.parse(request.input[0].content[0].text).supplierExtractionSource
+  assert.ok(source.pages[0].words.some((word) => word.confidence === 0.20))
+  assert.ok(source.pages[0].fingerprintEligibleWords.every((word) => word.confidence >= 0.90))
+  assert.ok(!source.pages[0].fingerprintEligibleWords.some((word) => word.confidence === 0.20))
   assert.equal(traces.length, 1)
   assert.equal(traces[0].outputText, '{broken json')
   assert.equal(traces[0].stage, 'interpret')
@@ -1042,6 +1051,20 @@ test('solo acepta un perfil candidato si reproduce la interpretación y las mate
   assert.throws(() => supplierProfileRulesSchema.parse({ ...fixture.extraction.proposedProfile, columns: [] }))
 })
 
+test('un requiredText no puede usar palabras OCR con confidence inferior al 90%', () => {
+  const fixture = getSupplierDocumentMockFixture('unknown-supplier')
+  const ocr = structuredClone(fixture.ocr)
+  const supplierWord = ocr.pages[0].words.find((word) => word.text === 'NUEVO')
+  supplierWord.confidence = 0.20
+
+  const rejected = validateProposedProfile(ocr, fixture.extraction)
+  assert.equal(rejected.candidate, false)
+  assert.equal(rejected.reason, 'PROFILE_FINGERPRINT_WORD_CONFIDENCE_TOO_LOW')
+
+  supplierWord.confidence = 0.90
+  assert.equal(validateProposedProfile(ocr, fixture.extraction).candidate, true)
+})
+
 test('valida perfiles multipfila por aliases OCR, descuentos, cargos, netos y matemáticas', () => {
   const fixture = getSupplierDocumentMockFixture('multi-row-product')
   assert.ok(fixture)
@@ -1220,6 +1243,24 @@ test('el bucket privado exige el path exacto reservado para un documento accesib
   assert.match(migration, /document\.storage_path = p_name/)
   assert.match(migration, /supplier_documents_storage_insert[\s\S]*can_access_supplier_document_object\(name\)/)
   assert.match(migration, /grant execute on function public\.can_access_supplier_document_object\(text\)[\s\S]*to authenticated/)
+})
+
+test('fecha y número manuales sobreviven a guardar líneas y decidir costes', () => {
+  assert.match(page, /async function refresh\([\s\S]*preserveDocumentFields = false/)
+  assert.match(page, /if \(!preserveDocumentFields\) \{[\s\S]*setDocumentDate\([\s\S]*setDocumentNumber\([\s\S]*setAffectsStock\(/)
+
+  const flows = [
+    page.match(/async function saveEditor\([\s\S]*?async function createItem\(/)?.[0] ?? '',
+    page.match(/async function decideCost\([\s\S]*?async function decideAllCosts\(/)?.[0] ?? '',
+    page.match(/async function decideAllCosts\([\s\S]*?async function confirm\(/)?.[0] ?? '',
+  ]
+  for (const flow of flows) {
+    assert.match(flow, /await refresh\(detail\.document\.id, \{ preserveDocumentFields: true \}\)/)
+  }
+
+  const confirmation = page.match(/async function confirm\([\s\S]*?async function changeSupplier\(/)?.[0] ?? ''
+  assert.match(confirmation, /await refresh\(detail\.document\.id\);/)
+  assert.doesNotMatch(confirmation, /preserveDocumentFields/)
 })
 
 test('la UI es mobile-first, revisa incidencias y confirma solo por la RPC global', () => {
