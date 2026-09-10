@@ -47,7 +47,7 @@ export function useCashlogyScope(context: TenantContext | null, cashSessionId: s
       }
     }
     void refresh()
-    const interval = window.setInterval(() => void refresh(), 5000)
+    const interval = window.setInterval(() => void refresh(), 15000)
     return () => {
       abortController.abort()
       window.clearInterval(interval)

@@ -115,6 +115,13 @@ test('la configuración predeterminada conserva el modo de solo impresora', () =
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { autoOpenCashDrawer: true, cashlogyConfigured: false } }), true)
 })
 
+test('el health periódico de Cashlogy usa un único intervalo de 15000 ms', async () => {
+  const scope = await readFile(new URL('src/features/local-printing/cashlogy/useCashlogyScope.ts', root), 'utf8')
+  const intervals = [...scope.matchAll(/window\.setInterval\([\s\S]*?,\s*(\d+)\)/g)].map((match) => Number(match[1]))
+
+  assert.deepEqual(intervals, [15000])
+})
+
 test('Cashlogy bloquea el cajón convencional y respeta la preferencia de impresión', () => {
   const settings = { alwaysPrintTicket: false, autoOpenCashDrawer: true, cashlogyConfigured: true }
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), false)
