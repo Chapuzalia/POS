@@ -187,7 +187,8 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
             message: 'El inicio anterior se interrumpió antes de enviar el cobro a Cashlogy. Puedes volver al pago con seguridad.',
           })
         : null,
-      modalOpen: Boolean(intent),
+      // Pending charges recover in the background until the backend answers.
+      modalOpen: Boolean(interruptedBeforeRequest),
       isCheckingHealth: false,
       isStarting: false,
       isPolling: false,
@@ -319,7 +320,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
     let intent = get().intent
     if (!intent) return null
     const blockingId = getBlockingCashlogyTransactionId(get().error)
-    set({ modalOpen: true, error: null })
+    set({ error: null })
     recoveryPromise = (async () => {
       try {
         if (blockingId) {
@@ -342,7 +343,8 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
         const state = useCashlogyStore.getState()
         reportOperationError(error, { operation: 'cashlogy.payment', integration: 'cashlogy', operationId: state.intent?.requestId, saleId: state.intent?.saleId, step: state.transaction?.status ?? (state.intent?.chargeRequestedAt ? 'charge_requested' : 'health') })
         const mapped = toCashlogyError(error)
-        set({ error: mapped, modalOpen: true })
+        // Keep background retries silent; resolveTransaction opens confirmed results.
+        set({ error: mapped })
         throw mapped
       }
     })().finally(() => { recoveryPromise = null })
