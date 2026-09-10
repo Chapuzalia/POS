@@ -3,7 +3,7 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { createPrintAgentClient } from '../src/features/local-printing/api/printAgentClient.ts'
 import { PrintAgentError } from '../src/features/local-printing/api/PrintAgentError.ts'
-import { CashlogyError, isUncertainCashlogyError, toCashlogyError } from '../src/features/local-printing/cashlogy/cashlogyError.ts'
+import { CashlogyError, getBlockingCashlogyTransactionId, isUncertainCashlogyError, toCashlogyError } from '../src/features/local-printing/cashlogy/cashlogyError.ts'
 import {
   denominationTotalCents,
   getDispensableDenominations,
@@ -21,6 +21,7 @@ import {
   pollCashlogyTransaction,
 } from '../src/features/local-printing/cashlogy/cashlogyPolling.ts'
 import { createCashlogyRequestId } from '../src/features/local-printing/cashlogy/cashlogyRequestId.ts'
+import { cashlogyAcknowledgements } from '../src/features/local-printing/cashlogy/cashlogyAcknowledgements.ts'
 import {
   formatCashlogyLevelPercentage,
   getCashlogyLevelTone,
@@ -195,6 +196,8 @@ test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () =
   await client.getCashlogyTransaction(tx.id)
   await client.getCashlogyTransactionByRequestId(tx.requestId)
   await client.cancelCashlogyTransaction(tx.id)
+  await client.recoverCashlogyTransaction(tx.id)
+  await client.acknowledgeCashlogyTransaction(tx.id, true)
   await client.cancelActiveCashlogyOperation()
   await client.startCashlogyRefill(refill.requestId)
   await client.getCashlogyRefill(refill.id)
@@ -210,6 +213,8 @@ test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () =
   await client.recoverCashlogy()
 
   assert.equal(calls.every((call) => call.init.headers.Authorization === 'Bearer secret'), true)
+  assert.ok(calls.some((call) => call.path.endsWith(`/transactions/${tx.id}/recover`) && call.init.method === 'POST'))
+  assert.deepEqual(calls.find((call) => call.path.endsWith(`/transactions/${tx.id}/acknowledge`)).body, { reviewed: true })
   assert.ok(calls.some((call) => call.path === '/api/v1/cashlogy/accounting'))
   assert.ok(calls.some((call) => call.path === '/api/v1/cashlogy/connectors/discover' && call.init.method === 'POST'))
   assert.ok(calls.some((call) => call.path.endsWith(`/${connector.id}/select`) && call.init.method === 'POST'))
@@ -350,7 +355,42 @@ test('requestId e intenciones de venta y gestión sobreviven a una recarga por t
   else globalThis.window = originalWindow
 })
 
+test('el cierre sobrevive a errores y recargas, aislado por backend, sin perder cierres concurrentes', async () => {
+  const values = new Map()
+  const originalWindow = globalThis.window
+  globalThis.window = { localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) } }
+  try {
+    const scope = { tenantId: 'tenant', establishmentId: 'venue', terminalId: 'terminal' }
+    const queue = cashlogyAcknowledgements(scope, 'https://agent-one')
+    queue.add('cltx-1', false)
+    assert.equal(cashlogyAcknowledgements(scope, 'https://agent-one').contains('cltx-1'), true)
+    await assert.rejects(queue.flush(async () => { throw new Error('Backend reiniciando') }))
+    await cashlogyAcknowledgements(scope, 'https://agent-two').flush(async () => assert.fail('Otro backend'))
+    const calls = []
+    await cashlogyAcknowledgements(scope, 'https://agent-one').flush(async (id, reviewed) => {
+      calls.push([id, reviewed])
+      queue.add('cltx-2', true)
+    })
+    assert.deepEqual(calls, [['cltx-1', false]])
+    await queue.flush(async (id, reviewed) => calls.push([id, reviewed]))
+    assert.deepEqual(calls, [['cltx-1', false], ['cltx-2', true]])
+    assert.equal(values.size, 0)
+    assert.equal(queue.contains('cltx-1'), false)
+  } finally {
+    if (originalWindow === undefined) delete globalThis.window
+    else globalThis.window = originalWindow
+  }
+})
+
 test('los errores se traducen y los resultados HTTP inciertos se distinguen', () => {
+  const busy = new PrintAgentError({ code: 'DUPLICATE_REQUEST', status: 409,
+    details: { error: { code: 'CASHLOGY_BUSY', details: { transactionId: 'cltx_previous', status: 'unknown' } } },
+  })
+  assert.equal(getBlockingCashlogyTransactionId(busy), 'cltx_previous')
+  assert.equal(getBlockingCashlogyTransactionId(toCashlogyError(busy)), 'cltx_previous')
+  assert.equal(getBlockingCashlogyTransactionId(new CashlogyError({ code: 'CASHLOGY_BUSY' })), null)
+  assert.equal(isUncertainCashlogyError(toCashlogyError(new PrintAgentError({ code: 'NETWORK_ERROR' }))), true)
+  assert.equal(isUncertainCashlogyError(toCashlogyError(busy)), false)
   const remote = toCashlogyError(new PrintAgentError({
     code: 'HTTP_ERROR', status: 409,
     details: { error: { code: 'CASHLOGY_BUSY', message: 'technical text', originalCode: 'LEGACY_42' } },

@@ -66,7 +66,16 @@ export function toCashlogyError(error: unknown, fallback: CashlogyErrorCode = 'C
   })
 }
 
-export function isUncertainCashlogyError(error: unknown) {
+export function isUncertainCashlogyError(error: unknown): boolean {
+  if (error instanceof CashlogyError) return ['CASHLOGY_NETWORK_ERROR', 'CASHLOGY_CONNECTION_LOST', 'CASHLOGY_STATUS_UNKNOWN'].includes(error.code) || isUncertainCashlogyError(error.cause)
   return error instanceof PrintAgentError
     && (['NETWORK_ERROR', 'TIMEOUT', 'ABORTED'].includes(error.code) || error.status === 502)
+}
+
+export function getBlockingCashlogyTransactionId(error: unknown): string | null {
+  const mapped = toCashlogyError(error)
+  if (mapped.code !== 'CASHLOGY_BUSY') return null
+  const body = mapped.details as { error?: { details?: { transactionId?: unknown } } } | undefined
+  const id = body?.error?.details?.transactionId
+  return typeof id === 'string' && id.length > 0 ? id : null
 }

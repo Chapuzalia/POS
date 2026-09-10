@@ -4,6 +4,7 @@ import { useShallow } from 'zustand/react/shallow'
 import { AppModal, Button, Metric } from '../../../components/ui'
 import { formatMoney } from '../../../lib/format'
 import { shouldShowCashlogyOperationDetails } from '../cashlogy/cashlogyPresentation'
+import { isUncertainCashlogyError } from '../cashlogy/cashlogyError'
 import { cashlogyActiveStatuses, cashlogyCancellableStatuses } from '../cashlogy/cashlogyPolling'
 import { useCashlogyStore } from '../cashlogy/useCashlogyStore'
 import type { CashlogyTransaction, CashlogyTransactionStatus } from '../types'
@@ -27,6 +28,7 @@ const statusLabels: Record<CashlogyTransactionStatus, string> = {
 
 export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: { finalizeDisabled?: boolean; onFinalizeRecovered: (transaction: CashlogyTransaction) => Promise<void> | void }) {
   const [isFinalizing, setIsFinalizing] = useState(false)
+  const [reviewedId, setReviewedId] = useState<string | null>(null)
   const state = useCashlogyStore(useShallow((value) => ({
     modalOpen: value.modalOpen,
     intent: value.intent,
@@ -40,20 +42,24 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
     recover: value.recover,
     hide: value.hide,
     discardForRetry: value.discardForRetry,
+    closeReviewed: value.closeReviewed,
   })))
   const acceptedCents = (state.transaction?.automaticAcceptedCents ?? 0) + (state.transaction?.manualAcceptedCents ?? 0)
 
   if (!state.modalOpen || !state.intent) return null
 
   const status = state.transaction?.status
+  const reviewed = Boolean(state.transaction && reviewedId === state.transaction.id)
   const active = status ? cashlogyActiveStatuses.has(status) : state.isStarting || state.isPolling
-  const critical = status === 'unknown' || status === 'needs_attention'
+  const previousCompleted = status === 'completed' && state.intent.recoveredFromConflict
+  const critical = status === 'unknown' || status === 'needs_attention' || previousCompleted
   const startFailed = !state.transaction && Boolean(state.error) && !state.isStarting && !state.isPolling
+  const preservePending = state.intent.recoveredFromConflict || (state.intent.chargeRequestedAt && isUncertainCashlogyError(state.error))
   const canCancel = Boolean(status && cashlogyCancellableStatuses.has(status) && !state.isCancelling)
   const showOperationDetails = shouldShowCashlogyOperationDetails(status)
 
   const finalizeRecovered = async () => {
-    if (!state.transaction || isFinalizing) return
+    if (!state.transaction || state.intent?.recoveredFromConflict || isFinalizing) return
     setIsFinalizing(true)
     try {
       await onFinalizeRecovered(state.transaction)
@@ -113,24 +119,30 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
       </div> : null}
 
       <div className="mt-5 flex flex-wrap justify-end gap-2">
+        {critical ? <label className="w-full text-sm">
+          <input type="checkbox" checked={reviewed} onChange={(event) => setReviewedId(event.target.checked ? state.transaction?.id ?? null : null)} className="mr-2" />
+          He revisado el efectivo con el responsable de caja y la máquina ya no tiene una operación pendiente. Cerrar no registrará esta venta como pagada.
+        </label> : null}
+        {(active && !state.isPolling && !state.isStarting) || startFailed ? <Button onClick={() => void state.recover().catch(() => undefined)}>Recuperar cobro</Button> : null}
         {active ? <Button onClick={state.hide} variant="tertiary">Volver al TPV</Button> : null}
         {canCancel ? <Button disabled={state.isCancelling} onClick={() => void state.cancel().catch(() => undefined)} variant="danger">
           {state.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
           Cancelar cobro
         </Button> : null}
-        {status === 'completed' && state.transaction ? <Button disabled={finalizeDisabled || isFinalizing} onClick={() => void finalizeRecovered()} variant="primary">
+        {status === 'completed' && state.transaction && !previousCompleted ? <Button disabled={finalizeDisabled || isFinalizing} onClick={() => void finalizeRecovered()} variant="primary">
           {isFinalizing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
           {isFinalizing ? 'Registrando venta…' : 'Aplicar cobro confirmado'}
         </Button> : null}
         {status === 'cancelled' ? <Button onClick={state.discardForRetry}>Volver al pago</Button> : null}
         {status === 'failed' ? <Button onClick={state.discardForRetry} variant="primary">Iniciar un nuevo intento</Button> : null}
-        {startFailed ? <Button onClick={state.discardForRetry} variant="primary">Volver al pago</Button> : null}
+        {startFailed ? <Button onClick={preservePending ? state.hide : state.discardForRetry} variant="primary">{preservePending ? 'Volver al TPV' : 'Volver al pago'}</Button> : null}
         {critical ? <>
           <Button disabled={state.isPolling} onClick={() => void state.recover().catch(() => undefined)} variant="primary">
             {state.isPolling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
             Consultar estado de nuevo
           </Button>
           <Button onClick={state.hide} variant="tertiary">Cerrar y revisar Cashlogy</Button>
+          <Button disabled={!reviewed} onClick={() => { state.closeReviewed(); setReviewedId(null) }} variant="danger">Cerrar operación revisada</Button>
         </> : null}
       </div>
     </section>
