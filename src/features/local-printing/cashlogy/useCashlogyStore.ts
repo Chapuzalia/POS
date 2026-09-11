@@ -425,6 +425,18 @@ export function finishCashlogyPayment(transaction: CashlogyTransaction | null) {
   if (transaction) useCashlogyStore.getState().finish(transaction.requestId)
 }
 
+export function getCashlogyPaymentSaleId(transaction: CashlogyTransaction) {
+  if (transaction.saleId) return transaction.saleId
+  const intent = useCashlogyStore.getState().intent
+  // Some recovered backend responses omit the optional saleId. Only reuse the
+  // locally persisted identity for this exact charge, never for a blocker.
+  if (!intent || intent.recoveredFromConflict
+    || intent.requestId !== transaction.requestId
+    || intent.amountCents !== transaction.requestedAmountCents
+    || (intent.transactionId && intent.transactionId !== transaction.id)) return null
+  return intent.saleId
+}
+
 export function getCashlogyPaymentAmounts(transaction: CashlogyTransaction | null, requestedAmountCents: number) {
   if (!transaction) return { receivedCents: null, changeCents: null }
   const acceptedCents = (transaction.automaticAcceptedCents ?? 0) + (transaction.manualAcceptedCents ?? 0)
