@@ -35,7 +35,10 @@ function detection(name = 'DISPOCH S.L.', taxId = 'B12345678') {
   fixture.ocr.text = fixture.ocr.text.replaceAll(fixture.extraction.supplier.name, name)
     .replaceAll(fixture.extraction.supplier.taxId, taxId)
   fixture.ocr.pages[0].text = fixture.ocr.text
-  fixture.ocr.pages[0].words = []
+  fixture.ocr.pages[0].words = fixture.ocr.text.split(/\s+/).map((text, index) => ({
+    text, confidence: 0.97,
+    polygon: [index * 10, 0, index * 10 + 8, 0, index * 10 + 8, 10, index * 10, 10],
+  }))
   fixture.extraction.supplier = { name, legalName: null, taxId, email: null, phone: null, address: null }
   fixture.extraction.proposedProfile.requiredTexts[0] = name
   const extraction = core.parseSupplierDocumentExtraction(core.groundSupplierExtractionInOcr(fixture.extraction, fixture.ocr))
@@ -477,6 +480,17 @@ test('OCR conserva el candidato validado en metadata aunque falte global, sin cr
   }
 })
 
+test('sin proveedor reconocido conserva el OCR y espera selección antes de interpretar o aprender', async () => {
+  const result = await processEdge(detection())
+  assert.equal(result.document.status, 'processing')
+  assert.equal(result.document.extraction_metadata.processingPhase, 'awaiting_supplier')
+  assert.deepEqual(result.document.ocr_snapshot, detection().ocr)
+  assert.equal(result.calls.interpret, 0)
+  assert.equal(result.calls.proposeProfile, 0)
+  assert.equal(result.calls.globalWrites, 0)
+  assert.deepEqual(result.insertedLines, [])
+})
+
 test('metadata incremental y selección global exacta (PostgreSQL efímero, sin base del proyecto)', async (t) => {
   const db = new PGlite()
   t.after(() => db.close())
@@ -712,6 +726,7 @@ test('metadata incremental y selección global exacta (PostgreSQL efímero, sin 
   await t.test('reparse tras selección y reparse defensivo enlazan por CIF y usan perfil global sin OCR ni GPT', async () => {
     for (const selected of [true, false, 'existing-link']) {
       const context = await setup()
+      await query("update global_supplier_document_profiles set status='verified' where id=$1", [context.profileId])
       if (selected !== 'existing-link') await query('update suppliers set global_supplier_id=null where id=$1', [context.supplierId])
       const id = await addDocument({ supplierId: context.supplierId, metadata: { supplierExtraction: {} } })
       const snapshot = (await document(id)).ocr_snapshot
@@ -731,15 +746,16 @@ test('metadata incremental y selección global exacta (PostgreSQL efímero, sin 
     }
   })
 
-  await t.test('perfil global incompatible conserva fallback local; sin compatible deja las líneas intactas', async () => {
+  await t.test('un perfil incompatible o un snapshot histórico sin estado no sustituye las líneas', async () => {
     const context = await setup()
-    await query("update global_supplier_document_profiles set rules_json=jsonb_set(rules_json,'{requiredTexts}','[\"INCOMPATIBLE\"]')")
+    await query("update global_supplier_document_profiles set status='verified', rules_json=jsonb_set(rules_json,'{requiredTexts}','[\"INCOMPATIBLE\"]')")
     const id = await addDocument({ supplierId: context.supplierId })
     const previous = [{ id: 'previous', tenant_id: tenant, venue_id: venue, supplier_id: context.supplierId, document_type: 'delivery_note', status: 'confirmed', extraction_metadata: { lineParserProfile: context.rules } }]
-    const result = await reparse(id, previous)
-    assert.equal(result.response.status, 200, await result.response.text())
-    assert.equal((await document(id)).global_profile_id, null)
     const before = await query('select * from supplier_document_lines where supplier_document_id=$1', [id])
+    const result = await reparse(id, previous)
+    assert.equal(result.response.status, 422, await result.response.text())
+    assert.equal((await document(id)).global_profile_id, null)
+    assert.deepEqual(await query('select * from supplier_document_lines where supplier_document_id=$1', [id]), before)
     const failed = await reparse(id)
     assert.equal(failed.response.status, 422)
     assert.match((await failed.response.json()).error, /perfil de líneas compatible/)
@@ -923,7 +939,7 @@ test('una omisión detectada por el parser pide una única reconciliación con O
         document: { ...data.extraction.document, total: 58 },
         lines: [...data.extraction.lines, ...data.extraction.lines] } : data.extraction
     }
-    const result = await processEdge(data)
+    const result = await processEdge(data, { globals: [{ id: 'global', name: data.extraction.supplier.name, tax_id: data.extraction.supplier.taxId }] })
     assert.equal(result.calls.interpret, 2)
     assert.equal(result.document.extraction_metadata.interpretationRetried, true)
     assert.equal(result.document.extraction_metadata.profileValidation.candidate, corrected)
@@ -951,7 +967,7 @@ test('correcciones de extracción invalidan la publicación; asignar inventario 
   for (const sql of [bootstrap, localMigration, migration, metadataMigration, learningGuardMigration,
     metadataEvidenceMigration, stickyLearningMigration, correctedParserMigration]) await db.exec(sql)
   const h = dbHelpers(db)
-  const scanned = await processEdge(detection())
+  const scanned = await processEdge(detection(), { globals: [{ id: 'global', name: 'DISPOCH S.L.', tax_id: 'B12345678' }] })
   assert.equal(scanned.insertedLines.length, 1)
   const original = scanned.insertedLines[0].raw_extraction_metadata.originalExtraction
   assert.equal(original.quantity, detection().extraction.lines[0].quantity)

@@ -147,8 +147,8 @@ test('reparsear usa OCR almacenado y valida el resultado determinista sin OCR ni
   assert.equal(lines[0].lineTotal, 99.94)
   const reparse = edge.match(/async function reparseLinesWithSelectedSupplier[\s\S]*?\n}/)?.[0] ?? ''
   assert.match(reparse, /ocrDocumentSchema\.parse\(document\.ocr_snapshot\)/)
-  assert.match(reparse, /runDeterministicParser/)
-  assert.match(reparse, /validateExtractionMath/)
+  assert.match(reparse, /diagnoseParser\(/)
+  assert.match(reparse, /diagnosis\.failedFields\.includes\('lines'\)/)
   assert.doesNotMatch(reparse, /\.analyze\(|\.interpret\(|extractSupplier\(|loadBinary\(/)
   assert.match(reparse, /replace_supplier_document_lines_from_ocr/)
 })
