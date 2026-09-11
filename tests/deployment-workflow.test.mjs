@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-test('producción valida desde el último release correcto y preconstruye antes de migrar', async () => {
+test('producción valida desde el último release correcto y construye en Vercel antes de migrar y promociona después', async () => {
   const workflow = await readFile(new URL('../.github/workflows/production.yml', import.meta.url), 'utf8')
 
   assert.match(workflow, /actions:\s+read/)
@@ -16,10 +16,15 @@ test('producción valida desde el último release correcto y preconstruye antes 
   assert.match(workflow, /pnpm@10\.15\.1/)
   assert.match(workflow, /vercel@59\.16\.0/)
 
-  const prebuild = workflow.indexOf('vercel build --prod')
+  const prebuild = workflow.indexOf('vercel deploy --yes --prod --skip-domain')
   const migration = workflow.indexOf('Backup and apply production migrations')
-  const deploy = workflow.indexOf('vercel deploy --yes --prebuilt --prod')
+  const deploy = workflow.indexOf('vercel promote')
   assert.ok(prebuild > -1 && migration > prebuild && deploy > migration)
+  assert.doesNotMatch(workflow, /vercel pull|vercel build|--prebuilt|--no-wait/)
+  assert.match(workflow, /--build-env APP_VERSION=/)
+  assert.match(workflow, /--build-env SUPPORTED_APP_VERSIONS=/)
+  assert.match(workflow, /DEPLOYMENT_URL: \$\{\{ steps\.staged\.outputs\.url \}\}/)
+  assert.match(workflow, /vercel promote "\$DEPLOYMENT_URL"/)
 })
 
 test('el workflow de PR ejecuta el checker y sus regresiones', async () => {

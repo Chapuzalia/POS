@@ -2,6 +2,7 @@ import { sentryVitePlugin } from "@sentry/vite-plugin";
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
+import { validateBuildEnvironment } from './build/validateBuildEnvironment.ts'
 
 const appVersion = process.env.APP_VERSION
   ?? process.env.VERCEL_GIT_COMMIT_SHA
@@ -24,6 +25,11 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(appVersion),
   },
   plugins: [react(), tailwindcss(), {
+    name: 'validate-build-environment',
+    configResolved(config) {
+      if (config.command === 'build') validateBuildEnvironment(config.env)
+    },
+  }, {
     name: 'offline-app-assets',
     generateBundle(_options, bundle) {
       this.emitFile({

@@ -111,15 +111,25 @@ jobs:
       - name: Install pinned Vercel CLI
         run: npm install --global vercel@59.16.0
 
-      - name: Prepare immutable Vercel build
+      - name: Build staged production deployment in Vercel
+        id: staged
         env:
           APP_VERSION: ${{ github.sha }}
           SUPPORTED_APP_VERSIONS: ${{ steps.release.outputs.supported_versions }}
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
         run: |
-          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
-          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+          set -Eeuo pipefail
+          vercel deploy --yes --prod --skip-domain \
+            --build-env APP_VERSION="$APP_VERSION" \
+            --build-env SUPPORTED_APP_VERSIONS="$SUPPORTED_APP_VERSIONS" \
+            --token=${{ secrets.VERCEL_TOKEN }} > staged-deployment-url.txt
+          deployment_url="$(tail -n 1 staged-deployment-url.txt)"
+          if [[ ! "$deployment_url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]; then
+            echo "Vercel did not return a valid staged deployment URL."
+            exit 1
+          fi
+          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
 
       - name: Configure SSH
         shell: bash
@@ -158,8 +168,9 @@ jobs:
                 -i "$HOME/.ssh/pos-production" \
                 "${SSH_USER}@${SSH_HOST}"
 
-      - name: Deploy production
+      - name: Promote verified production deployment
         env:
           VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
           VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: vercel deploy --yes --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}
+          DEPLOYMENT_URL: ${{ steps.staged.outputs.url }}
+        run: vercel promote "$DEPLOYMENT_URL" --yes --token=${{ secrets.VERCEL_TOKEN }}
