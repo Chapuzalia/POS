@@ -10,6 +10,7 @@ import {
   normalizeSupplierTaxId,
   parseSupplierDocumentExtraction,
   parsePackagingExpression,
+  profileFingerprint,
   profileMatchesOcr,
   resolveSupplierCandidate,
   runDeterministicLineParser,
@@ -418,6 +419,48 @@ test('el fingerprint encuentra requiredTexts presentes únicamente en celdas de 
   assert.equal(profileMatchesOcr(rules, ocr), true)
 })
 
+test('el fingerprint tolera variaciones OCR menores sin aceptar textos distintos', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  assert.ok(fixture?.knownProfile)
+
+  for (const [requiredText, ocrText] of [
+    ['PREU/PRECIO', 'PREG/PRECIO'],
+    ['DESCRIPCIÓ', 'DESCRIPCIÓN'],
+    ['CODI. BAR', 'CODI BAR'],
+  ]) {
+    const ocr = { ...structuredClone(fixture.ocr), text: `CABECERA ${ocrText} PIE`, pages: [] }
+    const rules = { ...fixture.knownProfile, requiredTexts: [requiredText] }
+    assert.deepEqual(profileFingerprint(rules, ocr).missingRequiredTexts, [])
+  }
+
+  const ocr = { ...structuredClone(fixture.ocr), text: 'CABECERA TOTAL/IMPORTE PIE', pages: [] }
+  const rules = { ...fixture.knownProfile, requiredTexts: ['PREU/PRECIO'] }
+  assert.deepEqual(profileFingerprint(rules, ocr).missingRequiredTexts, ['PREU/PRECIO'])
+})
+
+function assertRequiredTextCoverage(found, total, expected) {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const requiredTexts = Array.from({ length: total }, (_, index) => String.fromCharCode(65 + index).repeat(12))
+  const ocr = { ...structuredClone(fixture.ocr), text: requiredTexts.slice(0, found).join(' '), pages: [] }
+  const rules = { ...fixture.knownProfile, requiredTexts }
+  const fingerprint = profileFingerprint(rules, ocr)
+  assert.equal(fingerprint.requiredTexts.filter((entry) => entry.found).length, found)
+  assert.equal(fingerprint.layoutMatch, expected)
+  assert.equal(profileMatchesOcr(rules, ocr), expected)
+}
+
+test('fingerprint 7/8 es válido', () => {
+  assertRequiredTextCoverage(7, 8, true)
+})
+
+test('fingerprint 3/4 es válido', () => {
+  assertRequiredTextCoverage(3, 4, true)
+})
+
+test('fingerprint por debajo del 75% es inválido', () => {
+  assertRequiredTextCoverage(5, 8, false)
+})
+
 test('el parser reutiliza la cabecera cuando Mistral separa los productos en la tabla consecutiva', () => {
   const headers = ['Codi', 'Descripció', 'IBEE', 'QUAN', 'PREU', 'TOT.DTES.', 'IMPORT', 'IVA']
   const product = ['A-100', 'Aigua mineral 1L', '0,05', '2', '10,00', '0,00', '20,00', '21']
@@ -482,6 +525,47 @@ test('headerAliases elimina espacios, vacíos y duplicados antes de validar', ()
   profile.columns[1].headerAliases = ['', 'DESCRIPCIÓN', '  ', ' descripción ']
   const parsed = supplierProfileRulesSchema.parse(profile)
   assert.deepEqual(parsed.columns[1].headerAliases, ['DESCRIPCIÓN'])
+})
+
+test('solo description y quantity pueden quedar como columnas required', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  profile.columns = profile.columns.map((column) => ({ ...column, required: true }))
+
+  const parsed = supplierProfileRulesSchema.parse(profile)
+
+  assert.deepEqual(
+    parsed.columns.filter((column) => column.required).map((column) => column.field).sort(),
+    ['description', 'quantity'],
+  )
+})
+
+test('un headerAlias no puede quedar compartido entre dos campos distintos', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  const descriptionAlias = profile.columns.find((column) => column.field === 'description').headerAliases[0]
+  profile.columns.find((column) => column.field === 'quantity').headerAliases = [descriptionAlias]
+
+  assert.throws(
+    () => supplierProfileRulesSchema.parse(profile),
+    /PROFILE_DUPLICATE_HEADER_ALIAS/,
+  )
+})
+
+test('IMPORT/IMPORTE % no puede pertenecer a discountAmount y lineTotal simultáneamente', () => {
+  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const profile = structuredClone(fixture.knownProfile)
+  profile.columns.find((column) => column.field === 'lineTotal').headerAliases = ['IMPORT/IMPORTE %']
+  profile.columns.push({
+    field: 'discountAmount',
+    headerAliases: ['IMPORT/IMPORTE %'],
+    required: false,
+  })
+
+  assert.throws(
+    () => supplierProfileRulesSchema.parse(profile),
+    /PROFILE_DUPLICATE_HEADER_ALIAS:IMPORT\/IMPORTE %/,
+  )
 })
 
 test('una columna opcional sin aliases no colisiona con una cabecera identificada por alias', () => {
@@ -754,12 +838,21 @@ test('conserva las tablas de productos de todas las páginas, incluso con refere
 
 test('registra la respuesta GPT incluso cuando su JSON es inválido', async (t) => {
   const traces = []
-  t.mock.method(globalThis, 'fetch', async () => Response.json({ id: 'response-test', model: 'test-model',
-    output_text: '{broken json', usage: { output_tokens: 3 } }))
+  let request
+  t.mock.method(globalThis, 'fetch', async (_url, init) => {
+    request = JSON.parse(init.body)
+    return Response.json({ id: 'response-test', model: 'test-model',
+      output_text: '{broken json', usage: { output_tokens: 3 } })
+  })
   const provider = new OpenAiSupplierDocumentProvider({ apiKey: 'test', model: 'test-model',
     onResponse: async (trace) => traces.push(trace) })
-  const fixture = getSupplierDocumentMockFixture('known-supplier')
+  const fixture = structuredClone(getSupplierDocumentMockFixture('known-supplier'))
+  fixture.ocr.pages[0].words[0].confidence = 0.20
   await assert.rejects(provider.interpret({ ocr: fixture.ocr, documentType: 'delivery_note', supplierCandidates: [] }))
+  const source = JSON.parse(request.input[0].content[0].text).supplierExtractionSource
+  assert.ok(source.pages[0].words.some((word) => word.confidence === 0.20))
+  assert.ok(source.pages[0].fingerprintEligibleWords.every((word) => word.confidence >= 0.90))
+  assert.ok(!source.pages[0].fingerprintEligibleWords.some((word) => word.confidence === 0.20))
   assert.equal(traces.length, 1)
   assert.equal(traces[0].outputText, '{broken json')
   assert.equal(traces[0].stage, 'interpret')
@@ -958,6 +1051,20 @@ test('solo acepta un perfil candidato si reproduce la interpretación y las mate
   assert.throws(() => supplierProfileRulesSchema.parse({ ...fixture.extraction.proposedProfile, columns: [] }))
 })
 
+test('un requiredText no puede usar palabras OCR con confidence inferior al 90%', () => {
+  const fixture = getSupplierDocumentMockFixture('unknown-supplier')
+  const ocr = structuredClone(fixture.ocr)
+  const supplierWord = ocr.pages[0].words.find((word) => word.text === 'NUEVO')
+  supplierWord.confidence = 0.20
+
+  const rejected = validateProposedProfile(ocr, fixture.extraction)
+  assert.equal(rejected.candidate, false)
+  assert.equal(rejected.reason, 'PROFILE_FINGERPRINT_WORD_CONFIDENCE_TOO_LOW')
+
+  supplierWord.confidence = 0.90
+  assert.equal(validateProposedProfile(ocr, fixture.extraction).candidate, true)
+})
+
 test('valida perfiles multipfila por aliases OCR, descuentos, cargos, netos y matemáticas', () => {
   const fixture = getSupplierDocumentMockFixture('multi-row-product')
   assert.ok(fixture)
@@ -1136,6 +1243,24 @@ test('el bucket privado exige el path exacto reservado para un documento accesib
   assert.match(migration, /document\.storage_path = p_name/)
   assert.match(migration, /supplier_documents_storage_insert[\s\S]*can_access_supplier_document_object\(name\)/)
   assert.match(migration, /grant execute on function public\.can_access_supplier_document_object\(text\)[\s\S]*to authenticated/)
+})
+
+test('fecha y número manuales sobreviven a guardar líneas y decidir costes', () => {
+  assert.match(page, /async function refresh\([\s\S]*preserveDocumentFields = false/)
+  assert.match(page, /if \(!preserveDocumentFields\) \{[\s\S]*setDocumentDate\([\s\S]*setDocumentNumber\([\s\S]*setAffectsStock\(/)
+
+  const flows = [
+    page.match(/async function saveEditor\([\s\S]*?async function createItem\(/)?.[0] ?? '',
+    page.match(/async function decideCost\([\s\S]*?async function decideAllCosts\(/)?.[0] ?? '',
+    page.match(/async function decideAllCosts\([\s\S]*?async function confirm\(/)?.[0] ?? '',
+  ]
+  for (const flow of flows) {
+    assert.match(flow, /await refresh\(detail\.document\.id, \{ preserveDocumentFields: true \}\)/)
+  }
+
+  const confirmation = page.match(/async function confirm\([\s\S]*?async function changeSupplier\(/)?.[0] ?? ''
+  assert.match(confirmation, /await refresh\(detail\.document\.id\);/)
+  assert.doesNotMatch(confirmation, /preserveDocumentFields/)
 })
 
 test('la UI es mobile-first, revisa incidencias y confirma solo por la RPC global', () => {

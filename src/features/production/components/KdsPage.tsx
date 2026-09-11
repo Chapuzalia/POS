@@ -11,6 +11,7 @@ import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 type Props = {
   context: TenantContext
   isOnline: boolean
+  onBusyChange?: (busy: boolean) => void
   onLogout: () => Promise<void>
 }
 
@@ -24,12 +25,18 @@ function itemDetails(item: KdsQueue['items'][number]) {
   return [item.snapshot.variantName, ...modifiers].filter(Boolean).join(' · ')
 }
 
-export function KdsPage({ context, isOnline, onLogout }: Props) {
+export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
   const [queue, setQueue] = useState<KdsQueue>(emptyQueue)
   const [error, setError] = useState<string | null>(null)
   const [busyId, setBusyId] = useState<string | null>(null)
+  const [preparationBusy, setPreparationBusy] = useState(false)
   const [view, setView] = useState<'orders' | 'preparations'>('orders')
   const inventoryRecipesEnabled = hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')
+
+  useEffect(() => {
+    onBusyChange?.(busyId !== null || preparationBusy)
+    return () => onBusyChange?.(false)
+  }, [busyId, onBusyChange, preparationBusy])
 
   const refresh = useCallback(async () => {
     if (!isOnline) return
@@ -84,7 +91,7 @@ export function KdsPage({ context, isOnline, onLogout }: Props) {
       {!isOnline ? <div className="mb-4 flex items-center gap-2 rounded-[var(--radius)] border border-[var(--danger)] bg-[color-mix(in_srgb,var(--danger)_10%,var(--surface))] p-4 font-bold"><WifiOff className="h-5 w-5" /> El KDS necesita conexión. No se muestran datos en caché.</div> : null}
       {error ? <div className="mb-4 rounded-[var(--radius)] border border-[var(--danger)] p-4 font-semibold text-[var(--danger)]">{error}</div> : null}
 
-      {inventoryRecipesEnabled && view === 'preparations' ? <InventoryPreparationsPanel context={context} isOnline={isOnline} /> : <>
+      {inventoryRecipesEnabled && view === 'preparations' ? <InventoryPreparationsPanel context={context} isOnline={isOnline} onBusyChange={setPreparationBusy} /> : <>
       {recentEvents.length ? <section className="mb-4 space-y-2">
         {recentEvents.map((event) => <article className="flex items-start gap-3 rounded-[var(--radius)] border-2 border-[var(--danger)] bg-[var(--surface)] p-3" key={event.id}>
           <TriangleAlert className="mt-0.5 h-5 w-5 shrink-0 text-[var(--danger)]" />

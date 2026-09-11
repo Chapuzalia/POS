@@ -100,9 +100,9 @@ test('el ciclo queda protegido en POS, pagos, publicación, realtime, ticket det
   for (const table of ['products', 'product_variants', 'catalog_placements', 'selection_group_options', 'product_selection_group_assignments']) {
     assert.ok(realtime.includes(`'${table}'`))
   }
-  assert.match(groupsPage, /catalog\.selectionGroups\.filter\(\(group\) => group\.type === 'mixer'\)/)
+  assert.match(groupsPage, /catalog\.selectionGroups\.filter\(\(group\) => group\.type === ["']mixer["']\)/)
   assert.doesNotMatch(groupsPage, /menu_component/)
-  assert.match(productEditor, /catalog\.selectionGroups\.filter\(\(group\) => group\.type === 'mixer'\)/)
+  assert.match(productEditor, /catalog\.selectionGroups\.filter\(\(group\) => group\.type === ["']mixer["']\)/)
   assert.match(resolver, /\(product\.type === 'menu'\) !== \(group\.type === 'menu_component'\)/)
   assert.match(navigation, /label: 'Mixers'/)
   assert.match(triggerHotfix, /create or replace function public\.guard_published_menu_dependencies/)

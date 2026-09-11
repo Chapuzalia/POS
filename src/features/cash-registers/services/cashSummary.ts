@@ -1,5 +1,12 @@
 import type { CashMovement, CashSummary, SaleRecord } from '../../../types/domain.ts'
 
+export function getExpectedCashAfterStackerCollections(
+  expectedCashCents: number,
+  stackerCollectionsCents: number,
+) {
+  return expectedCashCents - stackerCollectionsCents
+}
+
 export function summarizeSales(
   openingFloatCents: number,
   records: SaleRecord[],

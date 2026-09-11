@@ -1,11 +1,14 @@
 import { lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { AppUpdateBanner } from '../components/feedback/AppUpdateBanner'
 import { LoginScreen } from '../components/screens/LoginScreen'
 import { LoadingScreen, MissingConfigScreen, PosStartupReveal } from '../components/screens/StateScreens'
 import themesData from '../config/themes.json'
+import type { AppVersionStatus } from '../config/appVersion'
 import { CashSessionGate } from '../features/cash-registers/CashSessionGate'
 import { useCashSession } from '../features/cash-registers'
 import { useOfflineController, useRejectedSaleRecovery } from '../features/offline'
 import { useQuickSale } from '../features/quick-sale'
+import { useCashlogyManagementStore, useCashlogyStore, usePrintAgentStore } from '../features/local-printing'
 import type { CatalogData } from '../features/catalog/domain/types'
 import { subscribeToCatalogTabChanges } from '../features/catalog/data/catalog-realtime'
 import { removeProductSalesStats } from '../features/quick-sale/services/productSalesStats'
@@ -15,7 +18,6 @@ import { useLoginActivity, useTenantSession } from '../features/session'
 import { loadTenantState } from '../features/session/services/loadTenantState'
 import { shouldResetTenantState } from '../features/session/session-state'
 import { useAddProductFeedback } from '../hooks/useAddProductFeedback'
-import { useOnlineStatus } from '../hooks/useOnlineStatus'
 import { useThemeTokens } from '../hooks/useThemeTokens'
 import { hasTenantFeature } from '../features/platform/tenantFeatureAccess'
 import {
@@ -65,9 +67,13 @@ const KdsPage = lazy(() => import('../features/production/components/KdsPage').t
 const themes = themesData as ThemeDefinition[]
 const defaultThemeId = themes[0]?.id ?? 'hero-minimal'
 
-export function AppShell() {
+type AppShellProps = {
+  networkOnline: boolean
+  versionStatus: AppVersionStatus
+}
+
+export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   const { selectedTheme, setThemeId, themeId } = useThemeTokens(themes, defaultThemeId)
-  const networkOnline = useOnlineStatus()
   const [sessionReady, setSessionReady] = useState(false)
   const isOnline = networkOnline && sessionReady
   const offline = useOfflineController(networkOnline, sessionReady)
@@ -85,6 +91,19 @@ export function AppShell() {
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [isBusy, setIsBusy] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
+  const cashlogyPaymentActive = useCashlogyStore((state) => Boolean(
+    state.intent || state.isStarting || state.isPolling || state.isCancelling,
+  ))
+  const cashlogyManagementActive = useCashlogyManagementStore((state) => Boolean(
+    state.intent
+      || state.isStarting
+      || state.isPolling
+      || state.isMutating
+      || state.isCancelling
+      || state.isRecordingStackerCollection
+      || state.stackerCollectionPending,
+  ))
+  const localHardwareActive = usePrintAgentStore((state) => state.isPrintingTicket || state.isOpeningCashDrawer)
   const {
     error,
     errorId,
@@ -99,6 +118,7 @@ export function AppShell() {
   const [pendingLoginContext, setPendingLoginContext] = useState<TenantContext | null>(null)
   const [mobileTicketOpen, setMobileTicketOpen] = useState(false)
   const [restaurantPaidFeedback, setRestaurantPaidFeedback] = useState<PaymentMethod | null>(null)
+  const [auxiliaryOperationBusy, setAuxiliaryOperationBusy] = useState(false)
   const floatingTicketButtonRef = useRef<HTMLButtonElement>(null)
   const addFeedback = useAddProductFeedback(floatingTicketButtonRef)
   const tenantIdForFeatureSync = context && !isSuperadmin(context) ? context.tenantId : null
@@ -385,10 +405,30 @@ export function AppShell() {
     saveCatalogStartTab(next)
   }
 
+  const updateBlocked = !networkOnline
+    || isBusy
+    || quickSale.paymentInFlight
+    || quickSale.cashPaymentOpen
+    || offline.isSyncing
+    || offline.pendingCount > 0
+    || Boolean(offline.rejectedSaleEvent)
+    || auxiliaryOperationBusy
+    || restaurant.saveState !== 'saved'
+    || Boolean(restaurant.pendingPayment)
+    || restaurant.equalSplitOpen
+    || reservations.isLoading
+    || Boolean(reservations.editor)
+    || Boolean(reservations.pendingConflictDraft)
+    || cash.movementSaving
+    || Boolean(cash.printingClosingId)
+    || cashlogyPaymentActive
+    || cashlogyManagementActive
+    || localHardwareActive
+
   if (!selectedTheme) return null
-  if (!supabaseConfig.isReady) return <MissingConfigScreen />
-  if (isBootstrapping || (isLoading && !context)) return <LoadingScreen />
-  if (!context) return <LoginScreen
+  if (!supabaseConfig.isReady) return <><MissingConfigScreen /><AppUpdateBanner blocked={false} status={versionStatus} /></>
+  if (isBootstrapping || (isLoading && !context)) return <><LoadingScreen /><AppUpdateBanner blocked status={versionStatus} /></>
+  if (!context) return <><LoginScreen
     allowOfflineEnter={!loginLeaseBlocked && getCachedContext()?.deviceMode !== 'kds'}
     cachedContext={getCachedContext()}
     conflictAccountName={pendingLoginContext?.userName ?? null}
@@ -399,19 +439,20 @@ export function AppShell() {
     onForceLoginConflict={() => void session.forceLogin()}
     onLogin={session.login}
     onOfflineEnter={session.enterOffline}
-  />
+  /><AppUpdateBanner blocked={updateBlocked} status={versionStatus} /></>
 
-  return <AppRouter context={context}>{() => {
+  return <><AppRouter context={context}>{() => {
     if (isSuperadmin(context)) return <SuperAdminPage context={context} error={error} isOnline={isOnline} onError={setGeneralError} onLogout={session.logout} />
     if (isCrmUser(context)) return <CrmPage
       context={context}
       error={error}
       isOnline={isOnline}
+      onBusyChange={setAuxiliaryOperationBusy}
       onCatalogChanged={(venueId) => refreshCatalog({ ...context, venueId })}
       onError={setGeneralError}
       onLogout={session.logout}
     />
-    if (context.deviceMode === 'kds') return <KdsPage context={context} isOnline={isOnline} onLogout={session.logout} />
+    if (context.deviceMode === 'kds') return <KdsPage context={context} isOnline={isOnline} onBusyChange={setAuxiliaryOperationBusy} onLogout={session.logout} />
     if (isOnline && !restaurant.tablesConfigLoaded) return <LoadingScreen />
     if (!cash.session && !reservations.isOpen) return <PosStartupReveal><CashSessionGate
       canOpenReservations={hasTenantFeature(context, 'restaurant') && hasTenantFeature(context, 'reservations')}
@@ -465,6 +506,7 @@ export function AppShell() {
       )}
       onSetError={setGeneralError}
       onSetMobileTicketOpen={setMobileTicketOpen}
+      onUpdateBlockingOperationChange={setAuxiliaryOperationBusy}
       onUpdateCatalogStartTab={updateCatalogStartTab}
       productSalesStats={productSalesStats}
       quickSale={quickSale}
@@ -475,7 +517,7 @@ export function AppShell() {
       setThemeId={setThemeId}
       themes={themes}
     /></PosStartupReveal>
-  }}</AppRouter>
+  }}</AppRouter><AppUpdateBanner blocked={updateBlocked} status={versionStatus} /></>
 }
 
 export default AppShell

@@ -1,0 +1,39 @@
+name: Migration safety
+
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+jobs:
+  check-migrations:
+    name: Check PR migrations for destructive operations
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+
+      - name: Run migration safety checker
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -Eeuo pipefail
+          merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
+          echo "Checking PR migrations from common ancestor $merge_base to $HEAD_SHA."
+          bash scripts/check-pr-migrations.sh "$merge_base" "$HEAD_SHA"
+
+      - name: Run checker regression tests
+        run: node --test tests/migration-safety.test.mjs

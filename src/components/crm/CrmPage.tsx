@@ -17,11 +17,12 @@ export type CrmPageProps = {
   error: string | null
   isOnline: boolean
   onCatalogChanged: (venueId: string) => Promise<void>
+  onBusyChange?: (busy: boolean) => void
   onError: (error: string | null) => void
   onLogout: () => void
 }
 
-export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, onLogout }: CrmPageProps) {
+export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChanged, onError, onLogout }: CrmPageProps) {
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)
@@ -32,6 +33,11 @@ export function CrmPage({ context, error, isOnline, onCatalogChanged, onError, o
   selectedVenueIdRef.current = selectedVenueId
   const handleCatalogLoadError = useCallback((loadError: unknown) => onError(getReadableError(loadError, { operation: 'components.crm.CrmPage' })), [onError])
   const { catalog, isLoading: isCatalogLoading, refresh: refreshAdminCatalog } = useCatalogAdmin(selectedVenueId, isOnline, handleCatalogLoadError)
+
+  useEffect(() => {
+    onBusyChange?.(isBusy || isCatalogLoading)
+    return () => onBusyChange?.(false)
+  }, [isBusy, isCatalogLoading, onBusyChange])
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
     setIsBusy(true)

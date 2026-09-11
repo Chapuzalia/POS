@@ -1,3 +1,5 @@
+import { APP_VERSION } from '../config/appVersion'
+
 export function registerServiceWorker() {
   if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return
 
@@ -5,7 +7,7 @@ export function registerServiceWorker() {
     'load',
     () => {
       void navigator.serviceWorker
-        .register('/sw.js', {
+        .register(`/sw.js?v=${encodeURIComponent(APP_VERSION)}`, {
           scope: '/',
           updateViaCache: 'none',
         })

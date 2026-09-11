@@ -309,7 +309,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     startPromise = null
     recoveryPromise = null
     const intent = loadCashlogyManagementIntent(scope)
-    set({ scope, cashSessionId: null, intent, operation: null, error: null, modalOpen: Boolean(intent), isStarting: false, isPolling: false, isMutating: false, isCancelling: false, isRecordingStackerCollection: false, stackerCollectionPending: false })
+    set({ scope, cashSessionId: null, intent, operation: null, error: null, modalOpen: false, isStarting: false, isPolling: false, isMutating: false, isCancelling: false, isRecordingStackerCollection: false, stackerCollectionPending: false })
   },
 
   setCashSessionId(cashSessionId) { set({ cashSessionId }) },
@@ -418,10 +418,11 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     if (recoveryPromise) return recoveryPromise
     const intent = get().intent
     if (!intent) return null
-    set({ modalOpen: true, error: null })
+    set({ error: null })
     recoveryPromise = (async () => {
       try {
         const operation = (await client().getCashlogyCashManagementOperationByRequestId(intent.requestId, signal)).operation
+        set({ modalOpen: true })
         await resolveObservedOperation(operation)
         startPolling(operation)
         return operation

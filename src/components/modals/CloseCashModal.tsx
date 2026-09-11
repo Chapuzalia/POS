@@ -6,11 +6,13 @@ import type { CashClosedPayload, CashSession, CashSummary } from "../../types";
 import { nowIso } from "../../utils/dates";
 import { AppModal, Button, Metric } from "../ui";
 import { NumericKeypadModal } from "../ui/NumericKeypadModal";
+import { getExpectedCashAfterStackerCollections } from "../../features/cash-registers/services/cashSummary";
 
 type CloseCashModalProps = {
   openOrderCount: number;
   cashSession: CashSession;
   cashlogyCashCents: number | null;
+  cashlogyStackerCollectionsCents: number;
   isBusy: boolean;
   onCancel: () => void;
   onConfirm: (payload: CashClosedPayload) => void;
@@ -22,14 +24,19 @@ export function CloseCashModal({
   openOrderCount,
   cashSession,
   cashlogyCashCents,
+  cashlogyStackerCollectionsCents,
   isBusy,
   onCancel,
   onConfirm,
   summary,
   userId,
 }: CloseCashModalProps) {
+  const expectedCashCents = getExpectedCashAfterStackerCollections(
+    summary.cashCents,
+    cashlogyStackerCollectionsCents,
+  );
   const [countedCash, setCountedCash] = useState(
-    centsToInput(cashlogyCashCents ?? summary.cashCents),
+    centsToInput(cashlogyCashCents ?? expectedCashCents),
   );
   const [countedCard, setCountedCard] = useState(
     centsToInput(summary.cardCents),
@@ -41,7 +48,7 @@ export function CloseCashModal({
   const countedCashCents = parseMoneyToCents(countedCash);
   const countedCardCents = parseMoneyToCents(countedCard);
   const finalCashFundCents = cashlogyCashCents ?? cashSession.openingFloatCents;
-  const expectedTotal = summary.cashCents + summary.cardCents;
+  const expectedTotal = expectedCashCents + summary.cardCents;
   const countedTotal = countedCashCents + countedCardCents;
   const discrepancy = countedTotal - expectedTotal;
   const notesRequired = discrepancy !== 0 && !notes.trim();
@@ -53,7 +60,7 @@ export function CloseCashModal({
       tenantId: cashSession.tenantId,
       closedAt: nowIso(),
       closedBy: userId,
-      expectedCashCents: summary.cashCents,
+      expectedCashCents,
       expectedCardCents: summary.cardCents,
       expectedInvitationCents: summary.invitationCents,
       expectedOtherCents: summary.otherCents,
@@ -107,7 +114,7 @@ export function CloseCashModal({
           <div className="mt-5 grid gap-3 sm:grid-cols-2">
             <Metric
               label="Efectivo esperado"
-              value={formatMoney(summary.cashCents)}
+              value={formatMoney(expectedCashCents)}
             />
             <Metric
               label="Tarjeta TPV"

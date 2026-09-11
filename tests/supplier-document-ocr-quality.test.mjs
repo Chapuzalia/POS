@@ -8,7 +8,7 @@ import * as fixtures from '../supabase/functions/_shared/supplier-documents/fixt
 import * as quality from '../supabase/functions/_shared/supplier-documents/ocrQuality.ts'
 import * as metadata from '../supabase/functions/_shared/supplier-documents/documentMetadata.ts'
 
-const { analyzeOcrWithQuality, validateOcrSanity, OcrQualityError, OCR_QUALITY_MESSAGE } = quality
+const { analyzeOcrWithQuality, validateOcrSanity, OcrQualityError, OCR_QUALITY_MESSAGE, MINIMUM_OCR_CONFIDENCE } = quality
 const fixture = fixtures.getSupplierDocumentMockFixture('known-supplier')
 const binary = { bytes: new Uint8Array([1, 2, 3]), contentType: 'image/jpeg', fileName: 'factura.jpg' }
 const repeatedBlock = 'Coca-Cola Corporation\nSan Francisco, California\n(415) 661-1001\n'
@@ -133,6 +133,33 @@ test('Mistral válido no construye ni llama a Azure y conserva exactamente su OC
   assert.equal(result.attempts.length, 1)
 })
 
+test('confidence OCR inferior al 94% usa Azure y el 94% exacto se acepta', async () => {
+  assert.equal(MINIMUM_OCR_CONFIDENCE, 0.94)
+  const calls = []
+  const azure = ocrText(fixture.ocr.text, 'azure', 0.94)
+  const result = await analyzeOcrWithQuality(binary, {
+    name: 'mistral', create: () => fakeProvider('mistral', ocrText(fixture.ocr.text, 'mistral', 0.939), calls),
+  }, () => fakeProvider('azure', azure, calls))
+  assert.strictEqual(result.ocr, azure)
+  assert.deepEqual(calls, ['mistral', 'azure'])
+  assert.deepEqual(result.attempts.map((attempt) => attempt.sanityReasons), [
+    ['confidence_below_94_percent'], [],
+  ])
+})
+
+test('si Mistral y Azure quedan por debajo del 94% pide una foto mejor', async () => {
+  const calls = []
+  await assert.rejects(analyzeOcrWithQuality(binary, {
+    name: 'mistral', create: () => fakeProvider('mistral', ocrText(fixture.ocr.text, 'mistral', 0.93), calls),
+  }, () => fakeProvider('azure', ocrText(fixture.ocr.text, 'azure', 0.939), calls)), (error) => {
+    assert.ok(error instanceof OcrQualityError)
+    assert.equal(error.message, OCR_QUALITY_MESSAGE)
+    assert.ok(error.attempts.every((attempt) => attempt.sanityReasons.includes('confidence_below_94_percent')))
+    return true
+  })
+  assert.deepEqual(calls, ['mistral', 'azure'])
+})
+
 test('Mistral inválido llama una vez a Azure; solo su OCR aceptado sale del flujo', async () => {
   const calls = []
   const azure = normal('azure')
@@ -220,7 +247,7 @@ test('adaptadores reales: markdown aberrante de Mistral activa Azure prebuilt-la
     assert.equal(String(url), 'https://azure.example.test/operations/1')
     return Response.json({ status: 'succeeded', analyzeResult: {
       content: fixture.ocr.text,
-      pages: [{ pageNumber: 1, width: 1000, height: 1500, lines: fixture.ocr.text.split('\n').map((content) => ({ content })), words: [{ content: 'Factura', confidence: 0.9 }] }],
+      pages: [{ pageNumber: 1, width: 1000, height: 1500, lines: fixture.ocr.text.split('\n').map((content) => ({ content })), words: [{ content: 'Factura', confidence: 0.96 }] }],
     } })
   })
   const selection = { provider: 'mistral', mistral: { apiKey: 'mistral-test' }, azure: { endpoint: 'https://azure.example.test', apiKey: 'azure-test' } }

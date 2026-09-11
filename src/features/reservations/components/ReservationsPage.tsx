@@ -28,7 +28,6 @@ type ReservationFilter = "all" | "upcoming" | "arrived" | "late" | "unassigned";
 type Props = {
   controller: Controller;
   isOnline: boolean;
-  onOpenOrder: (orderId: string) => void;
 };
 
 function matchesFilter(reservation: Reservation, filter: ReservationFilter) {
@@ -49,7 +48,7 @@ function matchesFilter(reservation: Reservation, filter: ReservationFilter) {
   return true;
 }
 
-export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
+export function ReservationsPage({ controller, isOnline }: Props) {
   const [filter, setFilter] = useState<ReservationFilter>("all");
   const [areaId, setAreaId] = useState("all");
   const searching = Boolean(controller.query.trim());
@@ -227,11 +226,11 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
         aria-label="Herramientas de reservas"
         className="m-3 mb-0 flex lg:flex-row max-lg:flex-wrap shrink-0  items-center gap-2 rounded-xl border border-[var(--separator)] bg-[var(--surface)] p-2 md:m-0 md:rounded-2xl md:shadow-sm"
       >
-        <label className="flex min-h-11 w-full basis-full items-center gap-2 rounded-xl bg-[var(--surface-secondary)] px-3 text-[var(--muted)] focus-within:ring-2 focus-within:ring-[var(--accent)] md:min-w-60 md:flex-1 md:basis-auto">
+        <label className="flex min-h-11 w-full basis-full items-center gap-2 rounded-xl border-1 bg-[var(--surface-secondary)] px-3 text-[var(--muted)] focus-within:ring-2 focus-within:ring-[var(--accent)] md:min-w-60 md:flex-1 md:basis-auto">
           <Search aria-hidden="true" size={18} />
           <span className="sr-only">Buscar reservas</span>
           <UiInput
-            className="min-w-0 flex-1 !bg-transparent !p-0 !text-[var(--foreground)]"
+            className="min-w-0 flex-1 !border-none !bg-transparent !p-0 !text-[var(--foreground)]"
             onChange={(event) => {
               controller.setQuery(event.target.value);
               if (event.target.value) {
@@ -309,7 +308,7 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
         </UiButton>
       </section>
 
-      <section className="flex min-h-0 min-w-0 w-full max-w-full flex-none gap-3 p-3 md:min-h-105 md:flex-1 md:p-0">
+      <section className="relative flex min-h-0 min-w-0 w-full max-w-full flex-none gap-3 p-3 md:min-h-105 md:flex-1 md:p-0">
         {controller.view === "list" ? (
           <ReservationList
             onSelect={controller.openDetail}
@@ -339,14 +338,12 @@ export function ReservationsPage({ controller, isOnline, onOpenOrder }: Props) {
         )}
         {controller.detail ? (
           <ReservationDetailPanel
+            floating={controller.view === "timeline"}
             canManage={controller.canManage}
             disabled={!isOnline || controller.isLoading}
             onClose={() => controller.setDetail(null)}
             onEdit={() => controller.openEdit(controller.detail!)}
-            onOpenOrder={(orderId) => {
-              controller.close();
-              onOpenOrder(orderId);
-            }}
+            onOpenOrder={() => void controller.seat(controller.detail!)}
             onSeat={() => void controller.seat(controller.detail!)}
             onStatus={(status, reason) =>
               void controller.updateStatus(controller.detail!, status, reason)

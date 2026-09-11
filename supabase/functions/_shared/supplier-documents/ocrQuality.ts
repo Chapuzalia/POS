@@ -3,6 +3,7 @@ import type { DocumentBinaryInput, DocumentOcrProvider } from './providers.ts'
 
 export const OCR_QUALITY_TOO_LOW = 'OCR_QUALITY_TOO_LOW'
 export const OCR_QUALITY_MESSAGE = 'No hemos podido leer correctamente el documento. Haz una nueva foto con mejor iluminación, enfoque y procurando que el documento aparezca completo.'
+export const MINIMUM_OCR_CONFIDENCE = 0.94
 
 // Conservative corruption guards, not a score of invoice/extraction correctness.
 export const ocrSanityThresholds = {
@@ -197,8 +198,11 @@ export async function analyzeOcrWithQuality(
       throw new OcrQualityError(attempts)
     }
     const sanity = validateOcrSanity(ocr)
-    attempts.push({ provider: name, accepted: sanity.valid, sanityReasons: sanity.reasons, metrics: sanity.metrics })
-    return sanity.valid ? ocr : null
+    const reasons = [...sanity.reasons]
+    if (ocr.confidence < MINIMUM_OCR_CONFIDENCE) reasons.push('confidence_below_94_percent')
+    const accepted = reasons.length === 0
+    attempts.push({ provider: name, accepted, sanityReasons: reasons, metrics: sanity.metrics })
+    return accepted ? ocr : null
   }
   const first = await attempt(primary.name, primary.create)
   if (first) return { ocr: first, attempts }

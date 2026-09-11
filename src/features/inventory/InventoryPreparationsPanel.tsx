@@ -5,7 +5,7 @@ import type { TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 import { loadInventoryPreparations, previewInventoryPreparation, recordInventoryPreparation, type InventoryPreparation, type InventoryPreparationPreview } from './preparationsService'
 
-export function InventoryPreparationsPanel({ context, isOnline, onClose }: { context: TenantContext; isOnline: boolean; onClose?: () => void }) {
+export function InventoryPreparationsPanel({ context, isOnline, onBusyChange, onClose }: { context: TenantContext; isOnline: boolean; onBusyChange?: (busy: boolean) => void; onClose?: () => void }) {
   const [items, setItems] = useState<InventoryPreparation[]>([])
   const [selected, setSelected] = useState<InventoryPreparation | null>(null)
   const [quantity, setQuantity] = useState('')
@@ -13,6 +13,11 @@ export function InventoryPreparationsPanel({ context, isOnline, onClose }: { con
   const [error, setError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
+
+  useEffect(() => {
+    onBusyChange?.(busy)
+    return () => onBusyChange?.(false)
+  }, [busy, onBusyChange])
 
   const refresh = useCallback(async () => {
     if (!isOnline) return

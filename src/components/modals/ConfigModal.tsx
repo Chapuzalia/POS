@@ -1,10 +1,11 @@
 import { Button as UiButton } from '../ui/Button'
-import { ArrowLeft, LayoutList, Palette, Printer, RefreshCw, X } from 'lucide-react'
+import { ArrowLeft, LayoutList, Palette, Printer, RefreshCw, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import type { CatalogStartTab, TenantContext, ThemeDefinition } from '../../types'
 import { PrintAgentSettings } from '../../features/local-printing'
 import { AppModal, Button, Metric } from '../ui'
 import { Select } from '../ui/Select'
+import { clearLocalCache } from '../../lib/clearLocalCache'
 
 type ConfigModalProps = {
   catalogStartTab: CatalogStartTab
@@ -32,6 +33,20 @@ export function ConfigModal({
   themes,
 }: ConfigModalProps) {
   const [section, setSection] = useState<'general' | 'printing'>('general')
+  const [clearingCache, setClearingCache] = useState(false)
+  const [clearCacheError, setClearCacheError] = useState<string | null>(null)
+
+  async function handleClearCache() {
+    if (clearingCache || !window.confirm('¿Borrar todos los datos locales de este TPV? Se eliminarán la sesión, las preferencias y los datos pendientes de sincronizar. Solo se conservarán la URL del backend de impresión y su token. La aplicación se recargará; necesitarás conexión para volver a entrar.')) return
+    setClearingCache(true)
+    setClearCacheError(null)
+    try {
+      await clearLocalCache()
+    } catch {
+      setClearCacheError('No se ha podido completar el borrado. La URL y el token de impresión se han conservado. Vuelve a intentarlo.')
+      setClearingCache(false)
+    }
+  }
   const theme = themes.find((item) => item.id === themeId)
   const canManageHardware = context.canManageCash === true || ['manager', 'owner', 'superadmin'].includes(context.role)
 
@@ -123,6 +138,14 @@ export function ConfigModal({
               value={catalogStartTab}
             />
           </div>
+        </div>
+        <div className="mt-5 border-t border-[var(--separator)] pt-4">
+          <Button disabled={clearingCache} onClick={() => void handleClearCache()} type="button" variant="dangerSoft" fullWidth>
+            <Trash2 className="h-4 w-4" />
+            {clearingCache ? 'Borrando caché…' : 'Borrar caché local'}
+          </Button>
+          <p className="mt-2 text-xs text-[var(--muted)]">Borra los datos locales y conserva solo la URL del backend de impresión y el token.</p>
+          {clearCacheError ? <p className="mt-2 text-sm text-red-600 dark:text-red-300" role="alert">{clearCacheError}</p> : null}
         </div>
       </section>
     </AppModal>

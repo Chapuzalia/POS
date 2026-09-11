@@ -109,24 +109,43 @@ function InfiniteTimeColumn({
   value: number;
 }) {
   const viewportRef = useRef<HTMLDivElement>(null);
+  const selectedValueRef = useRef(value);
+  const settleTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const optionsKey = options.join(",");
 
   useLayoutEffect(() => {
     const viewport = viewportRef.current;
     if (!viewport) return;
     const centerSelected = () => {
       const selected = viewport.querySelector<HTMLElement>(
-        `[data-cycle="2"][data-value="${value}"]`,
+        `[data-cycle="2"][data-value="${selectedValueRef.current}"]`,
       );
-      if (selected)
+      if (selected) {
         viewport.scrollTop =
           selected.offsetTop -
           (viewport.clientHeight - selected.offsetHeight) / 2;
+      }
     };
     centerSelected();
     const observer = new ResizeObserver(centerSelected);
     observer.observe(viewport);
-    return () => observer.disconnect();
-  }, [options, value]);
+    return () => {
+      observer.disconnect();
+      if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    };
+  }, [optionsKey]);
+
+  useLayoutEffect(() => {
+    if (selectedValueRef.current === value) return;
+    const viewport = viewportRef.current;
+    const selected = viewport?.querySelector<HTMLElement>(
+      `[data-cycle="2"][data-value="${value}"]`,
+    );
+    if (viewport && selected) {
+      selectedValueRef.current = value;
+      viewport.scrollTop = selected.offsetTop - (viewport.clientHeight - selected.offsetHeight) / 2;
+    }
+  }, [value]);
 
   function preserveInfiniteLoop(event: UIEvent<HTMLDivElement>) {
     const viewport = event.currentTarget;
@@ -134,12 +153,33 @@ function InfiniteTimeColumn({
     if (viewport.scrollTop < cycleHeight) viewport.scrollTop += cycleHeight * 2;
     else if (viewport.scrollTop > cycleHeight * 3)
       viewport.scrollTop -= cycleHeight * 2;
+    const rows = viewport.children;
+    const first = rows[0] as HTMLElement;
+    const second = rows[1] as HTMLElement;
+    if (!first || !second) return;
+    const rowHeight = second.offsetTop - first.offsetTop;
+    const index = Math.max(0, Math.min(rows.length - 1, Math.round(
+      (viewport.scrollTop + viewport.clientHeight / 2 - first.offsetTop - first.offsetHeight / 2) / rowHeight,
+    )));
+    const selected = rows[index] as HTMLElement;
+    const nextValue = Number(selected.dataset.value);
+    if (nextValue !== selectedValueRef.current) {
+      selectedValueRef.current = nextValue;
+      onChange(nextValue);
+    }
+    if (settleTimerRef.current) clearTimeout(settleTimerRef.current);
+    settleTimerRef.current = setTimeout(() => {
+      viewport.scrollTo({
+        top: selected.offsetTop - (viewport.clientHeight - selected.offsetHeight) / 2,
+        behavior: "smooth",
+      });
+    }, 120);
   }
 
   return (
     <div
       aria-label={label}
-      className="min-h-0 overflow-y-auto overscroll-contain [overflow-anchor:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
+      className="relative min-h-0 overflow-y-auto overscroll-contain [overflow-anchor:none] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden"
       onScroll={preserveInfiniteLoop}
       ref={viewportRef}
       role="listbox"
@@ -153,7 +193,15 @@ function InfiniteTimeColumn({
             data-cycle={cycle}
             data-value={option}
             key={`${cycle}:${option}`}
-            onClick={() => onChange(option)}
+            onClick={(event) => {
+              const viewport = viewportRef.current;
+              if (!viewport) return;
+              const row = event.currentTarget;
+              viewport.scrollTo({
+                top: row.offsetTop - (viewport.clientHeight - row.offsetHeight) / 2,
+                behavior: "smooth",
+              });
+            }}
             role="option"
             type="button"
           >

@@ -74,7 +74,7 @@ test('accesos integra las credenciales y la edición dentro de cada dispositivo'
   assert.match(accessPage, /data\.devices\.map/)
   assert.match(accessPage, /device\.account\?\.email/)
   assert.match(accessPage, /updateCrmDevice/)
-  assert.match(accessPage, /maxLength=\{6\} minLength=\{6\}/)
+  assert.match(accessPage, /maxLength=\{6\}\s+minLength=\{6\}/)
   assert.match(accessService, /action: "update-device"/)
   assert.match(edgeFunction, /action === 'update-device'/)
   assert.match(edgeFunction, /password\.length !== 6/)
@@ -110,7 +110,7 @@ test('el owner asigna locales al manager y el manager solo administra dispositiv
 
   assert.doesNotMatch(permissions, /OWNER_ONLY_SECTIONS[^\n]*access/)
   assert.match(accessPage, /VenueScopePicker/)
-  assert.match(accessPage, /tenantContext\.role === 'owner' \? <section/)
+  assert.match(accessPage, /tenantContext\.role === ["']owner["'] \? \(\s*<section/)
   assert.match(accessService, /action: "set-manager-venues"/)
   assert.match(accessService, /manager_venue_assignments/)
   assert.match(edgeFunction, /allowedVenueIds: isOwner \? null : \[\.\.\.managerVenueIds\]/)

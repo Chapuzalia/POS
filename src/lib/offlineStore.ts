@@ -15,6 +15,7 @@ import type {
 } from '../types'
 
 const prefix = 'clubpos:v1'
+const OFFLINE_QUEUE_SCHEMA_VERSION = 1 as const
 
 function hasStorage() {
   return typeof window !== 'undefined' && 'localStorage' in window
@@ -212,7 +213,10 @@ export function saveOfflineQueue(events: OfflineEvent[]) {
 }
 
 export function enqueueOfflineEvent(event: OfflineEvent) {
-  saveOfflineQueue(appendFrozenQueueEvent(getOfflineQueue(), event))
+  saveOfflineQueue(appendFrozenQueueEvent(getOfflineQueue(), {
+    ...event,
+    schemaVersion: OFFLINE_QUEUE_SCHEMA_VERSION,
+  }))
 }
 
 export function forgetOfflineEvent(eventId: string) {

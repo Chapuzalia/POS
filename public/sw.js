@@ -1,5 +1,7 @@
 const CACHE_PREFIX = 'tickit-pos'
-const CACHE_VERSION = 'v2'
+// The registration URL includes the application build. Keeping caches separate
+// lets an old controlled page finish safely while the next worker installs.
+const CACHE_VERSION = new URL(self.location.href).searchParams.get('v') || 'v3'
 const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`
 const APP_SHELL = [
   '/',
@@ -24,8 +26,7 @@ self.addEventListener('install', (event) => {
         if (!response.ok) throw new Error('No se pudo cargar el manifiesto offline')
         const assets = await response.json()
         await cache.addAll([...APP_SHELL, ...assets])
-      })
-      .then(() => self.skipWaiting()),
+      }),
   )
 })
 
@@ -39,8 +40,7 @@ self.addEventListener('activate', (event) => {
             .filter((cacheName) => cacheName.startsWith(`${CACHE_PREFIX}-`) && cacheName !== STATIC_CACHE)
             .map((cacheName) => caches.delete(cacheName)),
         ),
-      )
-      .then(() => self.clients.claim()),
+      ),
   )
 })
 

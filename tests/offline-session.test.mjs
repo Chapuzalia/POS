@@ -207,17 +207,20 @@ test('4 y 7: venta offline en la caja existente, validar → lease → sincroniz
     '../../../lib/format': { createId: () => crypto.randomUUID() }, '../services/salePayload': { buildSalePayload },
     '../../local-printing/cashlogy/useCashlogyStore': { getCashlogyPaymentAmounts: () => ({}), finishCashlogyPayment() {} },
   }, h.globals).useQuickSalePayment
+  const paymentInFlightChanges = []
   const payment = paymentRunner.render(pay, {
     context, cashSession: h.state.cash, isOnline: false, discount: null, invoiceCustomer: null, ledger: [], tickets: [],
     lines: [{ id: 'line', productId: 'product', productName: 'Café', variantId: 'variant', variantName: 'Normal', quantity: 1,
       basePriceCents: 200, unitPriceCents: 200, componentDeltaCents: 0, modifierDeltaCents: 0, components: [], modifiers: [], catalogSnapshot: { vatRate: 10 } }],
     persistLedger: (ledger) => h.store.saveSaleLedger(context, ledger), persistTickets() {}, persistLines() {}, mergeProductStats() {},
     resetUi() {}, refreshPendingCount() {}, printSale: async () => {}, onError: assert.fail,
+    onPaymentInFlightChange: (inFlight) => paymentInFlightChanges.push(inFlight),
     syncPendingEvents: () => assert.fail('No sync offline'),
   })
   const previousWindow = globalThis.window
   globalThis.window = { crypto }
   try { await payment('card', 200) } finally { globalThis.window = previousWindow }
+  assert.deepEqual(paymentInFlightChanges, [true, false])
   assert.equal(h.store.getOfflineQueue().length, 1)
   assert.equal(h.store.getOfflineQueue()[0].payload.ticket.cashSessionId, cash.id)
   h.calls.length = 0

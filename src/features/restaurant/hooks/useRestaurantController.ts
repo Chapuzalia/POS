@@ -913,12 +913,11 @@ export function useRestaurantController(options: Options) {
           invoice,
         }))
       })()
-      void Promise.allSettled([refreshMapTask, refreshSalesTask, printTask]).then((tasks) => {
-        const failures = tasks
-          .filter((task): task is PromiseRejectedResult => task.status === 'rejected')
-          .map((task) => getReadableError(task.reason, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
-        if (failures.length > 0) options.onError(failures.join(' '))
-      })
+      const tasks = await Promise.allSettled([refreshMapTask, refreshSalesTask, printTask])
+      const failures = tasks
+        .filter((task): task is PromiseRejectedResult => task.status === 'rejected')
+        .map((task) => getReadableError(task.reason, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
+      if (failures.length > 0) options.onError(failures.join(' '))
     } catch (error) {
       options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
     } finally {
@@ -1096,6 +1095,21 @@ export function useRestaurantController(options: Options) {
     await refreshProduction(saved.order.id)
   }), [draft, options.context, options.isOnline, productionAvailable, refreshProduction, runBusy])
 
+  const updateSessionLayout = useCallback(async (
+    cashSessionId: string,
+    expectedRevision: number,
+    tables: Parameters<typeof saveSessionTableLayout>[2],
+  ) => {
+    options.setBusy(true)
+    try {
+      const saved = await saveSessionTableLayout(cashSessionId, expectedRevision, tables)
+      realtime.setMap((current) => applySessionLayout(current, saved))
+      return saved
+    } finally {
+      options.setBusy(false)
+    }
+  }, [options, realtime])
+
   const reset = useCallback((areaId?: string) => {
     draft.clearOrder()
     setPosView({ type: 'quick_sale', areaId })
@@ -1165,11 +1179,7 @@ export function useRestaurantController(options: Options) {
     tablesConfigLoaded: realtime.configLoaded,
     tablesEnabled: realtime.tablesEnabled,
     updateDraft: draft.updateDraft,
-    updateSessionLayout: async (cashSessionId: string, expectedRevision: number, tables: Parameters<typeof saveSessionTableLayout>[2]) => {
-      const saved = await saveSessionTableLayout(cashSessionId, expectedRevision, tables)
-      realtime.setMap((current) => applySessionLayout(current, saved))
-      return saved
-    },
+    updateSessionLayout,
     reloadMap: realtime.refreshMap,
   }
 }

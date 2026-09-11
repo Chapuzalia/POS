@@ -18,6 +18,7 @@ type CashMovementRow = {
   request_id: string | null
   created_at: string
 }
+type CashlogyStackerCollectionAmountRow = { id: string; amount_cents: number }
 
 function client() {
   if (!supabase) throw new Error('Supabase no está configurado.')
@@ -133,6 +134,31 @@ export async function recordCashlogyStackerCollection(input: {
   if (error) throw error
   if (!data) throw new Error('La retirada del stacker se completó, pero no se pudo registrar en la caja.')
   return data
+}
+
+export async function loadCashlogyStackerCollectionsTotal(context: TenantContext, cashSessionId: string) {
+  const pageSize = 1000
+  let afterId: string | null = null
+  let totalCents = 0
+
+  while (true) {
+    let query = client()
+      .from('cash_session_stacker_collections')
+      .select('id, amount_cents')
+      .eq('tenant_id', context.tenantId)
+      .eq('venue_id', context.venueId)
+      .eq('cash_session_id', cashSessionId)
+      .order('id')
+      .limit(pageSize)
+    if (afterId) query = query.gt('id', afterId)
+
+    const { data, error } = await query
+    if (error) throw error
+    const rows = (data ?? []) as CashlogyStackerCollectionAmountRow[]
+    totalCents += rows.reduce((sum, row) => sum + row.amount_cents, 0)
+    if (rows.length < pageSize) return totalCents
+    afterId = rows[rows.length - 1]!.id
+  }
 }
 
 export async function closeCashRegisterSession(context: TenantContext, sessionId: string, payload: CashClosedPayload) {

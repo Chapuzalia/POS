@@ -77,8 +77,9 @@ test('primera instalación cachea shell, JS y CSS antes de abrir la PWA offline'
     put: async (request, response) => responses.set(key(request), response),
     match: async (request) => responses.get(key(request))?.clone(),
   }
-  vm.runInNewContext(await readProjectFile('public/sw.js'), {
-    self: { location: { origin: 'https://pos.test' }, addEventListener: (type, callback) => listeners.set(type, callback), skipWaiting: async () => {} },
+  const serviceWorker = await readProjectFile('public/sw.js')
+  vm.runInNewContext(serviceWorker, {
+    self: { location: { href: 'https://pos.test/sw.js?v=build-test', origin: 'https://pos.test' }, addEventListener: (type, callback) => listeners.set(type, callback) },
     caches: { open: async () => cache, match: cache.match }, fetch, URL, Response,
   })
   let installed
@@ -93,4 +94,17 @@ test('primera instalación cachea shell, JS y CSS antes de abrir la PWA offline'
   let intercepted = false
   listeners.get('fetch')({ request: { url: 'https://supabase.test/auth/v1/token', method: 'GET' }, respondWith: () => { intercepted = true } })
   assert.equal(intercepted, false, 'Auth responses must not be served from the PWA cache')
+
+  listeners.get('fetch')({ request: { url: 'https://pos.test/app-version.json', method: 'GET', mode: 'cors', destination: '' }, respondWith: () => { intercepted = true } })
+  assert.equal(intercepted, false, 'The remote version policy must always bypass the PWA cache')
+  assert.doesNotMatch(serviceWorker, /skipWaiting|clients\.claim/)
+})
+
+test('Vercel impide cachear la política de versión y el manifiesto offline', async () => {
+  const config = JSON.parse(await readProjectFile('vercel.json'))
+  const headers = new Map(config.headers.map((entry) => [entry.source, entry.headers]))
+
+  for (const path of ['/app-version.json', '/offline-assets.json']) {
+    assert.match(headers.get(path)?.find((header) => header.key === 'Cache-Control')?.value ?? '', /no-store/)
+  }
 })

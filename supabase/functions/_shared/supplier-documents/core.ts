@@ -107,6 +107,15 @@ const headerAliasesSchema = z.preprocess((input) => {
   return sanitized
 }, z.array(z.string().min(1).max(80)).max(12))
 
+const parserColumnSchema = z.object({
+  field: parserFieldSchema,
+  headerAliases: headerAliasesSchema,
+  required: z.boolean().default(false),
+}).strict().transform((column) => ({
+  ...column,
+  required: (column.field === 'description' || column.field === 'quantity') && column.required,
+}))
+
 const supplierProfileRulesBaseSchema = z.object({
   version: z.literal(1),
   requiredTexts: z.array(z.string().trim().min(1).max(120)).min(1).max(20),
@@ -118,11 +127,7 @@ const supplierProfileRulesBaseSchema = z.object({
   documentNumberLabel: z.string().trim().max(80).nullable().default(null),
   documentDateLabel: z.string().trim().max(80).nullable().default(null),
   lineGroup: lineGroupSchema.nullable().optional().default(null),
-  columns: z.array(z.object({
-    field: parserFieldSchema,
-    headerAliases: headerAliasesSchema,
-    required: z.boolean().default(false),
-  }).strict()).min(3).max(16),
+  columns: z.array(parserColumnSchema).min(3).max(16),
   normalizations: z.array(z.object({
     field: z.enum(['supplierReference', 'description', 'barcode', 'purchaseUnit']),
     operation: z.enum(['trim', 'collapse_spaces', 'uppercase', 'lowercase']),
@@ -130,6 +135,22 @@ const supplierProfileRulesBaseSchema = z.object({
 }).strict()
 
 export const supplierProfileRulesSchema = supplierProfileRulesBaseSchema.superRefine((rules, context) => {
+  const aliasFields = new Map<string, z.infer<typeof parserFieldSchema>>()
+  rules.columns.forEach((column, columnIndex) => {
+    column.headerAliases.forEach((alias, aliasIndex) => {
+      const normalizedAlias = normalizeDocumentText(alias) || alias.toLocaleLowerCase('es')
+      const existingField = aliasFields.get(normalizedAlias)
+      if (existingField && existingField !== column.field) {
+        context.addIssue({
+          code: 'custom',
+          message: `PROFILE_DUPLICATE_HEADER_ALIAS:${alias}`,
+          path: ['columns', columnIndex, 'headerAliases', aliasIndex],
+        })
+        return
+      }
+      aliasFields.set(normalizedAlias, column.field)
+    })
+  })
   for (const field of parserFieldSchema.options) {
     const columns = rules.columns.filter((column) => column.field === field)
     if (columns.length > 1) {
@@ -822,7 +843,36 @@ export function supplierIdentityMatches(
 }
 
 export function profileMatchesOcr(rules: SupplierProfileRules, ocr: OcrDocument) {
-  return profileFingerprint(rules, ocr).missingRequiredTexts.length === 0
+  return profileFingerprint(rules, ocr).layoutMatch
+}
+
+function fingerprintTextMatches(haystack: string, text: string) {
+  const expected = normalizeDocumentText(text)
+  if (haystack.includes(expected)) return true
+  const words = haystack.split(' ')
+  const wordCount = expected.split(' ').length
+  return words.some((_, index) => index + wordCount <= words.length
+    && Number.isFinite(labelMatchDistance(words.slice(index, index + wordCount).join(' '), expected)))
+}
+
+export const MINIMUM_PROFILE_FINGERPRINT_WORD_CONFIDENCE = 0.90
+
+export function profileRequiredTextsMeetConfidence(rules: SupplierProfileRules, ocr: OcrDocument) {
+  const reliableSegments = ocr.pages.flatMap((page) => {
+    const segments: string[] = []
+    let words: string[] = []
+    const flush = () => {
+      if (words.length) segments.push(normalizeDocumentText(words.join(' ')))
+      words = []
+    }
+    for (const word of page.words) {
+      if (word.confidence >= MINIMUM_PROFILE_FINGERPRINT_WORD_CONFIDENCE) words.push(word.text)
+      else flush()
+    }
+    flush()
+    return segments
+  })
+  return rules.requiredTexts.every((text) => reliableSegments.some((segment) => fingerprintTextMatches(segment, text)))
 }
 
 export function profileFingerprint(rules: SupplierProfileRules, ocr: OcrDocument) {
@@ -830,8 +880,10 @@ export function profileFingerprint(rules: SupplierProfileRules, ocr: OcrDocument
     ocr.text,
     ...ocr.pages.flatMap((page) => page.tables.flatMap((table) => table.cells.map((cell) => cell.text))),
   ].join(' '))
-  const requiredTexts = rules.requiredTexts.map((text) => ({ text, found: haystack.includes(normalizeDocumentText(text)) }))
+  const requiredTexts = rules.requiredTexts.map((text) => ({ text, found: fingerprintTextMatches(haystack, text) }))
+  const requiredTextCoverage = requiredTexts.filter((entry) => entry.found).length / requiredTexts.length
   return { requiredTexts, missingRequiredTexts: requiredTexts.filter((entry) => !entry.found).map((entry) => entry.text),
+    requiredTextCoverage, layoutMatch: requiredTextCoverage >= 0.75,
     optionalTexts: rules.optionalTexts.map((text) => ({ text, found: haystack.includes(normalizeDocumentText(text)) })) }
 }
 
@@ -1226,6 +1278,9 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
         || (documentNumber.length >= 4 && /\d/.test(documentNumber)
           && marker.includes(documentNumber))
     })) return { candidate: false, reason: 'PROFILE_DOCUMENT_SPECIFIC_FINGERPRINT' as const, parsed: null }
+    if (!profileRequiredTextsMeetConfidence(rules, ocr)) {
+      return { candidate: false, reason: 'PROFILE_FINGERPRINT_WORD_CONFIDENCE_TOO_LOW' as const, parsed: null }
+    }
     if (rules.lineGroup) {
       const ocrText = normalizeDocumentText([
         ocr.text,

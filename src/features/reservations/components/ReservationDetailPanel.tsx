@@ -21,6 +21,7 @@ import {
 import type { Reservation, ReservationStatus } from "../types";
 
 type Props = {
+  floating?: boolean;
   canManage: boolean;
   disabled: boolean;
   onClose: () => void;
@@ -75,7 +76,9 @@ export function ReservationDetailPanel(props: Props) {
 
   return (
     <>
-      <div className="contents max-lg:fixed max-lg:inset-0 max-lg:z-40 max-lg:flex max-lg:justify-end">
+      <div className={props.floating
+        ? "absolute inset-y-3 right-3 z-30 flex max-w-[calc(100%-1.5rem)] justify-end max-lg:fixed max-lg:inset-0 max-lg:z-40 max-lg:max-w-none"
+        : "contents max-lg:fixed max-lg:inset-0 max-lg:z-40 max-lg:flex max-lg:justify-end"}>
         <button
           aria-label="Cerrar detalle"
           className="absolute inset-0 hidden border-0 bg-black/40 max-lg:block"
@@ -86,7 +89,7 @@ export function ReservationDetailPanel(props: Props) {
           aria-label={`Reserva de ${reservation.customerName}`}
           className="relative z-[1] flex w-96 min-w-88 flex-col overflow-hidden rounded-2xl border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)] max-lg:h-full max-lg:w-full max-lg:max-w-md max-lg:min-w-0 max-lg:rounded-none max-md:max-w-none"
         >
-          <header className="flex items-start justify-between gap-3 border-b border-[var(--separator)] p-5">
+          <header className="flex shrink-0 items-start justify-between gap-3 border-b border-[var(--separator)] p-5">
             <div className="min-w-0">
               <span
                 className={`inline-flex w-fit items-center rounded-full px-2.5 py-1 text-[11px] font-extrabold ${statusClass(reservation.status)}`}

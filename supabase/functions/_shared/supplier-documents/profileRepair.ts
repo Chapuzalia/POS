@@ -1,6 +1,6 @@
 import {
   ocrDocumentSchema, supplierDocumentExtractionSchema, supplierProfileRulesSchema,
-  profileFingerprint, inspectParserTables, runDeterministicParser, validateExtractionMath,
+  profileFingerprint, profileRequiredTextsMeetConfidence, inspectParserTables, runDeterministicParser, validateExtractionMath,
   type OcrDocument, type SupplierDocumentExtraction, type SupplierProfileRules, type ParserExecutionTrace, type MathValidation,
 } from './core.ts'
 import { extractProfileMetadata, groundAiDocumentMetadata, normalizeMetadataValue } from './documentMetadata.ts'
@@ -84,7 +84,7 @@ export function diagnoseParser(profile: ParserProfile, ocrInput: OcrDocument, do
     const ocr = parsedOcr.data
     result.ocrQuality = validateOcrSanity(ocr)
     result.fingerprint = profileFingerprint(rules, ocr)
-    result.layoutMatch = !result.fingerprint.missingRequiredTexts.length
+    result.layoutMatch = result.fingerprint.layoutMatch
     result.execution = inspectParserTables(ocr, rules)
     const tableHasContent = ocr.pages.some((page) => page.tables.some((table) => table.cells.some((cell) => cell.text.trim())))
     if (!result.ocrQuality.valid || !tableHasContent) {
@@ -177,6 +177,7 @@ export function parseParserRepairProposal(raw: unknown, input: ParserRepairInput
   if (data.decision === 'new_layout') {
     if (metadataOnly || data.changes.length || typeof data.newRulesJson !== 'string') throw new Error('PROFILE_REPAIR_SCOPE_INVALID')
     const rules = supplierProfileRulesSchema.parse(JSON.parse(data.newRulesJson))
+    if (!profileRequiredTextsMeetConfidence(rules, input.ocr)) throw new Error('PROFILE_FINGERPRINT_WORD_CONFIDENCE_TOO_LOW')
     if (JSON.stringify(rules) === JSON.stringify(currentRules)) throw new Error('PROFILE_REPAIR_NO_CHANGE')
     return { ...base, rules }
   }
@@ -189,6 +190,7 @@ export function parseParserRepairProposal(raw: unknown, input: ParserRepairInput
     changes[change.field] = JSON.parse(change.valueJson)
   }
   const rules = supplierProfileRulesSchema.parse({ ...currentRules, ...changes })
+  if (!profileRequiredTextsMeetConfidence(rules, input.ocr)) throw new Error('PROFILE_FINGERPRINT_WORD_CONFIDENCE_TOO_LOW')
   const changedFields = Object.keys(changes).filter((field) => JSON.stringify(rules[field as keyof SupplierProfileRules])
     !== JSON.stringify(currentRules[field as keyof SupplierProfileRules]))
   if (!changedFields.length) throw new Error('PROFILE_REPAIR_NO_CHANGE')
