@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readdir, readFile } from 'node:fs/promises'
 import path from 'node:path'
+import { fileURLToPath } from 'node:url'
 import test from 'node:test'
 
 const root = new URL('..', import.meta.url)
@@ -18,8 +19,8 @@ async function collectTsxFiles(directory) {
 
 test('all CRM dropdowns use the shared CRM select instead of native selects', async () => {
   const directories = [
-    path.join(root.pathname.slice(1), 'src/features/crm'),
-    path.join(root.pathname.slice(1), 'src/components/crm'),
+    path.join(fileURLToPath(root), 'src/features/crm'),
+    path.join(fileURLToPath(root), 'src/components/crm'),
   ]
   const files = (await Promise.all(directories.map(collectTsxFiles))).flat()
   const nativeSelects = []

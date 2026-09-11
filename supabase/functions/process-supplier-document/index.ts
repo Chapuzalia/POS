@@ -205,7 +205,7 @@ function tryKnownProfiles(
     extraction: SupplierDocumentExtraction
     globalProfileId: string
     globalSupplierId: string
-    rules: unknown
+    rules: NonNullable<ParserDiagnosis['rules']>
   }
   let selected: SelectedProfile | null = null
   let candidate: SelectedProfile | null = null
@@ -249,6 +249,7 @@ function tryKnownProfiles(
     try {
       if (
         !diagnosis.extraction ||
+        !diagnosis.rules ||
         !['success', 'applicable_parser_failed'].includes(
           diagnosis.classification,
         ) ||
@@ -272,7 +273,7 @@ function tryKnownProfiles(
         extraction,
         globalProfileId: String(profile.id),
         globalSupplierId: String(supplier.id),
-        rules: profile.rules_json,
+        rules: diagnosis.rules,
       }
       if (profile.status === 'candidate') {
         if (isBetter(extraction, candidate)) candidate = parsedProfile

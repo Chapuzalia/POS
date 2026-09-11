@@ -7,6 +7,7 @@ import * as providers from '../supabase/functions/_shared/supplier-documents/pro
 import * as fixtures from '../supabase/functions/_shared/supplier-documents/fixtures.ts'
 import * as quality from '../supabase/functions/_shared/supplier-documents/ocrQuality.ts'
 import * as metadata from '../supabase/functions/_shared/supplier-documents/documentMetadata.ts'
+import * as profileRepair from '../supabase/functions/_shared/supplier-documents/profileRepair.ts'
 
 const { analyzeOcrWithQuality, validateOcrSanity, OcrQualityError, OCR_QUALITY_MESSAGE, MINIMUM_OCR_CONFIDENCE } = quality
 const fixture = fixtures.getSupplierDocumentMockFixture('known-supplier')
@@ -286,18 +287,25 @@ async function processWithOcr(mistral, azure, interpretationError = null, scanni
     from(table) {
       let write = null
       let insert = null
+      const filters = []
       const query = {
         select() { tablesRead.push(table); return this },
-        eq() { return this }, neq() { return this }, in() { return this }, order() { return this }, ilike() { return this },
+        eq(key, value) { filters.push((row) => row[key] === value); return this },
+        neq(key, value) { filters.push((row) => row[key] !== value); return this },
+        in() { return this }, order() { return this }, ilike() { return this },
         range() { return this },
         update(value) { write = value; return this },
         insert(value) { insert = value; return this },
         delete() { return this },
         maybeSingle() { return this }, single() { return this },
         then(resolve, reject) {
-          if (write && table === 'supplier_documents') { writes.push(structuredClone(write)); Object.assign(document, write) }
+          const matchesDocument = filters.every((filter) => filter(document))
+          if (write && table === 'supplier_documents' && matchesDocument) { writes.push(structuredClone(write)); Object.assign(document, write) }
           if (insert && table === 'supplier_document_lines') lineRows.push(...insert)
-          const data = table === 'supplier_documents' ? structuredClone(document) : []
+          const data = table === 'supplier_documents' ? (matchesDocument ? structuredClone(document) : null)
+            : table === 'suppliers' ? [{ id: 'supplier', tenant_id: 'tenant', venue_id: 'venue',
+              name: fixture.extraction.supplier.name, tax_id: fixture.extraction.supplier.taxId, is_active: true }]
+            : []
           return Promise.resolve({ data, error: null }).then(resolve, reject)
         },
       }
@@ -338,6 +346,7 @@ async function processWithOcr(mistral, azure, interpretationError = null, scanni
     '../_shared/supplier-documents/fixtures.ts': fixtures,
     '../_shared/supplier-documents/ocrQuality.ts': quality,
     '../_shared/supplier-documents/documentMetadata.ts': metadata,
+    '../_shared/supplier-documents/profileRepair.ts': profileRepair,
   }
   let handler
   const tasks = []
@@ -371,7 +380,7 @@ test('ambos rechazados: la Edge persiste error, dos intentos y ningún snapshot;
 test('fallback aceptado: la Edge continúa a revisión y persiste exclusivamente Azure con ambos intentos', async () => {
   const azure = normal('azure')
   const result = await processWithOcr(corrupt(), azure)
-  assert.equal(result.document.status, 'review')
+  assert.equal(result.document.status, 'review', JSON.stringify(result.document.extraction_metadata))
   assert.deepEqual(result.document.ocr_snapshot, azure)
   assert.deepEqual(result.calls.ocr, ['mistral', 'azure'])
   assert.equal(result.calls.ai, 1)
@@ -383,7 +392,7 @@ test('fallback aceptado: la Edge continúa a revisión y persiste exclusivamente
 
 test('factura normal: el mismo parser produce las mismas líneas con Mistral sin Azure', async () => {
   const result = await processWithOcr(normal(), null)
-  assert.equal(result.document.status, 'review')
+  assert.equal(result.document.status, 'review', JSON.stringify(result.document.extraction_metadata))
   assert.deepEqual(result.calls.ocr, ['mistral'])
   assert.equal(result.document.extraction_metadata.ocrFallbackUsed, false)
   assert.equal(result.lineRows.length, fixture.extraction.lines.length)

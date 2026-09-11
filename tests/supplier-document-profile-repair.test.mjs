@@ -22,55 +22,65 @@ function input() {
     quantity: line.quantity, purchase_unit: line.purchaseUnit, unit_price: line.unitPrice,
     discount_amount: line.discountAmount, charges_amount: line.chargesAmount, gross_cost: line.grossCost,
     net_cost: line.netCost, line_total: line.lineTotal, tax_rate: line.taxRate,
-  })), rules: fixture.knownProfile }
+  })), rules: fixture.knownProfile,
+  profile: { id: 'profile', status: 'verified', rules_json: { ...fixture.knownProfile, documentDateLabel: 'Etiqueta antigua' } } }
 }
 
-test('la reparación reproduce las líneas confirmadas usando solamente el OCR guardado', async () => {
+function proposal(target) {
+  return repair.parseParserRepairProposal({
+    decision: 'repair', reason: 'La fecha usa la etiqueta Fecha', evidence: ['Fecha 01/09/2026'],
+    changes: [{ field: 'documentDateLabel', valueJson: JSON.stringify('Fecha') }], newRulesJson: null,
+  }, target)
+}
+
+test('la reparación usa OCR guardado y entrega una propuesta vinculada al perfil diagnosticado', async () => {
   const data = input()
   let calls = 0
-  const rules = await proposeConfirmedProfileRepair({ ...data, propose: async (target) => {
+  const result = await proposeConfirmedProfileRepair({ ...data, propose: async (target) => {
     calls++
     assert.deepEqual(target.ocr, data.document.ocr_snapshot)
-    assert.equal(target.extraction.lines[0].quantity, data.lines[0].quantity)
-    return data.rules
+    assert.equal(target.correctedExtraction.lines[0].quantity, data.lines[0].quantity)
+    assert.equal(target.diagnosis.profileId, data.profile.id)
+    assert.ok(target.diagnosis.failedFields.includes('date'))
+    return proposal(target)
   } })
   assert.equal(calls, 1)
-  assert.deepEqual(rules, data.rules)
+  assert.equal(result.decision, 'repair')
+  assert.equal(result.parentProfileId, data.profile.id)
+  assert.deepEqual(result.changedFields, ['documentDateLabel'])
+  assert.equal(result.rules.documentDateLabel, data.rules.documentDateLabel)
 })
 
-test('una propuesta que ignora la corrección no se publica', async () => {
+test('una reparación de metadata no puede modificar las reglas de líneas', async () => {
   const data = input()
-  data.lines[0].quantity *= 2
-  data.lines[0].gross_cost *= 2
-  data.lines[0].discount_amount *= 2
-  data.lines[0].charges_amount *= 2
-  data.lines[0].line_total *= 2
-  data.lines[0].net_cost *= 2
-  await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async () => data.rules }), /PROFILE_OUTPUT_MISMATCH/)
+  await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async (target) =>
+    repair.parseParserRepairProposal({ decision: 'repair', reason: 'Cambio fuera de ámbito',
+      evidence: ['Fecha 01/09/2026'], changes: [{ field: 'columns', valueJson: JSON.stringify([]) }], newRulesJson: null,
+    }, target) }), /PROFILE_REPAIR_SCOPE_INVALID/)
 })
 
-test('selección manual, documentos sin confirmar y cantidades incoherentes no consumen GPT', async () => {
-  for (const mode of ['manual', 'reparsed', 'review', 'math']) {
+test('selección manual, documentos sin confirmar y cantidades inválidas no consumen GPT', async () => {
+  for (const mode of ['manual', 'reparsed', 'review', 'quantity']) {
     const data = input()
     if (mode === 'manual') data.document.extraction_metadata.learningExcluded = true
     if (mode === 'reparsed') data.document.extraction_metadata.linesReparsedAt = '2026-09-07'
     if (mode === 'review') data.document.status = 'review'
-    if (mode === 'math') data.lines[0].line_total += 100
+    if (mode === 'quantity') data.lines[0].quantity = -1
     let calls = 0
     await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async () => { calls++; return data.rules } }))
     assert.equal(calls, 0)
   }
 })
 
-test('un identificador corregido tampoco puede ser ignorado por el perfil', async () => {
+test('una propuesta sin evidencia literal del OCR se rechaza', async () => {
   const data = input()
-  data.lines[0].barcode = '9999999999999'
-  await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async () => data.rules }), /PROFILE_REPAIR_IDENTITY_OR_TAX_MISMATCH/)
+  await assert.rejects(proposeConfirmedProfileRepair({ ...data, propose: async (target) =>
+    repair.parseParserRepairProposal({ decision: 'repair', reason: 'Fecha inventada',
+      evidence: ['Fecha 31/12/2099'], changes: [{ field: 'documentDateLabel', valueJson: JSON.stringify('Fecha') }], newRulesJson: null,
+    }, target) }), /PROFILE_REPAIR_EVIDENCE_INVALID/)
 })
 
-
-
-test('endpoint autentica, respeta RLS y termina el trabajo antes de publicar', async () => {
+test('endpoint autentica, respeta RLS y guarda la propuesta con su diagnóstico', async () => {
   const source = await readFile(new URL('../supabase/functions/repair-supplier-document-profile/index.ts', import.meta.url), 'utf8')
   const compiled = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText
   for (const mode of ['unauthorized', 'forbidden', 'not_pending', 'valid']) {
@@ -94,7 +104,7 @@ test('endpoint autentica, respeta RLS y termina el trabajo antes de publicar', a
       'https://esm.sh/@supabase/supabase-js@2.110.0': { createClient: (_url, key) => key === 'service' ? admin : user },
       '../_shared/supplier-documents/profileRepair.ts': repair,
       '../_shared/supplier-documents/providers.ts': { OpenAiSupplierDocumentProvider: class {
-        async proposeProfile() { aiCalls++; return data.rules }
+        async repairProfile(target) { aiCalls++; return proposal(target) }
       } },
     }
     const env = { SUPABASE_URL: 'url', SUPABASE_ANON_KEY: 'anon', SUPABASE_SERVICE_ROLE_KEY: 'service' }
@@ -108,7 +118,9 @@ test('endpoint autentica, respeta RLS y termina el trabajo antes de publicar', a
     assert.equal(aiCalls, mode === 'valid' ? 1 : 0)
     if (mode === 'valid') {
       assert.equal(writes[1].name, 'finish_supplier_profile_repair')
-      assert.deepEqual(writes[1].args.p_rules, data.rules)
+      assert.equal(writes[1].args.p_rules.documentDateLabel, data.rules.documentDateLabel)
+      assert.equal(writes[1].args.p_proposal.sourceProfileId, data.profile.id)
+      assert.equal(writes[1].args.p_proposal.diagnosis.repairEligible, true)
       assert.equal(writes[1].args.p_error, null)
       assert.equal(writes[1].args.p_token, 'token')
     } else assert.equal(writes.length, mode === 'not_pending' ? 1 : 0)
