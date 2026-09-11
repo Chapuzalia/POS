@@ -32,6 +32,7 @@ type Options = {
   syncPendingEvents: () => Promise<void>
   printSale: (payload: SessionTicketRecord['payload']) => Promise<void>
   onError: (message: string | null) => void
+  onPaymentInFlightChange?: (inFlight: boolean) => void
 }
 
 export function useQuickSalePayment(options: Options) {
@@ -146,10 +147,12 @@ export function useQuickSalePayment(options: Options) {
   ) => {
     if (paymentInFlightRef.current) return
     paymentInFlightRef.current = true
+    options.onPaymentInFlightChange?.(true)
     try {
       await completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction)
     } finally {
       paymentInFlightRef.current = false
+      options.onPaymentInFlightChange?.(false)
     }
-  }, [completePayment])
+  }, [completePayment, options])
 }

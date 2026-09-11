@@ -526,7 +526,12 @@ export type CashClosingRecord = {
   printCopies: number
 }
 
-export type OfflineEvent =
+type OfflineEventEnvelope = {
+  /** Persisted payload contract. Missing means the legacy v1 shape. */
+  schemaVersion?: 1
+}
+
+export type OfflineEvent = OfflineEventEnvelope & (
   | {
       id: string
       kind: 'cash_opened'
@@ -583,6 +588,7 @@ export type OfflineEvent =
       lastError?: string
       payload: CashClosedPayload
     }
+)
 
 export type CrmStatsPeriodKind = 'year' | 'month' | 'day' | 'period'
 

@@ -30,8 +30,8 @@ test('el alta y la edición se realizan por una RPC autenticada y no exponen esc
 test('el parser solo recibe proveedores e identidades del local del documento', () => {
   const loader = parser.match(/async function loadSupplierCandidates[\s\S]*?^}/m)?.[0] ?? ''
   assert.match(loader, /tenantId: string,[\s\S]*venueId: string/)
-  assert.match(loader, /from\('suppliers'\)[\s\S]*\.eq\('tenant_id', tenantId\)\.eq\('venue_id', venueId\)/)
-  assert.match(loader, /from\('supplier_identity_aliases'\)[\s\S]*\.eq\('tenant_id', tenantId\)\.eq\('venue_id', venueId\)/)
+  assert.match(loader, /from\('suppliers'\)[\s\S]*\.eq\('tenant_id', tenantId\)\s*\.eq\('venue_id', venueId\)/)
+  assert.match(loader, /from\('supplier_identity_aliases'\)[\s\S]*\.eq\('tenant_id', tenantId\)\s*\.eq\('venue_id', venueId\)/)
   assert.match(parser, /loadSupplierCandidates\(admin, document\.tenant_id, document\.venue_id\)/)
 })
 

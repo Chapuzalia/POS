@@ -41,7 +41,7 @@ test('el dropdown ofrece las dos estrategias y el modal comunica importe y progr
   assert.match(bar, /Por ítems/)
   assert.match(bar, /A partes iguales/)
   assert.match(bar, /Dropdown\.Menu/)
-  assert.match(bar, /from '@heroui\/react'/)
+  assert.match(bar, /from ["']@heroui\/react["']/)
   assert.match(modal, /Número de comensales/)
   assert.match(modal, /Por comensal/)
   assert.match(modal, /Han pagado/)

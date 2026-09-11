@@ -150,7 +150,7 @@ test('gasto por categoría reutiliza solo una categoría de catálogo inequívoc
 })
 
 test('OCR se inicia en backend y el listado solo refresca su estado persistido', () => {
-  assert.match(edgeFunction, /EdgeRuntime\.waitUntil\(processSupplierDocumentRequest\(backgroundRequest\)/)
+  assert.match(edgeFunction, /EdgeRuntime\.waitUntil\(\s*processSupplierDocumentRequest\(backgroundRequest\)/)
   assert.match(edgeFunction, /return json\(\{ documentId, status: 'processing' \}, 202\)/)
   assert.match(supplierService, /await processDocument\(created\.documentId\)[\s\S]*return created/)
   assert.match(invoices, /hasProcessingDocuments[\s\S]*window\.setInterval[\s\S]*5_000/)

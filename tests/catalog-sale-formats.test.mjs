@@ -45,10 +45,10 @@ test('el esquema final expone formatos y su relación en el catálogo agregado',
 test('el editor hereda el IVA, compacta acciones y persiste destacados por aparición', () => {
   assert.match(productEditor, /IVA predeterminado del local/)
   assert.match(productEditor, /IVA personalizado/)
-  assert.match(productEditor, /vatMode === 'default' \? null/)
+  assert.match(productEditor, /vatMode === ["']default["'] \? null/)
   assert.doesNotMatch(productEditor, /Producto activo/)
   assert.doesNotMatch(productEditor, /moveVariant|movePlacement|ArrowUp|ArrowDown/)
-  assert.match(productEditor, /'Editar variante'/)
+  assert.match(productEditor, /["']Editar variante["']/)
   assert.match(productEditor, /aria-label="Editar aparición"/)
   assert.match(productEditor, /checked=\{placement\.featured\}/)
   assert.match(productEditor, /featured: placementFeatured/)

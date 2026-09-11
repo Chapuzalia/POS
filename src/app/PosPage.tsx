@@ -105,6 +105,7 @@ type Props = {
   onSelectProduct: Parameters<typeof CatalogPanel>[0]['onSelectProduct']
   onSetError: (message: string | null) => void
   onSetMobileTicketOpen: (open: boolean) => void
+  onUpdateBlockingOperationChange: (busy: boolean) => void
   onUpdateCatalogStartTab: (tab: CatalogStartTab) => void
   offline: {
     lastSyncError: string | null
@@ -127,6 +128,7 @@ export function PosPage(props: Props) {
   const clearDisplayedError = props.onSetError
   const [configOpen, setConfigOpen] = useState(false)
   const [preparationsOpen, setPreparationsOpen] = useState(false)
+  const [preparationBusy, setPreparationBusy] = useState(false)
   const [cashlogyMachineOpen, setCashlogyMachineOpen] = useState(false)
   const [quickSaleExitName, setQuickSaleExitName] = useState('')
   const [quickSaleExitOpen, setQuickSaleExitOpen] = useState(false)
@@ -139,6 +141,7 @@ export function PosPage(props: Props) {
   const restaurant = props.restaurant
   const quickSale = props.quickSale
   const cash = props.cash
+  const onUpdateBlockingOperationChange = props.onUpdateBlockingOperationChange
   const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured)
   const cashlogyPaymentIntent = useCashlogyStore((state) => state.intent)
   const cashlogyPaymentTransaction = useCashlogyStore((state) => state.transaction)
@@ -154,6 +157,15 @@ export function PosPage(props: Props) {
   const reservationsEnabled = restaurantEnabled && hasTenantFeature(props.context, 'reservations')
   const inventoryRecipesEnabled = hasTenantFeature(props.context, 'inventory') && hasTenantFeature(props.context, 'inventory_recipes')
   const appliedDiscount = discountsEnabled ? quickSale.discount : null
+
+  useEffect(() => {
+    onUpdateBlockingOperationChange(preparationBusy)
+    return () => onUpdateBlockingOperationChange(false)
+  }, [onUpdateBlockingOperationChange, preparationBusy])
+
+  const closePreparations = () => {
+    if (!preparationBusy) setPreparationsOpen(false)
+  }
   const activeCashlogyError = isActiveCashlogyError({
     displayedError,
     cashlogyError: cashlogyPaymentError,
@@ -681,7 +693,7 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
-      {inventoryRecipesEnabled && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={() => setPreparationsOpen(false)}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onClose={() => setPreparationsOpen(false)} /></Suspense></div></AppModal> : null}
+      {inventoryRecipesEnabled && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={closePreparations}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onBusyChange={setPreparationBusy} onClose={closePreparations} /></Suspense></div></AppModal> : null}
       {quickSaleExitOpen ? <QuickSaleExitModal
         canSave={Boolean(props.context.canTakeOrders && cash.session)}
         defaultName={quickSaleExitName}
@@ -738,6 +750,7 @@ export function PosPage(props: Props) {
         openOrderCount={cash.openOrderCount}
         cashSession={cash.session}
         cashlogyCashCents={cash.cashlogyClosingCashCents}
+        cashlogyStackerCollectionsCents={cash.cashlogyClosingStackerCollectionsCents}
         isBusy={props.isBusy}
         onCancel={() => cash.setCloseModalOpen(false)}
         onConfirm={async (payload) => {

@@ -6,10 +6,12 @@ on:
       - main
 
 permissions:
+  actions: read
   contents: read
 
 concurrency:
   group: pos-production
+  queue: max
   cancel-in-progress: false
 
 jobs:
@@ -21,6 +23,42 @@ jobs:
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve last successful production release
+        id: release
+        uses: actions/github-script@v7
+        env:
+          CONFIGURED_BASELINE_SHA: ${{ vars.PRODUCTION_BASE_SHA }}
+        with:
+          script: |
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'production.yml',
+                branch: 'main',
+                status: 'success',
+                per_page: 100,
+              },
+            )
+            const previous = runs.find((run) => run.head_sha !== context.sha)
+            const configuredBaseline = process.env.CONFIGURED_BASELINE_SHA?.trim()
+            const baselineSha = previous?.head_sha ?? configuredBaseline
+            if (!baselineSha || !/^[0-9a-f]{40}$/i.test(baselineSha)) {
+              core.setFailed('No previous successful production release was found. Set the PRODUCTION_BASE_SHA repository variable to the exact commit currently in production for the first protected deploy.')
+              return
+            }
+            core.setOutput('base_sha', baselineSha)
+            core.setOutput('supported_versions', `${context.sha},${baselineSha}`)
+            core.info(`Production baseline: ${baselineSha}${previous ? '' : ' (configured bootstrap)'}`)
+
+      - name: Configure Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
 
       - name: Validate migrations directory
         shell: bash
@@ -46,6 +84,42 @@ jobs:
           fi
 
           echo "Found $migration_count migration files."
+
+      - name: Check migrations for destructive operations
+        env:
+          BASE_SHA: ${{ steps.release.outputs.base_sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: bash scripts/check-pr-migrations.sh "$BASE_SHA" "$HEAD_SHA"
+
+      - name: Enable pinned pnpm
+        shell: bash
+        run: |
+          npm install --global corepack@0.36.0
+          corepack enable
+          corepack prepare pnpm@10.15.1 --activate
+          pnpm --version
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify application before database changes
+        run: |
+          pnpm run lint
+          pnpm test
+          pnpm run build
+
+      - name: Install pinned Vercel CLI
+        run: npm install --global vercel@59.16.0
+
+      - name: Prepare immutable Vercel build
+        env:
+          APP_VERSION: ${{ github.sha }}
+          SUPPORTED_APP_VERSIONS: ${{ steps.release.outputs.supported_versions }}
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: |
+          vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+          vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
 
       - name: Configure SSH
         shell: bash
@@ -84,21 +158,8 @@ jobs:
                 -i "$HOME/.ssh/pos-production" \
                 "${SSH_USER}@${SSH_HOST}"
 
-      - name: Configure Node and pnpm
-        uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Enable pnpm
-        shell: bash
-        run: |
-          npm install --global corepack@latest
-          corepack enable
-          corepack prepare pnpm@10 --activate
-          pnpm --version
-
-      - name: Install Vercel CLI
-        run: npm install --global vercel@latest
-
       - name: Deploy production
-        run: vercel deploy --yes --prod --token=${{ secrets.VERCEL_TOKEN }}
+        env:
+          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+        run: vercel deploy --yes --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}

@@ -51,6 +51,7 @@ import {
   createCashMovement as createCashMovementRequest,
   loadCashClosing,
   loadCashClosingHistory,
+  loadCashlogyStackerCollectionsTotal,
   loadCashMovements,
   recordCashClosingPrintResult,
   subscribeToCashMovements,
@@ -82,6 +83,7 @@ export function useCashSession(options: Options) {
   const [completedClosing, setCompletedClosing] = useState<CashClosingRecord | null>(null)
   const [printingClosingId, setPrintingClosingId] = useState<string | null>(null)
   const [cashlogyClosingCashCents, setCashlogyClosingCashCents] = useState<number | null>(null)
+  const [cashlogyClosingStackerCollectionsCents, setCashlogyClosingStackerCollectionsCents] = useState(0)
   const cashContext = options.context
   const isOnline = options.isOnline
   const reportError = options.onError
@@ -194,6 +196,7 @@ export function useCashSession(options: Options) {
     setTickets([...closed.tickets])
     setCloseModalOpen(false)
     setCashlogyClosingCashCents(null)
+    setCashlogyClosingStackerCollectionsCents(0)
     setHistoryOpen(false)
     options.onError('La caja con la que estabas trabajando se ha cerrado.')
   }, [options, session, setTickets])
@@ -215,6 +218,7 @@ export function useCashSession(options: Options) {
     saveCachedCashSession(options.context, nextSession)
     setCloseModalOpen(false)
     setCashlogyClosingCashCents(null)
+    setCashlogyClosingStackerCollectionsCents(0)
     setHistoryOpen(false)
     if (!nextSession) {
       setLedger([])
@@ -428,16 +432,23 @@ export function useCashSession(options: Options) {
       if (getOfflineQueue().some((event) => event.tenantId === options.context?.tenantId)) {
         throw new UserFacingError('Quedan operaciones sin sincronizar en este dispositivo. Sincronízalas antes de cerrar.')
       }
-      const cashlogyBalance = await loadActiveCashlogyCashBalance()
-      const effectivePayload = cashlogyBalance ? {
+      const [cashlogyBalance, stackerCollectionsCents] = await Promise.all([
+        loadActiveCashlogyCashBalance(),
+        loadCashlogyStackerCollectionsTotal(options.context, payload.sessionId),
+      ])
+      const expectedCashCents = payload.expectedCashCents
+        - (stackerCollectionsCents - cashlogyClosingStackerCollectionsCents)
+      const countedCashCents = cashlogyBalance?.totalCents ?? payload.countedCashCents
+      const effectivePayload = {
         ...payload,
-        countedCashCents: cashlogyBalance.totalCents,
-        finalCashFundCents: cashlogyBalance.totalCents,
-        discrepancyCents: (cashlogyBalance.totalCents - payload.expectedCashCents)
+        expectedCashCents,
+        countedCashCents,
+        finalCashFundCents: cashlogyBalance?.totalCents ?? payload.finalCashFundCents,
+        discrepancyCents: (countedCashCents - expectedCashCents)
           + (payload.countedCardCents - payload.expectedCardCents)
           + (payload.countedInvitationCents - payload.expectedInvitationCents)
           + (payload.countedOtherCents - payload.expectedOtherCents),
-      } : payload
+      }
       const closing = await closeCashSessionLifecycle(options.context, effectivePayload)
       persistSession(null)
       setLedger([])
@@ -446,6 +457,7 @@ export function useCashSession(options: Options) {
       setTickets([])
       setCloseModalOpen(false)
       setCashlogyClosingCashCents(null)
+      setCashlogyClosingStackerCollectionsCents(0)
       options.refreshPendingCount()
       await cashOptions.refresh(options.context)
       setCompletedClosing(closing)
@@ -459,7 +471,7 @@ export function useCashSession(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [cashOptions, options, persistSession, printClosing, setTickets])
+  }, [cashOptions, cashlogyClosingStackerCollectionsCents, options, persistSession, printClosing, setTickets])
 
   const openCloseModal = useCallback(async () => {
     if (!cashContext || !session) return false
@@ -470,14 +482,16 @@ export function useCashSession(options: Options) {
       if (getOfflineQueue().some((event) => event.tenantId === cashContext.tenantId)) {
         throw new UserFacingError('Quedan operaciones sin sincronizar en este dispositivo. Sincronízalas antes de cerrar.')
       }
-      const [openOrders, nextLedger] = await Promise.all([
+      const [openOrders, nextLedger, cashlogyBalance, stackerCollectionsCents] = await Promise.all([
         loadOpenRestaurantOrders(cashContext, session.id),
         loadSalesLedgerFromSupabase(cashContext, session.id),
+        loadActiveCashlogyCashBalance(),
+        loadCashlogyStackerCollectionsTotal(cashContext, session.id),
       ])
       setOpenOrderCount(openOrders.length)
       persistLedger(nextLedger)
-      const cashlogyBalance = await loadActiveCashlogyCashBalance()
       setCashlogyClosingCashCents(cashlogyBalance?.totalCents ?? null)
+      setCashlogyClosingStackerCollectionsCents(stackerCollectionsCents)
       setCloseModalOpen(true)
       return true
     } catch (error) {
@@ -495,6 +509,7 @@ export function useCashSession(options: Options) {
     setTickets([...closed.tickets])
     setCloseModalOpen(false)
     setCashlogyClosingCashCents(null)
+    setCashlogyClosingStackerCollectionsCents(0)
     setHistoryOpen(false)
     setClosingHistoryOpen(false)
     setCashClosings([])
@@ -513,6 +528,7 @@ export function useCashSession(options: Options) {
     setCashClosings([])
     setCompletedClosing(null)
     setCashlogyClosingCashCents(null)
+    setCashlogyClosingStackerCollectionsCents(0)
   }, [setTickets])
 
   const clearRejectedSession = useCallback((closedSessionId: string) => {
@@ -525,6 +541,7 @@ export function useCashSession(options: Options) {
     setTickets([])
     setCloseModalOpen(false)
     setCashlogyClosingCashCents(null)
+    setCashlogyClosingStackerCollectionsCents(0)
     setHistoryOpen(false)
   }, [options.context, setTickets])
 
@@ -536,6 +553,7 @@ export function useCashSession(options: Options) {
     closingHistoryOpen,
     cashClosings,
     cashlogyClosingCashCents,
+    cashlogyClosingStackerCollectionsCents,
     completedClosing,
     hydrate,
     historyOpen,
@@ -562,7 +580,10 @@ export function useCashSession(options: Options) {
     session,
     setCloseModalOpen: (open: boolean) => {
       setCloseModalOpen(open)
-      if (!open) setCashlogyClosingCashCents(null)
+      if (!open) {
+        setCashlogyClosingCashCents(null)
+        setCashlogyClosingStackerCollectionsCents(0)
+      }
     },
     setClosingHistoryOpen,
     setCompletedClosing,

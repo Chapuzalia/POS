@@ -40,6 +40,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
     isCancelling: value.isCancelling,
     cancel: value.cancel,
     recover: value.recover,
+    startPayment: value.startPayment,
     hide: value.hide,
     discardForRetry: value.discardForRetry,
     closeReviewed: value.closeReviewed,
@@ -59,10 +60,25 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
   const showOperationDetails = shouldShowCashlogyOperationDetails(status)
 
   const finalizeRecovered = async () => {
-    if (!state.transaction || state.intent?.recoveredFromConflict || isFinalizing) return
+    if (!state.transaction || isFinalizing) return
     setIsFinalizing(true)
     try {
       await onFinalizeRecovered(state.transaction)
+    } finally {
+      setIsFinalizing(false)
+    }
+  }
+
+  const retryReviewedPayment = async () => {
+    const intent = state.intent
+    if (!state.transaction || !intent || !reviewed || isFinalizing) return
+    const { amountCents, saleId } = intent
+    setIsFinalizing(true)
+    state.closeReviewed()
+    setReviewedId(null)
+    try {
+      const transaction = await state.startPayment(amountCents, saleId)
+      await onFinalizeRecovered(transaction)
     } finally {
       setIsFinalizing(false)
     }
@@ -121,7 +137,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
       <div className="mt-5 flex flex-wrap justify-end gap-2">
         {critical ? <label className="w-full text-sm">
           <input type="checkbox" checked={reviewed} onChange={(event) => setReviewedId(event.target.checked ? state.transaction?.id ?? null : null)} className="mr-2" />
-          He revisado el efectivo con el responsable de caja y la máquina ya no tiene una operación pendiente. Cerrar no registrará esta venta como pagada.
+          He revisado la máquina y el efectivo con el responsable de caja. Entiendo que «Marcar como cobrado» puede registrar una venta no cobrada y que «Volver a cobrar» puede duplicar un cobro.
         </label> : null}
         {(active && !state.isPolling && !state.isStarting) || startFailed ? <Button onClick={() => void state.recover().catch(() => undefined)}>Recuperar cobro</Button> : null}
         {active ? <Button onClick={state.hide} variant="tertiary">Volver al TPV</Button> : null}
@@ -137,12 +153,11 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
         {status === 'failed' ? <Button onClick={state.discardForRetry} variant="primary">Iniciar un nuevo intento</Button> : null}
         {startFailed ? <Button onClick={preservePending ? state.hide : state.discardForRetry} variant="primary">{preservePending ? 'Volver al TPV' : 'Volver al pago'}</Button> : null}
         {critical ? <>
-          <Button disabled={state.isPolling} onClick={() => void state.recover().catch(() => undefined)} variant="primary">
-            {state.isPolling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
-            Consultar estado de nuevo
+          <Button disabled={!reviewed || finalizeDisabled || isFinalizing} onClick={() => void finalizeRecovered()} variant="primary">
+            {isFinalizing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
+            {isFinalizing ? 'Marcando como cobrado…' : 'Marcar como cobrado'}
           </Button>
-          <Button onClick={state.hide} variant="tertiary">Cerrar y revisar Cashlogy</Button>
-          <Button disabled={!reviewed} onClick={() => { state.closeReviewed(); setReviewedId(null) }} variant="danger">Cerrar operación revisada</Button>
+          <Button disabled={!reviewed || finalizeDisabled || isFinalizing} onClick={() => void retryReviewedPayment().catch(() => undefined)} variant="danger">Volver a cobrar</Button>
         </> : null}
       </div>
     </section>

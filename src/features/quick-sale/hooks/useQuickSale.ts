@@ -76,6 +76,7 @@ export function useQuickSale(options: Options) {
   const [cashPaymentOpen, setCashPaymentOpen] = useState(false)
   const [discountModalOpen, setDiscountModalOpen] = useState(false)
   const [paidFeedback, setPaidFeedback] = useState<PaymentMethod | null>(null)
+  const [paymentInFlight, setPaymentInFlight] = useState(false)
   const activeDiscount = resolveTicketDiscount(
     discount,
     options.discounts,
@@ -156,6 +157,7 @@ export function useQuickSale(options: Options) {
     syncPendingEvents: options.syncPendingEvents,
     printSale: options.printSale,
     onError: options.onError,
+    onPaymentInFlightChange: setPaymentInFlight,
     resetUi: (method) => {
       options.setMobileTicketOpen(false)
       setDiscount(null)
@@ -270,6 +272,7 @@ export function useQuickSale(options: Options) {
     openDiscountModal: () => setDiscountModalOpen(true),
     openProductDialog: (dialog: ProductDialogState) => setProductDialog(dialog),
     paidFeedback,
+    paymentInFlight,
     productDialog,
     refreshProductStats,
     removeDiscount,

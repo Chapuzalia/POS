@@ -3,8 +3,26 @@ import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 
+const appVersion = process.env.APP_VERSION
+  ?? process.env.VERCEL_GIT_COMMIT_SHA
+  ?? process.env.GITHUB_SHA
+  ?? 'development'
+const configuredSupportedVersions = process.env.SUPPORTED_APP_VERSIONS
+  ?.split(',')
+  .map((version) => version.trim())
+  .filter(Boolean)
+// Git SHAs are intentionally opaque. A centrally configured allowlist is the
+// minimum-version equivalent and also permits gradual rollouts when needed.
+const supportedAppVersions = [...new Set([
+  ...(configuredSupportedVersions?.length ? configuredSupportedVersions : []),
+  appVersion,
+])]
+
 // https://vite.dev/config/
 export default defineConfig({
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   plugins: [react(), tailwindcss(), {
     name: 'offline-app-assets',
     generateBundle(_options, bundle) {
@@ -12,6 +30,11 @@ export default defineConfig({
         type: 'asset',
         fileName: 'offline-assets.json',
         source: JSON.stringify(Object.keys(bundle).filter((file) => /\.(js|css|woff2?)$/.test(file)).map((file) => `/${file}`)),
+      })
+      this.emitFile({
+        type: 'asset',
+        fileName: 'app-version.json',
+        source: JSON.stringify({ supportedVersions: supportedAppVersions }),
       })
     },
   }, sentryVitePlugin({

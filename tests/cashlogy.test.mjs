@@ -457,7 +457,7 @@ test('el histórico confirma en Cashlogy antes de cambiar un ticket de tarjeta a
   assert.match(page, /cash\.tickets\.find[\s\S]*ticket\.payload\.sale\.id === transaction\.saleId[\s\S]*ticketActions\.changePayment\(historicalTicket, 'cash', transaction\)/)
 })
 
-test('unknown y needs_attention nunca completan una venta y solo se consultan por requestId', async () => {
+test('unknown y needs_attention exigen una decisión manual revisada y solo se consultan por requestId', async () => {
   const [paymentStore, managementStore, paymentModal, operationStatus] = await Promise.all([
     readFile(new URL('src/features/local-printing/cashlogy/useCashlogyStore.ts', root), 'utf8'),
     readFile(new URL('src/features/local-printing/cashlogy/useCashlogyManagementStore.ts', root), 'utf8'),
@@ -471,8 +471,12 @@ test('unknown y needs_attention nunca completan una venta y solo se consultan po
   assert.match(managementStore, /getCashlogyCashManagementOperationByRequestId/)
   assert.match(managementStore, /if \(operation\.status === 'unknown' \|\| operation\.status === 'needs_attention'\) return/)
   assert.match(managementStore, /hide\(\)\s*{\s*set\(\{ modalOpen: false \}\)/)
-  assert.match(paymentModal, /Consultar estado de nuevo/)
-  assert.match(paymentModal, /Volver al TPV/)
+  assert.match(paymentModal, /Marcar como cobrado/)
+  assert.match(paymentModal, /Volver a cobrar/)
+  assert.equal(paymentModal.match(/disabled=\{!reviewed \|\| finalizeDisabled \|\| isFinalizing\}/g)?.length, 2)
+  assert.match(paymentModal, /state\.closeReviewed\(\)[\s\S]*await state\.startPayment\(amountCents, saleId\)[\s\S]*await onFinalizeRecovered\(transaction\)/)
+  assert.doesNotMatch(paymentModal, /Consultar estado de nuevo/)
+  assert.doesNotMatch(paymentModal, /Cerrar operación revisada/)
   assert.match(operationStatus, /No repitas la operación/)
 })
 

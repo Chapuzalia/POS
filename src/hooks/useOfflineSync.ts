@@ -20,6 +20,7 @@ export function useOfflineSync(isOnline: boolean, sessionReady = true) {
     () => initialQueue.some((event) => event.lastError) ? 'Hay operaciones pendientes de sincronizar. Revisa su estado.' : null,
   )
   const [rejectedSaleEvent, setRejectedSaleEvent] = useState<RejectedSaleEvent | null>(null)
+  const [isSyncing, setIsSyncing] = useState(false)
   const syncInFlightRef = useRef<Promise<void> | null>(null)
 
   const refreshPendingCount = useCallback(() => {
@@ -54,6 +55,7 @@ export function useOfflineSync(isOnline: boolean, sessionReady = true) {
       }
     }
 
+    setIsSyncing(true)
     const syncTask = (async () => {
       const events = getOfflineQueue()
 
@@ -87,6 +89,7 @@ export function useOfflineSync(isOnline: boolean, sessionReady = true) {
     } finally {
       if (syncInFlightRef.current === syncTask) {
         syncInFlightRef.current = null
+        setIsSyncing(false)
       }
     }
   }, [isOnline, refreshPendingCount])
@@ -99,6 +102,7 @@ export function useOfflineSync(isOnline: boolean, sessionReady = true) {
 
   return {
     clearRejectedSaleEvent,
+    isSyncing,
     lastSyncError,
     pendingCount,
     rejectedSaleEvent,
