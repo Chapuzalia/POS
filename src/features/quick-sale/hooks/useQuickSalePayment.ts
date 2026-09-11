@@ -9,6 +9,7 @@ import { loadTicketInvoice } from '../../customers/service'
 import {
   finishCashlogyPayment,
   getCashlogyPaymentAmounts,
+  getCashlogyPaymentSaleId,
   settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
 import type { AppliedDiscount, CashSession, Customer, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
@@ -44,13 +45,26 @@ export function useQuickSalePayment(options: Options) {
     confirmedCashlogyTransaction: CashlogyTransaction | null = null,
   ) => {
     const { context, cashSession, lines } = options
-    if (!context || !cashSession || lines.length === 0) return
-    if (options.invoiceCustomer && !options.isOnline) {
-      options.onError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
+    const fail = (message: string) => {
+      options.onError(message)
+      if (confirmedCashlogyTransaction) throw new Error(message)
+    }
+    if (!context || !cashSession || lines.length === 0) {
+      if (confirmedCashlogyTransaction) fail(!context || !cashSession
+        ? 'Abre la sesión de caja correspondiente antes de aplicar el cobro. El cobro sigue pendiente de registrar.'
+        : 'No hay productos en el ticket para aplicar este cobro. Recupera el ticket original; no vuelvas a cobrar en la máquina.')
       return
     }
+    if (options.invoiceCustomer && !options.isOnline) {
+      fail('Conéctate antes de cobrar una factura para asignar su número definitivo.')
+      return
+    }
+    if (confirmedCashlogyTransaction) confirmedCashlogyTransaction = {
+      ...confirmedCashlogyTransaction,
+      saleId: getCashlogyPaymentSaleId(confirmedCashlogyTransaction),
+    }
     if (confirmedCashlogyTransaction && !confirmedCashlogyTransaction.saleId) {
-      options.onError('El cobro recuperado no pertenece a una venta rápida identificable.')
+      fail('El cobro recuperado no pertenece a una venta rápida identificable. El cobro se conserva pendiente; no vuelvas a cobrar en la máquina.')
       return
     }
     const preview = buildSalePayload(
@@ -75,7 +89,7 @@ export function useQuickSalePayment(options: Options) {
           throw new Error('El cobro confirmado en Cashlogy no coincide con esta venta.')
         }
       } catch (error) {
-        options.onError(getReadableError(error, { operation: 'sale.payment', saleId: preview.sale.id, cashSessionId: cashSession.id, integration: 'cashlogy', step: 'settle' }, 'No se pudo completar el cobro con Cashlogy.'))
+        fail(getReadableError(error, { operation: 'sale.payment', saleId: preview.sale.id, cashSessionId: cashSession.id, integration: 'cashlogy', step: 'settle' }, 'No se pudo completar el cobro con Cashlogy.'))
         return
       }
     }
@@ -104,7 +118,7 @@ export function useQuickSalePayment(options: Options) {
       options.refreshPendingCount()
     } catch (error) {
       reportOperationError(error, { operation: 'sale.payment', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'local_persistence' })
-      options.onError('No se ha podido guardar completamente la venta. Comprueba las ventas pendientes y el cobro antes de repetirlo.')
+      fail('No se ha podido guardar completamente la venta. Comprueba las ventas pendientes y el cobro antes de repetirlo.')
       return
     }
     options.resetUi(paymentMethod)
@@ -145,7 +159,10 @@ export function useQuickSalePayment(options: Options) {
     receivedCents: number | null,
     confirmedCashlogyTransaction: CashlogyTransaction | null = null,
   ) => {
-    if (paymentInFlightRef.current) return
+    if (paymentInFlightRef.current) {
+      if (confirmedCashlogyTransaction) throw new Error('El registro del cobro anterior sigue en curso. Espera a que termine antes de aplicarlo de nuevo.')
+      return
+    }
     paymentInFlightRef.current = true
     options.onPaymentInFlightChange?.(true)
     try {

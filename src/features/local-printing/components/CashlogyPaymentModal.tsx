@@ -29,6 +29,7 @@ const statusLabels: Record<CashlogyTransactionStatus, string> = {
 export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: { finalizeDisabled?: boolean; onFinalizeRecovered: (transaction: CashlogyTransaction) => Promise<void> | void }) {
   const [isFinalizing, setIsFinalizing] = useState(false)
   const [reviewedId, setReviewedId] = useState<string | null>(null)
+  const [finalizationError, setFinalizationError] = useState<{ requestId: string; message: string } | null>(null)
   const state = useCashlogyStore(useShallow((value) => ({
     modalOpen: value.modalOpen,
     intent: value.intent,
@@ -61,9 +62,12 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
 
   const finalizeRecovered = async () => {
     if (!state.transaction || isFinalizing) return
+    setFinalizationError(null)
     setIsFinalizing(true)
     try {
       await onFinalizeRecovered(state.transaction)
+    } catch (error) {
+      setFinalizationError({ requestId: state.transaction.requestId, message: error instanceof Error ? error.message : 'No se ha podido registrar el cobro. El cobro sigue pendiente; puedes volver al TPV e intentarlo de nuevo.' })
     } finally {
       setIsFinalizing(false)
     }
@@ -130,8 +134,8 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
         <CashlogyLevelCards levels={state.levels} variant="payment" />
       </> : null}
 
-      {state.error ? <div className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm">
-        <p className="font-bold text-red-700 dark:text-red-300">{state.error.message}</p>
+      {state.error || finalizationError?.requestId === state.intent.requestId ? <div role="alert" className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm">
+        <p className="font-bold text-red-700 dark:text-red-300">{finalizationError?.requestId === state.intent.requestId ? finalizationError.message : state.error?.message}</p>
       </div> : null}
 
       <div className="mt-5 flex flex-wrap justify-end gap-2">
@@ -140,7 +144,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
           He revisado la máquina y el efectivo con el responsable de caja. Entiendo que «Marcar como cobrado» puede registrar una venta no cobrada y que «Volver a cobrar» puede duplicar un cobro.
         </label> : null}
         {(active && !state.isPolling && !state.isStarting) || startFailed ? <Button onClick={() => void state.recover().catch(() => undefined)}>Recuperar cobro</Button> : null}
-        {active ? <Button onClick={state.hide} variant="tertiary">Volver al TPV</Button> : null}
+        {active || status === 'completed' || critical ? <Button disabled={isFinalizing} onClick={state.hide} variant="tertiary">Volver al TPV</Button> : null}
         {canCancel ? <Button disabled={state.isCancelling} onClick={() => void state.cancel().catch(() => undefined)} variant="danger">
           {state.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
           Cancelar cobro
