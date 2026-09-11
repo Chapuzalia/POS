@@ -814,7 +814,7 @@ export function TableMapView(props: Props) {
     <main className={`flex min-h-0 flex-1 flex-col ${mobileLayout ? 'gap-0 overflow-hidden p-0' : 'gap-3.5 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-[18px]'}`}>
       {!mobileLayout ? <header className="flex items-center justify-between gap-[18px] [&_h1]:m-0 [&_h1]:text-2xl [&_p]:mb-0 [&_p]:mt-1 [&_p]:text-[var(--muted)]">
         <div>
-          <h1>Mapa de mesas</h1>
+          <h1>Mapa de mesas -</h1>
         </div>
         <nav className="flex gap-2 overflow-x-auto pb-0.5 [&>button]:min-h-[42px] [&>button]:whitespace-nowrap [&>button]:rounded-full [&>button]:border [&>button]:border-[var(--separator)] [&>button]:bg-[var(--surface)] [&>button]:px-[18px] [&>button]:font-extrabold [&>button]:text-[var(--foreground)]" aria-label="Zonas">
           {map.areas.map((area) => (
