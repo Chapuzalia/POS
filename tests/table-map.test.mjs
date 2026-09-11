@@ -425,7 +425,7 @@ test('las etiquetas externas mobile son mas compactas sin cambiar la medida de t
 
 test('mobile usa una composicion propia y tablet conserva el encabezado de escritorio', () => {
   assert.match(tableMapViewSource, /!mobileLayout \? <header/)
-  assert.match(tableMapViewSource, /<h1>Mapa de mesas<\/h1>/)
+  assert.match(tableMapViewSource, /<h1>Mapa de mesas -<\/h1>/)
   assert.match(tableMapViewSource, /<MobileTableMapChrome/)
   assert.match(tableMapViewSource, /mobileLayout \? 'gap-0 overflow-hidden p-0'/)
   assert.match(tableMapViewSource, /mobileLayout \? 'min-h-0 rounded-none border-x-0 border-b-0 shadow-none'/)
