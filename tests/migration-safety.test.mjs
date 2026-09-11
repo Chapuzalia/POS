@@ -34,7 +34,7 @@ test('bloquea cambios breaking, RLS debilitado e índices que bloquean escritura
     ["do $$ begin execute 'drop table public.sales'; end $$", 'ANONYMOUS DO BLOCK'],
     ['call public.rewrite_sales()', 'CALL PROCEDURE'],
     ['alter table public.sales rename column total to amount', 'RENAME'],
-    ['create or replace function public.pay() returns void language sql as $$ select 1 $$', 'CREATE OR REPLACE API'],
+    ['create or replace function public.pay() returns void language sql as $$ select 1 $$', 'CREATE OR REPLACE ROUTINE'],
     ['alter table public.sales disable row level security', 'WEAKEN RLS'],
     ['create index sales_created_idx on public.sales (created_at)', 'CREATE INDEX WITHOUT CONCURRENTLY'],
     ['alter table public.sales add constraint positive_total check (total > 0)', 'CHECK/FOREIGN KEY CONSTRAINT WITHOUT NOT VALID'],
@@ -43,6 +43,22 @@ test('bloquea cambios breaking, RLS debilitado e índices que bloquean escritura
   for (const [sql, expected] of cases) {
     assert.ok(analyzeMigration(`${safeHeader}${sql};`).includes(expected), expected)
   }
+})
+
+test('permite revisar una sustitución de RPC compatible sin eximir reglas destructivas', () => {
+  const findings = analyzeMigration(`
+    -- migration-safety: expand
+    -- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+    -- migration-safety-reason: Same signature and authenticated contract; fixes idempotent retry behavior.
+    set lock_timeout = '5s';
+    set statement_timeout = '5min';
+    create or replace function public.pay() returns void language sql as $$ select 1 $$;
+    revoke all on function public.pay() from public, anon;
+    grant execute on function public.pay() to authenticated;
+  `)
+
+  assert.deepEqual(findings, [])
+  assert.ok(analyzeMigration(`${safeHeader}drop table public.sales;\n-- migration-safety-reviewed: DROP`).includes('RULE CANNOT BE REVIEW-WAIVED: DROP'))
 })
 
 test('exige declaración expand y timeouts explícitos', () => {

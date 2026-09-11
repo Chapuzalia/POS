@@ -1,3 +1,9 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: Preserves the existing RPC signature, result and authenticated grant; only makes seated retries reuse an open order.
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+
 create or replace function public.seat_reservation(
   p_reservation_id uuid,
   p_cash_session_id uuid,

@@ -26,6 +26,7 @@ test('el workflow de PR ejecuta el checker y sus regresiones', async () => {
   const workflow = await readFile(new URL('../.github/workflows/migration-safety.yml', import.meta.url), 'utf8')
 
   assert.match(workflow, /pull_request:/)
+  assert.match(workflow, /git merge-base/)
   assert.match(workflow, /check-pr-migrations\.sh/)
   assert.match(workflow, /migration-safety\.test\.mjs/)
 })

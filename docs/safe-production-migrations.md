@@ -14,6 +14,8 @@ set statement_timeout = '5min';
 
 El checker solo analiza archivos añadidos. Si se modifica, renombra o elimina una migración existente, CI falla: la historia aplicada es inmutable y la corrección debe escribirse como otra migración.
 
+Una sustitución de función/procedimiento que conserve firma, resultado, permisos y comportamiento N-1 puede aprobarse explícitamente con `migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE` y una línea `migration-safety-reason`. Esta excepción solo admite retirar `PUBLIC`/`anon` de una función si se concede `EXECUTE` a `authenticated`; no puede eximir operaciones destructivas, vistas, RLS, renombrados ni cambios de tipo.
+
 Un despliegue no es atómico para todos los dispositivos: una versión anterior del cliente puede seguir creando, leyendo o actualizando datos mientras la nueva versión empieza a usarse. Las migraciones deben permitir que ambas convivan.
 
 ## Patrón expand/contract

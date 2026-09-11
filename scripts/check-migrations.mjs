@@ -146,19 +146,39 @@ const blockedRules = [
   ['ALTER COLUMN TYPE', /\bALTER\s+TABLE\b[^;]*\b(?:ALTER\s+COLUMN\s+)?[^;]*\bTYPE\b/i],
   ['SET NOT NULL', /\bALTER\s+TABLE\b[^;]*\bSET\s+NOT\s+NULL\b/i],
   ['ADD NOT NULL COLUMN', /\bALTER\s+TABLE\b[^;]*\bADD\s+(?:COLUMN\s+)?[^;]*\bNOT\s+NULL\b/i],
-  ['CREATE OR REPLACE API', /\bCREATE\s+OR\s+REPLACE\s+(?:FUNCTION|PROCEDURE|VIEW)\b/i],
+  ['CREATE OR REPLACE ROUTINE', /\bCREATE\s+OR\s+REPLACE\s+(?:FUNCTION|PROCEDURE)\b/i],
+  ['CREATE OR REPLACE VIEW', /\bCREATE\s+OR\s+REPLACE\s+VIEW\b/i],
   ['ALTER API/TYPE', /\bALTER\s+(?:FUNCTION|PROCEDURE|VIEW|TYPE)\b/i],
   ['REVOKE', /\bREVOKE\b/i],
   ['WEAKEN RLS', /\b(?:DISABLE\s+ROW\s+LEVEL\s+SECURITY|NO\s+FORCE\s+ROW\s+LEVEL\s+SECURITY|ALTER\s+POLICY)\b/i],
   ['MOVE SCHEMA', /\bSET\s+SCHEMA\b/i],
 ]
 
+const reviewableRules = new Set(['CREATE OR REPLACE ROUTINE', 'REVOKE'])
+
 export function analyzeMigration(sql) {
   const normalized = normalizeExecutableSql(sql)
   const safetyDeclaration = sql.split(/\r?\n/).find((line) => line.trim())?.trim().toLowerCase()
+  const reviewedDeclaration = sql.match(/^\s*--\s*migration-safety-reviewed:\s*(.+)$/im)?.[1]
+  const reviewedRules = new Set(reviewedDeclaration?.split(',').map((rule) => rule.trim().toUpperCase()).filter(Boolean) ?? [])
+  const reviewReason = sql.match(/^\s*--\s*migration-safety-reason:\s*(.+)$/im)?.[1]?.trim()
   const findings = blockedRules
-    .filter(([, pattern]) => pattern.test(normalized))
+    .filter(([name, pattern]) => pattern.test(normalized) && !(reviewableRules.has(name) && reviewedRules.has(name)))
     .map(([name]) => name)
+
+  for (const reviewedRule of reviewedRules) {
+    if (!reviewableRules.has(reviewedRule)) findings.push(`RULE CANNOT BE REVIEW-WAIVED: ${reviewedRule}`)
+  }
+  if (reviewedRules.size && !reviewReason) findings.push('MISSING REVIEW REASON')
+  if (reviewedRules.has('REVOKE')) {
+    const revokeStatements = normalized.split(';').filter((statement) => /\bREVOKE\b/i.test(statement))
+    if (revokeStatements.some((statement) => !/\bREVOKE\s+ALL\s+ON\s+FUNCTION\b[^;]*\bFROM\s+PUBLIC(?:\s*,\s*ANON)?\s*$/i.test(statement))) {
+      findings.push('REVIEWED REVOKE MAY ONLY REMOVE FUNCTION ACCESS FROM PUBLIC/ANON')
+    }
+    if (!/\bGRANT\s+EXECUTE\s+ON\s+FUNCTION\b[^;]*\bTO\s+AUTHENTICATED\b/i.test(normalized)) {
+      findings.push('REVIEWED REVOKE MUST GRANT FUNCTION EXECUTE TO AUTHENTICATED')
+    }
+  }
 
   if (safetyDeclaration !== '-- migration-safety: expand') {
     findings.push('MISSING EXPAND SAFETY DECLARATION')
