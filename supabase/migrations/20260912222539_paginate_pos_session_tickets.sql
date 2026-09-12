@@ -1,19 +1,19 @@
 -- migration-safety: expand
--- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
--- migration-safety-reason: Adds a new read-only authenticated RPC and removes only its default public/anon execution grants.
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE, CREATE INDEX WITHOUT CONCURRENTLY
+-- migration-safety-reason: Adds a read-only authenticated RPC; regular index builds are required because production Supabase CLI 2.54.11 rejects CONCURRENTLY in its migration pipeline, with lock waits bounded to 5s.
 set lock_timeout = '5s';
 set statement_timeout = '5min';
 
 -- Keep POS ticket history payloads bounded. The page RPC only returns ticket
 -- identifiers; the client then fetches nested detail for those twelve rows.
 
-create index concurrently if not exists tickets_tenant_session_local_created_idx
+create index if not exists tickets_tenant_session_local_created_idx
   on public.tickets (tenant_id, cash_session_id, local_created_at desc, id desc);
 
-create index concurrently if not exists ticket_line_components_ticket_line_id_idx
+create index if not exists ticket_line_components_ticket_line_id_idx
   on public.ticket_line_components (ticket_line_id);
 
-create index concurrently if not exists offline_event_log_sale_ticket_idx
+create index if not exists offline_event_log_sale_ticket_idx
   on public.offline_event_log (
     tenant_id,
     event_kind,
