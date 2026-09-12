@@ -27,6 +27,8 @@ test('producción valida desde el último release correcto y construye en Vercel
   assert.match(workflow, /--build-env SUPPORTED_APP_VERSIONS=/)
   assert.match(workflow, /DEPLOYMENT_URL: \$\{\{ steps\.staged\.outputs\.url \}\}/)
   assert.match(workflow, /vercel promote "\$DEPLOYMENT_URL"/)
+  assert.match(workflow, /prepare-production-migrations\.mjs/)
+  assert.match(workflow, /tar -czf - -C "\$package_root" migrations/)
 })
 
 test('el workflow de PR ejecuta el checker y sus regresiones', async () => {
