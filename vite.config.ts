@@ -21,6 +21,9 @@ const supportedAppVersions = [...new Set([
 
 // https://vite.dev/config/
 export default defineConfig({
+  optimizeDeps: {
+    exclude: ['@jsquash/webp'],
+  },
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },

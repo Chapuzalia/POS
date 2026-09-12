@@ -29,7 +29,9 @@ export function createCashTicketActionsHarness({
       forgetOfflineEvent: (id) => calls.forgotten.push(id),
       getOfflineQueue: () => offlineQueue,
     },
-    '../../../services/posService': { loadSessionTicketsFromSupabase: async () => [] },
+    '../../../services/posService': {
+      loadSessionTicketPageFromSupabase: async () => ({ currentPage: 1, tickets: [], totalResults: 0 }),
+    },
     '../../../utils/dates': { nowIso: () => '2026-09-12T00:00:00Z' },
     '../../../utils/errors': { getReadableError: (error) => error?.message ?? String(error) },
     '../../fiscal/service': { voidTicketWithFiscalCancellation },

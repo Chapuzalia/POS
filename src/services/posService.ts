@@ -32,6 +32,10 @@ import type {
   VenueRow,
 } from '../types/supabase'
 import { normalizeTenantFeatures } from '../features/platform/tenantFeatureAccess'
+import {
+  SESSION_TICKETS_PAGE_SIZE,
+  type SessionTicketHistoryPage,
+} from '../features/cash-registers/services/sessionTicketHistoryModel.ts'
 import { claimLoginLease, releaseLocalLoginLock, releaseLoginLease } from './loginLeaseService'
 async function requireExclusiveLogin(context: TenantContext) {
   if (await claimLoginLease()) {
@@ -618,18 +622,20 @@ type SessionTicketQueryRow = {
   }> | null
 }
 
-export async function loadSessionTicketsFromSupabase(
+async function loadSessionTicketRecordsFromSupabase(
   context: TenantContext,
   cashSessionId: string,
+  ticketIds?: string[],
 ): Promise<SessionTicketRecord[]> {
   if (!supabase) {
     throw new Error('Supabase no está configurado.')
   }
 
-  const [{ data: ticketData, error: ticketsError }, { data: eventData, error: eventsError }] = await Promise.all([
-    supabase
-      .from('tickets')
-      .select(`
+  if (ticketIds && !ticketIds.length) return []
+
+  let ticketQuery = supabase
+    .from('tickets')
+    .select(`
         id,
         tenant_id,
         cash_session_id,
@@ -708,16 +714,24 @@ export async function loadSessionTicketsFromSupabase(
         fiscal_invoices (
           id, provider, status, external_uuid, external_code, qr_base64, verification_url, error_code, error_message
         )
-      `)
-      .eq('tenant_id', context.tenantId)
-      .eq('cash_session_id', cashSessionId)
-      .order('local_created_at', { ascending: false }),
-    supabase
-      .from('offline_event_log')
-      .select('payload')
-      .eq('tenant_id', context.tenantId)
-      .eq('event_kind', 'sale_created')
-      .filter('payload->ticket->>cashSessionId', 'eq', cashSessionId),
+    `)
+    .eq('tenant_id', context.tenantId)
+    .eq('cash_session_id', cashSessionId)
+  let eventQuery = supabase
+    .from('offline_event_log')
+    .select('payload')
+    .eq('tenant_id', context.tenantId)
+    .eq('event_kind', 'sale_created')
+    .filter('payload->ticket->>cashSessionId', 'eq', cashSessionId)
+
+  if (ticketIds) {
+    ticketQuery = ticketQuery.in('id', ticketIds)
+    eventQuery = eventQuery.in('payload->ticket->>id', ticketIds)
+  }
+
+  const [{ data: ticketData, error: ticketsError }, { data: eventData, error: eventsError }] = await Promise.all([
+    ticketQuery.order('local_created_at', { ascending: false }),
+    eventQuery,
   ])
 
   if (ticketsError || eventsError) {
@@ -871,6 +885,58 @@ export async function loadSessionTicketsFromSupabase(
       payload,
     }
   })
+}
+
+export async function loadSessionTicketsFromSupabase(
+  context: TenantContext,
+  cashSessionId: string,
+) {
+  return loadSessionTicketRecordsFromSupabase(context, cashSessionId)
+}
+
+type SessionTicketPageRow = {
+  ticket_id: string
+  ticket_number: number | string
+  total_count: number | string
+}
+
+export async function loadSessionTicketPageFromSupabase(
+  context: TenantContext,
+  cashSessionId: string,
+  page: number,
+  query: string,
+): Promise<SessionTicketHistoryPage> {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+
+  const requestedPage = Math.max(1, Math.trunc(page))
+  const { data, error } = await supabase.rpc('pos_session_ticket_page', {
+    p_tenant_id: context.tenantId,
+    p_cash_session_id: cashSessionId,
+    p_query: query.trim() || null,
+    p_page: requestedPage,
+  })
+  if (error) throw error
+
+  const rows = ((data ?? []) as SessionTicketPageRow[]).slice(0, SESSION_TICKETS_PAGE_SIZE)
+  if (!rows.length && requestedPage > 1) {
+    return loadSessionTicketPageFromSupabase(context, cashSessionId, 1, query)
+  }
+
+  const records = await loadSessionTicketRecordsFromSupabase(
+    context,
+    cashSessionId,
+    rows.map((row) => row.ticket_id),
+  )
+  const recordsByTicketId = new Map(records.map((ticket) => [ticket.payload.ticket.id, ticket]))
+
+  return {
+    currentPage: requestedPage,
+    totalResults: Number(rows[0]?.total_count ?? 0),
+    tickets: rows.flatMap((row) => {
+      const ticket = recordsByTicketId.get(row.ticket_id)
+      return ticket ? [{ number: Number(row.ticket_number), ticket }] : []
+    }),
+  }
 }
 
 export async function loadProductSalesStatsFromSupabase(context: TenantContext): Promise<ProductSalesStat[]> {

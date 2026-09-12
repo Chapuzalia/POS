@@ -1,5 +1,6 @@
 import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
+import { PRODUCT_IMAGE_TYPE, convertImageFileToWebp, isProductImageWebp } from '../../../../lib/productImages.ts'
 import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
 import { loadInventorySnapshot } from '../../inventory/services/inventoryService'
 import { loadVenueSuppliers } from '../../purchases/services/supplierService'
@@ -104,12 +105,13 @@ export async function uploadSupplierDocument(
 ) {
   const client = requireSupabase()
   const fileHash = await sha256(file)
+  const uploadFile = await convertImageFileToWebp(file)
   const { data, error } = await client.rpc('create_supplier_document', {
     p_venue_id: venueId,
     p_document_type: documentType,
     p_affects_stock: affectsStock,
-    p_original_file_name: file.name,
-    p_original_mime_type: file.type || 'application/octet-stream',
+    p_original_file_name: uploadFile.name,
+    p_original_mime_type: uploadFile.type || 'application/octet-stream',
     p_file_hash: fileHash,
     p_mock_fixture_id: null,
   })
@@ -119,8 +121,13 @@ export async function uploadSupplierDocument(
     if (created.status === 'error') await processDocument(created.documentId)
     return created
   }
-  const { error: uploadError } = await client.storage.from(created.storageBucket).upload(created.storagePath, file, {
-    contentType: file.type || undefined,
+  if (file.type.startsWith('image/') && (
+    uploadFile.type !== PRODUCT_IMAGE_TYPE
+    || !created.storagePath.toLowerCase().endsWith('.webp')
+    || !await isProductImageWebp(uploadFile)
+  )) throw new Error('La imagen del documento no es un archivo WebP válido.')
+  const { error: uploadError } = await client.storage.from(created.storageBucket).upload(created.storagePath, uploadFile, {
+    contentType: uploadFile.type || undefined,
     upsert: false,
   })
   if (uploadError) throw uploadError

@@ -178,7 +178,11 @@ for (const duplicateState of ['new', 'uploaded', 'failed-upload']) {
     }
     const exports = {}
     vm.runInNewContext(ts.transpileModule(await read('src/features/crm/purchases/services/documentArchiveService.ts'), { compilerOptions: { module: ts.ModuleKind.CommonJS } }).outputText, {
-      exports, require: () => ({ requireSupabase: () => client }), crypto,
+      exports,
+      require: (specifier) => specifier.includes('productImages')
+        ? { PRODUCT_IMAGE_TYPE: 'image/webp', convertImageFileToWebp: async (file) => file, isProductImageWebp: async () => true }
+        : { requireSupabase: () => client },
+      crypto,
     })
     await exports.uploadDocumentArchive(venue, 'invoice', new File(['file'], 'factura.pdf', { type: 'application/pdf' }), {
       supplierId: null, documentDate: '2026-09-05', documentNumber: 'F001',

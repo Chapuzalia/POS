@@ -765,11 +765,11 @@ export function PosPage(props: Props) {
       {cash.historyOpen ? <SessionTicketsModal
         canReprint={Boolean(props.context.canManageCash || props.context.canCloseCashSession || ['manager', 'owner'].includes(props.context.role))}
         isBusy={props.isBusy}
+        loadPage={cash.ticketActions.loadHistoryPage}
         onChangePayment={cash.ticketActions.changePayment}
         onClose={() => cash.setHistoryOpen(false)}
         onReprint={(ticket) => void cash.ticketActions.reprint(ticket)}
         onVoidTicket={cash.ticketActions.voidTicket}
-        tickets={cash.tickets}
       /> : null}
       {cash.completedClosing ? <CashClosingResultModal
         closing={cash.completedClosing}
