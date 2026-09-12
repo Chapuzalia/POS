@@ -48,7 +48,9 @@ async function ticketHistoryDatabase() {
       select lower(translate(coalesce(value, ''), 'áéíóúüñÁÉÍÓÚÜÑ', 'aeiouunAEIOUUN'));
     $$;
   `)
-  await db.exec(migration)
+  // PGlite wraps exec batches in a transaction, while production intentionally
+  // builds these indexes concurrently. Preserve the SQL under test otherwise.
+  await db.exec(migration.replaceAll('create index concurrently', 'create index'))
   return db
 }
 

@@ -136,11 +136,7 @@ export function normalizeExecutableSql(sql) {
   return output.replace(/[\t\r ]+/g, ' ')
 }
 
-// The production receiver currently runs Supabase CLI 2.54.11, which sends
-// migrations through a PostgreSQL pipeline that rejects concurrent indexes.
-// Remove this compatibility rule after the receiver is upgraded and verified.
 const blockedRules = [
-  ['CREATE INDEX CONCURRENTLY UNSUPPORTED BY PRODUCTION CLI', /\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/i],
   ['DROP', /\bDROP\b/i],
   ['TRUNCATE', /\bTRUNCATE\b/i],
   ['DELETE FROM', /\bDELETE\s+FROM\b/i],
@@ -158,11 +154,7 @@ const blockedRules = [
   ['MOVE SCHEMA', /\bSET\s+SCHEMA\b/i],
 ]
 
-const reviewableRules = new Set([
-  'CREATE OR REPLACE ROUTINE',
-  'REVOKE',
-  'CREATE INDEX WITHOUT CONCURRENTLY',
-])
+const reviewableRules = new Set(['CREATE OR REPLACE ROUTINE', 'REVOKE'])
 
 export function analyzeMigration(sql) {
   const normalized = normalizeExecutableSql(sql)
@@ -200,8 +192,7 @@ export function analyzeMigration(sql) {
 
   for (const statement of normalized.split(';')) {
     if (/\bCREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(statement)
-      && !/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/i.test(statement)
-      && !reviewedRules.has('CREATE INDEX WITHOUT CONCURRENTLY')) {
+      && !/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/i.test(statement)) {
       findings.push('CREATE INDEX WITHOUT CONCURRENTLY')
     }
     if (/\bADD\s+CONSTRAINT\b[^;]*\b(?:CHECK|FOREIGN\s+KEY)\b/i.test(statement)

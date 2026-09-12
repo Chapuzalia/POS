@@ -158,7 +158,12 @@ jobs:
         run: |
           set -Eeuo pipefail
 
-          tar -czf - -C supabase migrations \
+          package_root="$(mktemp -d)"
+          node scripts/prepare-production-migrations.mjs \
+            supabase/migrations \
+            "$package_root/migrations"
+
+          tar -czf - -C "$package_root" migrations \
             | ssh \
                 -T \
                 -o BatchMode=yes \

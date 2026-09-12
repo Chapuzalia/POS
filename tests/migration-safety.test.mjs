@@ -21,11 +21,11 @@ test('normaliza comentarios y literales sin permitir separar palabras peligrosas
   assert.match(normalized, /DROP\s+TABLE\s+public\.sales/i)
 })
 
-test('rechaza índices concurrentes incompatibles con el CLI fijado en producción', () => {
+test('acepta una expansión con locks acotados e índice concurrente', () => {
   assert.deepEqual(analyzeMigration(`${safeHeader}
     alter table public.sales add column external_reference text;
     create index concurrently sales_external_reference_idx on public.sales (external_reference);
-  `), ['CREATE INDEX CONCURRENTLY UNSUPPORTED BY PRODUCTION CLI'])
+  `), [])
 })
 
 test('bloquea cambios breaking, RLS debilitado e índices que bloquean escrituras', () => {
@@ -43,21 +43,6 @@ test('bloquea cambios breaking, RLS debilitado e índices que bloquean escritura
   for (const [sql, expected] of cases) {
     assert.ok(analyzeMigration(`${safeHeader}${sql};`).includes(expected), expected)
   }
-})
-
-test('solo permite índices no concurrentes mediante una excepción revisada', () => {
-  const reviewedMigration = `
-    -- migration-safety: expand
-    -- migration-safety-reviewed: CREATE INDEX WITHOUT CONCURRENTLY
-    -- migration-safety-reason: The pinned production CLI cannot execute concurrent indexes in its migration pipeline.
-    set lock_timeout = '5s';
-    set statement_timeout = '5min';
-    create index sales_created_idx on public.sales (created_at);
-  `
-
-  assert.deepEqual(analyzeMigration(reviewedMigration), [])
-  assert.ok(analyzeMigration(`${safeHeader}create index sales_created_idx on public.sales (created_at);`)
-    .includes('CREATE INDEX WITHOUT CONCURRENTLY'))
 })
 
 test('permite revisar una sustitución de RPC compatible sin eximir reglas destructivas', () => {
