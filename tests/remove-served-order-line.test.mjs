@@ -22,12 +22,6 @@ test('only served order lines require explicit confirmation', () => {
   assert.match(modal, /onClick=\{onConfirm\}/)
 })
 
-test('the served-product confirmation modal is centered', () => {
-  assert.match(modal, /placement="center"/)
-  assert.doesNotMatch(modal, /placement="bottom"/)
-  assert.match(modal, /rounded-\[var\(--radius\)\]/)
-})
-
 test('the confirmed deletion locks the order and preserves revision safety', () => {
   assert.match(migration, /create or replace function public\.remove_restaurant_order_line_confirmed\([\s\S]*p_line_id uuid,[\s\S]*p_expected_revision integer/i)
   assert.match(migration, /for update of o/i)

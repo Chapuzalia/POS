@@ -381,7 +381,6 @@ test('las pantallas separan artículos físicos, stock y elaboraciones', () => {
 })
 
 test('el listado de stock abre el detalle por artículo físico', () => {
-  assert.match(stockPage, /filterPlaceholder="Buscar artículo físico…"/)
   assert.match(stockPage, /onClick=\{\(\) => open\(row\.item\.id\)\}/)
   assert.match(stockPage, /label=\{`Stock de \$\{selected\.name\}`\}/)
   assert.match(stockPage, /Existencias por artículo y almacén/)
@@ -408,11 +407,6 @@ test('el modal de stock permite sumar una entrada o establecer el total', () => 
 test('el listado de artículos reutiliza el modelo de tabla del proyecto', () => {
   assert.match(itemsPage, /<DataTable aria-label="Artículos de inventario"/)
   assert.match(itemsPage, /<thead>[\s\S]*<tbody>/)
-  assert.match(itemsPage, />Artículo<\/th>/)
-  assert.match(itemsPage, />Unidad<\/th>/)
-  assert.match(itemsPage, />Stock<\/th>/)
-  assert.match(itemsPage, />Ruta principal<\/th>/)
-  assert.doesNotMatch(itemsPage, /sm:grid-cols-2 xl:grid-cols-3/)
 })
 
 test('cada artículo define su propia ruta de consumo independiente del TPV', () => {

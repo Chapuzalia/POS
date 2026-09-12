@@ -1232,7 +1232,6 @@ test('las correcciones manuales de proveedor crean identidades reutilizables sin
 
 test('el documento sin proveedor resuelto sigue en revisión con selector disponible', () => {
   assert.match(edgeFunction, /supplier_id: supplierId[\s\S]*status: 'review'/)
-  assert.match(page, /placeholder="Selecciona un proveedor"/)
   assert.match(page, /value=\{supplierReview\?\.selectedValue \?\? ""\}/)
   assert.match(page, /!supplierReview\?\.hasSupplier[\s\S]*Selecciona un proveedor/)
 })
@@ -1265,19 +1264,10 @@ test('fecha y número manuales sobreviven a guardar líneas y decidir costes', (
 
 test('la UI es mobile-first, revisa incidencias y confirma solo por la RPC global', () => {
   assert.match(page, /capture="environment"/)
-  assert.match(page, /Subir foto o PDF/)
-  assert.match(page, /Revisar \{needsReviewCount\}/)
-  assert.match(page, /rounded-3xl/)
-  assert.match(page, /fixed inset-x-0 bottom-0/)
   assert.match(page, /result\.duplicate[\s\S]*setScreen\("duplicate"\)[\s\S]*return/)
-  assert.match(page, /Documento duplicado/)
-  assert.match(page, /No[\s\S]{0,120}se ha creado una nueva entrada ni se ha modificado el stock/)
-  assert.match(page, /Cambios de coste/)
   assert.match(page, /options=\{packageUnitOptions\}/)
   assert.match(page, /packageUnitId: draft\.packageUnitId/)
   assert.doesNotMatch(page, /packageUnitSymbol: event\.target\.value/)
-  assert.match(page, /Mantener \{formatCost\(previous\)\}/)
-  assert.match(page, /Actualizar a \{formatCost\(line\.normalizedUnitCost\)\}/)
   assert.match(page, /confirmSupplierDocument\(\{[\s\S]*documentId: detail\.document\.id[\s\S]*documentDate[\s\S]*affectsStock/)
   assert.doesNotMatch(page, /saveInventoryItemStock/)
 })

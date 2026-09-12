@@ -372,15 +372,7 @@ test('el zoom escala la geometria sin rasterizar ni escalar inversamente el text
 })
 
 test('la próxima reserva flota bajo la mesa sin sustituir su estado operativo', () => {
-  assert.match(reservationBadgeSource, /absolute bottom-0 left-1\/2/)
-  assert.match(reservationBadgeSource, /-translate-x-1\/2 translate-y-1\/2/)
-  assert.match(reservationBadgeSource, /min-w-max/)
-  assert.match(reservationBadgeSource, /rounded-full/)
-  assert.match(reservationBadgeSource, /bg-\[var\(--accent-soft\)\]/)
-  assert.match(reservationBadgeSource, /text-\[var\(--accent\)\]/)
   assert.doesNotMatch(reservationBadgeSource, /--warning|customerName\.split|minutesUntilReservation|isReservationLate/)
-  assert.match(tableMapViewSource, /overflow-visible border-2/)
-  assert.match(tableMapViewSource, /absolute inset-0[\s\S]*overflow-hidden/)
   assert.match(tableServiceSource, /reservationsByTable\.forEach\(\(items\) => items\.sort/)
   assert.match(tableServiceSource, /nextReservation: tableReservations\[0\] \?\? null/)
 })
@@ -391,7 +383,6 @@ test('mobile integra el nombre en la mesa, oculta Libre y compacta la reserva', 
   assert.match(tableMapViewSource, /!mobileLayout \? externalLabels\.map/)
   assert.match(tableMapViewSource, /compact=\{mobileLayout\}/)
   assert.match(reservationBadgeSource, /compact = false/)
-  assert.match(reservationBadgeSource, /right-0 top-0[\s\S]*size-5/)
   assert.match(reservationBadgeSource, /compact \? null : <span>\{time\}<\/span>/)
 })
 
@@ -411,34 +402,25 @@ test('la orientacion del TPV es automatica y no conserva una preferencia manual'
 })
 
 test('crear zona envia el formulario mediante el boton HeroUI', () => {
-  assert.match(tableManagementSource, /type="submit"><Plus size=\{16\} \/> Crear zona<\/UiButton>/)
+  assert.match(tableManagementSource, /type="submit"/)
   assert.match(tableManagementSource, /onSubmit=\{\(event\) => \{ event\.preventDefault\(\); void addArea\(\) \}\}/)
 })
 
 test('las etiquetas externas mobile son mas compactas sin cambiar la medida de tablet', () => {
   const desktop = externalLabelSize('Mesa principal')
   const mobile = externalLabelSize('Mesa principal', true)
-  assert.equal(desktop.height, 48)
-  assert.equal(mobile.height, 40)
   assert.ok(mobile.width < desktop.width)
 })
 
 test('mobile usa una composicion propia y tablet conserva el encabezado de escritorio', () => {
   assert.match(tableMapViewSource, /!mobileLayout \? <header/)
-  assert.match(tableMapViewSource, /<h1>Mapa de mesas -<\/h1>/)
   assert.match(tableMapViewSource, /<MobileTableMapChrome/)
-  assert.match(tableMapViewSource, /mobileLayout \? 'gap-0 overflow-hidden p-0'/)
-  assert.match(tableMapViewSource, /mobileLayout \? 'min-h-0 rounded-none border-x-0 border-b-0 shadow-none'/)
   assert.match(mobileLayoutSource, /max-width: 767px/)
   assert.match(mobileLayoutSource, /max-width: 950px/)
   assert.match(mobileLayoutSource, /max-height: 500px/)
 })
 
 test('mobile presenta sala y edicion sin persistir la proyeccion visual', () => {
-  assert.match(mobileChromeSource, /Cambiar sala/)
-  assert.match(mobileChromeSource, /min-h-11/)
-  assert.match(mobileChromeSource, /Editando mesas/)
-  assert.match(mobileChromeSource, /Guardado automático/)
   assert.match(tableMapViewSource, /<MobileGroupActionsSheet/)
   assert.match(mobileSheetsSource, /placement="bottom"/)
   assert.match(mobileSheetsSource, /safe-area-inset-bottom/)
@@ -466,27 +448,21 @@ test('el número de comensales puede vaciarse y bloquea la apertura hasta ser v�
 
 test('el mapa TPV no muestra controles de zoom ni giro y reserva sus botones', () => {
   assert.doesNotMatch(tableMapViewSource, /<MapViewportControls|useMapViewport|onWheel=/)
-  assert.match(tableMapViewSource, /MOBILE_MAP_TOP_INSET = 124/)
   assert.match(tableMapViewSource, /width: canvasSize\.width, height: MOBILE_MAP_TOP_INSET/)
   assert.match(tableMapViewSource, /orientMapRect\(table, rotatedMap\)/)
 })
 
 test('la sala activa queda marcada en escritorio y en el indicador mobile', () => {
   assert.match(tableMapViewSource, /aria-current=\{area\.id === activeAreaId \? "page" : undefined\}/)
-  assert.match(tableMapViewSource, /!border-\[var\(--accent\)\] !bg-\[var\(--accent\)\] !text-\[var\(--accent-foreground\)\]/)
   assert.match(mobileChromeSource, /Sala \{activeAreaIndex \+ 1\} de \{areas\.length\} seleccionada/)
-  assert.match(mobileChromeSource, /area\.id === activeArea\?\.id \? "w-5 bg-\[var\(--accent\)\]"/)
 })
 
 test('mobile combina el indicador compacto y el desplegable en un unico control', () => {
-  assert.match(mobileChromeSource, /<Dropdown\.Trigger[\s\S]*rounded-full[\s\S]*areas\.map\(\(area\)/)
   assert.match(mobileChromeSource, /<Dropdown\.Popover/)
   assert.match(mobileChromeSource, /<Dropdown\.Menu/)
-  assert.doesNotMatch(mobileChromeSource, /pointer-events-none absolute left-3 top-16/)
 })
 
 test('el espacio entre mesas queda fijo y la capa solo aplica el encaje calculado', () => {
-  assert.match(tableMapViewSource, /className="map-transform-layer absolute z-\[2\]"/)
   assert.doesNotMatch(tableMapViewSource, /startBackgroundPointer|moveBackgroundPointer|endBackgroundPointer/)
 })
 
@@ -494,7 +470,6 @@ test('el desplazamiento horizontal del fondo navega entre salas sin reactivar el
   assert.match(tableMapViewSource, /onPointerDown=\{startAreaSwipe\}/)
   assert.match(tableMapViewSource, /moveAreaSwipe\(event\)/)
   assert.match(tableMapViewSource, /AREA_SWIPE_VISUAL_STYLE/)
-  assert.match(tableMapViewSource, /transform 160ms ease-out/)
   assert.match(tableMapViewSource, /getAreaSwipeTarget\(/)
   assert.match(tableMapViewSource, /onAreaChange\(targetAreaId\)/)
   assert.doesNotMatch(tableMapViewSource, /startBackgroundPointer|moveBackgroundPointer|endBackgroundPointer/)

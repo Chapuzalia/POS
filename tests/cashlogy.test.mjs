@@ -40,6 +40,9 @@ import {
 import { getDefaultPrintAgentConfig } from '../src/features/local-printing/services/printAgentStorage.ts'
 import { getAutomaticSaleHardwareAction, shouldOpenCashDrawer } from '../src/features/local-printing/services/cashDrawerRules.ts'
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
+import { createCashTicketActionsHarness } from './helpers/cash-ticket-actions-harness.mjs'
+import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
+import { compileComponent } from './helpers/component-harness.mjs'
 
 const root = new URL('../', import.meta.url)
 
@@ -415,96 +418,42 @@ test('el ticket Cashlogy nunca abre el cajón de la impresora', () => {
   assert.equal(request.options.openCashDrawer, false)
 })
 
-test('el POS usa cobro headless antes de persistir e imprimir, también sin impresora', async () => {
-  const [quickSale, restaurant, printTicket, drawerButton, page] = await Promise.all([
-    readFile(new URL('src/features/quick-sale/hooks/useQuickSalePayment.ts', root), 'utf8'),
-    readFile(new URL('src/features/restaurant/hooks/useRestaurantController.ts', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/services/printTicket.ts', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/ManualCashDrawerButton.tsx', root), 'utf8'),
-    readFile(new URL('src/app/PosPage.tsx', root), 'utf8'),
-  ])
-  assert.match(quickSale, /settleCashlogyPaymentIfConfigured\(preview\.sale\.totalCents, preview\.sale\.id\)/)
-  assert.match(restaurant, /if \(method !== 'cash'\) return/)
-  assert.match(quickSale, /finishCashlogyPayment\(cashlogyTransaction\)[\s\S]*options\.printSale/)
-  assert.match(printTicket, /cashlogyConfigured/)
-  assert.match(drawerButton, /agent\.cashlogyConfigured/)
-  assert.match(page, /if \(cashlogyConfigured\)[\s\S]*completePayment\('cash', null\)/)
-})
-
 test('el histórico confirma en Cashlogy antes de cambiar un ticket de tarjeta a efectivo', async () => {
-  const [ticketActions, ticketHistory, paymentModal, page] = await Promise.all([
-    readFile(new URL('src/features/cash-registers/hooks/useCashTicketActions.ts', root), 'utf8'),
-    readFile(new URL('src/components/modals/SessionTicketsModal.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyPaymentModal.tsx', root), 'utf8'),
-    readFile(new URL('src/app/PosPage.tsx', root), 'utf8'),
-  ])
+  const settlement = deferred()
+  let attempts = 0
+  const confirmed = transaction('completed', {
+    changeCents: 100, id: 'tx-confirmed', receivedCents: 700, requestId: 'request-confirmed', requestedAmountCents: 600, saleId: 'sale-1',
+  })
+  const harness = createCashTicketActionsHarness({
+    settleCashlogyPaymentIfConfigured: async () => { attempts += 1; return settlement.promise },
+  })
 
-  assert.match(ticketActions, /ticket\.paymentMethod === 'card' && paymentMethod === 'cash'/)
-  assert.match(ticketActions, /await settleCashlogyPaymentIfConfigured\(ticket\.totalCents, ticket\.payload\.sale\.id\)/)
-  assert.ok(
-    ticketActions.indexOf('await settleCashlogyPaymentIfConfigured') < ticketActions.indexOf('options.persistTickets(nextTickets)'),
-    'Cashlogy debe confirmar el cobro antes de persistir el cambio de método',
-  )
-  assert.match(ticketActions, /getCashlogyPaymentAmounts\(cashlogyTransaction, ticket\.totalCents\)/)
-  assert.match(ticketActions, /confirmedCashlogyTransaction[\s\S]*\?\? await settleCashlogyPaymentIfConfigured/)
-  assert.match(ticketActions, /if \(cashlogyTransaction\) \{\s*await options\.syncPendingEvents\(\)\s*finishCashlogyPayment\(cashlogyTransaction\)/)
-  assert.match(ticketActions, /finishCashlogyPayment\(cashlogyTransaction\)/)
-  assert.match(ticketActions, /El ticket continúa pagado con tarjeta/)
-  assert.match(ticketActions, /El cobro está confirmado en Cashlogy, pero no se pudo guardar el cambio del ticket/)
-  assert.match(ticketHistory, /value=\{ticket\.paymentMethod \?\? ''\}/)
-  assert.match(ticketHistory, /void onChangePayment\(ticket, event\.target\.value as PaymentMethod\)/)
-  assert.match(paymentModal, /await onFinalizeRecovered\(state\.transaction\)/)
-  assert.match(page, /cash\.tickets\.find[\s\S]*ticket\.payload\.sale\.id === transaction\.saleId[\s\S]*ticketActions\.changePayment\(historicalTicket, 'cash', transaction\)/)
-})
+  const change = harness.render().changePayment(harness.ticket, 'cash')
+  await flush()
+  assert.equal(attempts, 1)
+  assert.equal(harness.calls.tickets.length, 0)
 
-test('unknown y needs_attention exigen una decisión manual revisada y solo se consultan por requestId', async () => {
-  const [paymentStore, managementStore, paymentModal, operationStatus] = await Promise.all([
-    readFile(new URL('src/features/local-printing/cashlogy/useCashlogyStore.ts', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/cashlogy/useCashlogyManagementStore.ts', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyPaymentModal.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyOperationStatus.tsx', root), 'utf8'),
-  ])
-  assert.match(paymentStore, /terminal\.status !== 'completed'/)
-  assert.match(paymentStore, /transaction\.status === 'unknown'/)
-  assert.match(paymentStore, /transaction\.status === 'needs_attention'/)
-  assert.match(paymentStore, /hide\(\)\s*{\s*set\(\{ modalOpen: false \}\)/)
-  assert.match(managementStore, /getCashlogyCashManagementOperationByRequestId/)
-  assert.match(managementStore, /if \(operation\.status === 'unknown' \|\| operation\.status === 'needs_attention'\) return/)
-  assert.match(managementStore, /hide\(\)\s*{\s*set\(\{ modalOpen: false \}\)/)
-  assert.match(paymentModal, /Marcar como cobrado/)
-  assert.match(paymentModal, /Volver a cobrar/)
-  assert.equal(paymentModal.match(/disabled=\{!reviewed \|\| finalizeDisabled \|\| isFinalizing\}/g)?.length, 2)
-  assert.match(paymentModal, /state\.closeReviewed\(\)[\s\S]*await state\.startPayment\(amountCents, saleId\)[\s\S]*await onFinalizeRecovered\(transaction\)/)
-  assert.doesNotMatch(paymentModal, /Consultar estado de nuevo/)
-  assert.doesNotMatch(paymentModal, /Cerrar operación revisada/)
-  assert.match(operationStatus, /No repitas la operación/)
-})
+  await harness.render().changePayment(harness.ticket, 'cash')
+  assert.equal(attempts, 1)
+  settlement.resolve(confirmed)
+  await change
 
-test('el cobro Cashlogy es single-flight, muestra feedback inmediato y bloquea el ticket', async () => {
-  const [store, quickSale, restaurant, page, modal] = await Promise.all([
-    readFile(new URL('src/features/local-printing/cashlogy/useCashlogyStore.ts', root), 'utf8'),
-    readFile(new URL('src/features/quick-sale/hooks/useQuickSalePayment.ts', root), 'utf8'),
-    readFile(new URL('src/features/restaurant/hooks/useRestaurantController.ts', root), 'utf8'),
-    readFile(new URL('src/app/PosPage.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyPaymentModal.tsx', root), 'utf8'),
-  ])
-
-  assert.ok(store.indexOf('persistIntent(intent)') < store.indexOf('await get().checkHealth(signal)'), 'la intención debe existir antes de consultar la máquina')
-  assert.match(store, /const existing = get\(\)\.intent[\s\S]*set\(\{ modalOpen: true \}\)[\s\S]*throw new CashlogyError/)
-  assert.doesNotMatch(store, /if \(settlementPromise\) return settlementPromise/)
-  assert.match(quickSale, /paymentInFlightRef\.current/)
-  assert.match(restaurant, /paymentLockRef\.current/)
-  assert.match(page, /cashlogyPaymentLocked[\s\S]*El ticket está bloqueado para evitar duplicados/)
-  assert.match(modal, /Conectando con Cashlogy…/)
+  const updated = harness.calls.tickets[0][0]
+  assert.equal(updated.paymentMethod, 'cash')
+  assert.equal(updated.payload.payment.cashlogyTransactionId, 'tx-confirmed')
+  assert.equal(updated.payload.payment.receivedCents, 700)
+  assert.equal(updated.payload.payment.changeCents, 100)
+  assert.equal(harness.calls.enqueued[0].payload.cashlogyRequestId, 'request-confirmed')
+  assert.equal(harness.calls.enqueued[0].payload.cashlogyTransactionId, 'tx-confirmed')
+  assert.equal(harness.calls.sync, 1)
+  assert.equal(harness.calls.finished.length, 1)
+  assert.deepEqual(harness.calls.busy, [true, false])
 })
 
 test('la identidad física de Cashlogy es única y se persiste en todos los cobros', async () => {
-  const [migration, consolidated, quickSale, tableService, syncService] = await Promise.all([
+  const [migration, consolidated] = await Promise.all([
     readFile(new URL('supabase/migrations/20260825130000_cashlogy_payment_idempotency.sql', root), 'utf8'),
     readFile(new URL('supabase/0.Complete_Database_24-07-26.sql', root), 'utf8'),
-    readFile(new URL('src/features/quick-sale/hooks/useQuickSalePayment.ts', root), 'utf8'),
-    readFile(new URL('src/features/tables/service.ts', root), 'utf8'),
-    readFile(new URL('src/services/posService.ts', root), 'utf8'),
   ])
 
   for (const sql of [migration, consolidated]) {
@@ -515,24 +464,37 @@ test('la identidad física de Cashlogy es única y se persiste en todos los cobr
     assert.match(sql, /pay_restaurant_order_equal_part_cashlogy/i)
     assert.match(sql, /change_sale_payment_method_cashlogy/i)
   }
-  assert.match(quickSale, /cashlogyRequestId: cashlogyTransaction\.requestId/)
-  assert.match(tableService, /p_cashlogy_request_id: cashlogyTransaction\.requestId/)
-  assert.match(syncService, /change_sale_payment_method_cashlogy/)
 })
 
-test('los cobros divididos usan Cashlogy y reservan el modal manual para terminales sin máquina', async () => {
-  const [itemSplit, equalSplit] = await Promise.all([
-    readFile(new URL('src/features/tables/components/SplitOrderModal.tsx', root), 'utf8'),
-    readFile(new URL('src/features/tables/components/EqualSplitOrderModal.tsx', root), 'utf8'),
-  ])
+test('los servicios de cobro dividido entregan la identidad Cashlogy a la RPC idempotente', async () => {
+  const calls = []
+  const supabase = { rpc: async (name, params) => {
+    calls.push([name, params])
+    const split = { id: 'split-1', order_group_id: 'group-1', total_cents: 600, part_count: 2, paid_parts: 1, paid_cents: 300, status: 'open', default_discount: null }
+    return { data: name.includes('equal_part') ? { pendingUnits: 0, requiresConfirmation: false, split } : { pendingUnits: 0, requiresConfirmation: false }, error: null }
+  } }
+  const source = await readFile(new URL('src/features/tables/service.ts', root), 'utf8')
+  const service = compileComponent(source, {
+    '../../utils/UserFacingError.ts': { UserFacingError: Error },
+    '../../lib/supabase': { supabase },
+    '../../lib/mixers': { splitLegacyMixerModifiers: () => ({ components: [], mixer: null, mixerProductId: null, modifiers: [] }) },
+    '../catalog/services/catalogSnapshots': { normalizeCatalogSnapshot: () => null },
+    './service-status': { getOrderPendingUnits: () => 0 },
+    './order-line-payload': { buildCatalogOrderLinesPayload: () => [], buildRestaurantOrderLinesPayload: () => [] },
+    './map-elements': { normalizeMapElements: (value) => value },
+    '../reservations/domain/reservationAvailability': { getDateRange: () => ({}), localDateKey: () => '2026-09-12' },
+    '../platform/tenantFeatureAccess': { hasTenantFeature: () => false },
+  })
+  const cashlogy = { id: 'tx-1', requestId: 'request-1' }
 
-  for (const modal of [itemSplit, equalSplit]) {
-    assert.match(modal, /usePrintAgentStore\(\(state\) => state\.cashlogyConfigured\)/)
-    assert.match(modal, /method === 'cash' && cashlogyConfigured/)
-    assert.match(modal, /else if \(method === 'cash'\) setCashOpen\(true\)/)
+  await service.payRestaurantOrderItems('order-1', 3, [{ lineId: 'line-1', quantity: 1 }], 'cash', 600, false, null, cashlogy)
+  await service.payRestaurantEqualPart('split-1', 'cash', 300, false, null, true, cashlogy)
+
+  assert.deepEqual(calls.map(([name]) => name), ['pay_restaurant_order_items_cashlogy', 'pay_restaurant_order_equal_part_cashlogy'])
+  for (const [, params] of calls) {
+    assert.equal(params.p_cashlogy_request_id, 'request-1')
+    assert.equal(params.p_cashlogy_transaction_id, 'tx-1')
   }
-  assert.match(itemSplit, /cashlogyConfigured\) void completePayment\('cash', null\)/)
-  assert.match(equalSplit, /cashlogyConfigured\) void completePart\('cash', null\)/)
 })
 
 test('la gestión es headless, cubre los cinco flujos y no contiene fallback externo', async () => {

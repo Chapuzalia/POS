@@ -1,59 +1,45 @@
 import assert from 'node:assert/strict'
-import { readdir, readFile } from 'node:fs/promises'
-import path from 'node:path'
-import { fileURLToPath } from 'node:url'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-const root = new URL('..', import.meta.url)
-const select = await readFile(new URL('../src/features/crm/shared/components/CrmSelect.tsx', import.meta.url), 'utf8')
+import {
+  compileComponent,
+  createHookHarness,
+  jsxRuntime,
+  nodes,
+} from './helpers/component-harness.mjs'
 
-async function collectTsxFiles(directory) {
-  const entries = await readdir(directory, { withFileTypes: true })
-  const nested = await Promise.all(entries.map(async (entry) => {
-    const entryPath = path.join(directory, entry.name)
-    if (entry.isDirectory()) return collectTsxFiles(entryPath)
-    return entry.name.endsWith('.tsx') ? [entryPath] : []
-  }))
-  return nested.flat()
+const source = await readFile(new URL('../src/features/crm/shared/components/CrmSelect.tsx', import.meta.url), 'utf8')
+const heroUi = {
+  ListBox: 'listbox',
+  ListBoxItem: Object.assign('option', { Indicator: 'indicator' }),
+  Select: Object.assign('select', { Popover: 'popover', Trigger: 'trigger', Value: 'value' }),
 }
 
-test('all CRM dropdowns use the shared CRM select instead of native selects', async () => {
-  const directories = [
-    path.join(fileURLToPath(root), 'src/features/crm'),
-    path.join(fileURLToPath(root), 'src/components/crm'),
-  ]
-  const files = (await Promise.all(directories.map(collectTsxFiles))).flat()
-  const nativeSelects = []
-  for (const file of files) {
-    const source = await readFile(file, 'utf8')
-    if (/<select(?:\s|>)/.test(source)) nativeSelects.push(file)
+test('el selector CRM conserva en el formulario el valor realmente elegido', () => {
+  const hooks = createHookHarness()
+  const changes = []
+  const { CrmSelect } = compileComponent(source, {
+    '../../../../components/ui/Input': { Input: 'input' },
+    '../../../../lib/format': { normalizeText: (value) => value.toLocaleLowerCase() },
+    '@heroui/react': heroUi,
+    'lucide-react': { Check: 'check', ChevronDown: 'chevron', Search: 'search' },
+    react: hooks.react,
+    'react/jsx-runtime': jsxRuntime,
+  })
+  const props = {
+    defaultValue: 'venue-a',
+    name: 'venueId',
+    onChange: (value) => changes.push(value),
+    options: [{ label: 'A', value: 'venue-a' }, { label: 'B', value: 'venue-b' }],
   }
-  assert.deepEqual(nativeSelects, [])
-})
+  const initial = hooks.render(CrmSelect, props)
 
-test('CRM select delegates accessible listbox and keyboard behavior to HeroUI', () => {
-  assert.match(select, /from '@heroui\/react'/)
-  assert.match(select, /aria-haspopup="listbox"/)
-  assert.match(select, /<ListBox/)
-  assert.match(select, /<ListBoxItem/)
-  assert.match(select, /onSelectionChange=/)
-  assert.match(select, /selectedKey=\{selectedValue \|\| null\}/)
-  assert.doesNotMatch(select, /document\.addEventListener/)
-})
+  nodes(initial).find((node) => node.type === heroUi.Select).props.onSelectionChange('venue-b')
+  const updated = hooks.render(CrmSelect, props)
+  const formField = nodes(updated).find((node) => node.type === 'input' && node.props.name === 'venueId')
 
-test('CRM select derives its checkmark from the live listbox selection state', () => {
-  assert.match(select, /<ListBoxItem\.Indicator/)
-  assert.match(select, /\{\(\{ isSelected \}\) =>\s*isSelected \? \(/)
-  assert.doesNotMatch(select, /<ListBoxItem\.Indicator[^>]*>\s*<Check/)
-  assert.doesNotMatch(select, /option\.value === selectedValue \? \(/)
-})
-
-test('CRM select retains form values and uses CRM theme tokens', () => {
-  assert.match(select, /<Select\.Popover/)
-  assert.match(select, /type="hidden" value=\{selectedValue\}/)
-  assert.match(select, /!bg-\[var\(--crm-input-bg\)\]/)
-  assert.match(select, /!border-\[var\(--crm-input-border\)\]/)
-  assert.match(select, /!bg-\[var\(--crm-popover-bg\)\]/)
-  assert.match(select, /!shadow-\[var\(--crm-shadow-floating\)\]/)
-  assert.doesNotMatch(select, /crm-select(?:__|\s)/)
+  assert.deepEqual(changes, ['venue-b'])
+  assert.equal(formField.props.value, 'venue-b')
+  assert.equal(nodes(updated).find((node) => node.type === heroUi.Select).props.selectedKey, 'venue-b')
 })

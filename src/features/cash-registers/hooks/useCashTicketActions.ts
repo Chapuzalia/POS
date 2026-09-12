@@ -1,7 +1,7 @@
 import { useCallback, useRef } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent, forgetOfflineEvent, getOfflineQueue } from '../../../lib/offlineStore'
-import { loadSessionTicketsFromSupabase } from '../../../services/posService'
+import { loadSessionTicketPageFromSupabase } from '../../../services/posService'
 import type { CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
@@ -13,6 +13,7 @@ import {
   settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
 import type { CashlogyTransaction } from '../../local-printing/types'
+import type { SessionTicketHistoryPage } from '../services/sessionTicketHistoryModel.ts'
 
 type Options = {
   context: TenantContext | null
@@ -34,18 +35,39 @@ type Options = {
 
 export function useCashTicketActions(options: Options) {
   const paymentChangeLockRef = useRef(false)
+  const historyContext = options.context
+  const historyCashSession = options.cashSession
+  const historyIsOnline = options.isOnline
+  const mergeHistoryPrintStates = options.mergeRemotePrintStates
+  const setHistoryBusy = options.setBusy
+  const setHistoryError = options.setError
+  const setHistoryOpen = options.setHistoryOpen
+  const syncHistoryPendingEvents = options.syncPendingEvents
   const openHistory = useCallback(async () => {
-    const { context, cashSession, isOnline } = options
-    if (!context || !cashSession) return
-    if (!isOnline) { options.setError('El histórico de tickets requiere conexión para consultar los datos de Supabase.'); return }
-    options.setBusy(true); options.setError(null)
+    if (!historyContext || !historyCashSession) return
+    if (!historyIsOnline) { setHistoryError('El histórico de tickets requiere conexión para consultar los datos de Supabase.'); return }
+    setHistoryBusy(true); setHistoryError(null)
     try {
-      await options.syncPendingEvents()
-      const tickets = options.mergeRemotePrintStates(await loadSessionTicketsFromSupabase(context, cashSession.id))
-      options.persistTickets(tickets)
-      options.setHistoryOpen(true)
-    } catch (error) { options.setError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' })) } finally { options.setBusy(false) }
-  }, [options])
+      await syncHistoryPendingEvents()
+      setHistoryOpen(true)
+    } catch (error) { setHistoryError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' })) } finally { setHistoryBusy(false) }
+  }, [historyCashSession, historyContext, historyIsOnline, setHistoryBusy, setHistoryError, setHistoryOpen, syncHistoryPendingEvents])
+
+  const loadHistoryPage = useCallback(async (page: number, query: string): Promise<SessionTicketHistoryPage> => {
+    if (!historyContext || !historyCashSession || !historyIsOnline) {
+      throw new Error('El histórico de tickets requiere conexión para consultar los datos de Supabase.')
+    }
+    const result = await loadSessionTicketPageFromSupabase(historyContext, historyCashSession.id, page, query)
+    const mergedTickets = mergeHistoryPrintStates(result.tickets.map(({ ticket }) => ticket))
+    const mergedById = new Map(mergedTickets.map((ticket) => [ticket.id, ticket]))
+    return {
+      ...result,
+      tickets: result.tickets.map((item) => ({
+        ...item,
+        ticket: mergedById.get(item.ticket.id) ?? item.ticket,
+      })),
+    }
+  }, [historyCashSession, historyContext, historyIsOnline, mergeHistoryPrintStates])
 
   const reprint = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
@@ -171,5 +193,5 @@ export function useCashTicketActions(options: Options) {
     }
   }, [options])
 
-  return { openHistory, reprint, changePayment, voidTicket }
+  return { openHistory, loadHistoryPage, reprint, changePayment, voidTicket }
 }

@@ -3,12 +3,10 @@ import { PGlite } from '@electric-sql/pglite'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import { createReservationsControllerHarness } from './helpers/reservations-controller-harness.mjs'
+
 const migration = await readFile(
   new URL('../supabase/migrations/20260909160347_repair_reservation_order_reuse.sql', import.meta.url),
-  'utf8',
-)
-const reservationsPage = await readFile(
-  new URL('../src/features/reservations/components/ReservationsPage.tsx', import.meta.url),
   'utf8',
 )
 
@@ -22,9 +20,19 @@ test('a seated reservation only reuses an open linked order', () => {
   assert.match(migration, /set status = 'seated', order_id = v_order_id/i)
 })
 
-test('opening a seated reservation goes through the status-aware RPC flow', () => {
-  assert.match(reservationsPage, /onOpenOrder=\{\(\) => void controller\.seat\(controller\.detail!\)\}/)
-  assert.doesNotMatch(reservationsPage, /onOpenOrder\(orderId\)/)
+test('opening a seated reservation goes through the status-aware service flow', async () => {
+  const calls = []
+  const harness = createReservationsControllerHarness({ services: {
+    seatReservation: async (...args) => { calls.push(args); return 'order-existing' },
+  } })
+  const reservation = { id: 'reservation-1', orderId: 'order-existing', status: 'seated', tableIds: ['table-1'] }
+
+  const result = await harness.render().seat(reservation)
+
+  assert.equal(result, 'order-existing')
+  assert.deepEqual(calls, [['reservation-1', 'cash-session', 'device', null]])
+  assert.deepEqual(harness.calls.openOrders, ['order-existing'])
+  assert.equal(harness.calls.operationalRefreshes, 1)
 })
 
 test('the repair keeps the existing backend guards and least-privilege grants', () => {

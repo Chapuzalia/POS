@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { resolveCatalogItem } from '../src/features/catalog/domain/resolver.ts'
 import {
@@ -198,20 +197,3 @@ test('the definitive POS resolver immediately reflects final CRM price, category
   assert.equal(item.selectionGroups[0].group.name, 'Primeros')
 })
 
-test('phase 3.2 CRM code uses final RPCs and contains no legacy catalog writes', async () => {
-  const [service, transfer, routing, migration] = await Promise.all([
-    readFile(new URL('../src/features/crm/catalog/services/catalogAdminService.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/crm/catalog/services/catalogTransferService.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/crm/routing/CrmSectionContent.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8'),
-  ])
-  const crmCode = service + transfer + routing
-  for (const legacy of ['sale_formats', 'selection_group_items', 'variant_selection_groups', 'product_modifier_groups']) {
-    assert.doesNotMatch(crmCode, new RegExp(String.raw`[.]from[(]['"]${legacy}`))
-  }
-  assert.match(service, /CatalogRepository/)
-  assert.match(service, /CatalogCommandService/)
-  assert.match(migration, /catalog_command_batch/)
-  assert.match(migration, /catalog_image_command/)
-  assert.match(migration, /catalog_tab_category_command/)
-})

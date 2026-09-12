@@ -2,84 +2,95 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
-test('the shared POS modal delegates dismissal, focus trap and Escape to HeroUI', async () => {
-  const source = await readFile(new URL('../src/components/ui/AppModal.tsx', import.meta.url), 'utf8')
+import {
+  compileComponent,
+  createHookHarness,
+  jsxRuntime,
+  nodes,
+} from './helpers/component-harness.mjs'
 
-  assert.match(source, /from ["']@heroui\/react["']/)
-  assert.match(source, /<Modal\.Trigger[^>]*aria-hidden="true"[^>]*className="(?:hidden|sr-only)"[^>]*tabIndex=\{-1\}[^>]*\/>/)
-  assert.match(source, /<Modal\.Backdrop/)
-  assert.match(source, /isDismissable=\{!dismissDisabled\}/)
-  assert.match(source, /isKeyboardDismissDisabled=\{dismissDisabled\}/)
+const appModalSource = await readFile(new URL('../src/components/ui/AppModal.tsx', import.meta.url), 'utf8')
+const cashlogyModalSource = await readFile(new URL('../src/features/local-printing/components/CashlogyPaymentModal.tsx', import.meta.url), 'utf8')
+
+const Modal = Object.assign('modal', {
+  Backdrop: 'modal-backdrop',
+  Container: 'modal-container',
+  Dialog: 'modal-dialog',
+  Trigger: 'modal-trigger',
 })
 
-test('only the Cashlogy payment modal blocks implicit dismissal for its whole lifecycle', async () => {
-  const [paymentModal, machineModal] = await Promise.all([
-    readFile(new URL('../src/features/local-printing/components/CashlogyPaymentModal.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/local-printing/components/CashlogyMachineModal.tsx', import.meta.url), 'utf8'),
-  ])
-
-  assert.match(paymentModal, /<AppModal dismissDisabled label="Cobro Cashlogy"/)
-  assert.doesNotMatch(machineModal, /<AppModal[^>]*dismissDisabled/)
+const { AppModal } = compileComponent(appModalSource, {
+  '@heroui/react': { Modal },
+  'react/jsx-runtime': jsxRuntime,
 })
 
-test('POS modal families use the shared HeroUI modal policy', async () => {
-  const modalSources = [
-    '../src/components/modals/CashPaymentModal.tsx',
-    '../src/components/modals/CashMovementModal.tsx',
-    '../src/components/modals/CloseCashModal.tsx',
-    '../src/components/modals/DiscountModal.tsx',
-    '../src/components/modals/ProductDialog.tsx',
-    '../src/components/modals/SessionTicketsModal.tsx',
-    '../src/components/modals/CashClosingResultModal.tsx',
-    '../src/components/modals/CashClosingsHistoryModal.tsx',
-    '../src/components/modals/ConfigModal.tsx',
-    '../src/components/screens/LoginScreen.tsx',
-    '../src/components/pos/MobileTicketModal.tsx',
-    '../src/components/superadmin/SuperAdminPage.tsx',
-    '../src/features/tables/components/RemoveOrderLineModal.tsx',
-    '../src/features/tables/components/EqualSplitOrderModal.tsx',
-    '../src/features/tables/components/SplitOrderModal.tsx',
-    '../src/features/tables/components/TableMapView.tsx',
-    '../src/features/reservations/components/ReservationFormModal.tsx',
-    '../src/features/reservations/components/ReservationDetailPanel.tsx',
-    '../src/features/local-printing/components/PrintAgentSetupWizard.tsx',
-    '../src/features/local-printing/components/CertificateHelpDialog.tsx',
-    '../src/app/PosPage.tsx',
-  ]
-
-  for (const sourcePath of modalSources) {
-    const source = await readFile(new URL(sourcePath, import.meta.url), 'utf8')
-    assert.match(source, /<AppModal/, `${sourcePath} must use the shared HeroUI modal`)
-    assert.doesNotMatch(source, /aria-modal|role=["']dialog["']|closeOnModalBackdrop/)
+function modalDriver(modal) {
+  const backdrop = nodes(modal).find((node) => node.type === 'modal-backdrop')
+  return {
+    clickBackdrop() {
+      if (backdrop.props.isDismissable) modal.props.onOpenChange(false)
+    },
+    isOpen: () => modal.props.isOpen,
+    pressEscape() {
+      if (!backdrop.props.isKeyboardDismissDisabled) modal.props.onOpenChange(false)
+    },
   }
+}
+
+test('el modal común se abre y Escape solicita el cierre', () => {
+  let closes = 0
+  const modal = AppModal({ children: null, onClose: () => { closes += 1 } })
+  const driver = modalDriver(modal)
+
+  assert.equal(driver.isOpen(), true)
+  driver.pressEscape()
+  assert.equal(closes, 1)
 })
 
-test('the superadmin modal carries its CRM theme variables into the HeroUI portal', async () => {
-  const source = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
+test('el cobro Cashlogy bloquea Escape y el cierre implícito durante todo el diálogo', () => {
+  const hooks = createHookHarness()
+  let implicitCloses = 0
+  const state = {
+    cancel() {},
+    closeReviewed() {},
+    discardForRetry() {},
+    error: null,
+    hide: () => { implicitCloses += 1 },
+    intent: { amountCents: 600, chargeRequestedAt: null, recoveredFromConflict: false, requestId: 'request', saleId: 'sale' },
+    isCancelling: false,
+    isPolling: false,
+    isStarting: true,
+    levels: null,
+    modalOpen: true,
+    recover() {},
+    startPayment() {},
+    transaction: null,
+  }
+  const { CashlogyPaymentModal } = compileComponent(cashlogyModalSource, {
+    '../../../components/ui': { AppModal, Button: 'button', Metric: 'metric' },
+    '../../../lib/format': { formatMoney: String },
+    '../cashlogy/cashlogyError': { isUncertainCashlogyError: () => false },
+    '../cashlogy/cashlogyPolling': { cashlogyActiveStatuses: new Set(), cashlogyCancellableStatuses: new Set() },
+    '../cashlogy/cashlogyPresentation': { shouldShowCashlogyOperationDetails: () => false },
+    '../cashlogy/useCashlogyStore': { useCashlogyStore: (selector) => selector(state) },
+    './CashlogyLevelCards': { CashlogyLevelCards: 'levels' },
+    'lucide-react': { AlertTriangle: 'icon', Ban: 'icon', CheckCircle2: 'icon', LoaderCircle: 'icon' },
+    react: hooks.react,
+    'react/jsx-runtime': jsxRuntime,
+    'zustand/react/shallow': { useShallow: (selector) => selector },
+  })
 
-  assert.match(source, /backdropClassName=["']crm-shell["']/)
+  const cashlogyDialog = hooks.render(CashlogyPaymentModal, { onFinalizeRecovered() {} })
+  const modal = cashlogyDialog.type(cashlogyDialog.props)
+  const driver = modalDriver(modal)
+
+  driver.pressEscape()
+  driver.clickBackdrop()
+  assert.equal(implicitCloses, 0)
 })
 
-test('the cash movement modal is centered and keeps long actions inside its width', async () => {
-  const source = await readFile(new URL('../src/components/modals/CashMovementModal.tsx', import.meta.url), 'utf8')
-
-  assert.doesNotMatch(source, /placement=["']bottom["']/)
-  assert.match(source, /containerClassName=["']!p-4["']/)
-  assert.match(source, /min-w-0 max-w-full/)
-  assert.match(source, /!whitespace-normal/)
-})
-
-test('the ticket history payment selector renders one shared border', async () => {
-  const [modal, nativeSelect] = await Promise.all([
-    readFile(new URL('../src/components/modals/SessionTicketsModal.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/components/ui/NativeSelect.tsx', import.meta.url), 'utf8'),
-  ])
-
-  assert.match(nativeSelect, /triggerClassName\?: string/)
-  assert.match(modal, /triggerClassName="!min-h-8 !border-0 !bg-transparent !px-0 !shadow-none"/)
-  assert.match(modal, /focus-within:border-\[var\(--accent\)\]/)
-  assert.match(nativeSelect, /HeroSelect\.Value className="min-w-0 flex-1 truncate pr-1"/)
-  assert.match(nativeSelect, /HeroSelect\.Indicator className="!static !inset-auto ml-1 shrink-0"/)
-  assert.match(nativeSelect, /className="relative pr-10/)
-  assert.match(nativeSelect, /className="absolute right-3 top-1\/2 -translate-y-1\/2"/)
+test('Escape, captura de foco y devolución del foco conservan la integración actual con HeroUI', () => {
+  // Falta un entorno DOM ejecutable (Playwright o Testing Library + DOM) para
+  // sustituir esta protección por Tab/Escape y document.activeElement reales.
+  assert.match(appModalSource, /<Modal\.Trigger[^>]*aria-hidden="true"[^>]*className="(?:hidden|sr-only)"[^>]*tabIndex=\{-1\}[^>]*\/>/)
 })

@@ -4,6 +4,8 @@ import { CatalogRepository } from '../../../catalog/data/repository.ts'
 import type { CatalogData } from '../../../catalog/domain/types.ts'
 import {
   PRODUCT_IMAGE_BUCKET,
+  PRODUCT_IMAGE_TYPE,
+  isProductImageWebp,
   resizeProductImageToWebp,
 } from '../../../../lib/productImages.ts'
 import { supabase } from '../../../../lib/supabase.ts'
@@ -155,13 +157,19 @@ export const catalogAdminService = {
       throw new Error('La imagen debe ocupar como máximo 10 MB.')
     }
     const blob = await resizeProductImageToWebp(input.file, input.fillColor)
+    if (!await isProductImageWebp(blob)) {
+      throw new Error('La imagen optimizada no es un archivo WebP válido.')
+    }
     if (blob.size > 1024 * 1024) throw new Error('La imagen optimizada supera el máximo de 1 MB.')
     const imageId = uuid()
     const storagePath = `${input.tenantId}/${input.venueId}/products/${input.productId}/${imageId}.webp`
+    if (!storagePath.endsWith('.webp') || blob.type !== PRODUCT_IMAGE_TYPE) {
+      throw new Error('La extensión y el formato de la imagen optimizada no coinciden.')
+    }
     const client = requireClient()
     const { error: uploadError } = await client.storage.from(PRODUCT_IMAGE_BUCKET).upload(storagePath, blob, {
       cacheControl: '31536000',
-      contentType: 'image/webp',
+      contentType: PRODUCT_IMAGE_TYPE,
       upsert: false,
     })
     if (uploadError) throw uploadError
@@ -170,7 +178,7 @@ export const catalogAdminService = {
         id: imageId,
         productId: input.productId,
         storagePath,
-        mimeType: 'image/webp',
+        mimeType: PRODUCT_IMAGE_TYPE,
         sizeBytes: blob.size,
         sha256: await sha256(blob),
       })

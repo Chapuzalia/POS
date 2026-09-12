@@ -2,12 +2,13 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
+import { createRestaurantControllerHarness, deferred, flush } from './helpers/restaurant-controller-harness.mjs'
+
 const migration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const partialPaymentMigration = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const completeDatabase = await readFile(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 const app = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
-const modal = await readFile(new URL('../src/features/tables/components/SplitOrderModal.tsx', import.meta.url), 'utf8')
 const partialPaymentFunction = partialPaymentMigration.match(
   /CREATE FUNCTION public\.pay_restaurant_order_items\([\s\S]*?\r?\n\$\$;/i,
 )?.[0] ?? ''
@@ -53,19 +54,32 @@ test('mapa, detalle y realtime trabajan por grupo de ocupacion', () => {
   assert.match(migration, /alter publication supabase_realtime add table public\.%I/i)
 })
 
-test('por items selecciona cantidades y cobra directamente sin crear subcomandas', () => {
-  assert.match(modal, /setLineQuantity/)
-  assert.match(modal, /Seleccionar visibles/)
-  assert.match(modal, /Buscar productos de la comanda/)
-  assert.match(modal, /Marca las unidades que quieras cobrar/)
-  assert.match(modal, /Cobrar ítems seleccionados/)
-  assert.match(modal, /<PaymentPanel/)
-  assert.match(modal, /CashPaymentModal/)
-  assert.match(modal, /DiscountModal/)
-  assert.match(modal, /Total a cobrar/)
-  assert.doesNotMatch(modal, /Nueva comanda|Mover productos|Crear y mover|onMove|onOpenOrder/)
-  assert.match(app, /paySelectedOrderItems/)
-  assert.match(service, /rpc\('pay_restaurant_order_items'/)
+test('dos intentos simultáneos de cobro por ítems ejecutan una sola acción', async () => {
+  const rpc = deferred()
+  const cashlogyTransaction = { changeCents: 0, id: 'cashlogy-tx', receivedCents: 600, requestId: 'cashlogy-request', requestedAmountCents: 600 }
+  let payments = 0
+  let serviceTransaction
+  const harness = createRestaurantControllerHarness({ cashlogyTransaction, tableService: {
+    payRestaurantOrderItems: async (...args) => { payments += 1; serviceTransaction = args.at(-1); return rpc.promise },
+  } })
+  const controller = harness.render()
+  const first = controller.paySelectedOrderItems([{ lineId: 'line', quantity: 1 }], 'cash', null, false, null)
+  await flush()
+
+  await assert.rejects(
+    controller.paySelectedOrderItems([{ lineId: 'line', quantity: 1 }], 'cash', null, false, null),
+    /cobro en curso/,
+  )
+  assert.equal(payments, 1)
+
+  rpc.resolve({ paymentId: 'payment', requiresConfirmation: false, saleId: 'sale', subtotalCents: 600, ticketId: 'ticket', totalCents: 600 })
+  harness.mapRefresh.resolve({ areas: [{ id: 'area' }], tables: [] })
+  await first
+  assert.equal(payments, 1)
+  assert.strictEqual(serviceTransaction, cashlogyTransaction)
+  assert.deepEqual(harness.calls.cashlogySettlements, [600])
+  assert.deepEqual(harness.calls.cashlogyFinished, [cashlogyTransaction])
+  assert.deepEqual(harness.calls.busy, [true, false])
 })
 
 test('el cobro parcial es atomico, descuenta solo la seleccion y mantiene abierta la comanda', () => {

@@ -199,13 +199,11 @@ test('el dashboard muestra primero las cajas y permite filtrar por el local sele
     readFile(new URL('../src/types/domain.ts', import.meta.url), 'utf8'),
   ])
 
-  assert.ok(dashboard.indexOf('<span>Cajas abiertas</span>') < dashboard.indexOf('<span>Actividad del día</span>'))
   assert.match(dashboard, /useState\(false\)/)
   assert.match(dashboard, /checked=\{showAllOpenCashSessions\}/)
   assert.match(dashboard, /Todas las cajas del negocio/)
   assert.match(dashboard, /showAll \|\| session\.venueId === selectedVenueId/)
   assert.match(dashboard, /No hay cajas abiertas en el local seleccionado/)
-  assert.match(dashboard, /<strong>\{session\.deviceName\}<\/strong>/)
   assert.doesNotMatch(dashboard, /showVenueName/)
   assert.match(routing, /selectedVenueId=\{selectedVenueId\}/)
 

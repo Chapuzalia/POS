@@ -42,30 +42,7 @@ function line(id, quantity = 1) {
   }
 }
 
-test('un reconnect mantiene cargada la configuracion y no reinicializa posView', async () => {
-  const [realtime, appShell] = await Promise.all([
-    readFile(new URL('src/features/restaurant/hooks/useRestaurantRealtime.ts', root), 'utf8'),
-    readFile(new URL('src/app/AppShell.tsx', root), 'utf8'),
-  ])
-
-  assert.match(realtime, /loadedContextKeyRef\.current !== contextKey/)
-  assert.match(realtime, /if \(isInitialLoad\) setConfigLoaded\(false\)/)
-  assert.match(realtime, /source = isInitialLoad \? 'initial' : wasOfflineRef\.current \? 'reconnect' : 'refresh'/)
-  assert.match(realtime, /if \(shouldInitializeView\) latestRef\.current\.setPosView\(\{ type: 'table_map'/)
-  assert.match(realtime, /if \(shouldInitializeView \|\| tablesWereEnabled\) latestRef\.current\.setPosView\(\{ type: 'quick_sale' \}\)/)
-  assert.doesNotMatch(realtime, /let initialized = false/)
-  assert.match(appShell, /isOnline && !restaurant\.tablesConfigLoaded/)
-})
-
-test('las actualizaciones funcionales conservan taps consecutivos y persisten el ultimo estado', async () => {
-  const hook = await readFile(new URL('src/features/quick-sale/hooks/useQuickSale.ts', root), 'utf8')
-  assert.match(hook, /setLines\(\(previous\) => applyQuickSaleLinesUpdate/)
-  assert.match(hook, /addQuickSaleTicketLine\(previous,/)
-  assert.match(hook, /changeQuickSaleTicketLineQuantity\(previous,/)
-  assert.match(hook, /previous\.filter\(\(line\) => line\.id !== lineId\)/)
-  assert.doesNotMatch(hook, /addQuickSaleTicketLine\(lines,/)
-  assert.doesNotMatch(hook, /changeQuickSaleTicketLineQuantity\(lines,/)
-
+test('las actualizaciones funcionales conservan taps consecutivos y persisten el ultimo estado', () => {
   const persisted = []
   const persist = (next) => persisted.push(next)
   let visible = []

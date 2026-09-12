@@ -26,6 +26,7 @@ const errorCodes = new Set<PrintAgentErrorCode>([
 
 const CASHLOGY_STACKER_TIMEOUT_MS = 910_000
 const CASHLOGY_RECOVERY_TIMEOUT_MS = 240_000
+const CASHLOGY_GIVE_CHANGE_DISPENSE_TIMEOUT_MS = 30_000
 
 export function buildPrintAgentHeaders(token?: string | null, hasBody = false) {
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -213,7 +214,7 @@ export function createPrintAgentClient(options: ClientOptions) {
     startCashlogyGiveChange: (requestId: string, signal?: AbortSignal) => request<CashlogyOperationResponse>('/api/v1/cashlogy/cash-management/give-change/start', { body: { requestId }, method: 'POST', signal }),
     getCashlogyGiveChange: (operationId: string, signal?: AbortSignal) => request<{ operation: CashlogyCashManagementOperation }>(`/api/v1/cashlogy/cash-management/give-change/${encodeURIComponent(operationId)}`, { retries: 1, signal }),
     finalizeCashlogyGiveChangeAdmission: (operationId: string, signal?: AbortSignal) => request<CashlogyOperationResponse>(`/api/v1/cashlogy/cash-management/give-change/${encodeURIComponent(operationId)}/finalize-admission`, { body: {}, method: 'POST', signal }),
-    dispenseCashlogyGiveChange: (operationId: string, denominations: CashlogyRequestedDenomination[], signal?: AbortSignal) => request<CashlogyOperationResponse>(`/api/v1/cashlogy/cash-management/give-change/${encodeURIComponent(operationId)}/dispense`, { body: { denominations }, method: 'POST', signal }),
+    dispenseCashlogyGiveChange: (operationId: string, denominations: CashlogyRequestedDenomination[], signal?: AbortSignal) => request<CashlogyOperationResponse>(`/api/v1/cashlogy/cash-management/give-change/${encodeURIComponent(operationId)}/dispense`, { body: { denominations }, method: 'POST', signal, timeoutMs: CASHLOGY_GIVE_CHANGE_DISPENSE_TIMEOUT_MS }),
     withdrawCashlogyCash: (requestId: string, denominations: CashlogyRequestedDenomination[], signal?: AbortSignal) => request<CashlogyOperationResponse>('/api/v1/cashlogy/cash-management/withdraw', { body: { requestId, denominations }, method: 'POST', signal }),
     emptyCashlogy: (requestId: string, signal?: AbortSignal) => request<CashlogyOperationResponse>('/api/v1/cashlogy/cash-management/empty', { body: { requestId }, method: 'POST', signal }),
     collectCashlogyStacker: (requestId: string, signal?: AbortSignal) => request<CashlogyOperationResponse>('/api/v1/cashlogy/cash-management/stacker/collect', { body: { requestId }, method: 'POST', signal, timeoutMs: CASHLOGY_STACKER_TIMEOUT_MS }),

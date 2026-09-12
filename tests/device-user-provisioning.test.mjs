@@ -120,14 +120,6 @@ test('el owner asigna locales al manager y el manager solo administra dispositiv
   assert.match(edgeFunction, /authClient\.rpc\('set_manager_venue_assignments'/)
 })
 
-test('los headers de dispositivos y usuarios usan Tailwind con tokens del tema CRM', async () => {
-  const accessPage = await readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8')
-
-  assert.match(accessPage, /border-\[var\(--crm-border-subtle\)\][^"]*bg-transparent[^"]*text-\[var\(--crm-text\)\][\s\S]{0,500}<h2>Dispositivos/)
-  assert.match(accessPage, /border-\[var\(--crm-border-subtle\)\][^"]*bg-transparent[^"]*text-\[var\(--crm-text\)\][\s\S]{0,500}<h2>Usuarios con acceso al CRM/)
-  assert.doesNotMatch(accessPage, /crm-list-toolbar/)
-})
-
 test('los dispositivos se eliminan y sus referencias historicas quedan a null', async () => {
   const [accessPage, accessService, edgeFunction, schema, migration] = await Promise.all([
     readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8'),

@@ -5,6 +5,9 @@ export const PRODUCT_IMAGE_TYPE = 'image/webp'
 export const PRODUCT_IMAGE_QUALITY = 0.86
 export const PRODUCT_IMAGE_DEFAULT_FILL = '#EFE4C6'
 
+const WEBP_RIFF_SIGNATURE = [0x52, 0x49, 0x46, 0x46]
+const WEBP_FORMAT_SIGNATURE = [0x57, 0x45, 0x42, 0x50]
+
 type LoadedImage = {
   close?: () => void
   height: number
@@ -37,7 +40,7 @@ function loadImageWithElement(file: File): Promise<LoadedImage> {
   })
 }
 
-async function loadProductImage(file: File): Promise<LoadedImage> {
+async function loadImageFile(file: File): Promise<LoadedImage> {
   if (!isImageFile(file)) {
     throw new UserFacingError('Selecciona un archivo de imagen válido.')
   }
@@ -80,6 +83,11 @@ export function getDefaultProductImageFillColor() {
   return PRODUCT_IMAGE_DEFAULT_FILL
 }
 
+function toWebpFileName(fileName: string) {
+  const baseName = fileName.replace(/\.[^./\\]+$/, '').trim() || 'document'
+  return `${baseName}.webp`
+}
+
 function getContainedImageBox(width: number, height: number) {
   const scale = Math.min(PRODUCT_IMAGE_SIZE / width, PRODUCT_IMAGE_SIZE / height)
   const drawWidth = Math.round(width * scale)
@@ -93,25 +101,73 @@ function getContainedImageBox(width: number, height: number) {
   }
 }
 
-function canvasToWebp(canvas: HTMLCanvasElement): Promise<Blob> {
-  return new Promise((resolve, reject) => {
-    canvas.toBlob(
-      (blob) => {
-        if (blob) {
-          resolve(blob)
-          return
-        }
-
-        reject(new Error('El navegador no ha podido generar la imagen WebP.'))
-      },
-      PRODUCT_IMAGE_TYPE,
-      PRODUCT_IMAGE_QUALITY,
-    )
+function tryCanvasToWebp(canvas: HTMLCanvasElement): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      canvas.toBlob(resolve, PRODUCT_IMAGE_TYPE, PRODUCT_IMAGE_QUALITY)
+    } catch {
+      resolve(null)
+    }
   })
 }
 
+export async function isProductImageWebp(blob: Blob) {
+  if (blob.type !== PRODUCT_IMAGE_TYPE || blob.size < 12) return false
+
+  const signature = new Uint8Array(await blob.slice(0, 12).arrayBuffer())
+  return WEBP_RIFF_SIGNATURE.every((byte, index) => signature[index] === byte)
+    && WEBP_FORMAT_SIGNATURE.every((byte, index) => signature[index + 8] === byte)
+}
+
+async function encodeCanvasToWebp(canvas: HTMLCanvasElement, context: CanvasRenderingContext2D) {
+  const canvasBlob = await tryCanvasToWebp(canvas)
+  if (canvasBlob && await isProductImageWebp(canvasBlob)) return canvasBlob
+
+  const { default: encodeWebp } = await import('@jsquash/webp/encode')
+  const encoded = await encodeWebp(
+    context.getImageData(0, 0, canvas.width, canvas.height),
+    { quality: PRODUCT_IMAGE_QUALITY * 100 },
+  )
+  const fallbackBlob = new Blob([encoded], { type: PRODUCT_IMAGE_TYPE })
+
+  if (!await isProductImageWebp(fallbackBlob)) {
+    throw new Error('El navegador no ha podido generar la imagen WebP.')
+  }
+
+  return fallbackBlob
+}
+
+export async function convertImageFileToWebp(file: File) {
+  if (!isImageFile(file)) return file
+
+  if (await isProductImageWebp(file)) {
+    return new File([file], toWebpFileName(file.name), {
+      lastModified: file.lastModified,
+      type: PRODUCT_IMAGE_TYPE,
+    })
+  }
+
+  const image = await loadImageFile(file)
+  try {
+    const canvas = document.createElement('canvas')
+    canvas.width = image.width
+    canvas.height = image.height
+    const context = canvas.getContext('2d')
+    if (!context) throw new Error('No se ha podido preparar la imagen.')
+
+    context.drawImage(image.source, 0, 0, image.width, image.height)
+    const blob = await encodeCanvasToWebp(canvas, context)
+    return new File([blob], toWebpFileName(file.name), {
+      lastModified: file.lastModified,
+      type: PRODUCT_IMAGE_TYPE,
+    })
+  } finally {
+    image.close?.()
+  }
+}
+
 export async function resizeProductImageToWebp(file: File, fillColor = getDefaultProductImageFillColor()) {
-  const image = await loadProductImage(file)
+  const image = await loadImageFile(file)
 
   try {
     const canvas = document.createElement('canvas')
@@ -136,7 +192,7 @@ export async function resizeProductImageToWebp(file: File, fillColor = getDefaul
       imageBox.height,
     )
 
-    return canvasToWebp(canvas)
+    return encodeCanvasToWebp(canvas, context)
   } finally {
     image.close?.()
   }

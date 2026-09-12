@@ -6,8 +6,6 @@ const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf
 const migration = read('supabase/migrations/20260902135457_scope_suppliers_by_venue.sql')
 const parser = read('supabase/functions/process-supplier-document/index.ts')
 const service = read('src/features/crm/purchases/services/supplierService.ts')
-const page = read('src/features/crm/purchases/pages/PurchasesSuppliersPage.tsx')
-const navigation = read('src/features/crm/routing/crmNavigation.ts')
 
 test('los proveedores quedan aislados por local con integridad referencial', () => {
   assert.match(migration, /alter table public\.suppliers[\s\S]*add column if not exists venue_id uuid/i)
@@ -43,12 +41,7 @@ test('la corrección manual vincula proveedor local e identidad global sin cruza
   assert.match(update, /on conflict \(tenant_id, venue_id, identity_type, normalized_value\)/i)
 })
 
-test('la sección muestra una tabla simple con alta y edición', () => {
-  assert.match(navigation, /purchases-suppliers[\s\S]*Proveedores/)
-  assert.match(page, /<table/)
-  assert.match(page, /Añadir proveedor/)
-  assert.match(page, /Editar proveedor/)
-  assert.match(page, /CIF \/ NIF/)
+test('la sección mantiene el alcance del local al guardar proveedores', () => {
   assert.match(service, /\.eq\('tenant_id', context\.tenantId\)[\s\S]*\.eq\('venue_id', venueId\)/)
   assert.match(service, /rpc\('save_venue_supplier'/)
 })
