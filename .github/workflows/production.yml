@@ -52,7 +52,7 @@ jobs:
               return
             }
             core.setOutput('base_sha', baselineSha)
-            core.setOutput('supported_versions', `${context.sha},${baselineSha}`)
+            core.setOutput('supported_versions', context.sha)
             core.info(`Production baseline: ${baselineSha}${previous ? '' : ' (configured bootstrap)'}`)
 
       - name: Configure Node

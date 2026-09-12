@@ -11,6 +11,8 @@ test('producción valida desde el último release correcto y construye en Vercel
   assert.match(workflow, /status:\s+'success'/)
   assert.match(workflow, /PRODUCTION_BASE_SHA/)
   assert.match(workflow, /BASE_SHA:\s+\$\{\{ steps\.release\.outputs\.base_sha \}\}/)
+  assert.match(workflow, /core\.setOutput\('supported_versions', context\.sha\)/)
+  assert.doesNotMatch(workflow, /core\.setOutput\('supported_versions', `\$\{context\.sha\},\$\{baselineSha\}`\)/)
   assert.match(workflow, /SUPPORTED_APP_VERSIONS:\s+\$\{\{ steps\.release\.outputs\.supported_versions \}\}/)
   assert.match(workflow, /corepack@0\.36\.0/)
   assert.match(workflow, /pnpm@10\.15\.1/)

@@ -7,9 +7,10 @@ import {
 } from '../src/config/appVersion.ts'
 
 test('la política de versión solo produce compatible o actualización requerida', () => {
-  const policy = { supportedVersions: ['build-current', 'build-previous'] }
+  const policy = { supportedVersions: ['build-current'] }
 
   assert.equal(resolveAppVersionStatus('build-current', policy), 'compatible')
+  assert.equal(resolveAppVersionStatus('build-previous', policy), 'update-required')
   assert.equal(resolveAppVersionStatus('build-old', policy), 'update-required')
   assert.throws(() => resolveAppVersionStatus('build-current', {}), /política de versiones/i)
 })
