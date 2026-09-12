@@ -2,13 +2,14 @@ import assert from 'node:assert/strict'
 import { readFile, readdir } from 'node:fs/promises'
 import test from 'node:test'
 
+import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
+import { createReservationsControllerHarness } from './helpers/reservations-controller-harness.mjs'
+
 const schemaUrl = new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url)
 const migrationUrl = new URL('../supabase/migrations/20260726220000_add_restaurant_reservations.sql', import.meta.url)
-const controllerUrl = new URL('../src/features/reservations/hooks/useReservationsController.ts', import.meta.url)
-const [schema, migration, controller] = await Promise.all([
+const [schema, migration] = await Promise.all([
   readFile(schemaUrl, 'utf8'),
   readFile(migrationUrl, 'utf8'),
-  readFile(controllerUrl, 'utf8'),
 ])
 
 test('crea reservas persistentes y asignaciones de cero, una o varias mesas', () => {
@@ -67,12 +68,31 @@ test('la comanda finalizada completa su reserva y el modelo no depende de la caj
   assert.match(migration, /Legacy reservation field/i)
 })
 
-test('el refresco conserva la reserva seleccionada y descarta respuestas antiguas', () => {
-  assert.match(controller, /const refresh = useCallback\(async \(requestedDetailId = detailIdRef\.current\)/)
-  assert.match(controller, /requestId !== refreshSequenceRef\.current/)
-  assert.match(controller, /reconcileReservationDetail\(current, requestedDetailId, refreshedDetail\)/)
-  assert.match(controller, /refresh\(result\.reservation\.id\)/)
-  assert.doesNotMatch(controller, /\}, \[date, detail\?\.id, timeZone\]\)/)
+test('el refresco conserva la reserva seleccionada y descarta respuestas antiguas', async () => {
+  const first = deferred()
+  const second = deferred()
+  let loads = 0
+  const harness = createReservationsControllerHarness({ services: {
+    loadReservationsForDate: () => (++loads === 1 ? first.promise : second.promise),
+  } })
+  let controller = harness.render()
+  controller.openDetail({ id: 'selected', tableIds: ['table-1'] })
+  controller = harness.render()
+
+  const staleRefresh = controller.refresh()
+  const currentRefresh = controller.refresh()
+  await flush()
+  second.resolve([{ id: 'selected', marker: 'current', tableIds: ['table-1'] }])
+  await currentRefresh
+  controller = harness.render()
+  assert.equal(controller.detail.marker, 'current')
+  assert.equal(controller.reservations[0].marker, 'current')
+
+  first.resolve([{ id: 'selected', marker: 'stale', tableIds: ['table-1'] }])
+  await staleRefresh
+  controller = harness.render()
+  assert.equal(controller.detail.marker, 'current')
+  assert.equal(controller.reservations[0].marker, 'current')
 })
 
 test('la vista de lista entrega filas tr directas al componente de tabla', async () => {

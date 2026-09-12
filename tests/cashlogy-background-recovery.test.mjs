@@ -11,6 +11,9 @@ async function loadStore(kind, request) {
   const code = stripTypeScriptTypes(source).replace(/^import\s[\s\S]*?from\s+['"][^'"]+['"]\s*;?/gm, '').replace(/^export\s+/gm, '')
   const intent = { requestId: 'request-1', transactionId: null, chargeRequestedAt: '2026-09-10', amountCents: 600 }
   const dependencies = {
+    CashlogyError: class CashlogyError extends Error {
+      constructor(options = {}) { super(options.message ?? options.code); Object.assign(this, options) }
+    },
     create: (initialize) => {
       let state
       const setState = (patch) => { state = { ...state, ...patch } }
@@ -27,7 +30,7 @@ async function loadStore(kind, request) {
     loadCashlogyManagementIntent: () => intent,
     saveCashlogyIntent: () => {},
     saveCashlogyManagementIntent: () => {},
-    cashlogyAcknowledgements: () => ({ contains: () => false, flush: async () => {} }),
+    cashlogyAcknowledgements: () => ({ add() {}, contains: () => false, flush: async () => {} }),
     getBlockingCashlogyTransactionId: () => null,
     cashlogyActiveStatuses: new Set(['waiting_for_cash']),
     cashlogyManagementActiveStatuses: new Set(['accepting']),
@@ -69,4 +72,30 @@ for (const kind of ['payment', 'management']) {
     await assert.rejects(store.getState().recover(), /Backend offline/)
     assert.equal(store.getState().modalOpen, true)
   })
+
+  for (const status of ['unknown', 'needs_attention']) {
+    test(`${kind}: ${status} remains pending and is never resent automatically`, async () => {
+      let requests = 0
+      const result = { id: 'operation-1', requestId: 'request-1', status, type: 'refill' }
+      const store = await loadStore(kind, async () => {
+        requests += 1
+        return kind === 'payment' ? { transaction: result } : { operation: result }
+      })
+      store.getState().configureScope({ tenantId: 't', establishmentId: 'v', terminalId: 'd' })
+
+      if (kind === 'payment') await assert.rejects(store.getState().recover())
+      else await store.getState().recover()
+
+      const key = kind === 'payment' ? 'transaction' : 'operation'
+      assert.equal(requests, 1)
+      assert.equal(store.getState()[key].status, status)
+      assert.equal(store.getState().modalOpen, true)
+      assert.equal(store.getState().intent.requestId, 'request-1')
+
+      if (kind === 'payment') store.getState().discardForRetry()
+      else store.getState().clearResolved()
+      assert.equal(requests, 1)
+      assert.equal(store.getState().intent.requestId, 'request-1')
+    })
+  }
 }

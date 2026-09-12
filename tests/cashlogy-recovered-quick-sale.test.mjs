@@ -156,3 +156,31 @@ test('el botón Aplicar registra la venta recuperada y cierra el modal', async (
   assert.equal(h.calls.charges, 0)
   assert.equal(h.calls.finishes, 1)
 })
+
+test('un estado incierto solo permite aplicar o repetir después de revisión manual', async () => {
+  const h = harness()
+  h.state.transaction.status = 'unknown'
+  const calls = { closed: 0, finalized: 0, retries: [] }
+  h.state.closeReviewed = () => { calls.closed += 1 }
+  h.state.startPayment = async (...args) => {
+    calls.retries.push(args)
+    return { ...h.transaction, id: 'retry', status: 'completed' }
+  }
+  const render = modalHarness(h.state, async () => { calls.finalized += 1 })
+
+  let rendered = nodes(render())
+  const checkbox = rendered.find((node) => node.type === 'input' && node.props.type === 'checkbox')
+  assert.equal(rendered.find((node) => node.type === 'button' && node.props.variant === 'primary').props.disabled, true)
+  assert.equal(rendered.find((node) => node.type === 'button' && node.props.variant === 'danger').props.disabled, true)
+
+  checkbox.props.onChange({ target: { checked: true } })
+  rendered = nodes(render())
+  const retry = rendered.find((node) => node.type === 'button' && node.props.variant === 'danger')
+  assert.equal(retry.props.disabled, false)
+  retry.props.onClick()
+  await flush()
+
+  assert.equal(calls.closed, 1)
+  assert.deepEqual(calls.retries, [[600, 'sale']])
+  assert.equal(calls.finalized, 1)
+})

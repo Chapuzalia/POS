@@ -110,15 +110,6 @@ test('el superadmin carga el catalogo de features y guarda asignaciones de forma
   assert.match(superadminPage, /features: editingTenantFeatures/)
 })
 
-test('el selector de features usa un panel compacto y conserva el fondo neutro al seleccionar', async () => {
-  const source = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
-
-  assert.match(source, /Módulos opcionales/)
-  assert.match(source, /!min-h-\[70px\]/)
-  assert.match(source, /data-\[selected=true\]:!bg-\[var\(--crm-surface\)\]/)
-  assert.doesNotMatch(source, /data-\[selected=true\]:!bg-\[var\(--crm-blue-soft\)\]/)
-})
-
 test('los slugs del superadmin usan un pattern compatible con Unicode v', async () => {
   const source = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
 

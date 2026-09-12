@@ -18,6 +18,8 @@ import {
   getMovedRestaurantPrintLines,
   getRestaurantPrintSubtotal,
 } from '../src/features/restaurant/services/restaurantPrintPayload.ts'
+import { createCompiledHookRunner } from './helpers/component-harness.mjs'
+import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
 
 const layout80 = { columns: 48, paperWidth: 80, characterSet: 'CP858' }
 
@@ -94,6 +96,48 @@ function buildQuickSalePayload(...args) {
     if (originalWindow === undefined) delete globalThis.window
     else globalThis.window = originalWindow
   }
+}
+
+function quickSalePaymentHarness({ isOnline }) {
+  const sync = deferred()
+  const calls = []
+  const printed = []
+  const source = readFileSync(new URL('../src/features/quick-sale/hooks/useQuickSalePayment.ts', import.meta.url), 'utf8')
+  const runner = createCompiledHookRunner(source, 'useQuickSalePayment', {
+    '../../../lib/observability.ts': { operationBreadcrumb() {}, reportOperationError() {} },
+    '../../../utils/errors.ts': { getReadableError: (error) => error?.message ?? String(error) },
+    '../../../lib/format': { createId: () => 'event-1' },
+    '../../../lib/offlineStore': { enqueueOfflineEvent: () => calls.push('persist') },
+    '../services/salePayload': { buildSalePayload: (...args) => buildQuickSalePayload(...args) },
+    '../../fiscal/service': { loadFiscalReceiptData: async () => { calls.push('fiscal'); return { status: 'accepted', verificationUrl: 'https://verify.local' } } },
+    '../../customers/service': { loadTicketInvoice: async () => null },
+    '../../local-printing/cashlogy/useCashlogyStore': {
+      finishCashlogyPayment() {},
+      getCashlogyPaymentAmounts: () => ({ changeCents: null, receivedCents: null }),
+      getCashlogyPaymentSaleId: () => null,
+      settleCashlogyPaymentIfConfigured: async () => null,
+    },
+  }, { window: { crypto } })
+  const options = {
+    cashSession: quickSaleCashSession,
+    context: quickSaleContext,
+    discount: null,
+    invoiceCustomer: null,
+    isOnline,
+    ledger: [],
+    lines: [quickSaleLine('line', 600, 21)],
+    mergeProductStats() {},
+    onError: assert.fail,
+    persistLedger() {},
+    persistLines() {},
+    persistTickets() {},
+    printSale: async (payload) => { calls.push('print'); printed.push(payload) },
+    refreshPendingCount() {},
+    resetUi() { calls.push('reset') },
+    syncPendingEvents: async () => { calls.push('sync'); await sync.promise },
+    tickets: [],
+  }
+  return { calls, pay: runner.render(options), printed, sync }
 }
 
 test('normaliza hostnames, IPv4 e IPv6 y aplica HTTPS con el puerto 8443', () => {
@@ -376,13 +420,20 @@ test('la preferencia de ticket decide entre imprimir, abrir cajon o no actuar', 
   assert.equal(getAutomaticSaleHardwareAction({ payments: card, isReprint: true, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true } }), 'print')
 })
 
-test('la venta rapida espera el QR fiscal online y tambien intenta imprimir offline', () => {
-  const source = readFileSync(new URL('../src/features/quick-sale/hooks/useQuickSalePayment.ts', import.meta.url), 'utf8')
-  const syncIndex = source.indexOf('await options.syncPendingEvents()')
-  const fiscalIndex = source.indexOf('await loadFiscalReceiptData(')
-  const printIndex = source.indexOf('const printTask = options.printSale(printPayload)')
-  assert.ok(syncIndex >= 0 && fiscalIndex > syncIndex && printIndex > fiscalIndex)
-  assert.match(source, /if \(options\.isOnline\) \{[\s\S]*await options\.syncPendingEvents\(\)[\s\S]*\}\r?\n    const printTask/)
+test('la venta rápida libera la interfaz y espera la fiscalización antes de imprimir online', async () => {
+  const online = quickSalePaymentHarness({ isOnline: true })
+  const payment = online.pay('card', null)
+  await flush()
+  assert.deepEqual(online.calls, ['persist', 'reset', 'sync'])
+
+  online.sync.resolve()
+  await payment
+  assert.deepEqual(online.calls, ['persist', 'reset', 'sync', 'fiscal', 'print'])
+  assert.equal(online.printed[0].fiscal.status, 'accepted')
+
+  const offline = quickSalePaymentHarness({ isOnline: false })
+  await offline.pay('card', null)
+  assert.deepEqual(offline.calls, ['persist', 'reset', 'print'])
 })
 
 test('construye el ticket de mesa localmente en cuanto la RPC devuelve sus IDs', () => {

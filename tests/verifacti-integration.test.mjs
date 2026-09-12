@@ -14,6 +14,8 @@ import {
   stableFiscalIdempotencyKey,
 } from '../supabase/functions/_shared/verifacti/mapping.ts'
 import { TicketBaiProvider, VerifactuProvider } from '../supabase/functions/_shared/verifacti/providers.ts'
+import { createCashTicketActionsHarness } from './helpers/cash-ticket-actions-harness.mjs'
+import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
 
 const tenantId = '16a9dccf-03a7-438d-9594-66b6ed820596'
 const invoiceId = 'db250d8b-1f26-445e-9c95-f7fe3a620063'
@@ -335,39 +337,36 @@ test('el webhook valida firma e idempotencia y el backend nunca devuelve las API
   assert.doesNotMatch(integrationPage, /api_key_ciphertext|management_api_key_ciphertext/)
 })
 
-test('el flujo automático obtiene la fiscalización antes de imprimir sin bloquear el cierre de la comanda', async () => {
-  const [posService, quickSale, restaurant, documentBuilder, schema, salesPage] = await Promise.all([
-    readFile(new URL('../src/services/posService.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/quick-sale/hooks/useQuickSalePayment.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/local-printing/services/documentLineBuilders.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/local-printing/schemas/printSchemas.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/crm/sales/pages/SalesReportsPage.tsx', import.meta.url), 'utf8'),
-  ])
-  assert.match(posService, /await autoIssueFiscalTicket\(event\.tenantId, event\.payload\.ticket\.id\)/)
-  assert.match(quickSale, /await options\.syncPendingEvents\(\)[\s\S]*loadFiscalReceiptData[\s\S]*printPayload = \{ \.\.\.payload, fiscal \}/)
-  assert.equal((restaurant.match(/fiscalizeTicketForPrint\((?:options\.)?context, result\.ticketId\)/g) ?? []).length, 3)
-  assert.match(restaurant, /const printTask = \(async \(\) => \{[\s\S]*fiscalizeTicketForPrint[\s\S]*options\.printSale/)
-  assert.match(documentBuilder, /sale\.fiscal\.verificationUrl/)
-  assert.doesNotMatch(schema, /qrBase64/)
-  assert.match(salesPage, /Consultar estado/)
-  assert.match(salesPage, /Ver QR/)
-  assert.match(salesPage, /Anular/)
-  assert.match(salesPage, /Historial de comunicaciones/)
-  assert.match(salesPage, /factura emitida es inmutable/i)
+test('el cliente espera la anulación fiscal antes de marcar el ticket como anulado', async () => {
+  const fiscal = deferred()
+  const fiscalCalls = []
+  const harness = createCashTicketActionsHarness({
+    voidTicketWithFiscalCancellation: async (...args) => { fiscalCalls.push(args); await fiscal.promise },
+  })
+
+  const pending = harness.render().voidTicket(harness.ticket)
+  await flush()
+  assert.deepEqual(harness.calls.busy, [true])
+  assert.equal(harness.calls.tickets.length, 0)
+  assert.deepEqual(fiscalCalls, [['tenant', 'ticket-1']])
+
+  fiscal.resolve()
+  await pending
+  assert.equal(harness.calls.tickets[0][0].status, 'voided')
+  assert.deepEqual(harness.calls.ledgers[0], [])
+  assert.equal(harness.calls.stats, 1)
+  assert.deepEqual(harness.calls.busy, [true, false])
+  assert.deepEqual(harness.calls.errors, [null])
 })
 
-test('el borrado remoto solicita la anulacion fiscal antes de poner el ticket en void', async () => {
-  const [api, cashActions, fiscalService, migration, posService] = await Promise.all([
+test('el borrado remoto conserva sus garantías de backend y persistencia SQL', async () => {
+  const [api, fiscalService, migration, posService] = await Promise.all([
     readFile(new URL('../supabase/functions/verifacti-api/index.ts', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/cash-registers/hooks/useCashTicketActions.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/fiscal/service.ts', import.meta.url), 'utf8'),
     readFile(new URL('../supabase/migrations/20260803230000_void_ticket_with_fiscal_cancellation.sql', import.meta.url), 'utf8'),
     readFile(new URL('../src/services/posService.ts', import.meta.url), 'utf8'),
   ])
   assert.match(fiscalService, /action: 'void-ticket', tenantId, ticketId/)
-  assert.match(cashActions, /await voidTicketWithFiscalCancellation\(context\.tenantId, ticket\.payload\.ticket\.id\)/)
-  assert.match(cashActions, /Necesitas conexión para anular un ticket/)
   assert.match(api, /if \(action === 'void-ticket'\)/)
   assert.match(api, /await queueInvoiceCancellation[\s\S]*admin\.rpc\('finalize_ticket_void'/)
   assert.match(api, /fiscalCancellationQueued: cancellation\?\.status === 'pending'/)

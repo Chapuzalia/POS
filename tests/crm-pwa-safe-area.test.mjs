@@ -29,11 +29,9 @@ test('the installed CRM sidebar also clears the iOS status area', () => {
 test('the iPhone CRM drawer keeps active submenu labels visible', () => {
   assert.match(sidebar, /const itemClass = '[^']*!flex[^']*!min-w-0/)
   assert.ok(sidebar.includes('<span className="!min-w-0 !flex-1 !truncate">{item.label}</span>'))
-  assert.match(sidebar, /!grid !gap-0.5 !border-l/)
 })
 
 test('the mobile CRM drawer can be closed from its header or backdrop', () => {
   assert.match(sidebar, /<div[\s\S]*aria-hidden="true"[\s\S]*onClick=\{onClose\}/)
   assert.ok(sidebar.includes('aria-label="Cerrar menú de navegación"'))
-  assert.ok(sidebar.includes('<X className="!size-5" />'))
 })

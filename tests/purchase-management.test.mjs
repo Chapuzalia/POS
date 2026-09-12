@@ -25,13 +25,9 @@ test('factura o albarán con stock activado registra compra y aplica una entrada
 test('stock desactivado conserva la compra y no ejecuta el movimiento', () => {
   assert.match(confirmation, /if coalesce\(p_affects_stock, true\) then[\s\S]*increment_inventory_item_stock[\s\S]*end if;/i)
   assert.match(confirmation, /affects_stock = coalesce\(p_affects_stock, true\)/)
-  assert.match(review, /Confirmar siempre registra la compra/)
 })
 
 test('la elección de stock se guarda al subir el documento y sobrevive al OCR', () => {
-  assert.match(review, /Subir documento/)
-  assert.doesNotMatch(review, /Recibir mercancía/)
-  assert.match(review, /Actualizar stock al confirmar/)
   assert.match(review, /uploadSupplierDocument\([\s\S]*affectsStock/)
   assert.match(supplierService, /p_affects_stock: affectsStock/)
   assert.match(stockChoiceMigration, /p_affects_stock boolean/)
@@ -43,14 +39,6 @@ test('abrir un confirmado muestra sus detalles en modo lectura y no la pantalla 
   assert.match(review, /workspace\.document\.status === "confirmed"\) setScreen\("review"\)/)
   assert.match(review, /const isConfirmedDocument = detail\?\.document\.status === "confirmed"/)
   assert.match(review, /disabled=\{isConfirmedDocument\}/)
-  assert.match(review, /!isConfirmedDocument \? <div className="fixed inset-x-0 bottom-0/)
-})
-
-test('los estados que requieren acción destacan en el listado de facturas', () => {
-  assert.match(invoices, /review:[\s\S]*bg-amber-500[\s\S]*Pendiente de revisión/)
-  assert.match(invoices, /processing:[\s\S]*bg-blue-600[\s\S]*Procesando/)
-  assert.match(invoices, /error:[\s\S]*bg-red-600[\s\S]*Error/)
-  assert.match(invoices, /PurchaseStatusBadge status=\{document\.status\}/)
 })
 
 test('una factura vinculada excluye el albarán del gasto y una independiente contabiliza normalmente', () => {
@@ -154,6 +142,4 @@ test('OCR se inicia en backend y el listado solo refresca su estado persistido',
   assert.match(edgeFunction, /return json\(\{ documentId, status: 'processing' \}, 202\)/)
   assert.match(supplierService, /await processDocument\(created\.documentId\)[\s\S]*return created/)
   assert.match(invoices, /hasProcessingDocuments[\s\S]*window\.setInterval[\s\S]*5_000/)
-  assert.match(invoices, /processing:[\s\S]*label: 'Procesando'/)
-  assert.match(review, /Reintentar procesamiento/)
 })

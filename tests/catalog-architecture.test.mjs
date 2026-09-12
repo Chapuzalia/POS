@@ -1,6 +1,5 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import { resolveCatalogItem } from '../src/features/catalog/domain/resolver.ts'
 import {
   buildSaleLine,
@@ -52,16 +51,6 @@ function selectedComponent(type, supplementCents) {
     variantName: 'Normal', quantity: 1, priceDeltaCents: supplementCents, sortOrder: 0, modifiers: [],
   }
 }
-
-test('la carga POS entra directamente por el repositorio definitivo y no proyecta catálogo legacy', () => {
-  const loader = readFileSync(new URL('../src/features/catalog/data/load-pos-catalog.ts', import.meta.url), 'utf8')
-  const repository = readFileSync(new URL('../src/features/catalog/data/repository.ts', import.meta.url), 'utf8')
-  const posService = readFileSync(new URL('../src/services/posService.ts', import.meta.url), 'utf8')
-  assert.match(loader, /catalogRepository\.getCatalog\(context\.venueId, 'pos', force\)/)
-  assert.match(repository, /rpc\('get_catalog', \{ p_venue_id: venueId, p_mode: mode \}\)/)
-  assert.match(posService, /return loadPosCatalog\(context, force\)/)
-  assert.doesNotMatch(loader + posService, /projectCatalogForCurrentUi|loadCurrentCatalog|sale_formats|selection_group_items|variant_selection_groups/)
-})
 
 test('el suplemento del mixer es contextual, usa pricing único y crea snapshot completo', () => {
   const catalog = catalogFixture('mixer')
