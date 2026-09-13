@@ -9,8 +9,8 @@ import { CrmSelect } from '../../shared/components/CrmSelect'
 import { KpiCard } from '../../dashboard/pages/DashboardPage'
 import { formatMoney, normalizeText } from '../../../../lib/format'
 import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
-import { loadCrmSalesReportFilterOptions, loadCrmSalesReportPage, loadCrmSalesReports, type CrmSalesReportFilterOptions, type CrmSalesReportFilters, type CrmSalesReportPage } from '../services/salesReportsService'
-import { buildSalesReportAggregates, buildSalesReportTicketTotals, compareSalesReportValues, crmReportDateTimeFormatter, paymentLabels, salesReportTabs, type SalesReportAggregateView, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
+import { loadCrmSalesReportFilterOptions, loadCrmSalesReportPage, loadCrmSalesReportAggregatePage, type CrmSalesReportAggregatePage, type CrmSalesReportFilterOptions, type CrmSalesReportFilters, type CrmSalesReportPage } from '../services/salesReportsService'
+import { buildSalesReportTicketTotals, crmReportDateTimeFormatter, paymentLabels, salesReportTabs, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
 import { useSalesReportSummary } from '../hooks/useSalesReportSummary'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
@@ -49,7 +49,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [isReportLoading, setIsReportLoading] = useState(true)
   const [productQuery, setProductQuery] = useState('')
-  const [reports, setReports] = useState<CrmSalesReports | null>(null)
+  const [aggregatePage, setAggregatePage] = useState<CrmSalesReportAggregatePage | null>(null)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
   const [sortDirection, setSortDirection] = useState<SalesReportSortDirection>('desc')
   const [sortKey, setSortKey] = useState<SalesReportSortKey>('createdAt')
@@ -58,9 +58,6 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   const debouncedProductQuery = useDebouncedFilter(productQuery)
   const debouncedCategoryQuery = useDebouncedFilter(categoryQuery)
   const requestVersion = useRef(0)
-  const ticketPageNumber = activeView === 'tickets' ? currentPage : 1
-  const ticketSortKey = activeView === 'tickets' ? sortKey : 'createdAt'
-  const ticketSortDirection = activeView === 'tickets' ? sortDirection : 'desc'
   const operationalDayConfig = useMemo(() => ({ dayChangeTime, timeZone }), [dayChangeTime, timeZone])
   const reportFilters = useMemo<CrmSalesReportFilters>(() => ({
     categoryQuery: normalizeText(debouncedCategoryQuery.trim()),
@@ -81,25 +78,25 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
           tenantContext,
           selectedVenueId,
           reportFilters,
-          ticketPageNumber,
+          currentPage,
           CRM_PAGE_SIZE,
-          ticketSortKey,
-          ticketSortDirection,
+          sortKey,
+          sortDirection,
         )
         if (requestVersion.current !== version) return
         setTicketPage(nextPage)
-        setReports(null)
+        setAggregatePage(null)
         return
       }
 
-      const nextReports = await loadCrmSalesReports(tenantContext, selectedVenueId, reportFilters)
+      const nextPage = await loadCrmSalesReportAggregatePage(tenantContext, selectedVenueId, reportFilters, activeView, currentPage, sortKey, sortDirection)
       if (requestVersion.current !== version) return
-      setReports(nextReports)
+      setAggregatePage(nextPage)
       setTicketPage(null)
     } finally {
       if (requestVersion.current === version) setIsReportLoading(false)
     }
-  }, [activeView, reportFilters, selectedVenueId, tenantContext, ticketPageNumber, ticketSortDirection, ticketSortKey])
+  }, [activeView, currentPage, reportFilters, selectedVenueId, tenantContext, sortDirection, sortKey])
 
   const refreshAll = useCallback(async () => {
     setSummaryRevision((current) => current + 1)
@@ -107,7 +104,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   }, [refresh])
 
   useEffect(() => {
-    setReports(null)
+    setAggregatePage(null)
     setTicketPage(null)
     setFilterOptions(null)
     setCurrentPage(1)
@@ -128,44 +125,11 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
     return () => { cancelled = true }
   }, [filterOptions, isFiltersOpen, runAction, selectedVenueId, tenantContext])
 
-  const normalizedProductQuery = reportFilters.productQuery
-  const normalizedCategoryQuery = reportFilters.categoryQuery
-  const filteredTickets = useMemo(() => reports?.tickets ?? [], [reports])
-  const activeAggregateView: SalesReportAggregateView = activeView === 'tickets' ? 'products' : activeView
-  const activeAggregates = useMemo(() => buildSalesReportAggregates(
-    filteredTickets,
-    activeAggregateView,
-    normalizedProductQuery,
-    normalizedCategoryQuery,
-  ), [activeAggregateView, filteredTickets, normalizedCategoryQuery, normalizedProductQuery])
-  const sortedAggregates = useMemo(() => [...activeAggregates].sort((left, right) => {
-    const leftValue = sortKey === 'label'
-      ? left.label
-      : sortKey === 'ticketCount'
-        ? left.ticketCount
-        : sortKey === 'quantity'
-          ? left.quantity
-          : sortKey === 'average'
-            ? left.quantity ? left.totalCents / left.quantity : 0
-            : left.totalCents
-    const rightValue = sortKey === 'label'
-      ? right.label
-      : sortKey === 'ticketCount'
-        ? right.ticketCount
-        : sortKey === 'quantity'
-          ? right.quantity
-          : sortKey === 'average'
-            ? right.quantity ? right.totalCents / right.quantity : 0
-            : right.totalCents
-
-    return compareSalesReportValues(leftValue, rightValue, sortDirection)
-  }), [activeAggregates, sortDirection, sortKey])
-  const totalResults = activeView === 'tickets' ? ticketPage?.totalResults ?? 0 : sortedAggregates.length
+  const totalResults = activeView === 'tickets' ? ticketPage?.totalResults ?? 0 : aggregatePage?.totalResults ?? 0
   const totalPages = Math.max(1, Math.ceil(totalResults / CRM_PAGE_SIZE))
   const visiblePage = Math.min(currentPage, totalPages)
-  const pageStart = (visiblePage - 1) * CRM_PAGE_SIZE
   const visibleTickets = ticketPage?.tickets ?? []
-  const visibleAggregates = sortedAggregates.slice(pageStart, pageStart + CRM_PAGE_SIZE)
+  const visibleAggregates = aggregatePage?.items ?? []
   const activeTab = salesReportTabs.find((tab) => tab.id === activeView) ?? salesReportTabs[0]
   const selectedTicket = ticketPage?.tickets.find((ticket) => ticket.id === selectedTicketId) ?? null
   const productOptions = filterOptions?.products ?? []
@@ -230,7 +194,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
         <div className="flex items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] p-3 max-[760px]:flex-col max-[760px]:items-stretch !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 md:!flex-row md:!items-center md:!px-[22px]">
           <div className="min-w-0 [&_h2]:m-0 [&_h2]:text-[17px] [&_h2]:font-bold [&_h2]:tracking-[-0.02em] [&_h2]:text-[var(--crm-text)] [&_p]:mt-1 [&_p]:mb-0 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)]">
             <h2>{activeTab.label}</h2>
-            <p>{isReportLoading && !ticketPage && !reports ? 'Cargando información de ventas...' : `${totalResults} resultados`}</p>
+            <p>{isReportLoading && !ticketPage && !aggregatePage ? 'Cargando información de ventas...' : `${totalResults} resultados`}</p>
           </div>
           <UiButton
             aria-controls="crm-sales-report-filters"

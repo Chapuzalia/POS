@@ -82,6 +82,7 @@ test('the page renders ticket results before cards complete and only refreshes c
   const pageSource = readFileSync(new URL('../src/features/crm/sales/pages/SalesReportsPage.tsx', import.meta.url), 'utf8')
   const summary = harness()
   const pages = []
+  const aggregates = []
   const modules = Object.fromEntries(Array.from(pageSource.matchAll(/from '([^']+)'/g), ([, path]) => [path, new Proxy({}, { get: (_, name) => name })]))
   Object.assign(modules, {
     'react/jsx-runtime': jsxRuntime,
@@ -91,6 +92,7 @@ test('the page renders ticket results before cards complete and only refreshes c
     '../hooks/useSalesReportSummary': { useSalesReportSummary: (...args) => summary.render(...args) },
     '../services/salesReportsService': {
       loadCrmSalesReportPage: (...args) => new Promise((resolve) => pages.push({ args, resolve })),
+      loadCrmSalesReportAggregatePage: (...args) => new Promise((resolve) => aggregates.push({ args, resolve })),
     },
   })
   const page = createCompiledHookRunner(pageSource, 'SalesReportsCrm', modules, {
@@ -126,6 +128,26 @@ test('the page renders ticket results before cards complete and only refreshes c
   assert.equal(pages.length, 5)
   assert.equal(summary.pending.length, 3)
   assert.equal(nodes(tree).find((node) => node.props?.['aria-label'] === 'Totales de ventas').props['aria-busy'], true)
+  const nextProps = { ...props, selectedVenueId: 'another-venue' }
+  nodes(tree).find((node) => node.props?.role === 'tab' && node.props.children === 'Por producto').props.onClick()
+  tree = page.render(nextProps)
+  assert.equal(aggregates.length, 1)
+  assert.equal(aggregates[0].args[3], 'products')
+  assert.equal(aggregates[0].args[4], 1)
+  aggregates[0].resolve({ items: [{ id: 'one', label: 'Café', quantity: 2, ticketCount: 2, totalCents: 100 }], totalResults: 31 })
+  await flush()
+  tree = page.render(nextProps)
+  assert.equal(nodes(tree).find((node) => node.type?.name === 'SalesReportAggregateTable').props.items.length, 1)
+  nodes(tree).find((node) => node.type === 'CrmPagination').props.onPageChange(2)
+  tree = page.render(nextProps)
+  assert.equal(aggregates.length, 2)
+  assert.equal(aggregates[1].args[4], 2)
+  nodes(tree).find((node) => node.type?.name === 'SalesReportAggregateTable').props.onSort('label', 'asc')
+  tree = page.render(nextProps)
+  assert.equal(aggregates.length, 3)
+  assert.equal(aggregates[2].args[4], 1)
+  assert.equal(aggregates[2].args[5], 'label')
+  assert.equal(summary.pending.length, 3)
   page.unmount()
   summary.unmount()
 })

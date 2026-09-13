@@ -3,7 +3,6 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { createClient } from '@supabase/supabase-js'
 import { normalizeText } from '../src/lib/format.ts'
-import { buildSalesReportAggregates } from '../src/features/crm/sales/services/salesReportModel.ts'
 import { compileComponent } from './helpers/component-harness.mjs'
 
 const source = readFileSync(new URL('../src/features/crm/sales/services/salesReportsService.ts', import.meta.url), 'utf8')
@@ -22,11 +21,19 @@ function harness(count, failDetailRequest = 0) {
       modifiers: [], ticket_line_components: [],
     }],
   }))
-  const requests = { pages: [], details: [] }
+  const requests = { pages: [], details: [], aggregates: [] }
   const client = createClient('https://crm-report-test.supabase.co', 'test-key', {
     auth: { persistSession: false, autoRefreshToken: false },
     global: { fetch: async (input, init) => {
       const url = new URL(String(input))
+      if (url.pathname.endsWith('/rpc/crm_sales_report_aggregate_page')) {
+        const args = JSON.parse(init.body)
+        requests.aggregates.push(args)
+        return Response.json({
+          items: tickets.slice((args.p_page - 1) * 12, args.p_page * 12).map(({ id }) => ({ id, label: 'Café', quantity: '2', ticketCount: '2', totalCents: '220' })),
+          totalResults: count,
+        })
+      }
       if (url.pathname.endsWith('/rpc/crm_sales_report_ticket_page')) {
         const args = JSON.parse(init.body)
         requests.pages.push(args)
@@ -53,29 +60,18 @@ function harness(count, failDetailRequest = 0) {
   return { service, requests, tickets }
 }
 
-test('grouped sales reports load multiple pages without oversized URLs or missing tickets', async () => {
+test('filtered tickets download only the twelve IDs returned by the requested page', async () => {
   const { service, requests, tickets } = harness(401)
-  const report = await service.loadCrmSalesReports({ tenantId }, venueId, filters)
-  assert.deepEqual(Array.from(report.tickets, ({ id }) => id), tickets.map(({ id }) => id))
-  for (const view of ['products', 'variants', 'categories']) {
-    const groups = buildSalesReportAggregates(report.tickets, view, filters.productQuery, filters.categoryQuery)
-    assert.equal(groups.length, 1)
-    assert.equal(groups[0].ticketCount, 401)
-    assert.equal(groups[0].quantity, 401)
-    assert.equal(groups[0].totalCents, 44110)
-  }
-  assert.ok(requests.pages.length > 1)
-  for (const args of requests.pages) {
-    assert.equal(args.p_product_query, 'cafe')
-    assert.equal(args.p_category_query, 'bebidas')
-    assert.equal(args.p_tenant_id, tenantId)
-    assert.equal(args.p_venue_id, venueId)
-  }
-  for (const url of requests.details) {
-    assert.ok(url.href.length < 8192)
-    assert.equal(url.searchParams.get('tenant_id'), `eq.${tenantId}`)
-    assert.equal(url.searchParams.get('venue_id'), `eq.${venueId}`)
-  }
+  const page = await service.loadCrmSalesReportPage({ tenantId }, venueId, filters, 1, 12, 'createdAt', 'desc')
+  assert.deepEqual(Array.from(page.tickets, ({ id }) => id), tickets.slice(0, 12).map(({ id }) => id))
+  assert.equal(requests.pages.length, 1)
+  assert.equal(requests.pages[0].p_product_query, 'cafe')
+  assert.equal(requests.pages[0].p_category_query, 'bebidas')
+  assert.equal(requests.details.length, 1)
+  const url = requests.details[0]
+  assert.equal(url.searchParams.get('id').slice(4, -1).split(',').length, 12)
+  assert.equal(url.searchParams.get('tenant_id'), `eq.${tenantId}`)
+  assert.equal(url.searchParams.get('venue_id'), `eq.${venueId}`)
 })
 
 test('ticket pages preserve server ordering without calculating card totals', async () => {
@@ -111,14 +107,33 @@ test('cards return zero totals when filters have no matches', async () => {
   assert.equal(requests.details.length, 0)
 })
 
+test('grouped pages send all filters and sorting to the server without loading ticket detail', async () => {
+  const { service, requests } = harness(401)
+  const selected = { ...filters, dateFromIso: '2026-09-01T00:00:00Z', dateToIso: '2026-10-01T00:00:00Z', discountFilter: 'with' }
+  for (const view of ['products', 'variants', 'categories', 'formats', 'tabs', 'mixers', 'menu-components', 'modifiers']) {
+    const page = await service.loadCrmSalesReportAggregatePage({ tenantId }, venueId, selected, view, 2, 'quantity', 'asc')
+    assert.equal(page.items.length, 12)
+    assert.equal(page.totalResults, 401)
+    assert.equal(page.items[0].quantity, 2)
+    assert.equal(page.items[0].totalCents, 220)
+    assert.deepEqual(requests.aggregates.at(-1), {
+      p_tenant_id: tenantId, p_venue_id: venueId, p_view: view, p_page: 2, p_sort_key: 'quantity', p_sort_direction: 'asc',
+      p_product_query: 'cafe', p_category_query: 'bebidas', p_date_from: selected.dateFromIso, p_date_to: selected.dateToIso, p_discount_filter: 'with',
+    })
+  }
+  assert.equal(requests.aggregates.length, 8)
+  assert.equal(requests.pages.length, 0)
+  assert.equal(requests.details.length, 0)
+})
+
 test('an empty report does not request ticket detail', async () => {
   const { service, requests } = harness(0)
-  const report = await service.loadCrmSalesReports({ tenantId }, venueId, filters)
+  const report = await service.loadCrmSalesReportPage({ tenantId }, venueId, filters, 1, 12, 'createdAt', 'desc')
   assert.equal(report.tickets.length, 0)
   assert.equal(requests.details.length, 0)
 })
 
-test('failure in a later detail batch rejects the report instead of returning partial totals', async () => {
-  const { service } = harness(201, 2)
-  await assert.rejects(service.loadCrmSalesReports({ tenantId }, venueId, filters), { message: 'detail denied' })
+test('ticket detail failures reject the page instead of returning partial rows', async () => {
+  const { service } = harness(201, 1)
+  await assert.rejects(service.loadCrmSalesReportPage({ tenantId }, venueId, filters, 1, 12, 'createdAt', 'desc'), { message: 'detail denied' })
 })
