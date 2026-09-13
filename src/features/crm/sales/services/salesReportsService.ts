@@ -18,7 +18,6 @@ export type CrmSalesReportSummary = {
 }
 
 export type CrmSalesReportPage = {
-  summary: CrmSalesReportSummary
   tickets: CrmSalesReportTicket[]
   totalResults: number
 }
@@ -257,7 +256,7 @@ async function loadSalesReportPageRows(
   pageSize: number,
   sortKey: string,
   sortDirection: 'asc' | 'desc',
-  includeSummary = true,
+  includeSummary = false,
 ) {
   const { data, error } = await requireSupabase().rpc(
     'crm_sales_report_ticket_page',
@@ -270,18 +269,25 @@ async function loadSalesReportPageRows(
 async function loadTicketRows(context: TenantContext, venueId: string | undefined, ticketIds: string[]) {
   if (!ticketIds.length) return []
 
-  let query = requireSupabase()
-    .from('tickets')
-    .select(ticketSelect)
-    .eq('tenant_id', context.tenantId)
-    .in('id', ticketIds)
+  // Aggregate reports request 200 IDs per RPC page. Sending all of those UUIDs
+  // with the nested select in one GET exceeds common gateway URL limits and
+  // can surface as "Load failed", incorrectly degrading the online session.
+  const detailBatchSize = 50
+  const rowsById = new Map<string, SalesReportTicketRow>()
+  for (let offset = 0; offset < ticketIds.length; offset += detailBatchSize) {
+    let query = requireSupabase()
+      .from('tickets')
+      .select(ticketSelect)
+      .eq('tenant_id', context.tenantId)
+      .in('id', ticketIds.slice(offset, offset + detailBatchSize))
 
-  if (venueId) query = query.eq('venue_id', venueId)
+    if (venueId) query = query.eq('venue_id', venueId)
 
-  const { data, error } = await query
-  if (error) throw error
+    const { data, error } = await query
+    if (error) throw error
+    for (const row of (data ?? []) as SalesReportTicketRow[]) rowsById.set(row.id, row)
+  }
 
-  const rowsById = new Map(((data ?? []) as SalesReportTicketRow[]).map((row) => [row.id, row]))
   return ticketIds.map((ticketId) => rowsById.get(ticketId)).filter((row): row is SalesReportTicketRow => Boolean(row))
 }
 
@@ -389,14 +395,24 @@ export async function loadCrmSalesReportPage(
   const ticketRows = await loadTicketRows(context, venueId, pageRows.map((row) => row.ticket_id))
 
   return {
-    summary: {
-      paidTicketCount: Number(firstRow?.paid_ticket_count ?? 0),
-      subtotalCents: Number(firstRow?.summary_subtotal_cents ?? 0),
-      taxAmountCents: Number(firstRow?.summary_tax_amount_cents ?? 0),
-      totalCents: Number(firstRow?.summary_total_cents ?? 0),
-    },
     tickets: ticketRows.map(mapSalesReportTicket),
     totalResults: Number(firstRow?.total_count ?? 0),
+  }
+}
+
+export async function loadCrmSalesReportSummary(
+  context: TenantContext,
+  venueId: string | undefined,
+  filters: CrmSalesReportFilters,
+): Promise<CrmSalesReportSummary> {
+  // The existing RPC returns totals for the full filtered set on each row.
+  // Request just one row and never hydrate its ticket detail for the cards.
+  const [row] = await loadSalesReportPageRows(context, venueId, filters, 1, 1, 'createdAt', 'desc', true)
+  return {
+    paidTicketCount: Number(row?.paid_ticket_count ?? 0),
+    subtotalCents: Number(row?.summary_subtotal_cents ?? 0),
+    taxAmountCents: Number(row?.summary_tax_amount_cents ?? 0),
+    totalCents: Number(row?.summary_total_cents ?? 0),
   }
 }
 
