@@ -10,7 +10,8 @@ import { KpiCard } from '../../dashboard/pages/DashboardPage'
 import { formatMoney, normalizeText } from '../../../../lib/format'
 import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
 import { loadCrmSalesReportFilterOptions, loadCrmSalesReportPage, loadCrmSalesReports, type CrmSalesReportFilterOptions, type CrmSalesReportFilters, type CrmSalesReportPage } from '../services/salesReportsService'
-import { buildSalesReportAggregates, buildSalesReportTicketTotals, buildSalesReportTotals, compareSalesReportValues, crmReportDateTimeFormatter, paymentLabels, salesReportTabs, type SalesReportAggregateView, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
+import { buildSalesReportAggregates, buildSalesReportTicketTotals, compareSalesReportValues, crmReportDateTimeFormatter, paymentLabels, salesReportTabs, type SalesReportAggregateView, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
+import { useSalesReportSummary } from '../hooks/useSalesReportSummary'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type RunAction } from '../../shared/types'
@@ -53,6 +54,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   const [sortDirection, setSortDirection] = useState<SalesReportSortDirection>('desc')
   const [sortKey, setSortKey] = useState<SalesReportSortKey>('createdAt')
   const [ticketPage, setTicketPage] = useState<CrmSalesReportPage | null>(null)
+  const [summaryRevision, setSummaryRevision] = useState(0)
   const debouncedProductQuery = useDebouncedFilter(productQuery)
   const debouncedCategoryQuery = useDebouncedFilter(categoryQuery)
   const requestVersion = useRef(0)
@@ -67,6 +69,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
     discountFilter,
     productQuery: normalizeText(debouncedProductQuery.trim()),
   }), [dateFrom, dateTo, debouncedCategoryQuery, debouncedProductQuery, discountFilter, operationalDayConfig])
+  const { summary: reportTotals, error: summaryError, isLoading: isSummaryLoading } = useSalesReportSummary(tenantContext, selectedVenueId, reportFilters, summaryRevision)
   const refresh = useCallback(async () => {
     const version = requestVersion.current + 1
     requestVersion.current = version
@@ -97,6 +100,11 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
       if (requestVersion.current === version) setIsReportLoading(false)
     }
   }, [activeView, reportFilters, selectedVenueId, tenantContext, ticketPageNumber, ticketSortDirection, ticketSortKey])
+
+  const refreshAll = useCallback(async () => {
+    setSummaryRevision((current) => current + 1)
+    await refresh()
+  }, [refresh])
 
   useEffect(() => {
     setReports(null)
@@ -152,14 +160,6 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
 
     return compareSalesReportValues(leftValue, rightValue, sortDirection)
   }), [activeAggregates, sortDirection, sortKey])
-  const aggregateReportTotals = useMemo(
-    () => buildSalesReportTotals(filteredTickets, normalizedProductQuery, normalizedCategoryQuery),
-    [filteredTickets, normalizedCategoryQuery, normalizedProductQuery],
-  )
-  const reportTotals = activeView === 'tickets' ? ticketPage?.summary ?? { paidTicketCount: 0, subtotalCents: 0, taxAmountCents: 0, totalCents: 0 } : aggregateReportTotals
-  const paidTicketCount = activeView === 'tickets'
-    ? ticketPage?.summary.paidTicketCount ?? 0
-    : filteredTickets.filter((ticket) => ticket.status === 'paid').length
   const totalResults = activeView === 'tickets' ? ticketPage?.totalResults ?? 0 : sortedAggregates.length
   const totalPages = Math.max(1, Math.ceil(totalResults / CRM_PAGE_SIZE))
   const visiblePage = Math.min(currentPage, totalPages)
@@ -211,18 +211,19 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
             aria-label="Actualizar informes de ventas"
             className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
             disabled={disabled}
-            onClick={() => void runAction(refresh)}
+            onClick={() => void runAction(refreshAll)}
             type="button"
           >
             <RefreshCw className="h-4 w-4" />
           </UiButton>
         </div>
-        <div className="!grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
-          <KpiCard color="neutral" label="Subtotal" value={formatMoney(reportTotals.subtotalCents)} />
-          <KpiCard color="blue" label="Impuestos" value={formatMoney(reportTotals.taxAmountCents)} />
-          <KpiCard color="green" label="Total" value={formatMoney(reportTotals.totalCents)} />
-          <KpiCard color="neutral" label="Tickets cobrados" value={paidTicketCount} />
+        <div aria-busy={isSummaryLoading} aria-label="Totales de ventas" className="!grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
+          <KpiCard color="neutral" label="Subtotal" value={reportTotals ? formatMoney(reportTotals.subtotalCents) : isSummaryLoading ? '…' : '—'} />
+          <KpiCard color="blue" label="Impuestos" value={reportTotals ? formatMoney(reportTotals.taxAmountCents) : isSummaryLoading ? '…' : '—'} />
+          <KpiCard color="green" label="Total" value={reportTotals ? formatMoney(reportTotals.totalCents) : isSummaryLoading ? '…' : '—'} />
+          <KpiCard color="neutral" label="Tickets cobrados" value={reportTotals?.paidTicketCount ?? (isSummaryLoading ? '…' : '—')} />
         </div>
+        {summaryError ? <p className="!px-[18px] !pb-4 !text-sm !text-[var(--crm-red)] md:!px-[22px]" role="alert">{summaryError}</p> : null}
       </section>
 
       <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
@@ -385,7 +386,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
         <SalesReportTicketModal
           disabled={disabled}
           onClose={() => setSelectedTicketId(null)}
-          onUpdated={refresh}
+          onUpdated={refreshAll}
           runAction={runAction}
           tenantContext={tenantContext}
           ticket={selectedTicket}
