@@ -350,6 +350,7 @@ export type SaleRecord = {
 
 export type SessionTicketRecord = {
   id: string
+  ticketNumber?: number
   cashSessionId: string
   paymentMethod: HistoricalPaymentMethod | null
   totalCents: number
@@ -408,6 +409,7 @@ export type SaleLinePayload = {
 export type SaleCreatedPayload = {
   ticket: {
     id: string
+    ticketNumber?: number
     tenantId: string
     cashSessionId: string
     cashRegisterId: string
@@ -678,6 +680,7 @@ export type CrmStats = {
 
 export type CrmSalesReportTicket = {
   id: string
+  ticketNumber: number
   createdAt: string
   lineCount: number
   lines: Array<{

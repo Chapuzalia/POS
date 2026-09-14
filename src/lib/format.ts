@@ -11,6 +11,10 @@ export function formatMoney(cents: number) {
   return moneyFormatter.format(cents / 100)
 }
 
+export function formatTicketNumber(ticketNumber: number | string) {
+  return String(ticketNumber).padStart(6, '0')
+}
+
 export function parseMoneyToCents(value: string) {
   const normalized = value
     .replace(',', '.')

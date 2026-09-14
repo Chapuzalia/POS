@@ -560,8 +560,9 @@ type SessionTicketQueryRow = {
   customer_snapshot: CustomerFiscalSnapshot | null
   invoice_series: string | null
   invoice_number: string | null
-  invoice_issued_at: string | null
-  ticket_lines: Array<{
+   invoice_issued_at: string | null
+   ticket_number: number | string
+   ticket_lines: Array<{
     id: string
     product_id: string | null
     variant_id: string | null
@@ -652,9 +653,10 @@ async function loadSessionTicketRecordsFromSupabase(
         discount_value,
         discount_rounding_increment_cents,
         discount_amount_cents,
-        total_cents,
-        local_created_at,
-        is_invoice,
+         total_cents,
+         ticket_number,
+         local_created_at,
+         is_invoice,
         customer_id,
         customer_snapshot,
         invoice_series,
@@ -790,9 +792,10 @@ async function loadSessionTicketRecordsFromSupabase(
       }
     })
     const payload: SaleCreatedPayload = {
-      ticket: {
-        id: ticket.id,
-        tenantId: ticket.tenant_id,
+       ticket: {
+         id: ticket.id,
+         ticketNumber: Number(ticket.ticket_number),
+         tenantId: ticket.tenant_id,
         cashSessionId: ticket.cash_session_id,
         cashRegisterId: ticket.cash_register_id,
         venueId: ticket.venue_id,
@@ -875,9 +878,10 @@ async function loadSessionTicketRecordsFromSupabase(
       } : {}),
     }
 
-    return {
-      id: saleId,
-      cashSessionId: ticket.cash_session_id,
+     return {
+       id: saleId,
+       ticketNumber: Number(ticket.ticket_number),
+       cashSessionId: ticket.cash_session_id,
       paymentMethod,
       totalCents: ticket.total_cents,
       createdAt,
@@ -934,7 +938,7 @@ export async function loadSessionTicketPageFromSupabase(
     totalResults: Number(rows[0]?.total_count ?? 0),
     tickets: rows.flatMap((row) => {
       const ticket = recordsByTicketId.get(row.ticket_id)
-      return ticket ? [{ number: Number(row.ticket_number), ticket }] : []
+       return ticket ? [{ number: ticket.ticketNumber ?? 0, ticket }] : []
     }),
   }
 }

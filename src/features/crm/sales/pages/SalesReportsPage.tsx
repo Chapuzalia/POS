@@ -7,7 +7,7 @@ import { CrmModal } from '../../shared/components/CrmModal'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { KpiCard } from '../../dashboard/pages/DashboardPage'
-import { formatMoney, normalizeText } from '../../../../lib/format'
+import { formatMoney, formatTicketNumber, normalizeText } from '../../../../lib/format'
 import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
 import { loadCrmSalesReportFilterOptions, loadCrmSalesReportPage, loadCrmSalesReportAggregatePage, type CrmSalesReportAggregatePage, type CrmSalesReportFilterOptions, type CrmSalesReportFilters, type CrmSalesReportPage } from '../services/salesReportsService'
 import { buildSalesReportTicketTotals, crmReportDateTimeFormatter, paymentLabels, salesReportTabs, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
@@ -421,7 +421,7 @@ export function SalesReportTicketsTable({
         <tbody>
           {tickets.map((ticket) => (
             <tr
-              aria-label={`Ver detalles del ticket ${ticket.id.slice(0, 8)}`}
+              aria-label={`Ver detalles del ticket ${formatTicketNumber(ticket.ticketNumber ?? 0)}`}
               className="!cursor-pointer !border-b !border-[var(--crm-border-subtle)] !outline-none hover:!bg-[var(--crm-surface-soft)] focus-visible:!bg-[var(--crm-surface-soft)] last:!border-0"
               key={ticket.id}
               onClick={() => onSelect(ticket.id)}
@@ -436,7 +436,7 @@ export function SalesReportTicketsTable({
             >
               <td className="!px-[22px] !py-4">
                 <strong className="!block !truncate !text-sm !font-semibold !text-[var(--crm-text)]">
-                  #{ticket.id.slice(0, 8).toUpperCase()}
+#{formatTicketNumber(ticket.ticketNumber ?? 0)}
                 </strong>
                 <span className="!block !truncate !text-xs !font-medium !text-[var(--crm-text-muted)]">
                   {ticket.lineCount} líneas
@@ -533,10 +533,10 @@ export function SalesReportTicketModal({
   }
 
   return (
-    <CrmModal label={`Detalle del ticket ${ticket.id.slice(0, 8)}`} onClose={onClose} size="large">
+    <CrmModal label={`Detalle del ticket ${formatTicketNumber(ticket.ticketNumber ?? 0)}`} onClose={onClose} size="large">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] bg-transparent p-3 text-[var(--crm-text)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:text-[15px] [&_span]:font-bold [&_small]:truncate [&_small]:text-xs [&_small]:font-medium [&_small]:text-[var(--crm-text-muted)] !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
         <div>
-          <span>Ticket #{ticket.id.slice(0, 8).toUpperCase()}</span>
+          <span>Ticket #{formatTicketNumber(ticket.ticketNumber ?? 0)}</span>
           <small>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</small>
         </div>
         <UiButton

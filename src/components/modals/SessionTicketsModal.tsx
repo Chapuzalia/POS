@@ -1,7 +1,7 @@
 import { NativeSelect as UiNativeSelect } from '../ui/NativeSelect'
 import { ChevronLeft, ChevronRight, CreditCard, LoaderCircle, Printer, Search, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { formatMoney } from '../../lib/format'
+import { formatMoney, formatTicketNumber } from '../../lib/format'
 import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from '../../types'
 import { AppModal, Button, Input } from '../ui'
 import { usePrintAgent } from '../../features/local-printing'
@@ -146,7 +146,7 @@ export function SessionTicketsModal({
             </div>
           ) : visibleTickets.length ? (
             <div className="grid gap-3">
-              {visibleTickets.map(({ number, ticket }) => (
+              {visibleTickets.map(({ ticket }) => (
                 <article
                   className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"
                   key={ticket.id}
@@ -154,7 +154,7 @@ export function SessionTicketsModal({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-black uppercase text-[var(--muted)]">
-                        Ticket {number}
+                        Ticket {formatTicketNumber(ticket.ticketNumber ?? 0)}
                         {ticket.status === 'voided' ? ' - anulado' : ''}
                       </p>
                       <p className="mt-1 font-mono text-2xl font-black tabular-nums">{formatMoney(ticket.totalCents)}</p>
