@@ -1,6 +1,6 @@
-import { normalizeText } from '../../../../lib/format'
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
-import { type CrmSalesReportAggregate, type CrmSalesReports, type CrmSalesReportTicket, type HistoricalPaymentMethod, type TenantContext } from '../../../../types'
+import type { SalesReportAggregateView } from './salesReportModel'
+import { type CrmSalesReportAggregate, type CrmSalesReportTicket, type HistoricalPaymentMethod, type TenantContext } from '../../../../types'
 
 export type CrmSalesReportFilters = {
   categoryQuery: string
@@ -22,6 +22,11 @@ export type CrmSalesReportPage = {
   totalResults: number
 }
 
+export type CrmSalesReportAggregatePage = {
+  items: CrmSalesReportAggregate[]
+  totalResults: number
+}
+
 export type CrmSalesReportFilterOptions = {
   categories: string[]
   discounts: Array<{ id: string; name: string }>
@@ -35,14 +40,6 @@ type SalesReportPageRow = {
   summary_total_cents: number | string
   ticket_id: string
   total_count: number | string
-}
-
-const emptyFilters: CrmSalesReportFilters = {
-  categoryQuery: '',
-  dateFromIso: null,
-  dateToIso: null,
-  discountFilter: 'all',
-  productQuery: '',
 }
 
 const ticketSelect = `
@@ -169,57 +166,9 @@ export type SalesReportTicketRow = {
   }> | null
 }
 
-export type MutableSalesReportAggregate = CrmSalesReportAggregate & {
-  ticketIds: Set<string>
-}
-
 export type NameRow = {
   id: string
   name: string
-}
-
-export function addSalesReportLine(
-  report: Map<string, MutableSalesReportAggregate>,
-  id: string,
-  label: string,
-  ticketId: string,
-  line: SalesReportLineRow,
-) {
-  const current = report.get(id) ?? {
-    id,
-    label,
-    quantity: 0,
-    ticketCount: 0,
-    ticketIds: new Set<string>(),
-    totalCents: 0,
-  }
-
-  current.quantity += Number(line.allocated_quantity ?? line.quantity)
-  current.totalCents += line.line_total_cents
-  current.ticketIds.add(ticketId)
-  current.ticketCount = current.ticketIds.size
-  report.set(id, current)
-}
-
-export function finalizeSalesReport(report: Map<string, MutableSalesReportAggregate>): CrmSalesReportAggregate[] {
-  return [...report.values()]
-    .map((item) => ({
-      id: item.id,
-      label: item.label,
-      quantity: item.quantity,
-      ticketCount: item.ticketCount,
-      totalCents: item.totalCents,
-    }))
-    .sort((a, b) => b.totalCents - a.totalCents || b.quantity - a.quantity || a.label.localeCompare(b.label, 'es'))
-}
-
-function addNamedAggregate(report: Map<string, MutableSalesReportAggregate>, id: string, label: string, ticketId: string, quantity: number, totalCents: number) {
-  const current = report.get(id) ?? { id, label, quantity: 0, ticketCount: 0, ticketIds: new Set<string>(), totalCents: 0 }
-  current.quantity += quantity
-  current.totalCents += totalCents
-  current.ticketIds.add(ticketId)
-  current.ticketCount = current.ticketIds.size
-  report.set(id, current)
 }
 
 function pageRpcArgs(
@@ -269,9 +218,8 @@ async function loadSalesReportPageRows(
 async function loadTicketRows(context: TenantContext, venueId: string | undefined, ticketIds: string[]) {
   if (!ticketIds.length) return []
 
-  // Aggregate reports request 200 IDs per RPC page. Sending all of those UUIDs
-  // with the nested select in one GET exceeds common gateway URL limits and
-  // can surface as "Load failed", incorrectly degrading the online session.
+  // Keep nested-detail GETs below gateway URL limits even if a future caller
+  // requests a larger page. The CRM table currently requests twelve IDs.
   const detailBatchSize = 50
   const rowsById = new Map<string, SalesReportTicketRow>()
   for (let offset = 0; offset < ticketIds.length; offset += detailBatchSize) {
@@ -416,6 +364,41 @@ export async function loadCrmSalesReportSummary(
   }
 }
 
+export async function loadCrmSalesReportAggregatePage(
+  context: TenantContext,
+  venueId: string | undefined,
+  filters: CrmSalesReportFilters,
+  view: SalesReportAggregateView,
+  page: number,
+  sortKey: string,
+  sortDirection: 'asc' | 'desc',
+): Promise<CrmSalesReportAggregatePage> {
+  const { data, error } = await requireSupabase().rpc('crm_sales_report_aggregate_page', {
+    p_tenant_id: context.tenantId,
+    p_venue_id: venueId || null,
+    p_view: view,
+    p_date_from: filters.dateFromIso,
+    p_date_to: filters.dateToIso,
+    p_product_query: filters.productQuery || null,
+    p_category_query: filters.categoryQuery || null,
+    p_discount_filter: filters.discountFilter,
+    p_sort_key: sortKey,
+    p_sort_direction: sortDirection,
+    p_page: page,
+  })
+  if (error) throw error
+  const result = data as CrmSalesReportAggregatePage | null
+  return {
+    items: (result?.items ?? []).map((item) => ({
+      ...item,
+      quantity: Number(item.quantity),
+      ticketCount: Number(item.ticketCount),
+      totalCents: Number(item.totalCents),
+    })),
+    totalResults: Number(result?.totalResults ?? 0),
+  }
+}
+
 export async function loadCrmSalesReportFilterOptions(context: TenantContext, venueId?: string): Promise<CrmSalesReportFilterOptions> {
   const { data, error } = await requireSupabase().rpc('crm_sales_report_filter_options', {
     p_tenant_id: context.tenantId,
@@ -430,75 +413,5 @@ export async function loadCrmSalesReportFilterOptions(context: TenantContext, ve
       ? value.discounts.filter((item): item is { id: string; name: string } => Boolean(item && typeof item.id === 'string' && typeof item.name === 'string'))
       : [],
     products: Array.isArray(value.products) ? value.products.filter((item): item is string => typeof item === 'string') : [],
-  }
-}
-
-export async function loadCrmSalesReports(
-  context: TenantContext,
-  venueId?: string,
-  filters: CrmSalesReportFilters = emptyFilters,
-): Promise<CrmSalesReports> {
-  const rows: SalesReportTicketRow[] = []
-  const batchSize = 200
-  let page = 1
-
-  while (true) {
-    const pageRows = await loadSalesReportPageRows(context, venueId, filters, page, batchSize, 'createdAt', 'desc', false)
-    const batch = await loadTicketRows(context, venueId, pageRows.map((row) => row.ticket_id))
-    rows.push(...batch)
-    if (pageRows.length < batchSize) break
-    page += 1
-  }
-
-  const tickets = rows
-  const byProduct = new Map<string, MutableSalesReportAggregate>()
-  const byCategory = new Map<string, MutableSalesReportAggregate>()
-  const byFormat = new Map<string, MutableSalesReportAggregate>()
-  const byVariant = new Map<string, MutableSalesReportAggregate>()
-  const byCatalogTab = new Map<string, MutableSalesReportAggregate>()
-  const byMixer = new Map<string, MutableSalesReportAggregate>()
-  const byMenuComponent = new Map<string, MutableSalesReportAggregate>()
-  const byModifier = new Map<string, MutableSalesReportAggregate>()
-
-  tickets.forEach((ticket) => {
-    if (ticket.status !== 'paid') return
-
-    ;(ticket.ticket_lines ?? []).forEach((line) => {
-      const productId = line.product_id ?? `deleted:${normalizeText(line.product_name)}`
-      const categoryId = line.category_id_snapshot
-      const categoryName = line.category_name_snapshot
-      const formatName = line.sale_format_name_snapshot?.trim() || line.variant_name.trim() || 'Sin formato'
-
-      addSalesReportLine(byProduct, productId, line.product_name, ticket.id, line)
-      addSalesReportLine(byCategory, categoryId ?? 'uncategorized', categoryName ?? 'Sin categoría', ticket.id, line)
-      addSalesReportLine(byFormat, line.sale_format_id ?? (normalizeText(formatName) || 'sin-formato'), formatName, ticket.id, line)
-      addSalesReportLine(byVariant, line.variant_id ?? `deleted:${normalizeText(line.variant_name)}`, line.variant_name || 'Sin variante', ticket.id, line)
-      addSalesReportLine(byCatalogTab, line.catalog_tab_id_snapshot ?? 'sin-pestana', line.catalog_tab_name_snapshot ?? 'Sin pestaña histórica', ticket.id, line)
-      for (const component of line.ticket_line_components ?? []) {
-        const target = component.component_type === 'mixer' ? byMixer : byMenuComponent
-        const lineQuantity = Number(line.allocated_quantity ?? line.quantity)
-        addNamedAggregate(target, component.product_id ?? component.id, component.product_name_snapshot, ticket.id, component.quantity * lineQuantity, component.price_delta_cents * component.quantity * lineQuantity)
-        for (const modifier of component.metadata?.modifiers ?? []) {
-          const name = modifier.name?.trim() || 'Modificador'
-          addNamedAggregate(byModifier, normalizeText(name), name, ticket.id, component.quantity * Number(line.allocated_quantity ?? line.quantity), modifier.priceCents * component.quantity * Number(line.allocated_quantity ?? line.quantity))
-        }
-      }
-      for (const modifier of line.modifiers ?? []) {
-        const name = modifier.name?.trim() || 'Modificador'
-        addNamedAggregate(byModifier, normalizeText(name), name, ticket.id, Number(line.allocated_quantity ?? line.quantity), (modifier.priceCents ?? modifier.price_cents ?? 0) * Number(line.allocated_quantity ?? line.quantity))
-      }
-    })
-  })
-
-  return {
-    byCategory: finalizeSalesReport(byCategory),
-    byFormat: finalizeSalesReport(byFormat),
-    byProduct: finalizeSalesReport(byProduct),
-    byVariant: finalizeSalesReport(byVariant),
-    byCatalogTab: finalizeSalesReport(byCatalogTab),
-    byMixer: finalizeSalesReport(byMixer),
-    byMenuComponent: finalizeSalesReport(byMenuComponent),
-    byModifier: finalizeSalesReport(byModifier),
-    tickets: tickets.map(mapSalesReportTicket),
   }
 }
