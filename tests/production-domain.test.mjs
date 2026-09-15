@@ -23,6 +23,15 @@ test('send is atomic, revision checked, incremental and idempotent', () => {
   assert.match(migration, /production_product_routes[\s\S]*production_category_routes/)
 })
 
+test('production state exposes only lines with a resolved KDS or printer destination as sendable', () => {
+  const routingMigration = read('../supabase/migrations/20260916120000_exclude_unroutable_production_lines.sql')
+  const controls = read('../src/features/production/components/ProductionControls.tsx')
+  assert.match(routingMigration, /'hasProductionDestination'/)
+  assert.match(routingMigration, /public\.production_resolve_destination/)
+  assert.match(routingMigration, /jsonb_array_elements\(line\.components\)/)
+  assert.match(controls, /productionLine\?\.hasProductionDestination && productionLine\.unsentQuantity > 0/)
+})
+
 test('production snapshots, readiness, split lineage and durable dispatches are separate domains', () => {
   assert.match(migration, /create table public\.production_items/)
   assert.match(migration, /create table public\.production_line_allocations/)
