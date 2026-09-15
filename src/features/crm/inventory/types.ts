@@ -52,6 +52,7 @@ export type InventoryStockLevel = {
   inventoryItemId: string
   warehouseId: string
   quantity: number
+  targetQuantity: number | null
 }
 
 export type InventoryRecipe = {

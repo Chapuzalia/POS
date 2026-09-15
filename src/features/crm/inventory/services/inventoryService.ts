@@ -91,7 +91,7 @@ export async function loadInventorySnapshot(context: Pick<TenantContext, 'tenant
     loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
     rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
     rows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId),
-    rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled', context, venueId),
+    rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled, target_quantity', context, venueId),
     rows('inventory_recipes', 'id, variant_id, mode, is_active', context, venueId),
     rows('inventory_recipe_lines', 'id, recipe_id, inventory_item_id, quantity, unit_id, uses_format_default, sort_order', context, venueId),
     rows('modifier_inventory_effects', 'id, modifier_id, operation, inventory_item_id, quantity, unit_id, sort_order', context, venueId),
@@ -107,6 +107,7 @@ export async function loadInventorySnapshot(context: Pick<TenantContext, 'tenant
     levels: levelRows.map<InventoryStockLevel>((row) => ({
       inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id),
       quantity: number(row.quantity), enabled: Boolean(row.is_enabled),
+      targetQuantity: row.target_quantity == null ? null : number(row.target_quantity),
     })),
     recipes: recipeRows.map<InventoryRecipe>((row) => ({
       id: string(row.id), variantId: string(row.variant_id), mode: row.mode === 'direct' ? 'direct' : 'recipe', active: Boolean(row.is_active),
@@ -134,12 +135,12 @@ export async function loadInventorySnapshot(context: Pick<TenantContext, 'tenant
 
 export async function saveInventoryItem(venueId: string, input: {
   id?: string | null; name: string; description: string; baseUnitId: string; active: boolean
-  routes: Array<{ warehouseId: string; priority: number; enabled: boolean }>
+  routes: Array<{ warehouseId: string; priority: number; enabled: boolean; targetQuantity?: number | null }>
 }) {
   const { data, error } = await requireSupabase().rpc('save_inventory_item', {
     p_venue_id: venueId, p_inventory_item_id: input.id ?? null, p_name: input.name,
     p_description: input.description, p_base_unit_id: input.baseUnitId, p_active: input.active,
-    p_routes: input.routes.map((route) => ({ warehouseId: route.warehouseId, priority: route.priority, enabled: route.enabled })),
+    p_routes: input.routes.map((route) => ({ warehouseId: route.warehouseId, priority: route.priority, enabled: route.enabled, targetQuantity: route.targetQuantity ?? null })),
   })
   if (error) throw error
   return String(data)
