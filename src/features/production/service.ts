@@ -25,6 +25,7 @@ function mapOrderState(value: unknown, orderId: string): OrderProductionState {
     lines: Array.isArray(row.lines) ? row.lines.map((entry) => {
       const line = entry as Record<string, unknown>
       return {
+        hasProductionDestination: Boolean(line.hasProductionDestination),
         lineId: String(line.lineId ?? ''),
         sentQuantity: readNumber(line.sentQuantity),
         readyQuantity: readNumber(line.readyQuantity),
