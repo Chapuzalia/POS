@@ -44,20 +44,24 @@ function OrderLineRow({ discount, isBusy, line, onDecrement, onEdit, onIncrement
   const production = productionState?.lines.find((state) => state.lineId === line.id)
   const additionNames = getLineAdditionNames(line.modifiers, line.mixer)
   return (
-    <article className={`rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 ${pending === 0 ? 'opacity-65' : ''}`}>
-      <div className="flex items-start justify-between gap-3">
+    <article className={`rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-2.5 ${pending === 0 ? 'opacity-70' : ''}`}>
+      <div className="flex items-start justify-between gap-2">
         <div className="min-w-0">
-          <p className="truncate font-bold">{line.quantity}x - {line.productName}</p>
+          <div className="flex items-center gap-2">
+            <p className="truncate font-bold">{line.quantity}x - {line.productName}</p>
+            <span className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${pending === 0 ? 'bg-[var(--success)]/15 text-[var(--success)]' : 'bg-[var(--warning)]/15 text-[var(--warning)]'}`}>
+              {pending === 0 ? 'Servido' : pending === line.quantity ? 'Pendiente' : 'Parcial'}
+            </span>
+          </div>
           {additionNames.length ? <p className="text-sm text-[var(--muted)]">+ {additionNames.join(', ')}</p> : null}
           <MenuComponentDetails compact components={line.components} />
-          <p className="mt-1 text-sm font-semibold text-[var(--muted)]">
-            {pending === 0 ? 'Todo servido' : `${line.servedQuantity} servidas - ${pending} ${pending === 1 ? 'pendiente' : 'pendientes'}`}
-          </p>
-          {productionState?.effective ? <p className="mt-1 text-xs font-black uppercase tracking-wide text-[var(--muted)]">Producción: {production?.unsentQuantity ?? line.quantity} sin enviar · {production?.readyQuantity ?? 0} listo(s)</p> : null}
+          {pending > 0 && pending < line.quantity ? <p className="mt-1 text-xs font-semibold text-[var(--muted)]">{line.servedQuantity} servidas · {pending} pendientes</p> : null}
+          {productionState?.effective ? <p className="mt-1 text-xs font-semibold text-[var(--muted)]">{production?.unsentQuantity ?? line.quantity} sin enviar · {production?.readyQuantity ?? 0} listas</p> : null}
           <button aria-haspopup="dialog" aria-label={`Editar precio unitario de ${line.productName}`} className="mt-1 inline cursor-pointer touch-manipulation border-0 bg-transparent p-0 font-mono text-sm tabular-nums text-[var(--muted)] focus:outline-none focus-visible:rounded-sm focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)] disabled:cursor-default" disabled={isBusy} onClick={onOpenUnitPriceEditor} type="button">
             {formatMoney(line.unitPriceCents)}/u
           </button>
           {discount && discount.discountAmountCents > 0 ? <p className="mt-1 flex flex-wrap items-baseline gap-2 font-mono text-sm">
+
             <span className="text-[var(--muted)] line-through">{formatMoney(discount.grossCents)}</span>
             <strong className="text-[var(--success)]">{formatMoney(discount.netCents)}</strong>
             <span className="text-xs font-semibold text-[var(--success)]">−{formatMoney(discount.discountAmountCents)}</span>
@@ -73,10 +77,10 @@ function OrderLineRow({ discount, isBusy, line, onDecrement, onEdit, onIncrement
           <Button aria-label="Eliminar línea" disabled={isBusy} onClick={() => onRemove(line.id)} size="sm" title="Eliminar línea" type="button" variant="tertiary"><Trash2 className="h-4 w-4" /></Button>
         </div>
       </div>
-      {pending > 0 ? <div className="mt-3 grid grid-cols-2 gap-2">
-        <Button disabled={isBusy} onClick={() => onServeOne(line.id)} size="md" type="button" variant="secondary"><Check className="h-4 w-4" /> Servir 1</Button>
-        <Button disabled={isBusy} onClick={() => onServeAll(line.id)} size="md" type="button" variant="primary"><CheckCheck className="h-4 w-4" /> Servir todas</Button>
-      </div> : null}
+       {pending > 0 ? <div className="mt-2 flex items-center justify-end gap-2 border-t border-[var(--separator)] pt-2">
+         {pending > 1 ? <Button disabled={isBusy} onClick={() => onServeOne(line.id)} size="sm" type="button" variant="tertiary"><Check className="h-4 w-4" /> Servir 1</Button> : null}
+         <Button disabled={isBusy} onClick={() => onServeAll(line.id)} size="sm" type="button" variant="secondary"><CheckCheck className="h-4 w-4" /> {pending === 1 ? 'Marcar servido' : `Servir ${pending}`}</Button>
+       </div> : null}
     </article>
   )
 }
@@ -152,18 +156,18 @@ export function RestaurantOrderPanel(props: Props) {
     <>
       <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
       {invoiceCustomerName && onChangeInvoiceCustomer && onRemoveInvoiceCustomer ? <InvoiceTicketNotice customerName={invoiceCustomerName} disabled={isBusy} onChange={onChangeInvoiceCustomer} onRemove={onRemoveInvoiceCustomer} /> : null}
-      <div className="min-h-0 flex-1 space-y-4 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
-        {order.lines.length === 0 ? <div className="flex min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">Pulsa un producto para añadirlo a la comanda.</div> : null}
-        {!productionState?.effective && pendingLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Por servir</h2><div className="space-y-2">{pendingLines.map(renderLine)}</div></section> : null}
-        {productionState?.effective && newLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Nuevos · {newLines.length}</h2><div className="space-y-2">{newLines.map(renderLine)}</div></section> : null}
-        {productionState?.effective && readyLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--success)]">Listos · {readyLines.length}</h2><div className="space-y-2">{readyLines.map(renderLine)}</div></section> : null}
-        {productionState?.effective && sentLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--muted)]">Enviados · {sentLines.length}</h2><div className="space-y-2">{sentLines.map(renderLine)}</div></section> : null}
-        {servedLines.length ? <section><h2 className="mb-2 text-xs font-black uppercase tracking-wide text-[var(--success)]">Servido</h2><div className="space-y-2">{servedLines.map(renderLine)}</div></section> : null}
-      </div>
-      <div className="space-y-3 border-t border-[var(--separator)] p-4">
+       <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
+         {order.lines.length === 0 ? <div className="flex min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">Pulsa un producto para añadirlo a la comanda.</div> : null}
+         {!productionState?.effective && pendingLines.length ? <section><h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Pendientes · {pendingUnits}</h2><div className="space-y-1.5">{pendingLines.map(renderLine)}</div></section> : null}
+         {productionState?.effective && readyLines.length ? <section><h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--success)]">Listo para servir · {readyLines.length}</h2><div className="space-y-1.5">{readyLines.map(renderLine)}</div></section> : null}
+         {productionState?.effective && newLines.length ? <section><h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Sin enviar a cocina · {newLines.length}</h2><div className="space-y-1.5">{newLines.map(renderLine)}</div></section> : null}
+         {productionState?.effective && sentLines.length ? <section><h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--muted)]">En preparación · {sentLines.length}</h2><div className="space-y-1.5">{sentLines.map(renderLine)}</div></section> : null}
+         {servedLines.length ? <section><h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--muted)]">Completados · {servedLines.length}</h2><div className="space-y-1.5">{servedLines.map(renderLine)}</div></section> : null}
+       </div>
+       <div className="space-y-2 border-t border-[var(--separator)] p-3">
         {productionState?.warnings.map((warning, index) => <p className="rounded-lg border border-[var(--danger)] p-2 text-sm font-bold text-[var(--danger)]" key={`${warning.destinationId}:${warning.status}:${index}`}>Impresión de producción {warning.status === 'unknown' ? 'sin confirmar' : 'fallida'}: {warning.message}</p>)}
         {productionState && onSendToProduction ? <ProductionControls disabled={isBusy} onSend={onSendToProduction} order={order} state={productionState} /> : null}
-        {pendingUnits > 0 ? <Button disabled={isBusy} fullWidth onClick={onServeAllOrder} size="lg" type="button" variant="primary"><CheckCheck className="h-5 w-5" /> Marcar {pendingUnits} {pendingUnits === 1 ? 'producto' : 'productos'} como servidos</Button> : order.lines.length ? <p className="text-center font-bold text-[var(--success)]">Todo servido OK</p> : null}
+         {pendingUnits > 0 ? <Button disabled={isBusy} fullWidth onClick={onServeAllOrder} size="md" type="button" variant="primary"><CheckCheck className="h-4 w-4" /> Servir toda la comanda · {pendingUnits}</Button> : order.lines.length ? <p className="text-center text-sm font-bold text-[var(--success)]">Comanda completada</p> : null}
       </div>
       </section>
       {valueEditor ? <NumericKeypadModal
