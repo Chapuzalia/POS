@@ -1,9 +1,7 @@
 import {
   ArrowDown,
   ArrowUp,
-  ChevronDown,
   CopyPlus,
-  GripVertical,
   Plus,
   RotateCcw,
   Settings,
