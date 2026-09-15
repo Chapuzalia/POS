@@ -18,7 +18,7 @@ type Draft = {
   description: string
   baseUnitId: string
   active: boolean
-  routes: Record<string, { enabled: boolean; priority: string }>
+  routes: Record<string, { enabled: boolean; priority: string; targetQuantity: string }>
 }
 
 const emptySnapshot: InventorySnapshot = { items: [], itemRoutes: [], levels: [], modifierEffects: [], productionRecipeLines: [], productionRecipes: [], recipeLines: [], recipes: [], units: [], warehouses: [] }
@@ -38,7 +38,8 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
   function open(item?: InventoryItem) {
     const routes = Object.fromEntries(snapshot.warehouses.map((warehouse, index) => {
       const route = item ? snapshot.itemRoutes.find((candidate) => candidate.inventoryItemId === item.id && candidate.warehouseId === warehouse.id) : null
-      return [warehouse.id, { enabled: route?.enabled ?? (!item && index === 0), priority: String(route?.priority ?? index + 1) }]
+      const level = item ? snapshot.levels.find((candidate) => candidate.inventoryItemId === item.id && candidate.warehouseId === warehouse.id) : null
+      return [warehouse.id, { enabled: route?.enabled ?? (!item && index === 0), priority: String(route?.priority ?? index + 1), targetQuantity: level?.targetQuantity == null ? '' : String(level.targetQuantity) }]
     }))
     setDraft({ id: item?.id ?? null, name: item?.name ?? '', description: item?.description ?? '', baseUnitId: item?.baseUnitId ?? snapshot.units.find((unit) => unit.active)?.id ?? '', active: item?.active ?? true, routes })
     setError(null)
@@ -46,11 +47,16 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
 
   async function save() {
     if (!draft) return
-    const routes = snapshot.warehouses.filter((warehouse) => draft.routes[warehouse.id]?.enabled).map((warehouse) => ({
-      warehouseId: warehouse.id, enabled: true, priority: Number(draft.routes[warehouse.id]?.priority),
-    }))
+    const routes = snapshot.warehouses.filter((warehouse) => draft.routes[warehouse.id]?.enabled).map((warehouse) => {
+      const targetValue = draft.routes[warehouse.id]?.targetQuantity.trim()
+      return {
+        warehouseId: warehouse.id, enabled: true, priority: Number(draft.routes[warehouse.id]?.priority),
+        targetQuantity: targetValue ? Number(targetValue.replace(',', '.')) : null,
+      }
+    })
     if (!draft.name.trim() || !draft.baseUnitId || !routes.length) return setError('Indica nombre, unidad y al menos un almacén.')
     if (routes.some((route) => !Number.isInteger(route.priority) || route.priority < 1) || new Set(routes.map((route) => route.priority)).size !== routes.length) return setError('Las prioridades activas deben ser enteros positivos diferentes.')
+    if (routes.some((route) => route.targetQuantity !== null && (!Number.isFinite(route.targetQuantity) || route.targetQuantity < 0))) return setError('El stock objetivo debe ser una cantidad válida igual o mayor que cero.')
     await runAction(async () => {
       await saveInventoryItem(selectedVenueId, { ...draft, routes })
       await refresh()
@@ -96,6 +102,6 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
       </tbody>
     </DataTable> : <div className="p-5"><EmptyList message="Crea el primer artículo físico de inventario." /></div>}
 
-    {draft ? <CrmModal label={draft.id ? 'Editar artículo' : 'Nuevo artículo'} onClose={() => setDraft(null)}><div className="flex items-center justify-between border-b border-[var(--crm-border-subtle)] p-5"><div><h2 className="text-lg font-bold">{draft.id ? 'Editar artículo' : 'Nuevo artículo'}</h2><p className="text-xs text-[var(--crm-text-muted)]">La ruta define de dónde se consume, no el TPV.</p></div><Button onClick={() => setDraft(null)} type="button" variant="tertiary"><X className="size-4" /></Button></div><div className="grid gap-4 p-5"><label className="grid gap-1 text-xs font-semibold">Nombre<Input autoFocus maxLength={120} onChange={(event) => setDraft({ ...draft, name: event.target.value })} value={draft.name} /></label><label className="grid gap-1 text-xs font-semibold">Descripción<TextArea maxLength={500} onChange={(event) => setDraft({ ...draft, description: event.target.value })} value={draft.description} /></label><label className="grid gap-1 text-xs font-semibold">Unidad física<CrmSelect onChange={(baseUnitId) => setDraft({ ...draft, baseUnitId })} options={snapshot.units.filter((unit) => unit.active).map((unit) => ({ label: `${unit.name} (${unit.symbol})`, value: unit.id }))} value={draft.baseUnitId} /></label><Checkbox checked={draft.active} onChange={(active) => setDraft({ ...draft, active })}>Artículo activo</Checkbox><div className="grid gap-2"><h3 className="text-sm font-bold">Ruta de almacenes</h3>{snapshot.warehouses.filter((warehouse) => warehouse.active).map((warehouse) => <div className="grid grid-cols-[1fr_110px] items-center gap-3 rounded-xl bg-[var(--crm-surface-soft)] p-3" key={warehouse.id}><Checkbox checked={draft.routes[warehouse.id]?.enabled ?? false} onChange={(enabled) => setDraft({ ...draft, routes: { ...draft.routes, [warehouse.id]: { ...draft.routes[warehouse.id], enabled } } })}>{warehouse.name}</Checkbox><Input aria-label={`Prioridad ${warehouse.name}`} disabled={!draft.routes[warehouse.id]?.enabled} min="1" onChange={(event) => setDraft({ ...draft, routes: { ...draft.routes, [warehouse.id]: { ...draft.routes[warehouse.id], priority: event.target.value } } })} type="number" value={draft.routes[warehouse.id]?.priority ?? ''} /></div>)}</div>{error ? <p className="rounded-xl bg-[var(--crm-red-soft)] p-3 text-sm font-semibold text-[var(--crm-red)]">{error}</p> : null}</div><div className="flex justify-end gap-2 border-t border-[var(--crm-border-subtle)] p-4"><Button onClick={() => setDraft(null)} type="button" variant="tertiary">Cancelar</Button><Button disabled={disabled} onClick={() => void save()} type="button"><Save className="size-4" /> Guardar</Button></div></CrmModal> : null}
+    {draft ? <CrmModal label={draft.id ? 'Editar artículo' : 'Nuevo artículo'} onClose={() => setDraft(null)}><div className="flex items-center justify-between border-b border-[var(--crm-border-subtle)] p-5"><div><h2 className="text-lg font-bold">{draft.id ? 'Editar artículo' : 'Nuevo artículo'}</h2><p className="text-xs text-[var(--crm-text-muted)]">La ruta define de dónde se consume, no el TPV.</p></div><Button onClick={() => setDraft(null)} type="button" variant="tertiary"><X className="size-4" /></Button></div><div className="grid gap-4 p-5"><label className="grid gap-1 text-xs font-semibold">Nombre<Input autoFocus maxLength={120} onChange={(event) => setDraft({ ...draft, name: event.target.value })} value={draft.name} /></label><label className="grid gap-1 text-xs font-semibold">Descripción<TextArea maxLength={500} onChange={(event) => setDraft({ ...draft, description: event.target.value })} value={draft.description} /></label><label className="grid gap-1 text-xs font-semibold">Unidad física<CrmSelect onChange={(baseUnitId) => setDraft({ ...draft, baseUnitId })} options={snapshot.units.filter((unit) => unit.active).map((unit) => ({ label: `${unit.name} (${unit.symbol})`, value: unit.id }))} value={draft.baseUnitId} /></label><Checkbox checked={draft.active} onChange={(active) => setDraft({ ...draft, active })}>Artículo activo</Checkbox><div className="grid gap-2"><h3 className="text-sm font-bold">Ruta de almacenes</h3>{snapshot.warehouses.filter((warehouse) => warehouse.active).map((warehouse) => <div className="grid gap-2 rounded-xl bg-[var(--crm-surface-soft)] p-3 sm:grid-cols-[1fr_110px_150px] sm:items-center" key={warehouse.id}><Checkbox checked={draft.routes[warehouse.id]?.enabled ?? false} onChange={(enabled) => setDraft({ ...draft, routes: { ...draft.routes, [warehouse.id]: { ...draft.routes[warehouse.id], enabled } } })}>{warehouse.name}</Checkbox><Input aria-label={`Prioridad ${warehouse.name}`} disabled={!draft.routes[warehouse.id]?.enabled} min="1" onChange={(event) => setDraft({ ...draft, routes: { ...draft.routes, [warehouse.id]: { ...draft.routes[warehouse.id], priority: event.target.value } } })} type="number" value={draft.routes[warehouse.id]?.priority ?? ''} /><Input aria-label={`Stock objetivo ${warehouse.name}`} disabled={!draft.routes[warehouse.id]?.enabled} inputMode="decimal" min="0" onChange={(event) => setDraft({ ...draft, routes: { ...draft.routes, [warehouse.id]: { ...draft.routes[warehouse.id], targetQuantity: event.target.value } } })} placeholder="Sin objetivo" value={draft.routes[warehouse.id]?.targetQuantity ?? ''} /></div>)}</div>{error ? <p className="rounded-xl bg-[var(--crm-red-soft)] p-3 text-sm font-semibold text-[var(--crm-red)]">{error}</p> : null}</div><div className="flex justify-end gap-2 border-t border-[var(--crm-border-subtle)] p-4"><Button onClick={() => setDraft(null)} type="button" variant="tertiary">Cancelar</Button><Button disabled={disabled} onClick={() => void save()} type="button"><Save className="size-4" /> Guardar</Button></div></CrmModal> : null}
   </section>
 }
