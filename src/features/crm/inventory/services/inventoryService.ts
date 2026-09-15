@@ -71,6 +71,25 @@ export async function createInventoryUnit(context: TenantContext, venueId: strin
   if (error) throw error
 }
 
+export async function updateInventoryUnit(context: TenantContext, venueId: string, unitId: string, input: {
+  name: string; symbol: string; decimalPlaces: number; contentQuantity: number; contentUnitId: string | null; active: boolean
+}) {
+  const name = validateInventoryName(input.name, 'de la unidad')
+  const symbol = validateInventoryUnitSymbol(input.symbol)
+  const decimalPlaces = validateInventoryDecimalPlaces(input.decimalPlaces)
+  const { error } = await requireSupabase().from('inventory_units').update({
+    name, symbol, decimal_places: decimalPlaces, content_quantity: input.contentQuantity,
+    content_unit_id: input.contentUnitId ?? unitId, is_active: input.active,
+  }).eq('id', unitId).eq('tenant_id', context.tenantId).eq('venue_id', venueId)
+  if (error) throw error
+}
+
+export async function deleteInventoryUnit(context: TenantContext, venueId: string, unitId: string) {
+  const { error } = await requireSupabase().from('inventory_units').delete()
+    .eq('id', unitId).eq('tenant_id', context.tenantId).eq('venue_id', venueId)
+  if (error) throw error
+}
+
 export async function loadInventoryWarehouses(context: Pick<TenantContext, 'tenantId'>, venueId: string) {
   return (await rows('inventory_warehouses', 'id, tenant_id, venue_id, name, description, is_active, sort_order, created_at, updated_at', context, venueId))
     .map(mapInventoryWarehouse).toSorted((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'es'))
