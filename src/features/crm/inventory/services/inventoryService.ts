@@ -71,6 +71,25 @@ export async function createInventoryUnit(context: TenantContext, venueId: strin
   if (error) throw error
 }
 
+export async function updateInventoryUnit(context: TenantContext, venueId: string, unitId: string, input: {
+  name: string; symbol: string; decimalPlaces: number; contentQuantity: number; contentUnitId: string | null; active: boolean
+}) {
+  const name = validateInventoryName(input.name, 'de la unidad')
+  const symbol = validateInventoryUnitSymbol(input.symbol)
+  const decimalPlaces = validateInventoryDecimalPlaces(input.decimalPlaces)
+  const { error } = await requireSupabase().from('inventory_units').update({
+    name, symbol, decimal_places: decimalPlaces, content_quantity: input.contentQuantity,
+    content_unit_id: input.contentUnitId ?? unitId, is_active: input.active,
+  }).eq('id', unitId).eq('tenant_id', context.tenantId).eq('venue_id', venueId)
+  if (error) throw error
+}
+
+export async function deleteInventoryUnit(context: TenantContext, venueId: string, unitId: string) {
+  const { error } = await requireSupabase().from('inventory_units').delete()
+    .eq('id', unitId).eq('tenant_id', context.tenantId).eq('venue_id', venueId)
+  if (error) throw error
+}
+
 export async function loadInventoryWarehouses(context: Pick<TenantContext, 'tenantId'>, venueId: string) {
   return (await rows('inventory_warehouses', 'id, tenant_id, venue_id, name, description, is_active, sort_order, created_at, updated_at', context, venueId))
     .map(mapInventoryWarehouse).toSorted((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'es'))
@@ -91,7 +110,7 @@ export async function loadInventorySnapshot(context: Pick<TenantContext, 'tenant
     loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
     rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
     rows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId),
-    rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled', context, venueId),
+    rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled, target_quantity', context, venueId),
     rows('inventory_recipes', 'id, variant_id, mode, is_active', context, venueId),
     rows('inventory_recipe_lines', 'id, recipe_id, inventory_item_id, quantity, unit_id, uses_format_default, sort_order', context, venueId),
     rows('modifier_inventory_effects', 'id, modifier_id, operation, inventory_item_id, quantity, unit_id, sort_order', context, venueId),
@@ -107,6 +126,7 @@ export async function loadInventorySnapshot(context: Pick<TenantContext, 'tenant
     levels: levelRows.map<InventoryStockLevel>((row) => ({
       inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id),
       quantity: number(row.quantity), enabled: Boolean(row.is_enabled),
+      targetQuantity: row.target_quantity == null ? null : number(row.target_quantity),
     })),
     recipes: recipeRows.map<InventoryRecipe>((row) => ({
       id: string(row.id), variantId: string(row.variant_id), mode: row.mode === 'direct' ? 'direct' : 'recipe', active: Boolean(row.is_active),
@@ -134,12 +154,12 @@ export async function loadInventorySnapshot(context: Pick<TenantContext, 'tenant
 
 export async function saveInventoryItem(venueId: string, input: {
   id?: string | null; name: string; description: string; baseUnitId: string; active: boolean
-  routes: Array<{ warehouseId: string; priority: number; enabled: boolean }>
+  routes: Array<{ warehouseId: string; priority: number; enabled: boolean; targetQuantity?: number | null }>
 }) {
   const { data, error } = await requireSupabase().rpc('save_inventory_item', {
     p_venue_id: venueId, p_inventory_item_id: input.id ?? null, p_name: input.name,
     p_description: input.description, p_base_unit_id: input.baseUnitId, p_active: input.active,
-    p_routes: input.routes.map((route) => ({ warehouseId: route.warehouseId, priority: route.priority, enabled: route.enabled })),
+    p_routes: input.routes.map((route) => ({ warehouseId: route.warehouseId, priority: route.priority, enabled: route.enabled, targetQuantity: route.targetQuantity ?? null })),
   })
   if (error) throw error
   return String(data)

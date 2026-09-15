@@ -1,14 +1,17 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
-import { Ban, FileText, History, QrCode, RefreshCw, Send, SlidersHorizontal, X } from 'lucide-react'
+import { Ban, Download, FileText, History, QrCode, RefreshCw, Send, SlidersHorizontal, X } from 'lucide-react'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination'
 import { CrmModal } from '../../shared/components/CrmModal'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { KpiCard } from '../../dashboard/pages/DashboardPage'
-import { formatMoney, normalizeText } from '../../../../lib/format'
+import { formatMoney, formatTicketNumber, normalizeText } from '../../../../lib/format'
 import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
+import { loadAccountingTickets, type AccountingTicketRow } from '../services/accountingExportService'
+import { buildCsv, downloadCsv } from '../../../../lib/csv'
+import { sileo } from 'sileo'
 import { loadCrmSalesReportFilterOptions, loadCrmSalesReportPage, loadCrmSalesReportAggregatePage, type CrmSalesReportAggregatePage, type CrmSalesReportFilterOptions, type CrmSalesReportFilters, type CrmSalesReportPage } from '../services/salesReportsService'
 import { buildSalesReportTicketTotals, crmReportDateTimeFormatter, paymentLabels, salesReportTabs, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
 import { useSalesReportSummary } from '../hooks/useSalesReportSummary'
@@ -25,6 +28,22 @@ export type SalesReportsCrmProps = {
   selectedVenueId: string
   tenantContext: TenantContext
   timeZone: string
+}
+
+function formatCents(value: number | string) {
+  return (Number(value) / 100).toFixed(2)
+}
+
+function exportTicketRowsToCsv(rows: AccountingTicketRow[], timeZone: string) {
+  const rates = [...new Set([10, 21, ...rows.flatMap((row) => row.tax_breakdown.map((tax) => Number(tax.rate)).filter(Number.isFinite))])].sort((a, b) => a - b)
+  const headers = ['Fecha', 'Hora', 'Venue', 'Caja', 'Número ticket', ...rates.flatMap((rate) => [`Base ${rate}%`, `IVA ${rate}%`]), 'Otras bases', 'Otros IVA', 'Total ticket', 'Efectivo', 'Tarjeta', 'Otros pagos', 'Descuentos', 'Propinas', 'Es factura', 'Serie factura', 'Número factura', 'Es devolución/rectificativa', 'Cliente', 'NIF/CIF', 'ID interno']
+  const formatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+  const rowsCsv = rows.map((row) => {
+    const parts = formatter.formatToParts(new Date(row.local_created_at)).reduce<Record<string, string>>((result, part) => { if (part.type !== 'literal') result[part.type] = part.value; return result }, {})
+    const taxes = new Map(row.tax_breakdown.map((tax) => [Number(tax.rate), tax]))
+    return [`${parts.year}-${parts.month}-${parts.day}`, `${parts.hour}:${parts.minute}:${parts.second}`, row.venue_name, row.cash_register_name, String(row.ticket_number).padStart(6, '0'), ...rates.flatMap((rate) => { const tax = taxes.get(rate); return [formatCents(tax?.baseCents ?? 0), formatCents(tax?.taxCents ?? 0)] }), formatCents(0), formatCents(0), formatCents(row.total_cents), formatCents(row.payment_cash_cents), formatCents(row.payment_card_cents), formatCents(row.payment_other_cents), formatCents(row.discount_cents), formatCents(row.tip_cents), row.is_invoice ? 'Sí' : 'No', row.invoice_series ?? '', row.invoice_number ?? '', row.invoice_type === 'corrective' || row.status === 'void' ? 'Sí' : 'No', row.customer_name ?? '', row.customer_tax_id ?? '', row.ticket_id]
+  })
+  return { headers, rowsCsv }
 }
 
 function useDebouncedFilter(value: string, delayMs = 250) {
@@ -48,6 +67,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   const [filterOptions, setFilterOptions] = useState<CrmSalesReportFilterOptions | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [isReportLoading, setIsReportLoading] = useState(true)
+  const [isExporting, setIsExporting] = useState(false)
   const [productQuery, setProductQuery] = useState('')
   const [aggregatePage, setAggregatePage] = useState<CrmSalesReportAggregatePage | null>(null)
   const [selectedTicketId, setSelectedTicketId] = useState<string | null>(null)
@@ -154,6 +174,25 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
     setSortDirection(nextSortKey === 'label' || nextSortKey === 'ticketId' || nextSortKey === 'paymentMethod' || nextSortKey === 'status' ? 'asc' : 'desc')
   }
 
+  async function exportAccountingTickets() {
+    if (isExporting || activeView !== 'tickets' || !selectedVenueId || !reportFilters.dateFromIso || !reportFilters.dateToIso) return
+    setIsExporting(true)
+    try {
+      const rows = await loadAccountingTickets({ ...tenantContext, venueId: selectedVenueId }, reportFilters)
+      if (!rows.length) {
+        sileo.info({ title: 'No hay tickets en el periodo seleccionado.' })
+        return
+      }
+      const { headers, rowsCsv } = exportTicketRowsToCsv(rows, timeZone)
+      downloadCsv(buildCsv(headers, rowsCsv), `tickets_${dateFrom}_${dateTo}.csv`)
+      sileo.success({ title: 'Exportación generada' })
+    } catch {
+      sileo.error({ title: 'No se ha podido generar la exportación.' })
+    } finally {
+      setIsExporting(false)
+    }
+  }
+
   function clearFilters() {
     setCategoryQuery('')
     setDateFrom('')
@@ -171,16 +210,21 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
             <h2>Resumen histórico</h2>
             <p>Datos del local seleccionado</p>
           </div>
-          <UiButton
-            aria-label="Actualizar informes de ventas"
+           <div className="!flex !items-center !gap-2">
+             <UiButton className="!min-h-10 !rounded-[10px] !bg-[var(--crm-blue)] !px-3 !text-white" disabled={disabled || isExporting || activeView !== 'tickets' || !selectedVenueId || !dateFrom || !dateTo} onClick={() => void exportAccountingTickets()} type="button">
+               <Download className="!size-4" />{isExporting ? 'Exportando...' : 'Exportar tickets'}
+             </UiButton>
+             <UiButton
+             aria-label="Actualizar informes de ventas"
             className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"
             disabled={disabled}
             onClick={() => void runAction(refreshAll)}
             type="button"
           >
-            <RefreshCw className="h-4 w-4" />
-          </UiButton>
-        </div>
+             <RefreshCw className="h-4 w-4" />
+             </UiButton>
+           </div>
+         </div>
         <div aria-busy={isSummaryLoading} aria-label="Totales de ventas" className="!grid !grid-cols-1 !gap-3 !px-[18px] !pt-3 !pb-[18px] sm:!grid-cols-2 md:!px-[22px] md:!pt-3.5 md:!pb-[22px] lg:!grid-cols-4 lg:!gap-[18px]">
           <KpiCard color="neutral" label="Subtotal" value={reportTotals ? formatMoney(reportTotals.subtotalCents) : isSummaryLoading ? '…' : '—'} />
           <KpiCard color="blue" label="Impuestos" value={reportTotals ? formatMoney(reportTotals.taxAmountCents) : isSummaryLoading ? '…' : '—'} />
@@ -421,7 +465,7 @@ export function SalesReportTicketsTable({
         <tbody>
           {tickets.map((ticket) => (
             <tr
-              aria-label={`Ver detalles del ticket ${ticket.id.slice(0, 8)}`}
+              aria-label={`Ver detalles del ticket ${formatTicketNumber(ticket.ticketNumber ?? 0)}`}
               className="!cursor-pointer !border-b !border-[var(--crm-border-subtle)] !outline-none hover:!bg-[var(--crm-surface-soft)] focus-visible:!bg-[var(--crm-surface-soft)] last:!border-0"
               key={ticket.id}
               onClick={() => onSelect(ticket.id)}
@@ -436,7 +480,7 @@ export function SalesReportTicketsTable({
             >
               <td className="!px-[22px] !py-4">
                 <strong className="!block !truncate !text-sm !font-semibold !text-[var(--crm-text)]">
-                  #{ticket.id.slice(0, 8).toUpperCase()}
+#{formatTicketNumber(ticket.ticketNumber ?? 0)}
                 </strong>
                 <span className="!block !truncate !text-xs !font-medium !text-[var(--crm-text-muted)]">
                   {ticket.lineCount} líneas
@@ -533,10 +577,10 @@ export function SalesReportTicketModal({
   }
 
   return (
-    <CrmModal label={`Detalle del ticket ${ticket.id.slice(0, 8)}`} onClose={onClose} size="large">
+    <CrmModal label={`Detalle del ticket ${formatTicketNumber(ticket.ticketNumber ?? 0)}`} onClose={onClose} size="large">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] bg-transparent p-3 text-[var(--crm-text)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:text-[15px] [&_span]:font-bold [&_small]:truncate [&_small]:text-xs [&_small]:font-medium [&_small]:text-[var(--crm-text-muted)] !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
         <div>
-          <span>Ticket #{ticket.id.slice(0, 8).toUpperCase()}</span>
+          <span>Ticket #{formatTicketNumber(ticket.ticketNumber ?? 0)}</span>
           <small>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</small>
         </div>
         <UiButton

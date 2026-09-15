@@ -43,8 +43,11 @@ type SalesReportPageRow = {
 }
 
 const ticketSelect = `
-  id,
-  status,
+    id,
+    ticket_number,
+    tenant_id,
+    venue_id,
+    status,
   subtotal_cents,
   discount_id,
   discount_name,
@@ -133,6 +136,9 @@ export type SalesReportLineRow = {
 
 export type SalesReportTicketRow = {
   id: string
+  ticket_number: number | string
+  tenant_id: string
+  venue_id: string
   local_created_at: string
   sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
   status: 'paid' | 'void'
@@ -242,6 +248,7 @@ async function loadTicketRows(context: TenantContext, venueId: string | undefine
 function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicket {
   return {
     id: ticket.id,
+    ticketNumber: Number(ticket.ticket_number),
     createdAt: ticket.local_created_at,
     lineCount: ticket.ticket_lines?.length ?? 0,
     lines: (ticket.ticket_lines ?? []).map((line) => {

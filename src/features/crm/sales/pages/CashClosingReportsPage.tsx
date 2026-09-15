@@ -4,7 +4,7 @@ import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPaginat
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { CrmModal } from '../../shared/components/CrmModal'
-import { Pencil, RefreshCw, Save, X } from "lucide-react";
+import { Download, Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
 import {
@@ -26,8 +26,11 @@ import {
 } from "../services/cashClosingReportModel";
 import type { OperationalDayConfig } from "../../../../lib/operationalDay";
 import { loadCashClosingReports } from '../services/revoCashClosingService';
+import { loadAccountingClosures, type AccountingClosureRow } from '../services/accountingExportService'
+import { buildCsv, downloadCsv } from '../../../../lib/csv'
 import { ImportedClosingDetail } from '../components/ImportedClosingDetail';
 import { formatRevoDate, type ImportedCashClosing } from '../../../../lib/revoCashClosings.ts';
+import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
 
 type Props = {
   dayChangeTime: string | null;
@@ -49,6 +52,31 @@ const operationalDateFormatter = new Intl.DateTimeFormat("es-ES", {
 
 function formatOperationalDate(date: string) {
   return operationalDateFormatter.format(new Date(`${date}T12:00:00Z`));
+}
+
+function formatCents(value: number | string) {
+  return (Number(value) / 100).toFixed(2)
+}
+
+function exportClosureRowsToCsv(rows: AccountingClosureRow[], timeZone: string) {
+  const rates = [10, 21]
+  const headers = ['Fecha apertura', 'Fecha cierre', 'Venue', 'Caja', 'Turno', 'Primer ticket', 'Último ticket', 'Número tickets', ...rates.flatMap((rate) => [`Base ${rate}%`, `IVA ${rate}%`]), 'Otras bases imponibles', 'Otros IVA', 'Total ventas', 'Efectivo', 'Tarjeta', 'Otros pagos', 'Devoluciones / rectificaciones', 'Descuentos', 'Propinas']
+  const dateFormatter = new Intl.DateTimeFormat('en-CA', { timeZone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+  const rowsCsv = rows.map((row) => {
+    const taxes = new Map(row.tax_breakdown.map((tax) => [Number(tax.rate), tax]))
+    const knownRates = new Set(rates)
+    const otherBase = row.tax_breakdown.filter((tax) => !knownRates.has(Number(tax.rate))).reduce((sum, tax) => sum + Number(tax.baseCents), 0)
+    const otherTax = row.tax_breakdown.filter((tax) => !knownRates.has(Number(tax.rate))).reduce((sum, tax) => sum + Number(tax.taxCents), 0)
+    const formatDateTime = (value: string) => dateFormatter.format(new Date(value))
+    return [
+      formatDateTime(row.opened_at), formatDateTime(row.closed_at), row.venue_name, row.cash_register_name, row.shift_label,
+      row.first_ticket_number === null ? '' : String(row.first_ticket_number).padStart(6, '0'),
+      row.last_ticket_number === null ? '' : String(row.last_ticket_number).padStart(6, '0'), row.ticket_count,
+      ...rates.flatMap((rate) => { const tax = taxes.get(rate); return [formatCents(tax?.baseCents ?? 0), formatCents(tax?.taxCents ?? 0)] }),
+      formatCents(otherBase), formatCents(otherTax), formatCents(row.total_sales_cents), formatCents(row.cash_cents), formatCents(row.card_cents), formatCents(row.other_payment_cents), formatCents(row.refunds_cents), formatCents(row.discounts_cents), formatCents(row.tips_cents),
+    ]
+  })
+  return { headers, rowsCsv }
 }
 
 function renderClosingDate(
@@ -571,6 +599,28 @@ export function CashClosingReportsCrm({
     () => buildCashClosingDailyValues(filteredClosings, operationalDayConfig),
     [filteredClosings, operationalDayConfig],
   );
+  const [isExporting, setIsExporting] = useState(false)
+
+  async function exportAccountingCsv() {
+    if (isExporting || !dateFrom || !dateTo || dateFrom > dateTo) return
+    setIsExporting(true)
+    try {
+      const from = getOperationalDayRangeIso(operationalDayConfig, dateFrom).startIso
+      const to = getOperationalDayRangeIso(operationalDayConfig, dateTo).endIso
+      const rows = await loadAccountingClosures({ ...tenantContext, venueId: selectedVenueId }, from, to)
+      if (!rows.length) {
+        sileo.info({ title: 'No hay cierres en el periodo seleccionado.' })
+        return
+      }
+      const { headers, rowsCsv } = exportClosureRowsToCsv(rows, timeZone)
+      downloadCsv(buildCsv(headers, rowsCsv), `cierres_gestoria_${dateFrom}_${dateTo}.csv`)
+      sileo.success({ title: 'Exportación generada' })
+    } catch {
+      sileo.error({ title: 'No se ha podido generar la exportación.' })
+    } finally {
+      setIsExporting(false)
+    }
+  }
 
   const saveClosingCounts = useCallback(
     async (
@@ -653,9 +703,12 @@ export function CashClosingReportsCrm({
                 ? `${filteredClosings.length} resultados`
                 : "Cargando cierres..."}
             </p>
-          </div>
-        </div>
-        <div className="!overflow-x-auto">
+           </div>
+           <UiButton className="!min-h-10 !rounded-[10px] !bg-[var(--crm-blue)] !px-3 !text-white" disabled={disabled || isExporting || !selectedVenueId} onClick={() => void exportAccountingCsv()} type="button">
+             <Download className="!size-4" />{isExporting ? 'Exportando...' : 'Exportar gestoría'}
+           </UiButton>
+         </div>
+         <div className="!overflow-x-auto">
           <UiDataTable aria-label="Cierres de caja" className="!w-full !min-w-[1050px] !border-collapse" emptyContent={closings ? 'No hay cierres de caja para el período seleccionado.' : 'Cargando cierres…'} filterable={false}
             sortDescriptor={sortDescriptor} onSortChange={(descriptor) => { setSortDescriptor(descriptor); setCurrentPage(1); }}>
             <thead>

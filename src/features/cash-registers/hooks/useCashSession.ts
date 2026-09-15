@@ -163,8 +163,9 @@ export function useCashSession(options: Options) {
     if (!options.context) return
     if (!printOptions.isReprint && !ticketsRef.current.some((ticket) => ticket.id === payload.sale.id)) {
       persistTickets([{
-        id: payload.sale.id,
-        cashSessionId: payload.sale.cashSessionId,
+         id: payload.sale.id,
+         ticketNumber: payload.ticket.ticketNumber ?? 0,
+         cashSessionId: payload.sale.cashSessionId,
         paymentMethod: payload.sale.paymentMethod,
         totalCents: payload.sale.totalCents,
         createdAt: payload.sale.createdAt,
