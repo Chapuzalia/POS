@@ -1,9 +1,8 @@
 import {
-  ArrowDown,
   ArrowLeft,
-  ArrowUp,
   ChevronRight,
   CopyPlus,
+  GripVertical,
   Plus,
   RotateCcw,
   Save,
@@ -147,22 +146,6 @@ export function PrintTemplatesCrm({
     }));
   };
 
-  const moveEditingBlock = (offset: -1 | 1) => {
-    if (!editing) return;
-    const resolved = readBlockAtPath(editing.path, definition.blocks);
-    if (!resolved) return;
-    const target = resolved.index + offset;
-    if (target < 0 || target >= resolved.siblings.length) return;
-    setDefinition((current) => ({
-      ...current,
-      blocks: moveBlockAtPath(editing.path, offset, current.blocks).blocks,
-    }));
-    setEditing({
-      ...editing,
-      path: [...editing.path.slice(0, -1), target],
-    });
-  };
-
   const deleteEditingBlock = () => {
     if (!editing) return;
     setDefinition((current) => ({
@@ -268,8 +251,14 @@ export function PrintTemplatesCrm({
               disabled={disabled}
               emptyMessage="Añade al menos un bloque."
               layout={previewLayout}
-              onOpen={(path) => setEditing({ path, context: mockContext })}
-              paper
+          onMove={(from, to) =>
+            setDefinition((current) => ({
+              ...current,
+              blocks: reorderBlockAtPath(from, to, current.blocks),
+            }))
+          }
+          onOpen={(path) => setEditing({ path, context: mockContext })}
+          paper
             />
           </div>
           <p className="mt-3 text-center text-[11px] text-[var(--crm-text-muted)]">
@@ -338,8 +327,6 @@ export function PrintTemplatesCrm({
         <BlockModal
           block={edited.block}
           canGoBack={editing.path.length > 1}
-          canMoveDown={edited.index < edited.siblings.length - 1}
-          canMoveUp={edited.index > 0}
           context={editing.context}
           disabled={disabled}
           label={blockLabel(edited.block.type)}
@@ -351,8 +338,6 @@ export function PrintTemplatesCrm({
           onChange={updateEditingBlock}
           onClose={() => setEditing(null)}
           onDelete={deleteEditingBlock}
-          onMoveDown={() => moveEditingBlock(1)}
-          onMoveUp={() => moveEditingBlock(-1)}
           onOpenChild={(childPath, childContext) =>
             setEditing({ path: childPath, context: childContext })
           }
@@ -370,6 +355,7 @@ function BlockRows({
   disabled,
   emptyMessage,
   layout,
+  onMove,
   onOpen,
   paper = true,
 }: {
@@ -379,9 +365,11 @@ function BlockRows({
   disabled: boolean;
   emptyMessage: string;
   layout: PrinterLayout;
+  onMove?: (from: BlockPath, to: BlockPath) => void;
   onOpen: (path: BlockPath, childContext?: PrintTemplateContext) => void;
   paper?: boolean;
 }) {
+  const [draggingPath, setDraggingPath] = useState<BlockPath | null>(null);
   if (!blocks.length)
     return (
       <p className="rounded-xl bg-[var(--crm-surface-soft)] p-3 text-xs text-[var(--crm-text-muted)]">
@@ -394,16 +382,39 @@ function BlockRows({
         const path = [...basePath, index];
         return (
           <button
-            className={
+            className={`${
               paper
                 ? "group flex w-full cursor-pointer items-start gap-1.5 py-0.5 pr-1 pl-0.5 text-left transition-colors hover:bg-amber-300 disabled:cursor-default disabled:opacity-60 disabled:hover:bg-transparent"
                 : "group flex w-full cursor-pointer items-center gap-2 px-2.5 py-1.5 text-left transition-colors hover:bg-[var(--crm-surface-hover)] disabled:cursor-default disabled:opacity-60"
-            }
+            } ${pathKey(draggingPath) === pathKey(path) ? "opacity-40" : ""}`}
             disabled={disabled}
+            draggable={!disabled}
             key={block.id}
             onClick={() => onOpen(path)}
+            onDragEnd={() => setDraggingPath(null)}
+            onDragOver={(event) => {
+              if (draggingPath && pathKey(draggingPath) !== pathKey(path))
+                event.preventDefault();
+            }}
+            onDragStart={(event) => {
+              setDraggingPath(path);
+              event.dataTransfer.effectAllowed = "move";
+              event.dataTransfer.setData("text/plain", pathKey(path));
+            }}
+            onDrop={(event) => {
+              event.preventDefault();
+              const source = parsePath(event.dataTransfer.getData("text/plain"));
+              if (source && onMove) onMove(source, path);
+              setDraggingPath(null);
+            }}
             type="button"
           >
+            <span
+              aria-hidden="true"
+              className="mt-0.5 shrink-0 cursor-grab text-[var(--crm-text-muted)] opacity-40 transition-opacity group-hover:opacity-100 active:cursor-grabbing"
+            >
+              <GripVertical className="h-3.5 w-3.5" />
+            </span>
             <span className="min-w-0 flex-1 font-mono text-[12px] leading-[1.45]">
               <RowPreview block={block} context={context} layout={layout} />
             </span>
@@ -486,8 +497,6 @@ function RowPreview({
 function BlockModal({
   block,
   canGoBack,
-  canMoveDown,
-  canMoveUp,
   context,
   disabled,
   label,
@@ -497,15 +506,11 @@ function BlockModal({
   onChange,
   onClose,
   onDelete,
-  onMoveDown,
-  onMoveUp,
   onOpenChild,
   path,
 }: {
   block: PrintTemplateBlock;
   canGoBack: boolean;
-  canMoveDown: boolean;
-  canMoveUp: boolean;
   context: PrintTemplateContext;
   disabled: boolean;
   label: string;
@@ -515,8 +520,6 @@ function BlockModal({
   onChange: (block: PrintTemplateBlock) => void;
   onClose: () => void;
   onDelete: () => void;
-  onMoveDown: () => void;
-  onMoveUp: () => void;
   onOpenChild: (path: BlockPath, childContext: PrintTemplateContext) => void;
   path: BlockPath;
 }) {
@@ -766,26 +769,11 @@ function BlockModal({
         </div>
 
         <footer className="flex flex-wrap items-center gap-2 border-t border-[var(--crm-border-subtle)] px-5 py-3">
-          <Button
-            aria-label="Subir bloque"
-            disabled={disabled || !canMoveUp}
-            onClick={onMoveUp}
-            size="sm"
-            variant="secondary"
-          >
-            <ArrowUp className="h-3.5 w-3.5" /> Subir
-          </Button>
-          <Button
-            aria-label="Bajar bloque"
-            disabled={disabled || !canMoveDown}
-            onClick={onMoveDown}
-            size="sm"
-            variant="secondary"
-          >
-            <ArrowDown className="h-3.5 w-3.5" /> Bajar
-          </Button>
+          <span className="text-[11px] text-[var(--crm-text-muted)]">
+            Arrastra las filas desde el asa del ticket para reordenarlas.
+          </span>
           <span className="ml-auto hidden text-[11px] text-[var(--crm-text-muted)] sm:block">
-            Reordena el bloque en el ticket con estas flechas.
+            El orden se guarda al pulsar Guardar.
           </span>
           <Button
             aria-label="Eliminar bloque"
@@ -969,32 +957,6 @@ function updateBlockAtPath(
   });
 }
 
-function moveBlockAtPath(
-  path: BlockPath,
-  offset: -1 | 1,
-  blocks: PrintTemplateBlock[],
-): { blocks: PrintTemplateBlock[]; moved: boolean } {
-  const resolved = readBlockAtPath(path, blocks);
-  if (!resolved) return { blocks, moved: false };
-  const target = resolved.index + offset;
-  if (target < 0 || target >= resolved.siblings.length)
-    return { blocks, moved: false };
-  const next = swap(resolved.siblings, resolved.index, target);
-  if (resolved.parent) {
-    const parent = resolved.parent;
-    if (parent.type !== "repeat") return { blocks, moved: false };
-    return {
-      blocks: updateBlockAtPath(
-        path.slice(0, -1),
-        { ...parent, blocks: next },
-        blocks,
-      ),
-      moved: true,
-    };
-  }
-  return { blocks: next, moved: true };
-}
-
 function removeBlockAtPath(
   path: BlockPath,
   blocks: PrintTemplateBlock[],
@@ -1034,10 +996,34 @@ function appendBlockAtPath(
   );
 }
 
-function swap<T>(items: T[], from: number, to: number): T[] {
-  const next = [...items];
-  [next[from], next[to]] = [next[to], next[from]];
-  return next;
+function pathKey(path: BlockPath | null) {
+  return path?.join(".") ?? "";
+}
+
+function parsePath(value: string): BlockPath | null {
+  if (!value) return null;
+  const path = value.split(".").map(Number);
+  return path.every(Number.isInteger) ? path : null;
+}
+
+function reorderBlockAtPath(
+  from: BlockPath,
+  to: BlockPath,
+  blocks: PrintTemplateBlock[],
+): PrintTemplateBlock[] {
+  if (from.length !== to.length || from.slice(0, -1).some((value, index) => value !== to[index]))
+    return blocks;
+  const sourceIndex = from[from.length - 1];
+  const targetIndex = to[to.length - 1];
+  if (sourceIndex === targetIndex) return blocks;
+  const resolved = readBlockAtPath(from, blocks);
+  if (!resolved) return blocks;
+  const reordered = [...resolved.siblings];
+  const [moved] = reordered.splice(sourceIndex, 1);
+  reordered.splice(targetIndex, 0, moved);
+  if (!resolved.parent) return reordered;
+  if (resolved.parent.type !== "repeat") return blocks;
+  return updateBlockAtPath(from.slice(0, -1), { ...resolved.parent, blocks: reordered }, blocks);
 }
 
 function sampleScope(
