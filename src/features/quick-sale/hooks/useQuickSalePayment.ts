@@ -3,6 +3,7 @@ import { getReadableError } from '../../../utils/errors.ts'
 import { useCallback, useRef } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
+import { loadSessionTicketFromSupabase } from '../../../services/posService'
 import { buildSalePayload } from '../services/salePayload'
 import { loadFiscalReceiptData } from '../../fiscal/service'
 import { loadTicketInvoice } from '../../customers/service'
@@ -31,6 +32,7 @@ type Options = {
   resetUi: (method: PaymentMethod | null) => void
   refreshPendingCount: () => void
   syncPendingEvents: () => Promise<void>
+  loadPersistedTicket?: (ticketId: string) => Promise<SessionTicketRecord | null>
   printSale: (payload: SessionTicketRecord['payload']) => Promise<void>
   onError: (message: string | null) => void
   onPaymentInFlightChange?: (inFlight: boolean) => void
@@ -107,7 +109,7 @@ export function useQuickSalePayment(options: Options) {
         }
       : preview
     const saleRecord: SaleRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt }
-    const ticketRecord: SessionTicketRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt, status: 'active', payload, printStatus: 'not_requested', printAttempts: 0 }
+    const ticketRecord: SessionTicketRecord = { id: payload.sale.id, ticketNumber: payload.ticket.ticketNumber ?? 0, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt, status: 'active', payload, printStatus: 'not_requested', printAttempts: 0 }
     operationBreadcrumb({ operation: 'sale.payment', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'persist' })
     try {
       enqueueOfflineEvent({ id: createId(), kind: 'sale_created', tenantId: context.tenantId, createdAt: payload.sale.createdAt, attempts: 0, payload })
@@ -127,6 +129,10 @@ export function useQuickSalePayment(options: Options) {
     if (options.isOnline) {
       await options.syncPendingEvents()
       try {
+        const persistedTicket = await (options.loadPersistedTicket
+          ? options.loadPersistedTicket(payload.ticket.id)
+          : loadSessionTicketFromSupabase(context, cashSession.id, payload.ticket.id))
+        if (persistedTicket) printPayload = persistedTicket.payload
         const fiscal = await loadFiscalReceiptData(context.tenantId, payload.ticket.id)
         if (fiscal) printPayload = { ...payload, fiscal }
         const invoice = options.invoiceCustomer
@@ -139,8 +145,11 @@ export function useQuickSalePayment(options: Options) {
         if (invoice) {
           printPayload = { ...printPayload, ticket: { ...printPayload.ticket, invoice } }
         }
-        if (fiscal || invoice) {
-          options.persistTickets([{ ...ticketRecord, payload: printPayload }, ...options.tickets])
+        if (persistedTicket || fiscal || invoice) {
+          options.persistTickets([{
+            ...(persistedTicket ?? ticketRecord),
+            payload: printPayload,
+          }, ...options.tickets.filter((ticket) => ticket.id !== payload.sale.id)])
         }
       } catch (fiscalError) {
         reportOperationError(fiscalError, { operation: 'sale.fiscal_receipt', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'before_print' })

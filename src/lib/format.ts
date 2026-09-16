@@ -11,6 +11,10 @@ export function formatMoney(cents: number) {
   return moneyFormatter.format(cents / 100)
 }
 
+export function formatTicketNumber(ticketNumber: number | string) {
+  return String(ticketNumber).padStart(6, '0')
+}
+
 export function parseMoneyToCents(value: string) {
   const normalized = value
     .replace(',', '.')
@@ -27,6 +31,26 @@ export function parseMoneyToCents(value: string) {
 
 export function centsToInput(cents: number) {
   return (cents / 100).toFixed(2)
+}
+
+export function roundQuantity(value: number) {
+  return Math.round(value * 1000) / 1000
+}
+
+export function isValidQuantity(value: number) {
+  return Number.isFinite(value) && value > 0 && roundQuantity(value) === value
+}
+
+export function parseQuantity(value: string) {
+  return roundQuantity(Number.parseFloat(value.replace(',', '.')))
+}
+
+export function formatQuantity(value: number) {
+  return roundQuantity(value).toLocaleString('es-ES', { maximumFractionDigits: 3 })
+}
+
+export function quantityAmountCents(unitPriceCents: number, quantity: number) {
+  return Math.round(unitPriceCents * roundQuantity(quantity))
 }
 
 export function normalizeText(value: string) {

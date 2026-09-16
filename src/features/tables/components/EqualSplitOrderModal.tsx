@@ -9,7 +9,7 @@ import { CashPaymentModal, DiscountModal } from '../../../components/modals'
 import { PaymentPanel } from '../../../components/pos'
 import { usePrintAgentStore } from '../../local-printing'
 import { calculateAppliedDiscount, calculateDiscountForLines, type DiscountScheduleContext } from '../../../lib/discounts'
-import { formatMoney } from '../../../lib/format'
+import { formatMoney, quantityAmountCents } from '../../../lib/format'
 import type { AppliedDiscount, Discount, PaymentMethod } from '../../../types'
 import type { PayRestaurantEqualPartResult, RestaurantEqualSplit, RestaurantOrderDetail } from '../types'
 
@@ -59,7 +59,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSched
   const totalCents = split?.totalCents ?? order.totalCents
   const nextPartCents = split?.nextPartCents ?? Math.floor(totalCents / partCount) + (totalCents % partCount > 0 ? 1 : 0)
   const setupDiscount = calculateDiscountForLines(
-    order.lines.map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.quantity * line.unitPriceCents, quantity: line.quantity })),
+    order.lines.map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: quantityAmountCents(line.unitPriceCents, line.quantity), quantity: line.quantity })),
     defaultDiscount,
   )
   const inheritedSetupDiscountAmount = Math.floor(setupDiscount.discountAmountCents / partCount) + (setupDiscount.discountAmountCents % partCount > 0 ? 1 : 0)

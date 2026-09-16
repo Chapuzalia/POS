@@ -95,6 +95,7 @@ test('separa inventario físico de la gestión documental de compras', () => {
   assert.deepEqual([...inventorySections], inventoryNavItems.map((item) => item.id))
   assert.deepEqual(purchaseNavItems.map(({ id, label }) => ({ id, label })), [
     { id: 'purchases-summary', label: 'Resumen' },
+    { id: 'purchases-replenishment', label: 'Reposición' },
     { id: 'purchases-invoices', label: 'Archivo de documentos' },
     { id: 'purchases-suppliers', label: 'Proveedores' },
   ])

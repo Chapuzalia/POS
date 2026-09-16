@@ -33,15 +33,12 @@ export async function savePrintTemplate(
   definition: PrintTemplateDefinition,
 ) {
   const validated = printTemplateDefinitionSchema.parse(definition)
-  const { error } = await requireSupabase().from('print_templates').upsert({
-    tenant_id: context.tenantId,
-    venue_id: context.venueId,
-    type,
-    name: type,
-    definition: validated,
-    is_active: true,
-    updated_at: new Date().toISOString(),
-  }, { onConflict: 'tenant_id,venue_id,type' })
+  const { error } = await requireSupabase().rpc('save_print_template', {
+    p_tenant_id: context.tenantId,
+    p_venue_id: context.venueId,
+    p_type: type,
+    p_definition: validated,
+  })
   if (error) throw error
 }
 

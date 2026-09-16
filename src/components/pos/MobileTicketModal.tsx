@@ -98,11 +98,11 @@ export function MobileTicketModal({
       </UiButton>
 
       {isOpen ? (
-        <AppModal backdropClassName="lg:!hidden" containerClassName="!p-0 lg:!hidden" maxWidth="100%" dialogClassName="!min-h-[65dvh] !rounded-t-2xl !rounded-b-none !border-b-0 !bg-[var(--background)]" label={title} onClose={onClose} placement="bottom">
+        <AppModal backdropClassName="lg:!hidden" containerClassName="!p-0 lg:!hidden" maxWidth="100%" dialogClassName="!h-[calc(var(--app-height,100dvh)-1rem)] !max-h-[calc(var(--app-height,100dvh)-1rem)] !rounded-t-2xl !rounded-b-none !border-b-0 !bg-[var(--background)]" label={title} onClose={onClose} placement="bottom">
 
           <section
             aria-labelledby="mobile-ticket-title"
-            className="absolute inset-x-0 bottom-0 flex max-h-[calc(100dvh-1rem)] min-h-[65dvh] flex-col overflow-hidden rounded-t-2xl border border-b-0 border-[var(--separator)] bg-[var(--background)] text-[var(--foreground)] shadow-[var(--shadow)]"
+            className="flex h-full min-h-0 flex-col overflow-hidden rounded-t-2xl border border-b-0 border-[var(--separator)] bg-[var(--background)] text-[var(--foreground)] shadow-[var(--shadow)]"
             id="mobile-ticket-modal"
           >
             <header className="flex items-center justify-between gap-4 border-b border-[var(--separator)] bg-[var(--surface)] px-4 py-3">

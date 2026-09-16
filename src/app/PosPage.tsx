@@ -588,20 +588,24 @@ export function PosPage(props: Props) {
         title={restaurant.posView.type === 'table_order' ? 'Comanda' : 'Ticket'}
         totalCents={totalCents}
       >
-        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-hidden p-4">
-          {activeTicketPanel}
-          <PaymentPanel
-            allowDiscount={discountsEnabled}
-            discount={appliedDiscount}
-            disabled={!canSell}
-            feedback={paidFeedback}
-            heading={undefined}
-            onOpenDiscount={quickSale.openDiscountModal}
-            onPayment={handlePayment}
-            onRemoveDiscount={quickSale.removeDiscount}
-            subtotalCents={subtotalCents}
-            totalCents={totalCents}
-          />
+        <div className="flex min-h-0 flex-1 flex-col gap-4 overflow-y-auto overscroll-contain p-4 [-webkit-overflow-scrolling:touch]">
+          <div className="flex min-h-72 flex-1 flex-col">
+            {activeTicketPanel}
+          </div>
+          <div className="shrink-0">
+            <PaymentPanel
+              allowDiscount={discountsEnabled}
+              discount={appliedDiscount}
+              disabled={!canSell}
+              feedback={paidFeedback}
+              heading={undefined}
+              onOpenDiscount={quickSale.openDiscountModal}
+              onPayment={handlePayment}
+              onRemoveDiscount={quickSale.removeDiscount}
+              subtotalCents={subtotalCents}
+              totalCents={totalCents}
+            />
+          </div>
         </div>
       </MobileTicketModal>}
 

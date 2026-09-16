@@ -1,7 +1,7 @@
 import { reportOperationError } from '../../../lib/observability.ts'
 import { UserFacingError } from '../../../utils/UserFacingError.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createId, getLineSignature } from '../../../lib/format'
+import { createId, getLineSignature, isValidQuantity, roundQuantity } from '../../../lib/format'
 import { calculateDiscountForLines } from '../../../lib/discounts'
 import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
@@ -17,6 +17,7 @@ import type {
 } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
+import { loadSessionTicketFromSupabase } from '../../../services/posService'
 import {
   buildRestaurantPrintPayload,
   getEqualSplitPrintLines,
@@ -92,6 +93,10 @@ async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string)
       return undefined
     }
   }
+}
+
+async function loadTicketNumberForPrint(context: TenantContext, cashSession: CashSession, ticketId: string) {
+  return (await loadSessionTicketFromSupabase(context, cashSession.id, ticketId))?.ticketNumber
 }
 
 type PendingPayment = {
@@ -623,7 +628,10 @@ export function useRestaurantController(options: Options) {
           ? await cleanupVirtualRoomTable(current, true)
           : null
         const printLines = paymentLines
-        const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
+        const [fiscal, ticketNumber] = await Promise.all([
+          fiscalizeTicketForPrint(options.context, result.ticketId),
+          loadTicketNumberForPrint(options.context, options.cashSession, result.ticketId),
+        ])
         void options.printSale(buildRestaurantPrintPayload({
           cashSession: options.cashSession,
           context: options.context,
@@ -637,6 +645,7 @@ export function useRestaurantController(options: Options) {
           saleId: result.saleId,
           subtotalCents: getRestaurantPrintSubtotal(printLines),
           ticketId: result.ticketId,
+          ticketNumber,
           totalCents: result.paidAmountCents,
           fiscal,
         }))
@@ -696,7 +705,10 @@ export function useRestaurantController(options: Options) {
           ? await cleanupVirtualRoomTable(saved, true)
           : null
         const printLines = paymentLines
-        const fiscal = await fiscalizeTicketForPrint(options.context, result.ticketId)
+        const [fiscal, ticketNumber] = await Promise.all([
+          fiscalizeTicketForPrint(options.context, result.ticketId),
+          loadTicketNumberForPrint(options.context, options.cashSession, result.ticketId),
+        ])
         void options.printSale(buildRestaurantPrintPayload({
           cashSession: options.cashSession,
           context: options.context,
@@ -708,10 +720,11 @@ export function useRestaurantController(options: Options) {
           receivedCents: cashlogy.receivedCents,
           changeCents: cashlogy.changeCents,
           saleId: result.saleId,
-          subtotalCents: result.subtotalCents,
-          ticketId: result.ticketId,
-          totalCents: result.totalCents,
-          fiscal,
+           subtotalCents: result.subtotalCents,
+           ticketId: result.ticketId,
+           ticketNumber,
+           totalCents: result.totalCents,
+           fiscal,
         }))
         await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
         const [nextOrder, nextMap] = await Promise.all([
@@ -888,9 +901,10 @@ export function useRestaurantController(options: Options) {
         refreshSales(result.saleId, 'Cobro completado sin imprimir', false),
       ])
       const printTask = (async () => {
-        const [fiscal, invoice] = await Promise.all([
+        const [fiscal, invoice, ticketNumber] = await Promise.all([
           fiscalizeTicketForPrint(context, result.ticketId),
           invoiceCustomer ? loadTicketInvoice(context.tenantId, result.ticketId) : Promise.resolve(null),
+          loadTicketNumberForPrint(context, cashSession, result.ticketId),
         ])
         if (invoiceCustomer && !invoice) {
           throw new Error('El cobro se ha registrado, pero no se ha confirmado el número de factura. No se imprimirá como ticket normal.')
@@ -906,10 +920,11 @@ export function useRestaurantController(options: Options) {
           receivedCents: cashlogy.receivedCents,
           changeCents: cashlogy.changeCents,
           saleId: result.saleId,
-          subtotalCents: getRestaurantPrintSubtotal(saved.lines),
-          ticketId: result.ticketId,
-          totalCents: result.totalCents,
-          fiscal,
+           subtotalCents: getRestaurantPrintSubtotal(saved.lines),
+           ticketId: result.ticketId,
+           ticketNumber,
+           totalCents: result.totalCents,
+           fiscal,
           invoice,
         }))
       })()
@@ -1043,16 +1058,17 @@ export function useRestaurantController(options: Options) {
     if (!options.isOnline) return
     const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
     if (!line || line.quantity === quantity) return
-    if (!Number.isSafeInteger(quantity) || quantity < line.servedQuantity || quantity < 1) {
-      options.onError('No puedes reducir la cantidad por debajo de las unidades servidas.')
+    const normalizedQuantity = roundQuantity(quantity)
+    if (!isValidQuantity(quantity) || normalizedQuantity < line.servedQuantity || normalizedQuantity < 1) {
+      options.onError('La cantidad debe ser positiva, tener como máximo tres decimales y no ser inferior a las unidades servidas.')
       return
     }
-    if (quantity < line.quantity
-      && (productionState?.lines.find((state) => state.lineId === lineId)?.sentQuantity ?? 0) > quantity
+    if (normalizedQuantity < line.quantity
+      && (productionState?.lines.find((state) => state.lineId === lineId)?.sentQuantity ?? 0) > normalizedQuantity
       && !window.confirm('Parte de esta cantidad ya se envió a producción. Se generará una anulación para cocina/barra. ¿Continuar?')) return
     draft.updateDraft((detail) => ({
       ...detail,
-      lines: detail.lines.map((item) => item.id === lineId ? { ...item, quantity, updatedAt: nowIso() } : item),
+      lines: detail.lines.map((item) => item.id === lineId ? { ...item, quantity: normalizedQuantity, updatedAt: nowIso() } : item),
     }))
   }, [draft, options, productionState])
 

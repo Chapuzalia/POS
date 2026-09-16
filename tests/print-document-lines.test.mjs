@@ -7,7 +7,7 @@ import { printerLayoutFromPrinter, receiptTextWidth } from '../src/features/loca
 
 const sale = {
   ticket: {
-    id: 'T-2026-0001', tenantId: 'tenant', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue',
+    id: 'T-2026-0001', ticketNumber: 1, tenantId: 'tenant', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue',
     deviceId: 'device', userId: 'user', subtotalCents: 2900, discount: null, discountAmountCents: 250,
     totalCents: 2650, createdAt: '2026-08-19T18:45:00+02:00',
   },
@@ -93,7 +93,7 @@ const EXPECTED_SALE_32 = [
   '       NIF/CIF B12345678',
   '         Calle Ñandú 10',
   '',
-  'Ticket               T-2026-0001',
+  'Ticket                    000001',
   'Fecha        2026-08-19 18:45:00',
   'Caja              Caja principal',
   'Empleado                   Iñaki',
@@ -136,7 +136,7 @@ const EXPECTED_SALE_48 = [
   '               NIF/CIF B12345678',
   '                 Calle Ñandú 10',
   '',
-  'Ticket                               T-2026-0001',
+  'Ticket                                    000001',
   'Fecha                        2026-08-19 18:45:00',
   'Caja                              Caja principal',
   'Empleado                                   Iñaki',

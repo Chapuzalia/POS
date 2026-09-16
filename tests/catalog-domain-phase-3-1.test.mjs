@@ -5,6 +5,7 @@ import { CatalogCommandService } from '../src/features/catalog/data/command-serv
 import { CatalogRepository } from '../src/features/catalog/data/repository.ts'
 import { CatalogDomainError } from '../src/features/catalog/domain/errors.ts'
 import { calculateCatalogPrice } from '../src/features/catalog/domain/pricing.ts'
+import { normalizeCatalogSnapshot } from '../src/features/catalog/services/catalogSnapshots.ts'
 import {
   getCategoriesForTab,
   resolveCatalogItem,
@@ -241,10 +242,13 @@ test('prepara creación completa, cambio de default, reordenación y asignacione
 })
 
 test('los snapshots históricos sobreviven sin consultar el producto vivo', () => {
-  const historicalLine = Object.freeze({ productId: 'deleted-product', productName: 'Nombre histórico', variantName: 'Normal', unitPriceCents: 700, catalogSnapshot: { categoryName: 'Histórica' } })
-  const catalog = catalogFixture({ products: [], variants: [], placements: [] })
-  assert.equal(resolveSellableCatalog(catalog).items.length, 0)
-  assert.equal(historicalLine.productName, 'Nombre histórico')
-  assert.equal(historicalLine.catalogSnapshot.categoryName, 'Histórica')
+  const normalized = normalizeCatalogSnapshot(
+    { productName: 'Nombre histórico', variantName: 'Normal', categoryName: 'Histórica' },
+    { productId: 'deleted-product', productName: '', variantId: null, variantName: '', basePriceCents: 700 },
+  )
+  assert.equal(normalized.productName, 'Nombre histórico')
+  assert.equal(normalized.variantName, 'Normal')
+  assert.equal(normalized.categoryName, 'Histórica')
+  assert.equal(normalized.basePriceCents, 700)
 })
 

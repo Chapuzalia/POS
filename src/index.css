@@ -109,7 +109,7 @@ button {
   --crm-topbar-bg: #ffffff;
   --crm-surface: #ffffff;
   --crm-surface-soft: #f1f4f7;
-  --crm-surface-hover: #e8edf2;
+  --crm-surface-hover: #0783ff;
   --crm-input-bg: #f8fafc;
   --crm-input-border: #cfd6df;
   --crm-border-subtle: #e1e5ea;
@@ -172,6 +172,16 @@ button {
 
 :root:has(.crm-shell:not([data-crm-theme='dark'])) {
   --background: #f3f5f7;
+  --crm-surface: #ffffff;
+  --crm-surface-soft: #f1f4f7;
+  --crm-input-bg: #f8fafc;
+  --crm-input-border: #cfd6df;
+  --crm-border: #d4dae2;
+  --crm-border-subtle: #e1e5ea;
+  --crm-text: #15171a;
+  --crm-text-muted: #858b93;
+  --crm-blue: #1478ed;
+  --crm-blue-soft: rgba(20, 120, 237, 0.15);
   --crm-popover-bg: #ffffff;
   --crm-popover-border: #d4dae2;
   --crm-popover-text: #15171a;
@@ -183,6 +193,16 @@ button {
 
 :root:has(.crm-shell[data-crm-theme='dark']) {
   --background: #000000;
+  --crm-surface: #181a1c;
+  --crm-surface-soft: #202326;
+  --crm-input-bg: #1f2224;
+  --crm-input-border: #303438;
+  --crm-border: #2a2d30;
+  --crm-border-subtle: #222426;
+  --crm-text: #f4f4f5;
+  --crm-text-muted: #71717a;
+  --crm-blue: #1478ed;
+  --crm-blue-soft: rgba(20, 120, 237, 0.2);
   --crm-popover-bg: #181a1c;
   --crm-popover-border: #2a2d30;
   --crm-popover-text: #f4f4f5;

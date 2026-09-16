@@ -1,4 +1,5 @@
 export type ProductionLineState = {
+  hasProductionDestination: boolean
   lineId: string
   sentQuantity: number
   readyQuantity: number

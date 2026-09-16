@@ -10,6 +10,7 @@ const SECTION_FEATURES: Partial<Record<CrmSection, TenantFeatureKey | TenantFeat
   tables: 'restaurant',
   production: 'production',
   'purchases-summary': 'supplier_document_scanning',
+  'purchases-replenishment': ['inventory', 'supplier_documents'],
   'purchases-invoices': 'supplier_documents',
   'purchases-suppliers': 'supplier_documents',
   'inventory-stock': 'inventory',

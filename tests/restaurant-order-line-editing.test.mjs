@@ -20,6 +20,11 @@ function panelHarness() {
       centsToInput: (cents) => String(cents / 100),
       formatMoney: String,
       parseMoneyToCents: (value) => Math.round(Number(String(value).replace(',', '.')) * 100),
+      formatQuantity: String,
+      isValidQuantity: (value) => Number.isFinite(value) && value > 0,
+      parseQuantity: (value) => Number(String(value).replace(',', '.')),
+      quantityAmountCents: (unitPriceCents, quantity) => Math.round(unitPriceCents * quantity),
+      roundQuantity: (value) => value,
     },
     '../../../lib/mixers': { getLineAdditionNames: () => [] },
     '../../../components/ui': { Button: 'button' },
@@ -49,23 +54,28 @@ function panelHarness() {
   return { calls, render: () => hooks.render(RestaurantOrderPanel, props) }
 }
 
-test('los editores entregan la cantidad y el precio confirmados a la comanda', () => {
+test('la comanda muestra el total de línea junto al precio unitario y permite editarlos', () => {
   const harness = panelHarness()
-  const dialogTriggers = expandedNodes(harness.render()).filter((node) => node.type === 'button' && node.props['aria-haspopup'] === 'dialog')
+  let renderedNodes = expandedNodes(harness.render())
+  const unitPriceTrigger = renderedNodes.find((node) => node.type === 'button' && node.props['aria-label'] === 'Editar precio unitario de Producto')
+  const lineTotal = renderedNodes.find((node) => node.type === 'strong' && node.props.children === '1200')
 
-  dialogTriggers[0].props.onClick()
+  assert.equal(unitPriceTrigger.props.children.flat().join(''), '600/u')
+  assert.ok(lineTotal)
+  unitPriceTrigger.props.onClick()
   let keypad = expandedNodes(harness.render()).find((node) => node.type === 'numeric-keypad')
   assert.equal(keypad.props.allowDecimal, true)
   keypad.props.onConfirm('7,50')
 
-  const quantityTrigger = expandedNodes(harness.render()).filter((node) => node.type === 'button' && node.props['aria-haspopup'] === 'dialog')[1]
+  renderedNodes = expandedNodes(harness.render())
+  const quantityTrigger = renderedNodes.find((node) => node.type === 'button' && node.props['aria-label'] === 'Editar cantidad de Producto')
   quantityTrigger.props.onClick()
   keypad = expandedNodes(harness.render()).find((node) => node.type === 'numeric-keypad')
-  assert.equal(keypad.props.allowDecimal, false)
-  keypad.props.onConfirm('5')
+  assert.equal(keypad.props.allowDecimal, true)
+  keypad.props.onConfirm('1,5')
 
   assert.deepEqual(harness.calls.prices, [['line-1', 750]])
-  assert.deepEqual(harness.calls.quantities, [['line-1', 5]])
+  assert.deepEqual(harness.calls.quantities, [['line-1', 1.5]])
   assert.equal(expandedNodes(harness.render()).some((node) => node.type === 'numeric-keypad'), false)
 })
 

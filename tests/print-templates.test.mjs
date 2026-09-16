@@ -85,8 +85,8 @@ test('una plantilla personalizada modifica el PrintRequest posterior sin cambiar
     printerLayout: layout,
     template: { version: 1, blocks: [{ id: 'custom', type: 'text', value: 'PERSONALIZADO {{ticket.number}}', bold: true }] },
   })
-  assert.deepEqual(request.lines, ['PERSONALIZADO T-1'])
-  assert.deepEqual(request.elements, [{ type: 'text', value: 'PERSONALIZADO T-1', bold: true }])
+  assert.deepEqual(request.lines, ['PERSONALIZADO 000001'])
+  assert.deepEqual(request.elements, [{ type: 'text', value: 'PERSONALIZADO 000001', bold: true }])
   assert.deepEqual(request.options, { cut: true, openCashDrawer: false, copies: 1 })
 })
 
@@ -123,7 +123,7 @@ test('la resolución usa personalizada, predeterminada persistida y fallback loc
 })
 
 const sampleSale = {
-  ticket: { id: 'T-1', tenantId: 'tenant', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue', deviceId: 'device', userId: 'user', subtotalCents: 1000, discount: null, discountAmountCents: 0, totalCents: 1000, createdAt: '2026-09-02T12:00:00+02:00' },
+  ticket: { id: 'T-1', ticketNumber: 1, tenantId: 'tenant', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue', deviceId: 'device', userId: 'user', subtotalCents: 1000, discount: null, discountAmountCents: 0, totalCents: 1000, createdAt: '2026-09-02T12:00:00+02:00' },
   lines: [{ id: 'line', ticketId: 'T-1', tenantId: 'tenant', productId: 'p', variantId: null, productName: 'Café', variantName: '', quantity: 1, unitPriceCents: 1000, lineTotalCents: 1000, netTotalCents: 1000, modifiers: [], components: [], fiscalSnapshot: { taxRate: 10, taxableBaseCents: 909, taxAmountCents: 91, grossTotalCents: 1000 } }],
   sale: { id: 'sale', tenantId: 'tenant', ticketId: 'T-1', cashSessionId: 'cash', cashRegisterId: 'register', venueId: 'venue', deviceId: 'device', userId: 'user', totalCents: 1000, paymentMethod: 'card', createdAt: '2026-09-02T12:00:00+02:00' },
   payment: { id: 'pay', tenantId: 'tenant', saleId: 'sale', method: 'card', amountCents: 1000, receivedCents: null, changeCents: 0 },

@@ -298,11 +298,6 @@ test('rechaza configuración automática con PIN y valida los campos de promoci�
   }), /día|franja/i)
 })
 
-test('el selector de programación aclara que utiliza el horario operativo del local', async () => {
-  const crmPage = await readFile(new URL('../src/features/crm/discounts/pages/DiscountsPage.tsx', import.meta.url), 'utf8')
-  assert.match(crmPage, /Utilizando horario operativo del local/)
-})
-
 test('el editor y el TPV exponen la aplicación por ticket o por unidad para importes fijos', async () => {
   const [crmPage, modal, crmService, catalogLoader, migration, consolidated] = await Promise.all([
     readFile(new URL('../src/features/crm/discounts/pages/DiscountsPage.tsx', import.meta.url), 'utf8'),

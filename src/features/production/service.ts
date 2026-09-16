@@ -25,6 +25,7 @@ function mapOrderState(value: unknown, orderId: string): OrderProductionState {
     lines: Array.isArray(row.lines) ? row.lines.map((entry) => {
       const line = entry as Record<string, unknown>
       return {
+        hasProductionDestination: Boolean(line.hasProductionDestination),
         lineId: String(line.lineId ?? ''),
         sentQuantity: readNumber(line.sentQuantity),
         readyQuantity: readNumber(line.readyQuantity),
@@ -78,6 +79,15 @@ export async function loadKdsQueue(deviceId: string) {
 
 export async function markKdsItemReady(deviceId: string, itemId: string, quantity: number) {
   const { error } = await client().rpc('mark_production_item_ready', {
+    p_device_id: deviceId,
+    p_item_id: itemId,
+    p_quantity: quantity,
+  })
+  if (error) throw error
+}
+
+export async function markKdsItemQuantityReady(deviceId: string, itemId: string, quantity: number) {
+  const { error } = await client().rpc('mark_production_item_quantity_ready', {
     p_device_id: deviceId,
     p_item_id: itemId,
     p_quantity: quantity,

@@ -111,6 +111,7 @@ function quickSalePaymentHarness({ isOnline }) {
     '../services/salePayload': { buildSalePayload: (...args) => buildQuickSalePayload(...args) },
     '../../fiscal/service': { loadFiscalReceiptData: async () => { calls.push('fiscal'); return { status: 'accepted', verificationUrl: 'https://verify.local' } } },
     '../../customers/service': { loadTicketInvoice: async () => null },
+    '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': {
       finishCashlogyPayment() {},
       getCashlogyPaymentAmounts: () => ({ changeCents: null, receivedCents: null }),
@@ -397,7 +398,7 @@ test('la reimpresion usa COPIA, un ID de copia y nunca abre el cajon', () => {
   const payload = mapSaleToPrintRequest({ sale, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint: true, copyNumber: 2, autoOpenCashDrawer: true })
   assert.equal(payload.requestId, 'print:sale_123:copy:2')
   assert.equal(payload.force, true)
-  assert.ok(payload.lines.includes('                     COPIA'))
+  assert.ok(payload.lines.some((line) => line.trim() === 'COPIA'))
   assert.equal(payload.options.openCashDrawer, false)
 })
 

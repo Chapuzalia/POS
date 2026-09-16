@@ -13,7 +13,7 @@ export function Input({ className, type, ...props }: InputProps) {
   return (
     <HeroInput
       {...heroProps}
-      className={`!p-2 border-1 w-full !text-normal !shadow-none !outline-none !ring-0 ${className ?? ''}`}
+      className={`!w-full !border !border-[var(--crm-input-border,var(--separator))] !bg-[var(--crm-input-bg,var(--surface-secondary))] !p-2 !text-[var(--crm-text,var(--foreground))] !shadow-none !outline-none !ring-0 placeholder:!text-[var(--crm-text-muted,var(--muted))] focus:!border-[var(--crm-blue,var(--accent))] ${className ?? ''}`}
       type={type}
     />
   )

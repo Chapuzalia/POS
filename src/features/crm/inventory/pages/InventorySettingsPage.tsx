@@ -2,7 +2,7 @@ import { getReadableError } from '../../../../utils/errors.ts'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { DataTable } from '../../../../components/ui/DataTable'
-import { Plus, Ruler, X } from 'lucide-react'
+import { Pencil, Plus, Ruler, Trash2, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { TenantContext } from '../../../../types'
 import { CrmModal } from '../../shared/components/CrmModal'
@@ -15,7 +15,7 @@ import {
   MAX_INVENTORY_DECIMAL_PLACES,
   parsePositiveInventoryQuantity,
 } from '../inventoryModel'
-import { createInventoryUnit, loadInventoryUnits } from '../services/inventoryService'
+import { createInventoryUnit, deleteInventoryUnit, loadInventoryUnits, updateInventoryUnit } from '../services/inventoryService'
 import type { InventoryUnit } from '../types'
 
 type Props = {
@@ -30,6 +30,7 @@ const SELF_UNIT_VALUE = '__self__'
 export function InventorySettingsCrm({ disabled, runAction, selectedVenueId, tenantContext }: Props) {
   const [units, setUnits] = useState<InventoryUnit[]>([])
   const [creating, setCreating] = useState(false)
+  const [editing, setEditing] = useState<InventoryUnit | null>(null)
 
   const refresh = useCallback(async () => {
     if (!selectedVenueId) {
@@ -41,6 +42,7 @@ export function InventorySettingsCrm({ disabled, runAction, selectedVenueId, ten
 
   useEffect(() => {
     setCreating(false)
+    setEditing(null)
     void runAction(refresh)
   }, [refresh, runAction])
 
@@ -58,7 +60,7 @@ export function InventorySettingsCrm({ disabled, runAction, selectedVenueId, ten
 
       {units.length ? <DataTable aria-label="Unidades de inventario" className="!w-full !min-w-[660px] !border-collapse" filterPlaceholder="Filtrar unidades…">
         <thead><tr className="!border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !text-[11px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">
-          <th className="!min-w-[220px] !px-[22px] !py-3">Unidad</th><th className="!w-[130px] !px-4 !py-3">Abreviatura</th><th className="!min-w-[190px] !px-4 !py-3">Equivalencia</th><th className="!w-[160px] !px-4 !py-3">Precisión</th><th className="!w-[120px] !px-4 !py-3">Estado</th>
+          <th className="!min-w-[220px] !px-[22px] !py-3">Unidad</th><th className="!w-[130px] !px-4 !py-3">Abreviatura</th><th className="!min-w-[190px] !px-4 !py-3">Equivalencia</th><th className="!w-[160px] !px-4 !py-3">Precisión</th><th className="!w-[120px] !px-4 !py-3">Estado</th><th aria-label="Acciones" className="!w-[100px] !px-4 !py-3" data-sortable="false" />
         </tr></thead>
         <tbody>{units.map((unit) => {
             const contentUnit = units.find((candidate) => candidate.id === unit.contentUnitId)
@@ -72,19 +74,21 @@ export function InventorySettingsCrm({ disabled, runAction, selectedVenueId, ten
               </td>
               <td className="!w-[160px] !px-4 !py-3 !text-[var(--crm-text-secondary)]" data-sort-value={unit.decimalPlaces}>{unit.decimalPlaces === 0 ? 'Unidades enteras' : `${unit.decimalPlaces} decimales`}</td>
               <td className="!w-[120px] !px-4 !py-3"><span className={unit.active ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-green-soft)] text-[var(--crm-green)] !w-fit' : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-red-soft)] text-[var(--crm-red)] !w-fit'}>{unit.active ? 'Activa' : 'Inactiva'}</span></td>
+              <td className="!w-[100px] !px-4 !py-3"><div className="!flex !items-center !justify-end !gap-2"><UiButton aria-label={`Editar ${unit.name}`} className="!inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-blue-soft)] !p-0 !text-[var(--crm-blue)] !shadow-none" disabled={disabled} onClick={() => setEditing(unit)} title="Editar unidad" type="button"><Pencil className="!size-4" /></UiButton><UiButton aria-label={`Eliminar ${unit.name}`} className="!inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-red-soft)] !p-0 !text-[var(--crm-red)] !shadow-none" disabled={disabled} onClick={() => { if (window.confirm(`¿Eliminar definitivamente la unidad “${unit.name}”?`)) void runAction(async () => { await deleteInventoryUnit(tenantContext, selectedVenueId, unit.id); await refresh() }) }} title="Eliminar unidad" type="button"><Trash2 className="!size-4" /></UiButton></div></td>
             </tr>
             )
           })}</tbody>
       </DataTable> : <div className="!p-[18px] md:!p-[22px]"><EmptyList message="Todavía no hay unidades. Crea, por ejemplo, ml para destilados y botellín para refrescos." /></div>}
 
-      {creating ? (
+      {creating || editing ? (
         <InventoryUnitEditor
           disabled={disabled}
-          onClose={() => setCreating(false)}
-          onSaved={async () => { await refresh(); setCreating(false) }}
+          onClose={() => { setCreating(false); setEditing(null) }}
+          onSaved={async () => { await refresh(); setCreating(false); setEditing(null) }}
           runAction={runAction}
           selectedVenueId={selectedVenueId}
           tenantContext={tenantContext}
+          unit={editing}
           units={units}
         />
       ) : null}
@@ -92,20 +96,21 @@ export function InventorySettingsCrm({ disabled, runAction, selectedVenueId, ten
   )
 }
 
-function InventoryUnitEditor({ disabled, onClose, onSaved, runAction, selectedVenueId, tenantContext, units }: {
+function InventoryUnitEditor({ disabled, onClose, onSaved, runAction, selectedVenueId, tenantContext, unit, units }: {
   disabled: boolean
   onClose: () => void
   onSaved: () => Promise<void>
   runAction: RunAction
   selectedVenueId: string
   tenantContext: TenantContext
+  unit: InventoryUnit | null
   units: InventoryUnit[]
 }) {
-  const [name, setName] = useState('')
-  const [symbol, setSymbol] = useState('')
-  const [decimalPlaces, setDecimalPlaces] = useState(0)
-  const [contentQuantity, setContentQuantity] = useState('1')
-  const [contentUnitId, setContentUnitId] = useState(SELF_UNIT_VALUE)
+  const [name, setName] = useState(unit?.name ?? '')
+  const [symbol, setSymbol] = useState(unit?.symbol ?? '')
+  const [decimalPlaces, setDecimalPlaces] = useState(unit?.decimalPlaces ?? 0)
+  const [contentQuantity, setContentQuantity] = useState(String(unit?.contentQuantity ?? 1))
+  const [contentUnitId, setContentUnitId] = useState(unit?.contentUnitId ?? SELF_UNIT_VALUE)
   const [validationError, setValidationError] = useState<string | null>(null)
 
   const save = async () => {
@@ -126,21 +131,23 @@ function InventoryUnitEditor({ disabled, onClose, onSaved, runAction, selectedVe
       return
     }
     await runAction(async () => {
-      await createInventoryUnit(tenantContext, selectedVenueId, {
+      const input = {
         name,
         symbol,
         decimalPlaces,
         contentQuantity: parsedContentQuantity,
         contentUnitId: contentUnitId === SELF_UNIT_VALUE ? null : contentUnitId,
-      })
+      }
+      if (unit) await updateInventoryUnit(tenantContext, selectedVenueId, unit.id, { ...input, active: unit.active })
+      else await createInventoryUnit(tenantContext, selectedVenueId, input)
       await onSaved()
     })
   }
 
   return (
-    <CrmModal label="Nueva unidad de inventario" onClose={onClose}>
+    <CrmModal label={unit ? `Editar ${unit.name}` : 'Nueva unidad de inventario'} onClose={onClose}>
       <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] bg-transparent p-3 text-[var(--crm-text)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:text-[15px] [&_span]:font-bold [&_small]:truncate [&_small]:text-xs [&_small]:font-medium [&_small]:text-[var(--crm-text-muted)] !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]">
-        <div><span>Nueva unidad</span><small>Se podrá asignar a cualquier producto del local</small></div>
+        <div><span>{unit ? `Editar ${unit.name}` : 'Nueva unidad'}</span><small>Se podrá asignar a cualquier producto del local</small></div>
         <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-muted)] shadow-none transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={onClose} type="button"><X className="!size-4" /></UiButton>
       </div>
       <form className="!grid !gap-4 !px-[22px] !py-5" onSubmit={(event) => { event.preventDefault(); void save() }}>
@@ -195,7 +202,7 @@ function InventoryUnitEditor({ disabled, onClose, onSaved, runAction, selectedVe
         </div>
         <p className="!rounded-[10px] !bg-[var(--crm-blue-soft)] !p-3 !text-xs !font-medium !text-[var(--crm-text-secondary)]">Para crear Mililitros usa 1 de la propia unidad. Para Botella 70 cl usa 700 ml.</p>
         {validationError ? <p className="!text-sm !font-semibold !text-[var(--crm-red)]">{validationError}</p> : null}
-        <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !font-semibold !text-white" disabled={disabled} type="submit">Crear unidad</UiButton>
+        <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !font-semibold !text-white" disabled={disabled} type="submit">{unit ? 'Guardar cambios' : 'Crear unidad'}</UiButton>
       </form>
     </CrmModal>
   )
