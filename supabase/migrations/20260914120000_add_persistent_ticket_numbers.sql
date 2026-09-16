@@ -29,10 +29,10 @@ set ticket_number = numbered.ticket_number
 from numbered
 where ticket_rows.id = numbered.id;
 
-create unique index concurrently if not exists tickets_tenant_venue_register_ticket_number_uidx
+create unique index if not exists tickets_tenant_venue_register_ticket_number_uidx
   on public.tickets (tenant_id, venue_id, cash_register_id, ticket_number);
 
-create index concurrently if not exists tickets_tenant_venue_register_ticket_number_idx
+create index if not exists tickets_tenant_venue_register_ticket_number_idx
   on public.tickets (tenant_id, venue_id, cash_register_id, ticket_number);
 
 alter table public.tickets add constraint tickets_ticket_number_positive_check
