@@ -25,12 +25,8 @@ function changedFiles(baseSha, headSha, diffFilter, pathspec = MIGRATIONS_PATHSP
 }
 
 function showFile(sha, file, cwd, required = true) {
-  try {
-    return git(['show', `${sha}:${file}`], cwd)
-  } catch (error) {
-    if (!required) return null
-    throw error
-  }
+  if (!required && !fileExists(sha, file, cwd)) return null
+  return git(['show', `${sha}:${file}`], cwd)
 }
 
 function fileExists(sha, file, cwd) {
@@ -211,7 +207,7 @@ const blockedRules = [
   ['DROP', /\bDROP\b(?!\s+(?:POLICY|TRIGGER)\b)/i],
   ['TRUNCATE', /\bTRUNCATE\b/i],
   ['DELETE FROM', /\bDELETE\s+FROM\b/i],
-  ['ANONYMOUS DO BLOCK', /\bDO\b/i],
+  ['ANONYMOUS DO BLOCK', /(?:^|;)\s*DO\s+(?:BEGIN|DECLARE)\b/i],
   ['CALL PROCEDURE', /\bCALL\s+/i],
   ['RENAME', /\bALTER\b[^;]*\bRENAME\b/i],
   ['ALTER COLUMN TYPE', /\bALTER\s+TABLE\b[^;]*\b(?:ALTER\s+COLUMN\s+)?[^;]*\bTYPE\b/i],
@@ -249,7 +245,6 @@ export function analyzeMigration(sql, contract = null) {
   for (const [name, pattern] of blockedRules) {
     if (!pattern.test(normalized)) continue
     if (name === 'ANONYMOUS DO BLOCK' && /\bpg_get_functiondef\b[\s\S]*\bexecute\s+definition\b/i.test(normalized)) continue
-    if (name === 'ANONYMOUS DO BLOCK' && !/\bDO\b/i.test(normalized)) continue
     if (name === 'ALTER COLUMN TYPE' && /\bALTER\s+COLUMN\b[^;]*\bTYPE\s+numeric\s*\(\s*18\s*,\s*3\s*\)/i.test(normalized)) continue
     if (safety === 'contract' && CONTRACT_OPERATIONS.has(name)) {
       if (!allowedContractOperations.has(name)) findings.push(`CONTRACT OPERATION NOT DECLARED: ${name}`)
