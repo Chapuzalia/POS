@@ -1,3 +1,6 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: Preserves the accounting export RPC signature and result shape while correcting only internal aliases.
 set lock_timeout = '5s';
 set statement_timeout = '5min';
 

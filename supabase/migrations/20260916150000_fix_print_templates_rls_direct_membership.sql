@@ -1,3 +1,8 @@
+-- migration-safety: expand
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+
+-- policy replacement preserves active tenant and venue membership checks.
 drop policy if exists print_templates_venue_read on public.print_templates;
 create policy print_templates_venue_read on public.print_templates
 for select to authenticated

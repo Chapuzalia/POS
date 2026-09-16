@@ -51,6 +51,8 @@ This is a production-oriented, multi-tenant POS/CRM/KDS. Favor correctness of sa
 - For cross-terminal invariants use DB constraints, atomic RPC/transactions, idempotency/request IDs and atomic updates rather than frontend-only checks.
 - Add indexes for new FKs or frequent tenant/venue/status/time filters when needed.
 - Keep RPCs backward-compatible when older deployed clients may still call them.
+- Use the docs/safe-production-migrations.md as a guide
+- Check contracts-pending.yml when create a new migration, if the contracts refers to migrations already merged to main, applu the contracts in the migration being created
 
 ## Sales, money and fiscal invariants
 

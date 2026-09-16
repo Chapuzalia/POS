@@ -1,3 +1,9 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE
+-- migration-safety-reason: Adds an authorization helper without changing existing print-template RPC signatures.
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+
 create or replace function public.user_can_manage_print_template(
   target_tenant uuid,
   target_venue uuid

@@ -1,3 +1,9 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE
+-- migration-safety-reason: Keeps the existing production-state RPC signature and result shape while adding routing metadata.
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+
 create or replace function public.get_order_production_state(p_order_id uuid)
 returns jsonb
 language plpgsql stable security definer

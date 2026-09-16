@@ -1,5 +1,8 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: Adds accounting export RPCs and preserves authenticated access while retaining existing contracts.
 set lock_timeout = '5s';
-set statement_timeout = '10min';
+set statement_timeout = '5min';
 
 create or replace function public.get_accounting_closures_export(
   p_tenant_id uuid,

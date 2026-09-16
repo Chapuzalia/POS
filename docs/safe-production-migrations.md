@@ -2,9 +2,13 @@
 
 ## Regla principal
 
-Cualquier migración desplegada debe seguir siendo compatible con la versión anterior del POS que pueda continuar abierta durante el deploy.
+Cada release debe mantener compatibilidad N-1: durante el despliegue pueden seguir activos clientes de la versión anterior. Las migraciones ya desplegadas son inmutables; cualquier corrección requiere una migración nueva.
 
-Cada archivo nuevo debe empezar con esta declaración y límites explícitos:
+El checker compara `baseSha` (último baseline desplegado correctamente) con `headSha`. Solo acepta migraciones añadidas, rechaza versiones/timestamps duplicados y no permite modificar, renombrar ni eliminar migraciones existentes.
+
+## Expand
+
+Una migración expand debe empezar exactamente así, sin líneas previas:
 
 ```sql
 -- migration-safety: expand
@@ -12,56 +16,89 @@ set lock_timeout = '5s';
 set statement_timeout = '5min';
 ```
 
-El checker solo analiza archivos añadidos. Si se modifica, renombra o elimina una migración existente, CI falla: la historia aplicada es inmutable y la corrección debe escribirse como otra migración.
+Expand añade estructura compatible sin retirar ni cambiar el contrato anterior. Ejemplos habituales:
 
-Una sustitución de función/procedimiento que conserve firma, resultado, permisos y comportamiento N-1 puede aprobarse explícitamente con `migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE` y una línea `migration-safety-reason`. Esta excepción solo admite retirar `PUBLIC`/`anon` de una función si se concede `EXECUTE` a `authenticated`; no puede eximir operaciones destructivas, vistas, RLS, renombrados ni cambios de tipo.
+- tablas o columnas nullable nuevas;
+- índices con `CREATE INDEX CONCURRENTLY`;
+- FK y `CHECK` iniciales con `NOT VALID`;
+- `UNIQUE`/`PRIMARY KEY` sobre tablas existentes mediante índice único concurrente y `USING INDEX`;
+- RPC nuevas manteniendo las anteriores.
 
-Un despliegue no es atómico para todos los dispositivos: una versión anterior del cliente puede seguir creando, leyendo o actualizando datos mientras la nueva versión empieza a usarse. Las migraciones deben permitir que ambas convivan.
+Una sustitución compatible de función/procedimiento puede declarar `migration-safety-reviewed: CREATE OR REPLACE ROUTINE` con una razón específica. Debe conservar firma, resultado, permisos y comportamiento N-1. El waiver `REVOKE` solo permite retirar acceso de función a `PUBLIC`/`anon` cuando se concede `EXECUTE` a `authenticated`. Ningún waiver permite operaciones contract.
 
-## Patrón expand/contract
+## Pending contract
 
-Divide los cambios incompatibles en releases independientes:
+Si el expand deja cleanup destructivo futuro, se registra en `supabase/contracts-pending.yml`:
 
-1. **Expandir:** añade la nueva estructura sin retirar ni cambiar la anterior. Despliega un cliente que sea compatible con ambas y, cuando aplique, escriba o lea los dos formatos.
-2. **Migrar:** rellena o transforma los datos existentes de forma segura y observa que ya no haya clientes antiguos en uso.
-3. **Contraer:** en un release posterior, retira la estructura, RPC o comportamiento anterior.
+```yaml
+contracts:
+  - id: example-cleanup
+    expand_migration: 20260901000000_add_example.sql
+    description: Remove the legacy column after all clients use the replacement.
+    allowed_operations:
+      - DROP
+    created_at: 2026-09-16
+```
 
-No combines la expansión y la contracción en la misma migración de producción.
+El fichero es el backlog técnico machine-readable de cleanup de base de datos. Cada ID es único, referencia una migración expand existente y enumera únicamente las operaciones destructivas esperadas: `DROP`, `RENAME`, `ALTER COLUMN TYPE`, `SET NOT NULL` o `ADD NOT NULL COLUMN`.
 
-## Cambios generalmente seguros
+Una entry nueva debe acompañar al expand que la origina. Una entry ya desplegada no se modifica. No se elimina sin una migración contract válida que la consuma.
 
-- `CREATE TABLE`.
-- Añadir una columna nullable.
-- Añadir una columna con un `DEFAULT` compatible con los clientes anteriores.
-- Crear índices nuevos con `CREATE INDEX CONCURRENTLY`.
-- Añadir funciones o RPC nuevas, manteniendo las existentes.
+## Contract posterior
 
-Incluso estos cambios deben revisarse si afectan a tablas grandes, bloqueos o permisos.
+Una migración contract debe empezar exactamente así:
 
-## Cambios breaking
+```sql
+-- migration-safety: contract
+-- migration-contract: example-cleanup
+set lock_timeout = '5s';
+set statement_timeout = '5min';
 
-Los siguientes cambios pueden romper una versión anterior del POS y deben dividirse en varios releases usando expand/contract:
+DROP ...;
+```
 
-- Cualquier `DROP`.
-- `RENAME` de tablas, columnas, funciones o RPC.
-- Cambios de tipo incompatibles.
-- Hacer obligatorio un campo que el cliente anterior no envía.
-- Eliminar o cambiar el contrato de RPC que usan clientes existentes.
-- Cambios de RLS que impidan al cliente anterior leer o escribir como antes.
+El checker permite únicamente las operaciones incluidas en `allowed_operations` y mantiene el resto de protecciones sobre timeouts, índices, constraints, RLS, rutinas y bloqueos.
 
-Antes de la fase de contracción, confirma que la versión anterior ya no puede permanecer activa y que los datos y clientes se han migrado.
+Para aceptar el contract se exige que:
 
-## Bloqueos y constraints
+1. el ID exista en `contracts-pending.yml` en `baseSha`;
+2. su `expand_migration` exista en `baseSha`;
+3. la migración contract sea nueva en `headSha`;
+4. la entry desaparezca de `contracts-pending.yml` en ese mismo PR.
 
-- Los índices de tablas existentes se crean con `CONCURRENTLY` para no bloquear escrituras.
-- Las claves foráneas y constraints `CHECK` se añaden primero como `NOT VALID` y se validan en una migración posterior.
-- Una restricción `UNIQUE` o `PRIMARY KEY` sobre una tabla existente se prepara con un índice único concurrente y después se adjunta con `USING INDEX`.
-- `lock_timeout` limita cuánto espera una migración por un lock; `statement_timeout` evita que un backfill o validación quede ejecutándose indefinidamente.
+`baseSha` garantiza que el expand ya pertenecía al baseline de producción anterior. No basta con añadir expand, pending y contract juntos en `headSha`: EXPAND y CONTRACT nunca se despliegan juntos.
 
-## Ventana N-1
+## Ciclo de vida
 
-El deploy genera `app-version.json` con exactamente dos versiones compatibles: la nueva y el último deploy de producción que terminó correctamente. Por ello, cada migración del release actual debe mantener el contrato de base de datos utilizado por esa versión anterior.
+### Release A
 
-El pipeline calcula el rango desde el último deploy completo correcto hasta el commit actual. Si un deploy intermedio falla, sus migraciones vuelven a analizarse en el siguiente intento y no pueden colarse por usar solamente el último push.
+- Añadir la nueva columna, RPC o estructura.
+- Mantener la estructura legacy.
+- Registrar el pending contract.
+- Desplegar.
 
-En el primer despliegue protegido, si todavía no existe una ejecución correcta de `production.yml`, la variable de repositorio `PRODUCTION_BASE_SHA` debe contener el SHA completo del commit que está realmente en producción. Después del primer deploy correcto, el historial de ejecuciones pasa a ser la fuente automática y esa variable queda solo como fallback de arranque.
+### Release B
+
+- Desplegar clientes que ya no dependan de la estructura legacy.
+- Mantener compatibilidad N-1 durante la transición.
+- Desplegar.
+
+### Release C o posterior
+
+- Crear la migración contract que referencia el ID.
+- Eliminar la entry pendiente en el mismo PR.
+- Desplegar el cleanup.
+
+No se fuerzan siempre tres releases. El contract puede ir en el segundo release si el `baseSha` ya contiene el expand y la ventana N-1 garantiza que ningún cliente compatible depende de la estructura antigua. La regla es el baseline desplegado y la compatibilidad real, no un número fijo de releases.
+
+## Operaciones y bloqueos
+
+- No mezclar operaciones expand y contract.
+- No eliminar datos en expand.
+- Usar `CREATE INDEX CONCURRENTLY` sobre tablas existentes.
+- Añadir FK/`CHECK` como `NOT VALID` y validar posteriormente.
+- Preparar restricciones `UNIQUE`/`PRIMARY KEY` con índice concurrente y `USING INDEX`.
+- Mantener `lock_timeout = '5s'` y `statement_timeout = '5min'` en expand y contract.
+- Confirmar antes del contract que la versión N-1 ya no usa la API o estructura retirada.
+
+El pipeline calcula el rango desde el último deploy completo correcto. Si un deploy falla, esas migraciones se vuelven a revisar. En el primer despliegue protegido, `PRODUCTION_BASE_SHA` debe señalar el commit realmente desplegado; después, el último workflow de producción correcto actúa como baseline.

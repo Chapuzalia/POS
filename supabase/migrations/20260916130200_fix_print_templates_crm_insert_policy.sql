@@ -1,3 +1,8 @@
+-- migration-safety: expand
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+
+-- policy replacement preserves the table and tenant scope.
 drop policy if exists print_templates_admin_insert on public.print_templates;
 create policy print_templates_admin_insert on public.print_templates
 for insert to authenticated

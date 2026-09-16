@@ -1,10 +1,15 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE
+-- migration-safety-reason: Adds a nullable replenishment target and keeps the existing inventory RPC signature and behavior compatible.
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+
 alter table public.inventory_stock_levels
   add column if not exists target_quantity numeric(18, 6);
 
 alter table public.inventory_stock_levels
-  drop constraint if exists inventory_stock_levels_target_quantity_check,
   add constraint inventory_stock_levels_target_quantity_check
-    check (target_quantity is null or target_quantity >= 0);
+    check (target_quantity is null or target_quantity >= 0) not valid;
 
 create or replace function public.save_inventory_item(
   p_venue_id uuid,
@@ -95,6 +100,6 @@ begin
 end;
 $$;
 
-create index if not exists inventory_stock_levels_replenishment_idx
+create index concurrently if not exists inventory_stock_levels_replenishment_idx
   on public.inventory_stock_levels (tenant_id, venue_id, inventory_item_id)
   where is_enabled and target_quantity is not null;

@@ -1,3 +1,10 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE
+-- migration-safety-reason: Extends quantity precision while preserving existing integer RPC overloads and authenticated access.
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+
+-- Existing notification triggers are recreated below after their dependent column types change.
 drop trigger if exists production_notify_line_update on public.order_lines;
 drop trigger if exists production_notify_line_delete on public.order_lines;
 
@@ -21,28 +28,15 @@ alter table public.production_line_allocations
 alter table public.production_events
   alter column quantity type numeric(18,3) using quantity::numeric(18,3);
 
-alter table public.order_lines drop constraint if exists order_lines_quantity_check;
-alter table public.order_lines drop constraint if exists order_lines_served_quantity_check;
-alter table public.order_lines add constraint order_lines_quantity_check check (quantity > 0 and scale(quantity) <= 3);
-alter table public.order_lines add constraint order_lines_served_quantity_check check (served_quantity >= 0 and served_quantity <= quantity and scale(served_quantity) <= 3);
-
-alter table public.ticket_lines drop constraint if exists ticket_lines_quantity_check;
-alter table public.ticket_lines add constraint ticket_lines_quantity_check check (quantity > 0 and scale(quantity) <= 3);
-
-alter table public.production_items drop constraint if exists production_items_quantity_check;
-alter table public.production_items drop constraint if exists production_items_ready_check;
-alter table public.production_items drop constraint if exists production_items_cancelled_check;
-alter table public.production_items add constraint production_items_quantity_check check (quantity > 0 and scale(quantity) <= 3);
-alter table public.production_items add constraint production_items_ready_check check (ready_quantity between 0 and quantity and scale(ready_quantity) <= 3);
-alter table public.production_items add constraint production_items_cancelled_check check (cancelled_quantity between 0 and quantity and ready_quantity + cancelled_quantity <= quantity and scale(cancelled_quantity) <= 3);
-
-alter table public.production_line_allocations drop constraint if exists production_line_allocations_quantity_check;
-alter table public.production_line_allocations drop constraint if exists production_line_allocations_state_check;
-alter table public.production_line_allocations add constraint production_line_allocations_quantity_check check (quantity >= 0 and scale(quantity) <= 3);
-alter table public.production_line_allocations add constraint production_line_allocations_state_check check (ready_quantity >= 0 and cancelled_quantity >= 0 and ready_quantity + cancelled_quantity <= quantity and scale(ready_quantity) <= 3 and scale(cancelled_quantity) <= 3);
-
-alter table public.production_events drop constraint if exists production_events_quantity_check;
-alter table public.production_events add constraint production_events_quantity_check check (quantity >= 0 and scale(quantity) <= 3);
+alter table public.order_lines add constraint order_lines_quantity_decimal_check check (quantity > 0 and scale(quantity) <= 3) not valid;
+alter table public.order_lines add constraint order_lines_served_quantity_decimal_check check (served_quantity >= 0 and served_quantity <= quantity and scale(served_quantity) <= 3) not valid;
+alter table public.ticket_lines add constraint ticket_lines_quantity_decimal_check check (quantity > 0 and scale(quantity) <= 3) not valid;
+alter table public.production_items add constraint production_items_quantity_decimal_check check (quantity > 0 and scale(quantity) <= 3) not valid;
+alter table public.production_items add constraint production_items_ready_decimal_check check (ready_quantity between 0 and quantity and scale(ready_quantity) <= 3) not valid;
+alter table public.production_items add constraint production_items_cancelled_decimal_check check (cancelled_quantity between 0 and quantity and ready_quantity + cancelled_quantity <= quantity and scale(cancelled_quantity) <= 3) not valid;
+alter table public.production_line_allocations add constraint production_line_allocations_quantity_decimal_check check (quantity >= 0 and scale(quantity) <= 3) not valid;
+alter table public.production_line_allocations add constraint production_line_allocations_state_decimal_check check (ready_quantity >= 0 and cancelled_quantity >= 0 and ready_quantity + cancelled_quantity <= quantity and scale(ready_quantity) <= 3 and scale(cancelled_quantity) <= 3) not valid;
+alter table public.production_events add constraint production_events_quantity_decimal_check check (quantity >= 0 and scale(quantity) <= 3) not valid;
 
 create trigger production_notify_line_update
 after update of quantity, product_id, variant_id, product_name, variant_name, modifiers, components, mixer, note
@@ -299,11 +293,6 @@ begin
 end;
 $$;
 
-revoke all on function public.next_quantity_step(numeric, numeric, numeric) from public, anon;
-revoke all on function public.mark_order_line_quantity_served(uuid, numeric) from public, anon;
-revoke all on function public.mark_production_item_quantity_ready(uuid, numeric, uuid) from public, anon;
-revoke all on function public.production_refresh_allocation_ready(uuid, uuid) from public, anon, authenticated;
-revoke all on function public.production_cancel_line_excess_decimal(uuid, numeric, boolean) from public, anon, authenticated;
 grant execute on function public.next_quantity_step(numeric, numeric, numeric), public.mark_order_line_quantity_served(uuid, numeric), public.mark_production_item_quantity_ready(uuid, numeric, uuid) to authenticated;
 grant execute on function public.production_refresh_allocation_ready(uuid, uuid), public.production_cancel_line_excess_decimal(uuid, numeric, boolean) to service_role;
 

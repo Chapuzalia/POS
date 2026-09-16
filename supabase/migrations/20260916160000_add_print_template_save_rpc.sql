@@ -1,3 +1,9 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: Adds the new print-template save RPC and limits execution to authenticated callers.
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+
 create or replace function public.save_print_template(
   p_tenant_id uuid,
   p_venue_id uuid,

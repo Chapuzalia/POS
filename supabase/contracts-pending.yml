@@ -1,0 +1,13 @@
+contracts:
+  - id: persistent-ticket-numbers-enforcement
+    expand_migration: 20260914120000_add_persistent_ticket_numbers.sql
+    description: Enforce non-null persistent ticket numbers after all clients use the persisted value.
+    allowed_operations:
+      - SET NOT NULL
+    created_at: 2026-09-16
+  - id: legacy-accounting-ticket-export-rpc
+    expand_migration: 20260914140000_add_accounting_ticket_export_rpc.sql
+    description: Remove the superseded singular accounting ticket export RPC after all clients use the plural export RPC.
+    allowed_operations:
+      - DROP
+    created_at: 2026-09-16

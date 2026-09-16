@@ -1,3 +1,6 @@
+-- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: Adds the accounting export RPC with a new signature and restricts its execution to authenticated callers.
 set lock_timeout = '5s';
 set statement_timeout = '5min';
 
