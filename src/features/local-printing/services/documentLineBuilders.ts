@@ -151,7 +151,7 @@ export function buildSaleTicketLines(
     ...(invoice ? ['', ...centeredWrapped(isInvoicePreview ? 'FACTURA (BORRADOR)' : 'FACTURA', printerLayout)] : []),
     ...(options.label ? ['', ...centeredWrapped(options.label, printerLayout)] : []),
     '',
-    ...row(invoice ? 'Factura' : 'Ticket', invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : sale.ticket.id), printerLayout),
+    ...row(invoice ? 'Factura' : 'Ticket', invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'), printerLayout),
     ...row(invoice ? 'Fecha expedición' : 'Fecha', formatReceiptDate(invoice?.issuedAt ?? sale.sale.createdAt, timezone), printerLayout),
     ...(establishment.cashRegisterName ? row('Caja', establishment.cashRegisterName, printerLayout) : []),
     ...(establishment.employeeName ? row('Empleado', establishment.employeeName, printerLayout) : []),
@@ -405,7 +405,7 @@ export function buildSalePrintTemplateContext(
       date_label: invoice ? 'Fecha expedición' : 'Fecha',
     },
     ticket: {
-      number: invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : sale.ticket.id),
+      number: invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'),
       ...datetime,
     },
     cash_register: { name: establishment.cashRegisterName ?? '' },

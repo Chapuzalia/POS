@@ -3,6 +3,7 @@ import { getReadableError } from '../../../utils/errors.ts'
 import { useCallback, useRef } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
+import { loadSessionTicketFromSupabase } from '../../../services/posService'
 import { buildSalePayload } from '../services/salePayload'
 import { loadFiscalReceiptData } from '../../fiscal/service'
 import { loadTicketInvoice } from '../../customers/service'
@@ -127,6 +128,8 @@ export function useQuickSalePayment(options: Options) {
     if (options.isOnline) {
       await options.syncPendingEvents()
       try {
+        const persistedTicket = await loadSessionTicketFromSupabase(context, cashSession.id, payload.ticket.id)
+        if (persistedTicket) printPayload = persistedTicket.payload
         const fiscal = await loadFiscalReceiptData(context.tenantId, payload.ticket.id)
         if (fiscal) printPayload = { ...payload, fiscal }
         const invoice = options.invoiceCustomer
@@ -139,8 +142,11 @@ export function useQuickSalePayment(options: Options) {
         if (invoice) {
           printPayload = { ...printPayload, ticket: { ...printPayload.ticket, invoice } }
         }
-        if (fiscal || invoice) {
-          options.persistTickets([{ ...ticketRecord, payload: printPayload }, ...options.tickets])
+        if (persistedTicket || fiscal || invoice) {
+          options.persistTickets([{
+            ...(persistedTicket ?? ticketRecord),
+            payload: printPayload,
+          }, ...options.tickets.filter((ticket) => ticket.id !== payload.sale.id)])
         }
       } catch (fiscalError) {
         reportOperationError(fiscalError, { operation: 'sale.fiscal_receipt', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'before_print' })

@@ -894,8 +894,18 @@ async function loadSessionTicketRecordsFromSupabase(
 export async function loadSessionTicketsFromSupabase(
   context: TenantContext,
   cashSessionId: string,
+  ticketIds?: string[],
 ) {
-  return loadSessionTicketRecordsFromSupabase(context, cashSessionId)
+  return loadSessionTicketRecordsFromSupabase(context, cashSessionId, ticketIds)
+}
+
+export async function loadSessionTicketFromSupabase(
+  context: TenantContext,
+  cashSessionId: string,
+  ticketId: string,
+) {
+  const [ticket] = await loadSessionTicketRecordsFromSupabase(context, cashSessionId, [ticketId])
+  return ticket ?? null
 }
 
 type SessionTicketPageRow = {

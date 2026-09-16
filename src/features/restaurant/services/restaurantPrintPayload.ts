@@ -46,6 +46,7 @@ type BuildRestaurantPrintPayloadInput = {
   subtotalCents: number
   ticketId: string
   totalCents: number
+  ticketNumber?: number
   fiscal?: FiscalReceiptData
   invoice?: TicketInvoice | null
 }
@@ -61,6 +62,7 @@ export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadIn
   return {
     ticket: {
       id: input.ticketId,
+      ticketNumber: input.ticketNumber,
       tenantId: input.context.tenantId,
       cashSessionId: input.cashSession.id,
       cashRegisterId: input.cashSession.cashRegisterId,
