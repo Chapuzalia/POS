@@ -191,7 +191,7 @@ export function normalizeExecutableSql(sql) {
       const match = sql.slice(index).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/)
       if (match) {
         dollarTag = match[0]
-        output += dollarTag
+        output += ' '.repeat(dollarTag.length)
         index += dollarTag.length
         state = 'dollar-quote'
         continue
@@ -244,7 +244,7 @@ export function analyzeMigration(sql, contract = null) {
 
   for (const [name, pattern] of blockedRules) {
     if (!pattern.test(normalized)) continue
-    if (name === 'ANONYMOUS DO BLOCK' && /\bpg_get_functiondef\b[\s\S]*\bexecute\s+definition\b/i.test(normalized)) continue
+    if (name === 'ANONYMOUS DO BLOCK' && /\bDO\s+\$\$[\s\S]*\bpg_get_functiondef\b[\s\S]*\bexecute\s+definition\b[\s\S]*\$\$/i.test(sql)) continue
     if (name === 'ANONYMOUS DO BLOCK' && !/\bDO\s+\$\$/i.test(normalized)) continue
     if (name === 'ALTER COLUMN TYPE' && /\bALTER\s+COLUMN\b[^;]*\bTYPE\s+numeric\s*\(\s*18\s*,\s*3\s*\)/i.test(normalized)) continue
     if (safety === 'contract' && CONTRACT_OPERATIONS.has(name)) {
