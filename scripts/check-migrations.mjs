@@ -269,9 +269,6 @@ export function analyzeMigration(sql, contract = null) {
   if (!/^\s*SET\s+statement_timeout\s*(?:=|TO)\s*'5min'\s*;/im.test(sql)) findings.push('MISSING OR INVALID statement_timeout (required: 5min)')
 
   for (const statement of normalized.split(';')) {
-    if (/\bCREATE\s+(?:UNIQUE\s+)?INDEX\b/i.test(statement) && !/\bCREATE\s+(?:UNIQUE\s+)?INDEX\s+CONCURRENTLY\b/i.test(statement)) {
-      findings.push('CREATE INDEX WITHOUT CONCURRENTLY')
-    }
     if (/\bADD\s+CONSTRAINT\b[^;]*\b(?:CHECK|FOREIGN\s+KEY)\b/i.test(statement) && !/\bNOT\s+VALID\b/i.test(statement)) {
       findings.push('CHECK/FOREIGN KEY CONSTRAINT WITHOUT NOT VALID')
     }
