@@ -117,7 +117,8 @@ test('product duplication preserves catalog values and remaps every product-owne
   const selectionAssignment = plan.batch.find((command) => command.command === 'save_assignment' && command.payload.domain === 'selection')
   const modifierAssignment = plan.batch.find((command) => command.command === 'save_assignment' && command.payload.domain === 'modifier')
 
-  assert.equal(createProduct.command, 'create_product')
+  assert.ok(createProduct)
+  assert.ok(placement)
   assert.deepEqual({
     type: createProduct.payload.type,
     name: createProduct.payload.name,

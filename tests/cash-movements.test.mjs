@@ -93,18 +93,14 @@ test('retirar el stacker durante la sesión no genera descuadre al cierre', () =
     assert.match(sql, /from public\.cash_session_stacker_collections sc[\s\S]*where sc\.cash_session_id = session_row\.id/i)
     assert.match(sql, /expected_cash_total := session_row\.opening_float_cents[\s\S]*- card_cashback_total[\s\S]*- stacker_collections_total/i)
   }
-
-  const openingFloatCents = 10000
-  const cashSalesCents = 5000
-  const collectedStackerCents = 3000
-  const countedCashlogyCents = 12000
-  const expectedCashCents = openingFloatCents + cashSalesCents - collectedStackerCents
-  assert.equal(countedCashlogyCents - expectedCashCents, 0)
+  assert.ok(migration.includes('stacker_collections_total'), 'el cierre descuenta la recaudación del stacker')
 })
 
-test('retirar efectivo sin salida de caja sigue generando descuadre', () => {
+test('el efectivo por tarjeta resta del esperado de caja y suma a tarjeta', () => {
   const openingFloatCents = 10000
-  const unregisteredWithdrawalCents = 3000
-  const countedCashCents = openingFloatCents - unregisteredWithdrawalCents
-  assert.equal(countedCashCents - openingFloatCents, -unregisteredWithdrawalCents)
+  const cashbackCents = 3000
+  const summary = summarizeSales(openingFloatCents, [], [movement('card_cashback', cashbackCents)])
+  assert.equal(summary.cashCents, 7000)
+  assert.equal(summary.cardCents, cashbackCents)
+  assert.equal(summary.cashEntriesCents, 0)
 })

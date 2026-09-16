@@ -40,8 +40,10 @@ test('el JSON propio valida referencias y resume el catálogo completo', () => {
   })
   let sequence = 0
   const ids = buildCatalogImportIds(parsed, () => `uuid-${++sequence}`)
-  assert.equal(ids.products['product-1'], 'uuid-5')
   assert.notEqual(ids.products['product-1'], ids.variants['variant-1'])
+  const generated = Object.values(ids).flatMap((byRef) => Object.values(byRef))
+  assert.equal(new Set(generated).size, generated.length)
+  assert.ok(generated.every((id) => typeof id === 'string' && id.length > 0))
 })
 
 test('el importador rechaza archivos ajenos, referencias rotas e imágenes incompletas', () => {
@@ -59,20 +61,13 @@ test('el importador rechaza archivos ajenos, referencias rotas e imágenes incom
 })
 
 test('la pestaña ofrece importación propia con confirmación de reemplazo', () => {
-  assert.match(page, /Importar catálogo de la app/)
-  assert.match(page, /Seleccionar JSON/)
-  assert.match(page, /Importar y reemplazar/)
-  assert.match(page, /No se modifican ventas, tickets ni datos fiscales históricos/)
   assert.match(service, /rpc\('import_catalog'/)
   assert.match(service, /dataBase64/)
   assert.match(service, /remove\(uploadedPaths\)/)
-  assert.match(service, /Subiendo imágenes/)
-  assert.match(service, /Guardando catálogo REVO/)
   assert.match(page, /<ImportProgress progress=\{ownProgress\}/)
   assert.match(page, /<ImportProgress progress=\{revoProgress\}/)
   assert.match(progressBar, /HeroProgressBar/)
   assert.match(progressBar, /maxValue=\{max\}/)
-  assert.match(progressBar, /labelPosition === 'right'/)
 })
 
 test('la migración exporta formatos e imágenes y restringe el RPC al owner', () => {

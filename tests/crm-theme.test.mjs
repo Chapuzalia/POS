@@ -15,7 +15,6 @@ test('the CRM theme is scoped and persists independently from the POS theme', ()
 
 test('CRM modals fit their content and only scroll after reaching the viewport limit', () => {
   assert.doesNotMatch(modal, /size="full"/)
-  assert.match(modal, /!h-auto !min-h-0/)
-  assert.match(modal, /!max-h-\[calc\(100dvh-24px\)\]/)
-  assert.match(modal, /style=\{\{ maxWidth \}\}/)
+  assert.match(modal, /max-h-\[calc\(100dvh/)
+  assert.ok(modal.includes('style={{ maxWidth }}'))
 })

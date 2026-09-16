@@ -115,7 +115,7 @@ test('realtime no restaura un descuento quitado mientras siga siendo la misma pa
       calculateAppliedDiscount: (totalCents, discount) => ({ discountAmountCents: discount ? 100 : 0, totalCents: discount ? totalCents - 100 : totalCents }),
       calculateDiscountForLines: () => ({ discountAmountCents: 0, totalCents: 600 }),
     },
-    '../../../lib/format': { formatMoney: String },
+    '../../../lib/format': { formatMoney: String, quantityAmountCents: (unitPriceCents, quantity) => unitPriceCents * quantity },
   }, { window: { setTimeout() { return 1 } } })
   const onPayCalls = []
   const inherited = { name: 'Heredado', type: 'manual' }

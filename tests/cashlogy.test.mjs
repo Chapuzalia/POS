@@ -477,6 +477,7 @@ test('los servicios de cobro dividido entregan la identidad Cashlogy a la RPC id
   const service = compileComponent(source, {
     '../../utils/UserFacingError.ts': { UserFacingError: Error },
     '../../lib/supabase': { supabase },
+    '../../lib/format': { quantityAmountCents: (unitPriceCents, quantity) => unitPriceCents * quantity },
     '../../lib/mixers': { splitLegacyMixerModifiers: () => ({ components: [], mixer: null, mixerProductId: null, modifiers: [] }) },
     '../catalog/services/catalogSnapshots': { normalizeCatalogSnapshot: () => null },
     './service-status': { getOrderPendingUnits: () => 0 },
