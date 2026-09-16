@@ -154,7 +154,7 @@ export function normalizeExecutableSql(sql) {
     }
     if (state === 'dollar-quote') {
       if (sql.startsWith(dollarTag, index)) {
-        output += ' '.repeat(dollarTag.length)
+        output += dollarTag
         index += dollarTag.length
         state = 'normal'
       } else {
@@ -191,7 +191,7 @@ export function normalizeExecutableSql(sql) {
       const match = sql.slice(index).match(/^\$[A-Za-z_][A-Za-z0-9_]*\$|^\$\$/)
       if (match) {
         dollarTag = match[0]
-        output += ' '.repeat(dollarTag.length)
+        output += dollarTag
         index += dollarTag.length
         state = 'dollar-quote'
         continue
@@ -207,7 +207,7 @@ const blockedRules = [
   ['DROP', /\bDROP\b(?!\s+(?:POLICY|TRIGGER)\b)/i],
   ['TRUNCATE', /\bTRUNCATE\b/i],
   ['DELETE FROM', /\bDELETE\s+FROM\b/i],
-  ['ANONYMOUS DO BLOCK', /(?:^|;)\s*DO\s+(?:BEGIN|DECLARE)\b/i],
+  ['ANONYMOUS DO BLOCK', /\bDO\b/i],
   ['CALL PROCEDURE', /\bCALL\s+/i],
   ['RENAME', /\bALTER\b[^;]*\bRENAME\b/i],
   ['ALTER COLUMN TYPE', /\bALTER\s+TABLE\b[^;]*\b(?:ALTER\s+COLUMN\s+)?[^;]*\bTYPE\b/i],
@@ -245,6 +245,7 @@ export function analyzeMigration(sql, contract = null) {
   for (const [name, pattern] of blockedRules) {
     if (!pattern.test(normalized)) continue
     if (name === 'ANONYMOUS DO BLOCK' && /\bpg_get_functiondef\b[\s\S]*\bexecute\s+definition\b/i.test(normalized)) continue
+    if (name === 'ANONYMOUS DO BLOCK' && !/\bDO\s+\$\$/i.test(normalized)) continue
     if (name === 'ALTER COLUMN TYPE' && /\bALTER\s+COLUMN\b[^;]*\bTYPE\s+numeric\s*\(\s*18\s*,\s*3\s*\)/i.test(normalized)) continue
     if (safety === 'contract' && CONTRACT_OPERATIONS.has(name)) {
       if (!allowedContractOperations.has(name)) findings.push(`CONTRACT OPERATION NOT DECLARED: ${name}`)
