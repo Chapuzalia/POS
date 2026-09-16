@@ -7,9 +7,15 @@ const app = (await Promise.all([readFile(new URL('../src/app/PosPage.tsx', impor
 const panel = await readFile(new URL('../src/features/tables/components/RestaurantOrderPanel.tsx', import.meta.url), 'utf8')
 const modal = await readFile(new URL('../src/features/tables/components/RemoveOrderLineModal.tsx', import.meta.url), 'utf8')
 
-test('the delete button remains available for served order lines', () => {
-  assert.doesNotMatch(panel, /disabled=\{isBusy \|\| !removable\}/)
-  assert.match(panel, /disabled=\{isBusy\}[^>]+onClick=\{\(\) => onRemove\(line\.id\)\}/)
+test('served order lines are deleted by swiping left', () => {
+  assert.match(panel, /const swipeDeleteThreshold = 72/)
+  assert.match(panel, /onPointerDown=\{handlePointerDown\}/)
+  assert.match(panel, /onPointerMove=\{handlePointerMove\}/)
+  assert.match(panel, /onPointerUp=\{endSwipe\}/)
+  assert.match(panel, /const shouldRemove = offsetX <= -swipeDeleteThreshold && !isBusy/)
+  assert.match(panel, /if \(shouldRemove\) onRemove\(line\.id\)/)
+  assert.match(panel, /data-order-line-action="true"/)
+  assert.doesNotMatch(panel, /aria-label="Eliminar línea"/)
 })
 
 test('only served order lines require explicit confirmation', () => {

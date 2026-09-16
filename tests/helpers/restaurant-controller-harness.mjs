@@ -83,7 +83,7 @@ export function createRestaurantControllerHarness({
   }
   const modules = {
     '../../../lib/discounts': { calculateDiscountForLines: () => ({ totalCents: 600 }) },
-    '../../../lib/format': { createId: () => 'id', getLineSignature: () => 'signature' },
+    '../../../lib/format': { createId: () => 'id', getLineSignature: () => 'signature', isValidQuantity: (value) => Number.isFinite(value) && value > 0, roundQuantity: (value) => value },
     '../../../lib/observability.ts': { reportOperationError() {} },
     '../../../utils/UserFacingError.ts': { UserFacingError: Error },
     '../../../utils/dates': { nowIso: () => '2026-09-12T00:00:00Z' },

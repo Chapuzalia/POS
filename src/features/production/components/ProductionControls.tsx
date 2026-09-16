@@ -1,6 +1,7 @@
 import { Minus, Plus, Send } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import { AppModal, Button } from '../../../components/ui'
+import { formatQuantity } from '../../../lib/format'
 import type { RestaurantOrderDetail } from '../../tables/types'
 import type { OrderProductionState, ProductionSelection } from '../types'
 
@@ -38,7 +39,7 @@ export function ProductionControls({ disabled, onSend, order, state }: Props) {
     const maximum = productionLines.get(lineId)?.unsentQuantity ?? 0
     setSelected((current) => ({
       ...current,
-      [lineId]: Math.max(0, Math.min(maximum, (current[lineId] ?? maximum) + direction)),
+      [lineId]: Math.max(0, Math.min(maximum, Math.round(((current[lineId] ?? maximum) + direction) * 1000) / 1000)),
     }))
   }
 
@@ -52,10 +53,10 @@ export function ProductionControls({ disabled, onSend, order, state }: Props) {
         <div><h2 className="text-xl font-black">Enviar a producción</h2><p className="text-sm font-semibold text-[var(--muted)]">Selecciona cantidades. El servidor vuelve a validar lo que sigue sin enviar.</p></div>
         <div className="max-h-72 space-y-2 overflow-y-auto">
       {availableLines.map((line) => <div className="flex items-center justify-between gap-2" key={line.id}>
-        <span className="min-w-0 truncate text-sm font-bold">{line.productName} · {productionLines.get(line.id)?.unsentQuantity} sin enviar</span>
+        <span className="min-w-0 truncate text-sm font-bold">{line.productName} · {formatQuantity(productionLines.get(line.id)?.unsentQuantity ?? 0)} sin enviar</span>
         <div className="flex items-center gap-1">
           <Button aria-label="Quitar una unidad del envío" disabled={disabled || (selected[line.id] ?? 0) === 0} onClick={() => change(line.id, -1)} size="sm" type="button" variant="tertiary"><Minus className="h-4 w-4" /></Button>
-          <strong className="w-6 text-center font-mono">{selected[line.id] ?? 0}</strong>
+          <strong className="min-w-6 text-center font-mono">{formatQuantity(selected[line.id] ?? 0)}</strong>
           <Button aria-label="Añadir una unidad al envío" disabled={disabled || (selected[line.id] ?? 0) >= (productionLines.get(line.id)?.unsentQuantity ?? 0)} onClick={() => change(line.id, 1)} size="sm" type="button" variant="tertiary"><Plus className="h-4 w-4" /></Button>
         </div>
       </div>)}

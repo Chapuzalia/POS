@@ -1,7 +1,7 @@
 import { reportOperationError } from '../../../lib/observability.ts'
 import { UserFacingError } from '../../../utils/UserFacingError.ts'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { createId, getLineSignature } from '../../../lib/format'
+import { createId, getLineSignature, isValidQuantity, roundQuantity } from '../../../lib/format'
 import { calculateDiscountForLines } from '../../../lib/discounts'
 import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
@@ -1043,16 +1043,17 @@ export function useRestaurantController(options: Options) {
     if (!options.isOnline) return
     const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
     if (!line || line.quantity === quantity) return
-    if (!Number.isSafeInteger(quantity) || quantity < line.servedQuantity || quantity < 1) {
-      options.onError('No puedes reducir la cantidad por debajo de las unidades servidas.')
+    const normalizedQuantity = roundQuantity(quantity)
+    if (!isValidQuantity(quantity) || normalizedQuantity < line.servedQuantity || normalizedQuantity < 1) {
+      options.onError('La cantidad debe ser positiva, tener como máximo tres decimales y no ser inferior a las unidades servidas.')
       return
     }
-    if (quantity < line.quantity
-      && (productionState?.lines.find((state) => state.lineId === lineId)?.sentQuantity ?? 0) > quantity
+    if (normalizedQuantity < line.quantity
+      && (productionState?.lines.find((state) => state.lineId === lineId)?.sentQuantity ?? 0) > normalizedQuantity
       && !window.confirm('Parte de esta cantidad ya se envió a producción. Se generará una anulación para cocina/barra. ¿Continuar?')) return
     draft.updateDraft((detail) => ({
       ...detail,
-      lines: detail.lines.map((item) => item.id === lineId ? { ...item, quantity, updatedAt: nowIso() } : item),
+      lines: detail.lines.map((item) => item.id === lineId ? { ...item, quantity: normalizedQuantity, updatedAt: nowIso() } : item),
     }))
   }, [draft, options, productionState])
 

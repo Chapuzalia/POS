@@ -86,6 +86,15 @@ export async function markKdsItemReady(deviceId: string, itemId: string, quantit
   if (error) throw error
 }
 
+export async function markKdsItemQuantityReady(deviceId: string, itemId: string, quantity: number) {
+  const { error } = await client().rpc('mark_production_item_quantity_ready', {
+    p_device_id: deviceId,
+    p_item_id: itemId,
+    p_quantity: quantity,
+  })
+  if (error) throw error
+}
+
 export function subscribeToOrderProduction(context: TenantContext, orderId: string, onChange: () => void) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`production-order:${context.venueId}:${orderId}`)

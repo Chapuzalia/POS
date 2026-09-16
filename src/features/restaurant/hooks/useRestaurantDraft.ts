@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { loadRestaurantOrder, saveRestaurantOrderLines } from '../../tables/service'
+import { quantityAmountCents } from '../../../lib/format'
 import type { RestaurantOrderDetail, RestaurantOrderSaveState } from '../../tables/types'
 import type { TenantContext } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
@@ -38,7 +39,7 @@ export function useRestaurantDraft({ context, isOnline, onError }: UseRestaurant
     const transformed = transform(current)
     const next = {
       ...transformed,
-      totalCents: transformed.lines.reduce((total, line) => total + line.quantity * line.unitPriceCents, 0),
+      totalCents: transformed.lines.reduce((total, line) => total + quantityAmountCents(line.unitPriceCents, line.quantity), 0),
     }
     orderRef.current = next
     editGenerationRef.current += 1
@@ -78,8 +79,8 @@ export function useRestaurantDraft({ context, isOnline, onError }: UseRestaurant
           order: { ...current.order, revision: result.revision },
           lines: hasNewerEdits ? current.lines : result.lines,
           totalCents: hasNewerEdits
-            ? current.lines.reduce((total, line) => total + line.quantity * line.unitPriceCents, 0)
-            : result.lines.reduce((total, line) => total + line.quantity * line.unitPriceCents, 0),
+            ? current.lines.reduce((total, line) => total + quantityAmountCents(line.unitPriceCents, line.quantity), 0)
+            : result.lines.reduce((total, line) => total + quantityAmountCents(line.unitPriceCents, line.quantity), 0),
         }
         orderRef.current = reconciled
         setOrder(reconciled)

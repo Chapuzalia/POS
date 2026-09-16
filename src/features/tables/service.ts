@@ -1,5 +1,6 @@
 import { UserFacingError } from '../../utils/UserFacingError.ts'
 import { supabase } from '../../lib/supabase'
+import { quantityAmountCents } from '../../lib/format'
 import { splitLegacyMixerModifiers } from '../../lib/mixers'
 import { normalizeCatalogSnapshot } from '../catalog/services/catalogSnapshots'
 import type { AppliedDiscount, Customer, PaymentMethod, SaleLineCatalogSnapshot, TenantContext, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
@@ -126,7 +127,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
   lines.forEach((line) => {
     const groupId = groupByOrder.get(line.orderId)
     if (!groupId) return
-    totals.set(groupId, (totals.get(groupId) ?? 0) + line.quantity * line.unitPriceCents)
+    totals.set(groupId, (totals.get(groupId) ?? 0) + quantityAmountCents(line.unitPriceCents, line.quantity))
     pendingUnits.set(groupId, (pendingUnits.get(groupId) ?? 0) + Math.max(0, line.quantity - line.servedQuantity))
     readyUnits.set(groupId, (readyUnits.get(groupId) ?? 0) + Math.max(0, (readyByLine.get(line.id) ?? 0) - line.servedQuantity))
   })
@@ -171,7 +172,7 @@ export async function loadRestaurantOrder(context: TenantContext, orderId: strin
   }
   const lines = ((linesResult.data ?? []) as OrderLineRow[]).map(mapLine)
   const { data: register } = await client.from('cash_registers').select('name').eq('id', orderResult.data.cash_register_id).maybeSingle<{ name: string }>()
-  return { order: mapOrder(orderResult.data), cashRegisterName: register?.name ?? 'Caja', lines, tables: tableRows.map(mapTable), totalCents: lines.reduce((sum, line) => sum + line.quantity * line.unitPriceCents, 0) }
+  return { order: mapOrder(orderResult.data), cashRegisterName: register?.name ?? 'Caja', lines, tables: tableRows.map(mapTable), totalCents: lines.reduce((sum, line) => sum + quantityAmountCents(line.unitPriceCents, line.quantity), 0) }
 }
 
 export async function createDiningArea(context: TenantContext, input: DiningAreaCreateInput) {
@@ -341,7 +342,7 @@ export async function loadRestaurantOrderGroup(context: TenantContext, orderId: 
   const tables = ((tablesResult.data ?? []) as TableRow[]).map(mapTable)
   const orders = orderRows.map((row) => {
     const lines = allLines.filter((line) => line.orderId === row.id)
-    return { order: mapOrder(row), cashRegisterName: registerResult.data?.name ?? 'Caja', lines, tables, totalCents: lines.reduce((sum, line) => sum + line.quantity * line.unitPriceCents, 0) }
+    return { order: mapOrder(row), cashRegisterName: registerResult.data?.name ?? 'Caja', lines, tables, totalCents: lines.reduce((sum, line) => sum + quantityAmountCents(line.unitPriceCents, line.quantity), 0) }
   })
   return { id: selected.order_group_id, orders, tables }
 }

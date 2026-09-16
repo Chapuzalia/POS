@@ -3,10 +3,11 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button } from '../../../components/ui'
 import type { TenantContext } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
-import { loadKdsQueue, markKdsItemReady, subscribeToKds } from '../service'
+import { loadKdsQueue, markKdsItemQuantityReady, markKdsItemReady, subscribeToKds } from '../service'
 import type { KdsQueue } from '../types'
 import { InventoryPreparationsPanel } from '../../inventory'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
+import { formatQuantity } from '../../../lib/format'
 
 type Props = {
   context: TenantContext
@@ -60,12 +61,13 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
 
   const recentEvents = useMemo(() => queue.events.slice(0, 8), [queue.events])
 
-  const markReady = async (itemId: string, quantity: number) => {
+  const markReady = async (itemId: string, quantity: number, complete = false) => {
     if (!isOnline || quantity <= 0 || busyId) return
     setBusyId(itemId)
     setError(null)
     try {
-      await markKdsItemReady(context.deviceId, itemId, quantity)
+      if (complete) await markKdsItemQuantityReady(context.deviceId, itemId, quantity)
+      else await markKdsItemReady(context.deviceId, itemId, quantity)
       await refresh()
     } catch (cause) {
       setError(getReadableError(cause, { operation: 'features.production.components.KdsPage' }))
@@ -105,7 +107,7 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
           const details = itemDetails(item)
           return <article className="flex min-h-64 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-4 shadow-[var(--shadow)]" key={item.id}>
             <div className="flex items-start justify-between gap-3">
-              <div><p className="text-sm font-black uppercase text-[var(--warning)]">{item.tableName} · Envío #{item.batchSequence}</p><h2 className="mt-1 text-xl font-black">{remaining}x {item.snapshot.productName ?? 'Producto'}</h2></div>
+              <div><p className="text-sm font-black uppercase text-[var(--warning)]">{item.tableName} · Envío #{item.batchSequence}</p><h2 className="mt-1 text-xl font-black">{formatQuantity(remaining)}x {item.snapshot.productName ?? 'Producto'}</h2></div>
               <time className="shrink-0 font-mono text-sm font-bold">{new Date(item.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
             </div>
             {item.snapshot.parentProductName ? <p className="mt-2 font-semibold text-[var(--muted)]">Menú: {item.snapshot.parentProductName}</p> : null}
@@ -113,7 +115,7 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
             {item.snapshot.note ? <p className="mt-3 rounded-lg border border-[var(--warning)] p-2 font-black">NOTA: {item.snapshot.note}</p> : null}
             <div className="mt-auto grid grid-cols-2 gap-2 pt-5">
               <Button disabled={busyId !== null || remaining < 1 || !isOnline} onClick={() => void markReady(item.id, 1)} size="lg" type="button" variant="secondary"><Check className="h-5 w-5" /> Lista 1</Button>
-              <Button disabled={busyId !== null || remaining < 1 || !isOnline} onClick={() => void markReady(item.id, remaining)} size="lg" type="button" variant="primary"><CheckCheck className="h-5 w-5" /> Todo listo</Button>
+              <Button disabled={busyId !== null || remaining < 1 || !isOnline} onClick={() => void markReady(item.id, remaining, true)} size="lg" type="button" variant="primary"><CheckCheck className="h-5 w-5" /> Todo listo</Button>
             </div>
           </article>
         })}
