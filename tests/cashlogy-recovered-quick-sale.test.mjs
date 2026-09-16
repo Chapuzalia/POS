@@ -48,6 +48,7 @@ function harness({ saleId = null, lines = [{ quantity: 1 }], intentPatch = {}, b
     }) },
     '../../fiscal/service': { loadFiscalReceiptData: async () => null },
     '../../customers/service': { loadTicketInvoice: async () => null },
+    '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': cashlogy,
   })
   const pay = createPayment({ context: { tenantId: 'tenant' }, cashSession: { id: 'session' }, lines,

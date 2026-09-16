@@ -32,6 +32,7 @@ type Options = {
   resetUi: (method: PaymentMethod | null) => void
   refreshPendingCount: () => void
   syncPendingEvents: () => Promise<void>
+  loadPersistedTicket?: (ticketId: string) => Promise<SessionTicketRecord | null>
   printSale: (payload: SessionTicketRecord['payload']) => Promise<void>
   onError: (message: string | null) => void
   onPaymentInFlightChange?: (inFlight: boolean) => void
@@ -128,7 +129,9 @@ export function useQuickSalePayment(options: Options) {
     if (options.isOnline) {
       await options.syncPendingEvents()
       try {
-        const persistedTicket = await loadSessionTicketFromSupabase(context, cashSession.id, payload.ticket.id)
+        const persistedTicket = await (options.loadPersistedTicket
+          ? options.loadPersistedTicket(payload.ticket.id)
+          : loadSessionTicketFromSupabase(context, cashSession.id, payload.ticket.id))
         if (persistedTicket) printPayload = persistedTicket.payload
         const fiscal = await loadFiscalReceiptData(context.tenantId, payload.ticket.id)
         if (fiscal) printPayload = { ...payload, fiscal }

@@ -206,6 +206,7 @@ test('4 y 7: venta offline en la caja existente, validar → lease → sincroniz
     react: paymentRunner.react, '../../../lib/offlineStore': h.store,
     '../../../lib/format': { createId: () => crypto.randomUUID() }, '../services/salePayload': { buildSalePayload },
     '../../local-printing/cashlogy/useCashlogyStore': { getCashlogyPaymentAmounts: () => ({}), finishCashlogyPayment() {} },
+    '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
   }, h.globals).useQuickSalePayment
   const paymentInFlightChanges = []
   const payment = paymentRunner.render(pay, {

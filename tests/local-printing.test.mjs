@@ -111,6 +111,7 @@ function quickSalePaymentHarness({ isOnline }) {
     '../services/salePayload': { buildSalePayload: (...args) => buildQuickSalePayload(...args) },
     '../../fiscal/service': { loadFiscalReceiptData: async () => { calls.push('fiscal'); return { status: 'accepted', verificationUrl: 'https://verify.local' } } },
     '../../customers/service': { loadTicketInvoice: async () => null },
+    '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': {
       finishCashlogyPayment() {},
       getCashlogyPaymentAmounts: () => ({ changeCents: null, receivedCents: null }),
