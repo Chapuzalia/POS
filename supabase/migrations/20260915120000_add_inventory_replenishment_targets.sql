@@ -100,6 +100,6 @@ begin
 end;
 $$;
 
-create index concurrently if not exists inventory_stock_levels_replenishment_idx
+create index if not exists inventory_stock_levels_replenishment_idx
   on public.inventory_stock_levels (tenant_id, venue_id, inventory_item_id)
   where is_enabled and target_quantity is not null;
