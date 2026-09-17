@@ -101,7 +101,7 @@ test('exige cabecera exacta y timeouts explícitos', () => {
 
 test('valida el esquema de contracts pendientes e IDs duplicados', () => {
   assert.equal(parsePendingContracts(pending('cleanup', '20260901000000_expand.sql'))[0].id, 'cleanup')
-  assert.throws(() => parsePendingContracts(`${pending('cleanup', '20260901000000_expand.sql')}  - id: cleanup\n    expand_migration: 20260901000000_expand.sql\n    description: duplicate\n    allowed_operations:\n      - DROP\n    created_at: 2026-09-16\n`), /Duplicate pending contract id/)
+  assert.throws(() => parsePendingContracts(`${pending('cleanup', '20260901000000_expand.sql')}  - id: cleanup\n    expand_migration: 20260901000000_expand.sql\n    description: duplicate\n    allowed_operations:\n      - DROP\n    created_at: 2026-09-16\n`), /Duplicate contract id/)
 })
 
 test('acepta un contract cuyo expand está en base y cuya entry se elimina', async () => withRepository(async (cwd) => {
