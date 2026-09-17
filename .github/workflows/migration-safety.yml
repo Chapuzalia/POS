@@ -68,6 +68,7 @@ jobs:
           set -Eeuo pipefail
 
           echo "Checking migrations from production baseline $BASE_SHA to merged PR $HEAD_SHA."
+          git merge-base --is-ancestor "$BASE_SHA" "$HEAD_SHA"
           bash scripts/check-pr-migrations.sh "$BASE_SHA" "$HEAD_SHA"
 
       - name: Run checker regression tests
