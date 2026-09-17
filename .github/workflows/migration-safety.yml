@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  actions: read
 
 jobs:
   check-migrations:
@@ -19,6 +20,46 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Resolve production migration baseline
+        id: release
+        uses: actions/github-script@v7
+        env:
+          CONFIGURED_BASELINE_SHA: ${{ vars.PRODUCTION_BASE_SHA }}
+        with:
+          script: |
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRuns,
+              {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                workflow_id: 'production.yml',
+                branch: 'main',
+                status: 'success',
+                per_page: 100,
+              },
+            )
+
+            const previous = runs[0]
+            const configuredBaseline =
+              process.env.CONFIGURED_BASELINE_SHA?.trim()
+
+            const baselineSha =
+              previous?.head_sha ?? configuredBaseline
+
+            if (
+              !baselineSha ||
+              !/^[0-9a-f]{40}$/i.test(baselineSha)
+            ) {
+              core.setFailed(
+                'No successful production baseline found. ' +
+                'Set PRODUCTION_BASE_SHA to the commit currently deployed.'
+              )
+              return
+            }
+
+            core.info(`Production migration baseline: ${baselineSha}`)
+            core.setOutput('base_sha', baselineSha)
+
       - name: Configure Node
         uses: actions/setup-node@v4
         with:
@@ -26,14 +67,14 @@ jobs:
 
       - name: Run migration safety checker
         env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          BASE_SHA: ${{ steps.release.outputs.base_sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
-          merge_base="$(git merge-base "$BASE_SHA" "$HEAD_SHA")"
-          echo "Checking PR migrations from common ancestor $merge_base to $HEAD_SHA."
-          bash scripts/check-pr-migrations.sh "$merge_base" "$HEAD_SHA"
+
+          echo "Checking migrations from production baseline $BASE_SHA to $HEAD_SHA."
+          bash scripts/check-pr-migrations.sh "$BASE_SHA" "$HEAD_SHA"
 
       - name: Run checker regression tests
         run: node --test tests/migration-safety.test.mjs
