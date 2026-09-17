@@ -6,7 +6,8 @@ const migration = await readFile(new URL('../supabase/migrations/20260916170000_
 
 test('la rentabilidad conserva snapshots y no rellena históricos', () => {
   assert.match(migration, /add column if not exists theoretical_cost_cents integer/i)
-  assert.match(migration, /theoretical_cost_known boolean not null default false/i)
+  assert.match(migration, /theoretical_cost_known boolean default false/i)
+  assert.doesNotMatch(migration, /theoretical_cost_known boolean not null default false/i)
   assert.match(migration, /new\.theoretical_cost_cents\s*:=\s*case\s+when\s+new\.theoretical_cost_known/i)
   assert.match(migration, /theoretical_cost_cents is null/i)
 })

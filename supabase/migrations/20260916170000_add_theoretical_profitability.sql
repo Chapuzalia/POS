@@ -6,7 +6,7 @@ set statement_timeout = '5min';
 
 alter table public.ticket_lines
   add column if not exists theoretical_cost_cents integer,
-  add column if not exists theoretical_cost_known boolean not null default false;
+  add column if not exists theoretical_cost_known boolean default false;
 
 alter table public.ticket_lines
   add constraint ticket_lines_theoretical_cost_check check (
