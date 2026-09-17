@@ -57,7 +57,10 @@ jobs:
               return
             }
 
-            core.info(`Production migration baseline: ${baselineSha}`)
+            core.info(
+              `Production migration baseline: ${baselineSha}`
+            )
+
             core.setOutput('base_sha', baselineSha)
 
       - name: Configure Node
@@ -68,13 +71,16 @@ jobs:
       - name: Run migration safety checker
         env:
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          HEAD_SHA: ${{ github.sha }}
         shell: bash
         run: |
           set -Eeuo pipefail
 
-          echo "Checking migrations from production baseline $BASE_SHA to $HEAD_SHA."
-          bash scripts/check-pr-migrations.sh "$BASE_SHA" "$HEAD_SHA"
+          echo "Checking migrations from production baseline $BASE_SHA to merged PR $HEAD_SHA."
+
+          bash scripts/check-pr-migrations.sh \
+            "$BASE_SHA" \
+            "$HEAD_SHA"
 
       - name: Run checker regression tests
         run: node --test tests/migration-safety.test.mjs
