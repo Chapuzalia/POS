@@ -8,6 +8,7 @@ import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 
 const AccessManagementCrm = lazy(() => import('../access/pages/AccessPage').then((module) => ({ default: module.AccessManagementCrm })))
 const StatsCrm = lazy(() => import('../analytics/pages/StatsPage').then((module) => ({ default: module.StatsCrm })))
+const ProfitabilityCrm = lazy(() => import('../analytics/pages/ProfitabilityPage').then((module) => ({ default: module.ProfitabilityCrm })))
 const CatalogGroupsCrm = lazy(() => import('../catalog/pages/CatalogGroupsPage.tsx').then((module) => ({ default: module.CatalogGroupsCrm })))
 const CatalogFormatsCrm = lazy(() => import('../catalog/pages/CatalogFormatsPage.tsx').then((module) => ({ default: module.CatalogFormatsCrm })))
 const CatalogProductsCrm = lazy(() => import('../catalog/pages/CatalogProductsPage.tsx').then((module) => ({ default: module.CatalogProductsCrm })))
@@ -158,6 +159,8 @@ export function CrmSectionContent({
         stats={stats}
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
+    case 'profitability':
+      return <ProfitabilityCrm catalog={catalog} context={context} disabled={disabled} key={selectedVenueId} timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'} venueId={selectedVenueId} />
     case 'integrations':
       return <IntegrationsCrm disabled={disabled} runAction={runAction} tenantContext={context} />
     case 'print-templates':

@@ -1,6 +1,6 @@
 import { Armchair, BarChart3, Beaker, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PackagePlus, PlugZap, Printer, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-replenishment' | 'purchases-invoices' | 'purchases-suppliers' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'print-templates' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-replenishment' | 'purchases-invoices' | 'purchases-suppliers' | 'profitability' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'print-templates' | 'settings' | 'plan'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -41,6 +41,7 @@ export const navItems: CrmNavItem[] = [
   { id: 'production', label: 'Producción', icon: ChefHat },
   { id: 'import', label: 'Importar / exportar', icon: Upload },
   { id: 'stats', label: 'Estadísticas', icon: BarChart3 },
+  { id: 'profitability', label: 'Rentabilidad', icon: BarChart3 },
   { id: 'integrations', label: 'Integraciones', icon: PlugZap },
   { id: 'plan', label: 'Mi Plan', icon: Gauge },
   { id: 'print-templates', label: 'Plantillas de impresión', icon: Printer },
@@ -78,6 +79,7 @@ export function getSectionTitle(section: CrmSection) {
     'inventory-units': 'Unidades de inventario',
     'inventory-settings': 'Configuración de inventario',
     stats: 'Analítica comercial',
+    profitability: 'Rentabilidad teórica',
     integrations: 'Integraciones',
     'print-templates': 'Configuración · Impresión · Plantillas',
     settings: 'Configuración de locales',

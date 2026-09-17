@@ -13,6 +13,7 @@ const SECTION_FEATURES: Partial<Record<CrmSection, TenantFeatureKey | TenantFeat
   'purchases-replenishment': ['inventory', 'supplier_documents'],
   'purchases-invoices': 'supplier_documents',
   'purchases-suppliers': 'supplier_documents',
+  profitability: ['inventory', 'inventory_recipes', 'supplier_documents'], 
   'inventory-stock': 'inventory',
   'inventory-items': 'inventory',
   'inventory-preparations': ['inventory', 'inventory_recipes'],
