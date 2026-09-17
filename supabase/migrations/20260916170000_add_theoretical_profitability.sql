@@ -10,17 +10,13 @@ alter table public.ticket_lines
 
 alter table public.ticket_lines
   add constraint ticket_lines_theoretical_cost_check check (
-    theoretical_cost_known is distinct from null
-    and (
-      (
-        theoretical_cost_known
-        and theoretical_cost_cents is not null
-        and theoretical_cost_cents >= 0
-      )
-      or (
-        not theoretical_cost_known
-        and theoretical_cost_cents is null
-      )
+    (
+      theoretical_cost_known is true
+      and (theoretical_cost_cents >= 0) is true
+    )
+    or (
+      theoretical_cost_known is false
+      and theoretical_cost_cents is null
     )
   ) not valid;
 
