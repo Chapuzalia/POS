@@ -63,6 +63,8 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     intent: state.intent,
     operation: state.operation,
     error: state.error,
+    missingIntent: state.missingIntent,
+    recoveryNotice: state.recoveryNotice,
     isStarting: state.isStarting,
     isPolling: state.isPolling,
     isMutating: state.isMutating,
@@ -81,6 +83,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     dispenseGiveChange: state.dispenseGiveChange,
     cancel: state.cancel,
     recover: state.recover,
+    discardMissingIntent: state.discardMissingIntent,
     clearResolved: state.clearResolved,
   })))
   const openManagement = management.open
@@ -238,6 +241,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
           selectedTotalCents={selectedTotalCents}
         /> : <>
           {!canManage ? <Notice tone="warning">Estas operaciones requieren permiso para gestionar caja.</Notice> : null}
+          {management.recoveryNotice ? <Notice tone="warning">{management.recoveryNotice}</Notice> : null}
           {!ready ? <Notice tone="warning">{health?.activeTransaction
             ? 'Hay un cobro Cashlogy en curso. Termínalo antes de gestionar la máquina.'
             : health?.activeCashManagementOperation
@@ -339,8 +343,8 @@ type OperationViewProps = {
   denominationOptions: ReturnType<typeof getDispensableDenominations>
   management: Pick<CashlogyManagementState,
     | 'intent' | 'operation' | 'error' | 'isStarting' | 'isPolling' | 'isMutating' | 'isCancelling'
-    | 'isRecordingStackerCollection' | 'stackerCollectionPending'
-    | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'cancel' | 'recover'>
+    | 'isRecordingStackerCollection' | 'stackerCollectionPending' | 'missingIntent'
+    | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'cancel' | 'recover' | 'discardMissingIntent'>
   onCloseReviewed: () => void
   onCloseResolved: () => void
   onClearQuantities: () => void
@@ -413,6 +417,14 @@ function OperationView(props: OperationViewProps) {
     </div> : null}
 
     {critical ? <div className="flex flex-wrap justify-end gap-2">
+      {management.missingIntent ? <Button
+        disabled={busy}
+        onClick={() => {
+          if (!window.confirm('Descarta solo esta referencia si has comprobado que Cashlogy no está aceptando ni entregando efectivo. ¿Continuar?')) return
+          void management.discardMissingIntent().catch(() => undefined)
+        }}
+        variant="dangerSoft"
+      >Descartar referencia local</Button> : null}
       <Button disabled={management.isPolling || management.isMutating} onClick={() => void management.recover().catch(() => undefined)} variant="primary">
         {management.isPolling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Consultar estado de nuevo
       </Button>

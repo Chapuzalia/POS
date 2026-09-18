@@ -34,6 +34,7 @@ export function useCashlogyScope(context: TenantContext | null, cashSessionId: s
       }
       const management = useCashlogyManagementStore.getState()
       const managementNeedsRecovery = management.intent
+        && !management.missingIntent
         && !management.isPolling
         && !management.isStarting
         && !management.isMutating
