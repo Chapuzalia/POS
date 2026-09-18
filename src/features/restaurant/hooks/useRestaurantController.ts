@@ -73,6 +73,7 @@ import {
 } from '../../local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
 import type { CashlogyTransaction } from '../../local-printing/types'
+import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 import {
   loadOrderProductionState,
@@ -104,6 +105,7 @@ type PendingPayment = {
   receivedCents: number | null
   pendingUnits: number
   cashlogyTransaction?: CashlogyTransaction | null
+  cashDrawerAlreadyRequested?: boolean
 }
 
 type Options = {
@@ -117,7 +119,7 @@ type Options = {
   onAddFeedback: (input: { feedbackType: 'added' | 'updated'; productName: string; sourceElement?: HTMLElement | null }) => void
   onError: (message: string | null) => void
   onPaidFeedback: (method: PaymentMethod | null) => void
-  printSale: (payload: SaleCreatedPayload) => Promise<void>
+  printSale: (payload: SaleCreatedPayload, options?: { cashDrawerAlreadyRequested?: boolean }) => Promise<void>
   refreshCashSales: (saleId: string, missingTicketTitle: string, shouldPrint?: boolean) => Promise<void>
   refreshProductSalesStats: () => Promise<void>
   setAppliedDiscount: (discount: AppliedDiscount | null) => void
@@ -620,6 +622,7 @@ export function useRestaurantController(options: Options) {
             productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
           })), effectiveDiscount).totalCents
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
+      const cashDrawerAlreadyRequested = requestEarlyCashDrawer({ requestId: `drawer:${equalSplit.id}:${createId()}`, payments: [{ method, amountCents }] })
       const result = await payRestaurantEqualPart(equalSplit.id, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount, cashlogy.transaction)
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
@@ -648,7 +651,7 @@ export function useRestaurantController(options: Options) {
           ticketNumber,
           totalCents: result.paidAmountCents,
           fiscal,
-        }))
+        }), { cashDrawerAlreadyRequested })
         await refreshSales(result.saleId, 'Pago completado sin imprimir', false)
         const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
         realtime.setMap(nextMap)
@@ -698,6 +701,7 @@ export function useRestaurantController(options: Options) {
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), discount).totalCents
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
+      const cashDrawerAlreadyRequested = requestEarlyCashDrawer({ requestId: `drawer:${saved.order.id}:${createId()}`, payments: [{ method, amountCents }] })
       const result = await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), cashlogy.transaction)
       if (!result.requiresConfirmation) {
         finishCashlogyPayment(cashlogy.transaction)
@@ -720,12 +724,12 @@ export function useRestaurantController(options: Options) {
           receivedCents: cashlogy.receivedCents,
           changeCents: cashlogy.changeCents,
           saleId: result.saleId,
-           subtotalCents: result.subtotalCents,
-           ticketId: result.ticketId,
-           ticketNumber,
-           totalCents: result.totalCents,
-           fiscal,
-        }))
+          subtotalCents: result.subtotalCents,
+          ticketId: result.ticketId,
+          ticketNumber,
+          totalCents: result.totalCents,
+          fiscal,
+        }), { cashDrawerAlreadyRequested })
         await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
         const [nextOrder, nextMap] = await Promise.all([
           cleanedAreaId ? Promise.resolve(null) : loadRestaurantOrder(options.context, saved.order.id),
@@ -851,9 +855,12 @@ export function useRestaurantController(options: Options) {
       })), options.appliedDiscount).totalCents
       const recoveredCashlogy = confirmedCashlogyTransaction ?? (forceWithPending ? pendingPayment?.cashlogyTransaction ?? null : null)
       const cashlogy = await settlePayment(method, amountCents, receivedCents, recoveredCashlogy)
+      const cashDrawerAlreadyRequested = forceWithPending && pendingPayment?.cashDrawerAlreadyRequested === true
+        ? true
+        : requestEarlyCashDrawer({ requestId: `drawer:${saved.order.id}:${createId()}`, payments: [{ method, amountCents }] })
       const result = await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines), invoiceCustomer, cashlogy.transaction)
       if (result.requiresConfirmation) {
-        setPendingPayment({ method, receivedCents: cashlogy.receivedCents, pendingUnits: result.pendingUnits, cashlogyTransaction: cashlogy.transaction })
+        setPendingPayment({ method, receivedCents: cashlogy.receivedCents, pendingUnits: result.pendingUnits, cashlogyTransaction: cashlogy.transaction, cashDrawerAlreadyRequested })
         return
       }
       finishCashlogyPayment(cashlogy.transaction)
@@ -926,7 +933,7 @@ export function useRestaurantController(options: Options) {
            totalCents: result.totalCents,
            fiscal,
           invoice,
-        }))
+        }), { cashDrawerAlreadyRequested })
       })()
       const tasks = await Promise.allSettled([refreshMapTask, refreshSalesTask, printTask])
       const failures = tasks

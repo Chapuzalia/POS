@@ -158,7 +158,7 @@ export function useCashSession(options: Options) {
 
   const printSale = useCallback(async (
     payload: SessionTicketRecord['payload'],
-    printOptions: { isReprint?: boolean; copyNumber?: number } = {},
+    printOptions: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean } = {},
   ) => {
     if (!options.context) return
     if (!printOptions.isReprint && !ticketsRef.current.some((ticket) => ticket.id === payload.sale.id)) {

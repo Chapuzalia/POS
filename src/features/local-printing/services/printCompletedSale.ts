@@ -11,6 +11,7 @@ export async function printCompletedSale(input: {
   isReprint?: boolean
   copyNumber?: number
   context: Pick<TenantContext, 'tenantId' | 'venueId'>
+  cashDrawerAlreadyRequested?: boolean
 }) {
   const state = usePrintAgentStore.getState()
   const { printer, layout } = await loadSelectedPrinterLayout()
@@ -24,6 +25,8 @@ export async function printCompletedSale(input: {
     cashlogyConfigured: state.cashlogyConfigured,
     cut: state.preferences.cut,
     template: template.definition,
+    cashDrawerAlreadyRequested: input.cashDrawerAlreadyRequested,
+
   })
   return state.printTicket(payload)
 }

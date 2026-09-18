@@ -15,6 +15,7 @@ import {
 } from '../../local-printing/cashlogy/useCashlogyStore'
 import type { AppliedDiscount, CashSession, Customer, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
 import type { CashlogyTransaction } from '../../local-printing/types'
+import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
 
 type Options = {
   context: TenantContext | null
@@ -33,7 +34,7 @@ type Options = {
   refreshPendingCount: () => void
   syncPendingEvents: () => Promise<void>
   loadPersistedTicket?: (ticketId: string) => Promise<SessionTicketRecord | null>
-  printSale: (payload: SessionTicketRecord['payload']) => Promise<void>
+  printSale: (payload: SessionTicketRecord['payload'], options?: { cashDrawerAlreadyRequested?: boolean }) => Promise<void>
   onError: (message: string | null) => void
   onPaymentInFlightChange?: (inFlight: boolean) => void
 }
@@ -123,6 +124,10 @@ export function useQuickSalePayment(options: Options) {
       fail('No se ha podido guardar completamente la venta. Comprueba las ventas pendientes y el cobro antes de repetirlo.')
       return
     }
+    const cashDrawerAlreadyRequested = requestEarlyCashDrawer({
+      requestId: `drawer:${payload.sale.id}:payment`,
+      payments: [{ method: payload.payment?.method, amountCents: payload.payment?.amountCents }],
+    })
     options.resetUi(paymentMethod)
     finishCashlogyPayment(cashlogyTransaction)
     let printPayload = payload
@@ -159,7 +164,7 @@ export function useQuickSalePayment(options: Options) {
         }
       }
     }
-    const printTask = options.printSale(printPayload)
+    const printTask = options.printSale(printPayload, { cashDrawerAlreadyRequested })
     await printTask
   }, [options])
 
