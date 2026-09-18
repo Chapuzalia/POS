@@ -23,6 +23,7 @@ type MapperOptions = {
   cashlogyConfigured?: boolean
   cut?: boolean
   template?: PrintTemplateDefinition
+  cashDrawerAlreadyRequested?: boolean
 }
 
 export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
@@ -51,7 +52,7 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     elements: rendered.elements,
     options: {
       cut: options.cut !== false,
-      openCashDrawer: isPreTicket ? false : shouldOpenCashDrawer({
+      openCashDrawer: isPreTicket || options.cashDrawerAlreadyRequested ? false : shouldOpenCashDrawer({
         payments,
         isReprint,
         settings: {

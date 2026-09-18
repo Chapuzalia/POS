@@ -102,6 +102,18 @@ function quickSalePaymentHarness({ isOnline }) {
   const sync = deferred()
   const calls = []
   const printed = []
+  const earlyDrawerCalls = []
+  const dispatchedRequestIds = new Set()
+  const earlyCashDrawerMock = {
+    requestEarlyCashDrawer: ({ requestId, payments }) => {
+      if (dispatchedRequestIds.has(requestId)) return false
+      if (!payments.some((payment) => payment.method === 'cash')) return false
+      dispatchedRequestIds.add(requestId)
+      calls.push('earlyDrawer')
+      earlyDrawerCalls.push(requestId)
+      return true
+    },
+  }
   const source = readFileSync(new URL('../src/features/quick-sale/hooks/useQuickSalePayment.ts', import.meta.url), 'utf8')
   const runner = createCompiledHookRunner(source, 'useQuickSalePayment', {
     '../../../lib/observability.ts': { operationBreadcrumb() {}, reportOperationError() {} },
@@ -118,6 +130,7 @@ function quickSalePaymentHarness({ isOnline }) {
       getCashlogyPaymentSaleId: () => null,
       settleCashlogyPaymentIfConfigured: async () => null,
     },
+    '../../local-printing/services/earlyCashDrawer': earlyCashDrawerMock,
   }, { window: { crypto } })
   const options = {
     cashSession: quickSaleCashSession,
@@ -132,13 +145,13 @@ function quickSalePaymentHarness({ isOnline }) {
     persistLedger() {},
     persistLines() {},
     persistTickets() {},
-    printSale: async (payload) => { calls.push('print'); printed.push(payload) },
+    printSale: async (payload, options) => { calls.push('print'); printed.push({ ...payload, printOptions: options }) },
     refreshPendingCount() {},
     resetUi() { calls.push('reset') },
     syncPendingEvents: async () => { calls.push('sync'); await sync.promise },
     tickets: [],
   }
-  return { calls, pay: runner.render(options), printed, sync }
+  return { calls, pay: runner.render(options), printed, sync, earlyDrawerCalls }
 }
 
 test('normaliza hostnames, IPv4 e IPv6 y aplica HTTPS con el puerto 8443', () => {
@@ -503,4 +516,35 @@ test('el informe tecnico elimina token, Authorization y datos de ticket', () => 
   const sanitized = sanitizePrintDiagnostics({ token: 'secret', Authorization: 'Bearer secret', nested: { ticket: { customerData: 'private' }, status: 'ok' } })
   assert.deepEqual(sanitized, { nested: { status: 'ok' } })
   assert.equal(JSON.stringify(sanitized).includes('secret'), false)
+})
+
+test('la venta rapida online persiste, solicita cajon temprano, sincroniza y marca el print', async () => {
+  const harness = quickSalePaymentHarness({ isOnline: true })
+  const payment = harness.pay('cash', null)
+  await flush()
+  assert.deepEqual(harness.calls.slice(0, 3), ['persist', 'earlyDrawer', 'reset'])
+  harness.sync.resolve()
+  await payment
+  assert.deepEqual(harness.calls, ['persist', 'earlyDrawer', 'reset', 'sync', 'fiscal', 'print'])
+  assert.equal(harness.earlyDrawerCalls.length, 1)
+  assert.match(harness.earlyDrawerCalls[0], /^drawer:[^:]+:payment$/u)
+  assert.equal(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
+})
+
+test('la venta rapida online con tarjeta no solicita cajon temprano', async () => {
+  const harness = quickSalePaymentHarness({ isOnline: true })
+  const payment = harness.pay('card', null)
+  await flush()
+  assert.deepEqual(harness.calls.slice(0, 2), ['persist', 'reset'])
+  assert.deepEqual(harness.earlyDrawerCalls, [])
+  harness.sync.resolve()
+  await payment
+  assert.deepEqual(harness.calls, ['persist', 'reset', 'sync', 'fiscal', 'print'])
+  assert.notEqual(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
+})
+
+test('el mapper suprime openCashDrawer cuando el cajon ya fue solicitado y conserva el comportamiento normal', () => {
+  const payload = buildQuickSalePayload(quickSaleContext, quickSaleCashSession, [quickSaleLine('line', 600, 21)], 'cash', null, null)
+  assert.equal(mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true, cashDrawerAlreadyRequested: true }).options.openCashDrawer, false)
+  assert.equal(mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true }).options.openCashDrawer, true)
 })

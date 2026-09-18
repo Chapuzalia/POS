@@ -50,6 +50,7 @@ function harness({ saleId = null, lines = [{ quantity: 1 }], intentPatch = {}, b
     '../../customers/service': { loadTicketInvoice: async () => null },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': cashlogy,
+    '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
   })
   const pay = createPayment({ context: { tenantId: 'tenant' }, cashSession: { id: 'session' }, lines,
     ledger: [], tickets: [], isOnline: true, persistLedger() {}, persistTickets() {}, persistLines() {},

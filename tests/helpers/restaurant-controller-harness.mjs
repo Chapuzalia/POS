@@ -98,6 +98,7 @@ export function createRestaurantControllerHarness({
       settleCashlogyPaymentIfConfigured: async (amountCents) => { calls.cashlogySettlements.push(amountCents); return cashlogyTransaction },
     },
     '../../local-printing/store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({ cashlogyConfigured }) } },
+    '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
     '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false },
     '../../production/service': { loadOrderProductionState() {}, sendProductionBatch() {}, subscribeToOrderProduction() {} },
     '../../tables/layout-service': { applySessionLayout() {}, saveSessionTableLayout() {} },

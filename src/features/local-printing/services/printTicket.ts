@@ -15,7 +15,7 @@ type PrintTicketOptions = {
   tickets: SessionTicketRecord[]
   updateTicketPrintState: (saleId: string, patch: Partial<Pick<SessionTicketRecord,
     'printStatus' | 'printJobId' | 'printRequestId' | 'printedAt' | 'printErrorCode' | 'printAttempts'>>) => void
-  options?: { isReprint?: boolean; copyNumber?: number }
+  options?: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean }
 }
 
 export async function printTicket({ cashSession, context, payload, tickets, updateTicketPrintState, options = {} }: PrintTicketOptions) {
@@ -33,6 +33,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
       printStatus: 'not_requested', printRequestId: null, printErrorCode: null,
     })
     if (hardwareAction === 'none') return
+    if (options.cashDrawerAlreadyRequested) return
     if (!printState.token || !printState.selectedPrinterId) {
       sileo.warning({ title: 'Venta completada, pero no se ha podido abrir el cajón', description: 'Configura el servidor y la impresora desde Ajustes > Hardware > Impresión.' })
       return
@@ -69,7 +70,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
         cashRegisterName: cashSession?.cashRegisterName,
         employeeName: context.userName,
       },
-      isReprint: options.isReprint, copyNumber: options.copyNumber,
+      isReprint: options.isReprint, copyNumber: options.copyNumber, cashDrawerAlreadyRequested: options.cashDrawerAlreadyRequested,
     })
     updateTicketPrintState(payload.sale.id, {
       printStatus: 'printed', printJobId: job.jobId || job.id || null,
