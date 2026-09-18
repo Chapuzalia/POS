@@ -28,6 +28,8 @@ export type CashlogyManagementState = {
   intent: CashlogyManagementIntent | null
   operation: CashlogyCashManagementOperation | null
   error: CashlogyError | null
+  missingIntent: boolean
+  recoveryNotice: string | null
   modalOpen: boolean
   isStarting: boolean
   isPolling: boolean
@@ -49,6 +51,7 @@ export type CashlogyManagementState = {
   dispenseGiveChange: (denominations: CashlogyRequestedDenomination[]) => Promise<CashlogyCashManagementOperation>
   cancel: (signal?: AbortSignal) => Promise<CashlogyCashManagementOperation>
   recover: (signal?: AbortSignal) => Promise<CashlogyCashManagementOperation | null>
+  discardMissingIntent: (signal?: AbortSignal) => Promise<void>
   clearResolved: () => void
   clearError: () => void
 }
@@ -98,6 +101,7 @@ function identifyOperation(operation: CashlogyCashManagementOperation) {
     intent,
     operation,
     error: operationError(operation),
+    missingIntent: false,
   })
 }
 
@@ -214,6 +218,30 @@ async function recoverAfterUncertainResult(requestId: string, originalError: unk
   }
 }
 
+function missingIntentError(activeRequestId?: string) {
+  return new CashlogyError({
+    code: activeRequestId ? 'CASHLOGY_INVALID_STATE' : 'CASHLOGY_CASH_MANAGEMENT_NOT_FOUND',
+    message: activeRequestId
+      ? 'La referencia guardada no existe, pero el agente informa de otra operación de efectivo activa. Resuélvela antes de descartar el estado local.'
+      : 'La operación guardada no existe en este agente. Comprueba físicamente Cashlogy y, si no hay ninguna operación en curso, descarta la referencia local.',
+    details: activeRequestId ? { activeRequestId } : undefined,
+  })
+}
+
+async function inspectMissingIntent(error: unknown, signal?: AbortSignal): Promise<never> {
+  const mapped = toCashlogyError(error)
+  if (mapped.code !== 'CASHLOGY_CASH_MANAGEMENT_NOT_FOUND') throw mapped
+  let activeRequestId: string | undefined
+  try {
+    activeRequestId = (await client().getCashlogyHealth(signal)).activeCashManagementOperation?.requestId
+  } catch (healthError) {
+    throw toCashlogyError(healthError)
+  }
+  const missing = missingIntentError(activeRequestId)
+  useCashlogyManagementStore.setState({ error: missing, missingIntent: true })
+  throw missing
+}
+
 async function createOperation(
   type: CashlogyCashManagementType,
   createRequest: (requestId: string) => Promise<CashlogyOperationResponse>,
@@ -229,12 +257,13 @@ async function createOperation(
     requestId: createCashlogyRequestId(type),
     type,
     operationId: null,
+    agentBaseUrl: usePrintAgentStore.getState().baseUrl,
     cashSessionId: type === 'remove_stacker' ? state.cashSessionId : null,
     ...(denominationOptions?.length ? { denominationOptions } : {}),
     createdAt: new Date().toISOString(),
   }
   persistIntent(intent)
-  useCashlogyManagementStore.setState({ intent, operation: null, error: null, modalOpen: true, isStarting: true })
+  useCashlogyManagementStore.setState({ intent, operation: null, error: null, missingIntent: false, recoveryNotice: null, modalOpen: true, isStarting: true })
   try {
     let operation: CashlogyCashManagementOperation
     try {
@@ -296,6 +325,8 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
   intent: null,
   operation: null,
   error: null,
+  missingIntent: false,
+  recoveryNotice: null,
   modalOpen: false,
   isStarting: false,
   isPolling: false,
@@ -309,7 +340,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     startPromise = null
     recoveryPromise = null
     const intent = loadCashlogyManagementIntent(scope)
-    set({ scope, cashSessionId: null, intent, operation: null, error: null, modalOpen: false, isStarting: false, isPolling: false, isMutating: false, isCancelling: false, isRecordingStackerCollection: false, stackerCollectionPending: false })
+    set({ scope, cashSessionId: null, intent, operation: null, error: null, missingIntent: false, recoveryNotice: null, modalOpen: false, isStarting: false, isPolling: false, isMutating: false, isCancelling: false, isRecordingStackerCollection: false, stackerCollectionPending: false })
   },
 
   setCashSessionId(cashSessionId) { set({ cashSessionId }) },
@@ -421,19 +452,65 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     set({ error: null })
     recoveryPromise = (async () => {
       try {
+        const currentAgentBaseUrl = usePrintAgentStore.getState().baseUrl
+        if (intent.agentBaseUrl && intent.agentBaseUrl !== currentAgentBaseUrl) {
+          const mismatch = new CashlogyError({
+            code: 'CASHLOGY_INVALID_STATE',
+            message: 'La operación guardada pertenece a otro agente de impresión. Revisa Cashlogy antes de descartar la referencia local.',
+            details: { currentAgentBaseUrl, intentAgentBaseUrl: intent.agentBaseUrl },
+          })
+          set({ error: mismatch, missingIntent: true })
+          throw mismatch
+        }
         const operation = (await client().getCashlogyCashManagementOperationByRequestId(intent.requestId, signal)).operation
         set({ modalOpen: true })
         await resolveObservedOperation(operation)
         startPolling(operation)
         return operation
       } catch (error) {
-    reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
-        const mapped = toCashlogyError(error)
-        set({ error: mapped })
-        throw mapped
+        reportOperationError(error, { operation: 'cashlogy.management', integration: 'cashlogy', operationId: useCashlogyManagementStore.getState().intent?.requestId, cashSessionId: useCashlogyManagementStore.getState().cashSessionId, step: useCashlogyManagementStore.getState().isRecordingStackerCollection ? 'record_stacker' : 'operation' })
+        if (get().missingIntent) {
+          const mapped = toCashlogyError(error)
+          set({ error: mapped })
+          throw mapped
+        }
+        try {
+          await inspectMissingIntent(error, signal)
+        } catch (inspectedError) {
+          const mapped = toCashlogyError(inspectedError)
+          set({ error: mapped })
+          throw mapped
+        }
+        throw toCashlogyError(error)
       }
     })().finally(() => { recoveryPromise = null })
     return recoveryPromise
+  },
+
+  async discardMissingIntent(signal) {
+    const state = get()
+    if (!state.intent || !state.missingIntent || state.operation) {
+      throw new CashlogyError({ code: 'CASHLOGY_INVALID_STATE' })
+    }
+    const health = await client().getCashlogyHealth(signal).catch((error) => {
+      const mapped = toCashlogyError(error)
+      set({ error: mapped })
+      throw mapped
+    })
+    if (health.activeCashManagementOperation) {
+      const blocked = missingIntentError(health.activeCashManagementOperation.requestId)
+      set({ error: blocked })
+      throw blocked
+    }
+    stopPolling()
+    persistIntent(null)
+    set({
+      intent: null,
+      operation: null,
+      error: null,
+      missingIntent: false,
+      recoveryNotice: 'Se ha descartado la referencia local que no existía en el agente. Ya puedes iniciar una operación nueva.',
+    })
   },
 
   clearResolved() {
@@ -442,7 +519,7 @@ export const useCashlogyManagementStore = create<CashlogyManagementState>((set, 
     if (operation.status === 'unknown' || operation.status === 'needs_attention') return
     stopPolling()
     persistIntent(null)
-    set({ intent: null, operation: null, error: null, modalOpen: false, isCancelling: false })
+    set({ intent: null, operation: null, error: null, missingIntent: false, recoveryNotice: null, modalOpen: false, isCancelling: false })
   },
 
   clearError() { set({ error: null }) },

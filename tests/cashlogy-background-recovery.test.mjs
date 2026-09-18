@@ -5,7 +5,7 @@ import { runInNewContext } from 'node:vm'
 import test from 'node:test'
 
 // Execute the real store actions with isolated storage/network dependencies.
-async function loadStore(kind, request) {
+async function loadStore(kind, request, options = {}) {
   const name = kind === 'payment' ? 'useCashlogyStore' : 'useCashlogyManagementStore'
   const source = await readFile(new URL(`../src/features/local-printing/cashlogy/${name}.ts`, import.meta.url), 'utf8')
   const code = stripTypeScriptTypes(source).replace(/^import\s[\s\S]*?from\s+['"][^'"]+['"]\s*;?/gm, '').replace(/^export\s+/gm, '')
@@ -24,12 +24,13 @@ async function loadStore(kind, request) {
     createPrintAgentClient: () => ({
       getCashlogyTransactionByRequestId: request,
       getCashlogyCashManagementOperationByRequestId: request,
+      getCashlogyHealth: options.getCashlogyHealth ?? (async () => ({ activeCashManagementOperation: null })),
     }),
-    usePrintAgentStore: { getState: () => ({ baseUrl: 'https://agent.local', token: 'token' }) },
+    usePrintAgentStore: { getState: () => ({ baseUrl: 'https://agent.local', token: 'token', cashlogyConfigured: true }) },
     loadCashlogyIntent: () => intent,
     loadCashlogyManagementIntent: () => intent,
     saveCashlogyIntent: () => {},
-    saveCashlogyManagementIntent: () => {},
+    saveCashlogyManagementIntent: options.saveCashlogyManagementIntent ?? (() => {}),
     cashlogyAcknowledgements: () => ({ add() {}, contains: () => false, flush: async () => {} }),
     getBlockingCashlogyTransactionId: () => null,
     cashlogyActiveStatuses: new Set(['waiting_for_cash']),
@@ -41,6 +42,65 @@ async function loadStore(kind, request) {
   }
   return runInNewContext(`${code}\n${name}`, dependencies)
 }
+
+test('management: a missing saved operation stops automatic recovery and can be discarded after a fresh health check', async () => {
+  const saves = []
+  let healthChecks = 0
+  const missing = new Error('missing')
+  missing.code = 'CASHLOGY_CASH_MANAGEMENT_NOT_FOUND'
+  const store = await loadStore('management', async () => { throw missing }, {
+    getCashlogyHealth: async () => {
+      healthChecks += 1
+      return { activeCashManagementOperation: null }
+    },
+    saveCashlogyManagementIntent: (_scope, intent) => saves.push(intent),
+  })
+  store.getState().configureScope({ tenantId: 't', establishmentId: 'v', terminalId: 'd' })
+
+  await assert.rejects(store.getState().recover(), /La operación guardada no existe/)
+  assert.equal(store.getState().missingIntent, true)
+  assert.equal(store.getState().intent.requestId, 'request-1')
+  assert.equal(healthChecks, 1)
+
+  await store.getState().discardMissingIntent()
+  assert.equal(healthChecks, 2)
+  assert.equal(store.getState().intent, null)
+  assert.equal(store.getState().missingIntent, false)
+  assert.match(store.getState().recoveryNotice, /operación nueva/)
+  assert.deepEqual(saves, [null])
+})
+
+test('management: an active cash operation prevents discarding an orphaned local reference', async () => {
+  const missing = new Error('missing')
+  missing.code = 'CASHLOGY_CASH_MANAGEMENT_NOT_FOUND'
+  const store = await loadStore('management', async () => { throw missing }, {
+    getCashlogyHealth: async () => ({
+      activeCashManagementOperation: { id: 'active-1', requestId: 'another-request', type: 'refill', status: 'accepting' },
+    }),
+  })
+  store.getState().configureScope({ tenantId: 't', establishmentId: 'v', terminalId: 'd' })
+
+  await assert.rejects(store.getState().recover(), /otra operación de efectivo activa/)
+  await assert.rejects(store.getState().discardMissingIntent(), /otra operación de efectivo activa/)
+  assert.equal(store.getState().intent.requestId, 'request-1')
+  assert.equal(store.getState().missingIntent, true)
+})
+
+test('management: an intent bound to another print agent is never queried automatically', async () => {
+  let requests = 0
+  const store = await loadStore('management', async () => { requests += 1 })
+  store.getState().configureScope({ tenantId: 't', establishmentId: 'v', terminalId: 'd' })
+  store.setState({ intent: { ...store.getState().intent, agentBaseUrl: 'https://old-agent.local' } })
+
+  await assert.rejects(store.getState().recover(), /otro agente de impresión/)
+  assert.equal(requests, 0)
+  assert.equal(store.getState().missingIntent, true)
+})
+
+test('management: background refresh skips a missing intent until an operator reviews it', async () => {
+  const source = await readFile(new URL('../src/features/local-printing/cashlogy/useCashlogyScope.ts', import.meta.url), 'utf8')
+  assert.match(source, /management\.intent\s*&&\s*!management\.missingIntent/)
+})
 
 for (const kind of ['payment', 'management']) {
   test(`${kind}: restored intent and repeated outages stay hidden, backend result opens modal`, async () => {
