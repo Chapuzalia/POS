@@ -160,7 +160,7 @@ export function CrmSectionContent({
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
     case 'profitability':
-      return <ProfitabilityCrm catalog={catalog} context={context} disabled={disabled} key={selectedVenueId} timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'} venueId={selectedVenueId} />
+      return <ProfitabilityCrm catalog={catalog} context={context} dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null} disabled={disabled} key={selectedVenueId} timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'} venueId={selectedVenueId} />
     case 'integrations':
       return <IntegrationsCrm disabled={disabled} runAction={runAction} tenantContext={context} />
     case 'print-templates':
