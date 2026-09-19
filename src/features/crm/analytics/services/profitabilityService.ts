@@ -32,22 +32,76 @@ export type ProfitabilityReport = {
   timeline: ProfitabilityTimelinePoint[]
 }
 
+export type ProductProfitabilityComponent = {
+  inventoryItemId: string
+  name?: string
+  quantity: number
+  unitId: string
+  unitCost: number | null
+  cost: number
+  known: boolean
+  components?: unknown[]
+}
+
+export type ProductProfitabilityVariant = {
+  variantId: string
+  variantName: string
+  formatName: string | null
+  priceCents: number
+  costCents: number | null
+  costKnown: boolean
+  components: ProductProfitabilityComponent[]
+}
+
+export type ProductProfitabilityMixer = {
+  name: string
+  units: number
+  netSalesCents: number
+  grossSalesCents: number
+  lineCount: number
+}
+
+export type ProductProfitabilityBreakdown = {
+  variantId: string
+  formatName: string
+  units: number
+  netSalesCents: number
+  grossSalesCents: number
+  discountsCents: number
+  theoreticalCostCents: number
+  knownNetSalesCents: number
+  knownGrossSalesCents: number
+  knownLines: number
+  lineCount: number
+  mixers: ProductProfitabilityMixer[]
+}
+
+export type ProductProfitabilityCombination = {
+  variantId: string
+  formatName: string
+  name: string
+  selections: Array<{ type: 'mixer' | 'modifier'; name: string }>
+  units: number
+  netSalesCents: number
+  grossSalesCents: number
+  discountsCents: number
+  theoreticalCostCents: number
+  knownNetSalesCents: number
+  knownGrossSalesCents: number
+  knownLines: number
+  lineCount: number
+}
+
 export type CurrentProductProfitability = {
+  variants: ProductProfitabilityVariant[]
+  breakdown: ProductProfitabilityBreakdown[]
+  combinations: ProductProfitabilityCombination[]
   variantId: string
   variantName: string
   priceCents: number
   costCents: number | null
   costKnown: boolean
-  components: Array<{
-    inventoryItemId: string
-    name?: string
-    quantity: number
-    unitId: string
-    unitCost: number | null
-    cost: number
-    known: boolean
-    components?: unknown[]
-  }>
+  components: ProductProfitabilityComponent[]
 }
 
 function parseReport(value: unknown): ProfitabilityReport {
@@ -82,14 +136,48 @@ export async function loadCurrentProductProfitability(
   context: Pick<TenantContext, 'tenantId'>,
   venueId: string,
   productId: string,
+  range: { startIso: string; endIso: string },
 ) {
   void context
-  const { data, error } = await requireSupabase().rpc('crm_current_product_profitability', {
+  const client = requireSupabase()
+  const { data, error } = await client.rpc('crm_product_profitability_detail', {
+    p_venue_id: venueId,
+    p_product_id: productId,
+    p_start_at: range.startIso,
+    p_end_at: range.endIso,
+  })
+  const combinations = await client.rpc('crm_product_profitability_combinations', {
+    p_venue_id: venueId,
+    p_product_id: productId,
+    p_start_at: range.startIso,
+    p_end_at: range.endIso,
+  })
+  if (!error) {
+    const detail = data as Omit<CurrentProductProfitability, 'combinations'> | null
+    return detail ? { ...detail, combinations: combinations.error ? [] : combinations.data as ProductProfitabilityCombination[] } : null
+  }
+
+  const fallback = await client.rpc('crm_current_product_profitability', {
     p_venue_id: venueId,
     p_product_id: productId,
   })
-  if (error) throw error
-  return data as CurrentProductProfitability | null
+  if (fallback.error) throw error
+  const legacy = fallback.data as Omit<CurrentProductProfitability, 'variants' | 'breakdown' | 'combinations'> | null
+  if (!legacy) return null
+  return {
+    ...legacy,
+    variants: [{
+      variantId: legacy.variantId,
+      variantName: legacy.variantName,
+      formatName: null,
+      priceCents: legacy.priceCents,
+      costCents: legacy.costCents,
+      costKnown: legacy.costKnown,
+      components: legacy.components,
+    }],
+    breakdown: [],
+    combinations: combinations.error ? [] : combinations.data as ProductProfitabilityCombination[],
+  }
 }
 
 export function profitabilityRange(period: CrmStatsPeriod, timeZone: string) {
