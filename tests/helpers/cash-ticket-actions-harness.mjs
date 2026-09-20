@@ -11,7 +11,7 @@ export function createCashTicketActionsHarness({
   syncPendingEvents = async () => undefined,
   voidTicketWithFiscalCancellation = async () => undefined,
 } = {}) {
-  const calls = { busy: [], enqueued: [], errors: [], finished: [], forgotten: [], ledgers: [], stats: 0, sync: 0, tickets: [] }
+  const calls = { busy: [], enqueued: [], errors: [], finished: [], forgotten: [], historyOpen: [], ledgers: [], stats: 0, sync: 0, tickets: [] }
   const ticket = {
     cashSessionId: 'cash', createdAt: '2026-09-12T00:00:00Z', id: 'sale-1', paymentMethod: 'card', printAttempts: 0,
     printStatus: 'not_requested', status: 'active', totalCents: 600,
@@ -54,7 +54,7 @@ export function createCashTicketActionsHarness({
     refreshPendingCount() {},
     setBusy: (busy) => calls.busy.push(busy),
     setError: (error) => calls.errors.push(error),
-    setHistoryOpen() {},
+    setHistoryOpen: (open) => calls.historyOpen.push(open),
     subtractProductSalesStats: () => { calls.stats += 1 },
     syncPendingEvents: async () => { calls.sync += 1; await syncPendingEvents() },
     tickets: [ticket],

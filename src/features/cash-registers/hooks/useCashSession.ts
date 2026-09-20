@@ -14,7 +14,7 @@ import {
 } from '../../../lib/offlineStore'
 import {
   loadSalesLedgerFromSupabase,
-  loadSessionTicketsFromSupabase,
+  loadSessionTicketFromSupabase,
   summarizeSales,
 } from '../../../services/posService'
 import type {
@@ -242,15 +242,23 @@ export function useCashSession(options: Options) {
     onError: (message) => options.onError(message),
   })
 
-  const refreshConfirmedSale = useCallback(async (saleId: string, missingTicketTitle: string, shouldPrint = true) => {
+  const refreshConfirmedSale = useCallback(async (ticketId: string, missingTicketTitle: string, shouldPrint = true) => {
     if (!options.context || !session) return
-    const [nextLedger, remoteTickets] = await Promise.all([
+    const [nextLedger, remoteTicket] = await Promise.all([
       loadSalesLedgerFromSupabase(options.context, session.id),
-      loadSessionTicketsFromSupabase(options.context, session.id),
+      loadSessionTicketFromSupabase(options.context, session.id, ticketId),
     ])
     persistLedger(nextLedger)
-    persistTickets(mergeRemotePrintStates(remoteTickets))
-    const confirmedTicket = remoteTickets.find((ticket) => ticket.id === saleId)
+    const confirmedTicket = remoteTicket ? mergeRemotePrintStates([remoteTicket])[0] : null
+    if (confirmedTicket) {
+      persistTickets([
+        confirmedTicket,
+        ...ticketsRef.current.filter((ticket) => (
+          ticket.id !== confirmedTicket.id
+          && ticket.payload.ticket.id !== confirmedTicket.payload.ticket.id
+        )),
+      ])
+    }
     if (confirmedTicket && shouldPrint) void printSale(confirmedTicket.payload)
     else if (!confirmedTicket) sileo.warning({ title: missingTicketTitle, description: 'No se ha podido recuperar el ticket confirmado.' })
   }, [mergeRemotePrintStates, options.context, persistLedger, persistTickets, printSale, session])
