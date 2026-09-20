@@ -13,7 +13,7 @@ import type { RunAction } from '../../shared/types'
 import {
   createInventoryWarehouse,
   deleteInventoryWarehouse,
-  loadInventoryWarehouseStockSummaries,
+  loadInventoryWarehouseStockSummary,
   loadInventoryWarehouses,
   loadInventoryWarehouseRouting,
   saveInventoryDeviceWarehouses,
@@ -41,14 +41,13 @@ export function InventoryWarehousesCrm({ disabled, runAction, selectedVenueId, t
       setStockSummaries([])
       return
     }
-    const [nextWarehouses, nextRouting, nextStockSummaries] = await Promise.all([
+    const [nextWarehouses, nextRouting] = await Promise.all([
       loadInventoryWarehouses(tenantContext, selectedVenueId),
       loadInventoryWarehouseRouting(tenantContext, selectedVenueId),
-      loadInventoryWarehouseStockSummaries(tenantContext, selectedVenueId),
     ])
     setWarehouses(nextWarehouses)
     setRouting(nextRouting)
-    setStockSummaries(nextStockSummaries)
+    setStockSummaries([])
   }, [selectedVenueId, tenantContext])
 
   useEffect(() => {
@@ -60,6 +59,12 @@ export function InventoryWarehousesCrm({ disabled, runAction, selectedVenueId, t
   const deletingWarehouse = deletingWarehouseId
     ? warehouses.find((warehouse) => warehouse.id === deletingWarehouseId) ?? null
     : null
+
+  async function openDelete(warehouseId: string) {
+    const summary = await loadInventoryWarehouseStockSummary(tenantContext, selectedVenueId, warehouseId)
+    setStockSummaries((current) => [...current.filter((item) => item.warehouseId !== warehouseId), summary])
+    setDeletingWarehouseId(warehouseId)
+  }
 
   return (
     <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
@@ -85,7 +90,7 @@ export function InventoryWarehousesCrm({ disabled, runAction, selectedVenueId, t
               </div></td>
               <td className="!min-w-[260px] !px-4 !py-3 !text-[var(--crm-text-secondary)]">{warehouse.description || 'Sin descripción'}</td>
               <td className="!w-[120px] !px-4 !py-3"><span className={warehouse.active ? 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-green-soft)] text-[var(--crm-green)] !w-fit' : 'inline-flex min-h-6 w-fit items-center whitespace-nowrap rounded-full px-[9px] text-[11px] font-semibold bg-[var(--crm-red-soft)] text-[var(--crm-red)] !w-fit'}>{warehouse.active ? 'Activo' : 'Inactivo'}</span></td>
-              <td className="!w-[64px] !px-4 !py-3"><UiButton aria-label={`Eliminar ${warehouse.name}`} className="!inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-red-soft)] !p-0 !text-[var(--crm-red)] !shadow-none hover:!brightness-95" disabled={disabled} onClick={() => setDeletingWarehouseId(warehouse.id)} title="Eliminar almacén" type="button"><Trash2 className="!size-4" /></UiButton></td>
+              <td className="!w-[64px] !px-4 !py-3"><UiButton aria-label={`Eliminar ${warehouse.name}`} className="!inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-red-soft)] !p-0 !text-[var(--crm-red)] !shadow-none hover:!brightness-95" disabled={disabled} onClick={() => void runAction(() => openDelete(warehouse.id))} title="Eliminar almacén" type="button"><Trash2 className="!size-4" /></UiButton></td>
             </tr>
           ))}</tbody>
       </DataTable> : <div className="!p-[18px] md:!p-[22px]"><EmptyList message="No hay almacenes. Crea el primero para empezar a registrar existencias." /></div>}

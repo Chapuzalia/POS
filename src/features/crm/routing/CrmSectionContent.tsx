@@ -3,7 +3,7 @@ import type { RunAction } from '../shared/types'
 import type { CatalogData } from '../../catalog/domain/types.ts'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../../types'
 import { canAccessCrmSection } from './crmPermissions'
-import type { CrmSection } from './crmNavigation'
+import { catalogSections, type CrmSection } from './crmNavigation'
 import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
 
 const AccessManagementCrm = lazy(() => import('../access/pages/AccessPage').then((module) => ({ default: module.AccessManagementCrm })))
@@ -56,8 +56,6 @@ type Props = {
   venues: CrmVenue[]
 }
 
-const catalogSections = new Set<CrmSection>(['dashboard', 'products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import'])
-
 export function CrmSectionContent({
   activeSection,
   catalog,
@@ -90,7 +88,7 @@ export function CrmSectionContent({
 
   switch (activeSection) {
     case 'dashboard':
-      return catalog ? <DashboardCrm disabled={disabled} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} /> : null
+      return <DashboardCrm disabled={disabled} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} />
     case 'products':
       return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
@@ -110,7 +108,7 @@ export function CrmSectionContent({
     case 'tables':
       return <TableManagementPage context={context} disabled={disabled} onError={onError} venueId={selectedVenueId} />
     case 'production':
-      return <ProductionCrm catalog={catalog} context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} />
+      return catalog ? <ProductionCrm catalog={catalog} context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} /> : null
     case 'inventory-stock':
       return <InventoryStockCrm disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'purchases-summary':
@@ -160,7 +158,7 @@ export function CrmSectionContent({
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
     case 'profitability':
-      return <ProfitabilityCrm catalog={catalog} context={context} dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null} disabled={disabled} key={selectedVenueId} timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'} venueId={selectedVenueId} />
+      return catalog ? <ProfitabilityCrm catalog={catalog} context={context} dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null} disabled={disabled} key={selectedVenueId} timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'} venueId={selectedVenueId} /> : null
     case 'integrations':
       return <IntegrationsCrm disabled={disabled} runAction={runAction} tenantContext={context} />
     case 'print-templates':

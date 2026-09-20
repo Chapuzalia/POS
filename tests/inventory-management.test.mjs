@@ -431,7 +431,7 @@ test('la pagina Stock conserva el interruptor general del local', () => {
 
 test('la pagina de almacenes confirma el borrado y solicita destino cuando queda stock', () => {
   assert.match(warehousesPage, /deleteInventoryWarehouse/)
-  assert.match(warehousesPage, /loadInventoryWarehouseStockSummaries/)
+  assert.match(warehousesPage, /loadInventoryWarehouseStockSummary/)
   assert.match(warehousesPage, /Eliminar almacén/)
   assert.match(warehousesPage, /Almacén de destino/)
   assert.match(warehousesPage, /Selecciona dónde transferir sus cantidades antes de eliminarlo/)

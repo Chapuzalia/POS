@@ -68,10 +68,11 @@ export async function loadPurchaseDocuments(
   const [linesResult, suppliersResult, linksResult] = await Promise.all([
     options.includeLines === false ? Promise.resolve({ data: [], error: null }) : client.from('supplier_document_lines')
       .select('supplier_document_id, inventory_item_id, description_raw, line_total, net_cost, normalized_unit_cost, inventory_items(name)')
-      .in('supplier_document_id', documentIds),
+      .eq('tenant_id', context.tenantId).eq('venue_id', venueId).in('supplier_document_id', documentIds),
     supplierIds.length ? client.from('suppliers').select('id, name')
       .eq('tenant_id', context.tenantId).eq('venue_id', venueId).in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
-    options.includeLines === false ? Promise.resolve({ data: [], error: null }) : client.from('supplier_document_links').select('invoice_document_id, delivery_note_document_id')
+    client.from('supplier_document_links').select('invoice_document_id, delivery_note_document_id')
+      .eq('tenant_id', context.tenantId).eq('venue_id', venueId)
       .or(`invoice_document_id.in.(${documentIds.join(',')}),delivery_note_document_id.in.(${documentIds.join(',')})`),
   ])
   if (linesResult.error) throw linesResult.error
@@ -139,7 +140,7 @@ export async function exportPurchaseDocuments(documents: PurchaseDocument[], sta
   const client = requireSupabase()
   const files: Record<string, Uint8Array> = {}
   const failures: string[] = []
-  await Promise.all(documents.map(async (document) => {
+  const downloadDocument = async (document: PurchaseDocument) => {
     if (!document.storageBucket || !document.storagePath) {
       failures.push(document.id)
       return
@@ -151,14 +152,20 @@ export async function exportPurchaseDocuments(documents: PurchaseDocument[], sta
     }
     const originalExtension = document.originalFileName?.match(/\.[a-zA-Z0-9]{1,8}$/)?.[0]
       ?? (document.originalMimeType === 'application/pdf' ? '.pdf' : '')
-    const name = [
+    const baseName = [
       document.documentDate ?? 'Sin_fecha',
       document.documentType === 'invoice' ? 'Factura' : 'Albaran',
       safeFilePart(document.supplierName ?? 'Sin_proveedor'),
       safeFilePart(document.documentNumber ?? document.id.slice(0, 8)),
-    ].join('_') + originalExtension
+    ].join('_')
+    let name = `${baseName}${originalExtension}`
+    if (files[name]) name = `${baseName}_${document.id.slice(0, 8)}${originalExtension}`
     files[name] = new Uint8Array(await data.arrayBuffer())
-  }))
+  }
+  const concurrency = 4
+  for (let index = 0; index < documents.length; index += concurrency) {
+    await Promise.all(documents.slice(index, index + concurrency).map(downloadDocument))
+  }
   const csv = [
     ['fecha', 'tipo', 'numero', 'proveedor', 'importe', 'id', 'fichero_disponible'],
     ...documents.map((document) => [

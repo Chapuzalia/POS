@@ -105,6 +105,78 @@ export async function createInventoryWarehouse(context: TenantContext, venueId: 
   if (error) throw error
 }
 
+export type InventoryItemsPageData = Pick<InventorySnapshot, 'items' | 'itemRoutes' | 'levels' | 'productionRecipes' | 'recipeLines' | 'recipes' | 'units' | 'warehouses'>
+export type InventoryPreparationsPageData = Pick<InventorySnapshot, 'items' | 'itemRoutes' | 'productionRecipeLines' | 'productionRecipes' | 'units' | 'warehouses'>
+export type InventoryStockPageData = Pick<InventorySnapshot, 'items' | 'itemRoutes' | 'levels' | 'productionRecipes' | 'units' | 'warehouses'>
+export type SupplierReceiptInventoryData = Pick<InventorySnapshot, 'items' | 'units' | 'warehouses'>
+
+function mapInventoryItemRoutes(rows: DbRow[]) {
+  return rows.map<InventoryItemWarehouseRoute>((row) => ({ inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id), priority: number(row.priority), enabled: Boolean(row.is_enabled) }))
+}
+
+function mapInventoryLevels(rows: DbRow[]) {
+  return rows.map<InventoryStockLevel>((row) => ({ inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id), quantity: number(row.quantity), enabled: Boolean(row.is_enabled), targetQuantity: row.target_quantity == null ? null : number(row.target_quantity) }))
+}
+
+function mapProductionRecipes(rows: DbRow[]) {
+  return rows.map<InventoryProductionRecipe>((row) => ({ id: string(row.id), inventoryItemId: string(row.inventory_item_id), productionWarehouseId: string(row.production_warehouse_id), referenceQuantity: number(row.reference_quantity), referenceUnitId: string(row.reference_unit_id), active: Boolean(row.is_active) }))
+}
+
+export async function loadInventoryStockPageData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventoryStockPageData> {
+  const [units, warehouses, itemRows, routeRows, levelRows, productionRows] = await Promise.all([
+    loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
+    rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
+    rows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId),
+    rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled, target_quantity', context, venueId),
+    rows('inventory_production_recipes', 'id, inventory_item_id, production_warehouse_id, reference_quantity, reference_unit_id, is_active', context, venueId),
+  ])
+  return { units, warehouses, items: itemRows.map(mapInventoryItem), itemRoutes: mapInventoryItemRoutes(routeRows), levels: mapInventoryLevels(levelRows), productionRecipes: mapProductionRecipes(productionRows) }
+}
+
+export async function loadSupplierReceiptInventoryData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<SupplierReceiptInventoryData> {
+  const [units, warehouses, itemRows] = await Promise.all([
+    loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
+    rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
+  ])
+  return { units, warehouses, items: itemRows.map(mapInventoryItem) }
+}
+
+export async function loadInventoryItemsPageData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventoryItemsPageData> {
+  const [units, warehouses, itemRows, routeRows, levelRows, recipeRows, recipeLineRows, productionRows] = await Promise.all([
+    loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
+    rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
+    rows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId),
+    rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled, target_quantity', context, venueId),
+    rows('inventory_recipes', 'id, variant_id, mode, is_active', context, venueId),
+    rows('inventory_recipe_lines', 'id, recipe_id, inventory_item_id, quantity, unit_id, uses_format_default, sort_order', context, venueId),
+    rows('inventory_production_recipes', 'id, inventory_item_id, production_warehouse_id, reference_quantity, reference_unit_id, is_active', context, venueId),
+  ])
+  return {
+    units, warehouses, items: itemRows.map(mapInventoryItem),
+    itemRoutes: routeRows.map<InventoryItemWarehouseRoute>((row) => ({ inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id), priority: number(row.priority), enabled: Boolean(row.is_enabled) })),
+    levels: levelRows.map<InventoryStockLevel>((row) => ({ inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id), quantity: number(row.quantity), enabled: Boolean(row.is_enabled), targetQuantity: row.target_quantity == null ? null : number(row.target_quantity) })),
+    recipes: recipeRows.map<InventoryRecipe>((row) => ({ id: string(row.id), variantId: string(row.variant_id), mode: row.mode === 'direct' ? 'direct' : 'recipe', active: Boolean(row.is_active) })),
+    recipeLines: recipeLineRows.map<InventoryRecipeLine>((row) => ({ id: string(row.id), recipeId: string(row.recipe_id), inventoryItemId: string(row.inventory_item_id), quantity: row.quantity == null ? null : number(row.quantity), unitId: row.unit_id == null ? null : string(row.unit_id), usesFormatDefault: Boolean(row.uses_format_default), sortOrder: number(row.sort_order) })),
+    productionRecipes: productionRows.map<InventoryProductionRecipe>((row) => ({ id: string(row.id), inventoryItemId: string(row.inventory_item_id), productionWarehouseId: string(row.production_warehouse_id), referenceQuantity: number(row.reference_quantity), referenceUnitId: string(row.reference_unit_id), active: Boolean(row.is_active) })),
+  }
+}
+
+export async function loadInventoryPreparationsPageData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventoryPreparationsPageData> {
+  const [units, warehouses, itemRows, routeRows, productionRows, productionLineRows] = await Promise.all([
+    loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
+    rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
+    rows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId),
+    rows('inventory_production_recipes', 'id, inventory_item_id, production_warehouse_id, reference_quantity, reference_unit_id, is_active', context, venueId),
+    rows('inventory_production_recipe_lines', 'id, recipe_id, inventory_item_id, quantity, unit_id, sort_order', context, venueId),
+  ])
+  return {
+    units, warehouses, items: itemRows.map(mapInventoryItem),
+    itemRoutes: routeRows.map<InventoryItemWarehouseRoute>((row) => ({ inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id), priority: number(row.priority), enabled: Boolean(row.is_enabled) })),
+    productionRecipes: productionRows.map<InventoryProductionRecipe>((row) => ({ id: string(row.id), inventoryItemId: string(row.inventory_item_id), productionWarehouseId: string(row.production_warehouse_id), referenceQuantity: number(row.reference_quantity), referenceUnitId: string(row.reference_unit_id), active: Boolean(row.is_active) })),
+    productionRecipeLines: productionLineRows.map<InventoryProductionRecipeLine>((row) => ({ id: string(row.id), recipeId: string(row.recipe_id), inventoryItemId: string(row.inventory_item_id), quantity: number(row.quantity), unitId: string(row.unit_id), sortOrder: number(row.sort_order) })),
+  }
+}
+
 export async function loadInventorySnapshot(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventorySnapshot> {
   const [units, warehouses, itemRows, routeRows, levelRows, recipeRows, recipeLineRows, effectRows, productionRows, productionLineRows] = await Promise.all([
     loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
@@ -222,7 +294,7 @@ export async function deleteInventoryWarehouse(context: TenantContext, venueId: 
   return Number(data ?? 0)
 }
 
-export async function loadInventoryWarehouseStockSummaries(context: TenantContext, venueId: string): Promise<InventoryWarehouseStockSummary[]> {
+export async function loadInventoryWarehouseStockSummaries(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventoryWarehouseStockSummary[]> {
   const levels = await rows('inventory_stock_levels', 'warehouse_id, quantity', context, venueId)
   const counts = new Map<string, number>()
   for (const row of levels) {
@@ -231,6 +303,13 @@ export async function loadInventoryWarehouseStockSummaries(context: TenantContex
     counts.set(warehouseId, (counts.get(warehouseId) ?? 0) + 1)
   }
   return [...counts].map(([warehouseId, nonZeroItemCount]) => ({ warehouseId, nonZeroItemCount }))
+}
+
+export async function loadInventoryWarehouseStockSummary(context: Pick<TenantContext, 'tenantId'>, venueId: string, warehouseId: string): Promise<InventoryWarehouseStockSummary> {
+  const { data, error } = await requireSupabase().from('inventory_stock_levels').select('quantity')
+    .eq('tenant_id', context.tenantId).eq('venue_id', venueId).eq('warehouse_id', warehouseId)
+  if (error) throw error
+  return { warehouseId, nonZeroItemCount: (data ?? []).filter((row) => number(row.quantity) !== 0).length }
 }
 
 export async function loadInventoryWarehouseRouting(context: TenantContext, venueId: string): Promise<InventoryWarehouseRouting> {
