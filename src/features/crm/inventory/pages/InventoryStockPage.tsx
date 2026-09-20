@@ -13,7 +13,7 @@ import {
   parseInventoryStockQuantity,
 } from "../inventoryModel";
 import {
-  loadInventorySnapshot,
+  loadInventoryStockPageData,
   saveInventoryItemStock,
   setVenueInventoryEnabled,
 } from "../services/inventoryService";
@@ -61,43 +61,38 @@ export function InventoryStockCrm({
   const refresh = useCallback(async () => {
     if (!selectedVenueId || !inventoryEnabled)
       return setSnapshot(emptySnapshot);
-    setSnapshot(await loadInventorySnapshot(tenantContext, selectedVenueId));
+    setSnapshot({ ...emptySnapshot, ...(await loadInventoryStockPageData(tenantContext, selectedVenueId)) });
   }, [inventoryEnabled, selectedVenueId, tenantContext]);
 
   useEffect(() => {
     void runAction(refresh);
   }, [refresh, runAction]);
 
-  const rows = useMemo(
-    () =>
-      snapshot.items
-        .map((item) => {
-          const unit = snapshot.units.find(
-            (candidate) => candidate.id === item.baseUnitId,
-          );
-          const levels = snapshot.levels.filter(
-            (level) => level.inventoryItemId === item.id && level.enabled,
-          );
-          const primaryRoute = snapshot.itemRoutes
-            .filter(
-              (route) => route.inventoryItemId === item.id && route.enabled,
-            )
-            .toSorted((a, b) => a.priority - b.priority)[0];
-          return {
-            item,
-            unit,
-            total: levels.reduce((sum, level) => sum + level.quantity, 0),
-            warehouse: snapshot.warehouses.find(
-              (warehouse) => warehouse.id === primaryRoute?.warehouseId,
-            ),
-            isPreparation: snapshot.productionRecipes.some(
-              (recipe) => recipe.inventoryItemId === item.id && recipe.active,
-            ),
-          };
-        })
-        .toSorted((a, b) => a.item.name.localeCompare(b.item.name, "es")),
-    [snapshot],
-  );
+  const rows = useMemo(() => {
+    const unitsById = new Map(snapshot.units.map((unit) => [unit.id, unit]));
+    const warehousesById = new Map(snapshot.warehouses.map((warehouse) => [warehouse.id, warehouse]));
+    const totalsByItemId = new Map<string, number>();
+    for (const level of snapshot.levels) {
+      if (level.enabled) totalsByItemId.set(level.inventoryItemId, (totalsByItemId.get(level.inventoryItemId) ?? 0) + level.quantity);
+    }
+    const primaryRouteByItemId = new Map<string, (typeof snapshot.itemRoutes)[number]>();
+    for (const route of snapshot.itemRoutes) {
+      if (!route.enabled) continue;
+      const current = primaryRouteByItemId.get(route.inventoryItemId);
+      if (!current || route.priority < current.priority) primaryRouteByItemId.set(route.inventoryItemId, route);
+    }
+    const preparations = new Set(snapshot.productionRecipes.filter((recipe) => recipe.active).map((recipe) => recipe.inventoryItemId));
+    return snapshot.items.map((item) => {
+      const primaryRoute = primaryRouteByItemId.get(item.id);
+      return {
+        item,
+        unit: unitsById.get(item.baseUnitId),
+        total: totalsByItemId.get(item.id) ?? 0,
+        warehouse: primaryRoute ? warehousesById.get(primaryRoute.warehouseId) : undefined,
+        isPreparation: preparations.has(item.id),
+      };
+    }).toSorted((a, b) => a.item.name.localeCompare(b.item.name, "es"));
+  }, [snapshot]);
 
   const selected = snapshot.items.find((item) => item.id === selectedId);
   const selectedUnit = snapshot.units.find(

@@ -2,7 +2,7 @@ import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
 import { PRODUCT_IMAGE_TYPE, convertImageFileToWebp, isProductImageWebp } from '../../../../lib/productImages.ts'
 import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
-import { loadInventorySnapshot } from '../../inventory/services/inventoryService'
+import { loadSupplierReceiptInventoryData } from '../../inventory/services/inventoryService'
 import { loadVenueSuppliers } from '../../purchases/services/supplierService'
 import type {
   SupplierDocument,
@@ -181,7 +181,7 @@ export async function loadSupplierDocument(
 export async function loadSupplierReceiptWorkspace(context: TenantContext, venueId: string, documentId: string) {
   const [detail, inventory, suppliers] = await Promise.all([
     loadSupplierDocument(context, venueId, documentId),
-    loadInventorySnapshot(context, venueId),
+    loadSupplierReceiptInventoryData(context, venueId),
     loadSupplierOptions(context, venueId),
   ])
   return { ...detail, inventory, suppliers }
@@ -266,10 +266,10 @@ export async function loadDeliveryNoteCandidates(
   const ids = rows.map((row) => String(row.id))
   const supplierIds = [...new Set(rows.map((row) => text(row.supplier_id)).filter((id): id is string => Boolean(id)))]
   const [lineResult, supplierResult, linkResult] = await Promise.all([
-    client.from('supplier_document_lines').select('supplier_document_id, line_total, net_cost').in('supplier_document_id', ids),
+    client.from('supplier_document_lines').select('supplier_document_id, line_total, net_cost').eq('tenant_id', context.tenantId).eq('venue_id', venueId).in('supplier_document_id', ids),
     supplierIds.length ? client.from('suppliers').select('id, name')
       .eq('tenant_id', context.tenantId).eq('venue_id', venueId).in('id', supplierIds) : Promise.resolve({ data: [], error: null }),
-    client.from('supplier_document_links').select('delivery_note_document_id').in('delivery_note_document_id', ids),
+    client.from('supplier_document_links').select('delivery_note_document_id').eq('tenant_id', context.tenantId).eq('venue_id', venueId).in('delivery_note_document_id', ids),
   ])
   if (lineResult.error) throw lineResult.error
   if (supplierResult.error) throw supplierResult.error

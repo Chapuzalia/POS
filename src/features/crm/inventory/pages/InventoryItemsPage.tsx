@@ -8,7 +8,7 @@ import { CrmSelect } from '../../shared/components/CrmSelect'
 import { EmptyList } from '../../shared/components/EmptyList'
 import type { RunAction } from '../../shared/types'
 import { formatInventoryQuantity, getEffectiveInventoryItemCost } from '../inventoryModel'
-import { loadInventorySnapshot, saveInventoryItem } from '../services/inventoryService'
+import { loadInventoryItemsPageData, saveInventoryItem } from '../services/inventoryService'
 import type { InventoryItem, InventorySnapshot } from '../types'
 
 type Props = { disabled: boolean; runAction: RunAction; selectedVenueId: string; tenantContext: TenantContext }
@@ -29,11 +29,39 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
   const [draft, setDraft] = useState<Draft | null>(null)
   const [error, setError] = useState<string | null>(null)
 
-  const refresh = useCallback(async () => setSnapshot(await loadInventorySnapshot(tenantContext, selectedVenueId)), [selectedVenueId, tenantContext])
+  const refresh = useCallback(async () => setSnapshot({ ...emptySnapshot, ...(await loadInventoryItemsPageData(tenantContext, selectedVenueId)) }), [selectedVenueId, tenantContext])
   useEffect(() => { void runAction(refresh) }, [refresh, runAction])
 
-  const items = useMemo(() => snapshot.items.toSorted((a, b) => a.name.localeCompare(b.name, 'es')), [snapshot.items])
-  const stock = (itemId: string) => snapshot.levels.filter((level) => level.inventoryItemId === itemId && level.enabled).reduce((sum, level) => sum + level.quantity, 0)
+  const rows = useMemo(() => {
+    const unitsById = new Map(snapshot.units.map((unit) => [unit.id, unit]))
+    const warehousesById = new Map(snapshot.warehouses.map((warehouse) => [warehouse.id, warehouse]))
+    const stockByItemId = new Map<string, number>()
+    for (const level of snapshot.levels) if (level.enabled) stockByItemId.set(level.inventoryItemId, (stockByItemId.get(level.inventoryItemId) ?? 0) + level.quantity)
+    const primaryRouteByItemId = new Map<string, (typeof snapshot.itemRoutes)[number]>()
+    for (const route of snapshot.itemRoutes) {
+      if (!route.enabled) continue
+      const current = primaryRouteByItemId.get(route.inventoryItemId)
+      if (!current || route.priority < current.priority) primaryRouteByItemId.set(route.inventoryItemId, route)
+    }
+    const recipeIdsByItemId = new Map<string, Set<string>>()
+    for (const line of snapshot.recipeLines) {
+      const ids = recipeIdsByItemId.get(line.inventoryItemId) ?? new Set<string>()
+      ids.add(line.recipeId)
+      recipeIdsByItemId.set(line.inventoryItemId, ids)
+    }
+    const preparationItemIds = new Set(snapshot.productionRecipes.filter((recipe) => recipe.active).map((recipe) => recipe.inventoryItemId))
+    return snapshot.items.map((item) => {
+      const primaryRoute = primaryRouteByItemId.get(item.id)
+      return {
+        item,
+        unit: unitsById.get(item.baseUnitId),
+        stock: stockByItemId.get(item.id) ?? 0,
+        primary: primaryRoute ? warehousesById.get(primaryRoute.warehouseId) : undefined,
+        linkedVariants: (recipeIdsByItemId.get(item.id) ?? new Set()).size,
+        preparation: preparationItemIds.has(item.id),
+      }
+    }).toSorted((a, b) => a.item.name.localeCompare(b.item.name, 'es'))
+  }, [snapshot])
 
   function open(item?: InventoryItem) {
     const routes = Object.fromEntries(snapshot.warehouses.map((warehouse, index) => {
@@ -66,7 +94,7 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
 
   return <section className="overflow-hidden rounded-2xl bg-[var(--crm-surface)] shadow-[var(--crm-shadow-card)]">
     <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] p-5"><div><h2 className="text-lg font-bold">Artículos de inventario</h2><p className="text-sm text-[var(--crm-text-muted)]">Todo lo que existe físicamente: ingredientes, bebidas y elaboraciones.</p></div><Button disabled={disabled || !snapshot.units.length || !snapshot.warehouses.length} onClick={() => open()} type="button"><Plus className="size-4" /> Nuevo artículo</Button></header>
-    {items.length ? <DataTable aria-label="Artículos de inventario" className="!w-full !min-w-[900px] !border-collapse" filterPlaceholder="Carne, harina, salsa…" filterValue={query} onFilterChange={setQuery}>
+    {rows.length ? <DataTable aria-label="Artículos de inventario" className="!w-full !min-w-[900px] !border-collapse" filterPlaceholder="Carne, harina, salsa…" filterValue={query} onFilterChange={setQuery}>
       <thead>
         <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-xs !font-bold !uppercase !text-[var(--crm-text-muted)]">
           <th className="!min-w-[240px] !px-5 !py-3">Artículo</th>
@@ -80,18 +108,14 @@ export function InventoryItemsCrm({ disabled, runAction, selectedVenueId, tenant
         </tr>
       </thead>
       <tbody>
-        {items.map((item) => {
-          const unit = snapshot.units.find((candidate) => candidate.id === item.baseUnitId)
-          const routes = snapshot.itemRoutes.filter((route) => route.inventoryItemId === item.id && route.enabled).toSorted((a, b) => a.priority - b.priority)
-          const primary = snapshot.warehouses.find((warehouse) => warehouse.id === routes[0]?.warehouseId)
-          const linkedVariants = snapshot.recipes.filter((recipe) => snapshot.recipeLines.some((line) => line.recipeId === recipe.id && line.inventoryItemId === item.id)).length
-          const preparation = snapshot.productionRecipes.some((recipe) => recipe.inventoryItemId === item.id && recipe.active)
+        {rows.map((row) => {
+          const { item, unit, stock, primary, linkedVariants, preparation } = row
           const effectiveCost = getEffectiveInventoryItemCost(item)
           const costSource = effectiveCost?.source === 'average' ? 'Coste medio' : effectiveCost?.source === 'last_purchase' ? 'Última compra' : 'Referencia'
           return <tr className="!border-b !border-[var(--crm-border-subtle)] last:!border-0" key={item.id}>
             <td className="!px-5 !py-3"><span className="flex items-center gap-3"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--crm-blue-soft)] text-[var(--crm-blue)]"><PackagePlus className="size-4" /></span><span className="min-w-0"><strong className="block">{item.name}</strong><small className="block max-w-[320px] truncate text-[var(--crm-text-muted)]">{item.description || 'Sin descripción'} · {item.active ? 'Activo' : 'Inactivo'}</small></span></span></td>
             <td className="!px-3 !py-3"><strong className="block">{unit?.name ?? 'Sin unidad'}</strong><small className="text-[var(--crm-text-muted)]">{unit?.symbol}</small></td>
-            <td className="!whitespace-nowrap !px-3 !py-3" data-sort-value={stock(item.id)}><strong className="font-mono">{formatInventoryQuantity(stock(item.id), unit?.decimalPlaces ?? 6)} {unit?.symbol}</strong></td>
+            <td className="!whitespace-nowrap !px-3 !py-3" data-sort-value={stock}><strong className="font-mono">{formatInventoryQuantity(stock, unit?.decimalPlaces ?? 6)} {unit?.symbol}</strong></td>
             <td className="!whitespace-nowrap !px-3 !py-3" data-sort-value={effectiveCost?.cost ?? -1}>{effectiveCost ? <><strong className="block font-mono">{effectiveCost.cost.toLocaleString('es-ES', { style: 'currency', currency: 'EUR', maximumFractionDigits: 4 })}/{unit?.symbol}</strong><small className="text-[var(--crm-text-muted)]">{costSource}</small></> : <span className="text-[var(--crm-text-muted)]">Sin coste</span>}</td>
             <td className="!px-3 !py-3">{primary?.name ?? 'Sin ruta'}</td>
             <td className="!px-3 !py-3" data-sort-value={linkedVariants}>{linkedVariants} {linkedVariants === 1 ? 'variante' : 'variantes'}</td>

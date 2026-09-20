@@ -25,7 +25,7 @@ import {
 import { CrmModal } from "../../shared/components/CrmModal";
 import { CrmSelect } from "../../shared/components/CrmSelect";
 import { Field } from "../../shared/components/Field";
-import type { InventorySnapshot } from "../../inventory/types";
+import type { SupplierReceiptInventoryData } from "../../inventory/services/inventoryService";
 import {
   confirmSupplierDocument,
   createInventoryItemFromSupplierDocument,
@@ -174,7 +174,7 @@ export function SupplierReceiptsCrm({
   const [documentType, setDocumentType] =
     useState<SupplierDocumentType>("delivery_note");
   const [detail, setDetail] = useState<SupplierDocumentDetail | null>(null);
-  const [inventory, setInventory] = useState<InventorySnapshot | null>(null);
+  const [inventory, setInventory] = useState<SupplierReceiptInventoryData | null>(null);
   const [supplierOptions, setSupplierOptions] = useState<SupplierOption[]>([]);
   const [manualHintSupplierId, setManualHintSupplierId] = useState("");
   const [showAll, setShowAll] = useState(false);

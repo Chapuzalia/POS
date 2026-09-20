@@ -53,6 +53,7 @@ export const productSections = new Set<CrmSection>(productNavItems.map((item) =>
 export const reportSections = new Set<CrmSection>(reportNavItems.map((item) => item.id))
 export const inventorySections = new Set<CrmSection>(inventoryNavItems.map((item) => item.id))
 export const purchaseSections = new Set<CrmSection>(purchaseNavItems.map((item) => item.id))
+export const catalogSections = new Set<CrmSection>(['products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import', 'production', 'profitability'])
 
 export function getSectionTitle(section: CrmSection) {
   const titles: Partial<Record<CrmSection, string>> = {

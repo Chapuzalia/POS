@@ -111,6 +111,9 @@ test('theoretical_ticket_line_cost resuelve una línea completa con recetas, com
   const componentModifier = id(30), removeModifier = id(31), addModifier = id(32)
 
   await db.exec(`
+    create role anon;
+    create role authenticated;
+    create role service_role;
     create table public.tickets (id uuid primary key, tenant_id uuid not null, venue_id uuid not null);
     create table public.ticket_lines (
       id uuid primary key, ticket_id uuid not null, tenant_id uuid not null, variant_id uuid not null,

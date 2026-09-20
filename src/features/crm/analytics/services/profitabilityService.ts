@@ -140,28 +140,31 @@ export async function loadCurrentProductProfitability(
 ) {
   void context
   const client = requireSupabase()
-  const { data, error } = await client.rpc('crm_product_profitability_detail', {
-    p_venue_id: venueId,
-    p_product_id: productId,
-    p_start_at: range.startIso,
-    p_end_at: range.endIso,
-  })
-  const combinations = await client.rpc('crm_product_profitability_combinations', {
-    p_venue_id: venueId,
-    p_product_id: productId,
-    p_start_at: range.startIso,
-    p_end_at: range.endIso,
-  })
+  const [{ data, error }, combinations] = await Promise.all([
+    client.rpc('crm_product_profitability_detail', {
+      p_venue_id: venueId,
+      p_product_id: productId,
+      p_start_at: range.startIso,
+      p_end_at: range.endIso,
+    }),
+    client.rpc('crm_product_profitability_combinations', {
+      p_venue_id: venueId,
+      p_product_id: productId,
+      p_start_at: range.startIso,
+      p_end_at: range.endIso,
+    }),
+  ])
+  if (combinations.error) throw combinations.error
   if (!error) {
     const detail = data as Omit<CurrentProductProfitability, 'combinations'> | null
-    return detail ? { ...detail, combinations: combinations.error ? [] : combinations.data as ProductProfitabilityCombination[] } : null
+    return detail ? { ...detail, combinations: combinations.data as ProductProfitabilityCombination[] } : null
   }
 
   const fallback = await client.rpc('crm_current_product_profitability', {
     p_venue_id: venueId,
     p_product_id: productId,
   })
-  if (fallback.error) throw error
+  if (fallback.error) throw fallback.error
   const legacy = fallback.data as Omit<CurrentProductProfitability, 'variants' | 'breakdown' | 'combinations'> | null
   if (!legacy) return null
   return {
@@ -176,7 +179,7 @@ export async function loadCurrentProductProfitability(
       components: legacy.components,
     }],
     breakdown: [],
-    combinations: combinations.error ? [] : combinations.data as ProductProfitabilityCombination[],
+    combinations: combinations.data as ProductProfitabilityCombination[],
   }
 }
 

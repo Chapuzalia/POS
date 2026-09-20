@@ -153,7 +153,7 @@ export async function loadCrmDayActivity(
   )
 }
 
-export async function loadCrmStats(
+async function loadCrmStatsLegacy(
   context: TenantContext,
   venue: CrmVenue,
   period?: CrmStatsPeriod,
@@ -439,6 +439,44 @@ export async function loadCrmStats(
     }))).slice(0, 8),
     topProducts: sortCrmTopProductsByUnits([...topProductMap.values()]).slice(0, 8),
   }
+}
+
+export async function loadCrmStats(
+  context: TenantContext,
+  venue: CrmVenue,
+  period?: CrmStatsPeriod,
+  options: { includeLiveState?: boolean } = {},
+): Promise<CrmStats> {
+  const client = requireSupabase()
+  const operationalDayConfig = { dayChangeTime: venue.dayChangeTime, timeZone: venue.timeZone }
+  const currentDay = getOperationalDateKey(new Date(), operationalDayConfig)
+  const selectedPeriod = period ?? createCrmStatsPeriod('month', currentDay.slice(0, 7))
+  const periodSummary = summarizeCrmStatsPeriod(selectedPeriod, currentDay)
+  const periodRange = getOperationalPeriodRangeIso(operationalDayConfig, periodSummary.startDate, periodSummary.effectiveEndDate)
+  const dayRange = getOperationalDayRangeIso(operationalDayConfig)
+  const [periodResult, liveResult] = await Promise.all([
+    client.rpc('crm_stats_period', {
+      p_tenant_id: context.tenantId,
+      p_venue_id: venue.id,
+      p_period_kind: selectedPeriod.kind,
+      p_period_start_date: selectedPeriod.startDate,
+      p_period_end_date: selectedPeriod.endDate,
+      p_effective_end_date: periodSummary.effectiveEndDate,
+      p_period_start: periodRange.startIso,
+      p_period_end: periodRange.endIso,
+      p_time_zone: venue.timeZone,
+      p_day_change_time: venue.dayChangeTime,
+    }),
+    options.includeLiveState === false
+      ? Promise.resolve({ data: { dayActivity: { totalCents: 0, cashCents: 0, cardCents: 0, ticketCount: 0 }, openCashSessions: [] }, error: null })
+      : client.rpc('crm_stats_live', { p_tenant_id: context.tenantId, p_venue_id: venue.id, p_day_start: dayRange.startIso, p_day_end: dayRange.endIso }),
+  ])
+  if (periodResult.error) {
+    if (periodResult.error.code === 'PGRST202' || periodResult.error.code === '42883') return loadCrmStatsLegacy(context, venue, period, options)
+    throw periodResult.error
+  }
+  if (liveResult.error) throw liveResult.error
+  return { ...(periodResult.data as CrmStats), ...(liveResult.data as Pick<CrmStats, 'dayActivity' | 'openCashSessions'>) }
 }
 
 export function subscribeToCrmStatsChanges(

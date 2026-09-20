@@ -20,10 +20,14 @@ export type ReplenishmentRow = {
 export type ReplenishmentData = { snapshot: InventorySnapshot; rows: ReplenishmentRow[] }
 
 export async function loadReplenishmentData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<ReplenishmentData> {
+  const replenishmentHistoryStart = new Date()
+  replenishmentHistoryStart.setUTCFullYear(replenishmentHistoryStart.getUTCFullYear() - 1)
+  const historyStart = replenishmentHistoryStart.toISOString().slice(0, 10)
+  const historyEnd = new Date().toISOString().slice(0, 10)
   const [snapshot, suppliers, documents] = await Promise.all([
     loadInventorySnapshot(context, venueId),
     loadVenueSuppliers(context, venueId),
-    loadPurchaseDocuments(context, venueId, '2000-01-01', '2100-01-01'),
+    loadPurchaseDocuments(context, venueId, historyStart, historyEnd, { includeUnconfirmed: false, includeLines: true }),
   ])
   const supplierById = new Map(suppliers.map((supplier) => [supplier.id, supplier]))
   const itemSupplierCosts = new Map<string, Map<string, { sum: number; count: number }>>()
@@ -54,8 +58,15 @@ export async function loadReplenishmentData(context: Pick<TenantContext, 'tenant
       : { sum: current.sum + line.normalizedUnitCost, count: current.count + 1 })
     itemSupplierCosts.set(line.inventoryItemId, bySupplier)
   }
+  const levelsByItemId = new Map<string, InventorySnapshot['levels']>()
+  for (const level of snapshot.levels) {
+    if (!level.enabled) continue
+    const levels = levelsByItemId.get(level.inventoryItemId) ?? []
+    levels.push(level)
+    levelsByItemId.set(level.inventoryItemId, levels)
+  }
   const rows = snapshot.items.filter((item) => item.active).flatMap((item) => {
-    const levels = snapshot.levels.filter((level) => level.inventoryItemId === item.id && level.enabled)
+    const levels = levelsByItemId.get(item.id) ?? []
     const targets = levels.filter((level) => level.targetQuantity !== null)
     if (!targets.length) return []
     const stock = levels.reduce((sum, level) => sum + level.quantity, 0)
