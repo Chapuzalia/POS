@@ -120,7 +120,7 @@ type Options = {
   onError: (message: string | null) => void
   onPaidFeedback: (method: PaymentMethod | null) => void
   printSale: (payload: SaleCreatedPayload, options?: { cashDrawerAlreadyRequested?: boolean }) => Promise<void>
-  refreshCashSales: (saleId: string, missingTicketTitle: string, shouldPrint?: boolean) => Promise<void>
+  refreshCashSales: (ticketId: string, missingTicketTitle: string, shouldPrint?: boolean) => Promise<void>
   refreshProductSalesStats: () => Promise<void>
   setAppliedDiscount: (discount: AppliedDiscount | null) => void
   setBusy: (busy: boolean) => void
@@ -588,9 +588,9 @@ export function useRestaurantController(options: Options) {
     }
   }, [draft, options, invoiceOrderId])
 
-  const refreshSales = useCallback(async (saleId: string, missingTicketTitle: string, shouldPrint = true) => {
+  const refreshSales = useCallback(async (ticketId: string, missingTicketTitle: string, shouldPrint = true) => {
     await Promise.all([
-      options.refreshCashSales(saleId, missingTicketTitle, shouldPrint),
+      options.refreshCashSales(ticketId, missingTicketTitle, shouldPrint),
       options.refreshProductSalesStats(),
     ])
   }, [options])
@@ -652,7 +652,7 @@ export function useRestaurantController(options: Options) {
           totalCents: result.paidAmountCents,
           fiscal,
         }), { cashDrawerAlreadyRequested })
-        await refreshSales(result.saleId, 'Pago completado sin imprimir', false)
+        await refreshSales(result.ticketId, 'Pago completado sin imprimir', false)
         const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
         realtime.setMap(nextMap)
         if (result.completed) {
@@ -730,7 +730,7 @@ export function useRestaurantController(options: Options) {
           totalCents: result.totalCents,
           fiscal,
         }), { cashDrawerAlreadyRequested })
-        await refreshSales(result.saleId, 'Cobro completado sin imprimir', false)
+        await refreshSales(result.ticketId, 'Cobro completado sin imprimir', false)
         const [nextOrder, nextMap] = await Promise.all([
           cleanedAreaId ? Promise.resolve(null) : loadRestaurantOrder(options.context, saved.order.id),
           realtime.loadCurrentMap(options.context, options.cashSession.id),
@@ -905,7 +905,7 @@ export function useRestaurantController(options: Options) {
       })()
       const refreshSalesTask = Promise.all([
         options.syncPendingEvents(),
-        refreshSales(result.saleId, 'Cobro completado sin imprimir', false),
+        refreshSales(result.ticketId, 'Cobro completado sin imprimir', false),
       ])
       const printTask = (async () => {
         const [fiscal, invoice, ticketNumber] = await Promise.all([

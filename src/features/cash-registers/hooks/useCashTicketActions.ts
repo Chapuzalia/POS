@@ -1,4 +1,4 @@
-import { useCallback, useRef } from 'react'
+import { useCallback, useRef, useState } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent, forgetOfflineEvent, getOfflineQueue } from '../../../lib/offlineStore'
 import { loadSessionTicketPageFromSupabase } from '../../../services/posService'
@@ -35,25 +35,39 @@ type Options = {
 
 export function useCashTicketActions(options: Options) {
   const paymentChangeLockRef = useRef(false)
+  const historySyncRef = useRef<Promise<void> | null>(null)
+  const [historyRefreshVersion, setHistoryRefreshVersion] = useState(0)
   const historyContext = options.context
   const historyCashSession = options.cashSession
   const historyIsOnline = options.isOnline
   const mergeHistoryPrintStates = options.mergeRemotePrintStates
-  const setHistoryBusy = options.setBusy
   const setHistoryError = options.setError
   const setHistoryOpen = options.setHistoryOpen
   const syncHistoryPendingEvents = options.syncPendingEvents
-  const openHistory = useCallback(async () => {
+  const openHistory = useCallback(() => {
     if (!historyContext || !historyCashSession) return
     if (!historyIsOnline) { setHistoryError('El histórico de tickets requiere conexión para consultar los datos de Supabase.'); return }
-    setHistoryBusy(true); setHistoryError(null)
-    try {
-      await syncHistoryPendingEvents()
-      setHistoryOpen(true)
-    } catch (error) { setHistoryError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' })) } finally { setHistoryBusy(false) }
-  }, [historyCashSession, historyContext, historyIsOnline, setHistoryBusy, setHistoryError, setHistoryOpen, syncHistoryPendingEvents])
+    setHistoryError(null)
+    setHistoryOpen(true)
+
+    const hasPendingEvents = getOfflineQueue().some((event) => event.tenantId === historyContext.tenantId)
+    if (!hasPendingEvents || historySyncRef.current) return
+
+    const syncTask = syncHistoryPendingEvents()
+      .catch((error) => {
+        setHistoryError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' }))
+      })
+      .finally(() => {
+        historySyncRef.current = null
+        setHistoryRefreshVersion((version) => version + 1)
+      })
+    historySyncRef.current = syncTask
+  }, [historyCashSession, historyContext, historyIsOnline, setHistoryError, setHistoryOpen, syncHistoryPendingEvents])
 
   const loadHistoryPage = useCallback(async (page: number, query: string): Promise<SessionTicketHistoryPage> => {
+    // Changing this version intentionally invalidates the callback so an open
+    // history refreshes after its background offline sync has settled.
+    void historyRefreshVersion
     if (!historyContext || !historyCashSession || !historyIsOnline) {
       throw new Error('El histórico de tickets requiere conexión para consultar los datos de Supabase.')
     }
@@ -67,7 +81,7 @@ export function useCashTicketActions(options: Options) {
         ticket: mergedById.get(item.ticket.id) ?? item.ticket,
       })),
     }
-  }, [historyCashSession, historyContext, historyIsOnline, mergeHistoryPrintStates])
+  }, [historyCashSession, historyContext, historyIsOnline, historyRefreshVersion, mergeHistoryPrintStates])
 
   const reprint = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
