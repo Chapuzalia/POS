@@ -30,6 +30,7 @@ import { QuickSaleExitModal } from '../features/tables/components/QuickSaleExitM
 import { useMobileTableMapLayout } from '../features/tables/useMobileTableMapLayout'
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
+import { createCachedSessionTicketHistoryPage } from '../features/cash-registers/services/sessionTicketHistoryModel.ts'
 import { hasTenantFeature } from '../features/platform/tenantFeatureAccess'
 import { calculateDiscountForLines, type DiscountScheduleContext } from '../lib/discounts'
 import { formatMoney, getLineTotal, getTicketTotal } from '../lib/format'
@@ -142,6 +143,10 @@ export function PosPage(props: Props) {
   const restaurant = props.restaurant
   const quickSale = props.quickSale
   const cash = props.cash
+  const initialTicketHistoryPage = useMemo(
+    () => createCachedSessionTicketHistoryPage(cash.tickets),
+    [cash.tickets],
+  )
   const onUpdateBlockingOperationChange = props.onUpdateBlockingOperationChange
   const cashlogyConfigured = usePrintAgentStore((state) => state.cashlogyConfigured)
   const cashlogyPaymentIntent = useCashlogyStore((state) => state.intent)
@@ -792,6 +797,7 @@ export function PosPage(props: Props) {
       /> : null}
       {cash.historyOpen ? <SessionTicketsModal
         canReprint={Boolean(props.context.canManageCash || props.context.canCloseCashSession || ['manager', 'owner'].includes(props.context.role))}
+        initialPage={initialTicketHistoryPage}
         isBusy={props.isBusy}
         loadPage={cash.ticketActions.loadHistoryPage}
         onChangePayment={cash.ticketActions.changePayment}

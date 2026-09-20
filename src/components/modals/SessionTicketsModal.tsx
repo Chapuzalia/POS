@@ -22,6 +22,7 @@ const paymentMethods: PaymentMethod[] = ['cash', 'card']
 
 type SessionTicketsModalProps = {
   canReprint: boolean
+  initialPage: SessionTicketHistoryPage | null
   isBusy: boolean
   loadPage: (page: number, query: string) => Promise<SessionTicketHistoryPage>
   onChangePayment: (ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => void | Promise<void>
@@ -32,6 +33,7 @@ type SessionTicketsModalProps = {
 
 export function SessionTicketsModal({
   canReprint,
+  initialPage,
   isBusy,
   loadPage,
   onChangePayment,
@@ -43,8 +45,8 @@ export function SessionTicketsModal({
   const [searchQuery, setSearchQuery] = useState('')
   const [requestedQuery, setRequestedQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
-  const [pageData, setPageData] = useState<SessionTicketHistoryPage | null>(null)
-  const [isLoading, setIsLoading] = useState(true)
+  const [pageData, setPageData] = useState<SessionTicketHistoryPage | null>(() => initialPage)
+  const [isLoading, setIsLoading] = useState(initialPage === null)
   const [loadError, setLoadError] = useState<string | null>(null)
   const requestVersion = useRef(0)
   const totalResults = pageData?.totalResults ?? 0
@@ -78,7 +80,6 @@ export function SessionTicketsModal({
       if (result.currentPage !== currentPage) setCurrentPage(result.currentPage)
     } catch {
       if (requestVersion.current !== version) return
-      setPageData(null)
       setLoadError('No se ha podido cargar el histórico de tickets.')
     } finally {
       if (requestVersion.current === version) setIsLoading(false)
@@ -139,7 +140,7 @@ export function SessionTicketsModal({
             <div className="flex min-h-52 items-center justify-center gap-2 text-sm font-semibold text-[var(--muted)]">
               <LoaderCircle className="h-5 w-5 animate-spin" /> Cargando tickets…
             </div>
-          ) : loadError ? (
+          ) : loadError && !pageData ? (
             <div className="flex min-h-52 flex-col items-center justify-center gap-3 rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">
               <span>{loadError}</span>
               <Button onClick={() => void refreshPage()} type="button" variant="secondary">Reintentar</Button>
