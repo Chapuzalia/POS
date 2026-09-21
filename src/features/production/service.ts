@@ -5,6 +5,7 @@ import type {
   KdsQueue,
   OrderProductionState,
   ProductionBatchResult,
+  ProductionEntry,
   ProductionSelection,
 } from './types'
 
@@ -22,6 +23,23 @@ function mapOrderState(value: unknown, orderId: string): OrderProductionState {
   const row = (value ?? {}) as Record<string, unknown>
   return {
     effective: Boolean(row.effective),
+    entries: Array.isArray(row.entries) ? row.entries.map((entry): ProductionEntry => {
+      const item = entry as Record<string, unknown>
+      return {
+        lineId: String(item.lineId ?? ''),
+        componentId: typeof item.componentId === 'string' ? item.componentId : null,
+        productName: String(item.productName ?? 'Producto'),
+        parentProductName: typeof item.parentProductName === 'string' ? item.parentProductName : null,
+        quantity: readNumber(item.quantity),
+        sentQuantity: readNumber(item.sentQuantity),
+        readyQuantity: readNumber(item.readyQuantity),
+        unsentQuantity: readNumber(item.unsentQuantity),
+        passId: String(item.passId ?? ''),
+        passName: String(item.passName ?? 'Directo'),
+        passSortOrder: readNumber(item.passSortOrder),
+        hasProductionDestination: Boolean(item.hasProductionDestination),
+      }
+    }) : [],
     lines: Array.isArray(row.lines) ? row.lines.map((entry) => {
       const line = entry as Record<string, unknown>
       return {
@@ -77,6 +95,15 @@ export async function loadKdsQueue(deviceId: string) {
   return data as KdsQueue
 }
 
+export async function setOrderLineProductionPass(input: { lineId: string; componentId?: string | null; passId: string }) {
+  const { error } = await client().rpc('set_order_line_production_pass', {
+    p_order_line_id: input.lineId,
+    p_component_id: input.componentId ?? '',
+    p_pass_id: input.passId,
+  })
+  if (error) throw error
+}
+
 export async function markKdsItemReady(deviceId: string, itemId: string, quantity: number) {
   const { error } = await client().rpc('mark_production_item_ready', {
     p_device_id: deviceId,
@@ -102,6 +129,7 @@ export function subscribeToOrderProduction(context: TenantContext, orderId: stri
   channel
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_batches', filter: `order_id=eq.${orderId}` }, schedule)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_line_allocations', filter: `venue_id=eq.${context.venueId}` }, schedule)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_component_allocations', filter: `venue_id=eq.${context.venueId}` }, schedule)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_printer_dispatches', filter: `venue_id=eq.${context.venueId}` }, schedule)
     .subscribe()
   return () => { void supabase?.removeChannel(channel) }

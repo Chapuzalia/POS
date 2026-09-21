@@ -339,8 +339,10 @@ export function PosPage(props: Props) {
         onServeOne={restaurant.serveLineUnit}
         onSetQuantity={restaurant.setLineQuantity}
         onSetUnitPrice={restaurant.setLineUnitPrice}
-        productionState={restaurant.productionState}
-        onSendToProduction={restaurant.sendToProduction}
+         catalog={props.catalog}
+         productionRouting={props.catalog?.productionRouting}
+         productionState={restaurant.productionState}
+         onSendToProduction={restaurant.sendToProduction}
         order={restaurant.order}
       />
     : <TicketPanel

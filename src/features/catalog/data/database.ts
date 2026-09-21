@@ -183,6 +183,14 @@ export type CatalogImageRow = {
   updated_at: string
 }
 
+export type CatalogProductionRoutingRow = {
+  passes?: Array<{ id: string; name: string; sortOrder: number }>
+  defaultPass?: { id: string; name: string; sortOrder: number } | null
+  productRoutes?: Array<{ productId: string; passId: string }>
+  categoryRoutes?: Array<{ categoryId: string; passId: string }>
+  loadedAt?: string
+}
+
 export type CatalogRpcPayload = {
   tenant_id: string
   venue_id: string
@@ -202,4 +210,5 @@ export type CatalogRpcPayload = {
   modifiers: CatalogModifierRow[]
   modifier_assignments: CatalogAssignmentRow[]
   images: CatalogImageRow[]
+  production_routing?: CatalogProductionRoutingRow | null
 }

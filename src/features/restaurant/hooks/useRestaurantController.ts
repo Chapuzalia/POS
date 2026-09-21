@@ -164,7 +164,10 @@ function selectionContainsAllOrderLines(lines: RestaurantOrderDetail['lines'], m
 export function useRestaurantController(options: Options) {
   const cashSessionId = options.cashSession?.id
   const deviceId = options.context?.deviceId
-  const reportError = options.onError
+  const context = options.context
+  const isOnline = options.isOnline
+  const onError = options.onError
+  const reportError = onError
   const paymentLockRef = useRef(false)
   const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
   const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
@@ -196,18 +199,18 @@ export function useRestaurantController(options: Options) {
       return
     }
     setProductionState(await loadOrderProductionState(orderId))
-  }, [invoiceOrderId, options.isOnline, productionAvailable])
+  }, [invoiceOrderId, isOnline, productionAvailable])
 
   useEffect(() => {
-    if (!options.context || !options.isOnline || !invoiceOrderId || !productionAvailable) {
+    if (!context || !isOnline || !invoiceOrderId || !productionAvailable) {
       setProductionState(null)
       return undefined
     }
-    void refreshProduction(invoiceOrderId).catch((cause) => options.onError(getReadableError(cause, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId })))
-    return subscribeToOrderProduction(options.context, invoiceOrderId, () => {
+    void refreshProduction(invoiceOrderId).catch((cause) => onError(getReadableError(cause, { operation: 'restaurant.action', cashSessionId, operationId: invoiceOrderId })))
+    return subscribeToOrderProduction(context, invoiceOrderId, () => {
       void refreshProduction(invoiceOrderId).catch((error) => reportOperationError(error, { operation: 'restaurant.refresh', recoverable: true }))
     })
-  }, [invoiceOrderId, options, productionAvailable, refreshProduction])
+  }, [cashSessionId, context, invoiceOrderId, isOnline, onError, productionAvailable, refreshProduction])
 
   const settlePayment = useCallback(async (
     method: PaymentMethod | null,
@@ -1108,14 +1111,32 @@ export function useRestaurantController(options: Options) {
     if (!options.context || !options.isOnline || !productionAvailable) return
     const saved = await draft.flush()
     if (!saved) return
-    await sendProductionBatch({
-      orderId: saved.order.id,
-      expectedRevision: saved.order.revision,
-      deviceId: options.context.deviceId,
-      requestId: `pos:${options.context.deviceId}:${createId()}`,
-      selection,
-    })
-    await refreshProduction(saved.order.id)
+    const authoritative = await loadOrderProductionState(saved.order.id)
+    const authoritativeByKey = new Map(authoritative.entries.map((entry) => [`${entry.lineId}:${entry.componentId ?? ''}`, entry]))
+    const reconciledSelection = selection?.flatMap((entry) => {
+      const serverEntry = authoritativeByKey.get(`${entry.lineId}:${entry.componentId ?? ''}`)
+      if (!serverEntry) return []
+      return [{ ...entry, quantity: Math.min(entry.quantity, serverEntry.unsentQuantity), passId: serverEntry.passId, passName: serverEntry.passName }]
+    }).filter((entry) => entry.quantity > 0)
+    if (selection && reconciledSelection?.length === 0) {
+      setProductionState(authoritative)
+      return
+    }
+    const selections = reconciledSelection ? [...reconciledSelection.reduce((groups, entry) => {
+      const passId = entry.passId ?? ''
+      groups.set(passId, [...(groups.get(passId) ?? []), entry])
+      return groups
+    }, new Map<string, ProductionSelection[]>()).values()] : [undefined]
+    for (const reconciledPassSelection of selections) {
+      await sendProductionBatch({
+        orderId: saved.order.id,
+        expectedRevision: saved.order.revision,
+        deviceId: options.context.deviceId,
+        requestId: `pos:${options.context.deviceId}:${createId()}`,
+        selection: reconciledPassSelection,
+      })
+    }
+    setProductionState(await loadOrderProductionState(saved.order.id))
   }), [draft, options.context, options.isOnline, productionAvailable, refreshProduction, runBusy])
 
   const updateSessionLayout = useCallback(async (
