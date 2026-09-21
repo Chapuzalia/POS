@@ -1,6 +1,6 @@
 -- migration-safety: expand
--- migration-safety-reviewed: CREATE OR REPLACE ROUTINE
--- migration-safety-reason: Preserve the existing venue addon RPC signature while synchronizing legacy operational flags required by venue capability checks.
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: Preserve the existing venue addon RPC signature while synchronizing legacy operational flags required by venue capability checks; remove only default PUBLIC/anon execution and retain authenticated/service_role execution.
 set lock_timeout = '5s';
 set statement_timeout = '5min';
 
