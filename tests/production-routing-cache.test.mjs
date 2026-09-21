@@ -30,8 +30,8 @@ test('menu components resolve independently and use deterministic placement cate
 test('authoritative entries replace optimistic entries by line and component without duplicates', () => {
   assert.match(routing, /authoritativeKeys/)
   assert.match(routing, /\$\{entry\.lineId\}:\$\{entry\.componentId \?\? ''\}/)
-  assert.match(panel, /mergeProductionEntries\(productionState\?\.entries \?\? \[\]/)
-  assert.match(panel, /localLines = order\.lines\.filter\(\(line\) => !persistedLineIds\.has\(line\.id\)\)/)
+  assert.match(panel, /mergeProductionEntries\(\s*productionState\?\.entries\s*\?\?\s*\[\]/)
+  assert.match(panel, /localLines = order\.lines\.filter\(\s*\(line\)\s*=>\s*!persistedLineIds\.has\(line\.id\)/)
 })
 
 test('send flushes and reconciles authoritative pass assignments before sending', () => {

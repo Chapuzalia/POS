@@ -46,7 +46,7 @@ test('production batch pass fallback aggregates UUIDs through text', () => {
 test('POS groups by pass and retains manual partial selection', () => {
   assert.match(panel, /productionPasses/)
   assert.match(panel, /Enviar \{pass\.name\}/)
-  assert.match(panel, /lines\.map\(\(line\) => renderLine\(line, getPendingQuantity\(line\)\)\)/)
+  assert.match(panel, /lines\.map\(\(line\)\s*=>\s*renderLine\(line,\s*getPendingQuantity\(line\)/)
   assert.doesNotMatch(panel, /pass\.entries\.map\(\(entry\) => <div/)
   assert.match(controls, /entry\.unsentQuantity - \(line\?\.servedQuantity \?\? 0\)/)
   assert.match(controls, /componentId: entry\.componentId/)
