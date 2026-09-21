@@ -225,7 +225,7 @@ export function RestaurantOrderPanel(props: Props) {
       {invoiceCustomerName && onChangeInvoiceCustomer && onRemoveInvoiceCustomer ? <InvoiceTicketNotice customerName={invoiceCustomerName} disabled={isBusy} onChange={onChangeInvoiceCustomer} onRemove={onRemoveInvoiceCustomer} /> : null}
        <div className="min-h-0 flex-1 space-y-3 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-3">
          {order.lines.length === 0 ? <div className="flex min-h-52 items-center justify-center rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-6 text-center text-sm font-semibold text-[var(--muted)]">Pulsa un producto para añadirlo a la comanda.</div> : null}
-          {(!productionState?.effective || productionPasses.length === 0) && pendingLines.length ? <section><h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Pendientes · {formatQuantity(pendingUnits)}</h2><div className="space-y-1.5">{pendingLines.map((line) => renderLine(line))}</div></section> : null}
+          {(!productionState?.effective || productionPasses.length === 0) && pendingLines.length ? <section><h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--warning)]">Pendientes · {formatQuantity(pendingUnits)}</h2><div className="space-y-1.5">{pendingLines.map((line) => renderLine(line, getPendingQuantity(line)))}</div></section> : null}
            {productionState?.effective ? productionPasses.map((pass) => {
              const unsentEntries = pass.entries.map((entry) => {
                const line = order.lines.find((candidate) => candidate.id === entry.lineId)

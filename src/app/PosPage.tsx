@@ -31,7 +31,7 @@ import { useMobileTableMapLayout } from '../features/tables/useMobileTableMapLay
 import { resolveSellableCatalog } from '../features/catalog/domain/resolver'
 import type { CatalogData } from '../features/catalog/domain/types'
 import { createCachedSessionTicketHistoryPage } from '../features/cash-registers/services/sessionTicketHistoryModel.ts'
-import { hasTenantFeature } from '../features/platform/tenantFeatureAccess'
+import { hasTenantCapability } from '../features/platform/tenantFeatureAccess'
 import { calculateDiscountForLines, type DiscountScheduleContext } from '../lib/discounts'
 import { formatMoney, getLineTotal, getTicketTotal } from '../lib/format'
 import { addDiagnosticBreadcrumb } from '../lib/diagnostics'
@@ -158,12 +158,13 @@ export function PosPage(props: Props) {
   const posInteractionBlocked = props.isBusy || cashlogyPaymentLocked
   const cashlogyManagementOpen = useCashlogyManagementStore((state) => state.modalOpen)
   const canManageCash = Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))
-  const discountsEnabled = hasTenantFeature(props.context, 'discounts')
-  const restaurantEnabled = hasTenantFeature(props.context, 'restaurant')
-  const reservationsEnabled = restaurantEnabled && hasTenantFeature(props.context, 'reservations')
-  const inventoryRecipesEnabled = hasTenantFeature(props.context, 'inventory') && hasTenantFeature(props.context, 'inventory_recipes')
+  const promotionsEnabled = hasTenantCapability(props.context, 'promotions')
+  const restaurantEnabled = hasTenantCapability(props.context, 'restaurant')
+  const reservationsEnabled = hasTenantCapability(props.context, 'reservations')
+  const inventoryRecipesEnabled = hasTenantCapability(props.context, 'costing')
+  const cashlogyEnabled = hasTenantCapability(props.context, 'cashlogy')
   const [hasInventoryPreparations, setHasInventoryPreparations] = useState(false)
-  const appliedDiscount = discountsEnabled ? quickSale.discount : null
+  const appliedDiscount = promotionsEnabled ? quickSale.discount : null
   const refreshInventoryPreparations = useCallback(async () => {
     if (!inventoryRecipesEnabled || !props.isOnline) {
       setHasInventoryPreparations(false)
@@ -393,7 +394,7 @@ export function PosPage(props: Props) {
       return
     }
     if (method === 'cash') {
-      if (cashlogyConfigured) {
+      if (cashlogyEnabled && cashlogyConfigured) {
         if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', null)
         else void quickSale.completePayment('cash', null)
         return
@@ -483,7 +484,7 @@ export function PosPage(props: Props) {
         canOpenCashDrawer={canManageCash && !cashlogyPaymentLocked}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
         canOpenPreparations={inventoryRecipesEnabled && hasInventoryPreparations}
-        cashlogyConnected={cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
+        cashlogyConnected={cashlogyEnabled && cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
         isOnline={props.isOnline}
@@ -499,7 +500,7 @@ export function PosPage(props: Props) {
         onOpenReservations={props.reservations.open}
         onOpenPreparations={() => setPreparationsOpen(true)}
         onOpenCashClosingHistory={() => void cash.openClosingHistory()}
-        onOpenCashlogyMachine={() => setCashlogyMachineOpen(true)}
+        onOpenCashlogyMachine={() => { if (cashlogyEnabled) setCashlogyMachineOpen(true) }}
         onOpenShiftSummary={openShiftSummary}
         onOpenCashMovements={() => cash.setMovementModalOpen(true)}
         onOpenTicketHistory={() => void cash.ticketActions.openHistory()}
@@ -586,7 +587,7 @@ export function PosPage(props: Props) {
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {activeTicketPanel}
           <PaymentPanel
-            allowDiscount={discountsEnabled}
+            allowDiscount={props.manualDiscountEnabled || promotionsEnabled}
             discount={appliedDiscount}
             disabled={!canSell}
             feedback={paidFeedback}
@@ -625,7 +626,7 @@ export function PosPage(props: Props) {
           </div>
           <div className="shrink-0">
             <PaymentPanel
-              allowDiscount={discountsEnabled}
+              allowDiscount={props.manualDiscountEnabled || promotionsEnabled}
               discount={appliedDiscount}
               disabled={!canSell}
               feedback={paidFeedback}
@@ -671,10 +672,10 @@ export function PosPage(props: Props) {
       {restaurantEnabled && restaurant.splitOrderGroup && restaurant.order ? <SplitOrderModal
         defaultDiscount={appliedDiscount}
         discountSchedule={props.discountSchedule}
-        discounts={discountsEnabled ? props.discounts : []}
+        discounts={promotionsEnabled ? props.discounts : []}
         isBusy={props.isBusy}
-        manualDiscountEnabled={discountsEnabled && props.manualDiscountEnabled}
-        manualDiscountRequiresPin={discountsEnabled && props.manualDiscountRequiresPin}
+        manualDiscountEnabled={props.manualDiscountEnabled}
+        manualDiscountRequiresPin={promotionsEnabled && props.manualDiscountRequiresPin}
         onClose={() => restaurant.setSplitOrderGroup(null)}
         onPay={restaurant.paySelectedOrderItems}
         order={restaurant.order}
@@ -684,11 +685,11 @@ export function PosPage(props: Props) {
       /> : null}
       {restaurantEnabled && restaurant.equalSplitOpen && restaurant.order ? <EqualSplitOrderModal
         defaultDiscount={appliedDiscount}
-        discounts={discountsEnabled ? props.discounts : []}
+        discounts={promotionsEnabled ? props.discounts : []}
         discountSchedule={props.discountSchedule}
         isBusy={props.isBusy}
-        manualDiscountEnabled={discountsEnabled && props.manualDiscountEnabled}
-        manualDiscountRequiresPin={discountsEnabled && props.manualDiscountRequiresPin}
+        manualDiscountEnabled={props.manualDiscountEnabled}
+        manualDiscountRequiresPin={promotionsEnabled && props.manualDiscountRequiresPin}
         onClose={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onCompleted={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onConfigure={restaurant.configureEqualSplit}
@@ -753,8 +754,8 @@ export function PosPage(props: Props) {
             : quickSale.addLine(sellable, selection, item, sourceElement)}
         onCancel={quickSale.closeProductDialog}
       /> : null}
-      {discountsEnabled && quickSale.discountModalOpen ? <DiscountModal
-        discounts={props.discounts}
+      {quickSale.discountModalOpen ? <DiscountModal
+        discounts={promotionsEnabled ? props.discounts : []}
         isBusy={props.isBusy}
         manualDiscountEnabled={props.manualDiscountEnabled}
         manualDiscountRequiresPin={props.manualDiscountRequiresPin}

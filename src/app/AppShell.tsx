@@ -19,7 +19,7 @@ import { loadTenantState } from '../features/session/services/loadTenantState'
 import { shouldResetTenantState } from '../features/session/session-state'
 import { useAddProductFeedback } from '../hooks/useAddProductFeedback'
 import { useThemeTokens } from '../hooks/useThemeTokens'
-import { hasTenantFeature } from '../features/platform/tenantFeatureAccess'
+import { hasTenantCapability } from '../features/platform/tenantFeatureAccess'
 import {
   clearSaleLedger,
   clearSessionTickets,
@@ -177,7 +177,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     subtractProductSalesStats,
     syncPendingEvents: offline.syncPendingEvents,
   })
-  const discountsFeatureEnabled = Boolean(context && hasTenantFeature(context, 'discounts'))
+  const promotionsEnabled = Boolean(context && hasTenantCapability(context, 'promotions'))
   const quickSale = useQuickSale({
     catalog,
     cashSession: cash.session,
@@ -201,16 +201,16 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   const closeDiscountModal = quickSale.closeDiscountModal
   const setAppliedDiscount = quickSale.setDiscount
   useEffect(() => {
-    if (discountsFeatureEnabled) return
-    setAppliedDiscount(null)
+    if (promotionsEnabled) return
+    if (quickSale.discount?.discountId) setAppliedDiscount(null)
     closeDiscountModal()
-  }, [closeDiscountModal, discountsFeatureEnabled, setAppliedDiscount])
+  }, [closeDiscountModal, promotionsEnabled, quickSale.discount?.discountId, setAppliedDiscount])
   const restaurant = useRestaurantController({
-    appliedDiscount: discountsFeatureEnabled ? quickSale.discount : null,
+    appliedDiscount: promotionsEnabled ? quickSale.discount : null,
     catalog,
     cashSession: cash.session,
     context,
-    enabled: Boolean(context && context.deviceMode !== 'kds' && !isBackofficeUser(context) && hasTenantFeature(context, 'restaurant')),
+    enabled: Boolean(context && context.deviceMode !== 'kds' && !isBackofficeUser(context) && hasTenantCapability(context, 'restaurant')),
     isBusy,
     isOnline,
     onAddFeedback: addFeedback.triggerAddFeedback,
@@ -227,7 +227,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   const reservations = useReservationsController({
     cashSession: cash.session,
     context,
-    enabled: Boolean(context && context.deviceMode !== 'kds' && !isBackofficeUser(context) && hasTenantFeature(context, 'restaurant') && hasTenantFeature(context, 'reservations') && restaurant.tablesEnabled),
+    enabled: Boolean(context && context.deviceMode !== 'kds' && !isBackofficeUser(context) && hasTenantCapability(context, 'reservations') && restaurant.tablesEnabled),
     isOnline,
     operationalMap: restaurant.map,
     onError: setRestaurantError,
@@ -455,7 +455,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     if (context.deviceMode === 'kds') return <KdsPage context={context} isOnline={isOnline} onBusyChange={setAuxiliaryOperationBusy} onLogout={session.logout} />
     if (isOnline && !restaurant.tablesConfigLoaded) return <LoadingScreen />
     if (!cash.session && !reservations.isOpen) return <PosStartupReveal><CashSessionGate
-      canOpenReservations={hasTenantFeature(context, 'restaurant') && hasTenantFeature(context, 'reservations')}
+      canOpenReservations={hasTenantCapability(context, 'restaurant') && hasTenantCapability(context, 'reservations')}
       cashClosings={cash.cashClosings}
       closingHistoryOpen={cash.closingHistoryOpen}
       completedClosing={cash.completedClosing}

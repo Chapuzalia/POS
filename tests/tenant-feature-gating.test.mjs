@@ -1,18 +1,19 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { hasTenantFeature, normalizeTenantFeatures } from '../src/features/platform/tenantFeatureAccess.ts'
+import { hasTenantAddon, hasTenantCapability, normalizeTenantFeatures, updateTenantAddons } from '../src/features/platform/tenantFeatureAccess.ts'
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 
-test('tenant feature helpers normalize assignments and preserve legacy cached sessions', () => {
-  assert.deepEqual(
-    normalizeTenantFeatures(['inventory_recipes', 'inventory', 'unknown', 'discounts', 'inventory']),
-    ['discounts', 'inventory', 'inventory_recipes'],
-  )
-  assert.equal(hasTenantFeature({}, 'discounts'), true)
-  assert.equal(hasTenantFeature({ features: [] }, 'discounts'), false)
-  assert.equal(hasTenantFeature({ features: ['discounts'] }, 'discounts'), true)
+test('tenant addons normalize legacy assignments and resolve commercial capabilities', () => {
+  assert.deepEqual(normalizeTenantFeatures(['inventory_recipes', 'inventory', 'supplier_documents', 'supplier_document_scanning', 'discounts']), ['inventory', 'costing', 'purchases', 'document_ai', 'promotions'])
+  assert.equal(hasTenantAddon({ features: [] }, 'promotions'), false)
+  assert.equal(hasTenantCapability({ features: [] }, 'analytics_basic'), true)
+  assert.equal(hasTenantCapability({ features: ['analytics_advanced', 'inventory', 'costing'] }, 'profitability'), true)
+  assert.equal(hasTenantCapability({ features: ['document_ai', 'purchases', 'inventory'] }, 'document_ai'), true)
+  assert.equal(hasTenantCapability({ features: ['reservations'] }, 'reservations'), false)
+  assert.deepEqual(updateTenantAddons([], 'document_ai', true), ['inventory', 'purchases', 'document_ai'])
+  assert.deepEqual(updateTenantAddons(['restaurant', 'reservations', 'production'], 'restaurant', false), [])
 })
 
 test('tenant sessions load feature assignments from the database', () => {
@@ -37,27 +38,27 @@ test('CRM and POS hide or disable every optional feature surface', () => {
   const kds = read('../src/features/production/components/KdsPage.tsx')
   const productInventory = read('../src/features/crm/inventory/components/ProductInventoryEditor.tsx')
 
-  assert.match(appShell, /hasTenantFeature\(context, 'restaurant'\)/)
-  assert.match(appShell, /hasTenantFeature\(context, 'reservations'\)/)
+  assert.match(appShell, /hasTenantCapability\(context, 'restaurant'\)/)
+  assert.match(appShell, /hasTenantCapability\(context, 'reservations'\)/)
   assert.match(appShell, /setInterval\(\(\) => void refreshFeatures\(\), 60_000\)/)
   assert.match(appShell, /addEventListener\('focus', handleFocus\)/)
-  assert.match(posPage, /allowDiscount=\{discountsEnabled\}/)
-  assert.match(posPage, /discountsEnabled && quickSale\.discountModalOpen/)
+  assert.match(posPage, /allowDiscount=\{props\.manualDiscountEnabled \|\| promotionsEnabled\}/)
+  assert.match(posPage, /quickSale\.discountModalOpen/)
   assert.match(posPage, /reservationsEnabled && props\.reservations\.isOpen/)
   assert.match(posPage, /restaurantEnabled && restaurant\.pendingPayment/)
-  assert.match(posPage, /hasTenantFeature\(props\.context, 'inventory_recipes'\)/)
+  assert.match(posPage, /hasTenantCapability\(props\.context, 'costing'\)/)
   assert.match(posPage, /loadInventoryPreparations\(props\.context\.venueId\)/)
   assert.match(posPage, /const hasPreparations = preparations\.length > 0/)
   assert.match(posPage, /setHasInventoryPreparations\(hasPreparations\)/)
   assert.match(posPage, /canOpenPreparations=\{inventoryRecipesEnabled && hasInventoryPreparations\}/)
   assert.match(posPage, /inventoryRecipesEnabled && hasInventoryPreparations && preparationsOpen/)
-  assert.match(tenantState, /discounts: hasTenantFeature\(context, 'discounts'\) \? posCatalog\.discounts : \[\]/)
+  assert.match(tenantState, /discounts: hasTenantAddon\(context, 'promotions'\) \? posCatalog\.discounts : \[\]/)
   assert.match(restaurantController, /if \(options\.enabled\) return[\s\S]*setPosView\(\{ type: 'quick_sale' \}\)/)
   assert.match(reservationsController, /if \(options\.enabled\) return[\s\S]*setIsOpen\(false\)/)
-  assert.match(crmPermissions, /access: 'multi_device'/)
+  assert.doesNotMatch(crmPermissions, /multi_device/)
   assert.match(crmPermissions, /tables: 'restaurant'/)
   assert.match(crmPermissions, /'inventory-stock': 'inventory'/)
-  assert.match(crmPermissions, /'inventory-preparations': \['inventory', 'inventory_recipes'\]/)
+  assert.match(crmPermissions, /'inventory-preparations': 'costing'/)
   assert.match(crmSidebar, /allowedInventoryItems\.length/)
   assert.match(formats, /inventoryFeatureEnabled \? <div/)
   assert.match(kds, /inventoryRecipesEnabled \? <Button/)

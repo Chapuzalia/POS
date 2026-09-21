@@ -1,8 +1,9 @@
 import { UserFacingError } from '../utils/UserFacingError.ts'
 import { supabase } from '../lib/supabase'
 import { getFunctionInvokeErrorMessage } from '../features/crm/shared/services/crmServiceSupport'
+import type { TenantAddonKey } from '../features/platform/tenantFeatureAccess'
 
-export type PlatformTenantFeature = string
+export type PlatformTenantFeature = TenantAddonKey
 
 export type PlatformFeature = {
   key: string

@@ -6,7 +6,7 @@ import { getReadableError } from '../../../utils/errors'
 import { loadKdsQueue, markKdsItemQuantityReady, markKdsItemReady, subscribeToKds } from '../service'
 import type { KdsQueue } from '../types'
 import { InventoryPreparationsPanel } from '../../inventory'
-import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
+import { hasTenantCapability } from '../../platform/tenantFeatureAccess'
 import { formatQuantity } from '../../../lib/format'
 
 type Props = {
@@ -32,7 +32,7 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [preparationBusy, setPreparationBusy] = useState(false)
   const [view, setView] = useState<'orders' | 'preparations'>('orders')
-  const inventoryRecipesEnabled = hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')
+  const inventoryRecipesEnabled = hasTenantCapability(context, 'costing')
 
   useEffect(() => {
     onBusyChange?.(busyId !== null || preparationBusy)

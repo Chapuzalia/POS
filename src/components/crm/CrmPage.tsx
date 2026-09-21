@@ -5,6 +5,7 @@ import { catalogSections, type CrmSection } from '../../features/crm/routing/crm
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
 import { applyCrmOpenCashSalesTotals, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
+import { hasTenantCapability } from '../../features/platform/tenantFeatureAccess'
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import { catalogAdminService } from '../../features/crm/catalog/services/catalogAdminService.ts'
@@ -133,7 +134,7 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
       }
       const [nextStats, nextComparisonStats] = await Promise.all([
         loadCrmStats(context, selectedVenue, options.period),
-        options.comparisonPeriod
+        options.comparisonPeriod && hasTenantCapability(context, 'analytics_advanced')
           ? loadCrmStats(context, selectedVenue, options.comparisonPeriod, { includeLiveState: false })
           : Promise.resolve(null),
       ])

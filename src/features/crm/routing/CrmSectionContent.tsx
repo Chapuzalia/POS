@@ -4,7 +4,7 @@ import type { CatalogData } from '../../catalog/domain/types.ts'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../../types'
 import { canAccessCrmSection } from './crmPermissions'
 import { catalogSections, type CrmSection } from './crmNavigation'
-import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
+import { hasTenantCapability } from '../../platform/tenantFeatureAccess'
 
 const AccessManagementCrm = lazy(() => import('../access/pages/AccessPage').then((module) => ({ default: module.AccessManagementCrm })))
 const StatsCrm = lazy(() => import('../analytics/pages/StatsPage').then((module) => ({ default: module.StatsCrm })))
@@ -90,15 +90,15 @@ export function CrmSectionContent({
     case 'dashboard':
       return <DashboardCrm disabled={disabled} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} />
     case 'products':
-      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')} mutate={mutateCatalog} venues={venues} /> : null
+      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantCapability(context, 'costing')} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
-      return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} inventoryFeatureEnabled={hasTenantFeature(context, 'inventory')} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} inventoryFeatureEnabled={hasTenantCapability(context, 'inventory')} mutate={mutateCatalog} /> : null
     case 'categories':
       return catalog ? <CatalogStructureCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'selection-groups':
-      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" inventoryRecipesEnabled={hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" inventoryRecipesEnabled={hasTenantCapability(context, 'costing')} mutate={mutateCatalog} /> : null
     case 'modifiers':
-      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" inventoryRecipesEnabled={hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" inventoryRecipesEnabled={hasTenantCapability(context, 'costing')} mutate={mutateCatalog} /> : null
     case 'access':
       return <AccessManagementCrm disabled={disabled} runAction={runAction} tenantContext={context} />
     case 'discounts':
@@ -148,8 +148,9 @@ export function CrmSectionContent({
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
     case 'stats':
-      return <StatsCrm
-        comparisonStats={comparisonStats}
+       return <StatsCrm
+         advancedEnabled={hasTenantCapability(context, 'analytics_advanced')}
+         comparisonStats={comparisonStats}
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
         disabled={disabled}
         key={selectedVenueId}

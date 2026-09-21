@@ -74,7 +74,7 @@ import {
 import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
 import type { CashlogyTransaction } from '../../local-printing/types'
 import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
-import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
+import { hasTenantCapability } from '../../platform/tenantFeatureAccess'
 import {
   loadOrderProductionState,
   sendProductionBatch,
@@ -191,7 +191,7 @@ export function useRestaurantController(options: Options) {
   const productionAvailable = Boolean(
     options.context
     && options.context.deviceMode !== 'kds'
-    && hasTenantFeature(options.context, 'production'),
+    && hasTenantCapability(options.context, 'production'),
   )
   const refreshProduction = useCallback(async (orderId = invoiceOrderId) => {
     if (!productionAvailable || !options.isOnline || !orderId) {

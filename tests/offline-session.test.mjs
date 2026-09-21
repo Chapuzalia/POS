@@ -115,7 +115,7 @@ async function harness({ online = true, boot = false, refreshError = null } = {}
   const service = load('services/posService', {
     '../lib/supabase': supabaseModule,
     '../features/session/services/sessionValidity': { isInvalidAuthError },
-    '../features/platform/tenantFeatureAccess': { normalizeTenantFeatures: (features) => features },
+    '../features/platform/tenantFeatureAccess': { normalizeTenantFeatures: (features) => features, hasTenantCapability: () => false },
     './loginLeaseService': lease,
   }, globals)
   const syncRunner = hooks()

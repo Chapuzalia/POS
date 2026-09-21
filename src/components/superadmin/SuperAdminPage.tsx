@@ -18,6 +18,7 @@ import {
 } from '../../services/platformService'
 import type { TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
+import { tenantAddonCatalog, updateTenantAddons } from '../../features/platform/tenantFeatureAccess'
 
 type SuperAdminPageProps = {
   context: TenantContext
@@ -177,17 +178,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   }
 
   function setEditingFeature(feature: PlatformTenantFeature, enabled: boolean) {
-    setEditingTenantFeatures((current) => {
-      const next = new Set(current)
-      if (enabled) next.add(feature)
-      else next.delete(feature)
-      if (enabled && feature === 'supplier_document_scanning') {
-        next.add('supplier_documents')
-        next.add('inventory')
-      }
-      if (!enabled && (feature === 'supplier_documents' || feature === 'inventory')) next.delete('supplier_document_scanning')
-      return platformFeatures.filter((candidate) => !candidate.isCore && next.has(candidate.key)).map((candidate) => candidate.key)
-    })
+    setEditingTenantFeatures((current) => updateTenantAddons(current, feature, enabled))
   }
 
   async function handleUpdateTenant(event: FormEvent<HTMLFormElement>, tenant: PlatformTenant) {
@@ -231,7 +222,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
 
   const inputClassName = 'h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150'
   const coreFeatures = platformFeatures.filter((feature) => feature.isCore)
-  const optionalFeatures = platformFeatures.filter((feature) => !feature.isCore)
+  const optionalFeatures = tenantAddonCatalog
 
   return (
     <div className="crm-shell !flex !h-full !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased">
