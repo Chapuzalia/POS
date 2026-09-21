@@ -1,4 +1,4 @@
-import type { TenantContext } from '../../types'
+import type { CrmVenue, TenantContext } from '../../types'
 
 export const tenantAddonKeys = ['analytics_advanced', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'document_ai', 'promotions', 'cashlogy'] as const
 export const tenantCapabilityKeys = ['analytics_basic', 'analytics_advanced', 'profitability', 'purchase_analytics', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'replenishment', 'document_ai', 'manual_discounts', 'promotions', 'cashlogy'] as const
@@ -7,6 +7,11 @@ export type TenantAddonKey = typeof tenantAddonKeys[number]
 export type TenantCapabilityKey = typeof tenantCapabilityKeys[number]
 
 type FeatureContext = Pick<TenantContext, 'features'>
+type VenueFeatureContext = FeatureContext & { venue?: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled'> }
+
+export function withTenantVenueActivations(context: TenantContext, venue: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled'>): TenantContext {
+  return { ...context, venueAddonActivations: venue.addonActivations }
+}
 
 const legacyAddonAliases: Readonly<Record<string, TenantAddonKey>> = {
   discounts: 'promotions',
@@ -52,6 +57,44 @@ function resolvedAddons(context: FeatureContext) {
 
 export function hasTenantAddon(context: FeatureContext, addon: TenantAddonKey) {
   return resolvedAddons(context).has(addon)
+}
+
+function isVenueAddonEnabled(context: VenueFeatureContext, addon: TenantAddonKey) {
+  if (!hasTenantAddon(context, addon) || !context.venue) return hasTenantAddon(context, addon)
+  const assigned = context.venue.addonActivations?.[addon] ?? true
+  if (!assigned) return false
+  if (addon === 'inventory') return context.venue.inventoryEnabled
+  if (addon === 'restaurant' || addon === 'reservations') return context.venue.tablesEnabled
+  if (addon === 'production') return context.venue.tablesEnabled && context.venue.productionEnabled
+  return true
+}
+
+export function hasTenantVenueAddon(context: VenueFeatureContext, addon: TenantAddonKey) {
+  return isVenueAddonEnabled(context, addon)
+}
+
+export function hasTenantVenueCapability(context: VenueFeatureContext, capability: TenantCapabilityKey) {
+  const venueContext = { ...context, features: context.features }
+  switch (capability) {
+    case 'analytics_basic':
+    case 'manual_discounts':
+      return true
+    case 'profitability':
+      return isVenueAddonEnabled(venueContext, 'analytics_advanced') && isVenueAddonEnabled(venueContext, 'inventory') && isVenueAddonEnabled(venueContext, 'costing')
+    case 'purchase_analytics':
+      return isVenueAddonEnabled(venueContext, 'analytics_advanced') && isVenueAddonEnabled(venueContext, 'purchases')
+    case 'reservations':
+    case 'production':
+      return isVenueAddonEnabled(venueContext, 'restaurant') && isVenueAddonEnabled(venueContext, capability)
+    case 'costing':
+      return isVenueAddonEnabled(venueContext, 'inventory') && isVenueAddonEnabled(venueContext, 'costing')
+    case 'replenishment':
+      return isVenueAddonEnabled(venueContext, 'purchases') && isVenueAddonEnabled(venueContext, 'inventory')
+    case 'document_ai':
+      return isVenueAddonEnabled(venueContext, 'purchases') && isVenueAddonEnabled(venueContext, 'inventory') && isVenueAddonEnabled(venueContext, 'document_ai')
+    default:
+      return isVenueAddonEnabled(venueContext, capability)
+  }
 }
 
 export function hasTenantCapability(context: FeatureContext, capability: TenantCapabilityKey) {

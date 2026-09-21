@@ -1,6 +1,6 @@
-import type { TenantRole } from '../../../types'
+import type { CrmVenue, TenantRole } from '../../../types'
 import type { CrmSection } from './crmNavigation'
-import { hasTenantCapability, type TenantCapabilityKey } from '../../platform/tenantFeatureAccess.ts'
+import { hasTenantCapability, hasTenantVenueCapability, type TenantCapabilityKey } from '../../platform/tenantFeatureAccess.ts'
 
 const CRM_ROLES = new Set<TenantRole>(['owner', 'manager'])
 const OWNER_ONLY_SECTIONS = new Set<CrmSection>(['plan'])
@@ -25,9 +25,10 @@ export function canAccessCrm(role: TenantRole) {
   return CRM_ROLES.has(role)
 }
 
-export function canAccessCrmSection(role: TenantRole, section: CrmSection, features?: string[]) {
+export function canAccessCrmSection(role: TenantRole, section: CrmSection, features?: string[], venue?: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled'>) {
   const requirement = SECTION_FEATURES[section]
-  const hasRequiredCapability = requirement ? hasTenantCapability({ features }, requirement) : true
+  const featureContext = venue ? { features, venue } : { features }
+  const hasRequiredCapability = requirement ? (venue ? hasTenantVenueCapability(featureContext, requirement) : hasTenantCapability(featureContext, requirement)) : true
   return canAccessCrm(role) && hasRequiredCapability && (role === 'owner' || !OWNER_ONLY_SECTIONS.has(section))
 }
 

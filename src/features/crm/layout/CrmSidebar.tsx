@@ -1,7 +1,7 @@
 import { Button as UiButton } from '../../../components/ui/Button'
 import { Boxes, ChevronDown, LogOut, Moon, Package, ReceiptText, ShoppingCart, Sun, X, type LucideIcon } from 'lucide-react'
 import { useEffect, useState } from 'react'
-import type { TenantContext } from '../../../types'
+import type { CrmVenue, TenantContext } from '../../../types'
 import {
   inventoryNavItems,
   inventorySections,
@@ -21,6 +21,7 @@ import type { CrmTheme } from './crmTheme'
 type Props = {
   activeSection: CrmSection
   context: TenantContext
+  selectedVenue?: CrmVenue
   inventoryEnabled: boolean
   isOpen: boolean
   onClose: () => void
@@ -102,7 +103,7 @@ function SidebarCollapsible({ activeSection, icon: Icon, isOpen, items, label, o
   )
 }
 
-export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, onClose, onLogout, onSectionChange, onToggleTheme, theme }: Props) {
+export function CrmSidebar({ activeSection, context, selectedVenue, inventoryEnabled, isOpen, onClose, onLogout, onSectionChange, onToggleTheme, theme }: Props) {
   const [isProductsOpen, setIsProductsOpen] = useState(productSections.has(activeSection))
   const [isInventoryOpen, setIsInventoryOpen] = useState(inventorySections.has(activeSection))
   const [isReportsOpen, setIsReportsOpen] = useState(reportSections.has(activeSection))
@@ -124,7 +125,7 @@ export function CrmSidebar({ activeSection, context, inventoryEnabled, isOpen, o
     if (purchaseSections.has(activeSection)) setIsPurchasesOpen(true)
   }, [activeSection])
 
-  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features))
+  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features, selectedVenue))
   const allowedPurchaseItems = allowed(purchaseNavItems)
   const allowedInventoryItems = allowed(inventoryNavItems)
     .filter((item) => inventoryEnabled || item.id === 'inventory-stock')

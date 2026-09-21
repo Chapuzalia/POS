@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { hasTenantAddon, hasTenantCapability, normalizeTenantFeatures, updateTenantAddons } from '../src/features/platform/tenantFeatureAccess.ts'
+import { hasTenantAddon, hasTenantCapability, hasTenantVenueCapability, normalizeTenantFeatures, updateTenantAddons } from '../src/features/platform/tenantFeatureAccess.ts'
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 
@@ -14,6 +14,8 @@ test('tenant addons normalize legacy assignments and resolve commercial capabili
   assert.equal(hasTenantCapability({ features: ['reservations'] }, 'reservations'), false)
   assert.deepEqual(updateTenantAddons([], 'document_ai', true), ['inventory', 'purchases', 'document_ai'])
   assert.deepEqual(updateTenantAddons(['restaurant', 'reservations', 'production'], 'restaurant', false), [])
+  assert.equal(hasTenantVenueCapability({ features: ['restaurant'], venue: { addonActivations: { restaurant: false }, inventoryEnabled: true, tablesEnabled: true, productionEnabled: false } }, 'restaurant'), false)
+  assert.equal(hasTenantVenueCapability({ features: ['restaurant'], venue: { addonActivations: { restaurant: true }, inventoryEnabled: true, tablesEnabled: true, productionEnabled: false } }, 'restaurant'), true)
 })
 
 test('tenant sessions load feature assignments from the database', () => {
