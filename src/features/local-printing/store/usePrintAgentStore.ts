@@ -194,11 +194,12 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
       set({ isCheckingCashlogy: true, lastConnectionError: null })
       try {
         const health = await client().getCashlogyHealth(signal)
-        set({ cashlogyHealth: health })
+        const now = new Date().toISOString()
+        set({ cashlogyHealth: health, connectionStatus: 'connected', lastConnectionCheckAt: now, lastSuccessfulConnectionAt: now })
         return health
       } catch (error) {
         const mapped = toPrintAgentError(error)
-        set({ lastConnectionError: mapped })
+        set({ lastConnectionError: mapped, connectionStatus: connectionStatusFor(mapped) })
         throw mapped
       } finally {
         set({ isCheckingCashlogy: false })
