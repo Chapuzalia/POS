@@ -21,6 +21,9 @@ export function subscribeToCatalogTabChanges(context: TenantContext, onChange: (
     'product_modifier_group_assignment_variants',
     'discounts',
     'discount_targets',
+    'production_passes',
+    'production_category_pass_routes',
+    'production_product_pass_routes',
   ] as const
   let channel = client.channel(`catalog-${context.tenantId}-${context.venueId}`)
   channel = channel.on(

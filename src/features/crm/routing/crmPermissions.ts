@@ -1,22 +1,21 @@
-import type { TenantRole } from '../../../types'
+import type { CrmVenue, TenantRole } from '../../../types'
 import type { CrmSection } from './crmNavigation'
-import { hasTenantFeature, type TenantFeatureKey } from '../../platform/tenantFeatureAccess.ts'
+import { hasTenantCapability, hasTenantVenueCapability, type TenantCapabilityKey } from '../../platform/tenantFeatureAccess.ts'
 
 const CRM_ROLES = new Set<TenantRole>(['owner', 'manager'])
 const OWNER_ONLY_SECTIONS = new Set<CrmSection>(['plan'])
-const SECTION_FEATURES: Partial<Record<CrmSection, TenantFeatureKey | TenantFeatureKey[]>> = {
-  access: 'multi_device',
-  discounts: 'discounts',
+const SECTION_FEATURES: Partial<Record<CrmSection, TenantCapabilityKey>> = {
+  discounts: 'promotions',
   tables: 'restaurant',
   production: 'production',
-  'purchases-summary': 'supplier_document_scanning',
-  'purchases-replenishment': ['inventory', 'supplier_documents'],
-  'purchases-invoices': 'supplier_documents',
-  'purchases-suppliers': 'supplier_documents',
-  profitability: ['inventory', 'inventory_recipes', 'supplier_documents'], 
+  'purchases-summary': 'purchase_analytics',
+  'purchases-replenishment': 'replenishment',
+  'purchases-invoices': 'purchases',
+  'purchases-suppliers': 'purchases',
+  profitability: 'profitability',
   'inventory-stock': 'inventory',
   'inventory-items': 'inventory',
-  'inventory-preparations': ['inventory', 'inventory_recipes'],
+  'inventory-preparations': 'costing',
   'inventory-warehouses': 'inventory',
   'inventory-units': 'inventory',
   'inventory-settings': 'inventory',
@@ -26,10 +25,10 @@ export function canAccessCrm(role: TenantRole) {
   return CRM_ROLES.has(role)
 }
 
-export function canAccessCrmSection(role: TenantRole, section: CrmSection, features?: string[]) {
+export function canAccessCrmSection(role: TenantRole, section: CrmSection, features?: string[], venue?: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled'>) {
   const requirement = SECTION_FEATURES[section]
-  const requiredFeatures = requirement ? (Array.isArray(requirement) ? requirement : [requirement]) : []
-  const hasRequiredFeatures = requiredFeatures.every((feature) => hasTenantFeature({ features }, feature))
-  return canAccessCrm(role) && hasRequiredFeatures && (role === 'owner' || !OWNER_ONLY_SECTIONS.has(section))
+  const featureContext = venue ? { features, venue } : { features }
+  const hasRequiredCapability = requirement ? (venue ? hasTenantVenueCapability(featureContext, requirement) : hasTenantCapability(featureContext, requirement)) : true
+  return canAccessCrm(role) && hasRequiredCapability && (role === 'owner' || !OWNER_ONLY_SECTIONS.has(section))
 }
 

@@ -99,7 +99,7 @@ export function createRestaurantControllerHarness({
     },
     '../../local-printing/store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({ cashlogyConfigured }) } },
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
-    '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false },
+    '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false, hasTenantCapability: () => false },
     '../../production/service': { loadOrderProductionState() {}, sendProductionBatch() {}, subscribeToOrderProduction() {} },
     '../../tables/layout-service': { applySessionLayout() {}, saveSessionTableLayout() {} },
     '../../tables/service': tableService,

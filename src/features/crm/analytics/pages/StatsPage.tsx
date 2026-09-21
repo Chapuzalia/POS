@@ -52,6 +52,7 @@ function openNativeDatePicker(event: ReactMouseEvent<HTMLInputElement>) {
 }
 
 export type StatsCrmProps = {
+  advancedEnabled: boolean
   comparisonStats: CrmStats | null
   dayChangeTime: string | null
   disabled: boolean
@@ -299,13 +300,13 @@ function ComparativeKpi({
   )
 }
 
-export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime, disabled, onRefresh, stats: loadedStats, timeZone }: StatsCrmProps) {
+export function StatsCrm({ advancedEnabled, comparisonStats: loadedComparisonStats, dayChangeTime, disabled, onRefresh, stats: loadedStats, timeZone }: StatsCrmProps) {
   const currentDay = getOperationalDateKey(new Date(), { dayChangeTime, timeZone })
   const [selectedPeriod, setSelectedPeriod] = useState(() => getDefaultCrmStatsPeriod('month', currentDay))
   const [compareEnabled, setCompareEnabled] = useState(false)
   const [comparisonPeriod, setComparisonPeriod] = useState(() => getPreviousCrmStatsPeriod(getDefaultCrmStatsPeriod('month', currentDay)))
   const stats = isSameCrmStatsPeriod(loadedStats?.period, selectedPeriod) ? loadedStats : null
-  const comparisonStats = compareEnabled && isSameCrmStatsPeriod(loadedComparisonStats?.period, comparisonPeriod)
+  const comparisonStats = advancedEnabled && compareEnabled && isSameCrmStatsPeriod(loadedComparisonStats?.period, comparisonPeriod)
     ? loadedComparisonStats
     : null
   const currentLabel = formatCrmStatsPeriod(selectedPeriod)
@@ -346,10 +347,11 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
             </div>
             <div className="!flex !items-center !gap-2">
               <label className="!flex !min-h-10 !cursor-pointer !items-center !gap-2 !rounded-[10px] !bg-[var(--crm-input-bg)] !px-3 !text-xs !font-bold !text-[var(--crm-text-secondary)]">
-                <input
-                  checked={compareEnabled}
+<input
+                   checked={compareEnabled}
+                   aria-label="Comparar períodos"
                   className="!size-4 !accent-[var(--crm-blue)]"
-                  disabled={disabled}
+                   disabled={disabled || !advancedEnabled}
                   onChange={(event) => toggleComparison(event.target.checked)}
                   type="checkbox"
                 />
@@ -388,7 +390,7 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
         </div>
       </section>
 
-      <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !col-span-full !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
+      {advancedEnabled ? <><section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !col-span-full !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
         <div className="!flex !min-h-[60px] !items-center !justify-between !gap-3 !px-[18px] !pt-[18px] !pb-3 md:!px-[22px]">
           <div>
             <span className="!text-base !font-bold">Actividad por hora</span>
@@ -425,7 +427,7 @@ export function StatsCrm({ comparisonStats: loadedComparisonStats, dayChangeTime
           </div>
         </div>
         <TopProductCombinationsList comparisonLabel={comparisonLabel} comparisonStats={comparisonStats} currentLabel={currentLabel} stats={stats} />
-      </section>
+      </section></> : null}
     </div>
   )
 }

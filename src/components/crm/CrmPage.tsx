@@ -5,6 +5,7 @@ import { catalogSections, type CrmSection } from '../../features/crm/routing/crm
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
 import { applyCrmOpenCashSalesTotals, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
+import { hasTenantVenueCapability } from '../../features/platform/tenantFeatureAccess'
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import { catalogAdminService } from '../../features/crm/catalog/services/catalogAdminService.ts'
@@ -102,11 +103,14 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
     if (isOnline) void runAction(refreshVenues)
   }, [isOnline, refreshVenues, runAction])
 
-  useEffect(() => {
-    if (!canAccessCrmSection(context.role, activeSection, context.features)) setActiveSection('dashboard')
-  }, [activeSection, context.features, context.role])
+  const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
 
-  const inventoryEnabled = venues.find((venue) => venue.id === selectedVenueId)?.inventoryEnabled ?? true
+  useEffect(() => {
+    if (!canAccessCrmSection(context.role, activeSection, context.features, selectedVenue)) setActiveSection('dashboard')
+  }, [activeSection, context.features, context.role, selectedVenue])
+
+
+  const inventoryEnabled = selectedVenue ? hasTenantVenueCapability({ features: context.features, venue: selectedVenue }, 'inventory') : false
 
   useEffect(() => {
     if (!inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock') {
@@ -133,7 +137,7 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
       }
       const [nextStats, nextComparisonStats] = await Promise.all([
         loadCrmStats(context, selectedVenue, options.period),
-        options.comparisonPeriod
+        options.comparisonPeriod && selectedVenue && hasTenantVenueCapability({ features: context.features, venue: selectedVenue }, 'analytics_advanced')
           ? loadCrmStats(context, selectedVenue, options.comparisonPeriod, { includeLiveState: false })
           : Promise.resolve(null),
       ])
@@ -231,7 +235,7 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
 
   return <CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
     const inventorySectionBlocked = !inventoryEnabled && section.startsWith('inventory-') && section !== 'inventory-stock'
-    if (canAccessCrmSection(context.role, section, context.features) && !inventorySectionBlocked) setActiveSection(section)
+    if (canAccessCrmSection(context.role, section, context.features, selectedVenue) && !inventorySectionBlocked) setActiveSection(section)
   }} onVenueChange={(venueId) => {
     setStats(null)
     setComparisonStats(null)

@@ -53,6 +53,7 @@ export function mapCatalogPayload(
     sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
   })))
   const variantFormats = new Map((payload.variant_formats ?? []).map((row) => [row.variant_id, row.format_id]))
+  const productionRouting = payload.production_routing
   return {
     tenantId: payload.tenant_id,
     venueId,
@@ -111,6 +112,13 @@ export function mapCatalogPayload(
       sortOrder: row.sort_order, createdAt: row.created_at, updatedAt: row.updated_at,
     }))),
     modifierAssignments: assignments(payload.modifier_assignments),
+    productionRouting: productionRouting && Array.isArray(productionRouting.passes) ? {
+      passes: order(productionRouting.passes.map((pass) => ({ id: pass.id, name: pass.name, sortOrder: pass.sortOrder }))),
+      defaultPass: productionRouting.defaultPass ?? null,
+      productRoutes: productionRouting.productRoutes ?? [],
+      categoryRoutes: productionRouting.categoryRoutes ?? [],
+      loadedAt: productionRouting.loadedAt ?? new Date().toISOString(),
+    } : undefined,
     loadedAt: new Date().toISOString(),
   }
 }

@@ -6,12 +6,14 @@ import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
 import { CrmModal } from '../../shared/components/CrmModal'
 import { CrmSelect } from '../../shared/components/CrmSelect'
-import { Building2, KeyRound, Plus, Save, X } from 'lucide-react'
+import { Building2, Check, ChevronDown, KeyRound, Plus, Save, Settings2, X } from 'lucide-react'
 import { sileo } from 'sileo'
 import { type CatalogProfile, type CrmVenue, type TenantContext } from '../../../../types'
 import { type FormEvent, useCallback, useEffect, useState } from 'react'
 import { type RunAction } from '../../shared/types'
 import { createCrmVenue, updateCrmVenueSettings } from '../../access/services/accessService'
+import { tenantAddonCatalog, hasTenantAddon, hasTenantVenueAddon } from '../../../platform/tenantFeatureAccess'
+import { requireSupabase } from '../../shared/services/crmServiceSupport'
 import { type CrmPlan, loadCrmPlan } from '../../plan/services/planService'
 import { CRM_PASSWORD_MIN_LENGTH, updateCurrentCrmPassword } from '../../settings/services/accountSettingsService'
 
@@ -46,6 +48,8 @@ const venueTemplates: Array<{
 ]
 
 const templateLabels = new Map(venueTemplates.map((template) => [template.value, template.label]))
+const inputClassName = 'h-11 min-h-11 w-full rounded-[10px] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium text-[var(--crm-text)] outline-none transition-[border-color,box-shadow] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)]'
+const activeAddonClassName = '!bg-[var(--crm-green-soft)] !text-[var(--crm-green)]'
 
 export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantContext, venues }: SettingsCrmProps) {
   const [plan, setPlan] = useState<CrmPlan | null>(null)
@@ -54,6 +58,8 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
   const [newVenueProfile, setNewVenueProfile] = useState<CatalogProfile>('bar_classic')
   const [newPassword, setNewPassword] = useState('')
   const [passwordConfirmation, setPasswordConfirmation] = useState('')
+  const [expandedVenueId, setExpandedVenueId] = useState<string | null>(null)
+  const [expandedAddonVenueId, setExpandedAddonVenueId] = useState<string | null>(null)
   const isOwner = tenantContext.role === 'owner'
 
   const refreshPlan = useCallback(async () => {
@@ -67,6 +73,14 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
   useEffect(() => {
     if (isOwner) void runAction(refreshPlan)
   }, [isOwner, refreshPlan, runAction])
+
+  async function toggleVenueAddon(venue: CrmVenue, addon: (typeof tenantAddonCatalog)[number]['key'], enabled: boolean) {
+    await runAction(async () => {
+      await requireSupabase().rpc('set_venue_addon_enabled', { p_venue_id: venue.id, p_addon_key: addon, p_enabled: enabled })
+      await onVenuesChanged()
+      sileo.success({ title: enabled ? 'Addon activado en el local' : 'Addon desactivado en el local', description: `${tenantAddonCatalog.find((item) => item.key === addon)?.name ?? addon} · ${venue.name}` })
+    })
+  }
 
   async function submitVenueSettings(event: FormEvent<HTMLFormElement>, venue: CrmVenue) {
     event.preventDefault()
@@ -163,56 +177,38 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
             </UiButton>
           </div> : null}
         </div>
-        <div className="!grid !grid-cols-1 !gap-4 !px-[18px] !pt-5 !pb-[22px] md:!grid-cols-2 md:!px-[22px] xl:!grid-cols-3">
-          {venues.map((venue) => (
-            <form className="!grid !gap-3 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)] !p-4" key={venue.id} onSubmit={(event) => void submitVenueSettings(event, venue)}>
-              <div className="!flex !items-center !justify-between !gap-3">
-                <strong className="!text-[13px] !text-[var(--crm-text)]">{venue.name}</strong>
-                <span className="!text-[10px] !font-semibold !text-[var(--crm-text-muted)]">{templateLabels.get(venue.catalogProfile) ?? 'Personalizado'}</span>
-              </div>
-              <Field label="Nombre del local">
-                <UiInput className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.name} disabled={disabled} maxLength={80} name="name" required />
-              </Field>
-              <Field label="Orden en el selector">
-                <UiInput className="!h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !text-[var(--crm-text)]" defaultValue={venue.sortOrder} disabled={disabled} min={0} max={2147483647} name="sortOrder" required step={1} type="number" aria-describedby={`venue-order-help-${venue.id}`} />
-              </Field>
-              <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]" id={`venue-order-help-${venue.id}`}>
-                Los números más bajos aparecen primero. Al abrir el CRM se carga el primer local activo al que tengas acceso. Si hay empate, se mantiene el orden de creación.
-              </p>
-              <Field label="Razón social">
-                <UiInput autoComplete="organization" className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.legalName} disabled={disabled} maxLength={80} name="legalName" placeholder="Empresa Ejemplo SL" />
-              </Field>
-              <Field label="NIF/CIF">
-                <UiInput className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.taxId} disabled={disabled} maxLength={80} name="taxId" placeholder="B12345678" />
-              </Field>
-              <Field label="Dirección">
-                <UiTextArea autoComplete="street-address" className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !min-h-20 !w-full !resize-y !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !py-3 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150" defaultValue={venue.address} disabled={disabled} maxLength={300} name="address" placeholder="Calle, número, localidad" rows={2} />
-              </Field>
-              <Field label="IVA por defecto">
-                <CrmSelect
-                  defaultValue={String(venue.defaultTaxRate)}
-                  disabled={disabled}
-                  name="defaultTaxRate"
-                  options={COMMON_TAX_RATES.map((rate) => ({ label: rate + ' %', value: String(rate) }))}
-                />
-              </Field>
-              <p className="m-0 text-xs leading-6 text-[var(--crm-text-muted)]">Se aplicará a los productos que no tengan un IVA específico.</p>
-              <Field label="Hora de cambio de día">
-                <UiInput
-                  className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
-                  defaultValue={venue.dayChangeTime ?? ''}
-                  disabled={disabled}
-                  name="dayChangeTime"
-                  step={60}
-                  type="time"
-                />
-              </Field>
-              <p className="m-0 text-xs leading-6 text-[var(--crm-text-muted)]">Vacío usa días naturales. Si indicas una hora, las ventas anteriores se contabilizan en el día operativo anterior.</p>
-              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-[13px] !text-[13px] !font-semibold !text-[var(--crm-text)]" disabled={disabled} type="submit">
-                <Save className="h-4 w-4" /> Guardar configuración
-              </UiButton>
-            </form>
-          ))}
+        <div className="!grid !gap-3 !px-[18px] !pt-5 !pb-[22px] md:!px-[22px]">
+          {venues.map((venue) => {
+            const contractedAddons = tenantAddonCatalog.filter((addon) => hasTenantAddon(tenantContext, addon.key))
+            const activeAddons = contractedAddons.filter((addon) => hasTenantVenueAddon({ features: tenantContext.features, venue }, addon.key))
+            const venueExpanded = expandedVenueId === venue.id
+            const addonsExpanded = expandedAddonVenueId === venue.id
+            return <article className="!overflow-hidden !rounded-[14px] !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)]" key={venue.id}>
+              <button aria-expanded={venueExpanded} className="!flex !min-h-[76px] !w-full !items-center !gap-3 !border-0 !bg-transparent !px-4 !py-3 !text-left hover:!bg-[var(--crm-surface-hover)]" onClick={() => setExpandedVenueId(venueExpanded ? null : venue.id)} type="button">
+                <span className="!grid !size-10 !shrink-0 !place-items-center !rounded-[10px] !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]"><Building2 className="!size-[18px]" /></span>
+                <span className="!min-w-0 !flex-1"><strong className="!block !truncate !text-sm">{venue.name}</strong><span className="!mt-1 !block !text-xs !text-[var(--crm-text-muted)]">{templateLabels.get(venue.catalogProfile) ?? 'Personalizado'} · {activeAddons.length} de {contractedAddons.length} addons activos</span></span>
+                <span className="!hidden !flex-wrap !justify-end !gap-1.5 sm:!flex">{activeAddons.slice(0, 3).map((addon) => <span className={`!rounded-full !px-2.5 !py-1 !text-[10px] !font-bold ${activeAddonClassName}`} key={addon.key}>{addon.name}</span>)}{activeAddons.length > 3 ? <span className="!rounded-full !bg-[var(--crm-input-bg)] !px-2.5 !py-1 !text-[10px] !font-bold !text-[var(--crm-text-muted)]">+{activeAddons.length - 3}</span> : null}</span>
+                <ChevronDown className={`!size-4 !shrink-0 !text-[var(--crm-text-muted)] !transition-transform ${venueExpanded ? '!rotate-180' : ''}`} />
+              </button>
+              {venueExpanded ? <form className="!grid !gap-4 !border-t !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-4 md:!grid-cols-2 xl:!grid-cols-3" onSubmit={(event) => void submitVenueSettings(event, venue)}>
+                <Field label="Nombre del local"><UiInput className={inputClassName} defaultValue={venue.name} disabled={disabled} maxLength={80} name="name" required /></Field>
+                <Field label="Orden en el selector"><UiInput className={inputClassName} defaultValue={venue.sortOrder} disabled={disabled} min={0} max={2147483647} name="sortOrder" required step={1} type="number" /></Field>
+                <Field label="IVA por defecto"><CrmSelect defaultValue={String(venue.defaultTaxRate)} disabled={disabled} name="defaultTaxRate" options={COMMON_TAX_RATES.map((rate) => ({ label: rate + ' %', value: String(rate) }))} /></Field>
+                <Field label="Razón social"><UiInput autoComplete="organization" className={inputClassName} defaultValue={venue.legalName} disabled={disabled} maxLength={80} name="legalName" placeholder="Empresa Ejemplo SL" /></Field>
+                <Field label="NIF/CIF"><UiInput className={inputClassName} defaultValue={venue.taxId} disabled={disabled} maxLength={80} name="taxId" placeholder="B12345678" /></Field>
+                <Field label="Hora de cambio de día"><UiInput className={inputClassName} defaultValue={venue.dayChangeTime ?? ''} disabled={disabled} name="dayChangeTime" step={60} type="time" /><span className="!mt-1.5 !block !text-[11px] !text-[var(--crm-text-muted)]">Vacío usa días naturales; el día cambia a medianoche.</span></Field>
+                <div className="md:!col-span-2 xl:!col-span-3"><Field label="Dirección"><UiTextArea autoComplete="street-address" className={`${inputClassName} !min-h-20 !resize-y !py-3`} defaultValue={venue.address} disabled={disabled} maxLength={300} name="address" placeholder="Calle, número, localidad" rows={2} /></Field></div>
+                <section className="!overflow-hidden !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] md:!col-span-2 xl:!col-span-3">
+                  <button aria-expanded={addonsExpanded} className="!flex !min-h-14 !w-full !items-center !gap-3 !border-0 !bg-transparent !px-4 !py-3 !text-left hover:!bg-[var(--crm-surface-hover)]" onClick={() => setExpandedAddonVenueId(addonsExpanded ? null : venue.id)} type="button"><Settings2 className="!size-4 !text-[var(--crm-blue)]" /><span className="!flex-1"><strong className="!block !text-xs">Addons del local</strong><span className="!text-[11px] !text-[var(--crm-text-muted)]">{activeAddons.length} activos de {contractedAddons.length} contratados</span></span><ChevronDown className={`!size-4 !text-[var(--crm-text-muted)] !transition-transform ${addonsExpanded ? '!rotate-180' : ''}`} /></button>
+                  {addonsExpanded ? <div className="!grid !border-t !border-[var(--crm-border-subtle)] sm:!grid-cols-2 xl:!grid-cols-3">{contractedAddons.map((addon) => {
+                    const enabled = hasTenantVenueAddon({ features: tenantContext.features, venue }, addon.key)
+                    return <label className="!flex !min-h-[78px] !cursor-pointer !items-start !gap-3 !border-b !border-[var(--crm-border-subtle)] !p-3.5 hover:!bg-[var(--crm-surface-hover)] sm:[&:nth-child(odd)]:!border-r xl:[&:nth-child(odd)]:!border-r-0 xl:[&:not(:nth-child(3n))]:!border-r" key={addon.key}><input checked={enabled} className="!mt-0.5 !size-4 !accent-[var(--crm-blue)]" disabled={disabled || !isOwner} onChange={(event) => void toggleVenueAddon(venue, addon.key, event.target.checked)} type="checkbox" /><span className="!min-w-0"><strong className="!flex !items-center !gap-1.5 !text-xs">{enabled ? <Check className="!size-3.5 !text-[var(--crm-green)]" /> : null}{addon.name}</strong><span className="!mt-1 !block !text-[11px] !leading-4 !text-[var(--crm-text-muted)]">{addon.description}</span>{addon.requires.length ? <span className="!mt-1 !block !text-[10px] !font-semibold !text-[var(--crm-blue)]">Requiere {addon.requires.map((key) => tenantAddonCatalog.find((item) => item.key === key)?.name ?? key).join(' + ')}</span> : null}</span></label>
+                  })}</div> : null}
+                </section>
+                <div className="!flex !items-center !justify-between !gap-3 md:!col-span-2 xl:!col-span-3"><p className="!m-0 !text-[11px] !text-[var(--crm-text-muted)]">Los cambios de addons se guardan al instante. Los datos generales se guardan con el botón.</p><UiButton className="!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} type="submit"><Save className="h-4 w-4" /> Guardar local</UiButton></div>
+              </form> : null}
+            </article>
+          })}
           {!venues.length ? <EmptyList message="No hay locales configurados." /> : null}
         </div>
       </section>

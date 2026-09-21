@@ -13,6 +13,8 @@ import {
   loadProductionAdmin,
   reprintDispatch,
   saveProductionDestination,
+  saveProductionPass,
+  saveProductionPassRoute,
   saveProductionRoute,
   setVenueProductionEnabled,
   unlinkAgent,
@@ -23,7 +25,7 @@ import {
 } from '../services/productionAdminService'
 
 type Props = { catalog: CatalogData | null; context: TenantContext; disabled: boolean; runAction: RunAction; venueId: string }
-const emptyState: ProductionAdminState = { venueEnabled: false, destinations: [], categoryRoutes: [], productRoutes: [], agent: null, printers: [], dispatches: [], kdsDevices: [] }
+const emptyState: ProductionAdminState = { venueEnabled: false, destinations: [], passes: [], categoryRoutes: [], productRoutes: [], categoryPassRoutes: [], productPassRoutes: [], agent: null, printers: [], dispatches: [], kdsDevices: [] }
 
 export function ProductionCrm({ catalog, context, disabled, runAction, venueId }: Props) {
   const [state, setState] = useState(emptyState)
@@ -33,6 +35,9 @@ export function ProductionCrm({ catalog, context, disabled, runAction, venueId }
   const [categoryId, setCategoryId] = useState('')
   const [productId, setProductId] = useState('')
   const [routeDestinationId, setRouteDestinationId] = useState('')
+  const [passId, setPassId] = useState('')
+  const [passName, setPassName] = useState('Directo')
+  const [passRouteId, setPassRouteId] = useState('')
   const [kdsName, setKdsName] = useState('KDS Cocina')
   const [kdsDestinationId, setKdsDestinationId] = useState('')
   const [credentials, setCredentials] = useState<{ email: string; password: string } | null>(null)
@@ -44,7 +49,8 @@ export function ProductionCrm({ catalog, context, disabled, runAction, venueId }
     const first = state.destinations.find((destination) => destination.isActive)?.id ?? ''
     if (!routeDestinationId) setRouteDestinationId(first)
     if (!kdsDestinationId) setKdsDestinationId(state.destinations.find((destination) => destination.isActive && destination.kdsEnabled)?.id ?? '')
-  }, [kdsDestinationId, routeDestinationId, state.destinations])
+    if (!passRouteId) setPassRouteId(state.passes.find((pass) => pass.isActive)?.id ?? '')
+  }, [kdsDestinationId, passRouteId, routeDestinationId, state.destinations, state.passes])
 
   const mutate = (action: () => Promise<unknown>) => runAction(async () => { await action(); await refresh() })
   const createDestination = (event: FormEvent) => {
@@ -63,6 +69,12 @@ export function ProductionCrm({ catalog, context, disabled, runAction, venueId }
       <section className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]"><h2 className="text-lg font-black">Destinos y salidas</h2><p className="mb-4 text-sm text-[var(--crm-text-muted)]">Cada destino activo necesita KDS, impresora o ambos.</p>
         <form className="mb-4 grid gap-2 md:grid-cols-[1fr_auto_1fr_auto]" onSubmit={createDestination}><Input onChange={(event) => setDestinationName(event.target.value)} placeholder="Nombre del destino" required value={destinationName} /><label className="flex items-center gap-2 px-2 text-sm font-bold"><input checked={destinationKds} onChange={(event) => setDestinationKds(event.target.checked)} type="checkbox" /> KDS</label><CrmSelect onChange={setDestinationPrinter} options={[{ label: 'Sin impresora', value: '' }, ...state.printers.map((printer) => ({ label: `${printer.displayName}${printer.available ? '' : ' (no disponible)'}`, value: printer.printerId }))]} value={destinationPrinter} /><Button disabled={disabled || (!destinationKds && !destinationPrinter)} size="md" type="submit" variant="primary"><Plus className="h-4 w-4" /> Crear</Button></form>
         <div className="space-y-2">{state.destinations.map((destination) => <article className="grid items-center gap-2 rounded-xl border border-[var(--crm-border)] p-3 md:grid-cols-[1fr_auto_1fr_auto]" key={destination.id}><Input onBlur={(event) => { if (event.target.value.trim() && event.target.value !== destination.name) void updateDestination(destination, { name: event.target.value }) }} defaultValue={destination.name} /><label className="flex items-center gap-2 text-sm font-bold"><input checked={destination.kdsEnabled} disabled={disabled || (destination.isActive && !destination.printerId && destination.kdsEnabled)} onChange={(event) => void updateDestination(destination, { kdsEnabled: event.target.checked })} type="checkbox" /> KDS</label><CrmSelect disabled={disabled} onChange={(value) => void updateDestination(destination, { printerId: value || null })} options={[{ label: 'Sin impresora', value: '' }, ...state.printers.map((printer) => ({ label: printer.displayName, value: printer.printerId }))]} value={destination.printerId ?? ''} /><div className="flex gap-1"><Button disabled={disabled || (!destination.kdsEnabled && !destination.printerId && !destination.isActive)} onClick={() => void updateDestination(destination, { isActive: !destination.isActive })} size="sm" type="button" variant="secondary">{destination.isActive ? 'Desactivar' : 'Activar'}</Button><Button disabled={disabled || destination.isActive} onClick={() => void mutate(() => deleteProductionDestination(context, destination.id))} size="sm" type="button" variant="tertiary"><Trash2 className="h-4 w-4" /></Button></div></article>)}</div>
+      </section>
+
+      <section className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]"><h2 className="text-lg font-black">Pases</h2><p className="mb-4 text-sm text-[var(--crm-text-muted)]">El destino indica dónde se prepara; el pase indica cuándo se envía. Producto prevalece sobre categoría y el primer pase activo es el fallback.</p>
+        <form className="mb-4 grid gap-2 md:grid-cols-[1fr_auto_auto]" onSubmit={(event) => { event.preventDefault(); if (!passName.trim()) return; void mutate(async () => { const id = passId || crypto.randomUUID(); await saveProductionPass(context, venueId, { id, name: passName, isActive: true, sortOrder: state.passes.length }); setPassId(''); setPassName('') }) }}><Input onChange={(event) => setPassName(event.target.value)} placeholder="Nombre del pase" required value={passName} /><Button disabled={disabled} size="md" type="submit" variant="primary"><Plus className="h-4 w-4" /> Crear pase</Button></form>
+        <div className="mb-5 space-y-2">{state.passes.map((pass) => <article className="flex items-center justify-between gap-2 rounded-xl border border-[var(--crm-border)] p-3" key={pass.id}><Input defaultValue={pass.name} onBlur={(event) => { if (event.target.value.trim() && event.target.value !== pass.name) void mutate(() => saveProductionPass(context, venueId, { ...pass, name: event.target.value })) }} /><div className="flex gap-1"><Button disabled={disabled} onClick={() => void mutate(() => saveProductionPass(context, venueId, { ...pass, isActive: !pass.isActive }))} size="sm" type="button" variant="secondary">{pass.isActive ? 'Desactivar' : 'Activar'}</Button><Button disabled={disabled || pass.sortOrder === 0} onClick={() => void mutate(() => saveProductionPass(context, venueId, { ...pass, sortOrder: Math.max(0, pass.sortOrder - 1) }))} size="sm" type="button" variant="tertiary">↑</Button></div></article>)}</div>
+        <div className="mb-5 grid gap-4 lg:grid-cols-2"><RouteEditor disabled={disabled} destinations={state.passes} items={(catalog?.categories ?? []).filter((item) => item.active).map((item) => ({ id: item.id, name: item.name }))} label="Pases por categoría" onSave={(source, pass) => void mutate(() => saveProductionPassRoute(context, venueId, 'category', source, pass))} routes={state.categoryPassRoutes} selectedDestination={passRouteId} selectedSource={categoryId} setDestination={setPassRouteId} setSource={setCategoryId} /><RouteEditor disabled={disabled} destinations={state.passes} items={(catalog?.products ?? []).filter((item) => item.active).map((item) => ({ id: item.id, name: item.name }))} label="Excepciones de pase por producto" onSave={(source, pass) => void mutate(() => saveProductionPassRoute(context, venueId, 'product', source, pass))} routes={state.productPassRoutes} selectedDestination={passRouteId} selectedSource={productId} setDestination={setPassRouteId} setSource={setProductId} /></div>
       </section>
 
       <section className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]"><h2 className="text-lg font-black">Routing</h2><p className="mb-4 text-sm text-[var(--crm-text-muted)]">La ruta específica de producto prevalece sobre la categoría.</p>
@@ -120,7 +132,7 @@ function KdsDeviceRow(props: { destinationName: string; device: ProductionKdsDev
   </article>
 }
 
-function RouteEditor(props: { disabled: boolean; destinations: ProductionDestination[]; items: Array<{ id: string; name: string }>; label: string; onSave: (source: string, destination: string | null) => void; routes: Array<{ sourceId: string; destinationId: string }>; selectedDestination: string; selectedSource: string; setDestination: (value: string) => void; setSource: (value: string) => void }) {
+function RouteEditor(props: { disabled: boolean; destinations: Array<{ id: string; name: string; isActive: boolean }>; items: Array<{ id: string; name: string }>; label: string; onSave: (source: string, destination: string | null) => void; routes: Array<{ sourceId: string; destinationId: string }>; selectedDestination: string; selectedSource: string; setDestination: (value: string) => void; setSource: (value: string) => void }) {
   const names = new Map(props.items.map((item) => [item.id, item.name]))
   const destinations = new Map(props.destinations.map((item) => [item.id, item.name]))
   return <div><h3 className="font-black">{props.label}</h3><div className="mt-2 flex gap-2"><CrmSelect className="min-w-0 flex-1" onChange={props.setSource} options={props.items.map((item) => ({ label: item.name, value: item.id }))} placeholder="Selecciona…" searchable value={props.selectedSource} /><CrmSelect className="min-w-0 flex-1" onChange={props.setDestination} options={[{ label: 'Sin ruta', value: '' }, ...props.destinations.filter((item) => item.isActive).map((item) => ({ label: item.name, value: item.id }))]} value={props.selectedDestination} /><Button disabled={props.disabled || !props.selectedSource} onClick={() => props.onSave(props.selectedSource, props.selectedDestination || null)} size="md" type="button" variant="primary"><Save className="h-4 w-4" /></Button></div><div className="mt-2 space-y-1">{props.routes.map((route) => <div className="flex justify-between rounded-lg bg-[var(--crm-surface-muted)] px-3 py-2 text-sm" key={route.sourceId}><span>{names.get(route.sourceId) ?? route.sourceId} → {destinations.get(route.destinationId) ?? 'Destino eliminado'}</span><button className="font-bold text-[var(--danger)]" disabled={props.disabled} onClick={() => props.onSave(route.sourceId, null)} type="button">Quitar</button></div>)}</div></div>

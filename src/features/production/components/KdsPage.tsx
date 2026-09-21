@@ -6,7 +6,7 @@ import { getReadableError } from '../../../utils/errors'
 import { loadKdsQueue, markKdsItemQuantityReady, markKdsItemReady, subscribeToKds } from '../service'
 import type { KdsQueue } from '../types'
 import { InventoryPreparationsPanel } from '../../inventory'
-import { hasTenantFeature } from '../../platform/tenantFeatureAccess'
+import { hasTenantCapability } from '../../platform/tenantFeatureAccess'
 import { formatQuantity } from '../../../lib/format'
 
 type Props = {
@@ -32,7 +32,7 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
   const [busyId, setBusyId] = useState<string | null>(null)
   const [preparationBusy, setPreparationBusy] = useState(false)
   const [view, setView] = useState<'orders' | 'preparations'>('orders')
-  const inventoryRecipesEnabled = hasTenantFeature(context, 'inventory') && hasTenantFeature(context, 'inventory_recipes')
+  const inventoryRecipesEnabled = hasTenantCapability(context, 'costing')
 
   useEffect(() => {
     onBusyChange?.(busyId !== null || preparationBusy)
@@ -107,7 +107,7 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
           const details = itemDetails(item)
           return <article className="flex min-h-64 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-4 shadow-[var(--shadow)]" key={item.id}>
             <div className="flex items-start justify-between gap-3">
-              <div><p className="text-sm font-black uppercase text-[var(--warning)]">{item.tableName} · Envío #{item.batchSequence}</p><h2 className="mt-1 text-xl font-black">{formatQuantity(remaining)}x {item.snapshot.productName ?? 'Producto'}</h2></div>
+              <div><p className="text-sm font-black uppercase text-[var(--warning)]">{item.tableName} · Envío #{item.batchSequence}</p><p className="mt-1 text-xs font-black uppercase tracking-wide text-[var(--muted)]">{item.snapshot.passName ?? item.passName ?? 'Directo'}</p><h2 className="mt-1 text-xl font-black">{formatQuantity(remaining)}x {item.snapshot.productName ?? 'Producto'}</h2></div>
               <time className="shrink-0 font-mono text-sm font-bold">{new Date(item.sentAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</time>
             </div>
             {item.snapshot.parentProductName ? <p className="mt-2 font-semibold text-[var(--muted)]">Menú: {item.snapshot.parentProductName}</p> : null}

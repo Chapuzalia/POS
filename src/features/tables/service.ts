@@ -9,7 +9,7 @@ import { getOrderPendingUnits } from './service-status'
 import { buildCatalogOrderLinesPayload, buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
 import { getDateRange, localDateKey } from '../reservations/domain/reservationAvailability'
-import { hasTenantFeature } from '../platform/tenantFeatureAccess'
+import { hasTenantCapability } from '../platform/tenantFeatureAccess'
 import type { CashlogyTransaction } from '../local-printing/types'
 
 export { buildRestaurantOrderLinesPayload } from './order-line-payload'
@@ -106,7 +106,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
     lines = ((data ?? []) as OrderLineRow[]).map(mapLine)
   }
   const readyByLine = new Map<string, number>()
-  if (hasTenantFeature(context, 'production') && lines.length) {
+  if (hasTenantCapability(context, 'production') && lines.length) {
     const { data, error } = await client.from('production_line_allocations')
       .select('current_order_line_id, ready_quantity')
       .in('current_order_line_id', lines.map((line) => line.id))

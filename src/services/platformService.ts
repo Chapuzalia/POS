@@ -1,8 +1,9 @@
 import { UserFacingError } from '../utils/UserFacingError.ts'
 import { supabase } from '../lib/supabase'
 import { getFunctionInvokeErrorMessage } from '../features/crm/shared/services/crmServiceSupport'
+import type { TenantAddonKey } from '../features/platform/tenantFeatureAccess'
 
-export type PlatformTenantFeature = string
+export type PlatformTenantFeature = TenantAddonKey
 
 export type PlatformFeature = {
   key: string
@@ -126,7 +127,7 @@ async function invokePlatformAction<T>(body: Record<string, unknown>, fallbackEr
 
 export async function updatePlatformTenant(input: UpdatePlatformTenantInput) {
   return invokePlatformAction<{ tenant?: Pick<PlatformTenant, 'id' | 'name' | 'slug'> }>(
-    { action: 'platform-update-tenant', ...input },
+    { action: 'platform-update-tenant', featureCatalogVersion: 2, ...input },
     'No se pudo actualizar el negocio.',
   )
 }

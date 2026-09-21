@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react'
 import { Button, Input } from '../../../../components/ui'
 import type { TenantContext } from '../../../../types'
 import { getReadableError } from '../../../../utils/errors'
-import { hasTenantFeature } from '../../../platform/tenantFeatureAccess'
+import { hasTenantCapability } from '../../../platform/tenantFeatureAccess'
 import { SupplierDocumentArchiveForm } from '../components/SupplierDocumentArchiveForm'
 import { CrmPagination, CRM_PAGE_SIZE } from '../../shared/components/CrmPagination'
 import { CrmSelect } from '../../shared/components/CrmSelect'
@@ -54,7 +54,7 @@ function PurchaseStatusBadge({ status }: { status: PurchaseDocument['status'] })
 }
 
 export function PurchasesInvoicesCrm({ disabled, selectedVenueId, tenantContext }: Props) {
-  const scanningEnabled = hasTenantFeature(tenantContext, 'supplier_document_scanning')
+  const scanningEnabled = hasTenantCapability(tenantContext, 'document_ai')
   const [archiveDocument, setArchiveDocument] = useState<PurchaseDocument | null | undefined>(undefined)
   const now = new Date()
   const [startDate, setStartDate] = useState(`${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-01`)

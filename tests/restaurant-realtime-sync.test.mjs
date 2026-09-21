@@ -251,7 +251,7 @@ for (const [message, refreshFails, expectedRefreshes] of [
       './useRestaurantRealtime': { useRestaurantRealtime: () => ({
         refreshMap: async () => { refreshes++; if (refreshFails) throw new Error('offline') },
       }) },
-      '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false },
+      '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false, hasTenantCapability: () => false },
     })
     const result = runner.render({
       context: { canTakeOrders: true, deviceId: 'device' }, cashSession: { id: 'session' },

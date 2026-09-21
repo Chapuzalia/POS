@@ -35,12 +35,13 @@ export async function loadCrmAccessData(
   const [
     { data: venueRows, error: venuesError },
     { data: deviceRows, error: devicesError },
+    { data: addonActivationRows, error: addonActivationsError },
     accessResult,
   ] = await Promise.all([
     client
       .from("venues")
       .select(
-        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, default_tax_rate, timezone, catalog_profile",
+        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, production_enabled, default_tax_rate, timezone, catalog_profile",
       )
       .eq("tenant_id", context.tenantId)
       .order("sort_order").order("created_at").order("id"),
@@ -52,6 +53,7 @@ export async function loadCrmAccessData(
       .eq("tenant_id", context.tenantId)
       .neq("device_mode", "kds")
       .order("name"),
+    client.rpc("list_current_tenant_venue_addons", { p_tenant_id: context.tenantId }),
     client.functions.invoke<{
       allowedVenueIds: string[] | null;
       deviceAccounts: CrmDeviceAccountRow[];
@@ -61,8 +63,8 @@ export async function loadCrmAccessData(
     }),
   ]);
 
-  if (venuesError || devicesError || accessResult.error) {
-    throw venuesError ?? devicesError ?? accessResult.error;
+  if (venuesError || devicesError || addonActivationsError || accessResult.error) {
+    throw venuesError ?? devicesError ?? addonActivationsError ?? accessResult.error;
   }
 
   const functionError = (accessResult.data as { error?: string } | null)?.error;
@@ -87,6 +89,12 @@ export async function loadCrmAccessData(
   const allowedVenueIds = accessResult.data?.allowedVenueIds;
   const canAccessVenue = (venueId: string) => context.role === "owner"
     || (Array.isArray(allowedVenueIds) && allowedVenueIds.includes(venueId));
+  const activationsByVenue = new Map<string, Record<string, boolean>>();
+  for (const row of addonActivationRows ?? []) {
+    const venueActivations = activationsByVenue.get(row.venue_id as string) ?? {};
+    venueActivations[row.addon_key as string] = row.is_enabled as boolean;
+    activationsByVenue.set(row.venue_id as string, venueActivations);
+  }
 
   return {
     venues: (venueRows ?? []).filter((venue) => canAccessVenue(venue.id as string)).map((venue) => ({
@@ -103,6 +111,8 @@ export async function loadCrmAccessData(
       isActive: venue.is_active as boolean,
       inventoryEnabled: venue.inventory_enabled as boolean,
       tablesEnabled: venue.tables_enabled as boolean,
+      productionEnabled: venue.production_enabled as boolean,
+      addonActivations: activationsByVenue.get(venue.id as string) ?? {},
       defaultTaxRate: Number(venue.default_tax_rate),
       timeZone: venue.timezone as string,
     })),
@@ -123,11 +133,11 @@ export async function loadCrmVenues(
   context: TenantContext,
 ): Promise<CrmVenue[]> {
   const client = requireSupabase();
-  const [venuesResult, assignmentsResult] = await Promise.all([
+  const [venuesResult, assignmentsResult, addonActivationsResult] = await Promise.all([
     client
       .from("venues")
       .select(
-        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, default_tax_rate, timezone, catalog_profile",
+        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, production_enabled, default_tax_rate, timezone, catalog_profile",
       )
       .eq("tenant_id", context.tenantId)
       .order("sort_order").order("created_at").order("id"),
@@ -138,16 +148,24 @@ export async function loadCrmVenues(
         .eq("tenant_id", context.tenantId)
         .eq("manager_user_id", context.userId)
       : Promise.resolve({ data: null, error: null }),
+    client.rpc("list_current_tenant_venue_addons", { p_tenant_id: context.tenantId }),
   ]);
   const { data, error } = venuesResult;
   const assignmentError = assignmentsResult.error;
+  const addonActivationsError = addonActivationsResult.error;
 
-  if (error || assignmentError) {
-    throw error ?? assignmentError;
+  if (error || assignmentError || addonActivationsError) {
+    throw error ?? assignmentError ?? addonActivationsError;
   }
   const managerVenueIds = context.role === "manager"
     ? new Set((assignmentsResult.data ?? []).map((item) => item.venue_id as string))
     : null;
+  const activationsByVenue = new Map<string, Record<string, boolean>>();
+  for (const row of addonActivationsResult.data ?? []) {
+    const current = activationsByVenue.get(row.venue_id as string) ?? {};
+    current[row.addon_key as string] = row.is_enabled as boolean;
+    activationsByVenue.set(row.venue_id as string, current);
+  }
 
   return (data ?? []).filter((venue) => !managerVenueIds || managerVenueIds.has(venue.id as string)).map((venue) => ({
     id: venue.id as string,
@@ -163,6 +181,8 @@ export async function loadCrmVenues(
     isActive: venue.is_active as boolean,
     inventoryEnabled: venue.inventory_enabled as boolean,
     tablesEnabled: venue.tables_enabled as boolean,
+    productionEnabled: venue.production_enabled as boolean,
+    addonActivations: activationsByVenue.get(venue.id as string) ?? {},
     defaultTaxRate: Number(venue.default_tax_rate),
     timeZone: venue.timezone as string,
   }));

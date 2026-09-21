@@ -42,8 +42,9 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
     <div className="crm-shell !flex !h-full !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased" data-crm-theme={crmTheme} data-theme={crmTheme}>
       <CrmSidebar
         activeSection={activeSection}
-        context={context}
-        inventoryEnabled={inventoryEnabled}
+         context={context}
+         selectedVenue={venues.find((venue) => venue.id === selectedVenueId)}
+         inventoryEnabled={inventoryEnabled}
         isOpen={isSidebarOpen}
         onClose={() => setIsSidebarOpen(false)}
         onLogout={onLogout}

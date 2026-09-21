@@ -183,6 +183,20 @@ export type CatalogModifier = {
   updatedAt: string
 }
 
+export type ProductionRoutingPass = {
+  id: string
+  name: string
+  sortOrder: number
+}
+
+export type ProductionRouting = {
+  passes: ProductionRoutingPass[]
+  defaultPass: ProductionRoutingPass | null
+  productRoutes: Array<{ productId: string; passId: string }>
+  categoryRoutes: Array<{ categoryId: string; passId: string }>
+  loadedAt: string
+}
+
 export type CatalogData = {
   tenantId: string
   venueId: string
@@ -200,6 +214,7 @@ export type CatalogData = {
   modifierGroups: CatalogModifierGroup[]
   modifiers: CatalogModifier[]
   modifierAssignments: CatalogAssignment[]
+  productionRouting?: ProductionRouting
   loadedAt: string
 }
 

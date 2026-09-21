@@ -176,6 +176,10 @@ export type TenantContext = {
   userName: string
   role: TenantRole
   features?: string[]
+  venueAddonActivations?: Partial<Record<string, boolean>>
+  venueInventoryEnabled?: boolean
+  venueTablesEnabled?: boolean
+  venueProductionEnabled?: boolean
 }
 
 export type LoginInput = {
@@ -195,6 +199,8 @@ export type CrmVenue = {
   isActive: boolean
   inventoryEnabled: boolean
   tablesEnabled: boolean
+  productionEnabled: boolean
+  addonActivations: Partial<Record<string, boolean>>
   defaultTaxRate: number
   timeZone: string
 }
