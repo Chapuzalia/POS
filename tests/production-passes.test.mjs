@@ -8,6 +8,8 @@ const uuidMinFix = read('../supabase/migrations/20260921120300_fix_production_ba
 const types = read('../src/features/production/types.ts')
 const panel = read('../src/features/tables/components/RestaurantOrderPanel.tsx')
 const controls = read('../src/features/production/components/ProductionControls.tsx')
+const productionService = read('../src/features/production/service.ts')
+const restaurantController = read('../src/features/restaurant/hooks/useRestaurantController.ts')
 const kds = read('../src/features/production/components/KdsPage.tsx')
 const crm = read('../src/features/crm/production/pages/ProductionPage.tsx')
 
@@ -49,6 +51,16 @@ test('POS groups by pass and retains manual partial selection', () => {
   assert.match(controls, /entry\.unsentQuantity - \(line\?\.servedQuantity \?\? 0\)/)
   assert.match(controls, /componentId: entry\.componentId/)
   assert.match(controls, /entry\.unsentQuantity > 0/)
+})
+
+test('POS edits the pass from the product gesture', () => {
+  assert.match(productionService, /setOrderLineProductionPass/)
+  assert.match(restaurantController, /changeProductionPass/)
+  assert.match(panel, /onContextMenu/)
+  assert.match(panel, /setTimeout\(openProductionPassEditor, 600\)/)
+  assert.match(panel, /passMenuOpen/)
+  assert.match(panel, /entry\.sentQuantity === 0/)
+  assert.doesNotMatch(controls, /onChangePass|NativeSelect/)
 })
 
 test('KDS displays the pass snapshot and CRM distinguishes passes from destinations', () => {

@@ -56,7 +56,7 @@ export function ProductionControls({ disabled, onSend, order, state }: Props) {
           {available.map((entry) => {
             const key = keyFor(entry.lineId, entry.componentId)
             return <div className="flex items-center justify-between gap-2" key={key}>
-              <span className="min-w-0 truncate text-sm font-bold">{entry.productName}{entry.parentProductName ? ` · ${entry.parentProductName}` : ''} · {formatQuantity(entry.unsentQuantity)} sin enviar</span>
+              <span className="min-w-0 flex-1 truncate text-sm font-bold">{entry.productName}{entry.parentProductName ? ` · ${entry.parentProductName}` : ''} · {formatQuantity(entry.unsentQuantity)} sin enviar</span>
               <div className="flex items-center gap-1">
                 <Button aria-label="Quitar una unidad del envío" disabled={disabled || (selected[key] ?? 0) === 0} onClick={() => change(entry.lineId, entry.componentId, entry.unsentQuantity, -1)} size="sm" type="button" variant="tertiary"><Minus className="h-4 w-4" /></Button>
                 <strong className="min-w-6 text-center font-mono">{formatQuantity(selected[key] ?? 0)}</strong>

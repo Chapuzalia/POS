@@ -11,6 +11,10 @@ const venueMigration = await readFile(
   new URL('../supabase/migrations/20260921130000_add_venue_addon_activations.sql', import.meta.url),
   'utf8',
 )
+const venueOperationalFlagsMigration = await readFile(
+  new URL('../supabase/migrations/20260921140000_sync_venue_addon_operational_flags.sql', import.meta.url),
+  'utf8',
+)
 
 test('la migración conserva contratos antiguos y distingue la selección nueva vacía', async (t) => {
   const db = new PGlite()
@@ -50,6 +54,7 @@ test('la migración conserva contratos antiguos y distingue la selección nueva 
       tables_enabled boolean not null default true,
       production_enabled boolean not null default true,
       inventory_enabled boolean not null default true,
+      updated_at timestamptz not null default now(),
       unique (id, tenant_id)
     );
     create table public.devices (id uuid primary key, tenant_id uuid not null, is_active boolean not null);
@@ -96,16 +101,40 @@ test('la migración conserva contratos antiguos y distingue la selección nueva 
   assert.deepEqual(await features(), ['multi_device'])
 
   await db.exec(venueMigration)
+  await db.exec(venueOperationalFlagsMigration)
   await db.query(
     'insert into public.venues (id, tenant_id) values ($1, $2)',
     ['22222222-2222-2222-2222-222222222222', tenantId],
   )
-  await update(['promotions', '__addon_catalog_v2'])
+  await update(['restaurant', 'reservations', 'production', 'inventory', 'promotions', '__addon_catalog_v2'])
   const venueId = '22222222-2222-2222-2222-222222222222'
+
+  await db.query('update public.venues set tables_enabled = false, production_enabled = false, inventory_enabled = false where id = $1', [venueId])
+  await db.query('select public.set_venue_addon_enabled($1, $2, $3)', [venueId, 'restaurant', true])
+  let { rows } = await db.query('select tables_enabled, production_enabled, inventory_enabled from public.venues where id = $1', [venueId])
+  assert.deepEqual(rows[0], { tables_enabled: true, production_enabled: false, inventory_enabled: false })
+
+  await db.query('update public.venues set tables_enabled = false, production_enabled = false where id = $1', [venueId])
+  await db.query('select public.set_venue_addon_enabled($1, $2, $3)', [venueId, 'production', true])
+  ;({ rows } = await db.query('select tables_enabled, production_enabled, inventory_enabled from public.venues where id = $1', [venueId]))
+  assert.deepEqual(rows[0], { tables_enabled: true, production_enabled: true, inventory_enabled: false })
+
+  await db.query('select public.set_venue_addon_enabled($1, $2, $3)', [venueId, 'inventory', true])
+  ;({ rows } = await db.query('select tables_enabled, production_enabled, inventory_enabled from public.venues where id = $1', [venueId]))
+  assert.deepEqual(rows[0], { tables_enabled: true, production_enabled: true, inventory_enabled: true })
+
+  await db.query('select public.set_venue_addon_enabled($1, $2, $3)', [venueId, 'restaurant', false])
+  ;({ rows } = await db.query('select tables_enabled, production_enabled from public.venues where id = $1', [venueId]))
+  assert.deepEqual(rows[0], { tables_enabled: false, production_enabled: false })
+
+  await db.query('select public.set_venue_addon_enabled($1, $2, $3)', [venueId, 'inventory', false])
+  ;({ rows } = await db.query('select inventory_enabled from public.venues where id = $1', [venueId]))
+  assert.deepEqual(rows[0], { inventory_enabled: false })
+
   await db.query('select public.set_venue_addon_enabled($1, $2, $3)', [venueId, 'promotions', false])
-  const { rows } = await db.query(
+  ;({ rows } = await db.query(
     'select public.venue_addon_enabled($1, $2, $3) as enabled',
     [tenantId, venueId, 'promotions'],
-  )
+  ))
   assert.equal(rows[0].enabled, false)
 })

@@ -127,7 +127,8 @@ export function CrmSidebar({ activeSection, context, selectedVenue, inventoryEna
 
   const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features, selectedVenue))
   const allowedPurchaseItems = allowed(purchaseNavItems)
-  const allowedInventoryItems = allowed(inventoryNavItems)
+  const allowedInventoryItems = inventoryNavItems
+    .filter((item) => item.id === 'inventory-stock' || canAccessCrmSection(context.role, item.id, context.features, selectedVenue))
     .filter((item) => inventoryEnabled || item.id === 'inventory-stock')
   const navigate = (section: CrmSection) => {
     onSectionChange(section)

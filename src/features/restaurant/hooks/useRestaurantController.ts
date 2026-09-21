@@ -78,6 +78,7 @@ import { hasTenantCapability } from '../../platform/tenantFeatureAccess'
 import {
   loadOrderProductionState,
   sendProductionBatch,
+  setOrderLineProductionPass,
   subscribeToOrderProduction,
 } from '../../production/service'
 import type { OrderProductionState, ProductionSelection } from '../../production/types'
@@ -1107,6 +1108,14 @@ export function useRestaurantController(options: Options) {
     }
   }), [draft, options, runBusy])
 
+  const changeProductionPass = useCallback((input: { lineId: string; componentId?: string | null; passId: string }) => runBusy(async () => {
+    if (!options.context || !options.isOnline || !productionAvailable) return
+    const saved = await draft.flush()
+    if (!saved) return
+    await setOrderLineProductionPass(input)
+    setProductionState(await loadOrderProductionState(saved.order.id))
+  }), [draft, options.context, options.isOnline, productionAvailable, runBusy])
+
   const sendToProduction = useCallback((selection?: ProductionSelection[]) => runBusy(async () => {
     if (!options.context || !options.isOnline || !productionAvailable) return
     const saved = await draft.flush()
@@ -1170,6 +1179,7 @@ export function useRestaurantController(options: Options) {
     addLine,
     cancelEmptyOrder,
     changeLineQuantity,
+    changeProductionPass,
     clearTicket: () => draft.updateDraft((detail) => ({ ...detail, lines: [] })),
     completePayment,
     configureEqualSplit,
