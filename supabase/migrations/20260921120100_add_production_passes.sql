@@ -1,13 +1,13 @@
 -- migration-safety: expand
--- migration-safety-reviewed: CREATE OR REPLACE ROUTINE
--- migration-safety-reason: Extends the existing production batch contract with pass snapshots and component-level selections while retaining the existing RPC signature.
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: Extends the existing production batch RPC without changing its signature or grants; the new pass-selection RPC removes PUBLIC/anon access and the new trigger helper removes client access.
 set lock_timeout = '5s';
 set statement_timeout = '5min';
 
 create table public.production_passes (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete cascade,
-  venue_id uuid not null references public.venues(id) on delete cascade,
+  venue_id uuid not null,
   name text not null,
   sort_order integer not null default 0,
   is_active boolean not null default true,
@@ -15,30 +15,34 @@ create table public.production_passes (
   updated_at timestamptz not null default now(),
   constraint production_passes_name_check check (char_length(btrim(name)) between 1 and 80),
   constraint production_passes_sort_order_check check (sort_order >= 0),
+  foreign key (venue_id, tenant_id) references public.venues(id, tenant_id) on delete cascade,
   unique (id, tenant_id, venue_id),
   unique (venue_id, name)
 );
 
 create table public.production_category_pass_routes (
   tenant_id uuid not null references public.tenants(id) on delete cascade,
-  venue_id uuid not null references public.venues(id) on delete cascade,
+  venue_id uuid not null,
   category_id uuid not null references public.categories(id) on delete cascade,
   pass_id uuid not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (venue_id, category_id),
+  foreign key (venue_id, tenant_id) references public.venues(id, tenant_id) on delete cascade,
   foreign key (pass_id, tenant_id, venue_id)
     references public.production_passes(id, tenant_id, venue_id) on delete restrict
 );
 
 create table public.production_product_pass_routes (
   tenant_id uuid not null references public.tenants(id) on delete cascade,
-  venue_id uuid not null references public.venues(id) on delete cascade,
-  product_id uuid not null references public.products(id) on delete cascade,
+  venue_id uuid not null,
+  product_id uuid not null,
   pass_id uuid not null,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (venue_id, product_id),
+  foreign key (venue_id, tenant_id) references public.venues(id, tenant_id) on delete cascade,
+  foreign key (product_id, tenant_id, venue_id) references public.products(id, tenant_id, venue_id) on delete cascade,
   foreign key (pass_id, tenant_id, venue_id)
     references public.production_passes(id, tenant_id, venue_id) on delete restrict
 );
@@ -46,7 +50,7 @@ create table public.production_product_pass_routes (
 create table public.order_line_production_passes (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete restrict,
-  venue_id uuid not null references public.venues(id) on delete restrict,
+  venue_id uuid not null,
   order_line_id uuid not null references public.order_lines(id) on delete cascade,
   component_id text not null default '',
   pass_id uuid not null,
@@ -56,6 +60,7 @@ create table public.order_line_production_passes (
   constraint order_line_production_passes_component_check check (char_length(component_id) <= 200),
   constraint order_line_production_passes_name_check check (char_length(btrim(pass_name)) between 1 and 80),
   unique (order_line_id, component_id),
+  foreign key (venue_id, tenant_id) references public.venues(id, tenant_id) on delete restrict,
   foreign key (pass_id, tenant_id, venue_id)
     references public.production_passes(id, tenant_id, venue_id) on delete restrict
 );
@@ -63,7 +68,7 @@ create table public.order_line_production_passes (
 create table public.production_component_allocations (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete restrict,
-  venue_id uuid not null references public.venues(id) on delete restrict,
+  venue_id uuid not null,
   batch_id uuid not null references public.production_batches(id) on delete restrict,
   source_order_line_id uuid not null,
   current_order_line_id uuid not null,
@@ -75,7 +80,8 @@ create table public.production_component_allocations (
   updated_at timestamptz not null default now(),
   constraint production_component_allocations_quantity_check check (quantity >= 0 and scale(quantity) <= 3),
   constraint production_component_allocations_state_check check (ready_quantity >= 0 and cancelled_quantity >= 0 and ready_quantity + cancelled_quantity <= quantity and scale(ready_quantity) <= 3 and scale(cancelled_quantity) <= 3),
-  unique (batch_id, source_order_line_id, current_order_line_id, source_component_id)
+  unique (batch_id, source_order_line_id, current_order_line_id, source_component_id),
+  foreign key (venue_id, tenant_id) references public.venues(id, tenant_id) on delete restrict
 );
 
 alter table public.production_batches add column pass_id uuid;
@@ -92,6 +98,24 @@ select venue.tenant_id, venue.id, 'Directo', 0
 from public.venues venue
 on conflict (venue_id, name) do nothing;
 
+create function public.production_seed_default_pass()
+returns trigger
+language plpgsql
+security definer
+set search_path = ''
+as $$
+begin
+  insert into public.production_passes (tenant_id, venue_id, name, sort_order)
+  values (new.tenant_id, new.id, 'Directo', 0)
+  on conflict (venue_id, name) do nothing;
+  return new;
+end;
+$$;
+
+create trigger production_seed_default_pass_after_venue_insert
+  after insert on public.venues
+  for each row execute function public.production_seed_default_pass();
+
 create or replace function public.production_resolve_pass(
   p_tenant_id uuid, p_venue_id uuid, p_product_id uuid, p_category_id uuid
 )
@@ -105,8 +129,8 @@ as $$
     and pass.venue_id = p_venue_id
     and pass.is_active
     and pass.id = coalesce(
-      (select route.pass_id from public.production_product_pass_routes route where route.venue_id = p_venue_id and route.product_id = p_product_id),
-      (select route.pass_id from public.production_category_pass_routes route where route.venue_id = p_venue_id and route.category_id = p_category_id),
+      (select route.pass_id from public.production_product_pass_routes route join public.production_passes routed on routed.id = route.pass_id and routed.tenant_id = p_tenant_id and routed.venue_id = p_venue_id and routed.is_active where route.tenant_id = p_tenant_id and route.venue_id = p_venue_id and route.product_id = p_product_id),
+      (select route.pass_id from public.production_category_pass_routes route join public.production_passes routed on routed.id = route.pass_id and routed.tenant_id = p_tenant_id and routed.venue_id = p_venue_id and routed.is_active where route.tenant_id = p_tenant_id and route.venue_id = p_venue_id and route.category_id = p_category_id),
       (select fallback.id from public.production_passes fallback where fallback.tenant_id = p_tenant_id and fallback.venue_id = p_venue_id and fallback.is_active order by fallback.sort_order, fallback.created_at, fallback.id limit 1)
     )
   limit 1;
@@ -331,10 +355,10 @@ create policy production_category_pass_routes_admin_all on public.production_cat
 create policy production_product_pass_routes_admin_all on public.production_product_pass_routes for all to authenticated using (public.user_is_tenant_admin(tenant_id)) with check (public.user_is_tenant_admin(tenant_id));
 create policy order_line_production_passes_read on public.order_line_production_passes for select to authenticated using (public.user_has_venue_access(tenant_id, venue_id));
 create policy production_component_allocations_read on public.production_component_allocations for select to authenticated using (public.user_has_venue_access(tenant_id, venue_id));
-revoke all on table public.production_passes, public.production_category_pass_routes, public.production_product_pass_routes, public.order_line_production_passes, public.production_component_allocations from public, anon;
 grant select, insert, update, delete on public.production_passes, public.production_category_pass_routes, public.production_product_pass_routes to authenticated;
 grant select on public.order_line_production_passes, public.production_component_allocations to authenticated;
 grant all on table public.production_passes, public.production_category_pass_routes, public.production_product_pass_routes, public.order_line_production_passes, public.production_component_allocations to service_role;
 revoke all on function public.set_order_line_production_pass(uuid, text, uuid) from public, anon;
+revoke all on function public.production_seed_default_pass() from public, anon, authenticated;
 grant execute on function public.set_order_line_production_pass(uuid, text, uuid), public.send_production_batch(uuid, integer, uuid, text, jsonb), public.get_order_production_state(uuid) to authenticated;
 notify pgrst, 'reload schema';

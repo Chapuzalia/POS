@@ -340,7 +340,7 @@ Deno.serve(async (request) => {
           p_slug: tenantSlug,
           p_max_venues: maxVenues,
           p_max_devices: maxDevices,
-          p_feature_keys: enabledFeatures,
+          p_feature_keys: body.featureCatalogVersion === 2 ? [...enabledFeatures, '__addon_catalog_v2'] : enabledFeatures,
         })
         .maybeSingle()
       if (updateError) {

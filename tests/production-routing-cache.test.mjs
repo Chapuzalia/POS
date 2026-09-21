@@ -42,11 +42,10 @@ test('send flushes and reconciles authoritative pass assignments before sending'
   assert.match(controller, /selection: reconciledPassSelection/)
 })
 
-test('catalog RPC scopes routing to tenant and venue and limits execution to authenticated users', () => {
+test('catalog RPC scopes routing to tenant and venue while preserving existing execute grants', () => {
   assert.match(migration, /route\.tenant_id = v_tenant_id and route\.venue_id = p_venue_id/g)
   assert.match(migration, /pass\.tenant_id = v_tenant_id and pass\.venue_id = p_venue_id/g)
-  assert.match(migration, /revoke execute on function public\.get_catalog\(uuid, text\) from public, anon/)
-  assert.match(migration, /grant execute on function public\.get_catalog\(uuid, text\) to authenticated/)
+  assert.doesNotMatch(migration, /revoke\s+execute\s+on\s+function\s+public\.get_catalog/i)
 })
 
 test('routing changes refresh the existing catalog cache and production component allocations refresh order state', () => {

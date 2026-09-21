@@ -3,8 +3,8 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
-const migration = read('../supabase/migrations/20260921120000_add_production_passes.sql')
-const uuidMinFix = read('../supabase/migrations/20260921120100_fix_production_batch_uuid_min.sql')
+const migration = read('../supabase/migrations/20260921120100_add_production_passes.sql')
+const uuidMinFix = read('../supabase/migrations/20260921120300_fix_production_batch_uuid_min.sql')
 const types = read('../src/features/production/types.ts')
 const panel = read('../src/features/tables/components/RestaurantOrderPanel.tsx')
 const controls = read('../src/features/production/components/ProductionControls.tsx')
@@ -17,6 +17,8 @@ test('passes persist venue configuration and product-over-category fallback', ()
   assert.match(migration, /production_category_pass_routes/)
   assert.match(migration, /coalesce\([\s\S]*route\.pass_id[\s\S]*route\.pass_id[\s\S]*fallback\.id/)
   assert.match(migration, /'Directo'/)
+  assert.match(migration, /create trigger production_seed_default_pass_after_venue_insert/)
+  assert.match(migration, /routed\.is_active where route\.tenant_id = p_tenant_id/)
 })
 
 test('menu components have independent pass assignments and component selections', () => {

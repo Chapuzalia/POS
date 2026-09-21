@@ -18,6 +18,19 @@ test('tenant addons normalize legacy assignments and resolve commercial capabili
   assert.equal(hasTenantVenueCapability({ features: ['restaurant'], venue: { addonActivations: { restaurant: true }, inventoryEnabled: true, tablesEnabled: true, productionEnabled: false } }, 'restaurant'), true)
 })
 
+test('commercial addon migration keeps legacy clients and assignments usable', () => {
+  const migration = read('../supabase/migrations/20260921120400_reframe_commercial_addons.sql')
+  assert.doesNotMatch(migration, /set is_active = false, enabled_by_default = false/i)
+  assert.match(migration, /when 'discounts' then 'promotions'/)
+  assert.match(migration, /when 'inventory_recipes' then 'costing'/)
+  assert.match(migration, /when 'supplier_documents' then 'purchases'/)
+  assert.match(migration, /when 'supplier_document_scanning' then 'document_ai'/)
+  assert.match(migration, /had_multi_device/)
+  assert.match(migration, /legacy_request boolean := not \('__addon_catalog_v2' = any/)
+  assert.match(read('../supabase/functions/manage-pos-users/index.ts'), /body\.featureCatalogVersion === 2 \? \[\.\.\.enabledFeatures, '__addon_catalog_v2'\]/)
+  assert.match(read('../src/services/platformService.ts'), /featureCatalogVersion: 2/)
+})
+
 test('tenant sessions load feature assignments from the database', () => {
   const service = read('../src/services/posService.ts')
   const migration = read('../supabase/migrations/20260811230000_expose_tenant_features.sql')

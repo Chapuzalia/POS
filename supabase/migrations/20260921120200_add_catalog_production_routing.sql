@@ -36,6 +36,4 @@ begin
 end;
 $$;
 
-revoke execute on function public.get_catalog(uuid, text) from public, anon;
-grant execute on function public.get_catalog(uuid, text) to authenticated;
 notify pgrst, 'reload schema';

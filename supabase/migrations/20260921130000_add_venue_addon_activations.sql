@@ -1,15 +1,18 @@
 -- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: All four RPCs are newly created; only their default PUBLIC/anon execute access is removed, with authenticated and service_role execute granted below.
 set lock_timeout = '5s';
 set statement_timeout = '5min';
 
 create table if not exists public.venue_addon_assignments (
   tenant_id uuid not null references public.tenants(id) on delete cascade,
-  venue_id uuid not null references public.venues(id) on delete cascade,
+  venue_id uuid not null,
   addon_key text not null references public.platform_features(key) on delete restrict,
   is_enabled boolean not null default true,
   created_at timestamptz not null default now(),
   updated_at timestamptz not null default now(),
   primary key (venue_id, addon_key),
+  foreign key (venue_id, tenant_id) references public.venues(id, tenant_id) on delete cascade,
   constraint venue_addon_assignments_key_check check (addon_key in ('analytics_advanced', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'document_ai', 'promotions', 'cashlogy'))
 );
 
@@ -17,7 +20,6 @@ create index if not exists venue_addon_assignments_tenant_idx
   on public.venue_addon_assignments(tenant_id, venue_id);
 
 alter table public.venue_addon_assignments enable row level security;
-revoke all on table public.venue_addon_assignments from anon, authenticated;
 
 create or replace function public.venue_addon_enabled(p_tenant_id uuid, p_venue_id uuid, p_addon_key text)
 returns boolean

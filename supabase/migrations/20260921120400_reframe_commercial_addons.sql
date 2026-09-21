@@ -1,4 +1,6 @@
 -- migration-safety: expand
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE, REVOKE
+-- migration-safety-reason: Existing RPC signatures and grants remain; their legacy feature entitlements are mirrored to the new addon keys, while the new tenant_addon_enabled helper only removes default PUBLIC/anon execute access and grants authenticated execute.
 set lock_timeout = '5s';
 set statement_timeout = '5min';
 
@@ -42,9 +44,8 @@ cross join lateral (
 ) dependency
 on conflict (tenant_id, feature_key) do nothing;
 
-update public.platform_features
-set is_active = false, enabled_by_default = false, updated_at = now()
-where key in ('discounts', 'multi_device', 'inventory_recipes', 'supplier_documents', 'supplier_document_scanning');
+-- Keep legacy keys visible and effective while older clients are still deployed.
+-- The new client presents only the new addon catalog.
 
 create or replace function public.tenant_addon_enabled(p_tenant_id uuid, p_addon_key text)
 returns boolean
@@ -105,10 +106,18 @@ as $$
 declare
   current_devices integer;
   current_venues integer;
+  had_multi_device boolean;
+  legacy_request boolean := not ('__addon_catalog_v2' = any(coalesce(p_feature_keys, array[]::text[])));
   requested text[] := array(
-    select distinct feature_key
-    from unnest(coalesce(p_feature_keys, array[]::text[])) requested(feature_key)
-    where feature_key in ('analytics_advanced', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'document_ai', 'promotions', 'cashlogy')
+    select distinct case feature_key
+      when 'discounts' then 'promotions'
+      when 'inventory_recipes' then 'costing'
+      when 'supplier_documents' then 'purchases'
+      when 'supplier_document_scanning' then 'document_ai'
+      else feature_key
+    end
+    from unnest(coalesce(p_feature_keys, array[]::text[])) input(feature_key)
+    where feature_key not in ('multi_device', '__addon_catalog_v2')
   );
 begin
   perform 1 from public.tenants where tenants.id = p_tenant_id for update;
@@ -119,7 +128,10 @@ begin
   if p_max_venues < current_venues or p_max_devices < current_devices then
     raise exception 'Los límites no pueden ser inferiores al uso actual del negocio' using errcode = 'P0001';
   end if;
-  if cardinality(requested) <> cardinality(array(select distinct feature_key from unnest(coalesce(p_feature_keys, array[]::text[])) feature_key)) then
+  if exists (
+    select 1 from unnest(coalesce(p_feature_keys, array[]::text[])) input(feature_key)
+    where feature_key is null or feature_key not in ('analytics_advanced', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'document_ai', 'promotions', 'cashlogy', 'discounts', 'inventory_recipes', 'supplier_documents', 'supplier_document_scanning', 'multi_device', '__addon_catalog_v2')
+  ) then
     raise exception 'La selección contiene addons no válidos' using errcode = '22023';
   end if;
 
@@ -128,16 +140,44 @@ begin
   if 'document_ai' = any(requested) then requested := array_append(requested, 'purchases'); requested := array_append(requested, 'inventory'); end if;
   requested := array(select distinct feature_key from unnest(requested) feature_key);
 
+  -- A legacy client cannot display the new-only addons, so retain those entitlements.
+  if legacy_request then
+    requested := array(
+      select distinct feature_key from unnest(requested) feature_key
+      union
+      select assignment.feature_key from public.tenant_feature_assignments assignment
+      where assignment.tenant_id = p_tenant_id and assignment.feature_key in ('analytics_advanced', 'cashlogy')
+    );
+  end if;
+
   update public.tenants set name = p_name, slug = p_slug, max_venues = p_max_venues, max_devices = p_max_devices, updated_at = now()
   where tenants.id = p_tenant_id;
+  select exists (
+    select 1 from public.tenant_feature_assignments assignment
+    where assignment.tenant_id = p_tenant_id and assignment.feature_key = 'multi_device'
+  ) into had_multi_device;
   delete from public.tenant_feature_assignments where tenant_feature_assignments.tenant_id = p_tenant_id;
   insert into public.tenant_feature_assignments (tenant_id, feature_key)
-  select p_tenant_id, feature_key from unnest(requested) feature_key;
+  select p_tenant_id, feature_key from (
+    select feature_key from unnest(requested) feature_key
+    union
+    select case feature_key
+      when 'promotions' then 'discounts'
+      when 'costing' then 'inventory_recipes'
+      when 'purchases' then 'supplier_documents'
+      when 'document_ai' then 'supplier_document_scanning'
+    end from unnest(requested) feature_key
+    where feature_key in ('promotions', 'costing', 'purchases', 'document_ai')
+    union
+    select 'multi_device' where
+      (legacy_request and 'multi_device' = any(coalesce(p_feature_keys, array[]::text[])))
+      or (not legacy_request and had_multi_device)
+  ) assignments;
 
   return query select tenants.id, tenants.name, tenants.slug from public.tenants where tenants.id = p_tenant_id;
 end;
 $$;
 
-revoke all on function public.tenant_addon_enabled(uuid, text) from public, anon, authenticated;
+revoke all on function public.tenant_addon_enabled(uuid, text) from public, anon;
 grant execute on function public.tenant_addon_enabled(uuid, text) to authenticated, service_role;
 comment on function public.tenant_addon_enabled(uuid, text) is 'Checks an active commercial addon assignment; capabilities are resolved by their prerequisite addons.';
