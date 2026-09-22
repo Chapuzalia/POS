@@ -5,6 +5,8 @@ import test from 'node:test'
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const migration = read('../supabase/migrations/20260825120000_add_production_domain.sql')
 const groupedDispatchMigration = read('../supabase/migrations/20260902151000_group_production_dispatches_by_printer.sql')
+const decimalQuantityMigration = read('../supabase/migrations/20260916130100_decimal_order_production_quantities.sql')
+const decimalPrintContextMigration = read('../supabase/migrations/20260922120000_fix_decimal_production_print_context.sql')
 
 test('production is opt-in at tenant and venue level', () => {
   assert.match(migration, /'production'.*false, 150/s)
@@ -39,6 +41,16 @@ test('production snapshots, readiness, split lineage and durable dispatches are 
   assert.match(migration, /create table public\.production_printer_dispatches/)
   assert.match(migration, /status in \('pending', 'claimed', 'printed', 'failed', 'unknown'\)/)
   assert.doesNotMatch(read('../src/features/production/service.ts'), /mark_order_line_units_served/)
+})
+
+test('decimal production quantities reach the print context without integer overload resolution failures', () => {
+  assert.match(decimalQuantityMigration, /production_items[\s\S]*numeric\(18,3\)/)
+  assert.match(decimalQuantityMigration, /send_production_batch[\s\S]*selected_quantity numeric\(18,3\)/)
+  assert.match(groupedDispatchMigration, /production_item_print_context\(item_row\.snapshot, item_row\.quantity\)/)
+  assert.match(groupedDispatchMigration, /create or replace function public\.production_item_print_context\(p_snapshot jsonb, p_quantity integer\)/)
+  assert.match(decimalPrintContextMigration, /create function public\.production_item_print_context\(p_snapshot jsonb, p_quantity numeric\)/)
+  assert.match(decimalPrintContextMigration, /'quantity', p_quantity/)
+  assert.match(decimalPrintContextMigration, /create function public\.production_item_lines\(p_snapshot jsonb, p_quantity numeric\)/)
 })
 
 test('physical dispatches group batch destinations by printer without changing logical routing', () => {
