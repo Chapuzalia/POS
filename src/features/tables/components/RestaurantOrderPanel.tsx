@@ -537,6 +537,7 @@ export function RestaurantOrderPanel(props: Props) {
       NonNullable<OrderProductionState["entries"]>
     >();
     for (const entry of productionEntries) {
+      if (!entry.hasProductionDestination) continue;
       const current = grouped.get(entry.passId) ?? [];
       current.push(entry);
       grouped.set(entry.passId, current);

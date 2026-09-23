@@ -117,6 +117,8 @@ export function mapCatalogPayload(
       defaultPass: productionRouting.defaultPass ?? null,
       productRoutes: productionRouting.productRoutes ?? [],
       categoryRoutes: productionRouting.categoryRoutes ?? [],
+      productDestinationRoutes: productionRouting.productDestinationRoutes ?? [],
+      categoryDestinationRoutes: productionRouting.categoryDestinationRoutes ?? [],
       loadedAt: productionRouting.loadedAt ?? new Date().toISOString(),
     } : undefined,
     loadedAt: new Date().toISOString(),

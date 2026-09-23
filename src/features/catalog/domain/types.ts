@@ -194,6 +194,8 @@ export type ProductionRouting = {
   defaultPass: ProductionRoutingPass | null
   productRoutes: Array<{ productId: string; passId: string }>
   categoryRoutes: Array<{ categoryId: string; passId: string }>
+  productDestinationRoutes: Array<{ productId: string; destinationId: string }>
+  categoryDestinationRoutes: Array<{ categoryId: string; destinationId: string }>
   loadedAt: string
 }
 

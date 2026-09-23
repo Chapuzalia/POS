@@ -16,9 +16,17 @@ export function resolveProductionPass(routing: ProductionRouting | undefined, pr
   return routing.passes.find((pass) => pass.id === passId) ?? routing.defaultPass ?? routing.passes[0] ?? null
 }
 
+function hasProductionDestination(routing: ProductionRouting, productId: string | null, categoryId: string | null) {
+  if (!productId) return false
+  return Boolean(
+    routing.productDestinationRoutes.some((route) => route.productId === productId) ||
+    (categoryId && routing.categoryDestinationRoutes.some((route) => route.categoryId === categoryId)),
+  )
+}
+
 function makeEntry(line: RestaurantOrderLine, componentId: string | null, productId: string | null, productName: string, quantity: number, categoryId: string | null, routing: ProductionRouting | undefined): ProductionEntry | null {
-  const pass = resolveProductionPass(routing, productId, categoryId)
-  if (!pass) return null
+   const pass = resolveProductionPass(routing, productId, categoryId)
+   if (!pass || !routing) return null
   return {
     lineId: line.id,
     componentId,
@@ -31,7 +39,7 @@ function makeEntry(line: RestaurantOrderLine, componentId: string | null, produc
     passId: pass.id,
     passName: pass.name,
     passSortOrder: pass.sortOrder,
-    hasProductionDestination: true,
+    hasProductionDestination: hasProductionDestination(routing, productId, categoryId),
     optimistic: true,
   }
 }

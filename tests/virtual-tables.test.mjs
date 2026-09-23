@@ -41,6 +41,11 @@ test('el mapa permite crear la mesa en Virtual o en una zona existente también 
   assert.match(mobileChrome, /className="flex items-center justify-end gap-2"[\s\S]*onClick=\{onCreateVirtual\}[\s\S]*onClick=\{onEditToggle\}/)
 })
 
+test('abrir una mesa no abre el teclado automáticamente en móvil', () => {
+  assert.match(mapView, /autoFocus=\{!mobileLayout\}/)
+  assert.match(mapView, /max-h-\[calc\(100dvh-24px\)\] overflow-y-auto rounded-t-\[20px\]/)
+})
+
 test('el editor permite eliminar mesas temporales del turno y cancela solo comandas sin cobros', () => {
   assert.match(mapView, /if \(table\?\.isVirtual\)[\s\S]*setSelectedTableId\(table\.id\)/)
   assert.match(mapView, /Eliminar mesa temporal/)

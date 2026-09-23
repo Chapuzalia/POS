@@ -92,6 +92,11 @@ export async function saveProductionPass(context: TenantContext, venueId: string
   if (error) throw error
 }
 
+export async function setDefaultProductionPass(venueId: string, passId: string) {
+  const { error } = await requireSupabase().rpc('set_default_production_pass', { p_venue_id: venueId, p_pass_id: passId })
+  if (error) throw error
+}
+
 export async function saveProductionPassRoute(context: TenantContext, venueId: string, kind: 'category' | 'product', sourceId: string, passId: string | null) {
   const table = kind === 'category' ? 'production_category_pass_routes' : 'production_product_pass_routes'
   const sourceColumn = kind === 'category' ? 'category_id' : 'product_id'
