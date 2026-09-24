@@ -1,4 +1,5 @@
 import type {
+  CommercialFiscalDocument,
   FiscalInvoiceRow,
   FiscalRecipient,
   FiscalStatus,
@@ -96,6 +97,47 @@ function rectificativeCode(invoice: FiscalInvoiceRow) {
   const value = String(invoice.document_data.codigo ?? '')
   if (!RECTIFICATIVE_CODES.has(value)) throw new Error('La factura rectificativa necesita un codigo R1, R2, R3, R4 o R5')
   return value as 'R1' | 'R2' | 'R3' | 'R4' | 'R5'
+}
+
+export function mapCommercialFiscalDocument(invoice: FiscalInvoiceRow, ticket: FiscalTicket, fiscalEntityRef = invoice.tenant_id): CommercialFiscalDocument {
+  return {
+    externalId: invoice.id,
+    idempotencyKey: invoice.idempotency_key,
+    fiscalEntityRef,
+    operationTimestamp: ticket.local_created_at,
+    kind: invoice.invoice_type === 'normal' ? 'full' : invoice.invoice_type,
+    expectedTotalCents: ticket.total_cents,
+    lines: ticket.ticket_lines.map((line) => {
+      if (line.taxable_base_cents === null || line.tax_amount_cents === null || line.tax_rate === null) {
+        throw new Error(`La linea ${line.id} no tiene un snapshot fiscal completo`)
+      }
+      if (line.taxable_base_cents + line.tax_amount_cents !== line.net_total_cents) {
+        throw new Error(`El snapshot fiscal de la linea ${line.id} no cuadra con su total neto`)
+      }
+      return {
+        description: [line.product_name, line.variant_name].filter(Boolean).join(' '),
+        quantity: line.quantity,
+        unitPriceCents: line.quantity > 0 ? Math.round(line.net_total_cents / line.quantity) : 0,
+        lineTotalCents: line.net_total_cents,
+        taxCode: String(line.tax_rate),
+        taxSnapshot: { taxableBaseCents: line.taxable_base_cents, taxCents: line.tax_amount_cents },
+      }
+    }),
+    ...(invoice.document_data.recipient && typeof invoice.document_data.recipient === 'object'
+      ? (() => {
+          const recipient = invoice.document_data.recipient as Record<string, unknown>
+          return {
+            customer: {
+              name: String(recipient.nombre ?? recipient.name ?? ''),
+              ...(recipient.nif || recipient.taxId ? { taxId: String(recipient.nif ?? recipient.taxId) } : {}),
+              ...(recipient.direccion || recipient.address ? { address: String(recipient.direccion ?? recipient.address) } : {}),
+              ...(recipient.cp || recipient.postalCode ? { postalCode: String(recipient.cp ?? recipient.postalCode) } : {}),
+              ...(recipient.id_otro && typeof recipient.id_otro === 'object' ? { countryCode: String((recipient.id_otro as Record<string, unknown>).codigo_pais ?? '') } : {}),
+            },
+          }
+        })()
+      : {}),
+  }
 }
 
 export function mapVerifactuInvoice(invoice: FiscalInvoiceRow, ticket: FiscalTicket): VerifactuCreatePayload {

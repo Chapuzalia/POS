@@ -3,13 +3,15 @@ import { decryptSecret, encryptSecret, generateWebhookSecret } from '../_shared/
 import { ProviderHttpError, requestVerifactiJson } from '../_shared/verifacti/client.ts'
 import {
   mapFiscalCancellation,
+  mapCommercialFiscalDocument,
   mapProviderStatus,
   mapTicketBaiInvoice,
   mapVerifactuInvoice,
   stableFiscalIdempotencyKey,
 } from '../_shared/verifacti/mapping.ts'
-import { createFiscalProvider } from '../_shared/verifacti/providers.ts'
-import type { FiscalInvoiceRow, FiscalTicket, ProviderStatusResponse } from '../_shared/verifacti/types.ts'
+import { createFiscalProvider, OdooBridgeError, OdooFiscalProvider } from '../_shared/verifacti/providers.ts'
+import { FiscalTotalDiscrepancyError } from '../_shared/verifacti/types.ts'
+import type { FiscalInvoiceRow, FiscalTicket, NormalizedFiscalResult, ProviderStatusResponse } from '../_shared/verifacti/types.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -73,10 +75,13 @@ function fiscalReceipt(invoice: Record<string, unknown>) {
   return {
     invoiceId: String(invoice.id),
     provider: invoice.provider,
+    integrationProvider: invoice.integration_provider ?? 'verifacti',
     status: invoice.status,
     uuid: invoice.external_uuid ?? null,
     externalCode: invoice.external_code ?? null,
+    fiscalNumber: invoice.fiscal_number ?? invoice.external_code ?? null,
     qrBase64: invoice.qr_base64 ?? null,
+    qrPayload: invoice.qr_payload ?? null,
     verificationUrl: invoice.verification_url ?? null,
   }
 }
@@ -95,6 +100,50 @@ async function loadSettings(admin: ReturnType<typeof createClient>, tenantId: st
   const { data, error } = await admin.from('fiscal_integration_settings').select('*').eq('tenant_id', tenantId).maybeSingle()
   if (error) throw error
   return data as Record<string, unknown> | null
+}
+
+async function loadFiscalContext(admin: ReturnType<typeof createClient>, tenantId: string, venueId: string, ticketId?: string) {
+  const { data: assignment, error: assignmentError } = await admin.from('fiscal_entity_venues')
+    .select('fiscal_entity_id').eq('tenant_id', tenantId).eq('venue_id', venueId).maybeSingle()
+  if (assignmentError) throw assignmentError
+  if (!assignment) return null
+  const [{ data: entity, error: entityError }, documentResult] = await Promise.all([
+    admin.from('fiscal_entities').select('*').eq('tenant_id', tenantId).eq('id', assignment.fiscal_entity_id).maybeSingle(),
+    ticketId
+      ? admin.from('fiscal_documents').select('*').eq('tenant_id', tenantId).eq('ticket_id', ticketId).maybeSingle()
+      : Promise.resolve({ data: null, error: null }),
+  ])
+  if (entityError || documentResult.error) throw entityError ?? documentResult.error
+  return entity ? { entity: entity as Record<string, unknown>, document: documentResult.data as Record<string, unknown> | null } : null
+}
+
+function publicFiscalEntity(row: Record<string, unknown> | null) {
+  if (!row) return null
+  return {
+    enabled: row.enabled === true,
+    integrationProvider: row.integration_provider,
+    provider: row.tax_system,
+    environment: row.environment,
+    legalName: row.legal_name,
+    taxId: row.tax_id,
+    odooBridgeUrl: row.integration_provider === 'odoo' ? row.bridge_url : null,
+    odooEntityReference: row.integration_provider === 'odoo' ? row.provider_entity_ref : null,
+    hasBridgeSecret: row.integration_provider === 'odoo' && typeof row.bridge_secret_ciphertext === 'string',
+    automaticSubmission: row.automatic_submission !== false,
+  }
+}
+
+function normalizedFiscalReceipt(invoice: Record<string, unknown>, result: NormalizedFiscalResult) {
+  return fiscalReceipt({
+    ...invoice,
+    status: result.status === 'generated' ? 'pending' : result.status,
+    integration_provider: 'odoo',
+    external_uuid: result.documentId,
+    external_code: result.fiscalNumber ?? null,
+    fiscal_number: result.fiscalNumber ?? null,
+    qr_payload: result.qrPayload ?? null,
+    verification_url: result.qrUrl ?? null,
+  })
 }
 
 async function loadInvoiceBundle(admin: ReturnType<typeof createClient>, tenantId: string, ticketId: string) {
@@ -171,12 +220,53 @@ async function issueInvoice(
   automatic: boolean,
 ) {
   const settings = await loadSettings(admin, tenantId)
+  const { invoice, ticket } = await loadInvoiceBundle(admin, tenantId, ticketId)
+  if (invoice.external_uuid) return { fiscal: fiscalReceipt(invoice as unknown as Record<string, unknown>), skipped: true, reason: 'already_submitted' }
+  const context = await loadFiscalContext(admin, tenantId, ticket.venue_id, ticketId)
+  if (context?.entity.integration_provider === 'odoo') {
+    if (context.entity.enabled !== true) return { skipped: true, reason: 'integration_disabled' }
+    if (automatic && context.entity.automatic_submission === false) return { skipped: true, reason: 'automatic_submission_disabled' }
+    if (!context.document) throw new Error('Documento fiscal no encontrado')
+    const documentId = String(context.document.id)
+    const workerId = `edge:${crypto.randomUUID()}`
+    const { data: claimed, error: claimError } = await admin.rpc('fiscal_outbox_claim_document', {
+      p_document_id: documentId, p_worker_id: workerId, p_lease_seconds: 60,
+    })
+    if (claimError) throw claimError
+    if (!claimed) return { fiscal: fiscalReceipt(invoice as unknown as Record<string, unknown>), skipped: true, reason: 'already_processing' }
+    try {
+      const bridgeUrl = String(context.entity.bridge_url ?? '')
+      const entityRef = String(context.entity.provider_entity_ref ?? '')
+      const secretCiphertext = context.entity.bridge_secret_ciphertext
+      if (!bridgeUrl || !entityRef || typeof secretCiphertext !== 'string') throw new Error('Configura el puente Odoo antes de emitir facturas')
+      const provider = new OdooFiscalProvider({ bridgeUrl, fiscalEntityRef: entityRef, bridgeSecret: await decryptSecret(secretCiphertext, requireEncryptionKey(encryptionKey)) })
+      const commercial = mapCommercialFiscalDocument(invoice, ticket, entityRef)
+       const result = await provider.issue(commercial, { idempotencyKey: String(context.document.idempotency_key) })
+       const { error: completeError } = await admin.rpc('fiscal_complete_operation', {
+         p_outbox_id: claimed.id, p_worker_id: workerId, p_status: result.status,
+         p_provider_external_id: result.documentId, p_fiscal_number: result.fiscalNumber ?? null,
+         p_fiscal_type: result.fiscalType ?? null, p_fiscal_date: result.fiscalDate ?? null,
+         p_returned_total_cents: result.finalTotalCents ?? null, p_provider_qr: result.qrPayload === false ? null : result.qrPayload ?? null,
+         p_provider_url: result.qrUrl === false ? null : result.qrUrl ?? null, p_response: result,
+       })
+
+      if (completeError) throw completeError
+      return { fiscal: normalizedFiscalReceipt(invoice as unknown as Record<string, unknown>, result), skipped: false }
+    } catch (error) {
+      const retryable = error instanceof OdooBridgeError && error.retryable
+      const code = error instanceof FiscalTotalDiscrepancyError ? 'total_discrepancy' : error instanceof OdooBridgeError ? `bridge_${error.status ?? 'network'}` : 'odoo_validation'
+      const safeMessage = error instanceof FiscalTotalDiscrepancyError ? 'Los totales devueltos por Odoo no coinciden con la venta.' : retryable ? 'Odoo no está disponible temporalmente.' : 'No se pudo generar el documento fiscal en Odoo.'
+      await admin.rpc('fiscal_fail_operation', {
+        p_outbox_id: claimed.id, p_worker_id: workerId, p_error_code: code, p_safe_error: safeMessage,
+        p_retry_at: retryable ? new Date(Date.now() + 5 * 60 * 1000).toISOString() : null,
+        p_incident_code: code,
+      })
+      throw new Error(safeMessage)
+    }
+  }
   if (!settings?.enabled) return { skipped: true, reason: 'integration_disabled' }
   if (automatic && settings.automatic_submission !== true) return { skipped: true, reason: 'automatic_submission_disabled' }
   if (typeof settings.api_key_ciphertext !== 'string') throw new Error('Configura una API key antes de emitir facturas')
-
-  const { invoice, ticket } = await loadInvoiceBundle(admin, tenantId, ticketId)
-  if (invoice.external_uuid) return { fiscal: fiscalReceipt(invoice as unknown as Record<string, unknown>), skipped: true, reason: 'already_submitted' }
   const apiKey = await decryptSecret(settings.api_key_ciphertext, requireEncryptionKey(encryptionKey))
   const provider = createFiscalProvider(invoice.provider, { apiKey })
 
@@ -251,6 +341,51 @@ async function queueInvoiceCancellation(
   }
   if (invoice.pending_operation === 'cancel') {
     return { status: 'pending' as const, response: (invoice.response_payload ?? {}) as Record<string, unknown> }
+  }
+  const context = await loadFiscalContext(admin, invoice.tenant_id, invoice.venue_id, invoice.ticket_id)
+  if (context?.entity.integration_provider === 'odoo' && context.document) {
+    const documentId = String(context.document.id)
+    const externalId = String(context.document.provider_external_id ?? invoice.external_uuid ?? '')
+    if (!externalId) throw new Error('El documento de Odoo aún no tiene identificador fiscal')
+    const key = `${invoice.tenant_id}:${documentId}:cancel`
+    const { error: enqueueError } = await admin.rpc('fiscal_outbox_enqueue', {
+      p_document_id: documentId, p_operation: 'cancel', p_idempotency_key: key,
+      p_tenant_id: invoice.tenant_id, p_venue_id: invoice.venue_id, p_entity_id: context.entity.id,
+    })
+    if (enqueueError) throw enqueueError
+    const workerId = `edge:${crypto.randomUUID()}`
+    const { data: claimed, error: claimError } = await admin.rpc('fiscal_outbox_claim_document', {
+      p_document_id: documentId, p_worker_id: workerId, p_lease_seconds: 60,
+    })
+    if (claimError) throw claimError
+    if (!claimed) return { status: 'pending' as const, response: {} }
+    try {
+      const secretCiphertext = context.entity.bridge_secret_ciphertext
+      if (typeof secretCiphertext !== 'string') throw new Error('Integración Odoo incompleta')
+      const provider = new OdooFiscalProvider({
+        bridgeUrl: String(context.entity.bridge_url), fiscalEntityRef: String(context.entity.provider_entity_ref),
+        bridgeSecret: await decryptSecret(secretCiphertext, requireEncryptionKey(encryptionKey)),
+      })
+       const result = await provider.cancel(externalId, { idempotencyKey: key })
+       const { error: completeError } = await admin.rpc('fiscal_complete_operation', {
+         p_outbox_id: claimed.id, p_worker_id: workerId, p_status: result.status,
+         p_provider_external_id: result.documentId, p_fiscal_number: result.fiscalNumber ?? null,
+         p_fiscal_type: result.fiscalType ?? null, p_fiscal_date: result.fiscalDate ?? null,
+         p_returned_total_cents: result.finalTotalCents ?? null, p_provider_qr: result.qrPayload === false ? null : result.qrPayload ?? null,
+         p_provider_url: result.qrUrl === false ? null : result.qrUrl ?? null, p_response: result,
+       })
+
+      if (completeError) throw completeError
+      return { status: result.status === 'generated' ? 'pending' as const : result.status, response: result }
+    } catch (error) {
+      const retryable = error instanceof OdooBridgeError && error.retryable
+      const safeMessage = retryable ? 'Odoo no está disponible temporalmente.' : 'No se pudo solicitar la anulación en Odoo.'
+      await admin.rpc('fiscal_fail_operation', {
+        p_outbox_id: claimed.id, p_worker_id: workerId, p_error_code: 'odoo_cancel_error', p_safe_error: safeMessage,
+        p_retry_at: retryable ? new Date(Date.now() + 5 * 60 * 1000).toISOString() : null, p_incident_code: 'odoo_cancel_error',
+      })
+      throw new Error(safeMessage)
+    }
   }
   if (!settings || typeof settings.api_key_ciphertext !== 'string') {
     throw new Error('Integracion sin API key')
@@ -337,6 +472,73 @@ Deno.serve(async (request) => {
     if (action === 'get-config') {
       if (!isAdmin) return json({ error: 'No tienes permiso para consultar la integracion' }, 403)
       return json(publicSettings(await loadSettings(admin, tenantId), url))
+    }
+
+    if (action === 'get-fiscal-entity-config') {
+      if (!isAdmin) return json({ error: 'No tienes permiso para consultar la configuración fiscal' }, 403)
+      const venueId = String(body.venueId ?? '')
+      if (!venueId) return json({ error: 'venueId es obligatorio' }, 400)
+      const context = await loadFiscalContext(admin, tenantId, venueId)
+      return json(publicFiscalEntity(context?.entity ?? null) ?? { integrationProvider: 'verifacti' })
+    }
+
+    if (action === 'save-fiscal-entity-config') {
+      if (!isOwner) return json({ error: 'Solo el propietario puede configurar la fiscalidad' }, 403)
+      const venueId = String(body.venueId ?? '')
+      const integrationProvider = body.provider === 'odoo' ? 'odoo' : 'verifacti'
+      const taxSystem = body.taxSystem === 'ticketbai' ? 'ticketbai' : 'verifactu'
+      const legalName = String(body.legalName ?? '').trim()
+      const taxId = String(body.taxId ?? '').trim().toUpperCase()
+      const environment = body.environment === 'production' ? 'production' : 'test'
+      if (!venueId || !legalName || !taxId) return json({ error: 'Local, razón social y NIF son obligatorios' }, 400)
+      if (integrationProvider === 'odoo' && taxSystem !== 'verifactu') return json({ error: 'Odoo solo está habilitado para VeriFactu' }, 400)
+      const { data: accessibleVenue } = await authClient.from('venues').select('id').eq('tenant_id', tenantId).eq('id', venueId).maybeSingle()
+      if (!accessibleVenue) return json({ error: 'Local no encontrado o sin acceso' }, 404)
+      const current = await loadFiscalContext(admin, tenantId, venueId)
+      const bridgeSecret = typeof body.bridgeSecret === 'string' && body.bridgeSecret.trim() ? body.bridgeSecret.trim() : null
+      const encryptedBridgeSecret = bridgeSecret ? await encryptSecret(bridgeSecret, requireEncryptionKey(env.encryptionKey)) : current?.entity.bridge_secret_ciphertext ?? null
+      const entityValues = {
+        tenant_id: tenantId, display_name: legalName, legal_name: legalName, tax_id: taxId,
+        integration_provider: integrationProvider, tax_system: taxSystem, environment,
+        enabled: body.enabled === true, automatic_submission: body.automaticSubmission !== false,
+        provider_entity_ref: integrationProvider === 'odoo' ? String(body.odooEntityReference ?? '').trim() || null : null,
+        bridge_url: integrationProvider === 'odoo' ? String(body.odooBridgeUrl ?? '').trim() || null : null,
+        bridge_secret_ciphertext: integrationProvider === 'odoo' ? encryptedBridgeSecret : null,
+        updated_at: new Date().toISOString(),
+      }
+      let entityId = current?.entity.id as string | undefined
+      if (entityId) {
+        const { error } = await admin.from('fiscal_entities').update(entityValues).eq('tenant_id', tenantId).eq('id', entityId)
+        if (error) throw error
+      } else {
+        const { data, error } = await admin.from('fiscal_entities').insert(entityValues).select('id').single()
+        if (error) throw error
+        entityId = data.id
+        const { error: assignmentError } = await admin.from('fiscal_entity_venues').insert({ tenant_id: tenantId, venue_id: venueId, fiscal_entity_id: entityId })
+        if (assignmentError) throw assignmentError
+      }
+      const refreshed = await loadFiscalContext(admin, tenantId, venueId)
+      return json({ ...publicSettings(await loadSettings(admin, tenantId), url), ...publicFiscalEntity(refreshed?.entity ?? null) })
+    }
+
+    if (action === 'list-fiscal-incidents') {
+      if (!isAdmin) return json({ error: 'No tienes permiso para consultar incidencias fiscales' }, 403)
+      const venueId = String(body.venueId ?? '')
+      const { data, error } = await admin.from('fiscal_outbox').select('id, operation, status, created_at, available_at')
+        .eq('tenant_id', tenantId).eq('venue_id', venueId).in('status', ['pending', 'failed']).order('created_at', { ascending: false }).limit(100)
+      if (error) throw error
+      return json({ incidents: (data ?? []).map((item) => ({ id: item.id, operation: item.operation, status: item.status, occurredAt: item.created_at, retryable: item.status === 'failed' })) })
+    }
+
+    if (action === 'retry-fiscal-operation') {
+      if (!isOwner) return json({ error: 'Solo el propietario puede reintentar operaciones fiscales' }, 403)
+      const venueId = String(body.venueId ?? '')
+      const incidentId = String(body.incidentId ?? '')
+      const { data, error } = await admin.from('fiscal_outbox').update({ status: 'pending', available_at: new Date().toISOString(), incident_code: null, last_error: null, updated_at: new Date().toISOString() })
+        .eq('tenant_id', tenantId).eq('venue_id', venueId).eq('id', incidentId).eq('status', 'failed').select('id').maybeSingle()
+      if (error) throw error
+      if (!data) return json({ error: 'Incidencia no encontrada o no reintentable' }, 404)
+      return json({ ok: true })
     }
 
     if (action === 'save-config') {
@@ -481,12 +683,15 @@ Deno.serve(async (request) => {
           )
         } else if (invoice.status !== 'cancelled') {
           const now = new Date().toISOString()
-          const { error: cancelLocalError } = await admin.from('fiscal_invoices').update({
-            status: 'cancelled', pending_operation: 'none', confirmed_at: now,
-            cancelled_at: now, next_retry_at: null, error_code: null,
-            error_message: null, updated_at: now,
-          }).eq('tenant_id', tenantId).eq('id', invoice.id)
-          if (cancelLocalError) throw cancelLocalError
+          const [{ error: cancelLocalError }, { error: documentCancelError }] = await Promise.all([
+            admin.from('fiscal_invoices').update({
+              status: 'cancelled', pending_operation: 'none', confirmed_at: now,
+              cancelled_at: now, next_retry_at: null, error_code: null,
+              error_message: null, updated_at: now,
+            }).eq('tenant_id', tenantId).eq('id', invoice.id),
+            admin.from('fiscal_documents').update({ status: 'cancelled', updated_at: now }).eq('tenant_id', tenantId).eq('ticket_id', ticketId),
+          ])
+          if (cancelLocalError || documentCancelError) throw cancelLocalError ?? documentCancelError
           await insertEvent(admin, fiscalInvoice, {
             source: 'system', event_type: 'unsent_invoice_cancelled', status: 'cancelled',
             payload: { reason: 'ticket_voided_before_submission' },
@@ -518,6 +723,26 @@ Deno.serve(async (request) => {
       const { data: invoice, error } = await admin.from('fiscal_invoices').select('*').eq('tenant_id', tenantId).eq('id', invoiceId).maybeSingle()
       if (error) throw error
       if (!invoice) return json({ error: 'Factura fiscal no encontrada' }, 404)
+      if (invoice.integration_provider === 'odoo') {
+        if (!invoice.external_uuid) return json({ error: 'El documento aún no tiene identificador de Odoo' }, 409)
+        const context = await loadFiscalContext(admin, tenantId, invoice.venue_id, invoice.ticket_id)
+        if (!context?.entity || !context.document || typeof context.entity.bridge_secret_ciphertext !== 'string') return json({ error: 'Integración Odoo incompleta' }, 400)
+        const provider = new OdooFiscalProvider({
+          bridgeUrl: String(context.entity.bridge_url), fiscalEntityRef: String(context.entity.provider_entity_ref),
+          bridgeSecret: await decryptSecret(context.entity.bridge_secret_ciphertext, requireEncryptionKey(env.encryptionKey)),
+        })
+        const result = await provider.status(invoice.external_uuid)
+        if (result.finalTotalCents !== undefined && result.finalTotalCents !== Number(context.document.expected_total_cents)) {
+          throw new FiscalTotalDiscrepancyError(Number(context.document.expected_total_cents), result.finalTotalCents)
+        }
+        const legacyStatus = result.status === 'generated' ? 'pending' : result.status
+        const [{ error: documentError }, { error: invoiceUpdateError }] = await Promise.all([
+          admin.from('fiscal_documents').update({ status: result.status, provider_external_id: result.documentId, provider_fiscal_number: result.fiscalNumber ?? null, returned_total_cents: result.finalTotalCents ?? null, provider_qr: result.qrPayload ?? null, provider_url: result.qrUrl ?? null, updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', context.document.id),
+          admin.from('fiscal_invoices').update({ status: legacyStatus, external_uuid: result.documentId, external_code: result.fiscalNumber ?? null, fiscal_number: result.fiscalNumber ?? null, qr_payload: result.qrPayload ?? null, verification_url: result.qrUrl ?? null, response_payload: result, updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', invoice.id),
+        ])
+        if (documentError || invoiceUpdateError) throw documentError ?? invoiceUpdateError
+        return json({ status: result.status, response: result })
+      }
       const settings = await loadSettings(admin, tenantId)
       if (!settings || typeof settings.api_key_ciphertext !== 'string') return json({ error: 'Integracion sin API key' }, 400)
       if (!invoice.external_uuid) return json({ error: 'La factura aun no tiene uuid externo' }, 409)
@@ -554,11 +779,13 @@ Deno.serve(async (request) => {
 
     return json({ error: 'Accion no valida' }, 400)
   } catch (error) {
-    console.error('verifacti-api failed', error)
+    console.error('fiscal-api failed', error instanceof ProviderHttpError ? { name: error.name, status: error.status } : { name: error instanceof Error ? error.name : 'UnknownError' })
     const status = error instanceof ProviderHttpError && error.status && error.status >= 400 && error.status < 500 ? 400 : 500
     return json({
-      error: error instanceof Error ? error.message : 'Error interno',
-      ...(error instanceof ProviderHttpError ? { providerStatus: error.status, providerResponse: error.body } : {}),
+      error: error instanceof ProviderHttpError && error.status && error.status < 500
+        ? 'El proveedor fiscal ha rechazado la operación.'
+        : error instanceof OdooBridgeError ? 'No se pudo comunicar con Odoo.'
+          : error instanceof Error ? error.message : 'Error interno',
     }, status)
   }
 })

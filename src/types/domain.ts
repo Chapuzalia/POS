@@ -412,6 +412,10 @@ export type SaleLinePayload = {
   note?: string | null
 }
 
+export type FiscalIntegrationProvider = 'verifacti' | 'odoo'
+export type FiscalTaxSystem = 'verifactu' | 'ticketbai'
+export type FiscalReceiptStatus = 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+
 export type SaleCreatedPayload = {
   ticket: {
     id: string
@@ -456,10 +460,13 @@ export type SaleCreatedPayload = {
   } | null
   fiscal?: {
     invoiceId: string
-    provider: 'verifactu' | 'ticketbai'
-    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+    provider: FiscalTaxSystem
+    integrationProvider?: FiscalIntegrationProvider
+    status: FiscalReceiptStatus
     uuid: string | null
     qrBase64: string | null
+    qrPayload?: string | null
+    fiscalNumber?: string | null
     verificationUrl: string | null
     externalCode: string | null
     errorCode: string | null
@@ -725,15 +732,18 @@ export type CrmSalesReportTicket = {
   totalCents: number
   fiscal: {
     id: string
-    provider: 'verifactu' | 'ticketbai'
+    provider: FiscalTaxSystem
+    integrationProvider?: FiscalIntegrationProvider
     environment: 'test' | 'production'
     invoiceType: 'normal' | 'simplified' | 'corrective'
     series: string
     number: string
-    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+    fiscalNumber?: string | null
+    status: FiscalReceiptStatus
     externalUuid: string | null
     externalCode: string | null
     qrBase64: string | null
+    qrPayload?: string | null
     verificationUrl: string | null
     errorCode: string | null
     errorMessage: string | null

@@ -1,6 +1,70 @@
 export type FiscalProviderName = 'verifactu' | 'ticketbai'
+export type FiscalIntegrationProvider = FiscalProviderName | 'odoo'
 export type FiscalEnvironment = 'test' | 'production'
-export type FiscalStatus = 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+export type FiscalStatus = 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+export type FiscalDocumentKind = 'simplified' | 'full' | 'corrective'
+
+/** Provider-neutral commercial input. All monetary values are integer cents. */
+export type CommercialFiscalDocument = {
+  externalId: string
+  idempotencyKey: string
+  fiscalEntityRef: string
+  operationTimestamp: string
+  kind: FiscalDocumentKind
+  lines: CommercialFiscalLine[]
+  expectedTotalCents: number
+  customer?: FiscalCustomer
+}
+
+export type CommercialFiscalLine = {
+  description: string
+  quantity: number
+  unitPriceCents: number
+  lineTotalCents: number
+  discountCents?: number
+  taxCode: string
+  taxSnapshot: { taxableBaseCents: number; taxCents: number }
+}
+
+export type FiscalCustomer = {
+  name: string
+  taxId?: string
+  address?: string
+  postalCode?: string
+  countryCode?: string
+}
+
+export type NormalizedFiscalStatus = FiscalStatus | 'generated'
+export type NormalizedFiscalResult = {
+  documentId: string
+  fiscalNumber?: string
+  fiscalType?: string
+  fiscalDate?: string
+  status: NormalizedFiscalStatus
+  finalTotalCents?: number
+  qrPayload?: string | false
+  qrUrl?: string | false
+  error?: { code?: string; message: string; retryable: boolean }
+}
+
+export class FiscalTotalDiscrepancyError extends Error {
+  readonly expectedTotalCents: number
+  readonly actualTotalCents: number
+  constructor(expectedTotalCents: number, actualTotalCents: number) {
+    super(`El total fiscal no coincide: esperado ${expectedTotalCents}, recibido ${actualTotalCents}`)
+    this.name = 'FiscalTotalDiscrepancyError'
+    this.expectedTotalCents = expectedTotalCents
+    this.actualTotalCents = actualTotalCents
+  }
+}
+
+export type FiscalIssueOptions = { idempotencyKey?: string }
+export interface FiscalDocumentProvider {
+  issue(document: CommercialFiscalDocument, options?: FiscalIssueOptions): Promise<NormalizedFiscalResult>
+  status(documentId: string): Promise<NormalizedFiscalResult>
+  rectify(document: CommercialFiscalDocument, options?: FiscalIssueOptions): Promise<NormalizedFiscalResult>
+  cancel(documentId: string, options?: FiscalIssueOptions): Promise<NormalizedFiscalResult>
+}
 
 export type FiscalInvoiceRow = {
   id: string
@@ -8,7 +72,7 @@ export type FiscalInvoiceRow = {
   venue_id: string
   ticket_id: string
   sale_id: string | null
-  provider: FiscalProviderName
+  provider: FiscalIntegrationProvider
   environment: FiscalEnvironment
   invoice_type: 'normal' | 'simplified' | 'corrective'
   series: string
@@ -138,6 +202,10 @@ export type ProviderStatusResponse = {
   mensaje_error?: string
   estado_registro_duplicado?: string
   tbai?: string
+  importe_total_cents?: number
+  final_total_cents?: number
+  document_id?: string
+  tipo_factura?: string
   [key: string]: unknown
 }
 

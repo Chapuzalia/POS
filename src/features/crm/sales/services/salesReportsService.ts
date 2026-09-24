@@ -88,8 +88,8 @@ const ticketSelect = `
     payment_method
   ),
   fiscal_invoices (
-    id, provider, environment, invoice_type, series, number, status,
-    external_uuid, external_code, qr_base64, verification_url,
+    id, provider, integration_provider, environment, invoice_type, series, number, status,
+    external_uuid, external_code, fiscal_number, qr_base64, qr_payload, verification_url,
     error_code, error_message, attempts, sent_at, confirmed_at
   )
 `
@@ -155,14 +155,17 @@ export type SalesReportTicketRow = {
   fiscal_invoices: Array<{
     id: string
     provider: 'verifactu' | 'ticketbai'
+    integration_provider: 'verifacti' | 'odoo' | null
     environment: 'test' | 'production'
     invoice_type: 'normal' | 'simplified' | 'corrective'
     series: string
     number: string
-    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+    status: 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
     external_uuid: string | null
     external_code: string | null
+    fiscal_number: string | null
     qr_base64: string | null
+    qr_payload: string | null
     verification_url: string | null
     error_code: string | null
     error_message: string | null
@@ -315,6 +318,7 @@ function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicke
     fiscal: ticket.fiscal_invoices?.[0] ? {
       id: ticket.fiscal_invoices[0].id,
       provider: ticket.fiscal_invoices[0].provider,
+      integrationProvider: ticket.fiscal_invoices[0].integration_provider ?? undefined,
       environment: ticket.fiscal_invoices[0].environment,
       invoiceType: ticket.fiscal_invoices[0].invoice_type,
       series: ticket.fiscal_invoices[0].series,
@@ -322,7 +326,9 @@ function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicke
       status: ticket.fiscal_invoices[0].status,
       externalUuid: ticket.fiscal_invoices[0].external_uuid,
       externalCode: ticket.fiscal_invoices[0].external_code,
+      fiscalNumber: ticket.fiscal_invoices[0].fiscal_number,
       qrBase64: ticket.fiscal_invoices[0].qr_base64,
+      qrPayload: ticket.fiscal_invoices[0].qr_payload,
       verificationUrl: ticket.fiscal_invoices[0].verification_url,
       errorCode: ticket.fiscal_invoices[0].error_code,
       errorMessage: ticket.fiscal_invoices[0].error_message,

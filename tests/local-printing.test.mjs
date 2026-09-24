@@ -295,6 +295,25 @@ test('una factura simplificada sustituye el enlace VeriFactu por un QR con el co
   )
 })
 
+test('un proveedor Odoo usa el payload QR suministrado y su número fiscal', () => {
+  const odooSale = structuredClone(sale)
+  odooSale.fiscal = {
+    invoiceId: 'odoo_1', provider: 'odoo', status: 'accepted', uuid: 'odoo-uuid',
+    externalCode: 'INV/2026/0007', qrBase64: null, verificationUrl: 'https://odoo.example/verify/0007',
+    qrPayload: 'odoo-provider-qr-payload',
+  }
+  const payload = mapSaleToPrintRequest({
+    sale: odooSale, establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80,
+  })
+  const qrElements = payload.elements?.filter((element) => element.type === 'qr') ?? []
+  assert.equal(qrElements.length, 1)
+  assert.equal(qrElements[0].data, 'odoo-provider-qr-payload')
+  assert.match(payload.lines.join('\\n'), /FISCAL/)
+  assert.ok(payload.lines.join('\\n').includes('INV/2026/0007'))
+  assert.equal(payload.elements.some((element) => element.type === 'text' && element.value.includes('odoo.example')), false)
+})
+
 test('una factura completa sustituye el enlace VeriFactu por un QR con el contenido exacto', () => {
   const payload = mapSaleToPrintRequest({
     sale: completeInvoiceSale(), establishment: { name: 'MESS' },

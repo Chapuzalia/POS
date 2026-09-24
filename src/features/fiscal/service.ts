@@ -5,9 +5,12 @@ import { supabase } from '../../lib/supabase'
 export type FiscalReceiptData = {
   invoiceId: string
   provider: 'verifactu' | 'ticketbai'
-  status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+  integrationProvider?: 'verifacti' | 'odoo'
+  status: 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
   uuid: string | null
   qrBase64: string | null
+  qrPayload?: string | null
+  fiscalNumber?: string | null
   verificationUrl: string | null
   externalCode: string | null
   errorCode: string | null
@@ -53,7 +56,7 @@ export function voidTicketWithFiscalCancellation(tenantId: string, ticketId: str
 export async function loadFiscalReceiptData(tenantId: string, ticketId: string): Promise<FiscalReceiptData | null> {
   if (!supabase) throw new Error('Supabase no está configurado.')
   const { data, error } = await supabase.from('fiscal_invoices')
-    .select('id, provider, status, external_uuid, external_code, qr_base64, verification_url, error_code, error_message')
+    .select('id, provider, integration_provider, status, external_uuid, external_code, fiscal_number, qr_base64, qr_payload, verification_url, error_code, error_message')
     .eq('tenant_id', tenantId)
     .eq('ticket_id', ticketId)
     .maybeSingle()
@@ -62,10 +65,13 @@ export async function loadFiscalReceiptData(tenantId: string, ticketId: string):
   return {
     invoiceId: data.id,
     provider: data.provider,
+    integrationProvider: data.integration_provider,
     status: data.status,
     uuid: data.external_uuid,
+    fiscalNumber: data.fiscal_number,
     externalCode: data.external_code,
     qrBase64: data.qr_base64,
+    qrPayload: data.qr_payload,
     verificationUrl: data.verification_url,
     errorCode: data.error_code,
     errorMessage: data.error_message,

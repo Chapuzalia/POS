@@ -62,6 +62,28 @@ function section(title: string, layout: PrinterLayout) {
   return [title.toLocaleUpperCase('es-ES'), createSeparator(layout.columns)]
 }
 
+type FiscalPrintData = {
+  qrPayload: string
+  verificationUrl: string
+  title: string
+}
+
+function getFiscalPrintData(sale: SaleCreatedPayload): FiscalPrintData | undefined {
+  const fiscal = sale.fiscal
+  if (!fiscal) return undefined
+
+  // Keep this boundary compatible with providers that are not yet part of the
+  // domain union. The fiscal service owns the provider-specific field names;
+  // printing only consumes an already supplied QR value and never builds one.
+  const providerFields = fiscal as unknown as Record<string, unknown>
+  const qrPayload = [providerFields.qrPayload, providerFields.qrData, providerFields.qrContent, fiscal.qrBase64]
+    .find((value): value is string => typeof value === 'string' && value.length > 0) ?? ''
+  const verificationUrl = fiscal.verificationUrl ?? ''
+  const provider = typeof providerFields.provider === 'string' ? providerFields.provider : ''
+  const title = provider === 'ticketbai' ? 'TicketBAI' : provider === 'verifactu' ? 'VeriFactu' : 'Fiscal'
+  return { qrPayload, verificationUrl, title }
+}
+
 function prefixedWrapped(value: string, firstPrefix: string, continuedPrefix: string, layout: PrinterLayout) {
   const available = Math.max(1, layout.columns - Math.max(firstPrefix.length, continuedPrefix.length))
   return wrapReceiptText(value, available, layout.characterSet)
@@ -209,11 +231,16 @@ export function buildSaleTicketLines(
   }
 
   if (sale.fiscal && options.label !== 'PRE-TICKET') {
-    lines.push('', ...section(sale.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu', printerLayout))
+    const fiscalPrintData = getFiscalPrintData(sale)!
+    lines.push('', ...section(fiscalPrintData.title, printerLayout))
     if (sale.fiscal.externalCode) lines.push(...wrapReceiptText(`Código: ${sale.fiscal.externalCode}`, printerLayout.columns, printerLayout.characterSet))
-    if (sale.fiscal.verificationUrl) lines.push(...wrapReceiptText(sale.fiscal.verificationUrl, printerLayout.columns, printerLayout.characterSet))
+    // Preserve the legacy URL text fallback, but avoid duplicating it when a
+    // provider has supplied a separate QR payload.
+    if (fiscalPrintData.verificationUrl && !fiscalPrintData.qrPayload) {
+      lines.push(...wrapReceiptText(fiscalPrintData.verificationUrl, printerLayout.columns, printerLayout.characterSet))
+    }
     const fiscalError = summarizeFiscalError(sale.fiscal.errorMessage ?? sale.fiscal.errorCode)
-    if (!sale.fiscal.verificationUrl && fiscalError) {
+    if (!fiscalPrintData.verificationUrl && !fiscalPrintData.qrPayload && fiscalError) {
       lines.push(...wrapReceiptText('QR no disponible.', printerLayout.columns, printerLayout.characterSet))
       lines.push(...wrapReceiptText(`Motivo: ${fiscalError}`, printerLayout.columns, printerLayout.characterSet))
     }
@@ -232,35 +259,38 @@ export function buildSaleTicketElements(
   lines: string[],
   options: SaleTicketLineOptions = {},
 ): PrintElement[] | undefined {
-  const verificationUrl = sale.fiscal?.verificationUrl
-  if (
-    options.label === 'PRE-TICKET' ||
-    sale.fiscal?.provider !== 'verifactu' ||
-    !verificationUrl
-  ) return undefined
+  const fiscalPrintData = getFiscalPrintData(sale)
+  if (options.label === 'PRE-TICKET' || !fiscalPrintData) return undefined
+  const qrData = fiscalPrintData.qrPayload || fiscalPrintData.verificationUrl
+  if (!qrData) return undefined
 
-  const verificationLines = wrapReceiptText(
-    verificationUrl,
+  const legacyUrlLines = wrapReceiptText(
+    fiscalPrintData.verificationUrl,
     printerLayout.columns,
     printerLayout.characterSet,
   )
-  const fiscalSectionStart = lines.lastIndexOf('VERIFACTU')
+  const fiscalSectionStart = lines.lastIndexOf(fiscalPrintData.title.toLocaleUpperCase('es-ES'))
+  const verificationLines = fiscalPrintData.qrPayload ? [] : legacyUrlLines
   let verificationStart = -1
-  for (
-    let index = Math.max(0, fiscalSectionStart + 1);
-    index <= lines.length - verificationLines.length;
-    index += 1
-  ) {
-    if (verificationLines.every((line, offset) => lines[index + offset] === line)) {
-      verificationStart = index
-      break
+  if (fiscalPrintData.qrPayload) {
+    verificationStart = fiscalSectionStart >= 0 ? fiscalSectionStart + 2 : lines.length
+  } else {
+    for (
+      let index = Math.max(0, fiscalSectionStart + 1);
+      index <= lines.length - verificationLines.length;
+      index += 1
+    ) {
+      if (verificationLines.every((line, offset) => lines[index + offset] === line)) {
+        verificationStart = index
+        break
+      }
     }
   }
   if (verificationStart < 0) return undefined
 
   return [
     ...lines.slice(0, verificationStart).map((value): PrintElement => ({ type: 'text', value })),
-    { type: 'qr', data: verificationUrl, size: 6, errorCorrection: 'M' },
+    { type: 'qr', data: qrData, size: 6, errorCorrection: 'M' },
     ...lines.slice(verificationStart + verificationLines.length)
       .map((value): PrintElement => ({ type: 'text', value })),
   ]
@@ -389,7 +419,9 @@ export function buildSalePrintTemplateContext(
     }
   }
   const fiscalError = summarizeFiscalError(sale.fiscal?.errorMessage ?? sale.fiscal?.errorCode)
-  const verificationUrl = options.label === 'PRE-TICKET' ? '' : sale.fiscal?.verificationUrl ?? ''
+  const fiscalPrintData = sale.fiscal ? getFiscalPrintData(sale) : undefined
+  const verificationUrl = options.label === 'PRE-TICKET' ? '' : fiscalPrintData?.verificationUrl ?? ''
+  const qrPayload = options.label === 'PRE-TICKET' ? '' : fiscalPrintData?.qrPayload ?? ''
 
   return {
     venue: {
@@ -436,12 +468,14 @@ export function buildSalePrintTemplateContext(
     },
     payment: { method: sale.payment ? paymentLabels[sale.payment.method] ?? sale.payment.method : '', rows: paymentRows },
     fiscal: sale.fiscal && options.label !== 'PRE-TICKET' ? {
-      title: sale.fiscal.provider === 'ticketbai' ? 'TICKETBAI' : 'VERIFACTU',
+      title: fiscalPrintData?.title.toLocaleUpperCase('es-ES') ?? 'FISCAL',
       external_code: sale.fiscal.externalCode ?? '',
-      verification_url: verificationUrl,
-      show_qr: sale.fiscal.provider === 'verifactu' && Boolean(verificationUrl),
-      show_url: sale.fiscal.provider !== 'verifactu' && Boolean(verificationUrl),
-      error: verificationUrl ? '' : fiscalError ?? '',
+      verification_url: qrPayload || verificationUrl,
+      show_qr: Boolean(qrPayload || verificationUrl),
+      // The URL is used as QR content; receipt lines retain the legacy URL
+      // fallback for agents that cannot render elements.
+      show_url: false,
+      error: verificationUrl || qrPayload ? '' : fiscalError ?? '',
     } : {},
     footer: { text: establishment.footer?.trim() ?? '' },
   }

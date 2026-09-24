@@ -4,14 +4,22 @@ import { autoIssueFiscalTicket, invokeFiscalBackend, loadFiscalReceiptData } fro
 
 export { autoIssueFiscalTicket }
 
-export type FiscalProvider = 'verifactu' | 'ticketbai'
+export type FiscalTaxSystem = 'verifactu' | 'ticketbai'
+export type FiscalIntegrationProvider = 'verifacti' | 'odoo'
+/** Legacy alias retained for installed clients. */
+export type FiscalProvider = FiscalTaxSystem
 export type FiscalEnvironment = 'test' | 'production'
-export type FiscalStatus = 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+export type FiscalStatus = 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
 
 export type VerifactiConfiguration = {
   enabled: boolean
-  provider: FiscalProvider
+  provider: FiscalTaxSystem
+  integrationProvider?: FiscalIntegrationProvider
   environment: FiscalEnvironment
+  legalName?: string
+  taxId?: string
+  odooBridgeUrl?: string | null
+  odooEntityReference?: string | null
   hasApiKey: boolean
   hasManagementApiKey: boolean
   automaticSubmission: boolean
@@ -25,14 +33,17 @@ export type VerifactiConfiguration = {
 export type FiscalInvoiceSummary = {
   id: string
   provider: FiscalProvider
+  integration_provider?: FiscalIntegrationProvider
   environment: FiscalEnvironment
   invoice_type: 'normal' | 'simplified' | 'corrective'
   series: string
   number: string
+  fiscal_number?: string | null
   status: FiscalStatus
   external_uuid: string | null
   external_code: string | null
   qr_base64: string | null
+  qr_payload?: string | null
   verification_url: string | null
   error_code: string | null
   error_message: string | null
@@ -58,6 +69,33 @@ async function invoke<T>(body: Record<string, unknown>, fallback: string) {
 
 export function loadVerifactiConfiguration(context: TenantContext) {
   return invoke<VerifactiConfiguration>({ action: 'get-config', tenantId: context.tenantId }, 'No se pudo cargar la configuración de Verifacti.')
+}
+
+export function loadFiscalEntityConfiguration(context: TenantContext) {
+  return invoke<VerifactiConfiguration>({ action: 'get-fiscal-entity-config', tenantId: context.tenantId, venueId: context.venueId }, 'No se pudo cargar la configuración fiscal del local.')
+}
+
+export function saveFiscalEntityConfiguration(context: TenantContext, input: {
+  legalName: string
+  taxId: string
+  provider: FiscalIntegrationProvider
+  taxSystem: FiscalTaxSystem
+  environment: FiscalEnvironment
+  odooBridgeUrl?: string
+  odooEntityReference?: string
+  bridgeSecret?: string
+  enabled: boolean
+  automaticSubmission: boolean
+}) {
+  return invoke<VerifactiConfiguration>({ action: 'save-fiscal-entity-config', tenantId: context.tenantId, venueId: context.venueId, ...input }, 'No se pudo guardar la configuración fiscal del local.')
+}
+
+export type FiscalIncident = { id: string; operation: string; status: 'pending' | 'failed'; occurredAt: string; retryable: boolean }
+export function listFiscalIncidents(context: TenantContext) {
+  return invoke<{ incidents: FiscalIncident[] }>({ action: 'list-fiscal-incidents', tenantId: context.tenantId, venueId: context.venueId }, 'No se pudieron cargar las incidencias fiscales.')
+}
+export function retryFiscalOperation(context: TenantContext, incidentId: string) {
+  return invoke<{ ok: boolean }>({ action: 'retry-fiscal-operation', tenantId: context.tenantId, venueId: context.venueId, incidentId }, 'No se pudo reintentar la operación fiscal.')
 }
 
 export function saveVerifactiConfiguration(context: TenantContext, input: {
@@ -117,7 +155,7 @@ export async function loadFiscalInvoiceEvents(context: TenantContext, invoiceId:
 
 export async function loadFiscalReceipt(tenantId: string, ticketId: string): Promise<FiscalInvoiceSummary | null> {
   const { data, error } = await requireSupabase().from('fiscal_invoices')
-    .select('id, provider, environment, invoice_type, series, number, status, external_uuid, external_code, qr_base64, verification_url, error_code, error_message, attempts, sent_at, confirmed_at')
+    .select('id, provider, integration_provider, environment, invoice_type, series, number, fiscal_number, status, external_uuid, external_code, qr_base64, qr_payload, verification_url, error_code, error_message, attempts, sent_at, confirmed_at')
     .eq('tenant_id', tenantId)
     .eq('ticket_id', ticketId)
     .maybeSingle()

@@ -13,7 +13,8 @@ import {
   mapVerifactuInvoice,
   stableFiscalIdempotencyKey,
 } from '../supabase/functions/_shared/verifacti/mapping.ts'
-import { TicketBaiProvider, VerifactuProvider } from '../supabase/functions/_shared/verifacti/providers.ts'
+import { OdooFiscalProvider, TicketBaiProvider, VerifactuProvider } from '../supabase/functions/_shared/verifacti/providers.ts'
+import { mapCommercialFiscalDocument } from '../supabase/functions/_shared/verifacti/mapping.ts'
 import { createCashTicketActionsHarness } from './helpers/cash-ticket-actions-harness.mjs'
 import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
 
@@ -239,6 +240,48 @@ test('los adaptadores implementan health, create, ambos status, cancel y list co
   }
 })
 
+test('el contrato comercial Odoo usa snapshots, centimos e idempotencia', async () => {
+  const document = mapCommercialFiscalDocument(invoice(), ticket())
+  assert.equal(document.expectedTotalCents, 1760)
+  assert.equal(document.lines[0].taxSnapshot.taxCents, 210)
+  assert.equal(document.kind, 'simplified')
+  assert.equal(document.fiscalEntityRef, tenantId)
+})
+
+test('Odoo bridge emite, consulta, anula y rechaza discrepancias sin filtrar secretos', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: String(url), init })
+    const path = new URL(url).pathname
+    return Response.json(path.endsWith('/cancel') ? { document_id: 'odoo-1', total_cents: 1760, status: 'cancelled' } : path.endsWith('/odoo-1') ? { document_id: 'odoo-1', final_total_cents: 1760, status: 'accepted' } : { document_id: 'odoo-1', fiscal_number: 'F-1', fiscal_type: 'F2', fiscal_date: '2026-09-24', final_total_cents: calls.length >= 4 ? 1800 : 1760, status: 'generated', qr_payload: false, qr_url: false })
+  }
+  const provider = new OdooFiscalProvider({ bridgeUrl: 'https://bridge.test', bridgeSecret: 'secret-value', fiscalEntityRef: 'backend-entity', fetchImpl })
+  const document = mapCommercialFiscalDocument(invoice(), ticket())
+  const issued = await provider.issue(document, { idempotencyKey: 'stable-key' })
+  assert.equal(issued.fiscalNumber, 'F-1')
+  assert.equal(issued.fiscalType, 'F2')
+  assert.equal(issued.status, 'generated')
+  assert.equal(issued.qrPayload, false)
+  assert.equal(issued.qrUrl, false)
+  assert.equal(new Headers(calls[0].init.headers).get('Idempotency-Key'), 'stable-key')
+  assert.equal(new Headers(calls[0].init.headers).get('Content-Type'), 'application/json')
+  assert.deepEqual(JSON.parse(calls[0].init.body), {
+    external_id: invoiceId,
+    fiscal_entity_ref: 'backend-entity',
+    document_type: 'simplified',
+    operation_date: '2026-08-03',
+    lines: [
+      { description: 'Menu Grande', quantity: 1, unit_price_cents: 1210, tax_code: 'IVA21' },
+      { description: 'Pan', quantity: 2, unit_price_cents: 275, tax_code: 'IVA10' },
+    ],
+    expected_total_cents: 1760,
+  })
+  assert.ok(!JSON.stringify(calls[0].init.body).includes('secret-value'))
+  assert.equal((await provider.status('odoo-1')).status, 'accepted')
+  assert.equal((await provider.cancel('odoo-1', { idempotencyKey: 'cancel-key' })).status, 'cancelled')
+  await assert.rejects(provider.issue(document, { idempotencyKey: 'stable-key' }).then(() => { throw new Error('bad') }), /no coincide/)
+})
+
 test('solo reintenta red, rate limit y servidor; nunca validacion', async () => {
   const statuses = [429, 503, 200]
   const sleeps = []
@@ -314,6 +357,33 @@ test('la migracion aplica aislamiento multi-tenant, historial e inmutabilidad fi
   assert.match(sql, /protect_fiscal_ticket_lines[\s\S]*before insert or update or delete on public\.ticket_lines/i)
   assert.match(sql, /revoke all on public\.fiscal_integration_settings from anon, authenticated/i)
   assert.match(sql, /user_is_tenant_admin\(tenant_id\)[\s\S]*user_has_venue_access\(tenant_id, venue_id\)/i)
+})
+
+test('la expansion fiscal separa proveedor y sistema, protege secretos y garantiza outbox idempotente', async () => {
+  const sql = await readFile(new URL('../supabase/migrations/20260923160000_expand_provider_neutral_fiscal_model.sql', import.meta.url), 'utf8')
+  for (const table of ['fiscal_entities', 'fiscal_entity_venues', 'fiscal_documents', 'fiscal_outbox']) {
+    assert.match(sql, new RegExp(`create table public\\.${table}`, 'i'))
+    assert.match(sql, new RegExp(`alter table public\\.${table} enable row level security`, 'i'))
+  }
+  assert.match(sql, /integration_provider text not null check \(integration_provider in \('verifacti', 'odoo'\)\)/i)
+  assert.match(sql, /check \(integration_provider <> 'odoo' or tax_system = 'verifactu'\)/i)
+  assert.match(sql, /expected_total_cents bigint/i)
+  assert.match(sql, /returned_total_cents bigint/i)
+  assert.match(sql, /discrepancy_cents bigint generated always/i)
+  assert.match(sql, /document_kind text not null check \(document_kind in \('simplified', 'full', 'corrective'\)\)/i)
+  assert.match(sql, /status text not null default 'pending' check \(status in \('pending', 'generated', 'accepted', 'accepted_with_errors', 'rejected', 'cancelled', 'error'\)\)/i)
+  assert.match(sql, /unique \(tenant_id, idempotency_key\)/i)
+  assert.match(sql, /resolve_fiscal_entity_for_venue/i)
+  assert.match(sql, /^-- migration-safety: expand\r?\nset lock_timeout = '5s';\r?\nset statement_timeout = '5min';/i)
+  assert.match(sql, /bridge_secret_ciphertext text/i)
+  assert.match(sql, /fiscal_outbox_claim_document/i)
+  assert.match(sql, /fiscal_complete_operation/i)
+  assert.match(sql, /fiscal_fail_operation/i)
+  assert.match(sql, /auth\.role\(\) <> 'service_role'/i)
+  assert.match(sql, /raw_request jsonb/i)
+  assert.match(sql, /revoke all on public\.fiscal_entities, public\.fiscal_entity_venues, public\.fiscal_documents, public\.fiscal_outbox from anon, authenticated/i)
+  assert.match(sql, /create view public\.fiscal_documents_safe/i)
+  assert.doesNotMatch(sql.match(/create view public\\.fiscal_documents_safe[\\s\\S]*?;/i)?.[0] ?? '', /raw_request|raw_response|ciphertext/i)
 })
 
 test('el webhook valida firma e idempotencia y el backend nunca devuelve las API keys', async () => {

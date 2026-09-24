@@ -1,4 +1,13 @@
-import type { CatalogProfile, DeviceMode, PaymentMethod, TenantRole } from './domain'
+import type { CatalogProfile, DeviceMode, FiscalIntegrationProvider, FiscalReceiptStatus, FiscalTaxSystem, PaymentMethod, TenantRole } from './domain'
+
+export type FiscalInvoiceRow = {
+  id: string
+  provider: FiscalTaxSystem
+  integration_provider?: FiscalIntegrationProvider | null
+  status: FiscalReceiptStatus
+  fiscal_number?: string | null
+  qr_payload?: string | null
+}
 
 export type TenantRow = {
   id: string

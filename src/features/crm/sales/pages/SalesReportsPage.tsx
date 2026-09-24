@@ -423,6 +423,7 @@ const fiscalStatusLabels = {
   rejected: 'Rechazada',
   cancelled: 'Anulada',
   error: 'Error',
+  generated: 'Generada',
 } as const
 
 function fiscalStatusClass(status: NonNullable<CrmSalesReports['tickets'][number]['fiscal']>['status']) {
@@ -508,7 +509,7 @@ export function SalesReportTicketsTable({
               <td className="!px-3 !py-4">
                 {ticket.fiscal ? (
                   <span className={`!inline-flex !min-h-6 !w-fit !items-center !whitespace-nowrap !rounded-full !px-[9px] !text-[11px] !font-semibold ${fiscalStatusClass(ticket.fiscal.status)}`}>
-                    {fiscalStatusLabels[ticket.fiscal.status]} · {ticket.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu'}
+                    {fiscalStatusLabels[ticket.fiscal.status]} · {ticket.fiscal.integrationProvider === 'odoo' ? 'Odoo' : ticket.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu'}
                   </span>
                 ) : <span className="!text-xs !text-[var(--crm-text-muted)]">Sin fiscalizar</span>}
               </td>
@@ -639,7 +640,7 @@ export function SalesReportTicketModal({
                   </span>
                 </div>
                 <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">
-                  {ticket.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu'} · {ticket.fiscal.environment === 'production' ? 'Produccion' : 'Pruebas'} · {ticket.fiscal.invoiceType === 'simplified' ? 'Simplificada' : ticket.fiscal.invoiceType === 'corrective' ? 'Rectificativa' : 'Normal'}
+                  {ticket.fiscal.integrationProvider === 'odoo' ? 'Odoo' : ticket.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu'} · {ticket.fiscal.environment === 'production' ? 'Produccion' : 'Pruebas'} · {ticket.fiscal.invoiceType === 'simplified' ? 'Simplificada' : ticket.fiscal.invoiceType === 'corrective' ? 'Rectificativa' : 'Normal'}
                 </p>
               </div>
               <div className="!flex !flex-wrap !gap-2">
