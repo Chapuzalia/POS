@@ -19,6 +19,7 @@ import {
 import type { TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 import { tenantAddonCatalog, updateTenantAddons } from '../../features/platform/tenantFeatureAccess'
+import { configureSuperadminFiscalEntity, createSuperadminFiscalEntity, loadSuperadminFiscalEntities, retrySuperadminFiscalEntity, type FiscalEntityOnboardingInput, type FiscalEntitySummary, type FiscalProvider } from '../../services/fiscalOnboardingService'
 
 type SuperAdminPageProps = {
   context: TenantContext
@@ -46,6 +47,7 @@ const dateFormatter = new Intl.DateTimeFormat('es-ES', {
 type TenantModalState =
   | { mode: 'create' }
   | { mode: 'details' | 'edit'; tenant: PlatformTenant }
+  | { mode: 'fiscal'; tenant: PlatformTenant }
   | null
 
 type SuperAdminModalProps = {
@@ -92,6 +94,17 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [editingMaxVenues, setEditingMaxVenues] = useState(1)
   const [editingMaxDevices, setEditingMaxDevices] = useState(5)
   const [editingTenantFeatures, setEditingTenantFeatures] = useState<PlatformTenantFeature[]>([])
+  const [fiscalEntities, setFiscalEntities] = useState<FiscalEntitySummary[]>([])
+  const [fiscalLegalName, setFiscalLegalName] = useState('')
+  const [fiscalTaxId, setFiscalTaxId] = useState('')
+  const [fiscalAddress, setFiscalAddress] = useState('')
+  const [fiscalPostalCode, setFiscalPostalCode] = useState('')
+  const [fiscalCity, setFiscalCity] = useState('')
+  const [fiscalCountryCode, setFiscalCountryCode] = useState('ES')
+  const [fiscalVenueIds, setFiscalVenueIds] = useState<string[]>([])
+  const [fiscalNewEntityOpen, setFiscalNewEntityOpen] = useState(false)
+  const [fiscalProvider, setFiscalProvider] = useState<FiscalProvider>('odoo')
+  const [fiscalConfigEntity, setFiscalConfigEntity] = useState<FiscalEntitySummary | null>(null)
 
   const refresh = useCallback(async () => {
     const platform = await loadPlatformTenants()
@@ -166,6 +179,22 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
     setMaxVenues(1)
     setMaxDevices(5)
     setTenantModal({ mode: 'create' })
+  }
+
+  async function openFiscalModal(tenant: PlatformTenant) {
+    setFiscalLegalName('')
+    setFiscalTaxId('')
+    setFiscalAddress('')
+    setFiscalPostalCode('')
+    setFiscalCity('')
+    setFiscalCountryCode('ES')
+    setFiscalVenueIds([])
+    setFiscalNewEntityOpen(false)
+    setFiscalConfigEntity(null)
+    setFiscalProvider('odoo')
+    setFiscalEntities([])
+    setTenantModal({ mode: 'fiscal', tenant })
+    await runAction(async () => setFiscalEntities(await loadSuperadminFiscalEntities(tenant.id)))
   }
 
   function openEditModal(tenant: PlatformTenant) {
@@ -339,7 +368,8 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
                     <td className="!w-[100px] !px-3 !py-3" data-sort-value={new Date(tenant.createdAt).getTime()}>{dateFormatter.format(new Date(tenant.createdAt))}</td>
                     <td className="!w-[200px] !px-[22px] !py-3"><div className="!flex !items-center !justify-end !gap-1.5">
                       <UiButton aria-label={`Ver detalles de ${tenant.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-secondary)]" onClick={() => setTenantModal({ mode: 'details', tenant })} title="Ver detalles" type="button"><Eye className="!size-4" /></UiButton>
-                      <UiButton aria-label={`Editar ${tenant.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-secondary)]" disabled={!isOnline || isBusy} onClick={() => openEditModal(tenant)} title="Editar" type="button"><Pencil className="!size-4" /></UiButton>
+                                             <UiButton aria-label={`Fiscalidad de ${tenant.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-secondary)]" disabled={!isOnline || isBusy} onClick={() => void openFiscalModal(tenant)} title="Fiscalidad" type="button"><Store className="!size-4" /></UiButton>
+                       <UiButton aria-label={`Editar ${tenant.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-secondary)]" disabled={!isOnline || isBusy} onClick={() => openEditModal(tenant)} title="Editar" type="button"><Pencil className="!size-4" /></UiButton>
                       <UiButton aria-label={`${tenant.isActive ? 'Desactivar' : 'Activar'} ${tenant.name}`} className={tenant.isActive ? 'inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-yellow-soft)] !p-0 !text-[var(--crm-yellow)]' : 'inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-green-soft)] !p-0 !text-[var(--crm-green)]'} disabled={!isOnline || isBusy} onClick={() => void toggleTenant(tenant)} title={tenant.isActive ? 'Desactivar' : 'Activar'} type="button"><Power className="!size-4" /></UiButton>
                       <UiButton aria-label={`Eliminar ${tenant.name}`} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95 !inline-flex !size-9 !min-h-9 !min-w-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-red-soft)] !p-0 !text-[var(--crm-red)]" disabled={!isOnline || isBusy} onClick={() => void removeTenant(tenant)} title="Eliminar" type="button"><Trash2 className="!size-4" /></UiButton>
                     </div></td>
@@ -431,6 +461,22 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
               <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={isBusy || !editingTenantName.trim() || !editingTenantSlug} type="submit"><Pencil className="!size-4" />Guardar cambios</UiButton>
             </div>
           </form>
+        </SuperAdminModal>
+      ) : null}
+
+      {tenantModal?.mode === 'fiscal' ? (
+        <SuperAdminModal label={`Fiscalidad de ${tenantModal.tenant.name}`} onClose={() => setTenantModal(null)} size="large">
+          <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4"><div><h2 className="!m-0 !text-lg !font-bold">Fiscalidad</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Entidades fiscales y locales asociados.</p></div><UiButton aria-label="Cerrar" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton></div>
+          <div className="!grid !min-h-0 !gap-5 !overflow-y-auto !px-5 !py-5 sm:!px-6">
+            {fiscalEntities.map((entity) => <div className="!grid !gap-3 !rounded-[12px] !border !border-[var(--crm-border)] !bg-[var(--crm-surface-soft)] !p-4" key={entity.id}><div className="!flex !items-start !justify-between !gap-3"><div><strong className="!block !text-sm">{entity.legalName}</strong><span className="!text-xs !text-[var(--crm-text-muted)]">NIF: {entity.taxId}</span></div><span className="!text-xs !font-semibold">{entity.provisioningStatus === 'ready' ? 'Ready' : entity.provisioningStatus}</span></div><div className="!grid !gap-1 !text-xs !text-[var(--crm-text-secondary)]"><span>Proveedor: {entity.provider === 'odoo' ? 'Odoo' : 'Verifacti'}</span><span>Locales: {entity.venueNames.join(', ') || 'Sin locales'}</span>{entity.provisioningError ? <span className="!text-[var(--crm-danger)]">{entity.provisioningError}</span> : null}</div><div className="!flex !flex-wrap !gap-2">{entity.provider !== 'odoo' ? <UiButton disabled={isBusy} onClick={() => { setFiscalConfigEntity(entity); setFiscalProvider('odoo') }} type="button">Migrar a Odoo</UiButton> : null}{entity.provisioningStatus === 'error' ? <UiButton disabled={isBusy} onClick={() => void runAction(async () => { const retried = await retrySuperadminFiscalEntity(tenantModal.tenant.id, entity.id); setFiscalEntities((current) => current.map((item) => item.id === entity.id ? retried : item)) })} type="button">Reintentar</UiButton> : null}</div></div>)}
+            <div className="!border-t !border-[var(--crm-border)] !pt-4"><UiButton disabled={isBusy} onClick={() => setFiscalNewEntityOpen((open) => !open)} type="button"><Plus className="!size-4" />Nueva entidad fiscal</UiButton></div>
+            {fiscalConfigEntity ? <div className="!grid !gap-3 !rounded-[12px] !border !border-[var(--crm-border)] !p-4"><h3 className="!m-0 !text-sm !font-bold">Configurar proveedor</h3><p className="!m-0 !text-xs">Empresa: {fiscalConfigEntity.legalName} · NIF: {fiscalConfigEntity.taxId}</p><p className="!m-0 !text-xs">Locales: {fiscalConfigEntity.venueNames.join(', ') || 'Sin locales'}</p><label className="!grid !gap-1 !text-xs !font-semibold">Proveedor fiscal<select className={inputClassName} value={fiscalProvider} onChange={(event) => setFiscalProvider(event.target.value as FiscalProvider)}><option value="verifacti">Verifacti</option><option value="odoo">Odoo</option></select></label><div className="!flex !gap-2"><UiButton disabled={isBusy} onClick={() => void runAction(async () => { const updated = await configureSuperadminFiscalEntity(tenantModal.tenant.id, fiscalConfigEntity.id, fiscalProvider); setFiscalEntities((current) => current.map((item) => item.id === updated.id ? { ...item, ...updated } : item)); setFiscalConfigEntity(null) })} type="button">{fiscalProvider === 'odoo' ? 'Provisionar en Odoo' : 'Configurar Verifacti'}</UiButton><UiButton onClick={() => setFiscalConfigEntity(null)} type="button">Cancelar</UiButton></div></div> : null}
+            {fiscalNewEntityOpen ? <form className="!grid !grid-cols-1 !gap-3 !rounded-[12px] !border !border-[var(--crm-border)] !p-4 sm:!grid-cols-2" onSubmit={(event) => { event.preventDefault(); const input: FiscalEntityOnboardingInput = { tenantId: tenantModal.tenant.id, legalName: fiscalLegalName, taxId: fiscalTaxId, address: fiscalAddress, postalCode: fiscalPostalCode, city: fiscalCity, countryCode: fiscalCountryCode, venueIds: fiscalVenueIds, provider: 'verifacti' }; void runAction(async () => { const created = await createSuperadminFiscalEntity(input); setFiscalEntities((current) => [created, ...current]); setFiscalNewEntityOpen(false); setSuccess('Entidad fiscal creada.') }) }}>
+              {[['Razón social', fiscalLegalName, setFiscalLegalName], ['NIF/CIF', fiscalTaxId, setFiscalTaxId], ['Dirección fiscal', fiscalAddress, setFiscalAddress], ['Código postal', fiscalPostalCode, setFiscalPostalCode], ['Ciudad', fiscalCity, setFiscalCity], ['País', fiscalCountryCode, setFiscalCountryCode]].map(([label, value, setter]) => <label className="block" key={String(label)}><span className="mb-1.5 block text-[11px] font-semibold text-[var(--crm-text-secondary)]">{String(label)}</span><UiInput className={inputClassName} disabled={isBusy} onChange={(event) => (setter as (value: string) => void)(event.target.value)} required value={String(value)} /></label>)}
+              <fieldset className="!col-span-full !grid !gap-2"><legend className="!text-sm !font-bold">Locales asociados</legend>{tenantModal.tenant.venues.map((venue) => <UiCheckbox checked={fiscalVenueIds.includes(venue.id)} key={venue.id} onChange={(checked) => setFiscalVenueIds((current) => checked ? [...current, venue.id] : current.filter((id) => id !== venue.id))}>{venue.name}</UiCheckbox>)}</fieldset>
+              <UiButton className="!col-span-full" disabled={isBusy || !fiscalVenueIds.length} type="submit">Crear entidad fiscal</UiButton>
+            </form> : null}
+          </div>
         </SuperAdminModal>
       ) : null}
 
