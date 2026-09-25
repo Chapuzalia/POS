@@ -8,6 +8,7 @@ export type NewMenuCourseDraft = {
   maxSelection: number
   options: Array<{
     productId: string
+    variantId: string | null
     supplementCents: number
   }>
 }
@@ -88,7 +89,7 @@ export function buildNewMenuBatch(input: {
     batch.push({ command: 'save_selection_group', payload: { id: groupId, name: course.name.trim(), type: 'menu_component', active: true, sortOrder: input.catalog.selectionGroups.length * 10 + courseIndex * 10 } })
     course.options.forEach((option, optionIndex) => batch.push({
       command: 'save_selection_option',
-      payload: { id: input.createId(), groupId, productId: option.productId, variantId: null, supplementCents: option.supplementCents, defaultQuantity: 0, maxQuantity: 1, active: true, sortOrder: optionIndex * 10 },
+      payload: { id: input.createId(), groupId, productId: option.productId, variantId: option.variantId, supplementCents: option.supplementCents, defaultQuantity: 0, maxQuantity: 1, active: true, sortOrder: optionIndex * 10 },
     }))
     batch.push({
       command: 'save_assignment',

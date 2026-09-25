@@ -121,6 +121,9 @@ export function CatalogMenuEditor({
   const [draftProductByCourse, setDraftProductByCourse] = useState<
     Record<string, string>
   >({});
+  const [draftVariantByCourse, setDraftVariantByCourse] = useState<
+    Record<string, string>
+  >({});
   const [draftSupplementByCourse, setDraftSupplementByCourse] = useState<
     Record<string, string>
   >({});
@@ -554,8 +557,12 @@ export function CatalogMenuEditor({
                   products={standardProducts}
                   setCourses={setDraftCourses}
                   setProductByCourse={setDraftProductByCourse}
+                  setVariantByCourse={setDraftVariantByCourse}
                   setSupplementByCourse={setDraftSupplementByCourse}
                   supplementByCourse={draftSupplementByCourse}
+                  variantByCourse={draftVariantByCourse}
+                  variants={catalog.variants}
+
                 />
               ) : (
                 <div className="grid gap-3">
@@ -780,7 +787,11 @@ function DraftCourseEditor({
   setCourses,
   setProductByCourse,
   setSupplementByCourse,
+  setVariantByCourse,
   supplementByCourse,
+  variantByCourse,
+  variants,
+
 }: {
   categoryOptions: CrmSelectFilterOption[];
   courses: NewMenuCourseDraft[];
@@ -791,15 +802,23 @@ function DraftCourseEditor({
   setCourses: Dispatch<SetStateAction<NewMenuCourseDraft[]>>;
   setProductByCourse: Dispatch<SetStateAction<Record<string, string>>>;
   setSupplementByCourse: Dispatch<SetStateAction<Record<string, string>>>;
+  setVariantByCourse: Dispatch<SetStateAction<Record<string, string>>>;
   supplementByCourse: Record<string, string>;
+  variantByCourse: Record<string, string>;
+  variants: CatalogData["variants"];
 }) {
   return (
     <div className="grid gap-3">
-      {courses.map((course, index) => (
-        <div
-          className="grid gap-3 rounded-xl border border-[var(--crm-border)] p-4"
-          key={course.id}
-        >
+      {courses.map((course, index) => {
+        const selectedProductId = productByCourse[course.id] ?? "";
+        const productVariants = variants.filter(
+          (variant) => variant.productId === selectedProductId && variant.active,
+        );
+        return (
+          <div
+            className="grid gap-3 rounded-xl border border-[var(--crm-border)] p-4"
+            key={course.id}
+          >
           <div className="flex items-center justify-between gap-3">
             <strong>Curso {index + 1}</strong>
             <UiButton
@@ -871,29 +890,45 @@ function DraftCourseEditor({
               value={course.maxSelection}
             />
           </div>
-          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_120px_auto]">
+          <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_minmax(180px,.7fr)_120px_auto]">
             <CrmSelect
               emptyMessage="No hay productos en esta categoría."
               filterOptions={categoryOptions}
               filterPlaceholder="Categorías"
-              onChange={(value) =>
+              onChange={(value) => {
                 setProductByCourse((current) => ({
+                  ...current,
+                  [course.id]: value,
+                }));
+                setVariantByCourse((current) => ({
+                  ...current,
+                  [course.id]: "",
+                }));
+              }}
+              options={productOptions}
+              placeholder="Añadir producto estándar"
+              searchable
+              searchPlaceholder="Buscar producto..."
+              value={selectedProductId}
+            />
+            <CrmSelect
+              onChange={(value) =>
+                setVariantByCourse((current) => ({
                   ...current,
                   [course.id]: value,
                 }))
               }
-              options={productOptions.filter(
-                (option) =>
-                  !course.options.some(
-                    (courseOption) => courseOption.productId === option.value,
-                  ),
-              )}
-              placeholder="Añadir producto estándar"
-              searchable
-              searchPlaceholder="Buscar producto..."
-              value={productByCourse[course.id] ?? ""}
+              options={[
+                { label: "Variante predeterminada", value: "" },
+                ...productVariants.map((variant) => ({
+                  label: variant.name,
+                  value: variant.id,
+                })),
+              ]}
+              value={variantByCourse[course.id] ?? ""}
             />
             <UiInput
+
               aria-label="Suplemento de la opción"
               className={inputClass}
               inputMode="decimal"
@@ -922,14 +957,24 @@ function DraftCourseEditor({
                 );
                 if (!productId || !Number.isSafeInteger(supplementCents))
                   return;
+                const variantId = variantByCourse[course.id] || null;
+                if (
+                  course.options.some(
+                    (option) =>
+                      option.productId === productId &&
+                      option.variantId === variantId,
+                  )
+                )
+                  return;
                 setCourses((current) =>
                   current.map((candidate) =>
+
                     candidate.id === course.id
                       ? {
                           ...candidate,
                           options: [
                             ...candidate.options,
-                            { productId, supplementCents },
+                            { productId, variantId, supplementCents },
                           ],
                         }
                       : candidate,
@@ -939,10 +984,15 @@ function DraftCourseEditor({
                   ...current,
                   [course.id]: "",
                 }));
+                setVariantByCourse((current) => ({
+                  ...current,
+                  [course.id]: "",
+                }));
                 setSupplementByCourse((current) => ({
                   ...current,
                   [course.id]: "0,00",
                 }));
+
               }}
               type="button"
             >
@@ -953,13 +1003,18 @@ function DraftCourseEditor({
             {course.options.map((option) => (
               <span
                 className="inline-flex items-center gap-2 rounded-full bg-[var(--crm-blue-soft)] px-3 py-1.5 text-xs font-semibold text-[var(--crm-blue)]"
-                key={option.productId}
+                key={`${option.productId}:${option.variantId ?? "default"}`}
               >
                 {
                   products.find((product) => product.id === option.productId)
                     ?.name
                 }
+
+                {option.variantId
+                  ? ` · ${variants.find((variant) => variant.id === option.variantId)?.name ?? "Variante"}`
+                  : " · Variante predeterminada"}
                 {option.supplementCents
+
                   ? ` · ${option.supplementCents > 0 ? "+" : ""}${formatMoney(option.supplementCents)}`
                   : " · Incluido"}
                 <button
@@ -971,8 +1026,10 @@ function DraftCourseEditor({
                           ? {
                               ...candidate,
                               options: candidate.options.filter(
-                                (courseOption) =>
-                                  courseOption.productId !== option.productId,
+                                 (courseOption) =>
+                                   courseOption.productId !== option.productId ||
+                                   courseOption.variantId !== option.variantId,
+
                               ),
                             }
                           : candidate,
@@ -987,7 +1044,8 @@ function DraftCourseEditor({
             ))}
           </div>
         </div>
-      ))}
+        );
+      })}
       <UiButton
         className={`${secondaryButton} w-fit`}
         disabled={disabled}
