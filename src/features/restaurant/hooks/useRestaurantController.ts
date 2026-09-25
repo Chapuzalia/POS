@@ -1124,18 +1124,28 @@ export function useRestaurantController(options: Options) {
     const authoritativeByKey = new Map(authoritative.entries.map((entry) => [`${entry.lineId}:${entry.componentId ?? ''}`, entry]))
     const reconciledSelection = selection?.flatMap((entry) => {
       const serverEntry = authoritativeByKey.get(`${entry.lineId}:${entry.componentId ?? ''}`)
-      if (!serverEntry) return []
+      if (!serverEntry?.hasProductionDestination) return []
       return [{ ...entry, quantity: Math.min(entry.quantity, serverEntry.unsentQuantity), passId: serverEntry.passId, passName: serverEntry.passName }]
     }).filter((entry) => entry.quantity > 0)
-    if (selection && reconciledSelection?.length === 0) {
+    const routableEntries = authoritative.entries
+      .filter((entry) => entry.hasProductionDestination && entry.unsentQuantity > 0)
+      .map((entry) => ({
+        lineId: entry.lineId,
+        componentId: entry.componentId,
+        quantity: entry.unsentQuantity,
+        passId: entry.passId,
+        passName: entry.passName,
+      }))
+    const effectiveSelection = selection ? (reconciledSelection ?? []) : routableEntries
+    if (effectiveSelection.length === 0) {
       setProductionState(authoritative)
       return
     }
-    const selections = reconciledSelection ? [...reconciledSelection.reduce((groups, entry) => {
+    const selections = [...effectiveSelection.reduce((groups, entry) => {
       const passId = entry.passId ?? ''
       groups.set(passId, [...(groups.get(passId) ?? []), entry])
       return groups
-    }, new Map<string, ProductionSelection[]>()).values()] : [undefined]
+    }, new Map<string, ProductionSelection[]>()).values()]
     for (const reconciledPassSelection of selections) {
       await sendProductionBatch({
         orderId: saved.order.id,

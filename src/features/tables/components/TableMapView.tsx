@@ -1198,7 +1198,7 @@ export function TableMapView(props: Props) {
       ) : null}
       {pendingIds ? (
         <AppModal containerClassName={mobileLayout ? "!p-0" : "!p-4"} dialogClassName={mobileLayout ? "!rounded-b-none !rounded-t-[20px] !border-x-0 !border-b-0" : ""} maxWidth={448} dismissDisabled={isBusy} label="Abrir mesa" onClose={() => setPendingIds(null)} placement={mobileLayout ? "bottom" : "center"}>
-          <section className={`w-full  max-w-[440px] bg-[var(--surface)] text-[var(--foreground)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 ${mobileLayout ? "rounded-t-[20px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5" : "rounded-[var(--radius)] border border-[var(--separator)] p-6 shadow-[var(--shadow)]"}`}>
+           <section className={`w-full max-w-[440px] bg-[var(--surface)] text-[var(--foreground)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 ${mobileLayout ? "max-h-[calc(100dvh-24px)] overflow-y-auto rounded-t-[20px] px-4 pb-[max(1rem,env(safe-area-inset-bottom))] pt-5" : "rounded-[var(--radius)] border border-[var(--separator)] p-6 shadow-[var(--shadow)]"}`}>
             <h2 className="font-extrabold">
               {pendingIds.length > 1
                 ? `Abrir ${pendingIds.length} mesas juntas`
@@ -1224,7 +1224,7 @@ export function TableMapView(props: Props) {
             <label className="!font-normal">
               Número de comensales
               <UiInput
-                autoFocus
+                autoFocus={!mobileLayout}
                 min="1"
                 onChange={(event) => setGuestCount(event.target.value)}
                 type="number"

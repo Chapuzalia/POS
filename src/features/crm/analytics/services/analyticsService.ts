@@ -481,7 +481,7 @@ export async function loadCrmStats(
 
 export function subscribeToCrmStatsChanges(
   context: TenantContext,
-  venueId: string,
+  _venueId: string,
   onCashSessionChange: () => void,
   onSaleChange: () => void,
   onStatus?: (status: string, error?: Error) => void,
@@ -493,10 +493,10 @@ export function subscribeToCrmStatsChanges(
   }
 
   const channel = client
-    .channel(`crm-open-cash:${context.tenantId}:${venueId}`)
+    .channel(`crm-open-cash:${context.tenantId}`)
     .on(
       'postgres_changes',
-      { event: '*', schema: 'public', table: 'cash_sessions', filter: `venue_id=eq.${venueId}` },
+      { event: '*', schema: 'public', table: 'cash_sessions' },
       (payload) => {
         const session = (Object.keys(payload.new).length ? payload.new : payload.old) as { tenant_id?: string }
         if (session.tenant_id === context.tenantId) onCashSessionChange()
@@ -504,7 +504,7 @@ export function subscribeToCrmStatsChanges(
     )
     .on(
       'postgres_changes',
-      { event: 'INSERT', schema: 'public', table: 'sales', filter: `venue_id=eq.${venueId}` },
+      { event: 'INSERT', schema: 'public', table: 'sales' },
       (payload) => {
         const sale = payload.new as { tenant_id?: string }
         if (sale.tenant_id === context.tenantId) onSaleChange()

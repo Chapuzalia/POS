@@ -12,6 +12,16 @@ const productionService = read('../src/features/production/service.ts')
 const restaurantController = read('../src/features/restaurant/hooks/useRestaurantController.ts')
 const kds = read('../src/features/production/components/KdsPage.tsx')
 const crm = read('../src/features/crm/production/pages/ProductionPage.tsx')
+const adminService = read('../src/features/crm/production/services/productionAdminService.ts')
+const defaultPassMigration = read('../supabase/migrations/20260923130000_set_default_production_pass.sql')
+
+test('CRM can select the default pass while preserving the first-active fallback contract', () => {
+  assert.match(crm, /Por defecto/)
+  assert.match(crm, /setDefaultProductionPass/)
+  assert.match(adminService, /set_default_production_pass/)
+  assert.match(defaultPassMigration, /row_number\(\) over/)
+  assert.match(defaultPassMigration, /pass\.id = p_pass_id/)
+})
 
 test('passes persist venue configuration and product-over-category fallback', () => {
   assert.match(migration, /create table public\.production_passes/)
