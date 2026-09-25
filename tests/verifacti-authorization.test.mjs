@@ -5,6 +5,9 @@ import test from 'node:test'
 import { authorizeSuperadmin } from '../supabase/functions/_shared/verifacti/authorization.ts'
 
 const source = await readFile(new URL('../supabase/functions/verifacti-api/index.ts', import.meta.url), 'utf8')
+const venueAssignmentMigration = await readFile(new URL('../supabase/migrations/20260925100000_add_fiscal_entity_venue_assignment_rpc.sql', import.meta.url), 'utf8')
+const fiscalOnboardingService = await readFile(new URL('../src/services/fiscalOnboardingService.ts', import.meta.url), 'utf8')
+const superadminPage = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
 
 test('superadmin valido autorizado por profiles.is_superadmin', () => {
   assert.deepEqual(authorizeSuperadmin('user-1', null, { is_superadmin: true }, null), {
@@ -44,8 +47,23 @@ test('la migracion reutiliza entidades y bloquea NIF duplicados normalizados', (
   assert.doesNotMatch(source, /fiscal_entity_venues.*delete/s)
 })
 
-test('el cutover Odoo actualiza la misma entidad', () => {
+test('el cutover Odoo actualiza la misma entidad y devuelve sus asociaciones', () => {
   assert.match(source, /update\(\{ integration_provider: 'odoo'/)
   assert.match(source, /provider_entity_ref: ref/)
   assert.match(source, /fiscal_documents/)
+  assert.match(source, /loadSuperadminFiscalEntitySummary\(admin, tenantId, entityId\)/)
+  assert.match(source, /venueNames: venueIds\.map/)
+  assert.doesNotMatch(source, /if \(action === 'superadmin-configure-fiscal-entity'[\s\S]*fiscal_entity_venues'\)\.delete/)
+})
+
+test('Superadmin puede editar locales y el backend valida el tenant y asociaciones únicas', () => {
+  assert.match(fiscalOnboardingService, /superadmin-update-fiscal-entity-venues/)
+  assert.match(superadminPage, /Editar locales/)
+  assert.match(superadminPage, /updateSuperadminFiscalEntityVenues/)
+  assert.match(venueAssignmentMigration, /v\.tenant_id = p_tenant_id/)
+  assert.match(venueAssignmentMigration, /create function public\.superadmin_update_fiscal_entity_venues/)
+  assert.match(venueAssignmentMigration, /auth\.role\(\) <> 'service_role'/)
+  assert.match(venueAssignmentMigration, /FISCAL_ENTITY_VENUE_ALREADY_ASSIGNED/)
+  assert.match(venueAssignmentMigration, /delete from public\.fiscal_entity_venues/)
+  assert.match(venueAssignmentMigration, /insert into public\.fiscal_entity_venues/)
 })

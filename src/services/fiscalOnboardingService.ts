@@ -60,6 +60,15 @@ export async function configureSuperadminFiscalEntity(tenantId: string, entityId
   return data.entity
 }
 
+export async function updateSuperadminFiscalEntityVenues(tenantId: string, entityId: string, venueIds: string[]) {
+  const { data, error } = await client().functions.invoke<{ entity?: FiscalEntitySummary; error?: string }>('verifacti-api', {
+    body: { action: 'superadmin-update-fiscal-entity-venues', tenantId, entityId, venueIds },
+  })
+  const message = data?.error
+  if (error || message || !data?.entity) throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudieron actualizar los locales de la entidad fiscal.'))
+  return data.entity
+}
+
 export async function retrySuperadminFiscalEntity(tenantId: string, entityId: string) {
   return configureSuperadminFiscalEntity(tenantId, entityId, 'odoo')
 }

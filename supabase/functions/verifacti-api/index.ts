@@ -544,10 +544,34 @@ Deno.serve(async (request) => {
        if ((validVenues ?? []).length !== venueIds.length) return json({ error: 'Uno o más locales no pertenecen al negocio' }, 400)
        const { error: assignmentError } = await admin.from('fiscal_entity_venues').insert(venueIds.map((venueId) => ({ tenant_id: tenantId, fiscal_entity_id: created.id, venue_id: venueId })))
        if (assignmentError) throw assignmentError
-       return json({ entity: { id: created.id, legalName: created.legal_name, taxId: created.tax_id, provider: 'verifacti', provisioningStatus: 'ready', provisioningError: null, odooCompanyId: null, venueIds: venueIds, venueNames: [] } })
+        const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, created.id)
+        if (!summary) throw new Error('No se pudo cargar la entidad fiscal creada')
+        return json({ entity: summary })
      }
 
-     if (action === 'superadmin-configure-fiscal-entity' || action === 'superadmin-retry-fiscal-entity' || action === 'provision-odoo-fiscal-entity') {
+      if (action === 'superadmin-update-fiscal-entity-venues') {
+        if (!isSuperadmin) return json({ error: 'Solo un superadmin puede editar los locales de entidades fiscales' }, 403)
+        const entityId = String(body.entityId ?? '')
+        const venueIds = Array.isArray(body.venueIds) ? [...new Set(body.venueIds.filter((value): value is string => typeof value === 'string' && value.length > 0))] : []
+        if (!venueIds.length) return json({ error: 'Selecciona al menos un local' }, 400)
+        const { data: entity, error: entityError } = await admin.from('fiscal_entities').select('id').eq('tenant_id', tenantId).eq('id', entityId).maybeSingle()
+        if (entityError) throw entityError
+        if (!entity) return json({ error: 'Entidad fiscal no encontrada' }, 404)
+        const { data: validVenues, error: venuesError } = await admin.from('venues').select('id').eq('tenant_id', tenantId).in('id', venueIds)
+        if (venuesError) throw venuesError
+        if ((validVenues ?? []).length !== venueIds.length) return json({ error: 'Uno o más locales no pertenecen al negocio' }, 400)
+        const { error: assignmentError } = await admin.rpc('superadmin_update_fiscal_entity_venues', { p_tenant_id: tenantId, p_fiscal_entity_id: entityId, p_venue_ids: venueIds })
+        if (assignmentError) {
+          if (assignmentError.code === '23505') return json({ error: 'Uno o más locales ya están asociados a otra entidad fiscal activa' }, 409)
+          if (assignmentError.code === '22023') return json({ error: 'Uno o más locales no pertenecen al negocio' }, 400)
+          throw assignmentError
+        }
+        const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, entityId)
+        if (!summary) throw new Error('No se pudo cargar la entidad fiscal actualizada')
+        return json({ entity: summary })
+      }
+
+      if (action === 'superadmin-configure-fiscal-entity' || action === 'superadmin-retry-fiscal-entity' || action === 'provision-odoo-fiscal-entity') {
       if (!isSuperadmin) return json({ error: 'Solo un superadmin puede provisionar entidades fiscales' }, 403)
        const entityId = String(body.entityId ?? '')
        const entity = await admin.from('fiscal_entities').select('*').eq('tenant_id', tenantId).eq('id', entityId).maybeSingle()
@@ -557,9 +581,9 @@ Deno.serve(async (request) => {
        if (requestedProvider !== 'odoo') {
          const { data: updated, error: updateError } = await admin.from('fiscal_entities').update({ integration_provider: 'verifacti', provisioning_status: 'ready', provisioning_error: null, updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', entityId).select('id, legal_name, tax_id, integration_provider, provisioning_status, provisioning_error, odoo_company_id').single()
          if (updateError || !updated) throw updateError ?? new Error('No se pudo configurar Verifacti')
-         const assignments = await admin.from('fiscal_entity_venues').select('venue_id').eq('tenant_id', tenantId).eq('fiscal_entity_id', entityId)
-         if (assignments.error) throw assignments.error
-         return json({ entity: { id: updated.id, legalName: updated.legal_name, taxId: updated.tax_id, provider: updated.integration_provider, provisioningStatus: updated.provisioning_status, provisioningError: updated.provisioning_error, odooCompanyId: updated.odoo_company_id, venueIds: (assignments.data ?? []).map((item) => item.venue_id), venueNames: [] } })
+          const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, updated.id)
+          if (!summary) throw new Error('No se pudo cargar la entidad fiscal configurada')
+          return json({ entity: summary })
        }
        const existingAssignments = await admin.from('fiscal_entity_venues').select('venue_id').eq('tenant_id', tenantId).eq('fiscal_entity_id', entityId)
       if (existingAssignments.error) throw existingAssignments.error
@@ -588,7 +612,9 @@ Deno.serve(async (request) => {
           const { error: assignmentError } = await admin.from('fiscal_entity_venues').insert(venues.map((venueId) => ({ tenant_id: tenantId, fiscal_entity_id: entityId, venue_id: venueId })))
           if (assignmentError) throw assignmentError
         }
-        return json({ entity: { id: entityId, legalName: entity.data.legal_name, taxId: entity.data.tax_id, provider: 'odoo', provisioningStatus: 'ready', provisioningError: null, odooCompanyId: typeof result.odoo_company_id === 'number' ? result.odoo_company_id : null, venueIds: venues, venueNames: [] } })
+        const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, entityId)
+        if (!summary) throw new Error('No se pudo cargar la entidad fiscal configurada')
+        return json({ entity: summary })
       } catch (provisioningError) {
         const message = provisioningError instanceof Error ? provisioningError.message : 'No se pudo configurar Odoo'
         await admin.from('fiscal_entities').update({ provisioning_status: 'error', provisioning_error: message.slice(0, 500), updated_at: new Date().toISOString() }).eq('id', entityId).eq('tenant_id', tenantId)
