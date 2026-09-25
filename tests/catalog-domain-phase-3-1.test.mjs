@@ -6,6 +6,7 @@ import { CatalogRepository } from '../src/features/catalog/data/repository.ts'
 import { CatalogDomainError } from '../src/features/catalog/domain/errors.ts'
 import { calculateCatalogPrice } from '../src/features/catalog/domain/pricing.ts'
 import { normalizeCatalogSnapshot } from '../src/features/catalog/services/catalogSnapshots.ts'
+import { buildNewMenuBatch } from '../src/features/crm/catalog/services/menuEditorModel.ts'
 import {
   getCategoriesForTab,
   resolveCatalogItem,
@@ -239,6 +240,45 @@ test('prepara creación completa, cambio de default, reordenación y asignacione
   await commands.reorder(venue, { entity: 'products', items: [{ id: 'product-1', sortOrder: 10 }] })
   await commands.saveAssignment(venue, { domain: 'selection', productId: 'product-1', groupId: 'group-1', minSelection: 0, maxSelection: 1, appliesToAllVariants: true, variantIds: [], sortOrder: 0 })
   assert.deepEqual(commandsSeen.map(([command]) => command), ['create_product', 'set_default_variant', 'reorder', 'save_assignment'])
+})
+
+test('crea el menú inactivo, conserva variantes de componentes y lo publica al final', () => {
+  const catalog = catalogFixture({
+    saleFormats: [row('format-1', { name: 'Menú', inventoryConsumptionQuantity: null, inventoryConsumptionUnitId: null })],
+    selectionGroups: [row('existing-group', { name: 'Existente', type: 'menu_component' })],
+  })
+  const plan = buildNewMenuBatch({
+    catalog,
+    productId: 'menu-1',
+    variantId: 'menu-variant-1',
+    formatId: 'format-1',
+    name: 'Menú diario',
+    description: '',
+    priceCents: 1500,
+    vatRate: 10,
+    tabId: 'tab-1',
+    categoryId: 'category-1',
+    courses: [{
+      id: 'course-1',
+      name: 'Principal',
+      minSelection: 1,
+      maxSelection: 1,
+      options: [
+        { productId: 'product-1', variantId: null, supplementCents: 0 },
+        { productId: 'product-1', variantId: 'variant-1', supplementCents: 125 },
+      ],
+    }],
+    createId: (() => { let id = 0; return () => `created-${++id}` })(),
+  })
+  assert.equal(plan.batch[0].command, 'create_product')
+  assert.equal(plan.batch[0].payload.active, false)
+  const options = plan.batch.filter((entry) => entry.command === 'save_selection_option')
+  assert.deepEqual(options.map((entry) => entry.payload.variantId), [null, 'variant-1'])
+  const assignmentIndex = plan.batch.findIndex((entry) => entry.command === 'save_assignment')
+  const publicationIndex = plan.batch.findIndex((entry) => entry.command === 'set_product_active')
+  assert.ok(assignmentIndex > 0)
+  assert.ok(publicationIndex > assignmentIndex)
+  assert.deepEqual(plan.batch[publicationIndex].payload, { id: 'menu-1', active: true })
 })
 
 test('los snapshots históricos sobreviven sin consultar el producto vivo', () => {
