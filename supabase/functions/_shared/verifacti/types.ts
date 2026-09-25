@@ -9,6 +9,7 @@ export type CommercialFiscalDocument = {
   externalId: string
   idempotencyKey: string
   fiscalEntityRef: string
+  venueRef: string
   operationTimestamp: string
   kind: FiscalDocumentKind
   lines: CommercialFiscalLine[]
@@ -28,10 +29,11 @@ export type CommercialFiscalLine = {
 
 export type FiscalCustomer = {
   name: string
-  taxId?: string
-  address?: string
-  postalCode?: string
-  countryCode?: string
+  vat: string
+  street: string
+  zip: string
+  city: string
+  country_code: 'ES'
 }
 
 export type NormalizedFiscalStatus = FiscalStatus | 'generated'
@@ -45,6 +47,13 @@ export type NormalizedFiscalResult = {
   qrPayload?: string | false
   qrUrl?: string | false
   error?: { code?: string; message: string; retryable: boolean }
+}
+
+export class FiscalDocumentValidationError extends Error {
+  constructor(message: string) {
+    super(message)
+    this.name = 'FiscalDocumentValidationError'
+  }
 }
 
 export class FiscalTotalDiscrepancyError extends Error {

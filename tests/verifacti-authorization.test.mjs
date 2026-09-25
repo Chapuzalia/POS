@@ -6,6 +6,7 @@ import { authorizeSuperadmin } from '../supabase/functions/_shared/verifacti/aut
 
 const source = await readFile(new URL('../supabase/functions/verifacti-api/index.ts', import.meta.url), 'utf8')
 const venueAssignmentMigration = await readFile(new URL('../supabase/migrations/20260925100000_add_fiscal_entity_venue_assignment_rpc.sql', import.meta.url), 'utf8')
+const venueSeriesPreservationMigration = await readFile(new URL('../supabase/migrations/20260925130000_preserve_fiscal_venue_series_on_assignment.sql', import.meta.url), 'utf8')
 const fiscalOnboardingService = await readFile(new URL('../src/services/fiscalOnboardingService.ts', import.meta.url), 'utf8')
 const superadminPage = await readFile(new URL('../src/components/superadmin/SuperAdminPage.tsx', import.meta.url), 'utf8')
 
@@ -66,4 +67,34 @@ test('Superadmin puede editar locales y el backend valida el tenant y asociacion
   assert.match(venueAssignmentMigration, /FISCAL_ENTITY_VENUE_ALREADY_ASSIGNED/)
   assert.match(venueAssignmentMigration, /delete from public\.fiscal_entity_venues/)
   assert.match(venueAssignmentMigration, /insert into public\.fiscal_entity_venues/)
+})
+
+test('editar locales de una entidad Odoo ready sincroniza el conjunto completo desde backend', () => {
+  assert.match(source, /if \(entity\.integration_provider === 'odoo'\)/)
+  assert.match(source, /await syncOdooFiscalEntity\(admin, env, tenantId, entityId\)/)
+  assert.match(source, /const fiscalVenues = await fiscalVenueProvisioningPayload\(admin, tenantId, entityId, venueIds\)/)
+  assert.match(source, /venues: fiscalVenues/)
+  assert.match(source, /provider_entity_ref: ref/)
+  assert.match(source, /provisioning_status: 'provisioning'/)
+  assert.match(source, /provisioning_status: 'ready'/)
+})
+
+test('el payload Odoo usa IDs y datos recargados del servidor con series persistidas', () => {
+  assert.match(source, /select\('venue_id, fiscal_series_code'\)/)
+  assert.match(source, /select\('id, name'\)\.eq\('tenant_id', tenantId\)\.in\('id', venueIds\)/)
+  assert.match(source, /venue_ref: venue\.id, name: venue\.name, series_code: seriesCode/)
+  assert.match(source, /update\(\{ fiscal_series_code: update\.fiscal_series_code \}\)/)
+  assert.match(source, /if \(!seriesCode\)/)
+})
+
+test('las asociaciones existentes preservan su serie y los locales quitados se eliminan', () => {
+  assert.match(venueSeriesPreservationMigration, /venue_id <> all\(p_venue_ids\)/)
+  assert.match(venueSeriesPreservationMigration, /where not exists \(/)
+  assert.match(venueSeriesPreservationMigration, /existing\.venue_id = requested\.venue_id/)
+})
+
+test('un fallo Odoo deja estado recuperable y no devuelve éxito al frontend', () => {
+  assert.match(source, /provisioning_status: 'error'/)
+  assert.match(source, /Los locales se guardaron en Tickit, pero no se pudieron sincronizar con Odoo/)
+  assert.match(source, /Odoo fiscal venue sync failed/)
 })

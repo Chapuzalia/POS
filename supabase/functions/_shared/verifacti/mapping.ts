@@ -1,3 +1,4 @@
+import { FiscalDocumentValidationError } from './types.ts'
 import type {
   CommercialFiscalDocument,
   FiscalInvoiceRow,
@@ -76,6 +77,35 @@ function readRecipient(documentData: Record<string, unknown>) {
   return value && typeof value === 'object' ? value as FiscalRecipient : null
 }
 
+function snapshotCustomer(invoice: FiscalInvoiceRow): Record<string, unknown> | null {
+  const legacySnapshot = invoice.document_data.customerSnapshot
+  if (legacySnapshot && typeof legacySnapshot === 'object') return legacySnapshot as Record<string, unknown>
+  const snapshot = invoice.document_data.snapshot
+  if (!snapshot || typeof snapshot !== 'object') return null
+  const ticket = (snapshot as Record<string, unknown>).ticket
+  if (!ticket || typeof ticket !== 'object') return null
+  const customer = (ticket as Record<string, unknown>).customer_snapshot
+  return customer && typeof customer === 'object' ? customer as Record<string, unknown> : null
+}
+
+function mapOdooCustomer(invoice: FiscalInvoiceRow) {
+  const snapshot = snapshotCustomer(invoice)
+  if (!snapshot) throw new FiscalDocumentValidationError('La factura completa necesita un snapshot fiscal de cliente')
+  const name = typeof snapshot.legalName === 'string' ? snapshot.legalName.trim() : ''
+  const vat = typeof snapshot.taxId === 'string' ? snapshot.taxId.trim() : ''
+  const street = typeof snapshot.address === 'string' ? snapshot.address.trim() : ''
+  const zip = typeof snapshot.postalCode === 'string' ? snapshot.postalCode.trim() : ''
+  const city = typeof snapshot.city === 'string' ? snapshot.city.trim() : ''
+  const country = typeof snapshot.country === 'string' ? snapshot.country.trim().toLocaleLowerCase('es-ES') : ''
+  if (!name || !vat || !street || !zip || !city || !country) {
+    throw new FiscalDocumentValidationError('La factura completa necesita un snapshot fiscal de cliente con nombre, NIF, direccion, codigo postal, ciudad y pais')
+  }
+  if (country !== 'es' && country !== 'espana' && country !== 'españa') {
+    throw new FiscalDocumentValidationError('El bridge Odoo solo admite clientes fiscales con pais ES')
+  }
+  return { name, vat, street, zip, city, country_code: 'ES' as const }
+}
+
 function description(invoice: FiscalInvoiceRow, ticket: FiscalTicket, maxLength: number) {
   const configured = typeof invoice.document_data.descripcion === 'string'
     ? invoice.document_data.descripcion.trim()
@@ -104,8 +134,10 @@ export function mapCommercialFiscalDocument(invoice: FiscalInvoiceRow, ticket: F
     externalId: invoice.id,
     idempotencyKey: invoice.idempotency_key,
     fiscalEntityRef,
+    venueRef: ticket.venue_id,
     operationTimestamp: ticket.local_created_at,
     kind: invoice.invoice_type === 'normal' ? 'full' : invoice.invoice_type,
+
     expectedTotalCents: ticket.total_cents,
     lines: ticket.ticket_lines.map((line) => {
       if (line.taxable_base_cents === null || line.tax_amount_cents === null || line.tax_rate === null) {
@@ -123,20 +155,7 @@ export function mapCommercialFiscalDocument(invoice: FiscalInvoiceRow, ticket: F
         taxSnapshot: { taxableBaseCents: line.taxable_base_cents, taxCents: line.tax_amount_cents },
       }
     }),
-    ...(invoice.document_data.recipient && typeof invoice.document_data.recipient === 'object'
-      ? (() => {
-          const recipient = invoice.document_data.recipient as Record<string, unknown>
-          return {
-            customer: {
-              name: String(recipient.nombre ?? recipient.name ?? ''),
-              ...(recipient.nif || recipient.taxId ? { taxId: String(recipient.nif ?? recipient.taxId) } : {}),
-              ...(recipient.direccion || recipient.address ? { address: String(recipient.direccion ?? recipient.address) } : {}),
-              ...(recipient.cp || recipient.postalCode ? { postalCode: String(recipient.cp ?? recipient.postalCode) } : {}),
-              ...(recipient.id_otro && typeof recipient.id_otro === 'object' ? { countryCode: String((recipient.id_otro as Record<string, unknown>).codigo_pais ?? '') } : {}),
-            },
-          }
-        })()
-      : {}),
+     ...(invoice.invoice_type === 'normal' ? { customer: mapOdooCustomer(invoice) } : {}),
   }
 }
 

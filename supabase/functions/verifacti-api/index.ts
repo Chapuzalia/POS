@@ -10,7 +10,7 @@ import {
   stableFiscalIdempotencyKey,
 } from '../_shared/verifacti/mapping.ts'
 import { createFiscalProvider, OdooBridgeError, OdooFiscalProvider } from '../_shared/verifacti/providers.ts'
-import { FiscalTotalDiscrepancyError } from '../_shared/verifacti/types.ts'
+import { FiscalDocumentValidationError, FiscalTotalDiscrepancyError } from '../_shared/verifacti/types.ts'
 import { authorizeSuperadmin } from '../_shared/verifacti/authorization.ts'
 import type { FiscalInvoiceRow, FiscalTicket, NormalizedFiscalResult, ProviderStatusResponse } from '../_shared/verifacti/types.ts'
 
@@ -102,6 +102,85 @@ async function loadSettings(admin: ReturnType<typeof createClient>, tenantId: st
   const { data, error } = await admin.from('fiscal_integration_settings').select('*').eq('tenant_id', tenantId).maybeSingle()
   if (error) throw error
   return data as Record<string, unknown> | null
+}
+
+function fiscalSeriesCode(venueName: string, venueId: string, used: Set<string>) {
+  const normalized = venueName.toUpperCase().replace(/[^A-Z0-9]/g, '')
+  const preferred = (normalized || 'VEN').slice(0, 3)
+  if (!used.has(preferred)) return preferred
+  const base = preferred.slice(0, 2)
+  for (const suffix of '0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ') {
+    const candidate = `${base}${suffix}`.slice(0, 3)
+    if (!used.has(candidate)) return candidate
+  }
+  const fallback = venueId.replace(/-/g, '').toUpperCase()
+  for (let index = 0; index < fallback.length - 2; index += 1) {
+    const candidate = fallback.slice(index, index + 3)
+    if (!used.has(candidate)) return candidate
+  }
+  throw new Error('No se pudo generar una serie fiscal única para el local')
+}
+
+async function fiscalVenueProvisioningPayload(admin: ReturnType<typeof createClient>, tenantId: string, entityId: string, venueIds: string[]) {
+  const { data: assignments, error: assignmentError } = await admin.from('fiscal_entity_venues')
+    .select('venue_id, fiscal_series_code').eq('tenant_id', tenantId).eq('fiscal_entity_id', entityId).order('venue_id')
+  if (assignmentError) throw assignmentError
+  const { data: venues, error: venuesError } = await admin.from('venues').select('id, name').eq('tenant_id', tenantId).in('id', venueIds).order('id')
+  if (venuesError) throw venuesError
+  if ((venues ?? []).length !== venueIds.length) throw new Error('Uno o más locales no pertenecen al negocio')
+  const used = new Set((assignments ?? []).map((assignment) => assignment.fiscal_series_code).filter((value): value is string => typeof value === 'string'))
+  const codes = new Map((assignments ?? []).map((assignment) => [assignment.venue_id, assignment.fiscal_series_code]))
+  const updates = []
+  const payload = (venues ?? []).map((venue) => {
+    let seriesCode = codes.get(venue.id)
+    if (!seriesCode) {
+      seriesCode = fiscalSeriesCode(venue.name, venue.id, used)
+      used.add(seriesCode)
+      updates.push({ venue_id: venue.id, fiscal_series_code: seriesCode })
+    }
+    return { venue_ref: venue.id, name: venue.name, series_code: seriesCode }
+  })
+  for (const update of updates) {
+    const { error } = await admin.from('fiscal_entity_venues').update({ fiscal_series_code: update.fiscal_series_code })
+      .eq('tenant_id', tenantId).eq('fiscal_entity_id', entityId).eq('venue_id', update.venue_id)
+    if (error) throw error
+  }
+  return payload
+}
+
+type FiscalEnvironment = ReturnType<typeof requiredEnvironment>
+
+async function syncOdooFiscalEntity(admin: ReturnType<typeof createClient>, env: FiscalEnvironment, tenantId: string, entityId: string) {
+  const { data: entity, error: entityError } = await admin.from('fiscal_entities').select('*').eq('tenant_id', tenantId).eq('id', entityId).maybeSingle()
+  if (entityError) throw entityError
+  if (!entity) throw new Error('Entidad fiscal no encontrada')
+  const { data: assignments, error: assignmentError } = await admin.from('fiscal_entity_venues').select('venue_id').eq('tenant_id', tenantId).eq('fiscal_entity_id', entityId)
+  if (assignmentError) throw assignmentError
+  const venueIds = (assignments ?? []).map((assignment) => assignment.venue_id)
+  if (!venueIds.length) throw new Error('Selecciona al menos un local')
+  const fiscalVenues = await fiscalVenueProvisioningPayload(admin, tenantId, entityId, venueIds)
+  const providerUrl = Deno.env.get('ODOO_BRIDGE_URL')
+  const provisioningSecret = Deno.env.get('ODOO_PROVISIONING_SECRET')
+  if (!providerUrl || !provisioningSecret) throw new Error('Provisioning Odoo no configurado')
+  const ref = entity.provider_entity_ref || `fe_${entity.id}`
+  const bridgeSecret = entity.bridge_secret_ciphertext ? await decryptSecret(entity.bridge_secret_ciphertext, requireEncryptionKey(env.encryptionKey)) : generateWebhookSecret()
+  const now = new Date().toISOString()
+  const { error: provisioningUpdateError } = await admin.from('fiscal_entities').update({ provider_entity_ref: ref, bridge_url: providerUrl, provisioning_status: 'provisioning', provisioning_error: null, provisioning_started_at: now, updated_at: now }).eq('id', entityId).eq('tenant_id', tenantId)
+  if (provisioningUpdateError) throw provisioningUpdateError
+  try {
+    const response = await fetch(`${providerUrl.replace(/\/$/, '')}/fiscal/admin/companies`, { method: 'POST', headers: { Authorization: `Bearer ${provisioningSecret}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider_entity_ref: ref, bridge_secret: bridgeSecret, company: { name: entity.legal_name, vat: entity.tax_id, street: entity.fiscal_address, zip: entity.fiscal_postal_code, city: entity.fiscal_city, country_code: entity.fiscal_country_code || 'ES' }, venues: fiscalVenues }) })
+    const result = await response.json() as Record<string, unknown>
+    if (!response.ok) throw new Error(typeof result.message === 'string' ? result.message : 'Odoo rechazó el provisioning')
+    const health = await fetch(`${providerUrl.replace(/\/$/, '')}/fiscal/health?fiscal_entity_ref=${encodeURIComponent(ref)}`, { headers: { Authorization: `Bearer ${bridgeSecret}` } })
+    if (!health.ok) throw new Error('No se pudo verificar la conexión Odoo')
+    const finalNow = new Date().toISOString()
+    const { error: finalError } = await admin.from('fiscal_entities').update({ integration_provider: 'odoo', tax_system: 'verifactu', provider_entity_ref: ref, bridge_url: providerUrl, bridge_secret_ciphertext: await encryptSecret(bridgeSecret, requireEncryptionKey(env.encryptionKey)), odoo_company_id: typeof result.odoo_company_id === 'number' ? result.odoo_company_id : null, provisioning_status: 'ready', provisioning_error: null, provisioning_completed_at: finalNow, updated_at: finalNow }).eq('id', entityId).eq('tenant_id', tenantId)
+    if (finalError) throw finalError
+  } catch (error) {
+    const message = error instanceof Error ? error.message : 'No se pudo sincronizar Odoo'
+    await admin.from('fiscal_entities').update({ provisioning_status: 'error', provisioning_error: message.slice(0, 500), updated_at: new Date().toISOString() }).eq('id', entityId).eq('tenant_id', tenantId)
+    throw error
+  }
 }
 
 async function loadSuperadminFiscalEntitySummary(admin: ReturnType<typeof createClient>, tenantId: string, entityId: string) {
@@ -275,7 +354,7 @@ async function issueInvoice(
       const secretCiphertext = context.entity.bridge_secret_ciphertext
       if (!bridgeUrl || !entityRef || typeof secretCiphertext !== 'string') throw new Error('Configura el puente Odoo antes de emitir facturas')
       const provider = new OdooFiscalProvider({ bridgeUrl, fiscalEntityRef: entityRef, bridgeSecret: await decryptSecret(secretCiphertext, requireEncryptionKey(encryptionKey)) })
-      const commercial = mapCommercialFiscalDocument(invoice, ticket, entityRef)
+       const commercial = mapCommercialFiscalDocument(invoice, ticket, entityRef)
        const result = await provider.issue(commercial, { idempotencyKey: String(context.document.idempotency_key) })
        const { error: completeError } = await admin.rpc('fiscal_complete_operation', {
          p_outbox_id: claimed.id, p_worker_id: workerId, p_status: result.status,
@@ -288,9 +367,9 @@ async function issueInvoice(
       if (completeError) throw completeError
       return { fiscal: normalizedFiscalReceipt(invoice as unknown as Record<string, unknown>, result), skipped: false }
     } catch (error) {
-      const retryable = error instanceof OdooBridgeError && error.retryable
-      const code = error instanceof FiscalTotalDiscrepancyError ? 'total_discrepancy' : error instanceof OdooBridgeError ? `bridge_${error.status ?? 'network'}` : 'odoo_validation'
-      const safeMessage = error instanceof FiscalTotalDiscrepancyError ? 'Los totales devueltos por Odoo no coinciden con la venta.' : retryable ? 'Odoo no está disponible temporalmente.' : 'No se pudo generar el documento fiscal en Odoo.'
+       const retryable = error instanceof OdooBridgeError && error.retryable
+       const code = error instanceof FiscalDocumentValidationError ? 'fiscal_customer_required' : error instanceof FiscalTotalDiscrepancyError ? 'total_discrepancy' : error instanceof OdooBridgeError ? `bridge_${error.status ?? 'network'}` : 'odoo_validation'
+       const safeMessage = error instanceof FiscalDocumentValidationError ? error.message : error instanceof FiscalTotalDiscrepancyError ? 'Los totales devueltos por Odoo no coinciden con la venta.' : retryable ? 'Odoo no está disponible temporalmente.' : 'No se pudo generar el documento fiscal en Odoo.'
       await admin.rpc('fiscal_fail_operation', {
         p_outbox_id: claimed.id, p_worker_id: workerId, p_error_code: code, p_safe_error: safeMessage,
         p_retry_at: retryable ? new Date(Date.now() + 5 * 60 * 1000).toISOString() : null,
@@ -554,9 +633,9 @@ Deno.serve(async (request) => {
         const entityId = String(body.entityId ?? '')
         const venueIds = Array.isArray(body.venueIds) ? [...new Set(body.venueIds.filter((value): value is string => typeof value === 'string' && value.length > 0))] : []
         if (!venueIds.length) return json({ error: 'Selecciona al menos un local' }, 400)
-        const { data: entity, error: entityError } = await admin.from('fiscal_entities').select('id').eq('tenant_id', tenantId).eq('id', entityId).maybeSingle()
-        if (entityError) throw entityError
-        if (!entity) return json({ error: 'Entidad fiscal no encontrada' }, 404)
+         const { data: entity, error: entityError } = await admin.from('fiscal_entities').select('id, integration_provider').eq('tenant_id', tenantId).eq('id', entityId).maybeSingle()
+         if (entityError) throw entityError
+         if (!entity) return json({ error: 'Entidad fiscal no encontrada' }, 404)
         const { data: validVenues, error: venuesError } = await admin.from('venues').select('id').eq('tenant_id', tenantId).in('id', venueIds)
         if (venuesError) throw venuesError
         if ((validVenues ?? []).length !== venueIds.length) return json({ error: 'Uno o más locales no pertenecen al negocio' }, 400)
@@ -566,61 +645,45 @@ Deno.serve(async (request) => {
           if (assignmentError.code === '22023') return json({ error: 'Uno o más locales no pertenecen al negocio' }, 400)
           throw assignmentError
         }
-        const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, entityId)
-        if (!summary) throw new Error('No se pudo cargar la entidad fiscal actualizada')
-        return json({ entity: summary })
-      }
+         if (entity.integration_provider === 'odoo') {
+           try {
+             await syncOdooFiscalEntity(admin, env, tenantId, entityId)
+           } catch (syncError) {
+             console.error('Odoo fiscal venue sync failed', { tenantId, entityId, error: syncError instanceof Error ? syncError.message : 'UnknownError' })
+             return json({ error: 'Los locales se guardaron en Tickit, pero no se pudieron sincronizar con Odoo', provisioningStatus: 'error' }, 502)
+           }
+         }
+         const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, entityId)
+         if (!summary) throw new Error('No se pudo cargar la entidad fiscal actualizada')
+         return json({ entity: summary })
+       }
 
-      if (action === 'superadmin-configure-fiscal-entity' || action === 'superadmin-retry-fiscal-entity' || action === 'provision-odoo-fiscal-entity') {
-      if (!isSuperadmin) return json({ error: 'Solo un superadmin puede provisionar entidades fiscales' }, 403)
-       const entityId = String(body.entityId ?? '')
-       const entity = await admin.from('fiscal_entities').select('*').eq('tenant_id', tenantId).eq('id', entityId).maybeSingle()
-       if (entity.error) throw entity.error
-       if (!entity.data) return json({ error: 'Entidad fiscal no encontrada' }, 404)
-       const requestedProvider = action === 'superadmin-configure-fiscal-entity' ? String(body.provider ?? '') : 'odoo'
-       if (requestedProvider !== 'odoo') {
-         const { data: updated, error: updateError } = await admin.from('fiscal_entities').update({ integration_provider: 'verifacti', provisioning_status: 'ready', provisioning_error: null, updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', entityId).select('id, legal_name, tax_id, integration_provider, provisioning_status, provisioning_error, odoo_company_id').single()
-         if (updateError || !updated) throw updateError ?? new Error('No se pudo configurar Verifacti')
-          const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, updated.id)
+       if (action === 'superadmin-configure-fiscal-entity' || action === 'superadmin-retry-fiscal-entity' || action === 'provision-odoo-fiscal-entity') {
+       if (!isSuperadmin) return json({ error: 'Solo un superadmin puede provisionar entidades fiscales' }, 403)
+        const entityId = String(body.entityId ?? '')
+        const entity = await admin.from('fiscal_entities').select('id').eq('tenant_id', tenantId).eq('id', entityId).maybeSingle()
+        if (entity.error) throw entity.error
+        if (!entity.data) return json({ error: 'Entidad fiscal no encontrada' }, 404)
+        const requestedProvider = action === 'superadmin-configure-fiscal-entity' ? String(body.provider ?? '') : 'odoo'
+        if (requestedProvider !== 'odoo') {
+          const { data: updated, error: updateError } = await admin.from('fiscal_entities').update({ integration_provider: 'verifacti', provisioning_status: 'ready', provisioning_error: null, updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', entityId).select('id, legal_name, tax_id, integration_provider, provisioning_status, provisioning_error, odoo_company_id').single()
+          if (updateError || !updated) throw updateError ?? new Error('No se pudo configurar Verifacti')
+           const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, updated.id)
+           if (!summary) throw new Error('No se pudo cargar la entidad fiscal configurada')
+           return json({ entity: summary })
+        }
+        try {
+          const { error: providerUpdateError } = await admin.from('fiscal_entities').update({ integration_provider: 'odoo', updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', entityId)
+          if (providerUpdateError) throw providerUpdateError
+          await syncOdooFiscalEntity(admin, env, tenantId, entityId)
+          const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, entityId)
           if (!summary) throw new Error('No se pudo cargar la entidad fiscal configurada')
           return json({ entity: summary })
-       }
-       const existingAssignments = await admin.from('fiscal_entity_venues').select('venue_id').eq('tenant_id', tenantId).eq('fiscal_entity_id', entityId)
-      if (existingAssignments.error) throw existingAssignments.error
-      const venues = Array.isArray(body.venueIds) ? body.venueIds.filter((value): value is string => typeof value === 'string') : (existingAssignments.data ?? []).map((item) => item.venue_id)
-      if (!venues.length) return json({ error: 'Selecciona al menos un local' }, 400)
-      const validVenues = await admin.from('venues').select('id').eq('tenant_id', tenantId).in('id', venues)
-      if (validVenues.error) throw validVenues.error
-      if ((validVenues.data ?? []).length !== venues.length) return json({ error: 'Uno o más locales no pertenecen al negocio' }, 400)
-      const providerUrl = Deno.env.get('ODOO_BRIDGE_URL')
-      const provisioningSecret = Deno.env.get('ODOO_PROVISIONING_SECRET')
-      if (!providerUrl || !provisioningSecret) return json({ error: 'Provisioning Odoo no configurado' }, 500)
-      const ref = entity.data.provider_entity_ref || `fe_${entity.data.id}`
-      const bridgeSecret = entity.data.bridge_secret_ciphertext ? await decryptSecret(entity.data.bridge_secret_ciphertext, env.encryptionKey) : generateWebhookSecret()
-      const now = new Date().toISOString()
-      await admin.from('fiscal_entities').update({ provider_entity_ref: ref, bridge_url: providerUrl, provisioning_status: 'provisioning', provisioning_error: null, provisioning_started_at: now, updated_at: now }).eq('id', entityId).eq('tenant_id', tenantId)
-      try {
-        const response = await fetch(`${providerUrl.replace(/\/$/, '')}/fiscal/admin/companies`, { method: 'POST', headers: { Authorization: `Bearer ${provisioningSecret}`, 'Content-Type': 'application/json' }, body: JSON.stringify({ provider_entity_ref: ref, bridge_secret: bridgeSecret, company: { name: entity.data.legal_name, vat: entity.data.tax_id, street: entity.data.fiscal_address, zip: entity.data.fiscal_postal_code, city: entity.data.fiscal_city, country_code: entity.data.fiscal_country_code || 'ES' } }) })
-        const result = await response.json() as Record<string, unknown>
-        if (!response.ok) throw new Error(typeof result.message === 'string' ? result.message : 'Odoo rechazó el provisioning')
-        const health = await fetch(`${providerUrl.replace(/\/$/, '')}/fiscal/health?fiscal_entity_ref=${encodeURIComponent(ref)}`, { headers: { Authorization: `Bearer ${bridgeSecret}` } })
-        if (!health.ok) throw new Error('No se pudo verificar la conexión Odoo')
-        const finalNow = new Date().toISOString()
-        const { error: finalError } = await admin.from('fiscal_entities').update({ integration_provider: 'odoo', tax_system: 'verifactu', provider_entity_ref: ref, bridge_url: providerUrl, bridge_secret_ciphertext: await encryptSecret(bridgeSecret, env.encryptionKey), odoo_company_id: typeof result.odoo_company_id === 'number' ? result.odoo_company_id : null, provisioning_status: 'ready', provisioning_error: null, provisioning_completed_at: finalNow, updated_at: finalNow }).eq('id', entityId).eq('tenant_id', tenantId)
-        if (finalError) throw finalError
-        if (action === 'superadmin-create-fiscal-entity') {
-          const { error: assignmentError } = await admin.from('fiscal_entity_venues').insert(venues.map((venueId) => ({ tenant_id: tenantId, fiscal_entity_id: entityId, venue_id: venueId })))
-          if (assignmentError) throw assignmentError
+        } catch (provisioningError) {
+          console.error('Odoo fiscal provisioning failed', { tenantId, entityId, error: provisioningError instanceof Error ? provisioningError.message : 'UnknownError' })
+          return json({ error: 'No se pudo completar la configuración Odoo', provisioningStatus: 'error' }, 502)
         }
-        const summary = await loadSuperadminFiscalEntitySummary(admin, tenantId, entityId)
-        if (!summary) throw new Error('No se pudo cargar la entidad fiscal configurada')
-        return json({ entity: summary })
-      } catch (provisioningError) {
-        const message = provisioningError instanceof Error ? provisioningError.message : 'No se pudo configurar Odoo'
-        await admin.from('fiscal_entities').update({ provisioning_status: 'error', provisioning_error: message.slice(0, 500), updated_at: new Date().toISOString() }).eq('id', entityId).eq('tenant_id', tenantId)
-        return json({ error: 'No se pudo completar la configuración Odoo', provisioningStatus: 'error' }, 502)
-      }
-    }
+     }
 
     if (action === 'get-config') {
       if (!isAdmin) return json({ error: 'No tienes permiso para consultar la integracion' }, 403)

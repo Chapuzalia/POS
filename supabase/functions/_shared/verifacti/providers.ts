@@ -195,6 +195,7 @@ export class OdooFiscalProvider implements FiscalDocumentProvider {
     const payload = {
       external_id: document.externalId,
       fiscal_entity_ref: this.options.fiscalEntityRef,
+      venue_ref: document.venueRef,
       document_type: document.kind === 'full' ? 'full' : 'simplified',
       operation_date: document.operationTimestamp.slice(0, 10),
       ...(document.customer ? { customer: document.customer } : {}),

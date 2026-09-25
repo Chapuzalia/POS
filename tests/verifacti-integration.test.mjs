@@ -246,6 +246,77 @@ test('el contrato comercial Odoo usa snapshots, centimos e idempotencia', async 
   assert.equal(document.lines[0].taxSnapshot.taxCents, 210)
   assert.equal(document.kind, 'simplified')
   assert.equal(document.fiscalEntityRef, tenantId)
+  assert.equal(document.venueRef, ticket().venue_id)
+  assert.equal('customer' in document, false)
+})
+
+test('F1 Odoo mapea el snapshot fiscal completo al cliente del bridge', () => {
+  const document = mapCommercialFiscalDocument(invoice({
+    invoice_type: 'normal',
+    document_data: {
+      snapshot: {
+        ticket: {
+          customer_snapshot: {
+            legalName: 'Cliente SL',
+            taxId: 'B12345678',
+            address: 'Calle Uno 1',
+            postalCode: '28001',
+            city: 'Madrid',
+            country: 'España',
+          },
+        },
+      },
+    },
+  }), ticket())
+  assert.equal(document.kind, 'full')
+  assert.deepEqual(document.customer, {
+    name: 'Cliente SL',
+    vat: 'B12345678',
+    street: 'Calle Uno 1',
+    zip: '28001',
+    city: 'Madrid',
+    country_code: 'ES',
+  })
+})
+
+test('F1 sin snapshot fiscal falla antes del fetch a Odoo', async () => {
+  let fetchCalls = 0
+  const provider = new OdooFiscalProvider({
+    bridgeUrl: 'https://bridge.test',
+    bridgeSecret: 'secret-value',
+    fiscalEntityRef: 'backend-entity',
+    fetchImpl: async () => {
+      fetchCalls += 1
+      return Response.json({ document_id: 'unexpected' })
+    },
+  })
+  await assert.rejects(async () => {
+    const document = mapCommercialFiscalDocument(invoice({ invoice_type: 'normal' }), ticket())
+    await provider.issue(document)
+  }, /snapshot fiscal de cliente/)
+  assert.equal(fetchCalls, 0)
+})
+
+test('Odoo bridge envia customer para F1 y no lo envia para F2', async () => {
+  const calls = []
+  const fetchImpl = async (url, init) => {
+    calls.push({ url: String(url), init })
+    return Response.json({ document_id: 'odoo-f1', final_total_cents: 1760, status: 'generated' })
+  }
+  const provider = new OdooFiscalProvider({ bridgeUrl: 'https://bridge.test', bridgeSecret: 'secret-value', fiscalEntityRef: 'backend-entity', fetchImpl })
+  const document = mapCommercialFiscalDocument(invoice({
+    invoice_type: 'normal',
+    document_data: { customerSnapshot: { legalName: 'Cliente SL', taxId: 'B12345678', address: 'Calle Uno 1', postalCode: '28001', city: 'Madrid', country: 'España' } },
+  }), ticket())
+  await provider.issue(document)
+  const payload = JSON.parse(calls[0].init.body)
+  assert.equal(payload.document_type, 'full')
+  assert.deepEqual(payload.customer, { name: 'Cliente SL', vat: 'B12345678', street: 'Calle Uno 1', zip: '28001', city: 'Madrid', country_code: 'ES' })
+  assert.equal(payload.venue_ref, ticket().venue_id)
+
+  calls.length = 0
+  await provider.issue(mapCommercialFiscalDocument(invoice(), ticket()))
+  assert.equal('customer' in JSON.parse(calls[0].init.body), false)
 })
 
 test('Odoo bridge emite, consulta, anula y rechaza discrepancias sin filtrar secretos', async () => {
@@ -268,6 +339,7 @@ test('Odoo bridge emite, consulta, anula y rechaza discrepancias sin filtrar sec
   assert.deepEqual(JSON.parse(calls[0].init.body), {
     external_id: invoiceId,
     fiscal_entity_ref: 'backend-entity',
+    venue_ref: ticket().venue_id,
     document_type: 'simplified',
     operation_date: '2026-08-03',
     lines: [
@@ -384,6 +456,15 @@ test('la expansion fiscal separa proveedor y sistema, protege secretos y garanti
   assert.match(sql, /revoke all on public\.fiscal_entities, public\.fiscal_entity_venues, public\.fiscal_documents, public\.fiscal_outbox from anon, authenticated/i)
   assert.match(sql, /create view public\.fiscal_documents_safe/i)
   assert.doesNotMatch(sql.match(/create view public\\.fiscal_documents_safe[\\s\\S]*?;/i)?.[0] ?? '', /raw_request|raw_response|ciphertext/i)
+})
+
+test('el trigger fiscal de ventas califica aliases para no bloquear cobros', async () => {
+  const sql = await readFile(new URL('../supabase/migrations/20260925140000_fix_fiscal_sale_trigger_aliases.sql', import.meta.url), 'utf8')
+  assert.match(sql, /^-- migration-safety: expand\r?\nset lock_timeout = '5s';\r?\nset statement_timeout = '5min';/i)
+  assert.match(sql, /migration-safety-reviewed: CREATE OR REPLACE ROUTINE/i)
+  assert.match(sql, /from public\.fiscal_documents as fiscal_document/i)
+  assert.match(sql, /fiscal_document\.series, fiscal_document\.number/i)
+  assert.doesNotMatch(sql, /\bd\.series\b/i)
 })
 
 test('el webhook valida firma e idempotencia y el backend nunca devuelve las API keys', async () => {
