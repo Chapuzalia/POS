@@ -189,9 +189,9 @@ test('el ticket normal conserva su impresión y la factura añade emisor, destin
   const normalText = mapSaleToPrintRequest({ sale: normal, establishment, printerId: 'main', printerLayout: layout }).lines.join('\n')
   const invoiceText = mapSaleToPrintRequest({ sale: billed, establishment, printerId: 'main', printerLayout: layout }).lines.join('\n')
   assert.doesNotMatch(normalText, /FACTURA|Alteil Solutions/)
-  assert.match(normalText, /Ticket/)
+  assert.match(normalText, /ID ticket/)
   assert.match(invoiceText, /FACTURA/)
-  assert.match(invoiceText, /F-2026-000123/)
+  assert.match(invoiceText, /Número de factura\s+Pendiente/)
   assert.match(invoiceText, /TICKIT BAR S\.L\./)
   assert.match(invoiceText, /Alteil Solutions S\.L\./)
   assert.match(invoiceText, /B12345678/)
@@ -210,8 +210,8 @@ test('la previsualización de factura muestra borrador y no usa el UUID como nú
     isPreTicket: true,
   }).lines.join('\n')
   assert.match(text, /FACTURA \(BORRADOR\)/)
-  assert.match(text, /Pendiente de numeración/)
-  assert.doesNotMatch(text, new RegExp(billed.ticket.id))
+  assert.match(text, /Número de factura\s+Pendiente/)
+  assert.match(text, new RegExp(billed.ticket.id))
 })
 
 test('un rechazo de VeriFactu imprime un resumen breve en lugar del QR', () => {

@@ -58,7 +58,7 @@ type Options = {
   persistLedger: (ledger: SaleRecord[]) => void
   persistProductSalesStats: (stats: ProductSalesStat[]) => void
   persistTickets: (tickets: SessionTicketRecord[]) => void
-  printSale: (payload: SessionTicketRecord['payload']) => Promise<void>
+  printSale: (payload: SessionTicketRecord['payload'], options?: { cashDrawerAlreadyRequested?: boolean; isProforma?: boolean }) => Promise<void>
   onError: (message: string | null) => void
   productSalesStats: ProductSalesStat[]
   refreshPendingCount: () => void

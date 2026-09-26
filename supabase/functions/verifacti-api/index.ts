@@ -349,7 +349,13 @@ async function issueInvoice(
     if (claimError) throw claimError
     if (!claimed) return { fiscal: fiscalReceipt(invoice as unknown as Record<string, unknown>), skipped: true, reason: 'already_processing' }
     try {
-      const bridgeUrl = String(context.entity.bridge_url ?? '')
+       if (invoice.status === 'error') {
+         const { error: retryError } = await admin.from('fiscal_invoices').update({
+           status: 'pending', error_code: null, error_message: null, next_retry_at: null, updated_at: new Date().toISOString(),
+         }).eq('tenant_id', tenantId).eq('id', invoice.id)
+         if (retryError) throw retryError
+       }
+       const bridgeUrl = String(context.entity.bridge_url ?? '')
       const entityRef = String(context.entity.provider_entity_ref ?? '')
       const secretCiphertext = context.entity.bridge_secret_ciphertext
       if (!bridgeUrl || !entityRef || typeof secretCiphertext !== 'string') throw new Error('Configura el puente Odoo antes de emitir facturas')
@@ -365,18 +371,38 @@ async function issueInvoice(
        })
 
       if (completeError) throw completeError
+      const aeatStatus = result.status === 'accepted' || result.status === 'accepted_with_errors' || result.status === 'rejected' || result.status === 'cancelled'
+        ? result.status
+        : 'pending'
+      const lifecycleUpdatedAt = new Date().toISOString()
+      const [{ error: documentLifecycleError }, { error: invoiceLifecycleError }] = await Promise.all([
+        admin.from('fiscal_documents').update({ emission_state: 'issued', aeat_status: aeatStatus, updated_at: lifecycleUpdatedAt }).eq('id', context.document.id).eq('tenant_id', tenantId),
+        admin.from('fiscal_invoices').update({ emission_state: 'issued', aeat_status: aeatStatus, updated_at: lifecycleUpdatedAt }).eq('id', invoice.id).eq('tenant_id', tenantId),
+      ])
+      if (documentLifecycleError || invoiceLifecycleError) throw documentLifecycleError ?? invoiceLifecycleError
       return { fiscal: normalizedFiscalReceipt(invoice as unknown as Record<string, unknown>, result), skipped: false }
     } catch (error) {
-       const retryable = error instanceof OdooBridgeError && error.retryable
-       const code = error instanceof FiscalDocumentValidationError ? 'fiscal_customer_required' : error instanceof FiscalTotalDiscrepancyError ? 'total_discrepancy' : error instanceof OdooBridgeError ? `bridge_${error.status ?? 'network'}` : 'odoo_validation'
-       const safeMessage = error instanceof FiscalDocumentValidationError ? error.message : error instanceof FiscalTotalDiscrepancyError ? 'Los totales devueltos por Odoo no coinciden con la venta.' : retryable ? 'Odoo no está disponible temporalmente.' : 'No se pudo generar el documento fiscal en Odoo.'
-      await admin.rpc('fiscal_fail_operation', {
-        p_outbox_id: claimed.id, p_worker_id: workerId, p_error_code: code, p_safe_error: safeMessage,
-        p_retry_at: retryable ? new Date(Date.now() + 5 * 60 * 1000).toISOString() : null,
-        p_incident_code: code,
-      })
-      throw new Error(safeMessage)
-    }
+        const retryable = error instanceof OdooBridgeError && error.retryable
+        const emissionUnknown = error instanceof OdooBridgeError && error.emissionUnknown
+        const code = error instanceof FiscalDocumentValidationError ? 'fiscal_customer_required' : error instanceof FiscalTotalDiscrepancyError ? 'total_discrepancy' : emissionUnknown ? 'odoo_emission_unknown' : error instanceof OdooBridgeError ? `bridge_${error.status ?? 'network'}` : 'odoo_validation'
+        const safeMessage = error instanceof FiscalDocumentValidationError ? error.message : error instanceof FiscalTotalDiscrepancyError ? 'Los totales devueltos por Odoo no coinciden con la venta.' : emissionUnknown ? 'No se pudo confirmar si Odoo emitió la factura. Consulta Odoo antes de reintentar.' : retryable ? 'Odoo no está disponible temporalmente.' : 'No se pudo generar el documento fiscal en Odoo.'
+        if (emissionUnknown) {
+          const now = new Date().toISOString()
+          const [{ error: documentError }, { error: invoiceError }, { error: outboxError }] = await Promise.all([
+            admin.from('fiscal_documents').update({ status: 'pending', emission_state: 'unknown', aeat_status: 'unknown', error_code: code, error_message: safeMessage, updated_at: now }).eq('id', context.document.id).eq('tenant_id', tenantId),
+            admin.from('fiscal_invoices').update({ status: 'pending', emission_state: 'unknown', aeat_status: 'unknown', error_code: code, error_message: safeMessage, next_retry_at: null, updated_at: now }).eq('id', invoice.id).eq('tenant_id', tenantId),
+            admin.from('fiscal_outbox').update({ status: 'failed', last_error: safeMessage, incident_code: code, lease_expires_at: null, claimed_by: null, updated_at: now }).eq('id', claimed.id).eq('status', 'claimed').eq('claimed_by', workerId),
+          ])
+          if (documentError || invoiceError || outboxError) throw documentError ?? invoiceError ?? outboxError
+        } else {
+          await admin.rpc('fiscal_fail_operation', {
+            p_outbox_id: claimed.id, p_worker_id: workerId, p_error_code: code, p_safe_error: safeMessage,
+            p_retry_at: retryable ? new Date(Date.now() + 5 * 60 * 1000).toISOString() : null,
+            p_incident_code: code,
+          })
+        }
+        throw new Error(safeMessage)
+      }
   }
   if (!settings?.enabled) return { skipped: true, reason: 'integration_disabled' }
   if (automatic && settings.automatic_submission !== true) return { skipped: true, reason: 'automatic_submission_disabled' }
@@ -955,10 +981,12 @@ Deno.serve(async (request) => {
         if (result.finalTotalCents !== undefined && result.finalTotalCents !== Number(context.document.expected_total_cents)) {
           throw new FiscalTotalDiscrepancyError(Number(context.document.expected_total_cents), result.finalTotalCents)
         }
-        const legacyStatus = result.status === 'generated' ? 'pending' : result.status
+        const lifecycleStatus = result.status === 'generated' ? 'pending' : result.status
+        const aeatStatus = result.status === 'generated' || result.status === 'pending' ? 'pending' : result.status
+        const lifecycleUpdatedAt = new Date().toISOString()
         const [{ error: documentError }, { error: invoiceUpdateError }] = await Promise.all([
-          admin.from('fiscal_documents').update({ status: result.status, provider_external_id: result.documentId, provider_fiscal_number: result.fiscalNumber ?? null, returned_total_cents: result.finalTotalCents ?? null, provider_qr: result.qrPayload ?? null, provider_url: result.qrUrl ?? null, updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', context.document.id),
-          admin.from('fiscal_invoices').update({ status: legacyStatus, external_uuid: result.documentId, external_code: result.fiscalNumber ?? null, fiscal_number: result.fiscalNumber ?? null, qr_payload: result.qrPayload ?? null, verification_url: result.qrUrl ?? null, response_payload: result, updated_at: new Date().toISOString() }).eq('tenant_id', tenantId).eq('id', invoice.id),
+          admin.from('fiscal_documents').update({ status: result.status, emission_state: 'issued', aeat_status: aeatStatus, provider_external_id: result.documentId, provider_fiscal_number: result.fiscalNumber ?? null, provider_fiscal_type: result.fiscalType ?? null, provider_fiscal_date: result.fiscalDate ?? null, returned_total_cents: result.finalTotalCents ?? null, provider_qr: result.qrPayload ?? null, provider_url: result.qrUrl ?? null, updated_at: lifecycleUpdatedAt }).eq('tenant_id', tenantId).eq('id', context.document.id),
+          admin.from('fiscal_invoices').update({ status: lifecycleStatus, emission_state: 'issued', aeat_status: aeatStatus, external_uuid: result.documentId, external_code: result.fiscalNumber ?? null, fiscal_number: result.fiscalNumber ?? null, qr_payload: result.qrPayload ?? null, verification_url: result.qrUrl ?? null, response_payload: result, updated_at: lifecycleUpdatedAt }).eq('tenant_id', tenantId).eq('id', invoice.id),
         ])
         if (documentError || invoiceUpdateError) throw documentError ?? invoiceUpdateError
         return json({ status: result.status, response: result })

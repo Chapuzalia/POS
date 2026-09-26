@@ -45,6 +45,7 @@ type SalesReportPageRow = {
 const ticketSelect = `
     id,
     ticket_number,
+    operational_reference,
     tenant_id,
     venue_id,
     status,
@@ -56,8 +57,10 @@ const ticketSelect = `
   discount_value,
   discount_rounding_increment_cents,
   discount_amount_cents,
-  total_cents,
-  local_created_at,
+   total_cents,
+   local_created_at,
+   is_invoice,
+   customer_snapshot,
   ticket_lines (
     id,
     product_id,
@@ -88,9 +91,9 @@ const ticketSelect = `
     payment_method
   ),
   fiscal_invoices (
-    id, provider, integration_provider, environment, invoice_type, series, number, status,
-    external_uuid, external_code, fiscal_number, qr_base64, qr_payload, verification_url,
-    error_code, error_message, attempts, sent_at, confirmed_at
+    id, provider, integration_provider, environment, invoice_type, series, number, status, emission_state, aeat_status,
+     external_uuid, external_code, fiscal_number, qr_base64, qr_payload, verification_url,
+    error_code, error_message, attempts, sent_at, confirmed_at, response_payload
   )
 `
 
@@ -137,10 +140,23 @@ export type SalesReportLineRow = {
 export type SalesReportTicketRow = {
   id: string
   ticket_number: number | string
+  operational_reference: string | null
   tenant_id: string
   venue_id: string
-  local_created_at: string
-  sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
+   local_created_at: string
+   is_invoice: boolean
+   customer_snapshot: {
+     legalName: string
+     taxId: string
+     address: string
+     postalCode: string
+     city: string
+     province: string
+     country: string
+     email: string | null
+     phone: string | null
+   } | null
+   sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
   status: 'paid' | 'void'
   subtotal_cents: number
   discount_id: string | null
@@ -160,8 +176,10 @@ export type SalesReportTicketRow = {
     invoice_type: 'normal' | 'simplified' | 'corrective'
     series: string
     number: string
-    status: 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-    external_uuid: string | null
+     status: 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+     emission_state: 'pending' | 'issued' | 'unknown' | 'failed'
+     aeat_status: 'not_requested' | 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'unknown'
+     external_uuid: string | null
     external_code: string | null
     fiscal_number: string | null
     qr_base64: string | null
@@ -172,7 +190,9 @@ export type SalesReportTicketRow = {
     attempts: number
     sent_at: string | null
     confirmed_at: string | null
+    response_payload: Record<string, unknown> | null
   }> | null
+
 }
 
 export type NameRow = {
@@ -249,9 +269,14 @@ async function loadTicketRows(context: TenantContext, venueId: string | undefine
 }
 
 function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicket {
+  const invoice = ticket.fiscal_invoices?.[0]
+  const response = invoice?.response_payload
+  const responseString = (key: string) => typeof response?.[key] === 'string' ? response[key] : null
+
   return {
     id: ticket.id,
     ticketNumber: Number(ticket.ticket_number),
+    operationalReference: ticket.operational_reference,
     createdAt: ticket.local_created_at,
     lineCount: ticket.ticket_lines?.length ?? 0,
     lines: (ticket.ticket_lines ?? []).map((line) => {
@@ -315,26 +340,33 @@ function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicke
     status: ticket.status,
     subtotalCents: ticket.subtotal_cents,
     totalCents: ticket.total_cents,
-    fiscal: ticket.fiscal_invoices?.[0] ? {
-      id: ticket.fiscal_invoices[0].id,
-      provider: ticket.fiscal_invoices[0].provider,
-      integrationProvider: ticket.fiscal_invoices[0].integration_provider ?? undefined,
-      environment: ticket.fiscal_invoices[0].environment,
-      invoiceType: ticket.fiscal_invoices[0].invoice_type,
-      series: ticket.fiscal_invoices[0].series,
-      number: ticket.fiscal_invoices[0].number,
-      status: ticket.fiscal_invoices[0].status,
-      externalUuid: ticket.fiscal_invoices[0].external_uuid,
-      externalCode: ticket.fiscal_invoices[0].external_code,
-      fiscalNumber: ticket.fiscal_invoices[0].fiscal_number,
-      qrBase64: ticket.fiscal_invoices[0].qr_base64,
-      qrPayload: ticket.fiscal_invoices[0].qr_payload,
-      verificationUrl: ticket.fiscal_invoices[0].verification_url,
-      errorCode: ticket.fiscal_invoices[0].error_code,
-      errorMessage: ticket.fiscal_invoices[0].error_message,
-      attempts: ticket.fiscal_invoices[0].attempts,
-      sentAt: ticket.fiscal_invoices[0].sent_at,
-      confirmedAt: ticket.fiscal_invoices[0].confirmed_at,
+    isInvoice: ticket.is_invoice,
+    customer: ticket.customer_snapshot,
+    fiscal: invoice ? {
+      id: invoice.id,
+      provider: invoice.provider,
+      integrationProvider: invoice.integration_provider ?? undefined,
+      environment: invoice.environment,
+      invoiceType: invoice.invoice_type,
+      series: invoice.series,
+      number: invoice.number,
+       status: invoice.status,
+       emissionState: invoice.emission_state,
+       aeatStatus: invoice.aeat_status,
+       externalUuid: invoice.external_uuid,
+      externalCode: invoice.external_code,
+      fiscalNumber: invoice.fiscal_number ?? responseString('fiscalNumber'),
+      documentId: invoice.external_uuid ?? responseString('documentId'),
+      fiscalType: responseString('fiscalType'),
+      fiscalDate: responseString('fiscalDate'),
+      qrBase64: invoice.qr_base64,
+      qrPayload: invoice.qr_payload,
+      verificationUrl: invoice.verification_url,
+      errorCode: invoice.error_code,
+      errorMessage: invoice.error_message,
+      attempts: invoice.attempts,
+      sentAt: invoice.sent_at,
+      confirmedAt: invoice.confirmed_at,
     } : null,
   }
 }

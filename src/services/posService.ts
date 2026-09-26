@@ -560,8 +560,10 @@ type SessionTicketQueryRow = {
   customer_snapshot: CustomerFiscalSnapshot | null
   invoice_series: string | null
   invoice_number: string | null
-   invoice_issued_at: string | null
-   ticket_number: number | string
+  invoice_issued_at: string | null
+    ticket_number: number | string
+    operational_reference: string | null
+    operational_reference_year: number | null
    ticket_lines: Array<{
     id: string
     product_id: string | null
@@ -615,6 +617,8 @@ type SessionTicketQueryRow = {
     provider: 'verifactu' | 'ticketbai'
     integration_provider: 'verifacti' | 'odoo' | null
     status: 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+    emission_state: 'pending' | 'issued' | 'unknown' | 'failed'
+    aeat_status: 'not_requested' | 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'unknown'
     external_uuid: string | null
     external_code: string | null
     fiscal_number: string | null
@@ -657,8 +661,10 @@ async function loadSessionTicketRecordsFromSupabase(
         discount_rounding_increment_cents,
         discount_amount_cents,
          total_cents,
-         ticket_number,
-         local_created_at,
+          ticket_number,
+          operational_reference,
+          operational_reference_year,
+          local_created_at,
          is_invoice,
         customer_id,
         customer_snapshot,
@@ -717,7 +723,7 @@ async function loadSessionTicketRecordsFromSupabase(
           )
         ),
         fiscal_invoices (
-          id, provider, integration_provider, status, external_uuid, external_code, fiscal_number, qr_base64, qr_payload, verification_url, error_code, error_message
+           id, provider, integration_provider, status, emission_state, aeat_status, external_uuid, external_code, fiscal_number, qr_base64, qr_payload, verification_url, error_code, error_message
         )
     `)
     .eq('tenant_id', context.tenantId)
@@ -797,8 +803,10 @@ async function loadSessionTicketRecordsFromSupabase(
     const payload: SaleCreatedPayload = {
        ticket: {
          id: ticket.id,
-         ticketNumber: Number(ticket.ticket_number),
-         tenantId: ticket.tenant_id,
+          ticketNumber: Number(ticket.ticket_number),
+          operationalReference: ticket.operational_reference,
+          operationalReferenceYear: ticket.operational_reference_year,
+          tenantId: ticket.tenant_id,
         cashSessionId: ticket.cash_session_id,
         cashRegisterId: ticket.cash_register_id,
         venueId: ticket.venue_id,
@@ -871,8 +879,10 @@ async function loadSessionTicketRecordsFromSupabase(
           invoiceId: ticket.fiscal_invoices[0].id,
           provider: ticket.fiscal_invoices[0].provider,
           integrationProvider: ticket.fiscal_invoices[0].integration_provider ?? undefined,
-          status: ticket.fiscal_invoices[0].status,
-          uuid: ticket.fiscal_invoices[0].external_uuid,
+           status: ticket.fiscal_invoices[0].status,
+           emissionState: ticket.fiscal_invoices[0].emission_state,
+           aeatStatus: ticket.fiscal_invoices[0].aeat_status,
+           uuid: ticket.fiscal_invoices[0].external_uuid,
           externalCode: ticket.fiscal_invoices[0].external_code,
           fiscalNumber: ticket.fiscal_invoices[0].fiscal_number,
           qrBase64: ticket.fiscal_invoices[0].qr_base64,

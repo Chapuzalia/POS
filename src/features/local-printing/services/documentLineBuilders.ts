@@ -1,5 +1,4 @@
 import { allocateNetTotalToLines } from '../../../lib/discounts.ts'
-import { formatTicketNumber } from '../../../lib/format.ts'
 import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import type { CashClosingRecord, SaleCreatedPayload } from '../../../types/index.ts'
 import { getCashClosingAmounts } from '../../cash-registers/services/cashClosingAmounts.ts'
@@ -29,7 +28,7 @@ export type PrintEstablishment = {
 }
 
 export type SaleTicketLineOptions = {
-  label?: 'COPIA' | 'PRE-TICKET'
+  label?: 'COPIA' | 'PRE-TICKET' | 'PROFORMA — SIN VALIDEZ FISCAL'
 }
 
 export type ClosingReportLineOptions = {
@@ -163,8 +162,9 @@ export function buildSaleTicketLines(
   const fiscal = fiscalBreakdown(sale)
   const taxableBaseCents = fiscal?.reduce((total, item) => total + item.baseCents, 0)
   const invoice = sale.ticket.invoice
-  const invoiceLabel = invoice?.series && invoice.number ? `${invoice.series}-${invoice.number}` : null
   const isInvoicePreview = Boolean(invoice && options.label === 'PRE-TICKET')
+  const isProforma = options.label === 'PROFORMA — SIN VALIDEZ FISCAL'
+  const ticketReference = sale.ticket.operationalReference ?? sale.ticket.id
   const lines: string[] = [
     ...centeredWrapped(establishment.name, printerLayout),
     ...(establishment.legalName ? centeredWrapped(establishment.legalName, printerLayout) : []),
@@ -173,7 +173,8 @@ export function buildSaleTicketLines(
     ...(invoice ? ['', ...centeredWrapped(isInvoicePreview ? 'FACTURA (BORRADOR)' : 'FACTURA', printerLayout)] : []),
     ...(options.label ? ['', ...centeredWrapped(options.label, printerLayout)] : []),
     '',
-    ...row(invoice ? 'Factura' : 'Ticket', invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'), printerLayout),
+    ...row('ID ticket', ticketReference, printerLayout),
+    ...(!isProforma ? [...row('Número de factura', sale.fiscal?.fiscalNumber ?? 'Pendiente', printerLayout)] : [...row('Número de factura', 'Pendiente', printerLayout)]),
     ...row(invoice ? 'Fecha expedición' : 'Fecha', formatReceiptDate(invoice?.issuedAt ?? sale.sale.createdAt, timezone), printerLayout),
     ...(establishment.cashRegisterName ? row('Caja', establishment.cashRegisterName, printerLayout) : []),
     ...(establishment.employeeName ? row('Empleado', establishment.employeeName, printerLayout) : []),
@@ -230,7 +231,7 @@ export function buildSaleTicketLines(
     }
   }
 
-  if (sale.fiscal && options.label !== 'PRE-TICKET') {
+  if (sale.fiscal && options.label !== 'PRE-TICKET' && !isProforma) {
     const fiscalPrintData = getFiscalPrintData(sale)!
     lines.push('', ...section(fiscalPrintData.title, printerLayout))
     if (sale.fiscal.externalCode) lines.push(...wrapReceiptText(`Código: ${sale.fiscal.externalCode}`, printerLayout.columns, printerLayout.characterSet))
@@ -396,8 +397,9 @@ export function buildSalePrintTemplateContext(
   const money = (amountCents: number) => formatMoneyForReceipt(amountCents, { currency, locale })
   const fiscal = fiscalBreakdown(sale)
   const invoice = sale.ticket.invoice
-  const invoiceLabel = invoice?.series && invoice.number ? `${invoice.series}-${invoice.number}` : null
   const isInvoicePreview = Boolean(invoice && options.label === 'PRE-TICKET')
+  const isProforma = options.label === 'PROFORMA — SIN VALIDEZ FISCAL'
+  const ticketReference = sale.ticket.operationalReference ?? sale.ticket.id
   const datetime = dateParts(invoice?.issuedAt ?? sale.sale.createdAt, timezone)
   const totalTaxCents = fiscal?.reduce((total, item) => total + item.taxCents, 0) ?? 0
   const taxableBaseCents = fiscal?.reduce((total, item) => total + item.baseCents, 0)
@@ -431,13 +433,15 @@ export function buildSalePrintTemplateContext(
       address: establishment.address ?? '',
     },
     document: {
-      title: invoice ? (isInvoicePreview ? 'FACTURA (BORRADOR)' : 'FACTURA') : '',
+      title: isProforma ? 'PROFORMA — SIN VALIDEZ FISCAL' : invoice ? (isInvoicePreview ? 'FACTURA (BORRADOR)' : 'FACTURA') : '',
       label: options.label ?? '',
-      number_label: invoice ? 'Factura' : 'Ticket',
+      number_label: 'ID ticket',
+      invoice_number_label: 'Número de factura',
       date_label: invoice ? 'Fecha expedición' : 'Fecha',
     },
     ticket: {
-      number: invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'),
+      number: ticketReference,
+      invoice_number: isProforma ? 'Pendiente' : sale.fiscal?.fiscalNumber ?? 'Pendiente',
       ...datetime,
     },
     cash_register: { name: establishment.cashRegisterName ?? '' },
@@ -467,7 +471,7 @@ export function buildSalePrintTemplateContext(
       rows: totalRows,
     },
     payment: { method: sale.payment ? paymentLabels[sale.payment.method] ?? sale.payment.method : '', rows: paymentRows },
-    fiscal: sale.fiscal && options.label !== 'PRE-TICKET' ? {
+    fiscal: sale.fiscal && options.label !== 'PRE-TICKET' && !isProforma ? {
       title: fiscalPrintData?.title.toLocaleUpperCase('es-ES') ?? 'FISCAL',
       external_code: sale.fiscal.externalCode ?? '',
       verification_url: qrPayload || verificationUrl,

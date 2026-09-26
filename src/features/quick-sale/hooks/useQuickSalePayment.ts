@@ -34,7 +34,7 @@ type Options = {
   refreshPendingCount: () => void
   syncPendingEvents: () => Promise<void>
   loadPersistedTicket?: (ticketId: string) => Promise<SessionTicketRecord | null>
-  printSale: (payload: SessionTicketRecord['payload'], options?: { cashDrawerAlreadyRequested?: boolean }) => Promise<void>
+  printSale: (payload: SessionTicketRecord['payload'], options?: { cashDrawerAlreadyRequested?: boolean; isProforma?: boolean }) => Promise<void>
   onError: (message: string | null) => void
   onPaymentInFlightChange?: (inFlight: boolean) => void
 }
@@ -164,7 +164,7 @@ export function useQuickSalePayment(options: Options) {
         }
       }
     }
-    const printTask = options.printSale(printPayload, { cashDrawerAlreadyRequested })
+    const printTask = options.printSale(printPayload, { cashDrawerAlreadyRequested, isProforma: !options.isOnline })
     await printTask
   }, [options])
 

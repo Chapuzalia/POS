@@ -19,7 +19,7 @@ set statement_timeout = '5min';
 Expand añade estructura compatible sin retirar ni cambiar el contrato anterior. Ejemplos habituales:
 
 - tablas o columnas nullable nuevas;
-- índices con `CREATE INDEX CONCURRENTLY`;
+- índices con `CREATE INDEX CONCURRENTLY` cuando el ejecutor permita sentencias fuera de transacción; si el ejecutor envuelve cada migración en una transacción, usar `CREATE INDEX` normal y revisar el impacto de bloqueo;
 - FK y `CHECK` iniciales con `NOT VALID`;
 - `UNIQUE`/`PRIMARY KEY` sobre tablas existentes mediante índice único concurrente y `USING INDEX`;
 - RPC nuevas manteniendo las anteriores.

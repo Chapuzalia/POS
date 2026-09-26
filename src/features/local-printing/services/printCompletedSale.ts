@@ -10,6 +10,7 @@ export async function printCompletedSale(input: {
   establishment: PrintEstablishment
   isReprint?: boolean
   copyNumber?: number
+  isProforma?: boolean
   context: Pick<TenantContext, 'tenantId' | 'venueId'>
   cashDrawerAlreadyRequested?: boolean
 }) {

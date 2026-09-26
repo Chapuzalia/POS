@@ -415,11 +415,15 @@ export type SaleLinePayload = {
 export type FiscalIntegrationProvider = 'verifacti' | 'odoo'
 export type FiscalTaxSystem = 'verifactu' | 'ticketbai'
 export type FiscalReceiptStatus = 'pending' | 'generated' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+export type FiscalEmissionState = 'pending' | 'issued' | 'unknown' | 'failed'
+export type FiscalAeatStatus = 'not_requested' | 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'unknown'
 
 export type SaleCreatedPayload = {
   ticket: {
     id: string
     ticketNumber?: number
+    operationalReference?: string | null
+    operationalReferenceYear?: number | null
     tenantId: string
     cashSessionId: string
     cashRegisterId: string
@@ -463,6 +467,8 @@ export type SaleCreatedPayload = {
     provider: FiscalTaxSystem
     integrationProvider?: FiscalIntegrationProvider
     status: FiscalReceiptStatus
+    emissionState?: FiscalEmissionState
+    aeatStatus?: FiscalAeatStatus
     uuid: string | null
     qrBase64: string | null
     qrPayload?: string | null
@@ -694,6 +700,7 @@ export type CrmStats = {
 export type CrmSalesReportTicket = {
   id: string
   ticketNumber: number
+  operationalReference?: string | null
   createdAt: string
   lineCount: number
   lines: Array<{
@@ -729,8 +736,10 @@ export type CrmSalesReportTicket = {
   quantity: number
   status: 'paid' | 'void'
   subtotalCents: number
-  totalCents: number
-  fiscal: {
+   totalCents: number
+   isInvoice: boolean
+   customer: CustomerFiscalSnapshot | null
+   fiscal: {
     id: string
     provider: FiscalTaxSystem
     integrationProvider?: FiscalIntegrationProvider
@@ -739,8 +748,13 @@ export type CrmSalesReportTicket = {
     series: string
     number: string
     fiscalNumber?: string | null
-    status: FiscalReceiptStatus
-    externalUuid: string | null
+    documentId?: string | null
+    fiscalType?: string | null
+    fiscalDate?: string | null
+     status: FiscalReceiptStatus
+     emissionState?: FiscalEmissionState
+     aeatStatus?: FiscalAeatStatus
+     externalUuid: string | null
     externalCode: string | null
     qrBase64: string | null
     qrPayload?: string | null

@@ -19,6 +19,7 @@ type MapperOptions = {
   isReprint?: boolean
   copyNumber?: number
   isPreTicket?: boolean
+  isProforma?: boolean
   autoOpenCashDrawer?: boolean
   cashlogyConfigured?: boolean
   cut?: boolean
@@ -30,11 +31,12 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
   const { sale } = options
   const isReprint = options.isReprint === true
   const isPreTicket = options.isPreTicket === true
+  const isProforma = options.isProforma === true
   const copyNumber = Math.max(1, Math.trunc(options.copyNumber || 1))
   const payments = sale.payment && !isPreTicket
     ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }]
     : []
-  const label = isPreTicket ? 'PRE-TICKET' : isReprint ? 'COPIA' : undefined
+  const label = isProforma ? 'PROFORMA — SIN VALIDEZ FISCAL' : isPreTicket ? 'PRE-TICKET' : isReprint ? 'COPIA' : undefined
   const templateType = sale.ticket.invoice ? 'invoice' : 'simplified_invoice'
   const rendered = renderPrintTemplateWithFallback(
     options.template ?? getSafeDefaultPrintTemplate(templateType),

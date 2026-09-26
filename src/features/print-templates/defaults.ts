@@ -11,6 +11,7 @@ const saleBlocks: PrintTemplateBlock[] = [
   { id: 'copy-label', type: 'text', value: '{{document.label}}', align: 'center', when: 'document.label' },
   { id: 'header-gap', type: 'spacer' },
   { id: 'ticket-number', type: 'row', label: '{{document.number_label}}', value: '{{ticket.number}}' },
+  { id: 'invoice-number', type: 'row', label: '{{document.invoice_number_label}}', value: '{{ticket.invoice_number}}' },
   { id: 'ticket-date', type: 'row', label: '{{document.date_label}}', value: '{{ticket.datetime}}' },
   { id: 'cash-register', type: 'row', label: 'Caja', value: '{{cash_register.name}}', when: 'cash_register.name' },
   { id: 'employee', type: 'row', label: 'Empleado', value: '{{employee.name}}', when: 'employee.name' },

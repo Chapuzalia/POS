@@ -118,11 +118,13 @@ type BridgeResponse = Record<string, unknown>
 export class OdooBridgeError extends Error {
   readonly retryable: boolean
   readonly status?: number
-  constructor(message: string, options: { retryable?: boolean; status?: number } = {}) {
+  readonly emissionUnknown: boolean
+  constructor(message: string, options: { retryable?: boolean; status?: number; emissionUnknown?: boolean } = {}) {
     super(message)
     this.name = 'OdooBridgeError'
     this.retryable = options.retryable === true
     this.status = options.status
+    this.emissionUnknown = options.emissionUnknown === true
   }
 }
 
@@ -165,20 +167,37 @@ export class OdooFiscalProvider implements FiscalDocumentProvider {
   }
 
   private async request(path: string, method: 'POST' | 'GET', body?: unknown, idempotencyKey?: string) {
-    const response = await (this.options.fetchImpl ?? fetch)(`${this.options.bridgeUrl.replace(/\/$/, '')}${path}`, {
-      method,
-      headers: {
-        Accept: 'application/json',
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${this.options.bridgeSecret}`,
-        ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
-        ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
-      },
-      ...(body === undefined ? {} : { body: JSON.stringify(body) }),
-    })
-    const parsed = await response.json() as unknown
+    let response: Response
+    try {
+      response = await (this.options.fetchImpl ?? fetch)(`${this.options.bridgeUrl.replace(/\/$/, '')}${path}`, {
+        method,
+        headers: {
+          Accept: 'application/json',
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${this.options.bridgeSecret}`,
+          ...(body === undefined ? {} : { 'Content-Type': 'application/json' }),
+          ...(idempotencyKey ? { 'Idempotency-Key': idempotencyKey } : {}),
+        },
+        ...(body === undefined ? {} : { body: JSON.stringify(body) }),
+      })
+    } catch {
+      throw new OdooBridgeError('No se pudo confirmar la respuesta del puente fiscal Odoo', {
+        retryable: true,
+        emissionUnknown: method === 'POST',
+      })
+    }
+    let parsed: unknown
+    try {
+      parsed = await response.json()
+    } catch {
+      throw new OdooBridgeError('Respuesta Odoo invalida', {
+        retryable: response.status >= 500 || response.status === 429,
+        status: response.status,
+        emissionUnknown: response.ok && method === 'POST',
+      })
+    }
     if (!response.ok) throw new OdooBridgeError('Error del puente fiscal Odoo', { retryable: response.status >= 500 || response.status === 429, status: response.status })
-    if (!parsed || typeof parsed !== 'object') throw new OdooBridgeError('Respuesta Odoo invalida')
+    if (!parsed || typeof parsed !== 'object') throw new OdooBridgeError('Respuesta Odoo invalida', { emissionUnknown: method === 'POST' })
     return parsed as BridgeResponse
   }
 

@@ -275,6 +275,23 @@ test('un ticket normal sin VeriFactu no añade QR', () => {
   assert.equal(payload.lines.join('').includes('prewww2.aeat.es'), false)
 })
 
+test('la venta offline imprime una proforma sin QR ni número fiscal inventado', () => {
+  const offlineSale = structuredClone(sale)
+  offlineSale.fiscal = {
+    invoiceId: 'fiscal_pending', provider: 'verifactu', status: 'pending', uuid: null,
+    externalCode: null, fiscalNumber: null, qrBase64: null, qrPayload: null, verificationUrl: null,
+  }
+  const payload = mapSaleToPrintRequest({
+    sale: offlineSale, establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80, isProforma: true,
+  })
+  const text = payload.lines.join('\n')
+  assert.match(text, /PROFORMA - SIN VALIDEZ FISCAL/)
+  assert.match(text, /ID ticket[ ]+ticket_123/)
+  assert.match(text, /Número de factura[ ]+Pendiente/)
+  assert.equal(payload.elements.some((element) => element.type === 'qr'), false)
+})
+
 test('una factura simplificada sustituye el enlace VeriFactu por un QR con el contenido exacto', () => {
   const simplifiedInvoiceSale = structuredClone(sale)
   simplifiedInvoiceSale.fiscal = {

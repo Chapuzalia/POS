@@ -417,7 +417,7 @@ function getReportPaymentLabel(ticket: CrmSalesReports['tickets'][number]) {
 }
 
 const fiscalStatusLabels = {
-  pending: 'Pendiente',
+  pending: 'Emisión pendiente',
   accepted: 'Aceptada',
   accepted_with_errors: 'Aceptada con errores',
   rejected: 'Rechazada',
@@ -425,6 +425,12 @@ const fiscalStatusLabels = {
   error: 'Error',
   generated: 'Generada',
 } as const
+
+function fiscalDisplayStatus(fiscal: NonNullable<CrmSalesReports['tickets'][number]['fiscal']>) {
+  if (fiscal.emissionState === 'unknown') return 'Emisión desconocida'
+  if (fiscal.emissionState === 'issued' && fiscal.aeatStatus === 'pending') return 'Pendiente de comunicación AEAT'
+  return fiscalStatusLabels[fiscal.status]
+}
 
 function fiscalStatusClass(status: NonNullable<CrmSalesReports['tickets'][number]['fiscal']>['status']) {
   if (status === 'accepted') return '!bg-[var(--crm-green-soft)] !text-[var(--crm-green)]'
@@ -509,7 +515,7 @@ export function SalesReportTicketsTable({
               <td className="!px-3 !py-4">
                 {ticket.fiscal ? (
                   <span className={`!inline-flex !min-h-6 !w-fit !items-center !whitespace-nowrap !rounded-full !px-[9px] !text-[11px] !font-semibold ${fiscalStatusClass(ticket.fiscal.status)}`}>
-                    {fiscalStatusLabels[ticket.fiscal.status]} · {ticket.fiscal.integrationProvider === 'odoo' ? 'Odoo' : ticket.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu'}
+                    {fiscalDisplayStatus(ticket.fiscal)} · {ticket.fiscal.integrationProvider === 'odoo' ? 'Odoo' : ticket.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu'}
                   </span>
                 ) : <span className="!text-xs !text-[var(--crm-text-muted)]">Sin fiscalizar</span>}
               </td>
@@ -578,10 +584,10 @@ export function SalesReportTicketModal({
   }
 
   return (
-    <CrmModal label={`Detalle del ticket ${formatTicketNumber(ticket.ticketNumber ?? 0)}`} onClose={onClose} size="large">
+    <CrmModal label={`Detalle del ticket ${ticket.operationalReference ?? formatTicketNumber(ticket.ticketNumber ?? 0)}`} onClose={onClose} size="large">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] bg-transparent p-3 text-[var(--crm-text)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:text-[15px] [&_span]:font-bold [&_small]:truncate [&_small]:text-xs [&_small]:font-medium [&_small]:text-[var(--crm-text-muted)] !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
         <div>
-          <span>Ticket #{formatTicketNumber(ticket.ticketNumber ?? 0)}</span>
+          <span>ID ticket: {ticket.operationalReference ?? formatTicketNumber(ticket.ticketNumber ?? 0)}</span>
           <small>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</small>
         </div>
         <UiButton
@@ -623,20 +629,35 @@ export function SalesReportTicketModal({
           </TicketDetailSummary>
         </div>
 
-        {ticket.status === 'void' ? (
-          <div className="!mb-4 !rounded-[10px] !bg-[var(--crm-red-soft)] !px-3.5 !py-3 !text-xs !font-semibold !text-[var(--crm-red)]">
-            Este ticket fue anulado y no se contabiliza en los informes de ventas.
-          </div>
-        ) : null}
+         {ticket.status === 'void' ? (
+           <div className="!mb-4 !rounded-[10px] !bg-[var(--crm-red-soft)] !px-3.5 !py-3 !text-xs !font-semibold !text-[var(--crm-red)]">
+             Este ticket fue anulado y no se contabiliza en los informes de ventas.
+           </div>
+         ) : null}
 
-        {ticket.fiscal ? (
+         {ticket.isInvoice && ticket.customer ? (
+           <section className="!mb-5 !grid !gap-2 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
+             <h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Datos del cliente</h3>
+             <div className="!grid !grid-cols-1 !gap-2 sm:!grid-cols-2 lg:!grid-cols-3">
+               <div><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Razón social</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.customer.legalName}</p></div>
+               <div><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">NIF/CIF</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.customer.taxId}</p></div>
+               <div><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Dirección</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.customer.address}</p></div>
+               <div><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Localidad</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{[ticket.customer.postalCode, ticket.customer.city].filter(Boolean).join(' ')}</p></div>
+               <div><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Provincia / país</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{[ticket.customer.province, ticket.customer.country].filter(Boolean).join(' · ')}</p></div>
+               {ticket.customer.email ? <div><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Email</span><p className="!mt-1 !mb-0 !break-all !text-xs !font-medium !text-[var(--crm-text)]">{ticket.customer.email}</p></div> : null}
+               {ticket.customer.phone ? <div><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Teléfono</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.customer.phone}</p></div> : null}
+             </div>
+           </section>
+         ) : null}
+
+         {ticket.fiscal ? (
           <section className="!mb-5 !grid !gap-4 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
             <div className="!flex !flex-wrap !items-start !justify-between !gap-3">
               <div>
                 <div className="!flex !flex-wrap !items-center !gap-2">
-                  <h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Factura fiscal {ticket.fiscal.series}-{ticket.fiscal.number}</h3>
+                  <h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Número de factura {ticket.fiscal.fiscalNumber ?? 'Pendiente'}</h3>
                   <span className={`!inline-flex !min-h-6 !items-center !rounded-full !px-2.5 !text-[11px] !font-semibold ${fiscalStatusClass(ticket.fiscal.status)}`}>
-                    {fiscalStatusLabels[ticket.fiscal.status]}
+                    {fiscalDisplayStatus(ticket.fiscal)}
                   </span>
                 </div>
                 <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">
@@ -644,7 +665,7 @@ export function SalesReportTicketModal({
                 </p>
               </div>
               <div className="!flex !flex-wrap !gap-2">
-                {!ticket.fiscal.externalUuid && (ticket.fiscal.status === 'pending' || (ticket.fiscal.status === 'error' && (ticket.fiscal.errorCode === 'network_error' || /^http_(429|5\d\d)$/.test(ticket.fiscal.errorCode ?? '')))) ? (
+                 {!ticket.fiscal.externalUuid && ticket.fiscal.emissionState !== 'unknown' && (ticket.fiscal.status === 'pending' || ticket.fiscal.status === 'error') ? (
                   <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-blue)]" disabled={disabled} onClick={() => void submitFiscalInvoice()} type="button"><Send className="!size-3.5" />{ticket.fiscal.status === 'error' ? 'Reintentar envío' : 'Enviar ahora'}</UiButton>
                 ) : null}
                 <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-xs !font-semibold !text-[var(--crm-text)]" disabled={disabled || !ticket.fiscal.externalUuid} onClick={() => void consultFiscalStatus()} type="button"><RefreshCw className="!size-3.5" />Consultar estado</UiButton>
@@ -657,7 +678,10 @@ export function SalesReportTicketModal({
             </div>
 
             <div className="!grid !grid-cols-1 !gap-2 sm:!grid-cols-2">
-              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">UUID</span><code className="!mt-1 !block !break-all !text-xs !text-[var(--crm-text)]">{ticket.fiscal.externalUuid ?? 'Pendiente de asignación'}</code></div>
+               <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">ID ticket</span><p className="!mt-1 !mb-0 !break-all !text-xs !font-medium !text-[var(--crm-text)]">{ticket.operationalReference ?? ticket.id}</p></div>
+               <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Número de factura</span><p className="!mt-1 !mb-0 !break-all !text-xs !font-medium !text-[var(--crm-text)]">{ticket.fiscal.fiscalNumber ?? 'Pendiente'}</p></div>
+               <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Estado AEAT</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.fiscal.aeatStatus === 'pending' ? 'Pendiente de comunicación AEAT' : ticket.fiscal.aeatStatus ?? 'No solicitado'}</p></div>
+               <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Documento técnico</span><code className="!mt-1 !block !break-all !text-xs !text-[var(--crm-text)]">{ticket.fiscal.documentId ?? ticket.fiscal.externalUuid ?? 'Pendiente'}</code></div>
               <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Último error</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.fiscal.errorMessage || ticket.fiscal.errorCode ? 'No se ha podido completar el envío fiscal. Revisa el estado antes de repetirlo.' : 'Sin errores'}</p></div>
             </div>
 

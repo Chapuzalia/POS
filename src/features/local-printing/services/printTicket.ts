@@ -15,7 +15,7 @@ type PrintTicketOptions = {
   tickets: SessionTicketRecord[]
   updateTicketPrintState: (saleId: string, patch: Partial<Pick<SessionTicketRecord,
     'printStatus' | 'printJobId' | 'printRequestId' | 'printedAt' | 'printErrorCode' | 'printAttempts'>>) => void
-  options?: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean }
+   options?: { isReprint?: boolean; copyNumber?: number; isProforma?: boolean; cashDrawerAlreadyRequested?: boolean }
 }
 
 export async function printTicket({ cashSession, context, payload, tickets, updateTicketPrintState, options = {} }: PrintTicketOptions) {
@@ -70,7 +70,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
         cashRegisterName: cashSession?.cashRegisterName,
         employeeName: context.userName,
       },
-      isReprint: options.isReprint, copyNumber: options.copyNumber, cashDrawerAlreadyRequested: options.cashDrawerAlreadyRequested,
+       isReprint: options.isReprint, copyNumber: options.copyNumber, isProforma: options.isProforma, cashDrawerAlreadyRequested: options.cashDrawerAlreadyRequested,
     })
     updateTicketPrintState(payload.sale.id, {
       printStatus: 'printed', printJobId: job.jobId || job.id || null,
