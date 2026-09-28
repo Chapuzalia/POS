@@ -98,7 +98,7 @@ function buildQuickSalePayload(...args) {
   }
 }
 
-function quickSalePaymentHarness({ isOnline }) {
+function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssue = null }) {
   const sync = deferred()
   const calls = []
   const printed = []
@@ -131,6 +131,17 @@ function quickSalePaymentHarness({ isOnline }) {
       settleCashlogyPaymentIfConfigured: async () => null,
     },
     '../../local-printing/services/earlyCashDrawer': earlyCashDrawerMock,
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => fiscalMode },
+    '../../fiscal/local/posInvoice.ts': { issuePosInvoice: async (...args) => {
+      calls.push('issueFiscal')
+      if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
+      return fiscalIssue(...args)
+    }, preflightPosInvoice: async () => { calls.push('preflightFiscal') },
+    printPayloadWithLocalFiscal: (payload) => ({ ...payload, localFiscal: { series: 'L1-C1-I1-2026-S', number: 1 },
+      fiscal: { verificationUrl: 'https://aeat.example.invalid/qr' } }) },
+    '../../fiscal/local/economicSync.ts': { synchronizeFiscalEconomicSales: async () => {} },
+    '../../fiscal/local/sync.ts': { synchronizeLocalFiscalQueue: async () => {} },
+    '../../fiscal/local/installation.ts': { fiscalBridgeAccessToken: async () => '', fiscalBridgeBaseUrl: () => '' },
   }, { window: { crypto } })
   const options = {
     cashSession: quickSaleCashSession,
@@ -541,6 +552,35 @@ test('la venta rapida online con tarjeta no solicita cajon temprano', async () =
   await payment
   assert.deepEqual(harness.calls, ['persist', 'reset', 'sync', 'fiscal', 'print'])
   assert.notEqual(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
+})
+
+test('la factura fiscal reimprime la base y cuota históricas sin recalcular el desglose', () => {
+  const issued = structuredClone(sale)
+  issued.localFiscal = { recordId: 'record-1', series: 'L1-C1-I1-2026-S', number: 3,
+    issuedAt: '2026-07-18T16:30:00+02:00', documentKind: 'simplified',
+    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1' }
+  issued.lines[0].fiscalSnapshot = { taxRate: 21, taxableBaseCents: 1323, taxAmountCents: 277, grossTotalCents: 1600 }
+  issued.fiscal = { invoiceId: 'invoice-1', provider: 'verifactu', status: 'pending',
+    externalCode: 'L1-C1-I1-2026-S/3', qrBase64: null, verificationUrl: verifactuUrl }
+  const payload = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80 })
+  const text = payload.lines.join('\n')
+  assert.match(text, /Base imponible[ ]+13,23 €/)
+  assert.match(text, /IVA 21 %[ ]+2,77 €/)
+  assert.ok(payload.elements.some((element) => element.type === 'qr' && element.data === verifactuUrl))
+})
+
+test('la venta rápida en modo producción emite localmente y conserva el envío pendiente', async () => {
+  const harness = quickSalePaymentHarness({ isOnline: false, fiscalMode: 'production',
+    fiscalIssue: async () => ({ id: 'fiscal-record', record: {
+      tenantId: quickSaleContext.tenantId, fiscalSubjectId: 'subject', installationId: 'installation',
+    } }) })
+  await harness.pay('card', null)
+  assert.deepEqual(harness.calls.filter(item => ['preflightFiscal', 'issueFiscal', 'print'].includes(item)),
+    ['preflightFiscal', 'issueFiscal', 'print'])
+  assert.equal(harness.calls.includes('persist'), false)
+  assert.equal(harness.printed[0].localFiscal.number, 1)
+  assert.equal(harness.printed[0].fiscal.verificationUrl, 'https://aeat.example.invalid/qr')
 })
 
 test('el mapper suprime openCashDrawer cuando el cajon ya fue solicitado y conserva el comportamiento normal', () => {

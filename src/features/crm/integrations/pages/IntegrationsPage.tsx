@@ -8,6 +8,7 @@ import type { TenantContext } from '../../../../types'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import type { RunAction } from '../../shared/types'
+import { LocalFiscalSettings } from '../components/LocalFiscalSettings'
 import {
   type FiscalEnvironment,
   type FiscalProvider,
@@ -90,6 +91,8 @@ export function IntegrationsCrm({ disabled, runAction, tenantContext }: Props) {
       : '!bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]'
 
   return (
+    <div className="!grid !gap-5">
+    <LocalFiscalSettings disabled={disabled} runAction={runAction} tenantContext={tenantContext} />
     <section className="!min-w-0 !overflow-hidden !rounded-2xl !bg-[var(--crm-surface)] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-card)]">
       <header className="!flex !items-start !gap-3 !px-[18px] !pt-[18px] !pb-3 md:!px-[22px]">
         <div className="!grid !size-11 !shrink-0 !place-items-center !rounded-xl !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]">
@@ -154,5 +157,6 @@ export function IntegrationsCrm({ disabled, runAction, tenantContext }: Props) {
         </footer> : null}
       </form>
     </section>
+    </div>
   )
 }

@@ -454,6 +454,16 @@ export type SaleCreatedPayload = {
     cashlogyRequestId?: string | null
     cashlogyTransactionId?: string | null
   } | null
+  localFiscal?: {
+    recordId: string
+    series: string
+    number: number
+    issuedAt: string
+    documentKind: 'simplified' | 'complete'
+    issuerName: string
+    issuerNif: string
+    issuerAddress: string
+  }
   fiscal?: {
     invoiceId: string
     provider: 'verifactu' | 'ticketbai'

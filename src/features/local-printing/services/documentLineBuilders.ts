@@ -109,6 +109,19 @@ function fiscalBreakdown(sale: SaleCreatedPayload) {
     (line) => line.fiscalSnapshot && isValidTaxRate(line.fiscalSnapshot.taxRate),
   )
   if (!complete) return null
+  if (sale.localFiscal) {
+    const byRate = new Map<number, { baseCents: number; taxCents: number }>()
+    for (const line of sale.lines) {
+      const snapshot = line.fiscalSnapshot!
+      const current = byRate.get(snapshot.taxRate) ?? { baseCents: 0, taxCents: 0 }
+      byRate.set(snapshot.taxRate, {
+        baseCents: current.baseCents + snapshot.taxableBaseCents,
+        taxCents: current.taxCents + snapshot.taxAmountCents,
+      })
+    }
+    return [...byRate.entries()].sort(([left], [right]) => left - right)
+      .map(([rate, totals]) => ({ rate, ...totals }))
+  }
   const allocated = allocateNetTotalToLines(
     sale.lines.map((line) => line.netTotalCents ?? line.lineTotalCents),
     sale.sale.totalCents,
@@ -141,18 +154,21 @@ export function buildSaleTicketLines(
   const fiscal = fiscalBreakdown(sale)
   const taxableBaseCents = fiscal?.reduce((total, item) => total + item.baseCents, 0)
   const invoice = sale.ticket.invoice
-  const invoiceLabel = invoice?.series && invoice.number ? `${invoice.series}-${invoice.number}` : null
+  const localFiscal = options.label === 'PRE-TICKET' ? undefined : sale.localFiscal
+  const invoiceLabel = localFiscal ? `${localFiscal.series}/${localFiscal.number}`
+    : invoice?.series && invoice.number ? `${invoice.series}-${invoice.number}` : null
   const isInvoicePreview = Boolean(invoice && options.label === 'PRE-TICKET')
   const lines: string[] = [
     ...centeredWrapped(establishment.name, printerLayout),
     ...(establishment.legalName ? centeredWrapped(establishment.legalName, printerLayout) : []),
     ...(establishment.taxId ? centeredWrapped(`NIF/CIF ${establishment.taxId}`, printerLayout) : []),
     ...(establishment.address ? centeredWrapped(establishment.address, printerLayout) : []),
-    ...(invoice ? ['', ...centeredWrapped(isInvoicePreview ? 'FACTURA (BORRADOR)' : 'FACTURA', printerLayout)] : []),
+    ...(invoice || localFiscal ? ['', ...centeredWrapped(isInvoicePreview ? 'FACTURA (BORRADOR)'
+      : localFiscal?.documentKind === 'simplified' ? 'FACTURA SIMPLIFICADA' : 'FACTURA', printerLayout)] : []),
     ...(options.label ? ['', ...centeredWrapped(options.label, printerLayout)] : []),
     '',
-    ...row(invoice ? 'Factura' : 'Ticket', invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'), printerLayout),
-    ...row(invoice ? 'Fecha expedición' : 'Fecha', formatReceiptDate(invoice?.issuedAt ?? sale.sale.createdAt, timezone), printerLayout),
+    ...row(invoice || localFiscal ? 'Factura' : 'Ticket', invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'), printerLayout),
+    ...row(invoice || localFiscal ? 'Fecha expedición' : 'Fecha', formatReceiptDate(localFiscal?.issuedAt ?? invoice?.issuedAt ?? sale.sale.createdAt, timezone), printerLayout),
     ...(establishment.cashRegisterName ? row('Caja', establishment.cashRegisterName, printerLayout) : []),
     ...(establishment.employeeName ? row('Empleado', establishment.employeeName, printerLayout) : []),
   ]
@@ -210,8 +226,10 @@ export function buildSaleTicketLines(
 
   if (sale.fiscal && options.label !== 'PRE-TICKET') {
     lines.push('', ...section(sale.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu', printerLayout))
-    if (sale.fiscal.externalCode) lines.push(...wrapReceiptText(`Código: ${sale.fiscal.externalCode}`, printerLayout.columns, printerLayout.characterSet))
+    if (sale.fiscal.externalCode && !localFiscal) lines.push(...wrapReceiptText(`Código: ${sale.fiscal.externalCode}`, printerLayout.columns, printerLayout.characterSet))
+    if (localFiscal) lines.push(...centeredWrapped('QR tributario:', printerLayout))
     if (sale.fiscal.verificationUrl) lines.push(...wrapReceiptText(sale.fiscal.verificationUrl, printerLayout.columns, printerLayout.characterSet))
+    if (localFiscal) lines.push(...centeredWrapped('VERI*FACTU', printerLayout))
     const fiscalError = summarizeFiscalError(sale.fiscal.errorMessage ?? sale.fiscal.errorCode)
     if (!sale.fiscal.verificationUrl && fiscalError) {
       lines.push(...wrapReceiptText('QR no disponible.', printerLayout.columns, printerLayout.characterSet))
@@ -366,9 +384,11 @@ export function buildSalePrintTemplateContext(
   const money = (amountCents: number) => formatMoneyForReceipt(amountCents, { currency, locale })
   const fiscal = fiscalBreakdown(sale)
   const invoice = sale.ticket.invoice
-  const invoiceLabel = invoice?.series && invoice.number ? `${invoice.series}-${invoice.number}` : null
+  const localFiscal = options.label === 'PRE-TICKET' ? undefined : sale.localFiscal
+  const invoiceLabel = localFiscal ? `${localFiscal.series}/${localFiscal.number}`
+    : invoice?.series && invoice.number ? `${invoice.series}-${invoice.number}` : null
   const isInvoicePreview = Boolean(invoice && options.label === 'PRE-TICKET')
-  const datetime = dateParts(invoice?.issuedAt ?? sale.sale.createdAt, timezone)
+  const datetime = dateParts(localFiscal?.issuedAt ?? invoice?.issuedAt ?? sale.sale.createdAt, timezone)
   const totalTaxCents = fiscal?.reduce((total, item) => total + item.taxCents, 0) ?? 0
   const taxableBaseCents = fiscal?.reduce((total, item) => total + item.baseCents, 0)
   const totalRows: Array<{ label: string; value: string }> = []
@@ -399,10 +419,11 @@ export function buildSalePrintTemplateContext(
       address: establishment.address ?? '',
     },
     document: {
-      title: invoice ? (isInvoicePreview ? 'FACTURA (BORRADOR)' : 'FACTURA') : '',
+      title: invoice || localFiscal ? (isInvoicePreview ? 'FACTURA (BORRADOR)'
+        : localFiscal?.documentKind === 'simplified' ? 'FACTURA SIMPLIFICADA' : 'FACTURA') : '',
       label: options.label ?? '',
-      number_label: invoice ? 'Factura' : 'Ticket',
-      date_label: invoice ? 'Fecha expedición' : 'Fecha',
+      number_label: invoice || localFiscal ? 'Factura' : 'Ticket',
+      date_label: invoice || localFiscal ? 'Fecha expedición' : 'Fecha',
     },
     ticket: {
       number: invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'),
@@ -436,7 +457,7 @@ export function buildSalePrintTemplateContext(
     },
     payment: { method: sale.payment ? paymentLabels[sale.payment.method] ?? sale.payment.method : '', rows: paymentRows },
     fiscal: sale.fiscal && options.label !== 'PRE-TICKET' ? {
-      title: sale.fiscal.provider === 'ticketbai' ? 'TICKETBAI' : 'VERIFACTU',
+      title: sale.fiscal.provider === 'ticketbai' ? 'TICKETBAI' : localFiscal ? 'QR tributario: VERI*FACTU' : 'VERIFACTU',
       external_code: sale.fiscal.externalCode ?? '',
       verification_url: verificationUrl,
       show_qr: sale.fiscal.provider === 'verifactu' && Boolean(verificationUrl),

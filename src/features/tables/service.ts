@@ -463,6 +463,21 @@ export async function payRestaurantOrderItems(orderId: string, expectedRevision:
   const result = data as Record<string, unknown>
   return { ...result, requiresConfirmation: Boolean(result.requiresConfirmation), pendingUnits: Number(result.pendingUnits) } as PayRestaurantOrderItemsResult
 }
+
+/** Atomic cloud sale plus locally prepared fiscal record for a production installation. */
+export async function payRestaurantLocalFiscal(
+  action: 'close' | 'equal_part' | 'selected_items',
+  params: Record<string, unknown>, record: Record<string, unknown>, invoice: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  const { data, error } = await requireSupabase().rpc('pay_restaurant_local_fiscal', {
+    p_action: action, p_params: params, p_record: record, p_invoice: invoice,
+  })
+  if (error) throw error
+  const result = data as Record<string, unknown>
+  return action === 'equal_part' && result.split
+    ? { ...result, split: mapEqualSplit(result.split) }
+    : result
+}
 export async function saveRestaurantOrderLines(detail: RestaurantOrderDetail): Promise<SaveRestaurantOrderLinesResult> {
   const { data, error } = await requireSupabase().rpc('save_catalog_order_lines', {
     p_order_id: detail.order.id,

@@ -100,6 +100,10 @@ export function useCashTicketActions(options: Options) {
     const { context } = options
     const currentPayment = ticket.payload.payment
     if (!context || !currentPayment || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod || paymentChangeLockRef.current) return
+    if (ticket.payload.localFiscal) {
+      options.setError('La forma de cobro de una factura fiscal expedida no se puede cambiar desde el histórico. Requiere un procedimiento de corrección supervisado.')
+      return
+    }
     paymentChangeLockRef.current = true
     const requiresCashlogyConfirmation = ticket.paymentMethod === 'card' && paymentMethod === 'cash'
     options.setBusy(true)
@@ -174,15 +178,14 @@ export function useCashTicketActions(options: Options) {
   const voidTicket = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
     if (!context || ticket.status !== 'active') return
+    if (ticket.payload.localFiscal) {
+      options.setError('La factura ya está expedida. Clasifica la devolución o rectificación antes de modificar la venta.')
+      return
+    }
     const pendingSale = getOfflineQueue().find((event) =>
       event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
     if (pendingSale) {
-      if (!window.confirm('¿Eliminar este ticket de la sesión? Todavía no se ha enviado a Verifacti.')) return
-      forgetOfflineEvent(pendingSale.id)
-      options.persistTickets(options.tickets.map((item) => item.id === ticket.id ? { ...item, status: 'voided' } : item))
-      options.persistLedger(options.ledger.filter((sale) => sale.id !== ticket.id))
-      options.subtractProductSalesStats(ticket.payload.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, lineTotalCents: line.lineTotalCents })))
-      options.refreshPendingCount()
+      options.setError('Esta venta pendiente puede haber sido entregada como factura. Consérvala y sincronízala; después solicita una rectificación o anulación fiscal según el caso.')
       return
     }
 
@@ -190,7 +193,7 @@ export function useCashTicketActions(options: Options) {
       options.setError('Necesitas conexión para anular un ticket que ya puede haberse enviado a Verifacti.')
       return
     }
-    if (!window.confirm('¿Eliminar este ticket? Si tiene una factura enviada, se solicitará su anulación fiscal en Verifacti.')) return
+    if (!window.confirm('¿Anular esta venta? Si existe una factura expedida, la operación se bloqueará hasta clasificar su tratamiento fiscal.')) return
 
     options.setBusy(true)
     options.setError(null)

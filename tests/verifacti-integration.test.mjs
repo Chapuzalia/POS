@@ -359,7 +359,7 @@ test('el cliente espera la anulación fiscal antes de marcar el ticket como anul
   assert.deepEqual(harness.calls.errors, [null])
 })
 
-test('el borrado remoto conserva sus garantías de backend y persistencia SQL', async () => {
+test('el borrado remoto bloquea facturas expedidas y conserva garantías de backend', async () => {
   const [api, fiscalService, migration, posService] = await Promise.all([
     readFile(new URL('../supabase/functions/verifacti-api/index.ts', import.meta.url), 'utf8'),
     readFile(new URL('../src/features/fiscal/service.ts', import.meta.url), 'utf8'),
@@ -368,8 +368,9 @@ test('el borrado remoto conserva sus garantías de backend y persistencia SQL', 
   ])
   assert.match(fiscalService, /action: 'void-ticket', tenantId, ticketId/)
   assert.match(api, /if \(action === 'void-ticket'\)/)
-  assert.match(api, /await queueInvoiceCancellation[\s\S]*admin\.rpc\('finalize_ticket_void'/)
-  assert.match(api, /fiscalCancellationQueued: cancellation\?\.status === 'pending'/)
+  assert.match(api, /if \(invoice \|\| accessibleTicket\.is_invoice\)[\s\S]*return json\([\s\S]*409\)/)
+  assert.match(api, /if \(invoice \|\| accessibleTicket\.is_invoice\)[\s\S]*admin\.rpc\('finalize_ticket_void'/)
+  assert.match(api, /fiscalCancellationQueued: false/)
   assert.match(migration, /FISCAL_CANCELLATION_REQUIRED/)
   assert.match(migration, /v_invoice\.pending_operation <> 'cancel'/)
   assert.match(migration, /update public\.tickets[\s\S]*set status = 'void'/)
@@ -386,5 +387,5 @@ test('el borrado no exige clave de cifrado cuando la integracion fiscal no inter
   assert.doesNotMatch(requiredEnvironment, /!encryptionKey/)
   assert.match(api, /function requireEncryptionKey\(encryptionKey: string \| undefined\)/)
   assert.match(issueInvoice, /if \(!settings\?\.enabled\) return \{ skipped: true, reason: 'integration_disabled' \}[\s\S]*requireEncryptionKey\(encryptionKey\)/)
-  assert.match(api, /if \(action === 'void-ticket'\)[\s\S]*if \(invoice\)[\s\S]*await queueInvoiceCancellation/)
+  assert.match(api, /if \(action === 'void-ticket'\)[\s\S]*if \(invoice \|\| accessibleTicket\.is_invoice\)[\s\S]*admin\.rpc\('finalize_ticket_void'/)
 })

@@ -23,6 +23,7 @@ import { EqualSplitOrderModal } from '../features/tables/components/EqualSplitOr
 import { RemoveOrderLineModal } from '../features/tables/components/RemoveOrderLineModal'
 import { RestaurantOrderPanel } from '../features/tables/components/RestaurantOrderPanel'
 import { CarryoverNotice } from '../features/restaurant/components/CarryoverNotice'
+import { FiscalQueueNotice } from '../features/fiscal/local/FiscalQueueNotice.tsx'
 import { SplitOrderModal } from '../features/tables/components/SplitOrderModal'
 import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
@@ -472,6 +473,7 @@ export function PosPage(props: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
+      <FiscalQueueNotice context={props.context} cashSession={props.cash.session} />
       {restaurantEnabled && cash.session ? <CarryoverNotice
         key={cash.session.id}
         context={props.context} session={cash.session} isOnline={props.isOnline}

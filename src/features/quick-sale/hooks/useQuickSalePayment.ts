@@ -16,6 +16,11 @@ import {
 import type { AppliedDiscount, CashSession, Customer, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext, TicketLine } from '../../../types'
 import type { CashlogyTransaction } from '../../local-printing/types'
 import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
+import { assertRealSaleAllowed, localFiscalMode } from '../../fiscal/local/mode.ts'
+import { issuePosInvoice, preflightPosInvoice, printPayloadWithLocalFiscal } from '../../fiscal/local/posInvoice.ts'
+import { synchronizeFiscalEconomicSales } from '../../fiscal/local/economicSync.ts'
+import { synchronizeLocalFiscalQueue } from '../../fiscal/local/sync.ts'
+import { fiscalBridgeAccessToken, fiscalBridgeBaseUrl } from '../../fiscal/local/installation.ts'
 
 type Options = {
   context: TenantContext | null
@@ -58,7 +63,16 @@ export function useQuickSalePayment(options: Options) {
         : 'No hay productos en el ticket para aplicar este cobro. Recupera el ticket original; no vuelvas a cobrar en la máquina.')
       return
     }
-    if (options.invoiceCustomer && !options.isOnline) {
+    const localFiscalProduction = localFiscalMode() === 'production'
+    if (!localFiscalProduction) {
+      try {
+        assertRealSaleAllowed()
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'La emisión fiscal no está disponible.')
+        return
+      }
+    }
+    if (!localFiscalProduction && options.invoiceCustomer && !options.isOnline) {
       fail('Conéctate antes de cobrar una factura para asignar su número definitivo.')
       return
     }
@@ -80,6 +94,13 @@ export function useQuickSalePayment(options: Options) {
       options.invoiceCustomer,
       confirmedCashlogyTransaction?.saleId ? { saleId: confirmedCashlogyTransaction.saleId } : undefined,
     )
+    if (localFiscalProduction) {
+      try { await preflightPosInvoice(context, cashSession, preview) }
+      catch (error) {
+        fail(error instanceof Error ? error.message : 'La instalación fiscal no está preparada para emitir.')
+        return
+      }
+    }
     let cashlogyTransaction = null
     if (paymentMethod === 'cash') {
       try {
@@ -109,11 +130,21 @@ export function useQuickSalePayment(options: Options) {
           },
         }
       : preview
+    let fiscalEntry = null
+    if (localFiscalProduction) {
+      try {
+        fiscalEntry = await issuePosInvoice(context, cashSession, payload)
+      } catch (error) {
+        fail(error instanceof Error ? error.message : 'No se ha podido guardar el registro fiscal; no se emitirá la factura.')
+        return
+      }
+    }
+    const fiscalPayload = fiscalEntry ? printPayloadWithLocalFiscal(payload, fiscalEntry) : payload
     const saleRecord: SaleRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt }
-    const ticketRecord: SessionTicketRecord = { id: payload.sale.id, ticketNumber: payload.ticket.ticketNumber ?? 0, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt, status: 'active', payload, printStatus: 'not_requested', printAttempts: 0 }
+    const ticketRecord: SessionTicketRecord = { id: payload.sale.id, ticketNumber: payload.ticket.ticketNumber ?? 0, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt, status: 'active', payload: fiscalPayload, printStatus: 'not_requested', printAttempts: 0 }
     operationBreadcrumb({ operation: 'sale.payment', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'persist' })
     try {
-      enqueueOfflineEvent({ id: createId(), kind: 'sale_created', tenantId: context.tenantId, createdAt: payload.sale.createdAt, attempts: 0, payload })
+      if (!fiscalEntry) enqueueOfflineEvent({ id: createId(), kind: 'sale_created', tenantId: context.tenantId, createdAt: payload.sale.createdAt, attempts: 0, payload })
       options.persistLedger([...options.ledger, saleRecord])
       options.persistTickets([ticketRecord, ...options.tickets])
       options.mergeProductStats(lines)
@@ -130,8 +161,15 @@ export function useQuickSalePayment(options: Options) {
     })
     options.resetUi(paymentMethod)
     finishCashlogyPayment(cashlogyTransaction)
-    let printPayload = payload
-    if (options.isOnline) {
+    if (fiscalEntry) {
+      const scope = { tenantId: fiscalEntry.record.tenantId, fiscalSubjectId: fiscalEntry.record.fiscalSubjectId,
+        installationId: fiscalEntry.record.installationId }
+      void synchronizeFiscalEconomicSales(scope).catch(() => { /* Saved in IndexedDB for retry. */ })
+      void synchronizeLocalFiscalQueue({ ...scope, mode: 'production', baseUrl: fiscalBridgeBaseUrl(context.tenantId),
+        getAccessToken: fiscalBridgeAccessToken }).catch(() => { /* LOCAL_PENDING is retained. */ })
+    }
+    let printPayload = fiscalPayload
+    if (options.isOnline && !fiscalEntry) {
       await options.syncPendingEvents()
       try {
         const persistedTicket = await (options.loadPersistedTicket

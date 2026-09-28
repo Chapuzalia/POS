@@ -64,8 +64,10 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
       sale: payload,
       context,
       establishment: {
-        name: context.venueName, address: context.venueAddress,
-        legalName: context.venueLegalName, taxId: context.venueTaxId,
+        name: context.venueName,
+        legalName: payload.localFiscal?.issuerName ?? context.venueLegalName,
+        taxId: payload.localFiscal?.issuerNif ?? context.venueTaxId,
+        address: payload.localFiscal?.issuerAddress ?? context.venueAddress,
         timezone: context.venueTimeZone,
         cashRegisterName: cashSession?.cashRegisterName,
         employeeName: context.userName,

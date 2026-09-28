@@ -28,6 +28,10 @@ import type {
   TenantContext,
 } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
+import { localFiscalMode } from '../../fiscal/local/mode.ts'
+import { loadFiscalInstallation } from '../../fiscal/local/installation.ts'
+import { findLocalFiscalEntryByTicket } from '../../fiscal/local/localLedger.ts'
+import { printPayloadWithLocalFiscal } from '../../fiscal/local/posInvoice.ts'
 import { usePrintAgentScope } from '../../local-printing/hooks/usePrintAgentScope'
 import { useCashlogyScope } from '../../local-printing/cashlogy/useCashlogyScope'
 import { loadActiveCashlogyCashBalance } from '../../local-printing/cashlogy/cashlogyCashBalance'
@@ -162,6 +166,15 @@ export function useCashSession(options: Options) {
     printOptions: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean } = {},
   ) => {
     if (!options.context) return
+    if (localFiscalMode() === 'production') {
+      const installation = await loadFiscalInstallation(options.context, { cashRegisterId: payload.ticket.cashRegisterId })
+      const entry = await findLocalFiscalEntryByTicket(installation, payload.ticket.id)
+      if (!entry) {
+        if (!printOptions.isReprint || !payload.fiscal || payload.localFiscal) {
+          throw new UserFacingError('No se puede imprimir una factura sin su registro fiscal local.')
+        }
+      } else payload = printPayloadWithLocalFiscal(payload, entry)
+    }
     if (!printOptions.isReprint && !ticketsRef.current.some((ticket) => ticket.id === payload.sale.id)) {
       persistTickets([{
          id: payload.sale.id,

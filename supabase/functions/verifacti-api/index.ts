@@ -454,7 +454,7 @@ Deno.serve(async (request) => {
       // be used to void a ticket hidden by tenant/venue RLS.
       const { data: accessibleTicket, error: ticketAccessError } = await authClient
         .from('tickets')
-        .select('id, status')
+        .select('id, status, is_invoice')
         .eq('tenant_id', tenantId)
         .eq('id', ticketId)
         .maybeSingle()
@@ -467,34 +467,10 @@ Deno.serve(async (request) => {
         .eq('ticket_id', ticketId)
         .maybeSingle()
       if (invoiceError) throw invoiceError
-
-      let cancellation: { status: 'pending' | 'cancelled'; response: Record<string, unknown> } | null = null
-      if (invoice) {
-        const fiscalInvoice = invoice as FiscalInvoiceRow & Record<string, unknown>
-        const wasSubmitted = Boolean(invoice.sent_at || invoice.external_uuid || invoice.request_payload)
-        if (wasSubmitted) {
-          cancellation = await queueInvoiceCancellation(
-            admin,
-            env.encryptionKey,
-            await loadSettings(admin, tenantId),
-            fiscalInvoice,
-          )
-        } else if (invoice.status !== 'cancelled') {
-          const now = new Date().toISOString()
-          const { error: cancelLocalError } = await admin.from('fiscal_invoices').update({
-            status: 'cancelled', pending_operation: 'none', confirmed_at: now,
-            cancelled_at: now, next_retry_at: null, error_code: null,
-            error_message: null, updated_at: now,
-          }).eq('tenant_id', tenantId).eq('id', invoice.id)
-          if (cancelLocalError) throw cancelLocalError
-          await insertEvent(admin, fiscalInvoice, {
-            source: 'system', event_type: 'unsent_invoice_cancelled', status: 'cancelled',
-            payload: { reason: 'ticket_voided_before_submission' },
-          })
-          cancellation = { status: 'cancelled', response: {} }
-        } else {
-          cancellation = { status: 'cancelled', response: (invoice.response_payload ?? {}) as Record<string, unknown> }
-        }
+      // A refund or cancellation of a paid sale does not imply that the invoice
+      // was issued in error. Require an explicit rectification/annulment workflow.
+      if (invoice || accessibleTicket.is_invoice) {
+        return json({ error: 'La factura expedida requiere clasificación fiscal y un procedimiento explícito de rectificación o anulación. No se ha modificado la venta ni el registro.' }, 409)
       }
 
       const { error: voidError } = await admin.rpc('finalize_ticket_void', {
@@ -506,9 +482,9 @@ Deno.serve(async (request) => {
 
       return json({
         ticketStatus: 'void',
-        fiscalCancellationQueued: cancellation?.status === 'pending',
-        fiscalStatus: cancellation?.status ?? null,
-        response: cancellation?.response ?? null,
+        fiscalCancellationQueued: false,
+        fiscalStatus: null,
+        response: null,
       })
     }
 
