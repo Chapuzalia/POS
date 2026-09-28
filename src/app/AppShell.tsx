@@ -470,7 +470,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
       onOpen={cash.open}
       onOpenReservations={reservations.open}
       onOpenClosingHistory={() => void cash.openClosingHistory()}
-      onPrintClosing={(closing, isReprint) => void cash.printClosing(closing, isReprint ? { isReprint: true, copyNumber: closing.printCopies + 1 } : {})}
+      onPrintClosing={(closing, isReprint, confirmedNotPrinted) => void cash.printClosing(closing, isReprint ? { isReprint: true, confirmedNotPrinted } : {})}
       onRefresh={() => void cash.options.refresh(context)}
       registers={cash.options.registers}
       printingClosingId={cash.printingClosingId}

@@ -5,6 +5,8 @@ import test from 'node:test'
 import { createPrintAgentClient } from '../src/features/local-printing/api/printAgentClient.ts'
 import { printRequestSchema } from '../src/features/local-printing/schemas/printSchemas.ts'
 import { mapCashClosingToPrintRequest } from '../src/features/local-printing/services/cashClosingPrintMapper.ts'
+import { checkUnknownClosingJob, nextCashClosingCopyNumber } from '../src/features/cash-registers/services/cashClosingPrintRecovery.ts'
+import { pollPrintJob } from '../src/features/local-printing/services/jobPolling.ts'
 import { buildClosingReportLines } from '../src/features/local-printing/services/documentLineBuilders.ts'
 import {
   adaptTextToCharacterSet,
@@ -86,6 +88,61 @@ test('la copia es explícita, usa force, tiene ID propio y nunca abre el cajón'
   assert.equal(request.force, true)
   assert.ok(request.lines.some((line) => line.trim() === 'COPIA'))
   assert.equal(request.options.openCashDrawer, false)
+})
+
+test('un cierre incierto solo permite copia manual cuando el trabajo anterior ya no puede imprimir', async () => {
+  const uncertain = { ...closing, printStatus: 'unknown', printRequestId: 'cash-closing:closing_123:original', printJobId: 'job-original', printAttempts: 1 }
+  const lookup = async (status) => checkUnknownClosingJob(uncertain, async (requestId, jobId) => {
+    assert.equal(requestId, uncertain.printRequestId)
+    assert.equal(jobId, uncertain.printJobId)
+    return status ? { id: jobId, requestId, status } : null
+  })
+  assert.equal(await lookup('pending'), 'in_progress')
+  assert.equal(await lookup('connecting'), 'in_progress')
+  assert.equal(await lookup('printing'), 'in_progress')
+  assert.equal(await lookup('printed'), 'printed')
+  assert.equal(await lookup('failed'), 'ready')
+  assert.equal(await lookup('unknown'), 'ready')
+  assert.equal(await lookup(null), 'ready')
+  const checkedIds = []
+  assert.equal(await checkUnknownClosingJob({ ...uncertain, printRequestId: 'cash-closing:closing_123:copy:1' }, async (requestId, jobId) => {
+    checkedIds.push(jobId)
+    return jobId ? { id: jobId, requestId: uncertain.printRequestId, status: 'failed' } : { requestId, status: 'pending' }
+  }), 'in_progress', 'el jobId heredado no autoriza otra copia mientras el intento actual siga pendiente')
+  assert.deepEqual(checkedIds, ['job-original', undefined])
+  assert.equal(nextCashClosingCopyNumber(uncertain), 1)
+  assert.equal(nextCashClosingCopyNumber({ ...uncertain, printAttempts: 2 }), 2, 'un nuevo intento no reutiliza el requestId de la copia fallida')
+  const copy = mapCashClosingToPrintRequest({ closing: uncertain, establishment, printerId: 'main', printerLayout: layout80, settings, isReprint: true, copyNumber: nextCashClosingCopyNumber(uncertain) })
+  assert.equal(copy.requestId, 'cash-closing:closing_123:copy:1')
+  assert.equal(copy.options.openCashDrawer, false)
+})
+
+test('el POS consulta por jobId después de la respuesta pending y observa el fallo o la impresión posterior', async () => {
+  const jobs = new Map()
+  const requests = []
+  let poweredOn = false
+  const client = createPrintAgentClient({ baseUrl: 'https://agent.local', token: 'secret', fetchImpl: async (url, init) => {
+    const path = new URL(url).pathname
+    requests.push(path)
+    if (path === '/api/v1/print') {
+      const request = JSON.parse(String(init.body))
+      const jobId = `job-${jobs.size + 1}`
+      jobs.set(jobId, { id: jobId, requestId: request.requestId, status: 'pending' })
+      queueMicrotask(() => jobs.set(jobId, { ...jobs.get(jobId), status: poweredOn ? 'printed' : 'failed' }))
+      return new Response(JSON.stringify({ ok: true, jobId, status: 'pending' }))
+    }
+    const jobId = path.split('/').at(-1)
+    return new Response(JSON.stringify(jobs.get(jobId)))
+  } })
+  const original = mapCashClosingToPrintRequest({ closing, establishment, printerId: 'main', printerLayout: layout80, settings })
+  const accepted = await client.printTicket(original)
+  assert.equal(accepted.status, 'pending')
+  assert.equal((await pollPrintJob(client, accepted.jobId, { intervalMs: 1, maxWaitMs: 100 })).status, 'failed')
+  poweredOn = true
+  const copy = mapCashClosingToPrintRequest({ closing, establishment, printerId: 'main', printerLayout: layout80, settings, isReprint: true, copyNumber: 1 })
+  const copyAccepted = await client.printTicket(copy)
+  assert.equal((await pollPrintJob(client, copyAccepted.jobId, { intervalMs: 1, maxWaitMs: 100 })).status, 'printed')
+  assert.deepEqual(requests, ['/api/v1/print', '/api/v1/jobs/job-1', '/api/v1/print', '/api/v1/jobs/job-2'])
 })
 
 test('diferencias positivas y negativas se imprimen sin recalcular el snapshot', () => {
