@@ -4,11 +4,13 @@ import { formatMoney } from '../../lib/format'
 import { getCashClosingAmounts } from '../../features/cash-registers/services/cashClosingAmounts'
 import { AppModal, Button, Metric } from '../ui'
 
-export function CashClosingResultModal({ closing, isPrinting, onClose, onPrint }: {
+export function CashClosingResultModal({ canReprint, closing, isPrinting, onClose, onPrint, onConfirmedReprint }: {
+  canReprint: boolean
   closing: CashClosingRecord
   isPrinting: boolean
   onClose: () => void
   onPrint: () => void
+  onConfirmedReprint: () => void
 }) {
   const printed = closing.printStatus === 'printed'
   const unknown = closing.printStatus === 'unknown'
@@ -40,14 +42,14 @@ export function CashClosingResultModal({ closing, isPrinting, onClose, onPrint }
           value={formatMoney(Math.abs(amounts.cashToWithdrawCents))}
         />
       </div>
-      {unknown ? <p className="mt-4 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-bold text-amber-700">No se puede confirmar si el cierre se imprimió. Comprueba la impresora antes de volver a imprimir.</p> : null}
-      {closing.printStatus === 'failed' ? <p className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold text-red-700">El cierre se ha guardado, pero no se ha podido imprimir. Puedes reintentar con el mismo identificador.</p> : null}
+      {unknown ? <p className="mt-4 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-bold text-amber-700">No se puede confirmar si el cierre se imprimió. Comprueba físicamente el papel antes de solicitar una copia. Si el trabajo sigue en curso, espera a que termine.</p> : null}
+      {closing.printStatus === 'failed' ? <p className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold text-red-700">El cierre se ha guardado, pero no se ha podido imprimir. Puedes crear una copia con un identificador nuevo.</p> : null}
       <div className="mt-5 flex flex-wrap justify-end gap-2">
         <Button onClick={onClose} type="button" variant="secondary">Cerrar</Button>
-        <Button disabled={isPrinting || printed || unknown} onClick={onPrint} type="button" variant="primary">
+        {unknown ? <Button disabled={isPrinting || !canReprint} onClick={onConfirmedReprint} type="button" variant="primary">He comprobado que no se imprimió · Crear copia</Button> : <Button disabled={isPrinting || printed || (closing.printStatus === 'failed' && !canReprint)} onClick={onPrint} type="button" variant="primary">
           {isPrinting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-          {isPrinting ? 'Imprimiendo...' : printed ? 'Cierre impreso' : 'Imprimir cierre'}
-        </Button>
+          {isPrinting ? 'Imprimiendo...' : printed ? 'Cierre impreso' : closing.printStatus === 'failed' ? 'Reintentar como copia' : 'Imprimir cierre'}
+        </Button>}
       </div>
     </section>
   </AppModal>

@@ -75,6 +75,7 @@ type StoreState = {
   selectPrinter: (printerId: string, signal?: AbortSignal) => Promise<Printer>
   testPrinter: (printerId?: string, signal?: AbortSignal) => Promise<unknown>
   printTicket: (payload: PrintRequest, signal?: AbortSignal) => Promise<PrintJob>
+  getPrintJob: (requestId: string, jobId?: string | null) => Promise<PrintJob | null>
   openCashDrawer: (payload?: { requestId?: string; printerId?: string }, signal?: AbortSignal) => Promise<unknown>
   loadJobs: (signal?: AbortSignal) => Promise<PrintJob[]>
   clearError: () => void
@@ -412,30 +413,43 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
       }
       set({ isPrintingTicket: true, lastConnectionError: null, currentJob: { requestId: payload.requestId, status: 'pending' } })
       const activeClient = client()
+      let acceptedJobId: string | undefined
       try {
         const response = await activeClient.printTicket(payload, signal)
+        acceptedJobId = response.jobId
+        if (!acceptedJobId) throw new PrintAgentError({ code: 'INVALID_RESPONSE' })
         let job: PrintJob = { jobId: response.jobId, id: response.jobId, requestId: payload.requestId, status: (response.status || 'pending') as PrintJob['status'] }
         set({ currentJob: job })
         if (response.jobId && !['printed', 'failed', 'cancelled'].includes(job.status)) {
           job = await pollPrintJob(activeClient, response.jobId, { signal, onUpdate: (next) => set({ currentJob: next }) })
         }
-        if (job.status === 'unknown') throw new PrintAgentError({ code: 'PRINT_STATUS_UNKNOWN' })
+        if (job.status === 'unknown') throw new PrintAgentError({ code: 'PRINT_STATUS_UNKNOWN', details: job })
         if (job.status === 'failed' || job.status === 'cancelled') throw new PrintAgentError({ code: job.errorCode === 'PRINTER_NOT_FOUND' ? 'PRINTER_NOT_FOUND' : 'PRINT_FAILED', details: job })
         const printedAt = job.printedAt || new Date().toISOString()
         set((state) => ({ currentJob: job, lastPrintAt: printedAt, jobs: [job, ...state.jobs.filter((item) => item.requestId !== job.requestId)].slice(0, 25) }))
         return job
       } catch (error) {
         const mapped = toPrintAgentError(error, 'PRINT_FAILED')
-        if (['NETWORK_ERROR', 'TIMEOUT'].includes(mapped.code)) {
+        if (['NETWORK_ERROR', 'TIMEOUT', 'INVALID_RESPONSE'].includes(mapped.code)) {
           try {
-            const known = await activeClient.findJobByRequestId(payload.requestId, signal)
+            const known = acceptedJobId
+              ? await activeClient.getJob(acceptedJobId, signal)
+              : await activeClient.findJobByRequestId(payload.requestId, signal)
             if (known) {
               const resolved = known.jobId || known.id ? await pollPrintJob(activeClient, String(known.jobId || known.id), { signal, onUpdate: (job) => set({ currentJob: job }) }) : known
               if (resolved.status === 'printed') { set({ currentJob: resolved, lastPrintAt: resolved.printedAt || new Date().toISOString() }); return resolved }
+              if (resolved.status === 'failed' || resolved.status === 'cancelled') {
+                const failed = new PrintAgentError({ code: resolved.errorCode === 'PRINTER_NOT_FOUND' ? 'PRINTER_NOT_FOUND' : 'PRINT_FAILED', details: resolved })
+                set({ lastConnectionError: failed, currentJob: resolved })
+                throw failed
+              }
             }
-          } catch { /* el resultado sigue siendo incierto */ }
-          const unknown = new PrintAgentError({ code: 'PRINT_STATUS_UNKNOWN', cause: mapped })
-          set({ lastConnectionError: unknown, currentJob: { requestId: payload.requestId, status: 'unknown' } })
+          } catch (recoveryError) {
+            if (recoveryError instanceof PrintAgentError && ['PRINTER_NOT_FOUND', 'PRINT_FAILED'].includes(recoveryError.code)) throw recoveryError
+          }
+          const uncertainJob = { id: acceptedJobId, jobId: acceptedJobId, requestId: payload.requestId, status: 'unknown' as const }
+          const unknown = new PrintAgentError({ code: 'PRINT_STATUS_UNKNOWN', cause: mapped, details: uncertainJob })
+          set({ lastConnectionError: unknown, currentJob: uncertainJob })
           reportOperationError(unknown, { operation: 'print.ticket', operationId: payload.requestId, integration: 'print-agent', step: 'reconcile_unknown' })
           throw unknown
         }
@@ -443,6 +457,20 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
         set({ lastConnectionError: mapped })
         throw mapped
       } finally { set({ isPrintingTicket: false }) }
+    },
+
+    getPrintJob: async (requestId, jobId) => {
+      const activeClient = client()
+      if (jobId) {
+        try {
+          const job = await activeClient.getJob(jobId)
+          if (job.requestId === requestId) return job
+        }
+        catch (error) {
+          if (!(error instanceof PrintAgentError) || error.status !== 404) throw error
+        }
+      }
+      return activeClient.findJobByRequestId(requestId)
     },
 
     async openCashDrawer(input = {}, signal) {

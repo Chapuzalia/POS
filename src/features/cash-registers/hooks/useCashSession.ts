@@ -32,6 +32,7 @@ import { usePrintAgentScope } from '../../local-printing/hooks/usePrintAgentScop
 import { useCashlogyScope } from '../../local-printing/cashlogy/useCashlogyScope'
 import { loadActiveCashlogyCashBalance } from '../../local-printing/cashlogy/cashlogyCashBalance'
 import { cashClosingRequestId } from '../../local-printing/services/cashClosingPrintMapper'
+import { checkUnknownClosingJob, nextCashClosingCopyNumber } from '../services/cashClosingPrintRecovery'
 import { printCashClosing } from '../../local-printing/services/printCashClosing'
 import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
 import {
@@ -363,7 +364,7 @@ export function useCashSession(options: Options) {
     if (registerId) void open(registerId, openingFloatCents)
   }, [cashOptions.registers, open, options.context?.defaultCashRegisterId])
 
-  const printClosing = useCallback(async (closing: CashClosingRecord, printOptions: { isReprint?: boolean; copyNumber?: number } = {}) => {
+  const printClosing = useCallback(async (closing: CashClosingRecord, printOptions: { isReprint?: boolean; copyNumber?: number; confirmedNotPrinted?: boolean } = {}) => {
     if (!options.context || printingClosingId) return false
     const state = usePrintAgentStore.getState()
     const printerId = state.selectedPrinterId || state.selectedPrinter?.id
@@ -373,11 +374,23 @@ export function useCashSession(options: Options) {
       sileo.warning({ title: 'Este cierre ya se imprimió.', description: 'Usa la acción de reimpresión para generar una copia.' })
       return false
     }
-    if (closing.printStatus === 'unknown') {
-      sileo.warning({ title: 'No se puede confirmar si el cierre se imprimió.', description: 'Comprueba la impresora antes de volver a imprimir.' })
+    if (closing.printStatus === 'unknown' && (!printOptions.isReprint || !printOptions.confirmedNotPrinted)) {
+      sileo.warning({ title: 'Confirma que no se imprimió.', description: 'Comprueba físicamente el cierre antes de solicitar una copia.' })
       return false
     }
-    const copyNumber = printOptions.isReprint ? Math.max(1, printOptions.copyNumber || closing.printCopies + 1) : 0
+    if (closing.printStatus === 'unknown') {
+      try {
+        const previousStatus = await checkUnknownClosingJob(closing, state.getPrintJob)
+        if (previousStatus !== 'ready') {
+          sileo.warning({ title: previousStatus === 'printed' ? 'El agente confirma que ya se imprimió.' : 'La impresión anterior sigue en curso.', description: 'Espera a que termine y actualiza el histórico antes de generar otra copia.' })
+          return false
+        }
+      } catch {
+        sileo.warning({ title: 'No se pudo comprobar el trabajo anterior.', description: 'Conecta con el agente de impresión antes de generar otra copia.' })
+        return false
+      }
+    }
+    const copyNumber = printOptions.isReprint ? nextCashClosingCopyNumber(closing, printOptions.copyNumber) : 0
     const requestId = cashClosingRequestId(closing.id, Boolean(printOptions.isReprint), copyNumber)
     setPrintingClosingId(closing.id)
     try {
@@ -402,9 +415,13 @@ export function useCashSession(options: Options) {
     } catch (error) {
       const errorCode = error && typeof error === 'object' && 'code' in error ? String(error.code) : 'PRINT_FAILED'
       const status = errorCode === 'PRINT_STATUS_UNKNOWN' ? 'unknown' : 'failed'
+      const errorJob = error && typeof error === 'object' && 'details' in error ? error.details : null
+      const errorJobId = errorJob && typeof errorJob === 'object'
+        ? 'jobId' in errorJob ? errorJob.jobId : 'id' in errorJob ? errorJob.id : null : null
+      const printJobId = typeof errorJobId === 'string' ? errorJobId : null
       try {
         await recordCashClosingPrintResult(options.context, {
-          closingId: closing.id, printerId, requestId, status, errorCode,
+          closingId: closing.id, printerId, requestId, printJobId, status, errorCode,
           isReprint: Boolean(printOptions.isReprint), copyNumber,
         })
         const refreshed = await loadCashClosing(options.context, closing.id)

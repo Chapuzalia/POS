@@ -13,7 +13,7 @@ export function CashClosingsHistoryModal({ canReprint, closings, printingClosing
   closings: CashClosingRecord[]
   printingClosingId: string | null
   onClose: () => void
-  onReprint: (closing: CashClosingRecord) => void
+  onReprint: (closing: CashClosingRecord, confirmedNotPrinted?: boolean) => void
 }) {
   return <AppModal containerClassName="!p-4" maxWidth={896} dismissDisabled={Boolean(printingClosingId)} label="Histórico de cierres" onClose={onClose}>
     <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
@@ -33,11 +33,12 @@ export function CashClosingsHistoryModal({ canReprint, closings, printingClosing
                   <p className="mt-1 font-mono text-xl font-black">{formatMoney(closing.printSnapshot.summary.totalSalesCents)}</p>
                   <p className="text-xs font-bold text-[var(--muted)]">{closing.printSnapshot.summary.salesCount} ventas · Impresión: {statusLabels[closing.printStatus]} · {closing.printCopies} copias</p>
                 </div>
-                <Button disabled={!canReprint || Boolean(printingClosingId) || closing.printStatus === 'unknown'} onClick={() => onReprint(closing)} type="button" variant="secondary">
+                <Button disabled={!canReprint || Boolean(printingClosingId)} onClick={() => onReprint(closing, closing.printStatus === 'unknown')} type="button" variant="secondary">
                   {printing ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
-                  {printing ? 'Imprimiendo...' : 'Imprimir cierre'}
+                  {printing ? 'Imprimiendo...' : closing.printStatus === 'unknown' ? 'He comprobado que no se imprimió · Crear copia' : 'Imprimir cierre'}
                 </Button>
               </div>
+              {closing.printStatus === 'unknown' ? <p className="mt-3 text-sm font-semibold text-amber-700">Comprueba físicamente que no salió papel antes de pulsar. El agente verificará que el trabajo anterior haya terminado.</p> : null}
             </article>
           })}
           {!closings.length ? <p className="rounded-[var(--radius)] border border-dashed border-[var(--separator)] p-8 text-center text-sm font-semibold text-[var(--muted)]">No hay cierres guardados.</p> : null}

@@ -810,16 +810,18 @@ export function PosPage(props: Props) {
         onVoidTicket={cash.ticketActions.voidTicket}
       /> : null}
       {cash.completedClosing ? <CashClosingResultModal
+        canReprint={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         closing={cash.completedClosing}
         isPrinting={cash.printingClosingId === cash.completedClosing.id}
         onClose={() => cash.setCompletedClosing(null)}
-        onPrint={() => void cash.printClosing(cash.completedClosing!)}
+        onPrint={() => void cash.printClosing(cash.completedClosing!, cash.completedClosing!.printStatus === 'failed' ? { isReprint: true } : {})}
+        onConfirmedReprint={() => void cash.printClosing(cash.completedClosing!, { isReprint: true, confirmedNotPrinted: true })}
       /> : null}
       {cash.closingHistoryOpen ? <CashClosingsHistoryModal
         canReprint={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         closings={cash.cashClosings}
         onClose={() => cash.setClosingHistoryOpen(false)}
-        onReprint={(closing) => void cash.printClosing(closing, { isReprint: true, copyNumber: closing.printCopies + 1 })}
+        onReprint={(closing, confirmedNotPrinted) => void cash.printClosing(closing, { isReprint: true, confirmedNotPrinted })}
         printingClosingId={cash.printingClosingId}
       /> : null}
       {configOpen ? <ConfigModal

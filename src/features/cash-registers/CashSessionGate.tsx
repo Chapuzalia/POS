@@ -36,7 +36,7 @@ type Props = {
   onOpenClosingHistory: () => void;
   onCloseClosingHistory: () => void;
   onCloseCompletedClosing: () => void;
-  onPrintClosing: (closing: CashClosingRecord, isReprint: boolean) => void;
+  onPrintClosing: (closing: CashClosingRecord, isReprint: boolean, confirmedNotPrinted?: boolean) => void;
 };
 
 export function CashSessionGate({
@@ -231,10 +231,12 @@ export function CashSessionGate({
       ) : null}
       {completedClosing ? (
         <CashClosingResultModal
+          canReprint={Boolean(context.canManageCash || ['manager', 'owner'].includes(context.role))}
           closing={completedClosing}
           isPrinting={printingClosingId === completedClosing.id}
           onClose={onCloseCompletedClosing}
-          onPrint={() => onPrintClosing(completedClosing, false)}
+          onPrint={() => onPrintClosing(completedClosing, completedClosing.printStatus === 'failed')}
+          onConfirmedReprint={() => onPrintClosing(completedClosing, true, true)}
         />
       ) : null}
       {closingHistoryOpen ? (
@@ -245,7 +247,7 @@ export function CashSessionGate({
           )}
           closings={cashClosings}
           onClose={onCloseClosingHistory}
-          onReprint={(closing) => onPrintClosing(closing, true)}
+          onReprint={(closing, confirmedNotPrinted) => onPrintClosing(closing, true, confirmedNotPrinted)}
           printingClosingId={printingClosingId}
         />
       ) : null}
