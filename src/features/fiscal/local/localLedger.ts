@@ -1,5 +1,5 @@
-import type { BridgeInvoiceSnapshot, BridgeRecord, BridgeResult } from './bridgeClient.ts'
-import { createAltaRecord, type FiscalDetail, type FiscalSystem } from './canonical.ts'
+import type { BridgeAnnulmentSnapshot, BridgeInvoiceSnapshot, BridgeRecord, BridgeResult } from './bridgeClient.ts'
+import { createAltaRecord, createAnulacionRecord, type FiscalDetail, type FiscalSystem } from './canonical.ts'
 import { centsToAeat } from './canonical.ts'
 import { fiscalSeries } from './fiscalPolicy.ts'
 import { assertFiscalClock, type FiscalClockSample } from './clock.ts'
@@ -12,6 +12,7 @@ export type LocalFiscalEntry = {
   scope: string
   record: BridgeRecord
   invoice: BridgeInvoiceSnapshot
+  annulment?: BridgeAnnulmentSnapshot
   delivery: { state: LocalFiscalState; attempts: number; lastError: string | null; nextAttemptAt: string | null; result: BridgeResult | null }
 }
 
@@ -24,7 +25,7 @@ type StoredEconomicSale = { id: string; scope: string; payload: SaleCreatedPaylo
 export type RestorableFiscalCopy = { entry: LocalFiscalEntry; economicPayload: SaleCreatedPayload | null; eventId: string | null }
 
 const dbName = 'tickit-verifactu-local-v1'
-const dbVersion = 3
+const dbVersion = 4
 
 function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error) })
@@ -54,7 +55,7 @@ async function openLedger(): Promise<IDBDatabase> {
       ? upgradeTx.objectStore('entries')
       : db.createObjectStore('entries', { keyPath: 'id' })
     if (!entries.indexNames.contains('scope')) entries.createIndex('scope', 'scope')
-    if (!entries.indexNames.contains('invoiceUnique')) entries.createIndex('invoiceUnique', ['scope', 'invoice.ticketId'], { unique: true })
+    if (!entries.indexNames.contains('ticket')) entries.createIndex('ticket', ['scope', 'invoice.ticketId'])
     if (!db.objectStoreNames.contains('delivery')) db.createObjectStore('delivery', { keyPath: 'id' })
     if (!db.objectStoreNames.contains('economicSales')) {
       const economicSales = db.createObjectStore('economicSales', { keyPath: 'id' })
@@ -251,6 +252,72 @@ export async function issueSyntheticTestInvoice(input: TestIssueInput): Promise<
   return issueLocalInvoice(input)
 }
 
+export async function persistLocalFiscalAnnulment(input: {
+  installation: {
+    tenantId: string; fiscalSubjectId: string; issuerNif: string; venueId: string; cashRegisterId: string
+    installationId: string; deviceId: string
+  }
+  lease: FiscalLease
+  original: LocalFiscalEntry
+  canonicalRecord: Awaited<ReturnType<typeof createAnulacionRecord>>['canonicalRecord']
+  hash: string
+  generatedAt: string
+  reason: string
+}): Promise<LocalFiscalEntry> {
+  const { installation, lease, original } = input
+  const scope = scopeKey(installation)
+  if (original.scope !== scope || original.record.tenantId !== installation.tenantId
+    || original.record.fiscalSubjectId !== installation.fiscalSubjectId
+    || original.record.installationId !== installation.installationId) {
+    throw new Error('La factura original no pertenece a esta instalación fiscal.')
+  }
+  assertFiscalLease(lease, installation.installationId, installation.deviceId, Date.now(), performance.now())
+  if (!navigator.locks?.request) throw new Error('Web Locks no está disponible. Se bloquea la anulación fiscal.')
+  return navigator.locks.request(`tickit-fiscal:${scope}`, { mode: 'exclusive' }, async () => {
+    const db = await openLedger()
+    try {
+      const tx = db.transaction(['cursors', 'bindings', 'entries', 'delivery'], 'readwrite')
+      const done = transactionDone(tx)
+      const chain = await request(tx.objectStore('cursors').get(scope)) as Cursor | undefined
+      const binding = await request(tx.objectStore('bindings').get(scope)) as DeviceBinding | undefined
+      assertInstallationBinding(binding, installation.deviceId)
+      if (!chain?.previous || chain.previous.hash !== original.record.hash) {
+        tx.abort()
+        throw new Error('Solo puede anularse la última factura de la cadena fiscal en esta V1.')
+      }
+      const id = crypto.randomUUID()
+      const entry: LocalFiscalEntry = {
+        id, scope,
+        record: {
+          idempotencyKey: id, environment: 'production', tenantId: installation.tenantId,
+          fiscalSubjectId: installation.fiscalSubjectId, issuerNif: installation.issuerNif,
+          venueId: installation.venueId, cashRegisterId: installation.cashRegisterId,
+          installationId: installation.installationId, deviceId: installation.deviceId,
+          invoiceId: original.record.invoiceId, chainPosition: chain.position + 1,
+          previous: chain.previous, hash: input.hash, generatedAt: input.generatedAt,
+          canonicalSchema: 'aeat-registro-v1', canonicalRecord: input.canonicalRecord,
+          lease: { leaseId: lease.leaseId, fencingToken: lease.fencingToken },
+        },
+        invoice: structuredClone(original.invoice),
+        annulment: { issuerName: original.invoice.issuerName, issuerNif: original.invoice.issuerNif,
+          series: original.invoice.series, number: original.invoice.number, issuedAt: original.invoice.issuedAt,
+          ticketId: original.invoice.ticketId, saleId: original.invoice.saleId, reason: input.reason },
+        delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null },
+      }
+      tx.objectStore('cursors').put({ scope, position: entry.record.chainPosition, previous: {
+        issuerNif: original.invoice.issuerNif, seriesAndNumber: `${original.invoice.series}/${original.invoice.number}`,
+        issueDate: (input.canonicalRecord as { RegistroAnulacion: { IDFactura: { FechaExpedicionFacturaAnulada: string } } }).RegistroAnulacion.IDFactura.FechaExpedicionFacturaAnulada,
+        hash: input.hash,
+      } } satisfies Cursor)
+      const { delivery, ...document } = entry
+      tx.objectStore('entries').add(document satisfies StoredFiscalDocument)
+      tx.objectStore('delivery').add({ id, ...delivery } satisfies StoredDelivery)
+      await done
+      return entry
+    } finally { db.close() }
+  })
+}
+
 export async function listLocalFiscalEntries(scopeInput: { tenantId: string; fiscalSubjectId: string; installationId: string }): Promise<LocalFiscalEntry[]> {
   const db = await openLedger()
   try {
@@ -346,7 +413,7 @@ export async function findLocalFiscalEntryByTicket(
   try {
     const tx = db.transaction(['entries', 'delivery'], 'readonly')
     const done = transactionDone(tx)
-    const entry = await request(tx.objectStore('entries').index('invoiceUnique').get([scopeKey(scopeInput), ticketId])) as StoredFiscalDocument | undefined
+    const entry = await request(tx.objectStore('entries').index('ticket').get([scopeKey(scopeInput), ticketId])) as StoredFiscalDocument | undefined
     if (!entry) { await done; return null }
     const status = await request(tx.objectStore('delivery').get(entry.id)) as StoredDelivery | undefined
     if (!status) throw new Error('Falta el estado de la factura fiscal local.')

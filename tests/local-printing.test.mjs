@@ -453,8 +453,7 @@ test('la venta rápida libera la interfaz y espera la fiscalización antes de im
 
   online.sync.resolve()
   await payment
-  assert.deepEqual(online.calls, ['persist', 'reset', 'sync', 'fiscal', 'print'])
-  assert.equal(online.printed[0].fiscal.status, 'accepted')
+  assert.deepEqual(online.calls, ['persist', 'reset', 'sync', 'print'])
 
   const offline = quickSalePaymentHarness({ isOnline: false })
   await offline.pay('card', null)
@@ -536,7 +535,7 @@ test('la venta rapida online persiste, solicita cajon temprano, sincroniza y mar
   assert.deepEqual(harness.calls.slice(0, 3), ['persist', 'earlyDrawer', 'reset'])
   harness.sync.resolve()
   await payment
-  assert.deepEqual(harness.calls, ['persist', 'earlyDrawer', 'reset', 'sync', 'fiscal', 'print'])
+  assert.deepEqual(harness.calls, ['persist', 'earlyDrawer', 'reset', 'sync', 'print'])
   assert.equal(harness.earlyDrawerCalls.length, 1)
   assert.match(harness.earlyDrawerCalls[0], /^drawer:[^:]+:payment$/u)
   assert.equal(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
@@ -550,7 +549,7 @@ test('la venta rapida online con tarjeta no solicita cajon temprano', async () =
   assert.deepEqual(harness.earlyDrawerCalls, [])
   harness.sync.resolve()
   await payment
-  assert.deepEqual(harness.calls, ['persist', 'reset', 'sync', 'fiscal', 'print'])
+  assert.deepEqual(harness.calls, ['persist', 'reset', 'sync', 'print'])
   assert.notEqual(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
 })
 

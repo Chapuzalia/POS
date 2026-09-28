@@ -466,12 +466,12 @@ export type SaleCreatedPayload = {
   }
   fiscal?: {
     invoiceId: string
-    provider: 'verifactu' | 'ticketbai'
+    provider: 'verifactu'
     status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-    uuid: string | null
-    qrBase64: string | null
-    verificationUrl: string | null
-    externalCode: string | null
+    uuid: null
+    qrBase64: null
+    verificationUrl: string
+    externalCode: string
     errorCode: string | null
     errorMessage: string | null
   }
@@ -733,24 +733,7 @@ export type CrmSalesReportTicket = {
   status: 'paid' | 'void'
   subtotalCents: number
   totalCents: number
-  fiscal: {
-    id: string
-    provider: 'verifactu' | 'ticketbai'
-    environment: 'test' | 'production'
-    invoiceType: 'normal' | 'simplified' | 'corrective'
-    series: string
-    number: string
-    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-    externalUuid: string | null
-    externalCode: string | null
-    qrBase64: string | null
-    verificationUrl: string | null
-    errorCode: string | null
-    errorMessage: string | null
-    attempts: number
-    sentAt: string | null
-    confirmedAt: string | null
-  } | null
+  invoice?: TicketInvoice | null
 }
 
 export type CrmSalesReportAggregate = {

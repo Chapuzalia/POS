@@ -56,9 +56,15 @@ const ticketSelect = `
   discount_value,
   discount_rounding_increment_cents,
   discount_amount_cents,
-  total_cents,
-  local_created_at,
-  ticket_lines (
+    total_cents,
+    local_created_at,
+    is_invoice,
+    customer_id,
+    customer_snapshot,
+    invoice_series,
+    invoice_number,
+    invoice_issued_at,
+    ticket_lines (
     id,
     product_id,
     variant_id,
@@ -87,11 +93,6 @@ const ticketSelect = `
   sales (
     payment_method
   ),
-  fiscal_invoices (
-    id, provider, environment, invoice_type, series, number, status,
-    external_uuid, external_code, qr_base64, verification_url,
-    error_code, error_message, attempts, sent_at, confirmed_at
-  )
 `
 
 export type SalesReportLineRow = {
@@ -151,26 +152,15 @@ export type SalesReportTicketRow = {
   discount_rounding_increment_cents: 5 | 10 | 50 | 100 | null
   discount_amount_cents: number | null
   ticket_lines: SalesReportLineRow[] | null
-  total_cents: number
-  fiscal_invoices: Array<{
-    id: string
-    provider: 'verifactu' | 'ticketbai'
-    environment: 'test' | 'production'
-    invoice_type: 'normal' | 'simplified' | 'corrective'
-    series: string
-    number: string
-    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-    external_uuid: string | null
-    external_code: string | null
-    qr_base64: string | null
-    verification_url: string | null
-    error_code: string | null
-    error_message: string | null
-    attempts: number
-    sent_at: string | null
-    confirmed_at: string | null
-  }> | null
-}
+   total_cents: number
+   is_invoice: boolean
+   customer_id: string | null
+   customer_snapshot: Record<string, unknown> | null
+   invoice_series: string | null
+   invoice_number: string | null
+   invoice_issued_at: string | null
+ }
+
 
 export type NameRow = {
   id: string
@@ -239,7 +229,7 @@ async function loadTicketRows(context: TenantContext, venueId: string | undefine
 
     const { data, error } = await query
     if (error) throw error
-    for (const row of (data ?? []) as SalesReportTicketRow[]) rowsById.set(row.id, row)
+    for (const row of (data ?? []) as unknown as SalesReportTicketRow[]) rowsById.set(row.id, row)
   }
 
   return ticketIds.map((ticketId) => rowsById.get(ticketId)).filter((row): row is SalesReportTicketRow => Boolean(row))
@@ -311,25 +301,15 @@ function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicke
     quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + Number(line.allocated_quantity ?? line.quantity), 0),
     status: ticket.status,
     subtotalCents: ticket.subtotal_cents,
-    totalCents: ticket.total_cents,
-    fiscal: ticket.fiscal_invoices?.[0] ? {
-      id: ticket.fiscal_invoices[0].id,
-      provider: ticket.fiscal_invoices[0].provider,
-      environment: ticket.fiscal_invoices[0].environment,
-      invoiceType: ticket.fiscal_invoices[0].invoice_type,
-      series: ticket.fiscal_invoices[0].series,
-      number: ticket.fiscal_invoices[0].number,
-      status: ticket.fiscal_invoices[0].status,
-      externalUuid: ticket.fiscal_invoices[0].external_uuid,
-      externalCode: ticket.fiscal_invoices[0].external_code,
-      qrBase64: ticket.fiscal_invoices[0].qr_base64,
-      verificationUrl: ticket.fiscal_invoices[0].verification_url,
-      errorCode: ticket.fiscal_invoices[0].error_code,
-      errorMessage: ticket.fiscal_invoices[0].error_message,
-      attempts: ticket.fiscal_invoices[0].attempts,
-      sentAt: ticket.fiscal_invoices[0].sent_at,
-      confirmedAt: ticket.fiscal_invoices[0].confirmed_at,
-    } : null,
+     totalCents: ticket.total_cents,
+     invoice: ticket.is_invoice && ticket.customer_id && ticket.customer_snapshot ? {
+       customerId: ticket.customer_id,
+       customer: ticket.customer_snapshot as SalesReportTicketRow['customer_snapshot'] & { legalName: string; taxId: string; address: string; postalCode: string; city: string; province: string; country: string; email: string | null; phone: string | null },
+       series: ticket.invoice_series,
+       number: ticket.invoice_number,
+       issuedAt: ticket.invoice_issued_at,
+     } : null,
+
   }
 }
 

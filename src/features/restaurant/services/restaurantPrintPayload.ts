@@ -10,7 +10,6 @@ import type { RestaurantEqualSplit, RestaurantOrderLine, RestaurantOrderLineMove
 import { calculateDiscountForLines } from '../../../lib/discounts.ts'
 import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import { normalizeCatalogSnapshot } from '../../catalog/services/catalogSnapshots.ts'
-import type { FiscalReceiptData } from '../../fiscal/service.ts'
 
 export type RestaurantPrintLine = RestaurantOrderLine & { lineTotalCents?: number }
 
@@ -47,7 +46,8 @@ type BuildRestaurantPrintPayloadInput = {
   ticketId: string
   totalCents: number
   ticketNumber?: number
-  fiscal?: FiscalReceiptData
+  fiscal?: SaleCreatedPayload['fiscal']
+
   invoice?: TicketInvoice | null
 }
 

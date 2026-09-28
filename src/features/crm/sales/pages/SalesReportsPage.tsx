@@ -1,7 +1,7 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
-import { Ban, Download, FileText, History, QrCode, RefreshCw, Send, SlidersHorizontal, X } from 'lucide-react'
+import { Download, FileText, RefreshCw, SlidersHorizontal, X } from 'lucide-react'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination'
 import { CrmModal } from '../../shared/components/CrmModal'
 import { Field } from '../../shared/components/Field'
@@ -18,8 +18,7 @@ import { useSalesReportSummary } from '../hooks/useSalesReportSummary'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type RunAction } from '../../shared/types'
-import { openFiscalInvoiceDocument } from '../../integrations/services/fiscalInvoiceDocument'
-import { cancelFiscalInvoice, fiscalQrDataUrl, issueFiscalTicket, loadFiscalInvoiceEvents, refreshFiscalInvoiceStatus, type FiscalCommunicationEvent } from '../../integrations/services/verifactiService'
+import { openCustomerInvoiceDocument } from '../../integrations/services/fiscalInvoiceDocument'
 
 export type SalesReportsCrmProps = {
   dayChangeTime: string | null
@@ -392,10 +391,8 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
 
       {selectedTicket ? (
         <SalesReportTicketModal
-          disabled={disabled}
-          onClose={() => setSelectedTicketId(null)}
-          onUpdated={refreshAll}
-          runAction={runAction}
+           onClose={() => setSelectedTicketId(null)}
+
           tenantContext={tenantContext}
           ticket={selectedTicket}
         />
@@ -414,22 +411,6 @@ function getReportDiscountLabel(ticket: CrmSalesReports['tickets'][number]) {
 function getReportPaymentLabel(ticket: CrmSalesReports['tickets'][number]) {
   if (ticket.totalCents === 0 && !ticket.paymentMethod) return 'No requerido'
   return ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'
-}
-
-const fiscalStatusLabels = {
-  pending: 'Pendiente',
-  accepted: 'Aceptada',
-  accepted_with_errors: 'Aceptada con errores',
-  rejected: 'Rechazada',
-  cancelled: 'Anulada',
-  error: 'Error',
-} as const
-
-function fiscalStatusClass(status: NonNullable<CrmSalesReports['tickets'][number]['fiscal']>['status']) {
-  if (status === 'accepted') return '!bg-[var(--crm-green-soft)] !text-[var(--crm-green)]'
-  if (status === 'pending') return '!bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]'
-  if (status === 'accepted_with_errors') return '!bg-[var(--crm-yellow-soft)] !text-[var(--crm-yellow)]'
-  return '!bg-[var(--crm-red-soft)] !text-[var(--crm-red)]'
 }
 
 export function SalesReportTicketsTable({
@@ -458,7 +439,6 @@ export function SalesReportTicketsTable({
             <th className="!min-w-[120px] !px-3 !py-3" data-column-key="paymentMethod">Método</th>
             <th className="!min-w-[170px] !px-3 !py-3" data-sortable="false">Descuento</th>
             <th className="!min-w-[100px] !px-3 !py-3" data-column-key="status">Estado</th>
-            <th className="!min-w-[180px] !px-3 !py-3" data-sortable="false">Estado fiscal</th>
             <th className="!min-w-[120px] !px-[22px] !py-3" data-column-key="totalCents">Total</th>
           </tr>
         </thead>
@@ -505,13 +485,6 @@ export function SalesReportTicketsTable({
                   {ticket.status === 'paid' ? 'Cobrado' : 'Anulado'}
                 </span>
               </td>
-              <td className="!px-3 !py-4">
-                {ticket.fiscal ? (
-                  <span className={`!inline-flex !min-h-6 !w-fit !items-center !whitespace-nowrap !rounded-full !px-[9px] !text-[11px] !font-semibold ${fiscalStatusClass(ticket.fiscal.status)}`}>
-                    {fiscalStatusLabels[ticket.fiscal.status]} · {ticket.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu'}
-                  </span>
-                ) : <span className="!text-xs !text-[var(--crm-text-muted)]">Sin fiscalizar</span>}
-              </td>
               <td className="!whitespace-nowrap !px-[22px] !py-4 !font-mono !text-[13px] !font-bold !text-[var(--crm-text)]">
                 {formatMoney(ticket.totalCents)}
               </td>
@@ -524,57 +497,16 @@ export function SalesReportTicketsTable({
 }
 
 export function SalesReportTicketModal({
-  disabled,
   onClose,
-  onUpdated,
-  runAction,
   tenantContext,
   ticket,
 }: {
-  disabled: boolean
   onClose: () => void
-  onUpdated: () => Promise<void>
-  runAction: RunAction
+
   tenantContext: TenantContext
   ticket: CrmSalesReports['tickets'][number]
 }) {
   const fiscalTotals = buildSalesReportTicketTotals(ticket)
-  const [events, setEvents] = useState<FiscalCommunicationEvent[]>([])
-
-  const refreshEvents = useCallback(async () => {
-    setEvents(ticket.fiscal ? await loadFiscalInvoiceEvents(tenantContext, ticket.fiscal.id) : [])
-  }, [tenantContext, ticket.fiscal])
-
-  useEffect(() => { void refreshEvents() }, [refreshEvents])
-
-  async function consultFiscalStatus() {
-    if (!ticket.fiscal) return
-    await runAction(async () => {
-      await refreshFiscalInvoiceStatus(tenantContext, ticket.fiscal!.id)
-      await Promise.all([onUpdated(), refreshEvents()])
-    })
-  }
-
-  async function submitFiscalInvoice() {
-    if (!ticket.fiscal) return
-    await runAction(async () => {
-      await issueFiscalTicket(tenantContext, ticket.id)
-      await Promise.all([onUpdated(), refreshEvents()])
-    })
-  }
-
-  async function cancelInvoice() {
-    if (!ticket.fiscal || !window.confirm('¿Solicitar la anulación fiscal de esta factura? Esta operación no edita el documento original.')) return
-    await runAction(async () => {
-      await cancelFiscalInvoice(tenantContext, ticket.fiscal!.id)
-      await Promise.all([onUpdated(), refreshEvents()])
-    })
-  }
-
-  function viewQr() {
-    const url = fiscalQrDataUrl(ticket.fiscal?.qrBase64)
-    if (url) window.open(url, '_blank', 'noopener,noreferrer')
-  }
 
   return (
     <CrmModal label={`Detalle del ticket ${formatTicketNumber(ticket.ticketNumber ?? 0)}`} onClose={onClose} size="large">
@@ -628,56 +560,13 @@ export function SalesReportTicketModal({
           </div>
         ) : null}
 
-        {ticket.fiscal ? (
-          <section className="!mb-5 !grid !gap-4 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
-            <div className="!flex !flex-wrap !items-start !justify-between !gap-3">
-              <div>
-                <div className="!flex !flex-wrap !items-center !gap-2">
-                  <h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Factura fiscal {ticket.fiscal.series}-{ticket.fiscal.number}</h3>
-                  <span className={`!inline-flex !min-h-6 !items-center !rounded-full !px-2.5 !text-[11px] !font-semibold ${fiscalStatusClass(ticket.fiscal.status)}`}>
-                    {fiscalStatusLabels[ticket.fiscal.status]}
-                  </span>
-                </div>
-                <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">
-                  {ticket.fiscal.provider === 'ticketbai' ? 'TicketBAI' : 'VeriFactu'} · {ticket.fiscal.environment === 'production' ? 'Produccion' : 'Pruebas'} · {ticket.fiscal.invoiceType === 'simplified' ? 'Simplificada' : ticket.fiscal.invoiceType === 'corrective' ? 'Rectificativa' : 'Normal'}
-                </p>
-              </div>
-              <div className="!flex !flex-wrap !gap-2">
-                {!ticket.fiscal.externalUuid && (ticket.fiscal.status === 'pending' || (ticket.fiscal.status === 'error' && (ticket.fiscal.errorCode === 'network_error' || /^http_(429|5\d\d)$/.test(ticket.fiscal.errorCode ?? '')))) ? (
-                  <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-blue)]" disabled={disabled} onClick={() => void submitFiscalInvoice()} type="button"><Send className="!size-3.5" />{ticket.fiscal.status === 'error' ? 'Reintentar envío' : 'Enviar ahora'}</UiButton>
-                ) : null}
-                <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-xs !font-semibold !text-[var(--crm-text)]" disabled={disabled || !ticket.fiscal.externalUuid} onClick={() => void consultFiscalStatus()} type="button"><RefreshCw className="!size-3.5" />Consultar estado</UiButton>
-                <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-xs !font-semibold !text-[var(--crm-text)]" disabled={!ticket.fiscal.qrBase64} onClick={viewQr} type="button"><QrCode className="!size-3.5" />Ver QR</UiButton>
-                <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-input-bg)] !px-3 !text-xs !font-semibold !text-[var(--crm-text)]" onClick={() => openFiscalInvoiceDocument(ticket, tenantContext)} type="button"><FileText className="!size-3.5" />Imprimir / PDF</UiButton>
-                {['accepted', 'accepted_with_errors'].includes(ticket.fiscal.status) ? (
-                  <UiButton className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-lg !border-0 !bg-[var(--crm-red-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-red)]" disabled={disabled} onClick={() => void cancelInvoice()} type="button"><Ban className="!size-3.5" />Anular</UiButton>
-                ) : null}
-              </div>
-            </div>
+          {ticket.invoice ? (
+           <section className="!mb-5 !grid !gap-2 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
+             <div className="!flex !items-center !justify-between !gap-3"><h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Factura de cliente {ticket.invoice.series}-{ticket.invoice.number}</h3><UiButton onClick={() => openCustomerInvoiceDocument(ticket, tenantContext)} type="button"><FileText className="!size-3.5" />Imprimir / PDF</UiButton></div>
+             <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">{ticket.invoice.customer.legalName} · {ticket.invoice.customer.taxId}</p>
+           </section>
+         ) : null}
 
-            <div className="!grid !grid-cols-1 !gap-2 sm:!grid-cols-2">
-              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">UUID</span><code className="!mt-1 !block !break-all !text-xs !text-[var(--crm-text)]">{ticket.fiscal.externalUuid ?? 'Pendiente de asignación'}</code></div>
-              <div className="!rounded-lg !bg-[var(--crm-surface)] !p-3"><span className="!block !text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">Último error</span><p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text)]">{ticket.fiscal.errorMessage || ticket.fiscal.errorCode ? 'No se ha podido completar el envío fiscal. Revisa el estado antes de repetirlo.' : 'Sin errores'}</p></div>
-            </div>
-
-            <div>
-              <h4 className="!m-0 !flex !items-center !gap-2 !text-xs !font-bold !text-[var(--crm-text-secondary)]"><History className="!size-4" />Historial de comunicaciones</h4>
-              <div className="!mt-2 !grid !gap-1.5">
-                {events.map((event) => (
-                  <div className="!flex !flex-wrap !items-center !justify-between !gap-2 !rounded-lg !bg-[var(--crm-surface)] !px-3 !py-2 !text-xs" key={event.id}>
-                    <span className="!font-semibold !text-[var(--crm-text)]">{event.event_type.replaceAll('_', ' ')}</span>
-                    <span className="!text-[var(--crm-text-muted)]">{event.source} · {event.http_status ?? '—'} · {crmReportDateTimeFormatter.format(new Date(event.created_at))}</span>
-                    {event.error_message ? <span className="!basis-full !text-[var(--crm-red)]">No se ha podido completar esta operación fiscal.</span> : null}
-                  </div>
-                ))}
-                {!events.length ? <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">Todavía no hay comunicaciones registradas.</p> : null}
-              </div>
-            </div>
-            <p className="!m-0 !text-xs !leading-5 !text-[var(--crm-text-muted)]">La factura emitida es inmutable. Cualquier corrección debe tramitarse mediante factura rectificativa, anulación o subsanación.</p>
-          </section>
-        ) : (
-          <div className="!mb-5 !rounded-[10px] !bg-[var(--crm-surface-soft)] !px-3.5 !py-3 !text-xs !font-medium !text-[var(--crm-text-muted)]">Este ticket no tiene un registro fiscal asociado.</div>
-        )}
 
         <div className="!overflow-hidden !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)]">
           <UiDataTable aria-label="Líneas del ticket" className="!w-full !min-w-[660px] !border-collapse" emptyContent="Este ticket no contiene líneas de producto." filterPlaceholder="Filtrar líneas del ticket…">

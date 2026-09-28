@@ -67,7 +67,18 @@ export type BridgeInvoiceSnapshot = {
   recipient: { name: string; nif: string } | null; totalCents: number; taxCents: number
 }
 
-export type BridgeSubmission = BridgeRecord & { invoice: BridgeInvoiceSnapshot }
+export type BridgeAnnulmentSnapshot = {
+  issuerName: string
+  issuerNif: string
+  series: string
+  number: number
+  issuedAt: string
+  ticketId: string
+  saleId: string
+  reason: string
+}
+
+export type BridgeSubmission = BridgeRecord & ({ invoice: BridgeInvoiceSnapshot } | { annulment: BridgeAnnulmentSnapshot })
 
 export type BridgeClientConfig = {
   mode: 'disabled' | 'test' | 'production'

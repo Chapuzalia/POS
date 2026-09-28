@@ -5,7 +5,7 @@ import { loadSessionTicketPageFromSupabase } from '../../../services/posService'
 import type { CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
-import { voidTicketWithFiscalCancellation } from '../../fiscal/service'
+import { prepareLocalFiscalAnnulment } from '../../fiscal/local/annulment.ts'
 import { nextPrintCopyNumber, usePrintAgentStore } from '../../local-printing'
 import {
   finishCashlogyPayment,
@@ -177,11 +177,7 @@ export function useCashTicketActions(options: Options) {
 
   const voidTicket = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
-    if (!context || ticket.status !== 'active') return
-    if (ticket.payload.localFiscal) {
-      options.setError('La factura ya está expedida. Clasifica la devolución o rectificación antes de modificar la venta.')
-      return
-    }
+    if (!context || !options.cashSession || ticket.status !== 'active') return
     const pendingSale = getOfflineQueue().find((event) =>
       event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
     if (pendingSale) {
@@ -189,16 +185,21 @@ export function useCashTicketActions(options: Options) {
       return
     }
 
-    if (!options.isOnline) {
-      options.setError('Necesitas conexión para anular un ticket que ya puede haberse enviado a Verifacti.')
-      return
-    }
-    if (!window.confirm('¿Anular esta venta? Si existe una factura expedida, la operación se bloqueará hasta clasificar su tratamiento fiscal.')) return
+    const reason = window.prompt('Motivo fiscal de la anulación:')?.trim()
+    if (!reason || !window.confirm('¿Anular esta venta? Se conservará el registro fiscal original y se añadirá una anulación encadenada.')) return
 
     options.setBusy(true)
     options.setError(null)
     try {
-      await voidTicketWithFiscalCancellation(context.tenantId, ticket.payload.ticket.id)
+      if (ticket.payload.localFiscal) {
+        if (!options.isOnline) throw new Error('La anulación fiscal requiere conexión para confirmar la venta y conservar la copia durable.')
+        await prepareLocalFiscalAnnulment(context, options.cashSession, ticket.payload.ticket.id, reason)
+      } else {
+        enqueueOfflineEvent({ id: createId(), kind: 'sale_voided', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: {
+          saleId: ticket.payload.sale.id, ticketId: ticket.payload.ticket.id,
+        } })
+        await options.syncPendingEvents()
+      }
       options.persistTickets(options.tickets.map((item) => item.id === ticket.id ? { ...item, status: 'voided' } : item))
       options.persistLedger(options.ledger.filter((sale) => sale.id !== ticket.id))
       options.subtractProductSalesStats(ticket.payload.lines.map((line) => ({ productId: line.productId, quantity: line.quantity, lineTotalCents: line.lineTotalCents })))

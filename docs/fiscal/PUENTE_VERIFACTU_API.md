@@ -87,6 +87,17 @@ curl 'https://puente.example.invalid/v1/records/2b1ed94d-03ec-4cc5-a07d-7cfac246
 
 Cambios incompatibles requieren `/v2` y nueva `canonicalSchema`. El VPS debe aceptar v1 durante una ventana N-1 de PWA instaladas. Ninguna actualización puede reinterpretar registros ya emitidos; el conversor usado se conserva por versión. Se fijarán versiones exactas de XSD, diseño y validaciones antes de crear `aeat-registro-v1` real.
 
+## Endpoints que consume el POS
+
+| Método | Ruta | Finalidad |
+| --- | --- | --- |
+| `POST` | `/v1/installations/{installationId}/lease` | Concesión exclusiva de la instalación, `fencingToken` y referencia horaria del VPS. |
+| `POST` | `/v1/records` | Recepción durable e idempotente de un lote ordenado de 1 a 100 altas o anulaciones. |
+| `GET` | `/v1/records/{idempotencyKey}` | Consulta del estado vigente tras timeout, reintento o sincronización diferida. |
+| `GET` | `/v1/records/{idempotencyKey}/responses` | Histórico saneado de respuestas VPS/AEAT del registro. |
+
+Todas las rutas usan `Authorization: Bearer <token temporal del dispositivo>`, `Content-Type: application/json` cuando hay cuerpo y el contrato `tickit-verifactu-bridge` versión `1`. El POS no consume ningún endpoint de Verifacti, TicketBAI ni Odoo.
+
 ## Trabajo pendiente en el VPS
 
 Certificados cualificados o representación autorizada; SOAP/XML oficial y cabeceras; separación de pruebas/producción por NIF; validación oficial de cada registro; flujo, tamaño de lote y espera variable de AEAT; reintentos propios para registros que ya estén en VPS aunque la PWA cierre; respuesta individual, duplicados y CSV; alertas, conciliación, retención y recuperación; instalación exclusiva y revocación; auditoría, seguridad y declaración responsable de la arquitectura completa.

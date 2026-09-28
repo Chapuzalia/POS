@@ -72,8 +72,11 @@ export async function synchronizeLocalFiscalQueue(config: FiscalSyncConfig): Pro
       if (terminal.has(entry.delivery.state)) continue
       if (entry.delivery.nextAttemptAt && Date.parse(entry.delivery.nextAttemptAt) > Date.now()) continue
       try {
+        const submission: BridgeSubmission = entry.annulment
+          ? { ...entry.record, annulment: entry.annulment }
+          : { ...entry.record, invoice: entry.invoice }
         const result = entry.delivery.state === 'LOCAL_PENDING'
-          ? await resolvePendingBridgeRecord(client, { ...entry.record, invoice: entry.invoice })
+          ? await resolvePendingBridgeRecord(client, submission)
           : await client.status(entry.id)
         await updateLocalFiscalDelivery(entry.id, deliveryFromResult(entry, result))
       } catch (error) {

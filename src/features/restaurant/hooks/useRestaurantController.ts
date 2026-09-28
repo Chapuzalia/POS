@@ -50,7 +50,6 @@ import {
   saveRestaurantOrderLines,
 } from '../../tables/service'
 import { canDecreaseLineQuantity } from '../../tables/service-status'
-import { autoIssueFiscalTicket, loadFiscalReceiptData } from '../../fiscal/service'
 import { loadTicketInvoice } from '../../customers/service'
 import type {
   PayRestaurantEqualPartResult,
@@ -86,20 +85,6 @@ import {
   subscribeToOrderProduction,
 } from '../../production/service'
 import type { OrderProductionState, ProductionSelection } from '../../production/types'
-
-async function fiscalizeTicketForPrint(context: TenantContext, ticketId: string) {
-  try {
-    return (await autoIssueFiscalTicket(context.tenantId, ticketId)).fiscal
-  } catch (error) {
-    reportOperationError(error, { operation: 'restaurant.fiscal', ticketId, step: 'before_print' })
-    try {
-      return await loadFiscalReceiptData(context.tenantId, ticketId) ?? undefined
-    } catch (receiptError) {
-      reportOperationError(receiptError, { operation: 'restaurant.fiscal', ticketId, step: 'load_rejection' })
-      return undefined
-    }
-  }
-}
 
 async function loadTicketNumberForPrint(context: TenantContext, cashSession: CashSession, ticketId: string) {
   return (await loadSessionTicketFromSupabase(context, cashSession.id, ticketId))?.ticketNumber
@@ -654,7 +639,7 @@ export function useRestaurantController(options: Options) {
           : null
         const printLines = paymentLines
         const [fiscal, ticketNumber] = await Promise.all([
-          production ? Promise.resolve(undefined) : fiscalizeTicketForPrint(options.context, result.ticketId),
+          Promise.resolve(undefined),
           loadTicketNumberForPrint(options.context, options.cashSession, result.ticketId),
         ])
         void options.printSale(prepared?.payload ? { ...prepared.payload, ticket: { ...prepared.payload.ticket, ticketNumber } } : buildRestaurantPrintPayload({
@@ -748,7 +733,7 @@ export function useRestaurantController(options: Options) {
           : null
         const printLines = paymentLines
         const [fiscal, ticketNumber] = await Promise.all([
-          production ? Promise.resolve(undefined) : fiscalizeTicketForPrint(options.context, result.ticketId),
+          Promise.resolve(undefined),
           loadTicketNumberForPrint(options.context, options.cashSession, result.ticketId),
         ])
         void options.printSale(prepared?.payload ? { ...prepared.payload, ticket: { ...prepared.payload.ticket, ticketNumber } } : buildRestaurantPrintPayload({
@@ -968,7 +953,7 @@ export function useRestaurantController(options: Options) {
       ])
       const printTask = (async () => {
         const [fiscal, invoice, ticketNumber] = await Promise.all([
-          production ? Promise.resolve(undefined) : fiscalizeTicketForPrint(context, result.ticketId),
+          Promise.resolve(undefined),
           production ? Promise.resolve(prepared?.payload?.ticket.invoice ?? null)
             : invoiceCustomer ? loadTicketInvoice(context.tenantId, result.ticketId) : Promise.resolve(null),
           loadTicketNumberForPrint(context, cashSession, result.ticketId),

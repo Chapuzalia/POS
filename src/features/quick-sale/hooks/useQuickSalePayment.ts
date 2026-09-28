@@ -5,7 +5,6 @@ import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent } from '../../../lib/offlineStore'
 import { loadSessionTicketFromSupabase } from '../../../services/posService'
 import { buildSalePayload } from '../services/salePayload'
-import { loadFiscalReceiptData } from '../../fiscal/service'
 import { loadTicketInvoice } from '../../customers/service'
 import {
   finishCashlogyPayment,
@@ -176,8 +175,6 @@ export function useQuickSalePayment(options: Options) {
           ? options.loadPersistedTicket(payload.ticket.id)
           : loadSessionTicketFromSupabase(context, cashSession.id, payload.ticket.id))
         if (persistedTicket) printPayload = persistedTicket.payload
-        const fiscal = await loadFiscalReceiptData(context.tenantId, payload.ticket.id)
-        if (fiscal) printPayload = { ...payload, fiscal }
         const invoice = options.invoiceCustomer
           ? await loadTicketInvoice(context.tenantId, payload.ticket.id)
           : null
@@ -188,7 +185,7 @@ export function useQuickSalePayment(options: Options) {
         if (invoice) {
           printPayload = { ...printPayload, ticket: { ...printPayload.ticket, invoice } }
         }
-        if (persistedTicket || fiscal || invoice) {
+        if (persistedTicket || invoice) {
           options.persistTickets([{
             ...(persistedTicket ?? ticketRecord),
             payload: printPayload,
