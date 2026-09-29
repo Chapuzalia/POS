@@ -3,7 +3,8 @@ import { supabase } from '../../../lib/supabase.ts'
 import type { CashSession, TenantContext } from '../../../types/index.ts'
 import type { FiscalSystem } from './canonical.ts'
 import { createBridgeClient } from './bridgeClient.ts'
-import { assertFiscalLease, type FiscalLease } from './clock.ts'
+import { assertFiscalLease, createLocalFallbackLease, type FiscalLease } from './clock.ts'
+import { isFiscalTransportUnavailable } from './availability.ts'
 import { loadFiscalPosSettings, type FiscalPosSettings } from './settings.ts'
 
 const installationSchema = z.object({
@@ -18,11 +19,11 @@ export type FiscalInstallation = {
   tenantId: string; fiscalSubjectId: string; issuerName: string; issuerNif: string
   venueId: string; cashRegisterId: string; deviceId: string; installationId: string; installationNumber: string
   venueCode: string; registerCode: string; installationCode: string; timezone: string
-  system: FiscalSystem; bridgeUrl: string
+  system: FiscalSystem; bridgeUrl: string | null
 }
 
 const leases = new Map<string, FiscalLease>()
-const bridgeUrls = new Map<string, string>()
+const bridgeUrls = new Map<string, string | null>()
 
 function publicSystem(installationNumber: string, settings: FiscalPosSettings): FiscalSystem {
   return {
@@ -62,7 +63,7 @@ export async function loadFiscalInstallation(context: TenantContext, cashSession
     throw new Error('El titular fiscal no coincide con la instalación.')
   }
   const settings = await loadFiscalPosSettings(context.tenantId)
-  bridgeUrls.set(context.tenantId, settings.bridge_url)
+  bridgeUrls.set(context.tenantId, settings.bridge_url || null)
   if (!installationResult.error && !subjectResult.error) {
     try { window.localStorage.setItem(key, JSON.stringify({ installation, subject })) } catch { /* The fiscal ledger checks durable storage separately. */ }
   }
@@ -72,14 +73,12 @@ export async function loadFiscalInstallation(context: TenantContext, cashSession
     installationId: installation.id, installationNumber: installation.installation_number,
     venueCode: installation.venue_code, registerCode: installation.register_code,
     installationCode: installation.installation_code, timezone: context.venueTimeZone || 'Europe/Madrid',
-    system: publicSystem(installation.installation_number, settings), bridgeUrl: settings.bridge_url,
+    system: publicSystem(installation.installation_number, settings), bridgeUrl: settings.bridge_url || null,
   }
 }
 
-export function fiscalBridgeBaseUrl(tenantId: string): string {
-  const value = bridgeUrls.get(tenantId)
-  if (!value) throw new Error('Falta la URL HTTPS del puente fiscal.')
-  return value
+export function fiscalBridgeBaseUrl(tenantId: string): string | null {
+  return bridgeUrls.get(tenantId) ?? null
 }
 
 export async function fiscalBridgeAccessToken(): Promise<string> {
@@ -89,6 +88,7 @@ export async function fiscalBridgeAccessToken(): Promise<string> {
 }
 
 export async function getFiscalInstallationLease(installation: FiscalInstallation): Promise<FiscalLease> {
+  if (!installation.bridgeUrl) return createLocalFallbackLease(installation.installationId, installation.deviceId)
   const leaseKey = `${installation.installationId}:${installation.bridgeUrl}`
   const existing = leases.get(leaseKey)
   if (existing) {
@@ -97,9 +97,14 @@ export async function getFiscalInstallationLease(installation: FiscalInstallatio
       return existing
     } catch { leases.delete(leaseKey) }
   }
-  const client = createBridgeClient({ mode: 'production', baseUrl: installation.bridgeUrl, getAccessToken: fiscalBridgeAccessToken })
-  const lease = await client.acquireInstallationLease(installation.installationId, installation.deviceId)
-  assertFiscalLease(lease, installation.installationId, installation.deviceId, Date.now(), performance.now())
-  leases.set(leaseKey, lease)
-  return lease
+  try {
+    const client = createBridgeClient({ mode: 'production', baseUrl: installation.bridgeUrl, getAccessToken: fiscalBridgeAccessToken })
+    const lease = { ...await client.acquireInstallationLease(installation.installationId, installation.deviceId), source: 'bridge' as const }
+    assertFiscalLease(lease, installation.installationId, installation.deviceId, Date.now(), performance.now())
+    leases.set(leaseKey, lease)
+    return lease
+  } catch (error) {
+    if (!isFiscalTransportUnavailable(error)) throw error
+    return createLocalFallbackLease(installation.installationId, installation.deviceId)
+  }
 }

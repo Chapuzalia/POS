@@ -1,3 +1,7 @@
+# DOCUMENTO HISTÓRICO — NO APLICABLE A LA ARQUITECTURA SIF LOCAL
+
+Este texto describe la integración antigua Tickit → Odoo y **no es una declaración responsable vigente, firmada ni publicable** para el componente SIF local o el futuro puente VPS. El borrador activo está en `DECLARACION_RESPONSABLE_BORRADOR.md` y sigue pendiente de completar y verificar.
+
 # DECLARACIÓN RESPONSABLE DEL SISTEMA INFORMÁTICO DE FACTURACIÓN
 
 En cumplimiento de lo dispuesto en el artículo 29.2.j) de la Ley 58/2003, de 17 de diciembre, General Tributaria; en el Real Decreto 1007/2023, de 5 de diciembre; y en la Orden HAC/1177/2024, de 17 de octubre, se emite la presente declaración responsable correspondiente al componente informático **Tickit**, integrado dentro de una arquitectura de Sistema Informático de Facturación en la que la generación, tratamiento y remisión de los registros de facturación conforme a Veri*Factu se realiza mediante **Odoo**.

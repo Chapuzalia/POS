@@ -1,6 +1,7 @@
 import type { SaleCreatedPayload } from '../../../types/index.ts'
 import { issueLocalInvoice, type LocalFiscalEntry, type ResolveFiscalSale } from './localLedger.ts'
 import { getFiscalInstallationLease, loadFiscalInstallation } from './installation.ts'
+import { isFiscalTransportUnavailable } from './availability.ts'
 import { recoverServerConfirmedFiscalChain } from './serverRecovery.ts'
 import type { CashSession, TenantContext } from '../../../types/index.ts'
 
@@ -37,7 +38,11 @@ export async function preflightPosInvoice(
 export async function preflightFiscalInstallation(context: TenantContext, cashSession: CashSession): Promise<void> {
   const installation = await loadFiscalInstallation(context, cashSession)
   await getFiscalInstallationLease(installation)
-  await recoverServerConfirmedFiscalChain(installation)
+  try {
+    await recoverServerConfirmedFiscalChain(installation)
+  } catch (error) {
+    if (!isFiscalTransportUnavailable(error)) throw error
+  }
 }
 
 /** The payment payload already carries the historical line, discount and tax snapshots. */
@@ -49,7 +54,11 @@ export async function issuePosInvoice(
 ): Promise<LocalFiscalEntry> {
   const installation = await loadFiscalInstallation(context, cashSession)
   const lease = await getFiscalInstallationLease(installation)
-  await recoverServerConfirmedFiscalChain(installation)
+  try {
+    await recoverServerConfirmedFiscalChain(installation)
+  } catch (error) {
+    if (!isFiscalTransportUnavailable(error)) throw error
+  }
   const customer = payload.ticket.invoice?.customer
   const recipient = customer ? { name: customer.legalName, nif: customer.taxId.toUpperCase() } : undefined
   if (!recipient && payload.sale.totalCents > simplifiedLimitCents) {
@@ -57,7 +66,8 @@ export async function issuePosInvoice(
   }
   const lines = fiscalLines(payload)
   return issueLocalInvoice({
-    environment: 'production', lease, salePayload: payload, economicAlreadySynced,
+    environment: 'production', lease, transmissionMode: installation.bridgeUrl ? 'bridge' : 'local-only',
+    salePayload: payload, economicAlreadySynced,
     tenantId: installation.tenantId, fiscalSubjectId: installation.fiscalSubjectId,
     issuerNif: installation.issuerNif, issuerName: installation.issuerName,
     issuerAddress: context.venueAddress,
@@ -89,6 +99,8 @@ export function printPayloadWithLocalFiscal(payload: SaleCreatedPayload, entry: 
       issuedAt: entry.invoice.issuedAt, documentKind: invoice ? 'complete' : 'simplified',
       issuerName: entry.invoice.issuerName, issuerNif: entry.invoice.issuerNif,
       issuerAddress: entry.invoice.issuerAddress ?? '',
+      // Records created by older POS versions always required a bridge URL.
+      verifactuLegend: entry.invoice.transmissionMode !== 'local-only',
     },
     ticket: {
       ...payload.ticket,

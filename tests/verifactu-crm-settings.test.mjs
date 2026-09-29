@@ -5,6 +5,7 @@ import { PGlite } from '@electric-sql/pglite'
 
 const base = await readFile(new URL('../supabase/migrations/20260928120000_prepare_local_verifactu_scope.sql', import.meta.url), 'utf8')
 const settings = await readFile(new URL('../supabase/migrations/20260928160000_fiscal_pos_bridge_settings.sql', import.meta.url), 'utf8')
+const optionalBridge = await readFile(new URL('../supabase/migrations/20260929150000_allow_local_fiscal_without_bridge.sql', import.meta.url), 'utf8')
 
 test('CRM bridge metadata is scoped by tenant and rejects non-HTTPS origins', async (t) => {
   const db = new PGlite()
@@ -27,6 +28,7 @@ test('CRM bridge metadata is scoped by tenant and rejects non-HTTPS origins', as
   `)
   await db.exec(base)
   await db.exec(settings)
+  await db.exec(optionalBridge)
   const row = "('11111111-1111-4111-8111-111111111111', 'https://fiscal.example.test/', 'Productor SL', 'B12345678', 'TK', '1.0')"
   await db.exec(`insert into public.fiscal_pos_bridge_settings
     (tenant_id, bridge_url, producer_name, producer_nif, system_id, system_version) values ${row};`)
@@ -41,4 +43,8 @@ test('CRM bridge metadata is scoped by tenant and rejects non-HTTPS origins', as
   await assert.rejects(db.exec(`update public.fiscal_pos_bridge_settings set tenant_id = '22222222-2222-4222-8222-222222222222';`), /cannot move between tenants/i)
   assert.match(settings, /fiscal_pos_bridge_settings_owner_insert[\s\S]*m\.role = 'owner'/)
   assert.match(settings, /fiscal_pos_bridge_settings_owner_update[\s\S]*m\.role = 'owner'/)
+  await db.exec(`update public.fiscal_pos_bridge_settings set bridge_url = null
+    where tenant_id = '11111111-1111-4111-8111-111111111111';`)
+  const localOnly = await db.query('select bridge_url from public.fiscal_pos_bridge_settings')
+  assert.deepEqual(localOnly.rows, [{ bridge_url: null }])
 })

@@ -90,9 +90,9 @@ const ticketSelect = `
       quantity, price_delta_cents, sort_order, metadata
     )
   ),
-  sales (
-    payment_method
-  ),
+    sales (
+      payment_method
+    )
 `
 
 export type SalesReportLineRow = {

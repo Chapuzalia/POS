@@ -218,7 +218,7 @@ test('distingue timeout, error de red, HTTP, token ausente y respuesta no JSON',
   await assert.rejects(anonymous.getServerInfo(), (error) => error.code === 'UNAUTHORIZED')
 })
 
-test('reintenta con lines cuando un servidor antiguo no admite elements', async () => {
+test('bloquea la impresión fiscal si un agente antiguo no admite el QR estructurado', async () => {
   const payload = mapSaleToPrintRequest({
     sale: completeInvoiceSale(), establishment: { name: 'MESS' },
     printerId: 'main-bar', printerLayout: layout80,
@@ -233,12 +233,30 @@ test('reintenta con lines cuando un servidor antiguo no admite elements', async 
         : new Response(JSON.stringify({ ok: true, jobId: 'legacy-job', status: 'printed' }), { status: 200 })
     },
   })
-  const response = await client.printTicket(payload)
+  await assert.rejects(client.printTicket(payload), (error) => error.code === 'FISCAL_QR_UNSUPPORTED')
+  assert.equal(bodies.length, 1)
+  assert.ok(bodies[0].elements.some((element) => element.type === 'qr'))
+})
+
+test('conserva el fallback de texto para documentos sin QR', async () => {
+  const bodies = []
+  const client = createPrintAgentClient({
+    baseUrl: 'https://tpv-printer.local:8443', token: 'secret',
+    fetchImpl: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return bodies.length === 1
+        ? new Response(JSON.stringify({ code: 'INVALID_REQUEST' }), { status: 400 })
+        : new Response(JSON.stringify({ ok: true, jobId: 'legacy-job', status: 'printed' }), { status: 200 })
+    },
+  })
+  const response = await client.printTicket({
+    requestId: 'test-legacy', printerId: 'main-bar', force: false, lines: ['Documento'],
+    elements: [{ type: 'text', value: 'Documento' }],
+    options: { cut: true, openCashDrawer: false, copies: 1 },
+  })
   assert.equal(response.jobId, 'legacy-job')
   assert.equal(bodies.length, 2)
-  assert.ok(bodies[0].elements.some((element) => element.type === 'qr'))
   assert.equal(bodies[1].elements, undefined)
-  assert.ok(bodies[1].lines.join('').includes('prewww2.aeat.es'))
 })
 
 test('permite cancelar una consulta mediante AbortSignal', async () => {
@@ -319,7 +337,7 @@ test('una factura completa sustituye el enlace VeriFactu por un QR con el conten
     payload.elements.some((element) => element.type === 'text' && element.value.includes('prewww2.aeat.es')),
     false,
   )
-  assert.equal(printRequestSchema.parse(payload).elements[0].type, 'text')
+  assert.equal(printRequestSchema.parse(payload).elements[0].type, 'qr')
 })
 
 test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipos', () => {
@@ -557,7 +575,8 @@ test('la factura fiscal reimprime la base y cuota históricas sin recalcular el 
   const issued = structuredClone(sale)
   issued.localFiscal = { recordId: 'record-1', series: 'L1-C1-I1-2026-S', number: 3,
     issuedAt: '2026-07-18T16:30:00+02:00', documentKind: 'simplified',
-    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1' }
+    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1',
+    verifactuLegend: false }
   issued.lines[0].fiscalSnapshot = { taxRate: 21, taxableBaseCents: 1323, taxAmountCents: 277, grossTotalCents: 1600 }
   issued.fiscal = { invoiceId: 'invoice-1', provider: 'verifactu', status: 'pending',
     externalCode: 'L1-C1-I1-2026-S/3', qrBase64: null, verificationUrl: verifactuUrl }
@@ -567,6 +586,29 @@ test('la factura fiscal reimprime la base y cuota históricas sin recalcular el 
   assert.match(text, /Base imponible[ ]+13,23 €/)
   assert.match(text, /IVA 21 %[ ]+2,77 €/)
   assert.ok(payload.elements.some((element) => element.type === 'qr' && element.data === verifactuUrl))
+  assert.equal(payload.elements.find((element) => element.type === 'qr' || element.value.trim()).type, 'qr')
+  assert.doesNotMatch(text, /VERI\*FACTU/)
+})
+
+test('la factura VERI*FACTU fuerza QR al principio, corrección M y leyenda aunque la plantilla fiscal sea incompleta', () => {
+  const issued = structuredClone(sale)
+  issued.localFiscal = { recordId: 'record-2', series: 'L1-C1-I1-2026-S', number: 4,
+    issuedAt: '2026-07-18T16:31:00+02:00', documentKind: 'simplified',
+    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1',
+    verifactuLegend: true }
+  issued.fiscal = { invoiceId: 'invoice-2', provider: 'verifactu', status: 'pending',
+    externalCode: 'L1-C1-I1-2026-S/4', qrBase64: null, verificationUrl: verifactuUrl }
+  const payload = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80,
+    template: { version: 1, blocks: [
+      { id: 'venue', type: 'text', value: '{{venue.name}}' },
+      { id: 'late-qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' },
+    ] } })
+  const firstVisible = payload.elements.find((element) => element.type === 'qr' || element.value.trim())
+  const qr = payload.elements.find((element) => element.type === 'qr')
+  assert.equal(firstVisible.type, 'qr')
+  assert.deepEqual(qr, { type: 'qr', data: verifactuUrl, size: 6, errorCorrection: 'M' })
+  assert.ok(payload.elements.some((element) => element.type === 'text' && element.value === 'VERI*FACTU'))
 })
 
 test('la venta rápida en modo producción emite localmente y conserva el envío pendiente', async () => {

@@ -463,6 +463,7 @@ export type SaleCreatedPayload = {
     issuerName: string
     issuerNif: string
     issuerAddress: string
+    verifactuLegend?: boolean
   }
   fiscal?: {
     invoiceId: string

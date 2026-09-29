@@ -5,7 +5,8 @@ import { classifyFiscalOperation, fiscalSeries } from '../src/features/fiscal/lo
 import { deliveryFromResult, resolvePendingBridgeRecord, summarizeLocalFiscalQueue } from '../src/features/fiscal/local/sync.ts'
 import { BridgeHttpError } from '../src/features/fiscal/local/bridgeClient.ts'
 import { assertInstallationBinding, localDateParts } from '../src/features/fiscal/local/localLedger.ts'
-import { assertFiscalClock, assertFiscalLease } from '../src/features/fiscal/local/clock.ts'
+import { assertFiscalClock, assertFiscalLease, createLocalFallbackLease } from '../src/features/fiscal/local/clock.ts'
+import { isFiscalTransportUnavailable } from '../src/features/fiscal/local/availability.ts'
 import { assertRealSaleAllowedForMode } from '../src/features/fiscal/local/mode.ts'
 
 const system = {
@@ -90,6 +91,18 @@ test('exclusive lease is bound to device and expires using monotonic time', () =
   assert.doesNotThrow(() => assertFiscalLease(lease, 'install-1', 'ipad-1', Date.parse('2026-09-28T10:04:00Z'), 241000))
   assert.throws(() => assertFiscalLease(lease, 'install-1', 'ipad-2', Date.parse('2026-09-28T10:04:00Z'), 241000), /dispositivo/)
   assert.throws(() => assertFiscalLease(lease, 'install-1', 'ipad-1', Date.parse('2026-09-28T10:05:00Z'), 301000), /expirado/)
+})
+
+test('an unavailable bridge uses a short local lease but authorization and conflicts still block', () => {
+  const lease = createLocalFallbackLease('install-1', 'ipad-1')
+  assert.equal(lease.source, 'local-fallback')
+  assert.match(lease.leaseId, /^local-/)
+  assert.doesNotThrow(() => assertFiscalLease(lease, 'install-1', 'ipad-1', Date.now(), performance.now()))
+  assert.equal(isFiscalTransportUnavailable(new TypeError('NetworkError when attempting to fetch resource')), true)
+  assert.equal(isFiscalTransportUnavailable(new BridgeHttpError(503)), true)
+  assert.equal(isFiscalTransportUnavailable(new BridgeHttpError(429)), true)
+  assert.equal(isFiscalTransportUnavailable(new BridgeHttpError(401)), false)
+  assert.equal(isFiscalTransportUnavailable(new BridgeHttpError(409)), false)
 })
 
 test('pending summary preserves acceptance with errors as a separate status', () => {

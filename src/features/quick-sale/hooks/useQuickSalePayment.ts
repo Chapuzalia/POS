@@ -164,7 +164,8 @@ export function useQuickSalePayment(options: Options) {
       const scope = { tenantId: fiscalEntry.record.tenantId, fiscalSubjectId: fiscalEntry.record.fiscalSubjectId,
         installationId: fiscalEntry.record.installationId }
       void synchronizeFiscalEconomicSales(scope).catch(() => { /* Saved in IndexedDB for retry. */ })
-      void synchronizeLocalFiscalQueue({ ...scope, mode: 'production', baseUrl: fiscalBridgeBaseUrl(context.tenantId),
+      const bridgeUrl = fiscalBridgeBaseUrl(context.tenantId)
+      if (bridgeUrl) void synchronizeLocalFiscalQueue({ ...scope, mode: 'production', baseUrl: bridgeUrl,
         getAccessToken: fiscalBridgeAccessToken }).catch(() => { /* LOCAL_PENDING is retained. */ })
     }
     let printPayload = fiscalPayload

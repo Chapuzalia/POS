@@ -50,7 +50,7 @@
       installationCode: productionInstallationId.slice(0, 8).toUpperCase(), deviceId: productionDeviceId,
       system: { ...system, NumeroInstalacion: productionInstallationId },
       ticketId: productionTicketId, saleId: productionSaleId, invoiceId: crypto.randomUUID(),
-      salePayload: productionPayload,
+      salePayload: productionPayload, transmissionMode: 'bridge',
       lease: { leaseId: 'fictitious-browser-test', installationId: productionInstallationId, deviceId: productionDeviceId,
         fencingToken: 1, expiresAt: new Date(wallNow + 60000).toISOString(),
         clock: { serverUtcAtReceipt: new Date(wallNow).toISOString(), wallUtcAtReceipt: wallNow,

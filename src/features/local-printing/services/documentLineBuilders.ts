@@ -229,7 +229,7 @@ export function buildSaleTicketLines(
     if (sale.fiscal.externalCode && !localFiscal) lines.push(...wrapReceiptText(`Código: ${sale.fiscal.externalCode}`, printerLayout.columns, printerLayout.characterSet))
     if (localFiscal) lines.push(...centeredWrapped('QR tributario:', printerLayout))
     if (sale.fiscal.verificationUrl) lines.push(...wrapReceiptText(sale.fiscal.verificationUrl, printerLayout.columns, printerLayout.characterSet))
-    if (localFiscal) lines.push(...centeredWrapped('VERI*FACTU', printerLayout))
+    if (localFiscal?.verifactuLegend) lines.push(...centeredWrapped('VERI*FACTU', printerLayout))
     const fiscalError = summarizeFiscalError(sale.fiscal.errorMessage ?? sale.fiscal.errorCode)
     if (!sale.fiscal.verificationUrl && fiscalError) {
       lines.push(...wrapReceiptText('QR no disponible.', printerLayout.columns, printerLayout.characterSet))
@@ -457,10 +457,11 @@ export function buildSalePrintTemplateContext(
     },
     payment: { method: sale.payment ? paymentLabels[sale.payment.method] ?? sale.payment.method : '', rows: paymentRows },
     fiscal: sale.fiscal && options.label !== 'PRE-TICKET' ? {
-      title: localFiscal ? 'QR tributario' : 'Fiscal',
+      title: localFiscal ? '' : 'Fiscal',
       external_code: sale.fiscal.externalCode ?? '',
       verification_url: verificationUrl,
       show_qr: sale.fiscal.provider === 'verifactu' && Boolean(verificationUrl),
+      show_verifactu_legend: sale.fiscal.provider === 'verifactu' && Boolean(verificationUrl) && localFiscal?.verifactuLegend !== false,
       show_url: sale.fiscal.provider !== 'verifactu' && Boolean(verificationUrl),
       error: verificationUrl ? '' : fiscalError ?? '',
     } : {},

@@ -23,6 +23,7 @@ const invoiceSchema = z.object({
   ticketId: z.uuid(), saleId: z.uuid(), paymentId: z.uuid().nullable(),
   lines: z.array(lineSchema), recipient: z.object({ name: z.string(), nif: z.string() }).nullable(),
   totalCents: z.number().int(), taxCents: z.number().int(),
+  transmissionMode: z.enum(['bridge', 'local-only']).optional(),
 })
 const rowSchema = z.object({
   id: z.uuid(), tenant_id: z.uuid(), fiscal_subject_id: z.uuid(), installation_id: z.uuid(),

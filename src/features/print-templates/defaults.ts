@@ -1,6 +1,9 @@
 import type { PrintTemplateBlock, PrintTemplateDefinition, PrintTemplateType } from './types.ts'
 
 const saleBlocks: PrintTemplateBlock[] = [
+  { id: 'fiscal-qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' },
+  { id: 'fiscal-verifactu-legend', type: 'text', value: 'VERI*FACTU', align: 'center', when: 'fiscal.show_verifactu_legend' },
+  { id: 'fiscal-top-gap', type: 'spacer', when: 'fiscal.show_qr' },
   { id: 'venue-name', type: 'text', value: '{{venue.name}}', align: 'center' },
   { id: 'venue-legal-name', type: 'text', value: '{{venue.legal_name}}', align: 'center', when: 'venue.legal_name' },
   { id: 'venue-tax-id', type: 'text', value: 'NIF/CIF {{venue.tax_id}}', align: 'center', when: 'venue.tax_id' },
@@ -47,7 +50,6 @@ const saleBlocks: PrintTemplateBlock[] = [
   { id: 'fiscal-title', type: 'text', value: '{{fiscal.title}}', when: 'fiscal.title' },
   { id: 'fiscal-separator', type: 'separator', when: 'fiscal.title' },
   { id: 'fiscal-code', type: 'text', value: 'Código: {{fiscal.external_code}}', when: 'fiscal.external_code' },
-  { id: 'fiscal-qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' },
   { id: 'fiscal-url', type: 'text', value: '{{fiscal.verification_url}}', when: 'fiscal.show_url' },
   { id: 'fiscal-unavailable', type: 'text', value: 'QR no disponible.', when: 'fiscal.error' },
   { id: 'fiscal-error', type: 'text', value: 'Motivo: {{fiscal.error}}', when: 'fiscal.error' },

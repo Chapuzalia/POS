@@ -65,6 +65,7 @@ export type BridgeInvoiceSnapshot = {
   ticketId: string; saleId: string; paymentId: string | null
   lines: readonly { description: string; grossCents: number; discountCents: number; baseCents: number; taxCents: number; taxRate: string }[]
   recipient: { name: string; nif: string } | null; totalCents: number; taxCents: number
+  transmissionMode?: 'bridge' | 'local-only'
 }
 
 export type BridgeAnnulmentSnapshot = {

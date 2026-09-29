@@ -1,12 +1,14 @@
 import { z } from 'zod'
 import { supabase } from '../../../lib/supabase.ts'
+import { assertUniqueFiscalInstallationIdentities, readableFiscalSetupError } from './setupPolicy.ts'
 
 const code = z.string().trim().toUpperCase().regex(/^[A-Z0-9]{1,8}$/)
 const setupSchema = z.object({
   legalName: z.string().trim().min(1).max(120),
   nif: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{9}$/),
   installations: z.array(z.object({
-    installationId: z.uuid().optional(), venueId: z.uuid(), cashRegisterId: z.uuid(), deviceId: z.uuid(),
+    installationId: z.uuid().optional(), replaceInstallationId: z.uuid().optional(),
+    venueId: z.uuid(), cashRegisterId: z.uuid(), deviceId: z.uuid(),
     installationNumber: z.string().trim().min(1).max(100), venueCode: code, registerCode: code, installationCode: code,
   })).min(1),
 })
@@ -32,11 +34,13 @@ export async function loadFiscalSifInstallations(tenantId: string): Promise<Fisc
 export async function saveFiscalSifSetup(tenantId: string, input: FiscalSifSetup): Promise<void> {
   if (!supabase) throw new Error('Supabase no está configurado.')
   const setup = setupSchema.parse(input)
+  assertUniqueFiscalInstallationIdentities(setup.installations)
   const { error } = await supabase.rpc('save_fiscal_sif_setup', {
     p_tenant_id: tenantId, p_legal_name: setup.legalName, p_nif: setup.nif,
-    p_installations: setup.installations.map(({ installationId, ...installation }) => ({
+    p_installations: setup.installations.map(({ installationId, replaceInstallationId, ...installation }) => ({
       ...(installationId ? { installationId } : {}), ...installation,
+      ...(replaceInstallationId ? { replaceInstallationId } : {}),
     })),
   })
-  if (error) throw error
+  if (error) throw readableFiscalSetupError(error)
 }

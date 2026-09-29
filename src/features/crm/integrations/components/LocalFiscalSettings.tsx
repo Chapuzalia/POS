@@ -52,25 +52,30 @@ export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Prop
       setSettings(saved)
       setExists(true)
       setLoadError(null)
-      sileo.success({ title: 'Puente fiscal guardado', description: 'Las cajas leerán estos datos para la siguiente factura.' })
+      sileo.success({
+        title: 'Configuración fiscal guardada',
+        description: saved.bridge_url
+          ? 'Las cajas intentarán entregar al puente los registros pendientes.'
+          : 'Las cajas emitirán y conservarán los registros localmente hasta configurar el puente.',
+      })
     })
   }
 
   return <section className="!min-w-0 !overflow-hidden !rounded-2xl !bg-[var(--crm-surface)] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-card)]">
     <header className="!px-[18px] !pt-[18px] !pb-3 md:!px-[22px]">
       <h2 className="!m-0 !text-base !font-bold">SIF local de Tickit y puente VERI*FACTU</h2>
-      <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Configura el origen HTTPS del VPS y los datos públicos del productor. El titular fiscal de cada caja se asigna a su instalación SIF.</p>
+      <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Configura los datos públicos del productor. La URL HTTPS del VPS es opcional mientras la remisión no esté activada; los registros quedarán pendientes en la caja.</p>
     </header>
     <form className="!grid !gap-4 !border-t !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]" onSubmit={(event) => void submit(event)}>
       {loadError ? <p role="status" className="!m-0 !rounded-xl !bg-[var(--crm-blue-soft)] !px-4 !py-3 !text-xs !font-semibold !text-[var(--crm-blue)]">{loadError}</p> : null}
       <div className="!grid !grid-cols-1 !gap-4 lg:!grid-cols-2">
-        <Field label="URL HTTPS del puente VPS"><UiInput className={inputClass} disabled={disabled || !canEdit} onChange={(event) => update('bridge_url', event.target.value)} placeholder="https://fiscal.ejemplo.es/" required type="url" value={settings.bridge_url} /></Field>
+        <Field label="URL HTTPS del puente VPS (opcional)"><UiInput className={inputClass} disabled={disabled || !canEdit} onChange={(event) => update('bridge_url', event.target.value)} placeholder="https://fiscal.ejemplo.es/" type="url" value={settings.bridge_url} /></Field>
         <Field label="Razón social del productor SIF"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={120} onChange={(event) => update('producer_name', event.target.value)} required value={settings.producer_name} /></Field>
         <Field label="NIF del productor"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={9} onChange={(event) => update('producer_nif', event.target.value)} required value={settings.producer_nif} /></Field>
         <Field label="ID de sistema (2 caracteres)"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={2} onChange={(event) => update('system_id', event.target.value)} required value={settings.system_id} /></Field>
         <Field label="Versión del sistema"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={40} onChange={(event) => update('system_version', event.target.value)} required value={settings.system_version} /></Field>
       </div>
-      <p className="!m-0 !flex !items-start !gap-2 !text-xs !leading-5 !text-[var(--crm-text-muted)]"><ShieldCheck className="!mt-0.5 !size-4 !shrink-0" />No introduzcas certificados ni secretos del VPS. Esta ficha identifica al productor en cada registro fiscal emitido. Una factura ya emitida conserva su propia copia.</p>
+      <p className="!m-0 !flex !items-start !gap-2 !text-xs !leading-5 !text-[var(--crm-text-muted)]"><ShieldCheck className="!mt-0.5 !size-4 !shrink-0" />Sin URL, el POS numera, encadena, firma con huella y genera el QR, pero no remite a AEAT. No introduzcas certificados ni secretos del VPS. Una factura ya emitida conserva su propia copia.</p>
       {canEdit ? <footer className="!flex !justify-end"><UiButton className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} type="submit"><Save className="!size-4" />{exists ? 'Guardar cambios' : 'Guardar configuración'}</UiButton></footer> : null}
     </form>
   </section>

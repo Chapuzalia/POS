@@ -5,7 +5,7 @@ export function localFiscalMode(): LocalFiscalMode {
   return value === 'disabled' || value === 'test' || value === 'production' ? value : 'invalid'
 }
 
-/** Production checkout must still pass the installation, ledger and bridge lease preflight. */
+/** Production checkout must pass installation and ledger preflight; transport may remain queued locally. */
 export function assertRealSaleAllowed(): void {
   assertRealSaleAllowedForMode(localFiscalMode())
 }

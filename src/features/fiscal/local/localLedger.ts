@@ -100,7 +100,8 @@ type IssueInputBase = {
 
 export type TestIssueInput = IssueInputBase & { environment: 'test'; syntheticData: true }
 export type ProductionIssueInput = IssueInputBase & {
-  environment: 'production'; lease: FiscalLease; salePayload: SaleCreatedPayload; economicAlreadySynced?: boolean
+  environment: 'production'; lease: FiscalLease; transmissionMode: 'bridge' | 'local-only'
+  salePayload: SaleCreatedPayload; economicAlreadySynced?: boolean
 }
 export type LocalIssueInput = TestIssueInput | ProductionIssueInput
 export type ResolveFiscalSale = (draft: LocalFiscalEntry) => Promise<SaleCreatedPayload>
@@ -209,7 +210,8 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
         invoice: { issuerName: input.issuerName, issuerNif: input.issuerNif, issuerAddress: input.issuerAddress,
           series, number: nextNumber,
           issuedAt: time.generatedAt, qrUrl: built.qrUrl, ticketId: input.ticketId, saleId: input.saleId,
-          paymentId: input.paymentId, lines: structuredClone(input.lines), recipient: input.recipient ?? null, totalCents, taxCents },
+          paymentId: input.paymentId, lines: structuredClone(input.lines), recipient: input.recipient ?? null, totalCents, taxCents,
+          transmissionMode: input.environment === 'production' ? input.transmissionMode : undefined },
         delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null },
       }
       let economicPayload = input.environment === 'production' ? input.salePayload : null

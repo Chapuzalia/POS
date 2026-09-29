@@ -1,12 +1,14 @@
 import { z } from 'zod'
 import { supabase } from '../../../lib/supabase.ts'
 
+const bridgeUrlSchema = z.url().refine((value) => {
+  const url = new URL(value)
+  return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/'
+}, 'La URL del puente debe ser un origen HTTPS sin credenciales ni parámetros.')
+
 const settingsSchema = z.object({
   tenant_id: z.uuid(),
-  bridge_url: z.url().refine((value) => {
-    const url = new URL(value)
-    return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/'
-  }, 'La URL del puente debe ser un origen HTTPS sin credenciales ni parámetros.'),
+  bridge_url: z.preprocess((value) => value ?? '', z.union([z.literal(''), bridgeUrlSchema])),
   producer_name: z.string().trim().min(1).max(120),
   producer_nif: z.string().regex(/^[A-Z0-9]{9}$/),
   system_id: z.string().regex(/^[A-Z0-9]{2}$/),
@@ -46,7 +48,7 @@ export async function saveFiscalPosSettings(settings: FiscalPosSettings): Promis
   if (!supabase) throw new Error('Supabase no está configurado.')
   const validated = settingsSchema.parse(settings)
   const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
-    .upsert(validated, { onConflict: 'tenant_id' })
+    .upsert({ ...validated, bridge_url: validated.bridge_url || null }, { onConflict: 'tenant_id' })
     .select('tenant_id,bridge_url,producer_name,producer_nif,system_id,system_version').single()
   if (error) throw error
   const saved = settingsSchema.parse(data)

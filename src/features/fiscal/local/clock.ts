@@ -25,6 +25,22 @@ export type FiscalLease = {
   fencingToken: number
   expiresAt: string
   clock: FiscalClockSample
+  source?: 'bridge' | 'local-fallback'
+}
+
+/** Local fallback keeps the browser transaction usable while the transport is absent or unavailable. */
+export function createLocalFallbackLease(installationId: string, deviceId: string): FiscalLease {
+  const wallUtcAtReceipt = Date.now()
+  const monotonicAtReceipt = performance.now()
+  return {
+    leaseId: `local-${crypto.randomUUID()}`,
+    installationId,
+    deviceId,
+    fencingToken: wallUtcAtReceipt,
+    expiresAt: new Date(wallUtcAtReceipt + 10 * 60 * 1000).toISOString(),
+    clock: { serverUtcAtReceipt: new Date(wallUtcAtReceipt).toISOString(), wallUtcAtReceipt, monotonicAtReceipt },
+    source: 'local-fallback',
+  }
 }
 
 /** An expired or mismatched remote lease blocks issuance, including while offline. */

@@ -10,6 +10,22 @@ import { renderPrintTemplateWithFallback } from '../../print-templates/renderer.
 import { getSafeDefaultPrintTemplate } from '../../print-templates/defaults.ts'
 import type { PrintTemplateDefinition } from '../../print-templates/types.ts'
 
+type RenderedSaleDocument = ReturnType<typeof renderPrintTemplateWithFallback>
+
+function hasRequiredFiscalLayout(rendered: RenderedSaleDocument, sale: SaleCreatedPayload) {
+  const verificationUrl = sale.fiscal?.verificationUrl
+  if (!sale.localFiscal || sale.fiscal?.provider !== 'verifactu' || !verificationUrl) return true
+  const qrElements = rendered.elements.filter((element) => element.type === 'qr')
+  const firstVisible = rendered.elements.find((element) => element.type === 'qr' || element.value.trim())
+  const hasExactQr = qrElements.length === 1 && qrElements[0].data === verificationUrl
+    && qrElements[0].errorCorrection === 'M' && qrElements[0].size === 6
+    && firstVisible?.type === 'qr'
+  const hasLegend = rendered.elements.some(
+    (element) => element.type === 'text' && element.value.trim() === 'VERI*FACTU',
+  )
+  return hasExactQr && hasLegend === (sale.localFiscal.verifactuLegend !== false)
+}
+
 type MapperOptions = {
   sale: SaleCreatedPayload
   establishment: PrintEstablishment
@@ -36,12 +52,21 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     : []
   const label = isPreTicket ? 'PRE-TICKET' : isReprint ? 'COPIA' : undefined
   const templateType = sale.ticket.invoice ? 'invoice' : 'simplified_invoice'
-  const rendered = renderPrintTemplateWithFallback(
+  let rendered = renderPrintTemplateWithFallback(
     options.template ?? getSafeDefaultPrintTemplate(templateType),
     getSafeDefaultPrintTemplate(templateType),
     buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
     options.printerLayout,
   )
+  if (!hasRequiredFiscalLayout(rendered, sale)) {
+    const safeTemplate = getSafeDefaultPrintTemplate(templateType)
+    rendered = renderPrintTemplateWithFallback(
+      safeTemplate,
+      safeTemplate,
+      buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
+      options.printerLayout,
+    )
+  }
   return printRequestSchema.parse({
     requestId: isPreTicket
       ? `pre-ticket:${sale.sale.id}`
