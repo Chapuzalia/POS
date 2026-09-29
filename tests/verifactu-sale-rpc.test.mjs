@@ -8,6 +8,7 @@ const prepare = await readFile(new URL('../supabase/migrations/20260928120000_pr
 const saleMigration = await readFile(new URL('../supabase/migrations/20260928130000_sync_local_verifactu_sale.sql', import.meta.url), 'utf8')
 const restaurantMigration = await readFile(new URL('../supabase/migrations/20260928140000_restaurant_local_verifactu_sale.sql', import.meta.url), 'utf8')
 const guardMigration = await readFile(new URL('../supabase/migrations/20260928150000_guard_issued_local_fiscal_sales.sql', import.meta.url), 'utf8')
+const seriesMigration = await readFile(new URL('../supabase/migrations/20260929190000_simplify_sif_series_identity.sql', import.meta.url), 'utf8')
 const ids = {
   tenant: '11111111-1111-4111-8111-111111111111', venue: '22222222-2222-4222-8222-222222222222',
   device: '33333333-3333-4333-8333-333333333333', register: '44444444-4444-4444-8444-444444444444',
@@ -60,6 +61,7 @@ test('sale and fiscal record commit together, with idempotency, chain and legacy
   await db.exec(saleMigration)
   await db.exec(restaurantMigration)
   await db.exec(guardMigration)
+  await db.exec(seriesMigration)
   await db.exec(`
     insert into public.fiscal_subjects(id,tenant_id,legal_name,nif) values
       ('${ids.subject}','${ids.tenant}','Emisor ficticio','89890001K');
@@ -71,7 +73,7 @@ test('sale and fiscal record commit together, with idempotency, chain and legacy
   `)
   const generatedAt = '2026-09-28T12:00:00+02:00'
   const built = await createAltaRecord({
-    invoice: { issuerNif: '89890001K', seriesAndNumber: 'L1-C1-I1-2026-S/1', issueDate: '28-09-2026' },
+    invoice: { issuerNif: '89890001K', seriesAndNumber: 'L1-C1-2026-S/1', issueDate: '28-09-2026' },
     issuerName: 'Emisor ficticio', type: 'F2', description: 'Venta ficticia',
     details: [{ Impuesto: '01', ClaveRegimen: '01', CalificacionOperacion: 'S1', TipoImpositivo: '21.00', BaseImponibleOimporteNoSujeto: '10.00', CuotaRepercutida: '2.10' }],
     system: { NombreRazon: 'Productor ficticio', NIF: '89890001K', NombreSistemaInformatico: 'Tickit', IdSistemaInformatico: 'TK',
@@ -86,7 +88,7 @@ test('sale and fiscal record commit together, with idempotency, chain and legacy
     previous: null, hash: built.hash, generatedAt, canonicalSchema: 'aeat-registro-v1',
     canonicalRecord: built.canonicalRecord, lease: { leaseId: 'lease', fencingToken: 1 } }
   const invoice = { invoiceId: ids.invoice, ticketId: ids.ticket, saleId: ids.sale,
-    series: 'L1-C1-I1-2026-S', number: 1, issuedAt: generatedAt, totalCents: 1210 }
+    series: 'L1-C1-2026-S', number: 1, issuedAt: generatedAt, totalCents: 1210 }
   const args = [ids.event, JSON.stringify(payload), JSON.stringify(record), JSON.stringify(invoice)]
   const call = (values = args) => db.query('select public.sync_local_fiscal_sale_created($1::uuid,$2::jsonb,$3::jsonb,$4::jsonb)', values)
   await assert.rejects(db.exec(`insert into public.sales(id,ticket_id,tenant_id,venue_id,cash_register_id,device_id)
@@ -117,18 +119,18 @@ test('sale and fiscal record commit together, with idempotency, chain and legacy
         'saleId','${secondSale}','paymentId',null,'totalCents',1210);
     end $$`)
   const chained = await createAltaRecord({
-    invoice: { issuerNif: '89890001K', seriesAndNumber: 'L1-C1-I1-2026-S/2', issueDate: '28-09-2026' },
+    invoice: { issuerNif: '89890001K', seriesAndNumber: 'L1-C1-2026-S/2', issueDate: '28-09-2026' },
     issuerName: 'Emisor ficticio', type: 'F2', description: 'Segunda venta ficticia',
     details: [{ Impuesto: '01', ClaveRegimen: '01', CalificacionOperacion: 'S1', TipoImpositivo: '21.00',
       BaseImponibleOimporteNoSujeto: '10.00', CuotaRepercutida: '2.10' }],
     system: { NombreRazon: 'Productor ficticio', NIF: '89890001K', NombreSistemaInformatico: 'Tickit',
       IdSistemaInformatico: 'TK', Version: '1.0', NumeroInstalacion: 'INSTALL-1',
       TipoUsoPosibleSoloVerifactu: 'S', TipoUsoPosibleMultiOT: 'S', IndicadorMultiplesOT: 'S' },
-    previous: { IDEmisorFactura: '89890001K', NumSerieFactura: 'L1-C1-I1-2026-S/1',
+      previous: { IDEmisorFactura: '89890001K', NumSerieFactura: 'L1-C1-2026-S/1',
       FechaExpedicionFactura: '28-09-2026', Huella: built.hash }, generatedAt, environment: 'production',
   })
   const secondRecord = { ...record, idempotencyKey: secondRecordId, invoiceId: secondInvoiceId, chainPosition: 2,
-    previous: { issuerNif: '89890001K', seriesAndNumber: 'L1-C1-I1-2026-S/1',
+    previous: { issuerNif: '89890001K', seriesAndNumber: 'L1-C1-2026-S/1',
       issueDate: '28-09-2026', hash: built.hash }, hash: chained.hash, canonicalRecord: chained.canonicalRecord }
   const secondInvoice = { ...invoice, invoiceId: secondInvoiceId, ticketId: secondTicket, saleId: secondSale, number: 2 }
   const restaurantArgs = ['close', JSON.stringify({ orderId: ids.ticket, method: 'card', receivedCents: 1210,

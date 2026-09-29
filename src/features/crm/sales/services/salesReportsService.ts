@@ -64,6 +64,8 @@ const ticketSelect = `
     invoice_series,
     invoice_number,
     invoice_issued_at,
+    fiscal_invoices (provider, status, invoice_type, series, number, issue_date, issued_at, verification_url, external_code, error_code, error_message),
+    fiscal_local_records (record_kind, invoice_snapshot),
     ticket_lines (
     id,
     product_id,
@@ -159,6 +161,23 @@ export type SalesReportTicketRow = {
    invoice_series: string | null
    invoice_number: string | null
    invoice_issued_at: string | null
+   fiscal_invoices: Array<{
+     provider: 'verifactu' | 'ticketbai'
+     status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+     invoice_type: 'normal' | 'simplified' | 'corrective'
+     series: string
+     number: string
+     issue_date: string
+     issued_at: string
+     verification_url: string | null
+     external_code: string | null
+     error_code: string | null
+     error_message: string | null
+   }> | null
+   fiscal_local_records: Array<{
+     record_kind: 'alta' | 'anulacion'
+     invoice_snapshot: Record<string, unknown>
+   }> | null
  }
 
 
@@ -235,10 +254,45 @@ async function loadTicketRows(context: TenantContext, venueId: string | undefine
   return ticketIds.map((ticketId) => rowsById.get(ticketId)).filter((row): row is SalesReportTicketRow => Boolean(row))
 }
 
+function mapFiscalRecord(ticket: SalesReportTicketRow): CrmSalesReportTicket['fiscal'] {
+  const localRecord = ticket.fiscal_local_records?.find((record) => record.record_kind === 'alta')
+  const localInvoice = localRecord?.invoice_snapshot
+  if (localInvoice) {
+    const series = typeof localInvoice.series === 'string' ? localInvoice.series : null
+    const number = typeof localInvoice.number === 'number' ? String(localInvoice.number) : null
+    const issuedAt = typeof localInvoice.issuedAt === 'string' ? localInvoice.issuedAt : null
+    const verificationUrl = typeof localInvoice.qrUrl === 'string' ? localInvoice.qrUrl : null
+    const transmissionMode = localInvoice.transmissionMode
+    if (series && number && issuedAt) {
+      return {
+        provider: 'verifactu', status: 'pending', documentKind: ticket.customer_id ? 'complete' : 'simplified',
+        series, number, issuedAt, verificationUrl, externalCode: `${series}/${number}`,
+        errorCode: null, errorMessage: null, verifactuLegend: transmissionMode !== 'local-only',
+      }
+    }
+  }
+  const fiscalInvoice = ticket.fiscal_invoices?.[0]
+  if (!fiscalInvoice) return null
+  return {
+    provider: fiscalInvoice.provider,
+    status: fiscalInvoice.status,
+    documentKind: fiscalInvoice.invoice_type,
+    series: fiscalInvoice.series,
+    number: fiscalInvoice.number,
+    issuedAt: fiscalInvoice.issued_at,
+    verificationUrl: fiscalInvoice.verification_url,
+    externalCode: fiscalInvoice.external_code,
+    errorCode: fiscalInvoice.error_code,
+    errorMessage: fiscalInvoice.error_message,
+    verifactuLegend: fiscalInvoice.provider === 'verifactu',
+  }
+}
+
 function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicket {
   return {
     id: ticket.id,
     ticketNumber: Number(ticket.ticket_number),
+    fiscal: mapFiscalRecord(ticket),
     createdAt: ticket.local_created_at,
     lineCount: ticket.ticket_lines?.length ?? 0,
     lines: (ticket.ticket_lines ?? []).map((line) => {

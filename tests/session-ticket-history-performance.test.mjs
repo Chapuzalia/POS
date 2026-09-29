@@ -54,6 +54,20 @@ test('el histórico abre sin iniciar una sincronización innecesaria cuando la c
   assert.equal(harness.calls.sync, 0)
 })
 
+test('el fallback local se actualiza cuando la caché llega después del primer render', async () => {
+  const harness = createCashTicketActionsHarness()
+  const firstActions = harness.render()
+  const firstLoadPage = firstActions.loadHistoryPage
+
+  harness.options.tickets = [harness.ticket]
+  const refreshedActions = harness.render()
+  assert.notEqual(refreshedActions.loadHistoryPage, firstLoadPage)
+
+  const page = await refreshedActions.loadHistoryPage(1, '')
+  assert.equal(page.totalResults, 1)
+  assert.equal(page.tickets[0].ticket.id, harness.ticket.id)
+})
+
 test('el refresco de una venta confirmada recupera solo ese ticket', async () => {
   const source = await readFile(new URL('../src/features/cash-registers/hooks/useCashSession.ts', import.meta.url), 'utf8')
   const refreshBlock = source.match(/const refreshConfirmedSale = useCallback[\s\S]*?\n  }, \[[^\n]+\]\)/)?.[0] ?? ''

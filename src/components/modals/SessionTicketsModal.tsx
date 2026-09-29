@@ -31,6 +31,13 @@ type SessionTicketsModalProps = {
   onVoidTicket: (ticket: SessionTicketRecord) => void | Promise<void>
 }
 
+function getSessionTicketLabel(ticket: SessionTicketRecord) {
+  if (ticket.payload.localFiscal) return `${ticket.payload.localFiscal.series}/${ticket.payload.localFiscal.number}`
+  if (ticket.payload.fiscal?.externalCode) return ticket.payload.fiscal.externalCode
+  if (ticket.payload.ticket.invoice?.series && ticket.payload.ticket.invoice.number) return `${ticket.payload.ticket.invoice.series}/${ticket.payload.ticket.invoice.number}`
+  return ticket.ticketNumber ? formatTicketNumber(ticket.ticketNumber) : 'Pendiente de numeración'
+}
+
 export function SessionTicketsModal({
   canReprint,
   initialPage,
@@ -155,7 +162,7 @@ export function SessionTicketsModal({
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-black uppercase text-[var(--muted)]">
-                        Ticket {formatTicketNumber(ticket.ticketNumber ?? 0)}
+                        Ticket {getSessionTicketLabel(ticket)}
                         {ticket.status === 'voided' ? ' - anulado' : ''}
                       </p>
                       <p className="mt-1 font-mono text-2xl font-black tabular-nums">{formatMoney(ticket.totalCents)}</p>

@@ -695,9 +695,24 @@ export type CrmStats = {
   }>
 }
 
+export type CrmSalesReportFiscal = {
+  provider: 'verifactu' | 'ticketbai'
+  status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+  documentKind: 'simplified' | 'complete' | 'normal' | 'corrective'
+  series: string
+  number: string
+  issuedAt: string
+  verificationUrl: string | null
+  externalCode: string | null
+  errorCode: string | null
+  errorMessage: string | null
+  verifactuLegend: boolean
+}
+
 export type CrmSalesReportTicket = {
   id: string
   ticketNumber: number
+  fiscal: CrmSalesReportFiscal | null
   createdAt: string
   lineCount: number
   lines: Array<{

@@ -25,8 +25,8 @@ test('cada dispositivo recibe una identidad SIF visible, estable y exclusiva', (
   assert.deepEqual(first, repeated)
   assert.notEqual(first.installationNumber, second.installationNumber)
   assert.notEqual(first.installationCode, second.installationCode)
-  assert.match(first.venueCode, /^[A-Z0-9]{1,8}$/)
-  assert.match(first.registerCode, /^[A-Z0-9]{1,8}$/)
+  assert.equal(first.venueCode, '')
+  assert.equal(first.registerCode, '')
   assert.match(first.installationCode, /^[A-Z0-9]{1,8}$/)
 })
 

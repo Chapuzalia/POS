@@ -40,6 +40,7 @@ export function useCashTicketActions(options: Options) {
   const historyContext = options.context
   const historyCashSession = options.cashSession
   const historyIsOnline = options.isOnline
+  const historyTickets = options.tickets
   const mergeHistoryPrintStates = options.mergeRemotePrintStates
   const setHistoryError = options.setError
   const setHistoryOpen = options.setHistoryOpen
@@ -72,16 +73,51 @@ export function useCashTicketActions(options: Options) {
       throw new Error('El histórico de tickets requiere conexión para consultar los datos de Supabase.')
     }
     const result = await loadSessionTicketPageFromSupabase(historyContext, historyCashSession.id, page, query)
-    const mergedTickets = mergeHistoryPrintStates(result.tickets.map(({ ticket }) => ticket))
+    if (query.trim()) {
+      const mergedTickets = mergeHistoryPrintStates(result.tickets.map(({ ticket }) => ticket))
+      const mergedById = new Map(mergedTickets.map((ticket) => [ticket.id, ticket]))
+      return {
+        ...result,
+        tickets: result.tickets.map((item) => ({
+          ...item,
+          ticket: mergedById.get(item.ticket.id) ?? item.ticket,
+        })),
+      }
+    }
+    const remoteByTicketId = new Map(result.tickets.map((item) => [item.ticket.payload.ticket.id, item]))
+    const cachedTickets = historyTickets.filter((ticket) => ticket.cashSessionId === historyCashSession.id)
+    const merged = new Map<string, SessionTicketHistoryPage['tickets'][number]>()
+    for (const cached of cachedTickets) {
+      const remote = remoteByTicketId.get(cached.payload.ticket.id)
+      merged.set(cached.payload.ticket.id, {
+        number: remote?.number ?? cached.ticketNumber ?? 0,
+        ticket: remote ? {
+          ...remote.ticket,
+          payload: {
+            ...remote.ticket.payload,
+            localFiscal: cached.payload.localFiscal ?? remote.ticket.payload.localFiscal,
+            fiscal: cached.payload.fiscal ?? remote.ticket.payload.fiscal,
+          },
+        } : cached,
+      })
+    }
+    for (const remote of result.tickets) {
+      if (!merged.has(remote.ticket.payload.ticket.id)) merged.set(remote.ticket.payload.ticket.id, remote)
+    }
+    const tickets = [...merged.values()].sort((left, right) => (
+      right.ticket.createdAt.localeCompare(left.ticket.createdAt) || right.ticket.id.localeCompare(left.ticket.id)
+    )).slice(0, 12)
+    const mergedTickets = mergeHistoryPrintStates(tickets.map(({ ticket }) => ticket))
     const mergedById = new Map(mergedTickets.map((ticket) => [ticket.id, ticket]))
     return {
       ...result,
-      tickets: result.tickets.map((item) => ({
+      totalResults: Math.max(result.totalResults, cachedTickets.length),
+      tickets: tickets.map((item) => ({
         ...item,
         ticket: mergedById.get(item.ticket.id) ?? item.ticket,
       })),
     }
-  }, [historyCashSession, historyContext, historyIsOnline, historyRefreshVersion, mergeHistoryPrintStates])
+  }, [historyCashSession, historyContext, historyIsOnline, historyRefreshVersion, historyTickets, mergeHistoryPrintStates])
 
   const reprint = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options

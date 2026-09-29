@@ -3,27 +3,21 @@ import { UserFacingError } from '../../../utils/UserFacingError.ts'
 export type FiscalInstallationIdentity = {
   installationNumber: string
   venueCode: string
-  registerCode: string
+  registerCode?: string
   installationCode: string
 }
 
-function compactUuid(value: string): string {
-  const compact = value.replace(/-/g, '').toUpperCase()
-  if (!/^[A-F0-9]{32}$/.test(compact)) throw new Error('La identidad de la caja no es válida.')
-  return compact
-}
-
-/** Stable defaults are visible in CRM and unique for UUID-backed venue/register/device identities. */
+/** Provides only technical defaults; venue and register codes are assigned by the SIF setup RPC. */
 export function defaultFiscalInstallationIdentity(
-  venueId: string,
-  cashRegisterId: string,
+  _venueId: string,
+  _cashRegisterId: string,
   deviceId: string,
 ): FiscalInstallationIdentity {
   return {
     installationNumber: `TICKIT-${deviceId.toUpperCase()}`,
-    venueCode: `L${compactUuid(venueId).slice(-7)}`,
-    registerCode: `C${compactUuid(cashRegisterId).slice(-7)}`,
-    installationCode: `I${compactUuid(deviceId).slice(-7)}`,
+    venueCode: '',
+    registerCode: '',
+    installationCode: `I${deviceId.replace(/-/g, '').slice(-7).toUpperCase()}`,
   }
 }
 

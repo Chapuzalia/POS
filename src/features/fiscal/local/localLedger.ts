@@ -186,7 +186,7 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
         assertProductionSaleMatchesInvoice(input, sale, totalCents)
       } else if (input.clockSample) assertFiscalClock(input.clockSample, Date.now(), performance.now())
       const time = localDateParts(new Date(), input.timezone)
-      const series = fiscalSeries({ venueCode: input.venueCode, registerCode: input.registerCode, installationCode: input.installationCode, kind: input.invoiceType === 'F1' ? 'complete' : 'simplified', exercise: time.exercise })
+      const series = fiscalSeries({ venueCode: input.venueCode, registerCode: input.registerCode, kind: input.invoiceType === 'F1' ? 'complete' : 'simplified', exercise: time.exercise })
       const { chain, number } = await loadCursors(db, scope, series)
       const nextNumber = number.lastNumber + 1
       if (!Number.isSafeInteger(nextNumber)) throw new Error('Contador fiscal agotado.')

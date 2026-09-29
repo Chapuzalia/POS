@@ -560,6 +560,21 @@ type SessionTicketQueryRow = {
   invoice_number: string | null
    invoice_issued_at: string | null
    ticket_number: number | string
+   fiscal_local_records: Array<{
+     id: string
+     invoice_id: string
+     record_kind: 'alta' | 'anulacion'
+     invoice_snapshot: {
+       issuerName: string
+       issuerNif: string
+       issuerAddress?: string
+       series: string
+       number: number
+       issuedAt: string
+       qrUrl: string
+       recipient: { name: string; nif: string } | null
+     }
+   }> | null
    ticket_lines: Array<{
     id: string
     product_id: string | null
@@ -648,8 +663,14 @@ async function loadSessionTicketRecordsFromSupabase(
         customer_snapshot,
         invoice_series,
         invoice_number,
-        invoice_issued_at,
-        discount_rule_kind,
+         invoice_issued_at,
+         fiscal_local_records (
+     id,
+     invoice_id,
+     record_kind,
+     invoice_snapshot
+         ),
+         discount_rule_kind,
         discount_scope,
         discount_automatic,
         discount_snapshot,
@@ -775,6 +796,8 @@ async function loadSessionTicketRecordsFromSupabase(
         catalogSnapshot: normalizeCatalogSnapshot(loggedLine?.catalogSnapshot ?? { saleFormatId: line.sale_format_id, saleFormatName: line.sale_format_name_snapshot ?? line.variant_name, categoryId: line.category_id_snapshot, categoryName: line.category_name_snapshot ?? '', catalogTabId: line.catalog_tab_id_snapshot, catalogTabName: line.catalog_tab_name_snapshot ?? '' }, { productId: line.product_id ?? loggedLine?.productId ?? null, productName: line.product_name, variantId: line.variant_id ?? loggedLine?.variantId ?? null, variantName: line.variant_name, basePriceCents: loggedLine?.basePriceCents ?? line.base_price_cents ?? line.unit_price_cents }),
       }
     })
+    const localFiscalRecord = ticket.fiscal_local_records?.find((record) => record.record_kind === 'alta')
+    const localFiscalInvoice = localFiscalRecord?.invoice_snapshot
     const payload: SaleCreatedPayload = {
        ticket: {
          id: ticket.id,
@@ -847,12 +870,36 @@ async function loadSessionTicketRecordsFromSupabase(
         cashlogyRequestId: payment.cashlogy_request_id,
         cashlogyTransactionId: payment.cashlogy_transaction_id,
       } : null,
+      ...(localFiscalRecord && localFiscalInvoice ? {
+        localFiscal: {
+          recordId: localFiscalRecord.id,
+          series: localFiscalInvoice.series,
+          number: localFiscalInvoice.number,
+          issuedAt: localFiscalInvoice.issuedAt,
+          documentKind: localFiscalInvoice.recipient ? 'complete' as const : 'simplified' as const,
+          issuerName: localFiscalInvoice.issuerName,
+          issuerNif: localFiscalInvoice.issuerNif,
+          issuerAddress: localFiscalInvoice.issuerAddress ?? '',
+          verifactuLegend: true,
+        },
+        fiscal: {
+          invoiceId: localFiscalRecord.invoice_id,
+          provider: 'verifactu' as const,
+          status: 'pending' as const,
+          uuid: null,
+          qrBase64: null,
+          verificationUrl: localFiscalInvoice.qrUrl,
+          externalCode: `${localFiscalInvoice.series}/${localFiscalInvoice.number}`,
+          errorCode: null,
+          errorMessage: null,
+        },
+      } : {}),
     }
 
      return {
        id: saleId,
-       ticketNumber: Number(ticket.ticket_number),
-       cashSessionId: ticket.cash_session_id,
+        ticketNumber: Number(ticket.ticket_number) || undefined,
+        cashSessionId: ticket.cash_session_id,
       paymentMethod,
       totalCents: ticket.total_cents,
       createdAt,

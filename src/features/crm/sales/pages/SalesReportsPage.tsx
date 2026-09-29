@@ -1,7 +1,8 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
-import { Download, FileText, RefreshCw, SlidersHorizontal, X } from 'lucide-react'
+import { Download, FileText, QrCode, RefreshCw, SlidersHorizontal, X } from 'lucide-react'
+import QRCode from 'qrcode'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination'
 import { CrmModal } from '../../shared/components/CrmModal'
 import { Field } from '../../shared/components/Field'
@@ -18,7 +19,7 @@ import { useSalesReportSummary } from '../hooks/useSalesReportSummary'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type RunAction } from '../../shared/types'
-import { openCustomerInvoiceDocument } from '../../integrations/services/fiscalInvoiceDocument'
+import { openCustomerInvoiceDocument, openTicketDocument } from '../../integrations/services/fiscalInvoiceDocument'
 
 export type SalesReportsCrmProps = {
   dayChangeTime: string | null
@@ -413,6 +414,10 @@ function getReportPaymentLabel(ticket: CrmSalesReports['tickets'][number]) {
   return ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'
 }
 
+function getDisplayedTicketNumber(ticket: CrmSalesReports['tickets'][number]) {
+  return ticket.fiscal ? `${ticket.fiscal.series}/${ticket.fiscal.number}` : formatTicketNumber(ticket.ticketNumber ?? 0)
+}
+
 export function SalesReportTicketsTable({
   isLoading,
   onSelect,
@@ -445,7 +450,7 @@ export function SalesReportTicketsTable({
         <tbody>
           {tickets.map((ticket) => (
             <tr
-              aria-label={`Ver detalles del ticket ${formatTicketNumber(ticket.ticketNumber ?? 0)}`}
+              aria-label={`Ver detalles del ticket ${getDisplayedTicketNumber(ticket)}`}
               className="!cursor-pointer !border-b !border-[var(--crm-border-subtle)] !outline-none hover:!bg-[var(--crm-surface-soft)] focus-visible:!bg-[var(--crm-surface-soft)] last:!border-0"
               key={ticket.id}
               onClick={() => onSelect(ticket.id)}
@@ -460,7 +465,7 @@ export function SalesReportTicketsTable({
             >
               <td className="!px-[22px] !py-4">
                 <strong className="!block !truncate !text-sm !font-semibold !text-[var(--crm-text)]">
-#{formatTicketNumber(ticket.ticketNumber ?? 0)}
+#{getDisplayedTicketNumber(ticket)}
                 </strong>
                 <span className="!block !truncate !text-xs !font-medium !text-[var(--crm-text-muted)]">
                   {ticket.lineCount} líneas
@@ -496,6 +501,25 @@ export function SalesReportTicketsTable({
   )
 }
 
+function FiscalVerificationQr({ url }: { url: string }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null)
+
+  useEffect(() => {
+    let cancelled = false
+    void QRCode.toDataURL(url, { errorCorrectionLevel: 'M', margin: 1, width: 160 }).then((nextDataUrl) => {
+      if (!cancelled) setDataUrl(nextDataUrl)
+    }).catch(() => {
+      if (!cancelled) setDataUrl(null)
+    })
+    return () => { cancelled = true }
+  }, [url])
+
+  return <div className="!flex !flex-wrap !items-center !gap-4 !border-t !border-[var(--crm-border-subtle)] !pt-3">
+    {dataUrl ? <img alt="Código QR de verificación fiscal" className="!size-40 !rounded-md !bg-white !p-2" src={dataUrl} /> : null}
+    <div className="!grid !gap-1 !text-xs"><strong>Verificación fiscal</strong><a className="!break-all !text-[var(--crm-blue)] !underline" href={url} rel="noreferrer" target="_blank">{url}</a></div>
+  </div>
+}
+
 export function SalesReportTicketModal({
   onClose,
   tenantContext,
@@ -507,12 +531,13 @@ export function SalesReportTicketModal({
   ticket: CrmSalesReports['tickets'][number]
 }) {
   const fiscalTotals = buildSalesReportTicketTotals(ticket)
+  const [isQrVisible, setIsQrVisible] = useState(false)
 
   return (
-    <CrmModal label={`Detalle del ticket ${formatTicketNumber(ticket.ticketNumber ?? 0)}`} onClose={onClose} size="large">
+    <CrmModal label={`Detalle del ticket ${getDisplayedTicketNumber(ticket)}`} onClose={onClose} size="large">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] bg-transparent p-3 text-[var(--crm-text)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:text-[15px] [&_span]:font-bold [&_small]:truncate [&_small]:text-xs [&_small]:font-medium [&_small]:text-[var(--crm-text-muted)] !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
         <div>
-          <span>Ticket #{formatTicketNumber(ticket.ticketNumber ?? 0)}</span>
+          <span>Ticket #{getDisplayedTicketNumber(ticket)}</span>
           <small>{crmReportDateTimeFormatter.format(new Date(ticket.createdAt))}</small>
         </div>
         <UiButton
@@ -560,12 +585,18 @@ export function SalesReportTicketModal({
           </div>
         ) : null}
 
-          {ticket.invoice ? (
-           <section className="!mb-5 !grid !gap-2 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
-             <div className="!flex !items-center !justify-between !gap-3"><h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Factura de cliente {ticket.invoice.series}-{ticket.invoice.number}</h3><UiButton onClick={() => openCustomerInvoiceDocument(ticket, tenantContext)} type="button"><FileText className="!size-3.5" />Imprimir / PDF</UiButton></div>
-             <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">{ticket.invoice.customer.legalName} · {ticket.invoice.customer.taxId}</p>
-           </section>
-         ) : null}
+          <section className="!mb-5 !grid !gap-3 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
+            <div className="!flex !flex-wrap !items-center !justify-between !gap-3">
+              <div><h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Documento fiscal {ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number}` : 'no disponible'}</h3><p className="!m-0 !mt-1 !text-xs !text-[var(--crm-text-muted)]">{ticket.fiscal ? `${ticket.fiscal.provider === 'verifactu' ? 'VERI*FACTU' : 'TicketBAI'} · ${ticket.fiscal.documentKind} · ${ticket.fiscal.status}` : 'Este ticket todavía no tiene una numeración fiscal emitida.'}</p></div>
+              <div className="!flex !flex-wrap !gap-2">
+                 {ticket.fiscal?.verificationUrl ? <UiButton onClick={() => setIsQrVisible((visible) => !visible)} type="button"><QrCode className="!size-3.5" /></UiButton> : null}
+                 <UiButton onClick={() => void openTicketDocument(ticket, tenantContext)} type="button"><Download className="!size-3.5" />Descargar ticket</UiButton>
+                {ticket.invoice ? <UiButton onClick={() => openCustomerInvoiceDocument(ticket, tenantContext)} type="button"><FileText className="!size-3.5" />Factura / PDF</UiButton> : null}
+              </div>
+            </div>
+             {isQrVisible && ticket.fiscal?.verificationUrl ? <FiscalVerificationQr url={ticket.fiscal.verificationUrl} /> : null}
+            {ticket.fiscal?.errorMessage || ticket.fiscal?.errorCode ? <p className="!m-0 !text-xs !text-[var(--crm-red)]">{ticket.fiscal.errorMessage || ticket.fiscal.errorCode}</p> : null}
+          </section>
 
 
         <div className="!overflow-hidden !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)]">

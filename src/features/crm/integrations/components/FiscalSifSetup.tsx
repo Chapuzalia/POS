@@ -33,6 +33,7 @@ export function FiscalSifSetup({ disabled, runAction, tenantContext }: Props) {
   const [legalName, setLegalName] = useState('')
   const [nif, setNif] = useState('')
   const [rows, setRows] = useState<Row[]>([])
+  const [venueCodes, setVenueCodes] = useState<Record<string, string>>({})
 
   const refresh = useCallback(async () => {
     if (!supabase) throw new Error('Supabase no está configurado.')
@@ -60,11 +61,12 @@ export function FiscalSifSetup({ disabled, runAction, tenantContext }: Props) {
         throw new UserFacingError(`La caja ${register.name} y el dispositivo ${device.name} están asociados a instalaciones fiscales distintas. Requieren conciliación antes de sustituirlos.`)
       }
       const defaults = defaultFiscalInstallationIdentity(venue.id, register.id, device.id)
+      const venueCode = saved?.venue_code ?? installations.find(item => item.venue_id === venue.id)?.venue_code ?? ''
       return [{ venue, device, register, installation: saved ?? {
         id: '', tenant_id: tenantContext.tenantId, fiscal_subject_id: '', venue_id: venue.id,
         cash_register_id: register.id, device_id: device.id,
-        installation_number: defaults.installationNumber, venue_code: defaults.venueCode,
-        register_code: defaults.registerCode, installation_code: defaults.installationCode,
+        installation_number: defaults.installationNumber, venue_code: venueCode,
+        register_code: '', installation_code: defaults.installationCode,
         mode: 'production', retired_at: null,
       }, replacement: conflicts[0], replaceExisting: false }]
     })
@@ -72,12 +74,13 @@ export function FiscalSifSetup({ disabled, runAction, tenantContext }: Props) {
     const firstVenue = (venueData as Venue[])[0]
     setLegalName(subject?.legal_name ?? firstVenue?.legal_name ?? '')
     setNif(subject?.nif ?? firstVenue?.tax_id ?? '')
+    setVenueCodes(Object.fromEntries((venueData as Venue[]).map((venue) => [venue.id, nextRows.find((row) => row.venue.id === venue.id)?.installation.venue_code ?? ''])))
     setRows(nextRows)
   }, [tenantContext.tenantId])
 
   useEffect(() => { void runAction(refresh) }, [refresh, runAction])
 
-  function updateRow(index: number, field: 'installationNumber' | 'venueCode' | 'registerCode' | 'installationCode', value: string) {
+  function updateRow(index: number, field: 'installationNumber' | 'installationCode', value: string) {
     setRows(current => current.map((row, rowIndex) => rowIndex === index ? { ...row, installation: {
       ...row.installation,
       [field === 'installationNumber' ? 'installation_number' : field.replace(/[A-Z]/g, match => `_${match.toLowerCase()}`)]: value,
@@ -87,7 +90,14 @@ export function FiscalSifSetup({ disabled, runAction, tenantContext }: Props) {
   async function submit() {
     await runAction(async () => {
       const registerOwners = new Map<string, Row>()
+      const missingVenueCode = rows.find(row => !venueCodes[row.venue.id]?.trim())
+      if (missingVenueCode) throw new UserFacingError(`Introduce el código del local ${missingVenueCode.venue.name} antes de guardar.`)
+      const venueCodeOwners = new Map<string, string>()
       for (const row of rows) {
+        const venueCode = venueCodes[row.venue.id].trim().toUpperCase()
+        const previousVenue = venueCodeOwners.get(venueCode)
+        if (previousVenue && previousVenue !== row.venue.id) throw new UserFacingError('Cada local debe tener un código fiscal distinto.')
+        venueCodeOwners.set(venueCode, row.venue.id)
         const prior = registerOwners.get(row.register.id)
         if (prior) {
           throw new UserFacingError(`Los dispositivos “${prior.device.name}” y “${row.device.name}” comparten la caja “${row.register.name}”. Asigna una caja distinta a cada dispositivo que pueda cobrar antes de activar sus instalaciones SIF.`)
@@ -98,12 +108,15 @@ export function FiscalSifSetup({ disabled, runAction, tenantContext }: Props) {
       if (pendingReplacement) {
         throw new UserFacingError(`La caja ${pendingReplacement.register.name} conserva una instalación vinculada a otro dispositivo. Marca su sustitución controlada antes de guardar.`)
       }
-      const installations = rows.map(row => ({
-        ...(row.installation.id ? { installationId: row.installation.id } : {}), venueId: row.venue.id, cashRegisterId: row.register.id, deviceId: row.device.id,
-        ...(row.replacement && row.replaceExisting ? { replaceInstallationId: row.replacement.id } : {}),
-        installationNumber: row.installation.installation_number,
-        venueCode: row.installation.venue_code, registerCode: row.installation.register_code, installationCode: row.installation.installation_code,
-      }))
+      const installations = rows.map((row) => {
+        const venueCode = venueCodes[row.venue.id].trim().toUpperCase()
+        return {
+          ...(row.installation.id ? { installationId: row.installation.id } : {}), venueId: row.venue.id, cashRegisterId: row.register.id, deviceId: row.device.id,
+          ...(row.replacement && row.replaceExisting ? { replaceInstallationId: row.replacement.id } : {}),
+          installationNumber: row.installation.installation_number,
+          venueCode, installationCode: row.installation.installation_code,
+        }
+      })
       await saveFiscalSifSetup(tenantContext.tenantId, { legalName, nif, installations })
       await refresh()
       sileo.success({ title: 'Configuración fiscal guardada', description: 'El titular y las cajas SIF ya están configurados.' })
@@ -114,7 +127,7 @@ export function FiscalSifSetup({ disabled, runAction, tenantContext }: Props) {
     <div><h2 className="!m-0 !text-base !font-bold">Titular e instalaciones fiscales</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Configura el NIF y una instalación inmutable para cada caja que vaya a emitir.</p></div>
     {!canEdit ? <p className="!m-0 !rounded-xl !bg-[var(--crm-blue-soft)] !px-4 !py-3 !text-xs !font-semibold !text-[var(--crm-blue)]">Solo el owner puede modificar la configuración fiscal.</p> : null}
     <div className="!grid !grid-cols-1 !gap-3 md:!grid-cols-2"><Field label="Razón social"><UiInput className={inputClass} disabled={disabled || !canEdit} value={legalName} onChange={event => setLegalName(event.target.value)} /></Field><Field label="NIF"><UiInput className={inputClass} disabled={disabled || !canEdit} value={nif} onChange={event => setNif(event.target.value.toUpperCase())} maxLength={9} /></Field></div>
-    <div className="!grid !gap-3">{rows.map((row, index) => <div className="!grid !gap-3 !rounded-xl !bg-[var(--crm-surface-soft)] !p-4" key={row.device.id}><div className="!font-semibold">{row.venue.name} · {row.device.name}</div><div className="!grid !grid-cols-1 !gap-3 sm:!grid-cols-2 lg:!grid-cols-4"><Field label="N.º instalación"><UiInput className={inputClass} disabled={disabled || !canEdit || Boolean(row.installation.id)} value={row.installation.installation_number} onChange={event => updateRow(index, 'installationNumber', event.target.value)} /></Field><Field label="Código local"><UiInput className={inputClass} disabled={disabled || !canEdit || Boolean(row.installation.id)} value={row.installation.venue_code} onChange={event => updateRow(index, 'venueCode', event.target.value)} maxLength={8} /></Field><Field label="Código caja"><UiInput className={inputClass} disabled={disabled || !canEdit || Boolean(row.installation.id)} value={row.installation.register_code} onChange={event => updateRow(index, 'registerCode', event.target.value)} maxLength={8} /></Field><Field label="Código instalación"><UiInput className={inputClass} disabled={disabled || !canEdit || Boolean(row.installation.id)} value={row.installation.installation_code} onChange={event => updateRow(index, 'installationCode', event.target.value)} maxLength={8} /></Field></div>{row.replacement ? <div className="!rounded-lg !bg-amber-500/10 !px-3 !py-3 !text-xs !text-amber-200"><p className="!mt-0 !mb-2">La caja o el dispositivo conserva la instalación <strong>{row.replacement.installation_number}</strong>. Se retirará sin borrar su cadena y se creará esta identidad nueva.</p><UiCheckbox checked={row.replaceExisting} disabled={disabled || !canEdit} onChange={checked => setRows(current => current.map((item, rowIndex) => rowIndex === index ? { ...item, replaceExisting: checked } : item))}>Confirmo la sustitución controlada de la instalación anterior</UiCheckbox></div> : null}</div>)}</div>
+         <div className="!grid !gap-3">{rows.map((row, index) => <div className="!grid !gap-3 !rounded-xl !bg-[var(--crm-surface-soft)] !p-4" key={row.device.id}><div className="!font-semibold">{row.venue.name} · {row.device.name}</div><div className="!grid !grid-cols-1 !gap-3 sm:!grid-cols-2 lg:!grid-cols-3">{!rows.some(item => item.venue.id === row.venue.id && item.installation.id) ? <Field label="Código local"><UiInput className={inputClass} disabled={disabled || !canEdit || Boolean(row.installation.id)} value={venueCodes[row.venue.id] ?? ''} onChange={event => setVenueCodes(current => ({ ...current, [row.venue.id]: event.target.value.toUpperCase() }))} maxLength={8} /></Field> : null}<Field label="N.º instalación"><UiInput className={inputClass} disabled={disabled || !canEdit || Boolean(row.installation.id)} value={row.installation.installation_number} onChange={event => updateRow(index, 'installationNumber', event.target.value)} /></Field><Field label="Código caja"><UiInput className={inputClass} disabled value={row.installation.id ? row.installation.register_code : 'Se asignará automáticamente'} /></Field><Field label="Código instalación"><UiInput className={inputClass} disabled={disabled || !canEdit || Boolean(row.installation.id)} value={row.installation.installation_code} onChange={event => updateRow(index, 'installationCode', event.target.value)} maxLength={8} /></Field></div>{row.replacement ? <div className="!rounded-lg !bg-amber-500/10 !px-3 !py-3 !text-xs !text-amber-200"><p className="!mt-0 !mb-2">La caja o el dispositivo conserva la instalación <strong>{row.replacement.installation_number}</strong>. Se retirará sin borrar su cadena y se creará esta identidad nueva.</p><UiCheckbox checked={row.replaceExisting} disabled={disabled || !canEdit} onChange={checked => setRows(current => current.map((item, rowIndex) => rowIndex === index ? { ...item, replaceExisting: checked } : item))}>Confirmo la sustitución controlada de la instalación anterior</UiCheckbox></div> : null}</div>)}</div>
     <p className="!m-0 !flex !items-start !gap-2 !text-xs !text-[var(--crm-text-muted)]"><ShieldCheck className="!mt-0.5 !size-4 !shrink-0" />Una instalación ya utilizada no se puede reescribir. Sustituir un iPad requiere una instalación nueva.</p>
     {canEdit ? <footer className="!flex !justify-end"><UiButton className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !rows.length} onClick={() => void submit()} type="button"><Save className="!size-4" />Guardar titular e instalaciones</UiButton></footer> : null}
   </section>

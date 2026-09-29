@@ -9,7 +9,7 @@ const setupSchema = z.object({
   installations: z.array(z.object({
     installationId: z.uuid().optional(), replaceInstallationId: z.uuid().optional(),
     venueId: z.uuid(), cashRegisterId: z.uuid(), deviceId: z.uuid(),
-    installationNumber: z.string().trim().min(1).max(100), venueCode: code, registerCode: code, installationCode: code,
+    installationNumber: z.string().trim().min(1).max(100), venueCode: code, registerCode: code.optional(), installationCode: code,
   })).min(1),
 })
 

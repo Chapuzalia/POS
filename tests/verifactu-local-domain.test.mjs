@@ -14,16 +14,15 @@ const system = {
   IdSistemaInformatico: 'TK', Version: '0.0.0-test', NumeroInstalacion: 'install-test',
   TipoUsoPosibleSoloVerifactu: 'S', TipoUsoPosibleMultiOT: 'S', IndicadorMultiplesOT: 'S',
 }
-const invoice = { issuerNif: '89890001K', seriesAndNumber: 'L1-C1-I1-2026-S/1', issueDate: '28-09-2026' }
+const invoice = { issuerNif: '89890001K', seriesAndNumber: 'L1-C1-2026-S/1', issueDate: '28-09-2026' }
 const generatedAt = '2026-09-28T12:00:00+02:00'
 const details = [{ Impuesto: '01', ClaveRegimen: '01', CalificacionOperacion: 'S1', TipoImpositivo: '21.00', BaseImponibleOimporteNoSujeto: '10.00', CuotaRepercutida: '2.10' }]
 
 test('series separate tenant-controlled installation, document kind and year', () => {
-  const base = { venueCode: 'L1', registerCode: 'C1', installationCode: 'I1', exercise: 2026 }
-  assert.equal(fiscalSeries({ ...base, kind: 'simplified' }), 'L1-C1-I1-2026-S')
+  const base = { venueCode: 'L1', registerCode: 'C1', exercise: 2026 }
+  assert.equal(fiscalSeries({ ...base, kind: 'simplified' }), 'L1-C1-2026-S')
   assert.notEqual(fiscalSeries({ ...base, kind: 'complete' }), fiscalSeries({ ...base, kind: 'simplified' }))
   assert.notEqual(fiscalSeries({ ...base, exercise: 2027, kind: 'simplified' }), fiscalSeries({ ...base, kind: 'simplified' }))
-  assert.notEqual(fiscalSeries({ ...base, installationCode: 'I2', kind: 'simplified' }), fiscalSeries({ ...base, kind: 'simplified' }))
   assert.throws(() => fiscalSeries({ ...base, venueCode: 'L-1', kind: 'simplified' }), /inválido/)
 })
 
