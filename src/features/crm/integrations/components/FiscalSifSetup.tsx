@@ -16,6 +16,7 @@ type Props = { disabled: boolean; runAction: RunAction; tenantContext: TenantCon
 type Venue = { id: string; name: string; legal_name: string | null; tax_id: string | null }
 type Device = { id: string; venue_id: string; name: string; default_cash_register_id: string | null; can_take_payments: boolean }
 type Register = { id: string; venue_id: string; name: string }
+type FiscalSubject = { id: string; legal_name: string; nif: string }
 type Row = {
   venue: Venue
   device: Device
@@ -44,6 +45,11 @@ export function FiscalSifSetup({ disabled, runAction, tenantContext }: Props) {
     if (deviceError) throw deviceError
     if (registerError) throw registerError
     const installations = await (await import('../../../fiscal/local/setup.ts')).loadFiscalSifInstallations(tenantContext.tenantId)
+    const subjectIds = [...new Set(installations.map(item => item.fiscal_subject_id))]
+    const subjectResult = subjectIds.length === 1
+      ? await supabase.from('fiscal_subjects').select('id,legal_name,nif').eq('tenant_id', tenantContext.tenantId).eq('id', subjectIds[0]).maybeSingle()
+      : { data: null, error: null }
+    if (subjectResult.error) throw subjectResult.error
     const nextRows = (deviceData as Device[]).filter(device => device.can_take_payments).flatMap(device => {
       const venue = (venueData as Venue[]).find(item => item.id === device.venue_id)
       const register = (registerData as Register[]).find(item => item.id === device.default_cash_register_id && item.venue_id === device.venue_id)
@@ -62,11 +68,10 @@ export function FiscalSifSetup({ disabled, runAction, tenantContext }: Props) {
         mode: 'production', retired_at: null,
       }, replacement: conflicts[0], replaceExisting: false }]
     })
+    const subject = subjectResult.data as FiscalSubject | null
     const firstVenue = (venueData as Venue[])[0]
-    if (firstVenue) {
-      setLegalName(current => current || firstVenue.legal_name || '')
-      setNif(current => current || firstVenue.tax_id || '')
-    }
+    setLegalName(subject?.legal_name ?? firstVenue?.legal_name ?? '')
+    setNif(subject?.nif ?? firstVenue?.tax_id ?? '')
     setRows(nextRows)
   }, [tenantContext.tenantId])
 

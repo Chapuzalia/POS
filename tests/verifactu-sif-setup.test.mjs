@@ -11,6 +11,7 @@ import {
 const fiscalSchemaMigration = await readFile(new URL('../supabase/migrations/20260928120000_prepare_local_verifactu_scope.sql', import.meta.url), 'utf8')
 const setupMigration = await readFile(new URL('../supabase/migrations/20260929130000_add_fiscal_sif_setup_rpc.sql', import.meta.url), 'utf8')
 const replacementMigration = await readFile(new URL('../supabase/migrations/20260929140000_allow_controlled_fiscal_installation_replacement.sql', import.meta.url), 'utf8')
+const subjectUpdateMigration = await readFile(new URL('../supabase/migrations/20260929170000_allow_fiscal_subject_updates.sql', import.meta.url), 'utf8')
 
 const venueId = '11111111-1111-4111-8111-111111111111'
 const registerId = '22222222-2222-4222-8222-222222222222'
@@ -48,7 +49,7 @@ test('una colisión histórica de PostgreSQL se presenta como una acción compre
   assert.equal(error.name, 'UserFacingError')
 })
 
-test('el reemplazo retira la identidad anterior y crea otra sin borrar su historial', async (t) => {
+async function createFiscalSetupDatabase(t) {
   const db = new PGlite()
   t.after(() => db.close())
   await db.exec(`
@@ -72,6 +73,12 @@ test('el reemplazo retira la identidad anterior y crea otra sin borrar su histor
   await db.exec(fiscalSchemaMigration)
   await db.exec(setupMigration)
   await db.exec(replacementMigration)
+  await db.exec(subjectUpdateMigration)
+  return db
+}
+
+test('el reemplazo retira la identidad anterior y crea otra sin borrar su historial', async (t) => {
+  const db = await createFiscalSetupDatabase(t)
   const firstPayload = JSON.stringify([{ venueId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', cashRegisterId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', deviceId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', installationNumber: 'OLD-INSTALLATION', venueCode: 'LOCAL1', registerCode: 'CAJA1', installationCode: 'OLD1' }])
   await db.query(`select public.save_fiscal_sif_setup($1::uuid, $2, $3, $4::jsonb)`, ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Emisor SL', 'B12345678', firstPayload])
   const first = await db.query(`select id from public.fiscal_sif_installations where retired_at is null`)
@@ -84,4 +91,21 @@ test('el reemplazo retira la identidad anterior y crea otra sin borrar su histor
     ['OLD1', 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', true],
     ['NEW1', 'eeeeeeee-eeee-4eee-8eee-eeeeeeeeeeee', false],
   ])
+})
+
+test('el titular fiscal puede corregir su razón social y NIF sin reescribir la instalación', async (t) => {
+  const db = await createFiscalSetupDatabase(t)
+  const payload = JSON.stringify([{ venueId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', cashRegisterId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', deviceId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', installationNumber: 'INSTALLATION-1', venueCode: 'LOCAL1', registerCode: 'CAJA1', installationCode: 'INST1' }])
+  await db.query(`select public.save_fiscal_sif_setup($1::uuid, $2, $3, $4::jsonb)`, ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Emisor original SL', 'B12345678', payload])
+  const installation = await db.query(`select id, fiscal_subject_id from public.fiscal_sif_installations where retired_at is null`)
+  const savedPayload = JSON.stringify([{ installationId: installation.rows[0].id, venueId: 'bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb', cashRegisterId: 'cccccccc-cccc-4ccc-8ccc-cccccccccccc', deviceId: 'dddddddd-dddd-4ddd-8ddd-dddddddddddd', installationNumber: 'INSTALLATION-1', venueCode: 'LOCAL1', registerCode: 'CAJA1', installationCode: 'INST1' }])
+  await db.query(`select public.save_fiscal_sif_setup($1::uuid, $2, $3, $4::jsonb)`, ['aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa', 'Emisor corregido SL', 'A12345678', savedPayload])
+  const subjects = await db.query(`select id, legal_name, nif from public.fiscal_subjects`)
+  const installations = await db.query(`select id, fiscal_subject_id, installation_code, retired_at from public.fiscal_sif_installations`)
+  assert.deepEqual(subjects.rows, [{ id: installation.rows[0].fiscal_subject_id, legal_name: 'Emisor corregido SL', nif: 'A12345678' }])
+  assert.equal(installations.rows.length, 1)
+  assert.equal(installations.rows[0].id, installation.rows[0].id)
+  assert.equal(installations.rows[0].fiscal_subject_id, installation.rows[0].fiscal_subject_id)
+  assert.equal(installations.rows[0].installation_code, 'INST1')
+  assert.equal(installations.rows[0].retired_at, null)
 })
