@@ -19,7 +19,7 @@ export type FiscalInstallation = {
   tenantId: string; fiscalSubjectId: string; issuerName: string; issuerNif: string
   venueId: string; cashRegisterId: string; deviceId: string; installationId: string; installationNumber: string
   venueCode: string; registerCode: string; installationCode: string; timezone: string
-  system: FiscalSystem; bridgeUrl: string | null
+  system: FiscalSystem; bridgeUrl: string | null; aeatEnvironment: 'test' | 'production'
 }
 
 const leases = new Map<string, FiscalLease>()
@@ -73,7 +73,7 @@ export async function loadFiscalInstallation(context: TenantContext, cashSession
     installationId: installation.id, installationNumber: installation.installation_number,
     venueCode: installation.venue_code, registerCode: installation.register_code,
     installationCode: installation.installation_code, timezone: context.venueTimeZone || 'Europe/Madrid',
-    system: publicSystem(installation.installation_number, settings), bridgeUrl: settings.bridge_url || null,
+    system: publicSystem(installation.installation_number, settings), bridgeUrl: settings.bridge_url || null, aeatEnvironment: settings.aeat_environment,
   }
 }
 

@@ -95,6 +95,7 @@ type IssueInputBase = {
   invoiceId: string; invoiceType: 'F1' | 'F2'; recipient?: { name: string; nif: string }
   description: string; system: FiscalSystem; timezone: string
   clockSample?: FiscalClockSample
+  qrEnvironment?: 'test' | 'production'
   lines: readonly { description: string; grossCents: number; discountCents: number; baseCents: number; taxCents: number; taxRate: string }[]
 }
 
@@ -194,7 +195,7 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
         invoice: { issuerNif: input.issuerNif, seriesAndNumber, issueDate: time.issueDate }, issuerName: input.issuerName,
         type: input.invoiceType, description: input.description, recipient: input.recipient, details, system: input.system,
         previous: chain.previous ? { IDEmisorFactura: chain.previous.issuerNif, NumSerieFactura: chain.previous.seriesAndNumber, FechaExpedicionFactura: chain.previous.issueDate, Huella: chain.previous.hash } : null,
-        generatedAt: time.generatedAt, environment: input.environment,
+         generatedAt: time.generatedAt, environment: input.qrEnvironment ?? input.environment,
       })
       const id = crypto.randomUUID()
       const entry: LocalFiscalEntry = {

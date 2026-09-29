@@ -9,6 +9,7 @@ const bridgeUrlSchema = z.url().refine((value) => {
 const settingsSchema = z.object({
   tenant_id: z.uuid(),
   bridge_url: z.preprocess((value) => value ?? '', z.union([z.literal(''), bridgeUrlSchema])),
+  aeat_environment: z.enum(['test', 'production']),
   producer_name: z.string().trim().min(1).max(120),
   producer_nif: z.string().regex(/^[A-Z0-9]{9}$/),
   system_id: z.string().regex(/^[A-Z0-9]{2}$/),
@@ -25,7 +26,7 @@ function storageKey(tenantId: string): string {
 export async function loadFiscalPosSettings(tenantId: string): Promise<FiscalPosSettings> {
   if (!supabase) throw new Error('Supabase no está configurado.')
   const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
-    .select('tenant_id,bridge_url,producer_name,producer_nif,system_id,system_version')
+    .select('tenant_id,bridge_url,aeat_environment,producer_name,producer_nif,system_id,system_version')
     .eq('tenant_id', tenantId).maybeSingle()
   if (!error) {
     if (!data) throw new Error('Configura el puente y el productor SIF en Integraciones del CRM antes de facturar.')
@@ -49,7 +50,7 @@ export async function saveFiscalPosSettings(settings: FiscalPosSettings): Promis
   const validated = settingsSchema.parse(settings)
   const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
     .upsert({ ...validated, bridge_url: validated.bridge_url || null }, { onConflict: 'tenant_id' })
-    .select('tenant_id,bridge_url,producer_name,producer_nif,system_id,system_version').single()
+    .select('tenant_id,bridge_url,aeat_environment,producer_name,producer_nif,system_id,system_version').single()
   if (error) throw error
   const saved = settingsSchema.parse(data)
   try { window.localStorage.setItem(storageKey(saved.tenant_id), JSON.stringify(saved)) } catch { /* No secret stored. */ }

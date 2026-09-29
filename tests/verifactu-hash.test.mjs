@@ -34,5 +34,7 @@ test('AEAT 0.1.2 chained anulación vector', async () => {
 test('QR encodes only the official invoice fields', () => {
   const url = aeatQrUrl({ ...first, environment: 'test' })
   assert.equal(url, 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=89890001K&numserie=12345678%2FG33&fecha=01-01-2024&importe=123.45')
+  const productionUrl = aeatQrUrl({ ...first, environment: 'production' })
+  assert.equal(productionUrl, 'https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?nif=89890001K&numserie=12345678%2FG33&fecha=01-01-2024&importe=123.45')
   assert.doesNotMatch(url, /Huella|hash/)
 })
