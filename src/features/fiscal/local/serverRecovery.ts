@@ -27,9 +27,11 @@ const invoiceSchema = z.object({
 })
 const rowSchema = z.object({
   id: z.uuid(), tenant_id: z.uuid(), fiscal_subject_id: z.uuid(), installation_id: z.uuid(),
-  ticket_id: z.uuid(), sale_id: z.uuid(), chain_position: z.number().int().positive(),
+  ticket_id: z.uuid().nullable(), sale_id: z.uuid().nullable(), refund_request_id: z.uuid().nullable(),
+  record_kind: z.enum(['alta', 'anulacion']), chain_position: z.number().int().positive(),
   hash: z.string().regex(/^[0-9A-F]{64}$/), record_envelope: recordSchema,
-  invoice_snapshot: invoiceSchema, rpc_result: z.record(z.string(), z.unknown()).nullable(),
+  invoice_snapshot: invoiceSchema, economic_snapshot: z.record(z.string(), z.unknown()).nullable(),
+  rpc_result: z.record(z.string(), z.unknown()).nullable(),
 })
 type Row = z.infer<typeof rowSchema>
 
@@ -43,12 +45,22 @@ function toCopy(row: Row, installation: FiscalInstallation): RestorableFiscalCop
   const paymentId = row.rpc_result?.paymentId
   const invoice: LocalFiscalEntry['invoice'] = {
     ...row.invoice_snapshot,
-    ticketId: row.ticket_id, saleId: row.sale_id,
+    ticketId: row.ticket_id ?? row.invoice_snapshot.ticketId,
+    saleId: row.sale_id ?? row.invoice_snapshot.saleId,
     paymentId: typeof paymentId === 'string' ? paymentId : row.invoice_snapshot.paymentId,
   }
+  if ((!row.ticket_id || !row.sale_id) && !row.refund_request_id) {
+    throw new Error('La copia fiscal del servidor no contiene vínculo económico recuperable.')
+  }
+  const annulment = row.record_kind === 'anulacion'
+    ? { issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, series: invoice.series, number: invoice.number,
+      issuedAt: invoice.issuedAt, ticketId: invoice.ticketId, saleId: invoice.saleId,
+      reason: typeof row.economic_snapshot?.reason === 'string' ? row.economic_snapshot.reason : 'Anulación fiscal recuperada' }
+    : undefined
   return { entry: {
     id: row.id, scope: `${installation.tenantId}:${installation.fiscalSubjectId}:${installation.installationId}`,
-    record, invoice, delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null },
+    record, invoice, ...(annulment ? { annulment } : {}),
+    delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null },
   }, economicPayload: null, eventId: null }
 }
 
@@ -61,7 +73,7 @@ export async function recoverServerConfirmedFiscalChain(installation: FiscalInst
   const local = await listLocalFiscalEntries(scope)
   const lastLocal = local.at(-1)
   const scopeQuery = () => client.from('fiscal_local_records').select(
-    'id,tenant_id,fiscal_subject_id,installation_id,ticket_id,sale_id,chain_position,hash,record_envelope,invoice_snapshot,rpc_result',
+    'id,tenant_id,fiscal_subject_id,installation_id,ticket_id,sale_id,refund_request_id,record_kind,chain_position,hash,record_envelope,invoice_snapshot,economic_snapshot,rpc_result',
   ).eq('tenant_id', installation.tenantId).eq('fiscal_subject_id', installation.fiscalSubjectId)
     .eq('installation_id', installation.installationId)
   const latest = await scopeQuery().order('chain_position', { ascending: false }).limit(1).maybeSingle()

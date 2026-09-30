@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { aeatToCents, canonicalRecordSchema, canonicalRecordToXml, createAltaRecord, createAnulacionRecord } from '../src/features/fiscal/local/canonical.ts'
+import { aeatToCents, canonicalRecordSchema, canonicalRecordToXml, createAltaRecord, createAnulacionRecord, createRectificativeRecord } from '../src/features/fiscal/local/canonical.ts'
 import { classifyFiscalOperation, fiscalSeries } from '../src/features/fiscal/local/fiscalPolicy.ts'
 import { deliveryFromResult, resolvePendingBridgeRecord, summarizeLocalFiscalQueue } from '../src/features/fiscal/local/sync.ts'
 import { BridgeHttpError } from '../src/features/fiscal/local/bridgeClient.ts'
@@ -58,6 +58,15 @@ test('supported alta maps losslessly to ordered AEAT XML fields and QR', async (
   assert.match(xml, /<sf:TipoHuella>01<\/sf:TipoHuella>/)
   assert.throws(() => canonicalRecordSchema.parse({ RegistroAlta: { ...built.canonicalRecord.RegistroAlta, ImporteTotal: '12.11' } }), /custom|desglose/i)
   assert.equal(aeatToCents('12.10'), 1210)
+})
+
+test('rectificative R5 uses negative integer amounts and links the original invoice', async () => {
+  const built = await createRectificativeRecord({ invoice: { ...invoice, seriesAndNumber: 'L1-C1-2026-R/1' }, originalInvoice: invoice, issuerName: 'Emisor ficticio', type: 'R5', description: 'Devolución', details: [{ ...details[0], BaseImponibleOimporteNoSujeto: '-10.00', CuotaRepercutida: '-2.10' }], system, previous: null, generatedAt, environment: 'test' })
+  const alta = built.canonicalRecord.RegistroAlta
+  assert.equal(alta.TipoFactura, 'R5')
+  assert.equal(alta.TipoRectificativa, 'I')
+  assert.equal(alta.ImporteTotal, '-12.10')
+  assert.equal(alta.FacturasRectificadas.IDFacturaRectificada[0].NumSerieFactura, invoice.seriesAndNumber)
 })
 
 test('anulacion uses its own identity and previous hash without changing the original', async () => {

@@ -1,5 +1,5 @@
 import type { BridgeAnnulmentSnapshot, BridgeInvoiceSnapshot, BridgeRecord, BridgeResult } from './bridgeClient.ts'
-import { createAltaRecord, createAnulacionRecord, type FiscalDetail, type FiscalSystem } from './canonical.ts'
+import { createAltaRecord, createAnulacionRecord, createRectificativeRecord, type FiscalDetail, type FiscalSystem } from './canonical.ts'
 import { centsToAeat } from './canonical.ts'
 import { fiscalSeries } from './fiscalPolicy.ts'
 import { assertFiscalClock, type FiscalClockSample } from './clock.ts'
@@ -255,6 +255,80 @@ export async function issueSyntheticTestInvoice(input: TestIssueInput): Promise<
   return issueLocalInvoice(input)
 }
 
+export type LocalRectificativeLineSelection = { lineId: string; quantity: number; originalQuantity?: number }
+export type LocalRectificativeInput = {
+  installation: { tenantId: string; fiscalSubjectId: string; issuerNif: string; issuerName: string; venueId: string; cashRegisterId: string; venueCode: string; registerCode: string; installationId: string; deviceId: string; installationNumber?: string }
+  lease?: FiscalLease
+  original: LocalFiscalEntry
+  type: 'R1' | 'R5'
+  reason: string
+  system: FiscalSystem
+  timezone: string
+  environment: 'test' | 'production'
+  syntheticData?: true
+  qrEnvironment?: 'test' | 'production'
+  selectedLines?: readonly LocalRectificativeLineSelection[]
+  refundRequestId?: string
+}
+
+export async function buildLocalRectificative(input: LocalRectificativeInput): Promise<LocalFiscalEntry> {
+  if (!input.reason.trim()) throw new Error('La rectificativa requiere un motivo fiscal explícito.')
+  if (input.environment === 'test' && input.syntheticData !== true) throw new Error('Solo se admiten datos ficticios en el entorno de pruebas.')
+  if (input.environment === 'production' && !input.lease) throw new Error('La rectificativa requiere una autorización fiscal.')
+  if (!navigator.locks?.request) throw new Error('Web Locks no está disponible. No se puede preparar la emisión fiscal.')
+  if (input.original.record.tenantId !== input.installation.tenantId || input.original.record.fiscalSubjectId !== input.installation.fiscalSubjectId || input.original.record.installationId !== input.installation.installationId) throw new Error('La factura original no pertenece a esta instalación fiscal.')
+  const scope = scopeKey(input.installation)
+  return navigator.locks.request(`tickit-fiscal:${scope}`, { mode: 'exclusive' }, async () => {
+    const db = await openLedger()
+    try {
+      const time = localDateParts(new Date(), input.timezone)
+      const series = fiscalSeries({ venueCode: input.installation.venueCode, registerCode: input.installation.registerCode, kind: 'corrective', exercise: time.exercise, rectificative: true })
+      const { chain, number } = await loadCursors(db, scope, series)
+      const nextNumber = number.lastNumber + 1
+      const hasSelections = Boolean(input.selectedLines)
+      const lines = input.original.invoice.lines.flatMap((line, index) => {
+        const lineId = (line as typeof line & { lineId?: string }).lineId ?? String(index)
+        const selected = input.selectedLines?.find(item => item.lineId === lineId || item.lineId === String(index))
+        const quantity = hasSelections ? selected?.quantity ?? 0 : 1
+        const availableQuantity = selected?.originalQuantity ?? 1
+        if (!Number.isInteger(quantity) || quantity < 0 || quantity > availableQuantity) throw new Error('La cantidad de rectificación debe ser un entero válido.')
+        if (!quantity) return []
+        const ratio = selected?.originalQuantity ? quantity / selected.originalQuantity : quantity
+        return [{ ...line, grossCents: -Math.round(line.grossCents * ratio), discountCents: -Math.round(line.discountCents * ratio), baseCents: -Math.round(line.baseCents * ratio), taxCents: -Math.round(line.taxCents * ratio) }]
+      })
+      if (!lines.length) throw new Error('La rectificativa carece de líneas seleccionadas.')
+      const details = [...new Set(lines.map(line => line.taxRate))].map(rate => ({ Impuesto: '01' as const, ClaveRegimen: '01' as const, CalificacionOperacion: 'S1' as const, TipoImpositivo: rate, BaseImponibleOimporteNoSujeto: centsToAeat(lines.filter(line => line.taxRate === rate).reduce((sum, line) => sum + line.baseCents, 0)), CuotaRepercutida: centsToAeat(lines.filter(line => line.taxRate === rate).reduce((sum, line) => sum + line.taxCents, 0)) }))
+      const invoice = { issuerNif: input.installation.issuerNif, seriesAndNumber: `${series}/${nextNumber}`, issueDate: time.issueDate }
+      const built = await createRectificativeRecord({ invoice, originalInvoice: { issuerNif: input.original.invoice.issuerNif, seriesAndNumber: `${input.original.invoice.series}/${input.original.invoice.number}`, issueDate: input.original.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-') }, issuerName: input.installation.issuerName, type: input.type, description: input.reason, details, system: input.system, previous: chain?.previous ? { IDEmisorFactura: chain.previous.issuerNif, NumSerieFactura: chain.previous.seriesAndNumber, FechaExpedicionFactura: chain.previous.issueDate, Huella: chain.previous.hash } : null, generatedAt: time.generatedAt, environment: input.qrEnvironment ?? input.environment })
+      const id = crypto.randomUUID()
+      const totalCents = lines.reduce((sum, line) => sum + line.baseCents + line.taxCents, 0)
+      const refundRequestId = input.refundRequestId ?? id
+      return { id, scope, record: { ...input.original.record, idempotencyKey: id, invoiceId: id, chainPosition: chain.position + 1, previous: chain.previous, hash: built.hash, generatedAt: time.generatedAt, canonicalRecord: built.canonicalRecord }, invoice: { ...input.original.invoice, issuerName: input.installation.issuerName, issuerNif: input.installation.issuerNif, series, number: nextNumber, issuedAt: time.generatedAt, qrUrl: built.qrUrl, ticketId: refundRequestId, saleId: refundRequestId, paymentId: null, lines, totalCents, taxCents: lines.reduce((sum, line) => sum + line.taxCents, 0), transmissionMode: input.environment === 'production' ? 'bridge' : 'local-only' }, delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null } }
+    } finally { db.close() }
+  })
+}
+
+export async function persistLocalRectificative(entry: LocalFiscalEntry): Promise<void> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction(['cursors', 'numbers', 'bindings', 'entries', 'delivery'], 'readwrite')
+    const done = transactionDone(tx)
+    const series = entry.invoice.series
+    tx.objectStore('cursors').put({ scope: entry.scope, position: entry.record.chainPosition, previous: { issuerNif: entry.record.issuerNif, seriesAndNumber: `${series}/${entry.invoice.number}`, issueDate: entry.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-'), hash: entry.record.hash } } satisfies Cursor)
+    tx.objectStore('numbers').put({ key: `${entry.scope}:${series}`, lastNumber: entry.invoice.number } satisfies NumberCursor)
+    const { delivery, ...document } = entry
+    tx.objectStore('entries').put(document satisfies StoredFiscalDocument)
+    tx.objectStore('delivery').put({ id: entry.id, ...delivery } satisfies StoredDelivery)
+    await done
+  } finally { db.close() }
+}
+
+export async function issueLocalRectificative(input: LocalRectificativeInput): Promise<LocalFiscalEntry> {
+  const entry = await buildLocalRectificative(input)
+  await persistLocalRectificative(entry)
+  return entry
+}
+
 export async function persistLocalFiscalAnnulment(input: {
   installation: {
     tenantId: string; fiscalSubjectId: string; issuerNif: string; venueId: string; cashRegisterId: string
@@ -377,28 +451,29 @@ export async function reconcileLocalFiscalCopies(
           || entry.record.previous?.hash !== (cursor.previous?.hash ?? undefined)) {
           tx.abort(); throw new Error('Falta un registro anterior; se bloquea la conciliación fiscal.')
         }
-        const alta = entry.record.canonicalRecord.RegistroAlta
-        if (!alta || typeof alta !== 'object' || !('IDFactura' in alta)
-          || !alta.IDFactura || typeof alta.IDFactura !== 'object') {
-          tx.abort(); throw new Error('La copia del servidor no contiene un alta recuperable.')
+        const recordRoot = entry.record.canonicalRecord.RegistroAlta ?? entry.record.canonicalRecord.RegistroAnulacion
+        if (!recordRoot || typeof recordRoot !== 'object' || !('IDFactura' in recordRoot)
+          || !recordRoot.IDFactura || typeof recordRoot.IDFactura !== 'object') {
+          tx.abort(); throw new Error('La copia del servidor no contiene una identidad fiscal recuperable.')
         }
-        const fiscalId = alta.IDFactura as Record<string, unknown>
-        const issueDate = fiscalId.FechaExpedicionFactura
+        const fiscalId = recordRoot.IDFactura as Record<string, unknown>
+        const issueDate = fiscalId.FechaExpedicionFactura ?? fiscalId.FechaExpedicionFacturaAnulada
         if (typeof issueDate !== 'string') { tx.abort(); throw new Error('Falta fecha de expedición recuperable.') }
         const numberKey = `${scope}:${entry.invoice.series}`
         const number = await request(tx.objectStore('numbers').get(numberKey)) as NumberCursor | undefined
-        if (entry.invoice.number !== (number?.lastNumber ?? 0) + 1) {
+        if (entry.annulment === undefined && entry.invoice.number !== (number?.lastNumber ?? 0) + 1) {
           tx.abort(); throw new Error('La numeración local difiere de la copia durable del servidor.')
         }
         const { delivery, ...document } = entry
         tx.objectStore('entries').add(document satisfies StoredFiscalDocument)
         tx.objectStore('delivery').add({ id: entry.id, ...delivery } satisfies StoredDelivery)
-        tx.objectStore('numbers').put({ key: numberKey, lastNumber: entry.invoice.number } satisfies NumberCursor)
+        if (entry.annulment === undefined) tx.objectStore('numbers').put({ key: numberKey, lastNumber: entry.invoice.number } satisfies NumberCursor)
         if (copy.economicPayload) tx.objectStore('economicSales').put({ id: entry.id, scope,
           payload: copy.economicPayload, eventId: copy.eventId ?? crypto.randomUUID(), synced: true } satisfies StoredEconomicSale)
+        const previousIdentity = fiscalId.NumSerieFactura ?? fiscalId.NumSerieFacturaAnulada
         cursor = { scope, position: entry.record.chainPosition,
           previous: { issuerNif: entry.invoice.issuerNif,
-            seriesAndNumber: `${entry.invoice.series}/${entry.invoice.number}`, issueDate, hash: entry.record.hash } }
+            seriesAndNumber: typeof previousIdentity === 'string' ? previousIdentity : `${entry.invoice.series}/${entry.invoice.number}`, issueDate, hash: entry.record.hash } }
         tx.objectStore('cursors').put(cursor)
         restored += 1
       }

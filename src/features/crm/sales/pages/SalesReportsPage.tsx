@@ -468,7 +468,8 @@ export function SalesReportTicketsTable({
 #{getDisplayedTicketNumber(ticket)}
                 </strong>
                 <span className="!block !truncate !text-xs !font-medium !text-[var(--crm-text-muted)]">
-                  {ticket.lineCount} líneas
+                   {ticket.lineCount} líneas · {ticket.linkedDocumentRole === 'original' ? 'Original con devolución' : ticket.linkedDocumentRole === 'refund' ? 'Devolución' : 'Venta'}
+
                 </span>
               </td>
               <td className="!whitespace-nowrap !px-3 !py-4 !text-[13px] !font-medium !text-[var(--crm-text-secondary)]">
@@ -552,7 +553,9 @@ export function SalesReportTicketModal({
 
       <div className="!min-h-0 !overflow-y-auto !px-[18px] !py-5 md:!px-[22px]">
         <div className="!mb-5 !grid !grid-cols-1 !gap-2.5 sm:!grid-cols-2 lg:!grid-cols-4 xl:!grid-cols-7">
-          <TicketDetailSummary label="Estado">
+           {ticket.linkedDocumentRole ? <div className="!col-span-full !rounded-[10px] !bg-[var(--crm-surface-soft)] !px-3.5 !py-3 !text-xs !font-semibold">Documento relacionado: {ticket.linkedDocumentRole === 'refund' ? 'devolución' : 'original'}{ticket.linkedDocumentIds?.length ? ` · ${ticket.linkedDocumentIds.length} documento(s) fiscal(es) relacionado(s)` : ''}</div> : null}
+           <TicketDetailSummary label="Estado">
+
             <span className={ticket.status === 'paid'
               ? '!inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-green-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-green)]'
               : '!inline-flex !min-h-6 !w-fit !items-center !rounded-full !bg-[var(--crm-red-soft)] !px-[9px] !text-[11px] !font-semibold !text-[var(--crm-red)]'}>
@@ -579,7 +582,20 @@ export function SalesReportTicketModal({
           </TicketDetailSummary>
         </div>
 
-        {ticket.status === 'void' ? (
+         <section className="!mb-5 !grid !gap-3 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
+           <h3 className="!m-0 !text-sm !font-bold">Documentos fiscales de la venta</h3>
+           <div className="!grid !gap-3 !text-xs">
+             <div className="!rounded-lg !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-3"><strong>Original</strong><span className="!ml-2">{ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number} · ${crmReportDateTimeFormatter.format(new Date(ticket.fiscal.issuedAt))} · ${formatMoney(ticket.totalCents)}` : 'Sin documento fiscal emitido'}</span></div>
+             {ticket.refundDocuments.map((document) => <div className="!rounded-lg !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-3" key={document.id}>
+               <div><strong>Definitiva / correctiva</strong><span className="!ml-2">{document.series && document.number ? `${document.series}-${document.number}` : 'Numeración no disponible'} · {crmReportDateTimeFormatter.format(new Date(document.issuedAt))} · {formatMoney(document.totalCents)} · {paymentLabels[document.method]}</span></div>
+               {document.rectifies ? <div className="!mt-1">Rectifica factura {document.rectifies.seriesAndNumber}</div> : null}
+               <div className="!mt-1">{document.lines.map((line) => `${line.quantity} × ${line.name}${line.variantName ? ` (${line.variantName})` : ''} · ${formatMoney(line.amountCents)}`).join(' · ')}</div>
+               {document.verificationUrl ? <a className="!mt-1 !inline-block !text-[var(--crm-blue)] !underline" href={document.verificationUrl} rel="noreferrer" target="_blank">Verificación fiscal / QR</a> : null}
+             </div>)}
+           </div>
+         </section>
+
+         {ticket.status === 'void' ? (
           <div className="!mb-4 !rounded-[10px] !bg-[var(--crm-red-soft)] !px-3.5 !py-3 !text-xs !font-semibold !text-[var(--crm-red)]">
             Este ticket fue anulado y no se contabiliza en los informes de ventas.
           </div>
@@ -587,7 +603,7 @@ export function SalesReportTicketModal({
 
           <section className="!mb-5 !grid !gap-3 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
             <div className="!flex !flex-wrap !items-center !justify-between !gap-3">
-              <div><h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Documento fiscal {ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number}` : 'no disponible'}</h3><p className="!m-0 !mt-1 !text-xs !text-[var(--crm-text-muted)]">{ticket.fiscal ? `${ticket.fiscal.provider === 'verifactu' ? 'VERI*FACTU' : 'TicketBAI'} · ${ticket.fiscal.documentKind} · ${ticket.fiscal.status}` : 'Este ticket todavía no tiene una numeración fiscal emitida.'}</p></div>
+              <div><h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Documento fiscal original {ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number}` : 'no disponible'}</h3><p className="!m-0 !mt-1 !text-xs !text-[var(--crm-text-muted)]">{ticket.fiscal ? `${ticket.fiscal.provider === 'verifactu' ? 'VERI*FACTU' : 'TicketBAI'} · ${ticket.fiscal.documentKind} · ${ticket.fiscal.status}` : 'Este ticket todavía no tiene una numeración fiscal emitida.'}</p></div>
               <div className="!flex !flex-wrap !gap-2">
                  {ticket.fiscal?.verificationUrl ? <UiButton onClick={() => setIsQrVisible((visible) => !visible)} type="button"><QrCode className="!size-3.5" /></UiButton> : null}
                  <UiButton onClick={() => void openTicketDocument(ticket, tenantContext)} type="button"><Download className="!size-3.5" />Descargar ticket</UiButton>

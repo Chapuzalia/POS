@@ -17,13 +17,17 @@ const system = z.object({
 const detail = z.object({ Impuesto: z.literal('01'), ClaveRegimen: z.literal('01'), CalificacionOperacion: z.literal('S1'), TipoImpositivo: z.string().regex(/^\d{1,3}\.\d{2}$/), BaseImponibleOimporteNoSujeto: amount, CuotaRepercutida: amount }).strict()
 const alta = z.object({
   IDVersion: z.literal('1.0'), IDFactura: identity, NombreRazonEmisor: z.string().min(1).max(120),
-  TipoFactura: z.enum(['F1', 'F2']), DescripcionOperacion: z.string().min(1).max(500),
+  TipoFactura: z.enum(['F1', 'F2', 'R1', 'R5']), DescripcionOperacion: z.string().min(1).max(500),
+  TipoRectificativa: z.literal('I').optional(),
+  FacturasRectificadas: z.object({ IDFacturaRectificada: z.array(identity).min(1).max(1) }).strict().optional(),
   Destinatarios: z.object({ IDDestinatario: z.array(z.object({ NombreRazon: z.string().min(1).max(120), NIF: nif }).strict()).length(1) }).strict().optional(),
   Desglose: z.object({ DetalleDesglose: z.array(detail).min(1).max(12) }).strict(),
   CuotaTotal: amount, ImporteTotal: amount, Encadenamiento: chain, SistemaInformatico: system,
   FechaHoraHusoGenRegistro: timestamp, TipoHuella: z.literal('01'), Huella: z.string().regex(/^[0-9A-F]{64}$/),
 }).strict().superRefine((value, ctx) => {
   if (value.TipoFactura === 'F1' && !value.Destinatarios) ctx.addIssue({ code: 'custom', message: 'F1 requiere destinatario.', path: ['Destinatarios'] })
+  if ((value.TipoFactura === 'R1' || value.TipoFactura === 'R5') && (value.TipoRectificativa !== 'I' || !value.FacturasRectificadas)) ctx.addIssue({ code: 'custom', message: 'La rectificativa requiere tipo I y factura rectificada.' })
+  if (value.TipoFactura !== 'R1' && value.TipoFactura !== 'R5' && (value.TipoRectificativa || value.FacturasRectificadas)) ctx.addIssue({ code: 'custom', message: 'Solo las rectificativas pueden declarar factura rectificada.' })
   const cents = (text: string) => aeatToCents(text)
   const tax = value.Desglose.DetalleDesglose.reduce((sum, row) => sum + cents(row.CuotaRepercutida), 0)
   const gross = value.Desglose.DetalleDesglose.reduce((sum, row) => sum + cents(row.BaseImponibleOimporteNoSujeto) + cents(row.CuotaRepercutida), 0)
@@ -71,8 +75,9 @@ export function canonicalRecordToXml(value: CanonicalRecord): string {
 }
 
 export async function createAltaRecord(input: {
-  invoice: InvoiceIdentity; issuerName: string; type: 'F1' | 'F2'; description: string
+  invoice: InvoiceIdentity; issuerName: string; type: 'F1' | 'F2' | 'R1' | 'R5'; description: string
   recipient?: { name: string; nif: string }; details: FiscalDetail[]; system: FiscalSystem
+  rectifiedInvoice?: InvoiceIdentity
   previous: FiscalPrevious | null; generatedAt: string; environment: 'test' | 'production'
 }): Promise<{ canonicalRecord: CanonicalRecord; hash: string; qrUrl: string }> {
   const taxCents = input.details.reduce((sum, row) => sum + aeatToCents(row.CuotaRepercutida), 0)
@@ -83,12 +88,21 @@ export async function createAltaRecord(input: {
   const record = canonicalRecordSchema.parse({ RegistroAlta: {
     IDVersion: '1.0', IDFactura: { IDEmisorFactura: input.invoice.issuerNif, NumSerieFactura: input.invoice.seriesAndNumber, FechaExpedicionFactura: input.invoice.issueDate },
     NombreRazonEmisor: input.issuerName, TipoFactura: input.type, DescripcionOperacion: input.description,
-    ...(input.recipient ? { Destinatarios: { IDDestinatario: [{ NombreRazon: input.recipient.name, NIF: input.recipient.nif }] } } : {}),
+     ...((input.type === 'R1' || input.type === 'R5') ? { TipoRectificativa: 'I' as const, FacturasRectificadas: { IDFacturaRectificada: [{ IDEmisorFactura: (input.rectifiedInvoice ?? (() => { throw new Error('Falta factura rectificada.') })()).issuerNif, NumSerieFactura: (input.rectifiedInvoice ?? (() => { throw new Error('Falta factura rectificada.') })()).seriesAndNumber, FechaExpedicionFactura: (input.rectifiedInvoice ?? (() => { throw new Error('Falta factura rectificada.') })()).issueDate }] } } : {}),
+     ...(input.recipient ? { Destinatarios: { IDDestinatario: [{ NombreRazon: input.recipient.name, NIF: input.recipient.nif }] } } : {}),
     Desglose: { DetalleDesglose: input.details }, CuotaTotal: taxTotal, ImporteTotal: invoiceTotal,
     Encadenamiento: input.previous ? { RegistroAnterior: input.previous } : { PrimerRegistro: 'S' },
     SistemaInformatico: input.system, FechaHoraHusoGenRegistro: input.generatedAt, TipoHuella: '01', Huella: hash,
   } })
   return { canonicalRecord: record, hash, qrUrl: aeatQrUrl({ ...input.invoice, invoiceTotal, environment: input.environment }) }
+}
+
+export async function createRectificativeRecord(input: {
+  invoice: InvoiceIdentity; originalInvoice: InvoiceIdentity; issuerName: string; type: 'R1' | 'R5'; description: string
+  recipient?: { name: string; nif: string }; details: FiscalDetail[]; system: FiscalSystem
+  previous: FiscalPrevious | null; generatedAt: string; environment: 'test' | 'production'
+}): Promise<{ canonicalRecord: CanonicalRecord; hash: string; qrUrl: string }> {
+  return createAltaRecord({ ...input, rectifiedInvoice: input.originalInvoice })
 }
 
 export async function createAnulacionRecord(input: { invoice: InvoiceIdentity; system: FiscalSystem; previous: FiscalPrevious; generatedAt: string }): Promise<{ canonicalRecord: CanonicalRecord; hash: string }> {

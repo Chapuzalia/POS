@@ -532,8 +532,39 @@ type SessionTicketQueryRow = {
   venue_id: string
   device_id: string
   user_id: string
-  status: 'paid' | 'void'
-  subtotal_cents: number
+   status: 'paid' | 'void'
+   refund_requests: Array<{
+     id: string
+     original_ticket_id: string
+     total_cents: number
+     refund_method: HistoricalPaymentMethod
+     created_at: string
+     fiscal_rectificative_record: unknown
+     refund_lines: Array<{
+       id: string
+       original_ticket_line_id: string
+       quantity: number
+       gross_cents: number
+       discount_cents: number
+       net_total_cents: number
+       product_name: string
+       variant_name: string
+       modifiers: TicketLineModifier[] | null
+       tax_rate: number | null
+       taxable_base_cents: number | null
+       tax_amount_cents: number | null
+     }> | null
+     refund_payments: Array<{ id: string; method: HistoricalPaymentMethod; amount_cents: number; payment_snapshot: { receivedCents?: number; changeCents?: number } | null }> | null
+     fiscal_local_records: Array<{
+       id: string
+       invoice_id: string
+       invoice_snapshot: { issuerName: string; issuerNif: string; issuerAddress?: string; series: string; number: number; issuedAt: string; qrUrl: string; recipient: { name: string; nif: string } | null }
+       record_envelope: unknown
+     }> | null
+   }> | null
+
+   subtotal_cents: number
+
   discount_id: string | null
   discount_name: string | null
   discount_type: 'percentage' | 'fixed' | 'manual' | null
@@ -659,8 +690,16 @@ async function loadSessionTicketRecordsFromSupabase(
          ticket_number,
          local_created_at,
          is_invoice,
-        customer_id,
-        customer_snapshot,
+         customer_id,
+         customer_snapshot,
+          refund_requests (
+            id, original_ticket_id, total_cents, refund_method, created_at, fiscal_rectificative_record,
+            refund_lines (id, original_ticket_line_id, quantity, gross_cents, discount_cents, net_total_cents, product_name, variant_name, modifiers, tax_rate, taxable_base_cents, tax_amount_cents),
+            refund_payments (id, method, amount_cents, payment_snapshot),
+            fiscal_local_records (id, invoice_id, invoice_snapshot, record_envelope)
+          ),
+
+
         invoice_series,
         invoice_number,
          invoice_issued_at,
@@ -896,15 +935,56 @@ async function loadSessionTicketRecordsFromSupabase(
       } : {}),
     }
 
+     const refundDocuments = (ticket.refund_requests ?? []).map((request) => {
+       const invoice = request.fiscal_local_records?.[0]?.invoice_snapshot
+       if (!invoice) return null
+       const refundLines = (request.refund_lines ?? []).map((refundLine) => {
+         const originalLine = lines.find((line) => line.id === refundLine.original_ticket_line_id)
+         if (!originalLine) return null
+         return {
+           ...originalLine,
+           id: refundLine.id,
+           ticketId: request.id,
+           productName: refundLine.product_name,
+           variantName: refundLine.variant_name,
+           quantity: -refundLine.quantity,
+           grossBeforeDiscountCents: -Math.abs(originalLine.grossBeforeDiscountCents * refundLine.quantity),
+           lineTotalCents: refundLine.net_total_cents,
+           discountAmountCents: refundLine.discount_cents,
+           netTotalCents: refundLine.net_total_cents,
+           fiscalSnapshot: originalLine.fiscalSnapshot ? { ...originalLine.fiscalSnapshot, taxableBaseCents: refundLine.taxable_base_cents, taxAmountCents: refundLine.tax_amount_cents } : null,
+           modifiers: refundLine.modifiers ?? originalLine.modifiers,
+         }
+       }).filter((line): line is NonNullable<typeof line> => line !== null)
+       const refundPayment = request.refund_payments?.[0]
+       const refundPayload: SaleCreatedPayload = {
+         ...payload,
+         ticket: { ...payload.ticket, id: request.id, totalCents: request.total_cents, subtotalCents: request.total_cents, discountAmountCents: 0, discount: null, createdAt: request.created_at, invoice: null },
+         lines: refundLines,
+         sale: { ...payload.sale, id: request.id, ticketId: request.id, totalCents: request.total_cents, paymentMethod: request.refund_method, createdAt: request.created_at },
+         payment: refundPayment ? { id: refundPayment.id, tenantId: ticket.tenant_id, saleId: request.id, method: refundPayment.method, amountCents: refundPayment.amount_cents, receivedCents: refundPayment.payment_snapshot?.receivedCents ?? null, changeCents: refundPayment.payment_snapshot?.changeCents ?? 0 } : null,
+          localFiscal: { recordId: request.fiscal_local_records?.[0]?.id ?? request.id, series: invoice.series, number: invoice.number, issuedAt: invoice.issuedAt, documentKind: invoice.recipient ? 'complete' : 'simplified', issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, issuerAddress: invoice.issuerAddress ?? '', verifactuLegend: true, rectifiedInvoice: { series: payload.localFiscal?.series ?? '', number: payload.localFiscal?.number ?? 0, issuedAt: payload.localFiscal?.issuedAt ?? ticket.local_created_at } },
+         fiscal: { invoiceId: request.fiscal_local_records?.[0]?.invoice_id ?? request.id, provider: 'verifactu', status: 'pending', uuid: null, qrBase64: null, verificationUrl: invoice.qrUrl, externalCode: `${invoice.series}/${invoice.number}`, errorCode: null, errorMessage: null },
+       }
+       return { id: request.id, createdAt: request.created_at, payload: refundPayload }
+     }).filter((document): document is NonNullable<typeof document> => document !== null)
+
      return {
        id: saleId,
-        ticketNumber: Number(ticket.ticket_number) || undefined,
+         ticketNumber: Number(ticket.ticket_number) || undefined,
         cashSessionId: ticket.cash_session_id,
       paymentMethod,
       totalCents: ticket.total_cents,
       createdAt,
-      status: ticket.status === 'void' ? 'voided' : 'active',
-      payload,
+       status: ticket.status === 'void' ? 'voided' : 'active',
+        isRefund: false,
+        originalTicketId: null,
+        refundTicketId: null,
+        linkedDocumentRole: ticket.refund_requests?.length ? 'original' : null,
+         linkedDocumentIds: (ticket.refund_requests ?? []).map((request) => request.id),
+         refundDocuments,
+        payload,
+
     }
   })
 }
@@ -1077,40 +1157,20 @@ export async function syncEvent(event: OfflineEvent) {
       if (!cashlogyRequestId || !cashlogyTransactionId || paymentMethod !== 'cash' || receivedCents === null) {
         throw new Error('La identidad del cobro Cashlogy está incompleta.')
       }
-      const { error } = await supabase.rpc('change_sale_payment_method_cashlogy', {
-        p_sale_id: saleId,
-        p_payment_id: paymentId,
-        p_received_cents: receivedCents,
-        p_change_cents: changeCents,
-        p_cashlogy_request_id: cashlogyRequestId,
-        p_cashlogy_transaction_id: cashlogyTransactionId,
-      })
-      if (error) throw error
-      return
     }
-    const { error: saleError } = await supabase
-      .from('sales')
-      .update({ payment_method: paymentMethod })
-      .eq('tenant_id', event.tenantId)
-      .eq('id', saleId)
-
-    if (saleError) {
-      throw saleError
-    }
-
-    const { error: paymentError } = await supabase
-      .from('sale_payments')
-      .update({
-        method: paymentMethod,
-        received_cents: receivedCents,
-        change_cents: changeCents,
-      })
-      .eq('tenant_id', event.tenantId)
-      .eq('id', paymentId)
-
-    if (paymentError) {
-      throw paymentError
-    }
+    const { error } = await supabase.rpc('change_sale_payment_method_safe', {
+      p_event_id: event.id,
+      p_tenant_id: event.tenantId,
+      p_sale_id: saleId,
+      p_payment_id: paymentId,
+      p_payment_method: paymentMethod,
+      p_received_cents: receivedCents,
+      p_change_cents: changeCents,
+      p_payload: event.payload,
+      p_cashlogy_request_id: cashlogyRequestId ?? null,
+      p_cashlogy_transaction_id: cashlogyTransactionId ?? null,
+    })
+    if (error) throw error
 
     return
   }

@@ -2,10 +2,14 @@ import { useCallback, useRef, useState } from 'react'
 import { createId } from '../../../lib/format'
 import { enqueueOfflineEvent, forgetOfflineEvent, getOfflineQueue } from '../../../lib/offlineStore'
 import { loadSessionTicketPageFromSupabase } from '../../../services/posService'
+import { supabase } from '../../../lib/supabase.ts'
 import type { CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
 import { prepareLocalFiscalAnnulment } from '../../fiscal/local/annulment.ts'
+import { loadFiscalInstallation, getFiscalInstallationLease } from '../../fiscal/local/installation.ts'
+import { findLocalFiscalEntryByTicket, buildLocalRectificative, persistLocalRectificative } from '../../fiscal/local/localLedger.ts'
+import { assertFiscalLease } from '../../fiscal/local/clock.ts'
 import { nextPrintCopyNumber, usePrintAgentStore } from '../../local-printing'
 import {
   finishCashlogyPayment,
@@ -129,15 +133,26 @@ export function useCashTicketActions(options: Options) {
       && !window.confirm('La impresión anterior tiene estado desconocido y podría haber salido. Comprueba la impresora. ¿Quieres crear una nueva copia igualmente?')) return
     const scope = usePrintAgentStore.getState().scope
     if (!scope) { options.setError('No se ha inicializado la configuración de impresión de esta terminal.'); return }
-    await options.printTicket(ticket.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, ticket.id) })
-  }, [options])
+     try {
+       await options.printTicket(ticket.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, ticket.id) })
+       for (const refund of [...(ticket.refundDocuments ?? [])].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || (left.payload.localFiscal?.number ?? 0) - (right.payload.localFiscal?.number ?? 0))) {
+         try {
+           await options.printTicket(refund.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, refund.id) })
+         } catch (error) {
+           throw new Error(`Paquete parcialmente impreso: el original se imprimió, pero no se pudo imprimir la devolución rectificativa (${getReadableError(error, { operation: 'reimpresión de paquete' })}).`)
+         }
+       }
+     } catch (error) {
+       options.setError(getReadableError(error, { operation: 'reimpresión de ticket' }))
+     }
+   }, [options])
 
   const changePayment = useCallback(async (ticket: SessionTicketRecord, paymentMethod: PaymentMethod, confirmedCashlogyTransaction: CashlogyTransaction | null = null) => {
     const { context } = options
     const currentPayment = ticket.payload.payment
     if (!context || !currentPayment || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod || paymentChangeLockRef.current) return
-    if (ticket.payload.localFiscal) {
-      options.setError('La forma de cobro de una factura fiscal expedida no se puede cambiar desde el histórico. Requiere un procedimiento de corrección supervisado.')
+    if (ticket.cashSessionId !== options.cashSession?.id) {
+      options.setError('La forma de cobro solo puede cambiarse mientras siga abierta la caja original.')
       return
     }
     paymentChangeLockRef.current = true
@@ -211,6 +226,70 @@ export function useCashTicketActions(options: Options) {
     }
   }, [options])
 
+  const refund = useCallback(async (ticket: SessionTicketRecord, lines: Array<{ lineId: string; quantity: number }>, paymentMethod: PaymentMethod) => {
+    const { context, cashSession } = options
+    if (!context || !cashSession || ticket.status !== 'active') return
+    if (!options.isOnline) { options.setError('La devolución requiere conexión para guardar conjuntamente el documento económico y fiscal.'); return }
+    if (ticket.cashSessionId !== cashSession.id) { options.setError('La devolución solo puede hacerse mientras siga abierta la caja original.'); return }
+    if (!ticket.payload.localFiscal) {
+      options.setError('La devolución requiere una factura fiscal local original.')
+      return
+    }
+    const reason = 'Devolución de bienes o servicios'
+    options.setBusy(true)
+    options.setError(null)
+    try {
+      if (!supabase) throw new Error('Supabase no está disponible para confirmar la devolución.')
+      const installation = await loadFiscalInstallation(context, cashSession)
+      const lease = await getFiscalInstallationLease(installation)
+      assertFiscalLease(lease, installation.installationId, installation.deviceId, Date.now(), performance.now())
+      const original = await findLocalFiscalEntryByTicket(installation, ticket.payload.ticket.id)
+      if (!original) throw new Error('No se encontró la factura fiscal local original del ticket.')
+      const refundRequestId = crypto.randomUUID()
+       const selectedLines = lines.map((line) => {
+         const lineIndex = ticket.payload.lines.findIndex((item) => item.id === line.lineId)
+         if (lineIndex < 0) throw new Error('La línea seleccionada no pertenece al ticket original.')
+         return { lineId: String(lineIndex), quantity: line.quantity, originalQuantity: ticket.payload.lines[lineIndex].quantity }
+       })
+      const originalAlta = original.record.canonicalRecord.RegistroAlta
+      if (!originalAlta || typeof originalAlta !== 'object' || !('TipoFactura' in originalAlta)) throw new Error('La factura fiscal original no contiene un alta válida.')
+      const entry = await buildLocalRectificative({
+        installation,
+        lease,
+        original,
+        type: originalAlta.TipoFactura === 'F1' ? 'R1' : 'R5',
+        reason,
+        system: installation.system,
+        timezone: installation.timezone,
+        environment: 'production',
+        qrEnvironment: installation.aeatEnvironment,
+        selectedLines,
+        refundRequestId,
+      })
+      const rpcLines = lines.map((line) => ({ originalTicketLineId: line.lineId, quantity: line.quantity }))
+      const { error } = await supabase.rpc('create_ticket_refund', {
+        p_tenant_id: context.tenantId,
+        p_original_ticket_id: ticket.payload.ticket.id,
+        p_original_sale_id: ticket.payload.sale.id,
+        p_refund_request_id: refundRequestId,
+        p_refund_cash_session_id: cashSession.id,
+        p_refund_method: paymentMethod,
+        p_lines: rpcLines,
+        p_idempotency_key: entry.record.idempotencyKey,
+        p_record: entry.record,
+        p_invoice: entry.invoice,
+      })
+      if (error) throw error
+      await persistLocalRectificative(entry)
+      options.refreshPendingCount()
+      setHistoryRefreshVersion((version) => version + 1)
+    } catch (error) {
+      options.setError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' }))
+    } finally {
+      options.setBusy(false)
+    }
+  }, [options])
+
   const voidTicket = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
     if (!context || !options.cashSession || ticket.status !== 'active') return
@@ -247,5 +326,5 @@ export function useCashTicketActions(options: Options) {
     }
   }, [options])
 
-  return { openHistory, loadHistoryPage, reprint, changePayment, voidTicket }
+  return { openHistory, loadHistoryPage, reprint, changePayment, refund, voidTicket }
 }

@@ -354,6 +354,12 @@ export type SaleRecord = {
   createdAt: string
 }
 
+export type RefundDocument = {
+  id: string
+  createdAt: string
+  payload: SaleCreatedPayload
+}
+
 export type SessionTicketRecord = {
   id: string
   ticketNumber?: number
@@ -363,12 +369,18 @@ export type SessionTicketRecord = {
   createdAt: string
   status: 'active' | 'voided'
   payload: SaleCreatedPayload
+  refundDocuments?: RefundDocument[]
   printStatus?: 'not_requested' | 'pending' | 'printed' | 'failed' | 'unknown'
   printJobId?: string | null
   printRequestId?: string | null
   printedAt?: string | null
   printErrorCode?: string | null
   printAttempts?: number
+  isRefund?: boolean
+  originalTicketId?: string | null
+  refundTicketId?: string | null
+  linkedDocumentRole?: 'original' | 'refund' | null
+  linkedDocumentIds?: string[]
 }
 
 export type ProductSalesStat = {
@@ -464,6 +476,7 @@ export type SaleCreatedPayload = {
     issuerNif: string
     issuerAddress: string
     verifactuLegend?: boolean
+    rectifiedInvoice?: { series: string; number: number; issuedAt: string }
   }
   fiscal?: {
     invoiceId: string
@@ -709,9 +722,39 @@ export type CrmSalesReportFiscal = {
   verifactuLegend: boolean
 }
 
+export type CrmSalesReportRefundDocument = {
+  id: string
+  series: string | null
+  number: string | null
+  issuedAt: string
+  verificationUrl: string | null
+  status: string | null
+  method: HistoricalPaymentMethod
+  totalCents: number
+  taxableBaseCents: number
+  taxAmountCents: number
+  rectifies: {
+    issuerNif: string
+    seriesAndNumber: string
+    issueDate: string
+  } | null
+  lines: Array<{
+    name: string
+    variantName: string
+    quantity: number
+    amountCents: number
+  }>
+}
+
 export type CrmSalesReportTicket = {
   id: string
   ticketNumber: number
+  isRefund?: boolean
+  originalTicketId?: string | null
+  refundTicketId?: string | null
+  linkedDocumentRole?: 'original' | 'refund' | null
+  linkedDocumentIds?: string[]
+  refundDocuments: CrmSalesReportRefundDocument[]
   fiscal: CrmSalesReportFiscal | null
   createdAt: string
   lineCount: number

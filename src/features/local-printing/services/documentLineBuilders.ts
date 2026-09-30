@@ -171,6 +171,12 @@ export function buildSaleTicketLines(
     ...row(invoice || localFiscal ? 'Fecha expedición' : 'Fecha', formatReceiptDate(localFiscal?.issuedAt ?? invoice?.issuedAt ?? sale.sale.createdAt, timezone), printerLayout),
     ...(establishment.cashRegisterName ? row('Caja', establishment.cashRegisterName, printerLayout) : []),
     ...(establishment.employeeName ? row('Empleado', establishment.employeeName, printerLayout) : []),
+    ...(localFiscal?.rectifiedInvoice ? [
+      '',
+      ...centeredWrapped('FACTURA RECTIFICATIVA', printerLayout),
+      ...row('Rectifica factura', `${localFiscal.rectifiedInvoice.series}/${localFiscal.rectifiedInvoice.number}`, printerLayout),
+      ...row('Fecha factura original', formatReceiptDate(localFiscal.rectifiedInvoice.issuedAt, timezone), printerLayout),
+    ] : []),
   ]
 
   if (invoice) {
@@ -427,6 +433,7 @@ export function buildSalePrintTemplateContext(
     },
     ticket: {
       number: invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'),
+      ...(localFiscal?.rectifiedInvoice ? { rectified_invoice: `${localFiscal.rectifiedInvoice.series}/${localFiscal.rectifiedInvoice.number}`, rectified_invoice_date: formatReceiptDate(localFiscal.rectifiedInvoice.issuedAt, timezone), document_kind: 'FACTURA RECTIFICATIVA' } : {}),
       ...datetime,
     },
     cash_register: { name: establishment.cashRegisterName ?? '' },

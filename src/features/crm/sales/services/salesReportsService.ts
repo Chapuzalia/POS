@@ -48,7 +48,15 @@ const ticketSelect = `
     tenant_id,
     venue_id,
     status,
-  subtotal_cents,
+    refund_requests (
+      id, original_ticket_id, total_cents, refund_method, created_at, fiscal_series, fiscal_status,
+      fiscal_rectificative_record,
+      refund_lines (id, original_ticket_line_id, quantity, gross_cents, discount_cents, net_total_cents, product_name, variant_name, modifiers, tax_rate, taxable_base_cents, tax_amount_cents),
+      refund_payments (id, method, amount_cents, payment_snapshot),
+      fiscal_local_records (id, invoice_id, invoice_snapshot, canonical_record, record_envelope)
+    ),
+   subtotal_cents,
+
   discount_id,
   discount_name,
   discount_type,
@@ -144,8 +152,23 @@ export type SalesReportTicketRow = {
   venue_id: string
   local_created_at: string
   sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
-  status: 'paid' | 'void'
-  subtotal_cents: number
+   status: 'paid' | 'void'
+     refund_requests: Array<{
+       id: string
+       original_ticket_id: string
+       total_cents: number
+       refund_method: HistoricalPaymentMethod
+       created_at: string
+       fiscal_series: string | null
+       fiscal_status: string | null
+       fiscal_rectificative_record: Record<string, unknown> | null
+       refund_lines: Array<{ id: string; original_ticket_line_id: string; quantity: number; gross_cents: number; discount_cents: number; net_total_cents: number; product_name: string; variant_name: string; modifiers: SalesReportLineRow['modifiers']; tax_rate: number | null; taxable_base_cents: number | null; tax_amount_cents: number | null }> | null
+       refund_payments: Array<{ id: string; method: HistoricalPaymentMethod; amount_cents: number; payment_snapshot: Record<string, unknown> | null }> | null
+        fiscal_local_records: Array<{ id: string; invoice_id: string; invoice_snapshot: Record<string, unknown> | null; canonical_record: Record<string, unknown> | null; record_envelope: Record<string, unknown> | null }> | null
+      }>
+
+    subtotal_cents: number
+
   discount_id: string | null
   discount_name: string | null
   discount_type: 'percentage' | 'fixed' | 'manual' | null
@@ -288,11 +311,48 @@ function mapFiscalRecord(ticket: SalesReportTicketRow): CrmSalesReportTicket['fi
   }
 }
 
+function mapRefundDocuments(ticket: SalesReportTicketRow): CrmSalesReportTicket['refundDocuments'] {
+  return (ticket.refund_requests ?? []).filter((request): request is NonNullable<typeof request> => Boolean(request)).map((request) => {
+    const localRecord = request.fiscal_local_records?.[0]
+    const invoice = localRecord?.invoice_snapshot ?? {}
+    const canonical = localRecord?.canonical_record ?? request.fiscal_rectificative_record
+    const alta = canonical?.RegistroAlta as Record<string, unknown> | undefined
+    const identity = alta?.FacturasRectificadas as { IDFacturaRectificada?: Array<Record<string, unknown>> } | undefined
+    const original = identity?.IDFacturaRectificada?.[0]
+    const number = typeof invoice.number === 'number' || typeof invoice.number === 'string' ? String(invoice.number) : null
+    const issuedAt = typeof invoice.issuedAt === 'string' ? invoice.issuedAt : request.created_at
+    const lines = request.refund_lines ?? []
+    return {
+      id: request.id,
+      series: request.fiscal_series ?? (typeof invoice.series === 'string' ? invoice.series : null),
+      number,
+      issuedAt,
+      verificationUrl: typeof invoice.qrUrl === 'string' ? invoice.qrUrl : null,
+      status: request.fiscal_status,
+      method: request.refund_method,
+      totalCents: -Math.abs(request.total_cents),
+      taxableBaseCents: -Math.abs(lines.reduce((sum, line) => sum + (line.taxable_base_cents ?? 0), 0)),
+      taxAmountCents: -Math.abs(lines.reduce((sum, line) => sum + (line.tax_amount_cents ?? 0), 0)),
+      rectifies: original && typeof original.IDEmisorFactura === 'string' && typeof original.NumSerieFactura === 'string' && typeof original.FechaExpedicionFactura === 'string'
+        ? { issuerNif: original.IDEmisorFactura, seriesAndNumber: original.NumSerieFactura, issueDate: original.FechaExpedicionFactura }
+        : null,
+      lines: lines.map((line) => ({ name: line.product_name, variantName: line.variant_name, quantity: -Math.abs(line.quantity), amountCents: -Math.abs(line.net_total_cents) })),
+    }
+  })
+}
+
 function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicket {
   return {
     id: ticket.id,
-    ticketNumber: Number(ticket.ticket_number),
-    fiscal: mapFiscalRecord(ticket),
+     ticketNumber: Number(ticket.ticket_number),
+      isRefund: false,
+      originalTicketId: null,
+      refundTicketId: null,
+      linkedDocumentRole: ticket.refund_requests?.length ? 'original' : null,
+       linkedDocumentIds: (ticket.refund_requests ?? []).filter((request): request is NonNullable<typeof request> => Boolean(request)).map((request) => request.id),
+       refundDocuments: mapRefundDocuments(ticket),
+      fiscal: mapFiscalRecord(ticket),
+
     createdAt: ticket.local_created_at,
     lineCount: ticket.ticket_lines?.length ?? 0,
     lines: (ticket.ticket_lines ?? []).map((line) => {

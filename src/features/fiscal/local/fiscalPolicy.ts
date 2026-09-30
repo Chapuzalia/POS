@@ -31,7 +31,7 @@ export function classifyFiscalOperation(operation: FiscalOperation) {
 }
 
 /** A new exercise is a new series; the SIF chain is independent of series and sessions. */
-export function fiscalSeries(input: { venueCode: string; registerCode: string; kind: FiscalDocumentKind; exercise: number }): string {
+export function fiscalSeries(input: { venueCode: string; registerCode: string; kind: FiscalDocumentKind; exercise: number; rectificative?: boolean }): string {
   const segment = (value: string) => {
     const normalized = value.trim().toUpperCase()
     if (!/^[A-Z0-9]+$/.test(normalized)) throw new Error('Código fiscal de serie inválido.')
@@ -40,7 +40,7 @@ export function fiscalSeries(input: { venueCode: string; registerCode: string; k
   const venue = segment(input.venueCode)
   const register = segment(input.registerCode)
   if (!venue || !register || input.exercise < 2024 || !Number.isInteger(input.exercise)) throw new Error('Identificación de serie fiscal inválida.')
-  const series = `${venue}-${register}-${input.exercise}-${{ simplified: 'S', complete: 'F', corrective: 'R' }[input.kind]}`
+  const series = `${venue}-${register}-${input.exercise}-${input.rectificative ? 'R' : { simplified: 'S', complete: 'F', corrective: 'R' }[input.kind]}`
   if (series.length > 40) throw new Error('La serie fiscal supera el límite configurado.')
   return series
 }
