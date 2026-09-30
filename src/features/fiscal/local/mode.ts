@@ -11,7 +11,5 @@ export function assertRealSaleAllowed(): void {
 }
 
 export function assertRealSaleAllowedForMode(mode: LocalFiscalMode): void {
-  if (mode === 'test' || mode === 'invalid') throw new Error(mode === 'test'
-    ? 'Modo VERI*FACTU de pruebas: los cobros reales están bloqueados. Usa solo datos ficticios.'
-    : 'El modo VERI*FACTU está mal configurado.')
+  if (mode === 'invalid') throw new Error('El modo VERI*FACTU está mal configurado.')
 }

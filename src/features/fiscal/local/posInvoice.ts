@@ -37,7 +37,6 @@ export async function preflightPosInvoice(
 
 export async function preflightFiscalInstallation(context: TenantContext, cashSession: CashSession): Promise<void> {
   const installation = await loadFiscalInstallation(context, cashSession)
-  if (installation.aeatEnvironment !== 'production') throw new Error('El entorno AEAT de pruebas está activo. Los cobros reales están bloqueados.')
   await getFiscalInstallationLease(installation)
   try {
     await recoverServerConfirmedFiscalChain(installation)

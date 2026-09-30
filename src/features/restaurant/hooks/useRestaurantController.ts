@@ -72,8 +72,7 @@ import {
 } from '../../local-printing/cashlogy/useCashlogyStore'
 import type { CashlogyTransaction } from '../../local-printing/types'
 import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
-import { assertRealSaleAllowed } from '../../fiscal/local/mode.ts'
-import { localFiscalMode } from '../../fiscal/local/mode.ts'
+import { assertRealSaleAllowed, localFiscalMode } from '../../fiscal/local/mode.ts'
 import { issueRestaurantInvoice } from '../../fiscal/local/restaurantInvoice.ts'
 import { preflightFiscalInstallation } from '../../fiscal/local/posInvoice.ts'
 import { customerFiscalSnapshot } from '../../customers/customerValidation.ts'
@@ -615,10 +614,10 @@ export function useRestaurantController(options: Options) {
         : calculateDiscountForLines(paymentLines.map((line) => ({
             productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
           })), effectiveDiscount).totalCents
-      if (localFiscalMode() === 'production') await preflightFiscalInstallation(options.context, options.cashSession)
+      if (localFiscalMode() !== 'disabled') await preflightFiscalInstallation(options.context, options.cashSession)
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
       const cashDrawerAlreadyRequested = requestEarlyCashDrawer({ requestId: `drawer:${equalSplit.id}:${createId()}`, payments: [{ method, amountCents }] })
-      const production = localFiscalMode() === 'production'
+      const production = localFiscalMode() !== 'disabled'
       const prepared = production ? await issueRestaurantInvoice(options.context, options.cashSession,
         buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
           discount: effectiveDiscount, lines: paymentLines, paymentId: createId(), paymentMethod: method,
@@ -708,10 +707,10 @@ export function useRestaurantController(options: Options) {
       const amountCents = calculateDiscountForLines(paymentLines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), discount).totalCents
-      if (localFiscalMode() === 'production') await preflightFiscalInstallation(options.context, options.cashSession)
+      if (localFiscalMode() !== 'disabled') await preflightFiscalInstallation(options.context, options.cashSession)
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
       const cashDrawerAlreadyRequested = requestEarlyCashDrawer({ requestId: `drawer:${saved.order.id}:${createId()}`, payments: [{ method, amountCents }] })
-      const production = localFiscalMode() === 'production'
+      const production = localFiscalMode() !== 'disabled'
       const prepared = production ? await issueRestaurantInvoice(options.context, options.cashSession,
         buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
           discount, lines: paymentLines, paymentId: createId(), paymentMethod: method,
@@ -879,13 +878,13 @@ export function useRestaurantController(options: Options) {
       const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), options.appliedDiscount).totalCents
-      if (localFiscalMode() === 'production') await preflightFiscalInstallation(context, cashSession)
+      if (localFiscalMode() !== 'disabled') await preflightFiscalInstallation(context, cashSession)
       const recoveredCashlogy = confirmedCashlogyTransaction ?? (forceWithPending ? pendingPayment?.cashlogyTransaction ?? null : null)
       const cashlogy = await settlePayment(method, amountCents, receivedCents, recoveredCashlogy)
       const cashDrawerAlreadyRequested = forceWithPending && pendingPayment?.cashDrawerAlreadyRequested === true
         ? true
         : requestEarlyCashDrawer({ requestId: `drawer:${saved.order.id}:${createId()}`, payments: [{ method, amountCents }] })
-      const production = localFiscalMode() === 'production'
+      const production = localFiscalMode() !== 'disabled'
       const prepared = production ? await issueRestaurantInvoice(context, cashSession,
         buildRestaurantPrintPayload({ cashSession, context, createdAt: nowIso(),
           discount: options.appliedDiscount, lines: saved.lines,

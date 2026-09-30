@@ -31,9 +31,9 @@ test('local installation binding rejects a different device identity', () => {
   assert.throws(() => assertInstallationBinding({ scope: 't:s:i', deviceId: 'ipad-1' }, 'ipad-2'), /otro dispositivo/)
 })
 
-test('test blocks real charges; production proceeds to fiscal preflight', () => {
+test('el modo test no bloquea ventas y solo el modo inválido se rechaza', () => {
   assert.doesNotThrow(() => assertRealSaleAllowedForMode('disabled'))
-  assert.throws(() => assertRealSaleAllowedForMode('test'), /cobros reales están bloqueados/)
+  assert.doesNotThrow(() => assertRealSaleAllowedForMode('test'))
   assert.doesNotThrow(() => assertRealSaleAllowedForMode('production'))
   assert.throws(() => assertRealSaleAllowedForMode('invalid'), /mal configurado/)
 })

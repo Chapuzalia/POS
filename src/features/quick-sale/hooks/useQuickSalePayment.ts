@@ -62,7 +62,7 @@ export function useQuickSalePayment(options: Options) {
         : 'No hay productos en el ticket para aplicar este cobro. Recupera el ticket original; no vuelvas a cobrar en la máquina.')
       return
     }
-    const localFiscalProduction = localFiscalMode() === 'production'
+    const localFiscalProduction = localFiscalMode() !== 'disabled'
     if (!localFiscalProduction) {
       try {
         assertRealSaleAllowed()
