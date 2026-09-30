@@ -2,6 +2,7 @@ import type { TenantContext } from '../../types/index.ts'
 import { requireSupabase } from '../crm/shared/services/crmServiceSupport.ts'
 import { getSafeDefaultPrintTemplate } from './defaults.ts'
 import { printTemplateDefinitionSchema } from './schema.ts'
+import { resolveSafeTemplateDefinition } from './saleTemplateGuard.ts'
 import type { PrintTemplateDefinition, PrintTemplateType, ResolvedPrintTemplate } from './types.ts'
 
 export async function resolvePrintTemplate(
@@ -14,12 +15,14 @@ export async function resolvePrintTemplate(
     const custom = await client.from('print_templates').select('definition, is_active')
       .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('type', type).maybeSingle()
     const parsedCustom = custom.data?.is_active ? printTemplateDefinitionSchema.safeParse(custom.data.definition) : null
-    if (!custom.error && parsedCustom?.success) return { definition: parsedCustom.data, isCustom: true, source: 'custom', type }
+    if (!custom.error && parsedCustom?.success) {
+      return { definition: resolveSafeTemplateDefinition(type, parsedCustom.data), isCustom: true, source: 'custom', type }
+    }
     const persistedDefault = await client.from('print_template_defaults').select('definition')
       .eq('type', type).maybeSingle()
     const parsedDefault = printTemplateDefinitionSchema.safeParse(persistedDefault.data?.definition)
     if (!persistedDefault.error && parsedDefault.success) {
-      return { definition: parsedDefault.data, isCustom: false, source: 'database-default', type }
+      return { definition: resolveSafeTemplateDefinition(type, parsedDefault.data), isCustom: false, source: 'database-default', type }
     }
     return safe()
   } catch {
@@ -37,7 +40,7 @@ export async function savePrintTemplate(
     p_tenant_id: context.tenantId,
     p_venue_id: context.venueId,
     p_type: type,
-    p_definition: validated,
+    p_definition: resolveSafeTemplateDefinition(type, validated),
   })
   if (error) throw error
 }

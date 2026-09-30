@@ -7,6 +7,8 @@ import { normalizePrintAgentUrl } from '../src/features/local-printing/utils/nor
 import { sanitizePrintDiagnostics } from '../src/features/local-printing/utils/sanitizePrintDiagnostics.ts'
 import { getAutomaticSaleHardwareAction, shouldOpenCashDrawer } from '../src/features/local-printing/services/cashDrawerRules.ts'
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
+import { getSafeDefaultPrintTemplate } from '../src/features/print-templates/defaults.ts'
+import { isRegulatedSaleTemplateType, resolveSafeTemplateDefinition } from '../src/features/print-templates/saleTemplateGuard.ts'
 import { buildSalePayload } from '../src/features/quick-sale/services/salePayload.ts'
 import { pollPrintJob } from '../src/features/local-printing/services/jobPolling.ts'
 import { recoverSelectedPrinter } from '../src/features/local-printing/services/printerSelectionRecovery.ts'
@@ -361,7 +363,7 @@ test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipo
   assert.match(text, /Base imponible[ ]+20,00 €/)
   assert.match(text, /IVA 10 %[ ]+1,00 €/)
   assert.match(text, /IVA 21 %[ ]+2,10 €/)
-  assert.match(text, /TOTAL[ ]+23,10 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+23,10 €/)
 })
 
 test('la venta rapida reparte el descuento y recalcula el IVA final de cada tipo', () => {
@@ -389,7 +391,7 @@ test('la venta rapida reparte el descuento y recalcula el IVA final de cada tipo
   assert.match(text, /Descuento[ ]+-4,62 €/)
   assert.match(text, /IVA 10 %[ ]+0,80 €/)
   assert.match(text, /IVA 21 %[ ]+1,68 €/)
-  assert.match(text, /TOTAL[ ]+18,48 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+18,48 €/)
 })
 
 test('omite todo el desglose fiscal si alguna linea de venta rapida no tiene IVA', () => {
@@ -408,7 +410,7 @@ test('omite todo el desglose fiscal si alguna linea de venta rapida no tiene IVA
   const text = request.lines.join('\n')
   assert.match(text, /Subtotal[ ]+17,10 €/)
   assert.match(text, /Descuento[ ]+-3,42 €/)
-  assert.match(text, /TOTAL[ ]+13,68 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+13,68 €/)
   assert.doesNotMatch(text, /\nIVA \d/u)
 })
 
@@ -433,7 +435,7 @@ test('la venta rapida aplica el IVA predeterminado del local a productos que lo 
   assert.match(text, /Subtotal[ ]+100,00 €/)
   assert.match(text, /Base imponible[ ]+82,64 €/)
   assert.match(text, /IVA 21 %[ ]+17,36 €/)
-  assert.match(text, /TOTAL[ ]+100,00 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+100,00 €/)
 })
 
 test('la reimpresion usa COPIA, un ID de copia y nunca abre el cajon', () => {
@@ -497,7 +499,7 @@ test('construye el ticket de mesa localmente en cuanto la RPC devuelve sus IDs',
   assert.equal(request.requestId, 'print:sale-table:original')
   assert.match(request.lines.join('\n'), /1 x Brugal Cubata/)
   assert.match(request.lines.join('\n'), /Coca-Cola/)
-  assert.doesNotMatch(request.lines.join('\n'), /IVA /)
+  assert.doesNotMatch(request.lines.join('\n'), /\nIVA \d/u)
   assert.equal(request.options.openCashDrawer, true)
 })
 
@@ -622,6 +624,83 @@ test('la factura VERI*FACTU fuerza QR al principio, corrección M y leyenda aunq
   assert.equal(firstVisible.type, 'qr')
   assert.deepEqual(qr, { type: 'qr', data: verifactuUrl, size: 6, errorCorrection: 'M' })
   assert.ok(payload.elements.some((element) => element.type === 'text' && element.value === 'VERI*FACTU'))
+})
+
+test('una plantilla de venta solo con texto libre no oculta los datos obligatorios ni desplaza el QR', () => {
+  const issued = structuredClone(sale)
+  issued.localFiscal = { recordId: 'record-guard', series: 'L1-C1-I1-2026-S', number: 7,
+    issuedAt: '2026-07-18T16:40:00+02:00', documentKind: 'simplified',
+    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1', verifactuLegend: true }
+  issued.fiscal = { invoiceId: 'invoice-guard', provider: 'verifactu', status: 'pending',
+    externalCode: 'L1-C1-I1-2026-S/7', qrBase64: null, verificationUrl: verifactuUrl }
+  const payload = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS', taxId: 'B12345678' },
+    printerId: 'main', printerLayout: layout80, template: { version: 1, blocks: [
+      { id: 'saludo', type: 'text', value: 'Síguenos en @restaurante' },
+    ] } })
+  const firstVisible = payload.elements.find((element) => element.type === 'qr' || element.value.trim())
+  assert.equal(firstVisible.type, 'qr')
+  assert.deepEqual(payload.elements.find((element) => element.type === 'qr'),
+    { type: 'qr', data: verifactuUrl, size: 6, errorCorrection: 'M' })
+  const text = payload.lines.join('\n')
+  assert.match(text, /VERI\*FACTU/)
+  assert.match(text, /FACTURA SIMPLIFICADA/)
+  assert.match(text, /NIF\/CIF B12345678/)
+  assert.match(text, /Número fiscal[ ]+L1-C1-I1-2026-S\/7/)
+  assert.match(text, /Fecha expedición[ ]+2026-07-18 16:40:00/)
+  assert.match(text, /Brugal/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+16,00 €/)
+  assert.match(text, /Código: L1-C1-I1-2026-S\/7/)
+  assert.doesNotMatch(text, /Gracias por su visita/)
+  assert.deepEqual(payload.elements.at(-1), { type: 'text', value: 'Síguenos en @restaurante' })
+})
+
+test('el guard de venta restaura la estructura legal y deduplica el texto propio del local', () => {
+  const structural = getSafeDefaultPrintTemplate('simplified_invoice')
+  const resolved = resolveSafeTemplateDefinition('simplified_invoice', { version: 1, blocks: [
+    { id: 'titulo', type: 'text', value: 'PRODUCTOS' },
+     { id: 'saludo', type: 'text', value: '  Bienvenidos  ' },
+     { id: 'saludo-2', type: 'text', value: 'bienvenidos' },
+     { id: 'custom-text:after_document:1', type: 'text', value: 'Entre documento y productos' },
+    { id: 'variable', type: 'text', value: 'Total {{ticket.number}}' },
+    { id: 'falso-qr', type: 'qr', value: 'https://example.test/falso' },
+    { id: 'falsa-fila', type: 'row', label: 'TOTAL', value: '0,00 €' },
+    { id: 'falso-bucle', type: 'repeat', source: 'items', blocks: [{ id: 'item', type: 'text', value: 'gratis' }] },
+    { id: 'condicionado', type: 'text', value: 'Solo con cliente', when: 'customer.name' },
+  ] })
+  const mandatoryIds = new Set(structural.blocks.map((block) => block.id))
+  assert.deepEqual(resolved.blocks.filter((block) => mandatoryIds.has(block.id)), structural.blocks)
+  assert.deepEqual(resolved.blocks.filter((block) => !mandatoryIds.has(block.id)), [
+    { id: 'custom-text:after_document:1', type: 'text', value: 'Entre documento y productos' },
+    { id: 'saludo', type: 'text', value: 'Bienvenidos' },
+  ])
+  const documentIndex = resolved.blocks.findIndex((block) => block.id === 'ticket-date')
+  const customIndex = resolved.blocks.findIndex((block) => block.id === 'custom-text:after_document:1')
+  const itemsIndex = resolved.blocks.findIndex((block) => block.id === 'items')
+  assert.ok(documentIndex < customIndex && customIndex < itemsIndex)
+  assert.deepEqual(resolveSafeTemplateDefinition('simplified_invoice', resolved), resolved)
+})
+
+test('una plantilla de venta manipulada queda reducida a la estructura obligatoria mas su texto literal', () => {
+  const structural = getSafeDefaultPrintTemplate('invoice')
+  const resolved = resolveSafeTemplateDefinition('invoice', { version: 1, blocks: [
+    { id: 'nota', type: 'text', value: 'Gracias' },
+    { id: 'leyenda', type: 'text', value: 'VERI*FACTU' },
+  ] })
+  assert.equal(resolved.blocks[0].id, 'fiscal-qr')
+  assert.deepEqual(resolved.blocks.slice(0, structural.blocks.length), structural.blocks)
+  assert.deepEqual(resolved.blocks.at(-1), { id: 'nota', type: 'text', value: 'Gracias' })
+  assert.equal(resolveSafeTemplateDefinition('invoice', undefined).blocks.length, structural.blocks.length)
+})
+
+test('los tipos de plantilla ajenos a la venta conservan su definicion', () => {
+  const kds = { version: 1, blocks: [
+    { id: 'kds-order', type: 'text', value: 'COMANDA #{{order.number}}', bold: true, size: 'large' },
+  ] }
+  assert.equal(isRegulatedSaleTemplateType('simplified_invoice'), true)
+  assert.equal(isRegulatedSaleTemplateType('invoice'), true)
+  assert.equal(isRegulatedSaleTemplateType('cash_closure'), false)
+  assert.deepEqual(resolveSafeTemplateDefinition('kds', kds), kds)
+  assert.deepEqual(resolveSafeTemplateDefinition('cash_closure', undefined), getSafeDefaultPrintTemplate('cash_closure'))
 })
 
 test('la venta rápida en modo producción emite localmente y conserva el envío pendiente', async () => {

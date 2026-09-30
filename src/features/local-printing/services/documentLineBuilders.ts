@@ -404,7 +404,7 @@ export function buildSalePrintTemplateContext(
   }
   if (taxableBaseCents !== undefined) totalRows.push({ label: 'Base imponible', value: money(taxableBaseCents) })
   for (const tax of fiscal ?? []) totalRows.push({ label: `IVA ${formatQuantity(tax.rate, locale)} %`, value: money(tax.taxCents) })
-  totalRows.push({ label: 'TOTAL', value: money(sale.sale.totalCents) })
+  totalRows.push({ label: 'TOTAL (IVA incluido)', value: money(sale.sale.totalCents) })
 
   const paymentRows: Array<{ label: string; value: string }> = []
   if (sale.payment && options.label !== 'PRE-TICKET') {
@@ -428,7 +428,7 @@ export function buildSalePrintTemplateContext(
       title: invoice || localFiscal ? (isInvoicePreview ? 'FACTURA (BORRADOR)'
         : localFiscal?.rectifiedInvoice ? 'FACTURA RECTIFICATIVA' : localFiscal?.documentKind === 'simplified' ? 'FACTURA SIMPLIFICADA' : 'FACTURA') : '',
       label: options.label ?? '',
-      number_label: invoice || localFiscal ? 'Factura' : 'Ticket',
+      number_label: invoice || localFiscal ? 'Número fiscal' : 'Ticket',
       date_label: invoice || localFiscal ? 'Fecha expedición' : 'Fecha',
     },
     ticket: {

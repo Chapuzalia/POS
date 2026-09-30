@@ -242,7 +242,7 @@ test('la factura imprime descuentos y varios tipos de IVA desde los importes fin
   assert.match(text, /Base imponible[ ]+16,00 €/)
   assert.match(text, /IVA 10 %[ ]+0,80 €/)
   assert.match(text, /IVA 21 %[ ]+1,68 €/)
-  assert.match(text, /TOTAL[ ]+18,48 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+18,48 €/)
 })
 
 test('la factura de mesa y la venta rápida pasan el customerId solo a RPC de servidor', () => {

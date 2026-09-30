@@ -8,6 +8,7 @@ import {
 } from './documentLineBuilders.ts'
 import { renderPrintTemplateWithFallback } from '../../print-templates/renderer.ts'
 import { getSafeDefaultPrintTemplate } from '../../print-templates/defaults.ts'
+import { resolveSafeTemplateDefinition } from '../../print-templates/saleTemplateGuard.ts'
 import type { PrintTemplateDefinition } from '../../print-templates/types.ts'
 
 type RenderedSaleDocument = ReturnType<typeof renderPrintTemplateWithFallback>
@@ -54,20 +55,24 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
     : []
   const label = isPreTicket ? 'PRE-TICKET' : isReprint ? 'COPIA' : undefined
   const templateType = sale.ticket.invoice ? 'invoice' : 'simplified_invoice'
+  const safeTemplate = getSafeDefaultPrintTemplate(templateType)
+  // Incluso una plantilla guardada con una estructura manipulada imprime la estructura legal
+  // obligatoria y solo conserva el texto literal decorativo del local.
+  const requestedTemplate = resolveSafeTemplateDefinition(templateType, options.template)
   let rendered = renderPrintTemplateWithFallback(
-    options.template ?? getSafeDefaultPrintTemplate(templateType),
-    getSafeDefaultPrintTemplate(templateType),
+    requestedTemplate,
+    safeTemplate,
     buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
     options.printerLayout,
   )
   if (!hasRequiredFiscalLayout(rendered, sale)) {
-    const safeTemplate = getSafeDefaultPrintTemplate(templateType)
-    rendered = renderPrintTemplateWithFallback(
-      safeTemplate,
-      safeTemplate,
-      buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
-      options.printerLayout,
-    )
+    rendered =
+      renderPrintTemplateWithFallback(
+        safeTemplate,
+        safeTemplate,
+        buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
+        options.printerLayout,
+      )
   }
   const rectifiedInvoice = sale.localFiscal?.rectifiedInvoice
   if (rectifiedInvoice) {

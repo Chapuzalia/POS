@@ -1,5 +1,16 @@
 import type { PrintTemplateBlock, PrintTemplateDefinition, PrintTemplateType } from './types.ts'
 
+export const SALE_TEMPLATE_SLOTS = ['top', 'after_issuer', 'after_document', 'before_items', 'after_items', 'after_totals', 'bottom'] as const
+export type SaleTemplateSlot = typeof SALE_TEMPLATE_SLOTS[number]
+
+export const SALE_MANDATORY_GROUPS = Object.freeze({
+  fiscal: ['fiscal-qr', 'fiscal-verifactu-legend', 'fiscal-top-gap'],
+  issuer: ['venue-name', 'venue-legal-name', 'venue-tax-id', 'venue-address'],
+  document: ['invoice-heading-gap', 'invoice-heading', 'copy-label-gap', 'copy-label', 'header-gap', 'ticket-number', 'ticket-date'],
+  items: ['items-gap', 'items-title', 'items-separator', 'items'],
+  totals: ['totals-gap', 'totals-separator', 'totals'],
+} as const)
+
 const saleBlocks: PrintTemplateBlock[] = [
   { id: 'fiscal-qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' },
   { id: 'fiscal-verifactu-legend', type: 'text', value: 'VERI*FACTU', align: 'center', when: 'fiscal.show_verifactu_legend' },
