@@ -95,6 +95,7 @@ export function printPayloadWithLocalFiscal(payload: SaleCreatedPayload, entry: 
   return {
     ...payload,
     localFiscal: {
+      ...payload.localFiscal,
       recordId: entry.id, series: entry.invoice.series, number: entry.invoice.number,
       issuedAt: entry.invoice.issuedAt, documentKind: invoice ? 'complete' : 'simplified',
       issuerName: entry.invoice.issuerName, issuerNif: entry.invoice.issuerNif,

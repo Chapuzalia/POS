@@ -20,10 +20,12 @@ function hasRequiredFiscalLayout(rendered: RenderedSaleDocument, sale: SaleCreat
   const hasExactQr = qrElements.length === 1 && qrElements[0].data === verificationUrl
     && qrElements[0].errorCorrection === 'M' && qrElements[0].size === 6
     && firstVisible?.type === 'qr'
-  const hasLegend = rendered.elements.some(
-    (element) => element.type === 'text' && element.value.trim() === 'VERI*FACTU',
+  const hasLegend = rendered.elements.some((element) => element.type === 'text' && element.value.trim() === 'VERI*FACTU')
+  const hasRectificationReference = !sale.localFiscal.rectifiedInvoice || (
+    rendered.elements.some((element) => element.type === 'text' && element.value.includes('FACTURA RECTIFICATIVA'))
+    && rendered.elements.some((element) => element.type === 'text' && element.value.includes(`${sale.localFiscal?.rectifiedInvoice?.series}/${sale.localFiscal?.rectifiedInvoice?.number}`))
   )
-  return hasExactQr && hasLegend === (sale.localFiscal.verifactuLegend !== false)
+  return hasExactQr && hasLegend === (sale.localFiscal.verifactuLegend !== false) && hasRectificationReference
 }
 
 type MapperOptions = {
@@ -66,6 +68,20 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
       buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
       options.printerLayout,
     )
+  }
+  const rectifiedInvoice = sale.localFiscal?.rectifiedInvoice
+  if (rectifiedInvoice) {
+    const rectifiedReference = `${rectifiedInvoice.series}/${rectifiedInvoice.number}`
+    const hasRectification = rendered.elements.some((element) => element.type === 'text' && element.value.includes('FACTURA RECTIFICATIVA'))
+      && rendered.elements.some((element) => element.type === 'text' && element.value.includes(rectifiedReference))
+    if (!hasRectification) {
+      const referenceLines = [
+        `FACTURA RECTIFICATIVA · Rectifica factura ${rectifiedReference}`,
+        `Fecha factura original: ${rectifiedInvoice.issuedAt}`,
+      ]
+      rendered.elements.splice(1, 0, ...referenceLines.map((value) => ({ type: 'text' as const, value })))
+      rendered.lines.splice(1, 0, ...referenceLines)
+    }
   }
   return printRequestSchema.parse({
     requestId: isPreTicket

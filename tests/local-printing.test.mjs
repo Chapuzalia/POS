@@ -590,6 +590,19 @@ test('la factura fiscal reimprime la base y cuota históricas sin recalcular el 
   assert.doesNotMatch(text, /VERI\*FACTU/)
 })
 
+test('la rectificativa fuerza en la impresión la referencia a la factura original aunque la plantilla personalizada la omita', () => {
+  const issued = structuredClone(sale)
+  issued.localFiscal = { recordId: 'refund-record', series: 'MES-C2-2026-R', number: 4,
+    issuedAt: '2026-09-30T19:44:45+02:00', documentKind: 'simplified', issuerName: 'Emisor', issuerNif: 'B12345678', issuerAddress: '',
+    verifactuLegend: true, rectifiedInvoice: { series: 'MES-C2-2026-S', number: 123, issuedAt: '2026-09-30T16:46:00+02:00' } }
+  issued.fiscal = { invoiceId: 'refund-invoice', provider: 'verifactu', status: 'pending', externalCode: 'MES-C2-2026-R/4', qrBase64: null, verificationUrl: verifactuUrl }
+  const request = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, template: { version: 1, blocks: [{ id: 'qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' }] } })
+  const text = request.lines.join('\\n')
+  assert.match(text, /FACTURA RECTIFICATIVA/)
+  assert.ok(text.includes('MES-C2-2026-S/123'))
+  assert.match(text, /Fecha factura original/)
+})
+
 test('la factura VERI*FACTU fuerza QR al principio, corrección M y leyenda aunque la plantilla fiscal sea incompleta', () => {
   const issued = structuredClone(sale)
   issued.localFiscal = { recordId: 'record-2', series: 'L1-C1-I1-2026-S', number: 4,

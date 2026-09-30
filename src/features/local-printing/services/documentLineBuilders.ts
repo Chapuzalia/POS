@@ -164,7 +164,7 @@ export function buildSaleTicketLines(
     ...(establishment.taxId ? centeredWrapped(`NIF/CIF ${establishment.taxId}`, printerLayout) : []),
     ...(establishment.address ? centeredWrapped(establishment.address, printerLayout) : []),
     ...(invoice || localFiscal ? ['', ...centeredWrapped(isInvoicePreview ? 'FACTURA (BORRADOR)'
-      : localFiscal?.documentKind === 'simplified' ? 'FACTURA SIMPLIFICADA' : 'FACTURA', printerLayout)] : []),
+      : localFiscal?.rectifiedInvoice ? 'FACTURA RECTIFICATIVA' : localFiscal?.documentKind === 'simplified' ? 'FACTURA SIMPLIFICADA' : 'FACTURA', printerLayout)] : []),
     ...(options.label ? ['', ...centeredWrapped(options.label, printerLayout)] : []),
     '',
     ...row(invoice || localFiscal ? 'Factura' : 'Ticket', invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'), printerLayout),
@@ -426,14 +426,14 @@ export function buildSalePrintTemplateContext(
     },
     document: {
       title: invoice || localFiscal ? (isInvoicePreview ? 'FACTURA (BORRADOR)'
-        : localFiscal?.documentKind === 'simplified' ? 'FACTURA SIMPLIFICADA' : 'FACTURA') : '',
+        : localFiscal?.rectifiedInvoice ? 'FACTURA RECTIFICATIVA' : localFiscal?.documentKind === 'simplified' ? 'FACTURA SIMPLIFICADA' : 'FACTURA') : '',
       label: options.label ?? '',
       number_label: invoice || localFiscal ? 'Factura' : 'Ticket',
       date_label: invoice || localFiscal ? 'Fecha expedición' : 'Fecha',
     },
     ticket: {
       number: invoiceLabel ?? (isInvoicePreview ? 'Pendiente de numeración' : sale.ticket.ticketNumber ? formatTicketNumber(sale.ticket.ticketNumber) : 'Pendiente de numeración'),
-      ...(localFiscal?.rectifiedInvoice ? { rectified_invoice: `${localFiscal.rectifiedInvoice.series}/${localFiscal.rectifiedInvoice.number}`, rectified_invoice_date: formatReceiptDate(localFiscal.rectifiedInvoice.issuedAt, timezone), document_kind: 'FACTURA RECTIFICATIVA' } : {}),
+      ...(localFiscal?.rectifiedInvoice ? { is_rectificative: true, rectified_invoice: `${localFiscal.rectifiedInvoice.series}/${localFiscal.rectifiedInvoice.number}`, rectified_invoice_date: formatReceiptDate(localFiscal.rectifiedInvoice.issuedAt, timezone), document_kind: 'FACTURA RECTIFICATIVA' } : {}),
       ...datetime,
     },
     cash_register: { name: establishment.cashRegisterName ?? '' },
