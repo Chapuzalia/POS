@@ -72,7 +72,6 @@ const ticketSelect = `
     invoice_series,
     invoice_number,
     invoice_issued_at,
-    fiscal_invoices (provider, status, invoice_type, series, number, issue_date, issued_at, verification_url, external_code, error_code, error_message),
     fiscal_local_records (record_kind, invoice_snapshot),
     ticket_lines (
     id,
@@ -184,20 +183,7 @@ export type SalesReportTicketRow = {
    invoice_series: string | null
    invoice_number: string | null
    invoice_issued_at: string | null
-   fiscal_invoices: Array<{
-     provider: 'verifactu' | 'ticketbai'
-     status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-     invoice_type: 'normal' | 'simplified' | 'corrective'
-     series: string
-     number: string
-     issue_date: string
-     issued_at: string
-     verification_url: string | null
-     external_code: string | null
-     error_code: string | null
-     error_message: string | null
-   }> | null
-   fiscal_local_records: Array<{
+    fiscal_local_records: Array<{
      record_kind: 'alta' | 'anulacion'
      invoice_snapshot: Record<string, unknown>
    }> | null
@@ -294,21 +280,7 @@ function mapFiscalRecord(ticket: SalesReportTicketRow): CrmSalesReportTicket['fi
       }
     }
   }
-  const fiscalInvoice = ticket.fiscal_invoices?.[0]
-  if (!fiscalInvoice) return null
-  return {
-    provider: fiscalInvoice.provider,
-    status: fiscalInvoice.status,
-    documentKind: fiscalInvoice.invoice_type,
-    series: fiscalInvoice.series,
-    number: fiscalInvoice.number,
-    issuedAt: fiscalInvoice.issued_at,
-    verificationUrl: fiscalInvoice.verification_url,
-    externalCode: fiscalInvoice.external_code,
-    errorCode: fiscalInvoice.error_code,
-    errorMessage: fiscalInvoice.error_message,
-    verifactuLegend: fiscalInvoice.provider === 'verifactu',
-  }
+  return null
 }
 
 function mapRefundDocuments(ticket: SalesReportTicketRow): CrmSalesReportTicket['refundDocuments'] {
