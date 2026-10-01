@@ -49,9 +49,6 @@ function toCopy(row: Row, installation: FiscalInstallation): RestorableFiscalCop
     saleId: row.sale_id ?? row.invoice_snapshot.saleId,
     paymentId: typeof paymentId === 'string' ? paymentId : row.invoice_snapshot.paymentId,
   }
-  if ((!row.ticket_id || !row.sale_id) && !row.refund_request_id) {
-    throw new Error('La copia fiscal del servidor no contiene vínculo económico recuperable.')
-  }
   const annulment = row.record_kind === 'anulacion'
     ? { issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, series: invoice.series, number: invoice.number,
       issuedAt: invoice.issuedAt, ticketId: invoice.ticketId, saleId: invoice.saleId,
