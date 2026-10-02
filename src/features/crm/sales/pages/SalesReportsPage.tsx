@@ -1,7 +1,7 @@
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { DataTable as UiDataTable } from '../../../../components/ui/DataTable'
-import { Download, FileText, QrCode, RefreshCw, SlidersHorizontal, X } from 'lucide-react'
+import { Download, RefreshCw, SlidersHorizontal, X } from 'lucide-react'
 import QRCode from 'qrcode'
 import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPagination'
 import { CrmModal } from '../../shared/components/CrmModal'
@@ -19,7 +19,7 @@ import { useSalesReportSummary } from '../hooks/useSalesReportSummary'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type RunAction } from '../../shared/types'
-import { openCustomerInvoiceDocument, openTicketDocument } from '../../integrations/services/fiscalInvoiceDocument'
+import { openRefundDocument, openTicketDocument } from '../../integrations/services/fiscalInvoiceDocument'
 
 export type SalesReportsCrmProps = {
   dayChangeTime: string | null
@@ -492,7 +492,7 @@ export function SalesReportTicketsTable({
                 </span>
               </td>
               <td className="!whitespace-nowrap !px-[22px] !py-4 !font-mono !text-[13px] !font-bold !text-[var(--crm-text)]">
-                {formatMoney(ticket.totalCents)}
+                {formatMoney(ticket.totalCents + ticket.refundDocuments.reduce((sum, document) => sum + document.totalCents, 0))}
               </td>
             </tr>
           ))}
@@ -502,7 +502,7 @@ export function SalesReportTicketsTable({
   )
 }
 
-function FiscalVerificationQr({ url }: { url: string }) {
+export function FiscalVerificationQr({ url }: { url: string }) {
   const [dataUrl, setDataUrl] = useState<string | null>(null)
 
   useEffect(() => {
@@ -532,7 +532,13 @@ export function SalesReportTicketModal({
   ticket: CrmSalesReports['tickets'][number]
 }) {
   const fiscalTotals = buildSalesReportTicketTotals(ticket)
-  const [isQrVisible, setIsQrVisible] = useState(false)
+  const netTotalCents = fiscalTotals.totalCents + ticket.refundDocuments.reduce((sum, document) => sum + document.totalCents, 0)
+  const netSubtotalCents = fiscalTotals.subtotalCents + ticket.refundDocuments.reduce((sum, document) => sum + document.taxableBaseCents, 0)
+  const netTaxCents = fiscalTotals.taxAmountCents + ticket.refundDocuments.reduce((sum, document) => sum + document.taxAmountCents, 0)
+  const lineRows = [
+    ...ticket.lines.map((line) => ({ key: line.id, line, quantity: line.quantity, totalCents: line.lineTotalCents })),
+    ...ticket.refundDocuments.flatMap((document) => document.lines.map((line, index) => ({ key: `${document.id}-${index}`, line: { productName: line.name, variantName: line.variantName, quantity: line.quantity, lineTotalCents: line.amountCents, unitPriceCents: line.quantity ? Math.round(line.amountCents / line.quantity) : 0, modifiers: [], components: [] }, quantity: line.quantity, totalCents: line.amountCents }))),
+  ]
 
   return (
     <CrmModal label={`Detalle del ticket ${getDisplayedTicketNumber(ticket)}`} onClose={onClose} size="large">
@@ -578,19 +584,19 @@ export function SalesReportTicketModal({
             <strong>{getReportDiscountLabel(ticket)}</strong>
           </TicketDetailSummary>
           <TicketDetailSummary label="Total cobrado">
-            <strong className="!font-mono !text-base">{formatMoney(ticket.totalCents)}</strong>
+            <strong className="!font-mono !text-base">{formatMoney(netTotalCents)}</strong>
           </TicketDetailSummary>
         </div>
 
          <section className="!mb-5 !grid !gap-3 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
            <h3 className="!m-0 !text-sm !font-bold">Documentos fiscales de la venta</h3>
            <div className="!grid !gap-3 !text-xs">
-             <div className="!rounded-lg !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-3"><strong>Original</strong><span className="!ml-2">{ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number} · ${crmReportDateTimeFormatter.format(new Date(ticket.fiscal.issuedAt))} · ${formatMoney(ticket.totalCents)}` : 'Sin documento fiscal emitido'}</span></div>
+             <div className="!flex !flex-wrap !items-center !justify-between !gap-2 !rounded-lg !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-3"><span><strong>Original</strong><span className="!ml-2">{ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number} · ${crmReportDateTimeFormatter.format(new Date(ticket.fiscal.issuedAt))} · ${formatMoney(ticket.totalCents)}` : 'Sin documento fiscal emitido'}</span></span>{ticket.fiscal ? <UiButton onClick={() => void openTicketDocument(ticket, tenantContext)} type="button"><Download className="!size-3.5" />Descargar</UiButton> : null}</div>
              {ticket.refundDocuments.map((document) => <div className="!rounded-lg !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-3" key={document.id}>
-               <div><strong>Definitiva / correctiva</strong><span className="!ml-2">{document.series && document.number ? `${document.series}-${document.number}` : 'Numeración no disponible'} · {crmReportDateTimeFormatter.format(new Date(document.issuedAt))} · {formatMoney(document.totalCents)} · {paymentLabels[document.method]}</span></div>
+               <div><strong>Definitiva / correctiva</strong><span className="!ml-2">{document.series && document.number ? `${document.series}-${document.number}` : 'Numeración no disponible'} · {crmReportDateTimeFormatter.format(new Date(document.issuedAt))} · {formatMoney(document.totalCents)} · {paymentLabels[document.method]}</span><UiButton className="!ml-2" onClick={() => void openRefundDocument(ticket, document, tenantContext)} type="button"><Download className="!size-3.5" />Descargar</UiButton></div>
                {document.rectifies ? <div className="!mt-1">Rectifica factura {document.rectifies.seriesAndNumber}</div> : null}
                <div className="!mt-1">{document.lines.map((line) => `${line.quantity} × ${line.name}${line.variantName ? ` (${line.variantName})` : ''} · ${formatMoney(line.amountCents)}`).join(' · ')}</div>
-               {document.verificationUrl ? <a className="!mt-1 !inline-block !text-[var(--crm-blue)] !underline" href={document.verificationUrl} rel="noreferrer" target="_blank">Verificación fiscal / QR</a> : null}
+               <div className="!mt-2 !flex !flex-wrap !items-center !gap-3">{document.verificationUrl ? <a className="!text-[var(--crm-blue)] !underline" href={document.verificationUrl} rel="noreferrer" target="_blank">Verificación fiscal / QR</a> : null}</div>
              </div>)}
            </div>
          </section>
@@ -601,18 +607,7 @@ export function SalesReportTicketModal({
           </div>
         ) : null}
 
-          <section className="!mb-5 !grid !gap-3 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
-            <div className="!flex !flex-wrap !items-center !justify-between !gap-3">
-              <div><h3 className="!m-0 !text-sm !font-bold !text-[var(--crm-text)]">Documento fiscal original {ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number}` : 'no disponible'}</h3><p className="!m-0 !mt-1 !text-xs !text-[var(--crm-text-muted)]">{ticket.fiscal ? `${ticket.fiscal.provider === 'verifactu' ? 'VERI*FACTU' : 'TicketBAI'} · ${ticket.fiscal.documentKind} · ${ticket.fiscal.status}` : 'Este ticket todavía no tiene una numeración fiscal emitida.'}</p></div>
-              <div className="!flex !flex-wrap !gap-2">
-                 {ticket.fiscal?.verificationUrl ? <UiButton onClick={() => setIsQrVisible((visible) => !visible)} type="button"><QrCode className="!size-3.5" /></UiButton> : null}
-                 <UiButton onClick={() => void openTicketDocument(ticket, tenantContext)} type="button"><Download className="!size-3.5" />Descargar ticket</UiButton>
-                {ticket.invoice ? <UiButton onClick={() => openCustomerInvoiceDocument(ticket, tenantContext)} type="button"><FileText className="!size-3.5" />Factura / PDF</UiButton> : null}
-              </div>
-            </div>
-             {isQrVisible && ticket.fiscal?.verificationUrl ? <FiscalVerificationQr url={ticket.fiscal.verificationUrl} /> : null}
-            {ticket.fiscal?.errorMessage || ticket.fiscal?.errorCode ? <p className="!m-0 !text-xs !text-[var(--crm-red)]">{ticket.fiscal.errorMessage || ticket.fiscal.errorCode}</p> : null}
-          </section>
+
 
 
         <div className="!overflow-hidden !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-surface-soft)]">
@@ -621,8 +616,8 @@ export function SalesReportTicketModal({
               <th className="!min-w-[240px] !px-4 !py-3">Producto</th><th className="!min-w-[150px] !px-3 !py-3">Formato</th><th className="!w-[80px] !px-3 !py-3">Cantidad</th><th className="!w-[120px] !px-3 !py-3">Precio / ud.</th><th className="!w-[120px] !px-3 !py-3">Total</th>
             </tr></thead>
             <tbody>
-          {ticket.lines.map((line) => (
-            <tr className="!min-h-[68px] !border-b !border-[var(--crm-border)] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={line.id}>
+          {lineRows.map(({ line, key, quantity, totalCents }) => (
+            <tr className="!min-h-[68px] !border-b !border-[var(--crm-border)] !text-[13px] !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={key}>
               <td className="!min-w-[240px] !px-4 !py-3"><div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
                 <strong>{line.productName}</strong>
                 {line.modifiers.length ? (
@@ -638,9 +633,9 @@ export function SalesReportTicketModal({
                 </div> : null}
               </div></td>
               <td className="!min-w-[150px] !px-3 !py-3">{line.variantName || 'Sin formato'}</td>
-              <td className="!w-[80px] !px-3 !py-3" data-sort-value={line.quantity}>{line.quantity}</td>
-              <td className="!w-[120px] !px-3 !py-3 !font-mono" data-sort-value={line.quantity ? Math.round(line.lineTotalCents / line.quantity) : line.unitPriceCents}>{formatMoney(line.quantity ? Math.round(line.lineTotalCents / line.quantity) : line.unitPriceCents)}</td>
-              <td className="!w-[120px] !px-3 !py-3 !font-mono !font-bold !text-[var(--crm-text)]" data-sort-value={line.lineTotalCents}>{formatMoney(line.lineTotalCents)}</td>
+              <td className="!w-[80px] !px-3 !py-3" data-sort-value={quantity}>{quantity}</td>
+              <td className="!w-[120px] !px-3 !py-3 !font-mono" data-sort-value={quantity ? Math.round(totalCents / quantity) : line.unitPriceCents}>{formatMoney(quantity ? Math.round(totalCents / quantity) : line.unitPriceCents)}</td>
+              <td className="!w-[120px] !px-3 !py-3 !font-mono !font-bold !text-[var(--crm-text)]" data-sort-value={totalCents}>{formatMoney(totalCents)}</td>
             </tr>
           ))}
             </tbody>
@@ -649,9 +644,9 @@ export function SalesReportTicketModal({
       </div>
 
       <div className="!flex !flex-wrap !items-center !justify-end !gap-x-8 !gap-y-3 !border-t !border-[var(--crm-border-subtle)] !px-[18px] !py-4 md:!px-[22px]">
-        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Subtotal</small><strong className="!font-mono !text-sm !text-[var(--crm-text)]">{formatMoney(fiscalTotals.subtotalCents)}</strong></span>
-        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Impuestos</small><strong className="!font-mono !text-sm !text-[var(--crm-text)]">{formatMoney(fiscalTotals.taxAmountCents)}</strong></span>
-        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Total del ticket</small><strong className="!font-mono !text-xl !text-[var(--crm-text)]">{formatMoney(ticket.totalCents)}</strong></span>
+        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Subtotal</small><strong className="!font-mono !text-sm !text-[var(--crm-text)]">{formatMoney(netSubtotalCents)}</strong></span>
+        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Impuestos</small><strong className="!font-mono !text-sm !text-[var(--crm-text)]">{formatMoney(netTaxCents)}</strong></span>
+        <span className="!grid !gap-1"><small className="!text-[11px] !font-medium !text-[var(--crm-text-muted)]">Total del ticket</small><strong className="!font-mono !text-xl !text-[var(--crm-text)]">{formatMoney(netTotalCents)}</strong></span>
       </div>
     </CrmModal>
   )

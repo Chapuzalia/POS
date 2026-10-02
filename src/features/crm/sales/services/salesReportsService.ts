@@ -308,7 +308,7 @@ function mapRefundDocuments(ticket: SalesReportTicketRow): CrmSalesReportTicket[
       rectifies: original && typeof original.IDEmisorFactura === 'string' && typeof original.NumSerieFactura === 'string' && typeof original.FechaExpedicionFactura === 'string'
         ? { issuerNif: original.IDEmisorFactura, seriesAndNumber: original.NumSerieFactura, issueDate: original.FechaExpedicionFactura }
         : null,
-      lines: lines.map((line) => ({ name: line.product_name, variantName: line.variant_name, quantity: -Math.abs(line.quantity), amountCents: -Math.abs(line.net_total_cents) })),
+      lines: lines.map((line) => ({ name: line.product_name, variantName: line.variant_name, quantity: Math.abs(line.quantity), amountCents: -Math.abs(line.net_total_cents) })),
     }
   })
 }
