@@ -16,7 +16,7 @@ import type { AppliedDiscount, CashSession, Customer, PaymentMethod, SaleRecord,
 import type { CashlogyTransaction } from '../../local-printing/types'
 import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
 import { assertRealSaleAllowed, localFiscalMode } from '../../fiscal/local/mode.ts'
-import { issuePosInvoice, preflightPosInvoice, printPayloadWithLocalFiscal } from '../../fiscal/local/posInvoice.ts'
+import { issuePosInvoice, preflightPosInvoice, printPayloadWithLocalFiscal, type PreparedFiscalInstallation } from '../../fiscal/local/posInvoice.ts'
 import { synchronizeFiscalEconomicSales } from '../../fiscal/local/economicSync.ts'
 import { synchronizeLocalFiscalQueue } from '../../fiscal/local/sync.ts'
 import { fiscalBridgeAccessToken, fiscalBridgeBaseUrl } from '../../fiscal/local/installation.ts'
@@ -93,8 +93,9 @@ export function useQuickSalePayment(options: Options) {
       options.invoiceCustomer,
       confirmedCashlogyTransaction?.saleId ? { saleId: confirmedCashlogyTransaction.saleId } : undefined,
     )
+    let preparedFiscalInstallation: PreparedFiscalInstallation | null = null
     if (localFiscalProduction) {
-      try { await preflightPosInvoice(context, cashSession, preview) }
+      try { preparedFiscalInstallation = await preflightPosInvoice(context, cashSession, preview) }
       catch (error) {
         fail(error instanceof Error ? error.message : 'La instalación fiscal no está preparada para emitir.')
         return
@@ -132,7 +133,7 @@ export function useQuickSalePayment(options: Options) {
     let fiscalEntry = null
     if (localFiscalProduction) {
       try {
-        fiscalEntry = await issuePosInvoice(context, cashSession, payload)
+        fiscalEntry = await issuePosInvoice(context, cashSession, payload, false, undefined, undefined, preparedFiscalInstallation)
       } catch (error) {
         fail(error instanceof Error ? error.message : 'No se ha podido guardar el registro fiscal; no se emitirá la factura.')
         return

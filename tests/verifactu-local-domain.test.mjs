@@ -4,7 +4,7 @@ import { aeatToCents, canonicalRecordSchema, canonicalRecordToXml, createAltaRec
 import { classifyFiscalOperation, fiscalSeries } from '../src/features/fiscal/local/fiscalPolicy.ts'
 import { deliveryFromResult, resolvePendingBridgeRecord, summarizeLocalFiscalQueue } from '../src/features/fiscal/local/sync.ts'
 import { BridgeHttpError } from '../src/features/fiscal/local/bridgeClient.ts'
-import { assertInstallationBinding, localDateParts } from '../src/features/fiscal/local/localLedger.ts'
+import { assertInstallationBinding, localDateParts, rectificativeLineAmounts } from '../src/features/fiscal/local/localLedger.ts'
 import { assertFiscalClock, assertFiscalLease, createLocalFallbackLease } from '../src/features/fiscal/local/clock.ts'
 import { isFiscalTransportUnavailable } from '../src/features/fiscal/local/availability.ts'
 import { assertRealSaleAllowedForMode } from '../src/features/fiscal/local/mode.ts'
@@ -58,6 +58,12 @@ test('supported alta maps losslessly to ordered AEAT XML fields and QR', async (
   assert.match(xml, /<sf:TipoHuella>01<\/sf:TipoHuella>/)
   assert.throws(() => canonicalRecordSchema.parse({ RegistroAlta: { ...built.canonicalRecord.RegistroAlta, ImporteTotal: '12.11' } }), /custom|desglose/i)
   assert.equal(aeatToCents('12.10'), 1210)
+})
+
+test('la devolución invierte el desglose fiscal guardado sin recalcular el IVA', () => {
+  assert.deepEqual(rectificativeLineAmounts({ description: 'Bebida', grossCents: 600, discountCents: 0, baseCents: 545, taxCents: 55, taxRate: '10.00' }, 1, 1), {
+    description: 'Bebida', grossCents: -600, discountCents: 0, baseCents: -545, taxCents: -55, taxRate: '10.00',
+  })
 })
 
 test('rectificative R5 uses negative integer amounts and links the original invoice', async () => {

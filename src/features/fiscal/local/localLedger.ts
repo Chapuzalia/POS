@@ -255,6 +255,21 @@ export async function issueSyntheticTestInvoice(input: TestIssueInput): Promise<
   return issueLocalInvoice(input)
 }
 
+export function rectificativeLineAmounts(line: BridgeInvoiceSnapshot['lines'][number], quantity: number, originalQuantity: number) {
+  if (!Number.isInteger(quantity) || !Number.isInteger(originalQuantity) || quantity < 1 || originalQuantity < quantity) throw new Error('La cantidad de rectificación debe ser un entero válido.')
+  if (![line.grossCents, line.discountCents, line.baseCents, line.taxCents].every(value => Number.isSafeInteger(value) && value >= 0)
+    || line.grossCents - line.discountCents !== line.baseCents + line.taxCents) throw new Error('Los importes de la línea fiscal original no cuadran.')
+  const invertAmount = (cents: number) => {
+    const amount = Math.round(cents * quantity / originalQuantity)
+    return amount === 0 ? 0 : -amount
+  }
+  const grossCents = invertAmount(line.grossCents)
+  const discountCents = invertAmount(line.discountCents)
+  const taxCents = invertAmount(line.taxCents)
+  const baseCents = quantity === originalQuantity ? invertAmount(line.baseCents) : grossCents - discountCents - taxCents
+  return { ...line, grossCents, discountCents, baseCents, taxCents }
+}
+
 export type LocalRectificativeLineSelection = { lineId: string; quantity: number; originalQuantity?: number }
 export type LocalRectificativeInput = {
   installation: { tenantId: string; fiscalSubjectId: string; issuerNif: string; issuerName: string; venueId: string; cashRegisterId: string; venueCode: string; registerCode: string; installationId: string; deviceId: string; installationNumber?: string }
@@ -293,8 +308,8 @@ export async function buildLocalRectificative(input: LocalRectificativeInput): P
         const availableQuantity = selected?.originalQuantity ?? 1
         if (!Number.isInteger(quantity) || quantity < 0 || quantity > availableQuantity) throw new Error('La cantidad de rectificación debe ser un entero válido.')
         if (!quantity) return []
-        const ratio = selected?.originalQuantity ? quantity / selected.originalQuantity : quantity
-        return [{ ...line, grossCents: -Math.round(line.grossCents * ratio), discountCents: -Math.round(line.discountCents * ratio), baseCents: -Math.round(line.baseCents * ratio), taxCents: -Math.round(line.taxCents * ratio) }]
+        const originalQuantity = selected?.originalQuantity ?? 1
+        return [rectificativeLineAmounts(line, quantity, originalQuantity)]
       })
       if (!lines.length) throw new Error('La rectificativa carece de líneas seleccionadas.')
       const details = [...new Set(lines.map(line => line.taxRate))].map(rate => ({ Impuesto: '01' as const, ClaveRegimen: '01' as const, CalificacionOperacion: 'S1' as const, TipoImpositivo: rate, BaseImponibleOimporteNoSujeto: centsToAeat(lines.filter(line => line.taxRate === rate).reduce((sum, line) => sum + line.baseCents, 0)), CuotaRepercutida: centsToAeat(lines.filter(line => line.taxRate === rate).reduce((sum, line) => sum + line.taxCents, 0)) }))

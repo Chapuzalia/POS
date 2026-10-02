@@ -100,7 +100,7 @@ function buildQuickSalePayload(...args) {
   }
 }
 
-function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssue = null }) {
+function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssue = null, fiscalPreflight = null }) {
   const sync = deferred()
   const calls = []
   const printed = []
@@ -138,7 +138,10 @@ function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssu
       calls.push('issueFiscal')
       if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
       return fiscalIssue(...args)
-    }, preflightPosInvoice: async () => { calls.push('preflightFiscal') },
+    }, preflightPosInvoice: async (...args) => {
+      calls.push('preflightFiscal')
+      return fiscalPreflight ? fiscalPreflight(...args) : undefined
+    },
     printPayloadWithLocalFiscal: (payload) => ({ ...payload, localFiscal: { series: 'L1-C1-I1-2026-S', number: 1 },
       fiscal: { verificationUrl: 'https://aeat.example.invalid/qr' } }) },
     '../../fiscal/local/economicSync.ts': { synchronizeFiscalEconomicSales: async () => {} },
@@ -714,6 +717,32 @@ test('la venta rápida en modo producción emite localmente y conserva el envío
   assert.equal(harness.calls.includes('persist'), false)
   assert.equal(harness.printed[0].localFiscal.number, 1)
   assert.equal(harness.printed[0].fiscal.verificationUrl, 'https://aeat.example.invalid/qr')
+})
+
+test('la venta rápida entrega a la emisión la instalación fiscal preparada en el mismo cobro', async () => {
+  const issued = []
+  const harness = quickSalePaymentHarness({ isOnline: false, fiscalMode: 'production',
+    fiscalPreflight: async (context, cashSession, preview) => ({
+      tenantId: context.tenantId, venueId: context.venueId, deviceId: context.deviceId,
+      cashRegisterId: cashSession.cashRegisterId, cashSessionId: cashSession.id, saleId: preview.sale.id,
+      installation: { installationId: 'installation' }, preparedAt: 1, preparedMonotonicAt: 1,
+    }),
+    fiscalIssue: async (context, cashSession, payload, economicAlreadySynced, resolveSale, simplifiedLimitCents, prepared) => {
+      issued.push({ payload, economicAlreadySynced, resolveSale, simplifiedLimitCents, prepared })
+      return { id: 'fiscal-record', record: {
+        tenantId: quickSaleContext.tenantId, fiscalSubjectId: 'subject', installationId: 'installation',
+      } }
+    } })
+  await harness.pay('card', null)
+
+  assert.deepEqual(harness.calls.filter(item => ['preflightFiscal', 'issueFiscal', 'print'].includes(item)),
+    ['preflightFiscal', 'issueFiscal', 'print'])
+  assert.equal(issued.length, 1)
+  assert.equal(issued[0].prepared.saleId, issued[0].payload.sale.id)
+  assert.equal(issued[0].prepared.installation.installationId, 'installation')
+  assert.equal(issued[0].economicAlreadySynced, false)
+  assert.equal(issued[0].resolveSale, undefined)
+  assert.equal(issued[0].simplifiedLimitCents, undefined)
 })
 
 test('el mapper suprime openCashDrawer cuando el cajon ya fue solicitado y conserva el comportamiento normal', () => {

@@ -1,9 +1,51 @@
 import type { SaleCreatedPayload } from '../../../types/index.ts'
 import { issueLocalInvoice, type LocalFiscalEntry, type ResolveFiscalSale } from './localLedger.ts'
-import { getFiscalInstallationLease, loadFiscalInstallation } from './installation.ts'
+import { getFiscalInstallationLease, loadFiscalInstallation, type FiscalInstallation } from './installation.ts'
 import { isFiscalTransportUnavailable } from './availability.ts'
 import { recoverServerConfirmedFiscalChain } from './serverRecovery.ts'
 import type { CashSession, TenantContext } from '../../../types/index.ts'
+
+export type PreparedFiscalInstallation = {
+  readonly tenantId: string
+  readonly venueId: string
+  readonly deviceId: string
+  readonly cashRegisterId: string
+  readonly cashSessionId: string
+  readonly saleId: string
+  readonly installation: FiscalInstallation
+  readonly preparedAt: number
+  readonly preparedMonotonicAt: number
+}
+
+const PREPARED_INSTALLATION_MAX_AGE_MS = 60_000
+
+function preparedFiscalInstallation(
+  context: TenantContext, cashSession: CashSession, saleId: string, installation: FiscalInstallation,
+): PreparedFiscalInstallation {
+  return {
+    tenantId: context.tenantId, venueId: context.venueId, deviceId: context.deviceId,
+    cashRegisterId: cashSession.cashRegisterId, cashSessionId: cashSession.id, saleId, installation,
+    preparedAt: Date.now(), preparedMonotonicAt: performance.now(),
+  }
+}
+
+function reusablePreparedInstallation(
+  prepared: PreparedFiscalInstallation | null | undefined,
+  context: TenantContext, cashSession: CashSession, saleId: string,
+): FiscalInstallation | null {
+  if (!prepared) return null
+  const installation = prepared.installation
+  if (prepared.tenantId !== context.tenantId || prepared.venueId !== context.venueId
+    || prepared.deviceId !== context.deviceId || prepared.cashRegisterId !== cashSession.cashRegisterId
+    || prepared.cashSessionId !== cashSession.id || prepared.saleId !== saleId) return null
+  if (installation.tenantId !== context.tenantId || installation.venueId !== context.venueId
+    || installation.deviceId !== context.deviceId || installation.cashRegisterId !== cashSession.cashRegisterId) return null
+  const wallAge = Date.now() - prepared.preparedAt
+  const monotonicAge = performance.now() - prepared.preparedMonotonicAt
+  if (wallAge < 0 || wallAge > PREPARED_INSTALLATION_MAX_AGE_MS) return null
+  if (monotonicAge < 0 || monotonicAge > PREPARED_INSTALLATION_MAX_AGE_MS) return null
+  return installation
+}
 
 function fiscalLines(payload: SaleCreatedPayload) {
   return payload.lines.map(line => {
@@ -26,16 +68,17 @@ function fiscalLines(payload: SaleCreatedPayload) {
 export async function preflightPosInvoice(
   context: TenantContext, cashSession: CashSession, payload: SaleCreatedPayload,
   simplifiedLimitCents = 40000,
-): Promise<void> {
+): Promise<PreparedFiscalInstallation> {
   const customer = payload.ticket.invoice?.customer
   if (!customer && payload.sale.totalCents > simplifiedLimitCents) {
     throw new Error('Esta venta requiere cliente fiscal y factura completa.')
   }
   fiscalLines(payload)
-  await preflightFiscalInstallation(context, cashSession)
+  const installation = await preflightFiscalInstallation(context, cashSession)
+  return preparedFiscalInstallation(context, cashSession, payload.sale.id, installation)
 }
 
-export async function preflightFiscalInstallation(context: TenantContext, cashSession: CashSession): Promise<void> {
+export async function preflightFiscalInstallation(context: TenantContext, cashSession: CashSession): Promise<FiscalInstallation> {
   const installation = await loadFiscalInstallation(context, cashSession)
   await getFiscalInstallationLease(installation)
   try {
@@ -43,6 +86,7 @@ export async function preflightFiscalInstallation(context: TenantContext, cashSe
   } catch (error) {
     if (!isFiscalTransportUnavailable(error)) throw error
   }
+  return installation
 }
 
 /** The payment payload already carries the historical line, discount and tax snapshots. */
@@ -51,8 +95,10 @@ export async function issuePosInvoice(
   economicAlreadySynced = false,
   resolveSale?: ResolveFiscalSale,
   simplifiedLimitCents = 40000,
+  prepared?: PreparedFiscalInstallation | null,
 ): Promise<LocalFiscalEntry> {
-  const installation = await loadFiscalInstallation(context, cashSession)
+  const installation = reusablePreparedInstallation(prepared, context, cashSession, payload.sale.id)
+    ?? await loadFiscalInstallation(context, cashSession)
   const lease = await getFiscalInstallationLease(installation)
   try {
     await recoverServerConfirmedFiscalChain(installation)

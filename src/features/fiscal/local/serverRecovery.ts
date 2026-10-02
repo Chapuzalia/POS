@@ -62,7 +62,7 @@ function toCopy(row: Row, installation: FiscalInstallation): RestorableFiscalCop
 }
 
 /** Rebuilds a lost local tail from the immutable copy committed by the restaurant RPC. */
-export async function recoverServerConfirmedFiscalChain(installation: FiscalInstallation): Promise<number> {
+async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstallation): Promise<number> {
   const client = supabase
   if (!client) throw new Error('No se puede conciliar sin Supabase.')
   const scope = { tenantId: installation.tenantId, fiscalSubjectId: installation.fiscalSubjectId,
@@ -96,4 +96,17 @@ export async function recoverServerConfirmedFiscalChain(installation: FiscalInst
     offset += rows.length
   }
   return reconcileLocalFiscalCopies(scope, installation.deviceId, copies)
+}
+
+const inFlightRecoveries = new Map<string, Promise<number>>()
+
+export function recoverServerConfirmedFiscalChain(installation: FiscalInstallation): Promise<number> {
+  const key = `${installation.tenantId}:${installation.fiscalSubjectId}:${installation.installationId}:${installation.deviceId}`
+  const alreadyRunning = inFlightRecoveries.get(key)
+  if (alreadyRunning) return alreadyRunning
+  const pending = runServerConfirmedFiscalChainRecovery(installation)
+  inFlightRecoveries.set(key, pending)
+  const release = () => { if (inFlightRecoveries.get(key) === pending) inFlightRecoveries.delete(key) }
+  void pending.then(release, release)
+  return pending
 }
