@@ -121,6 +121,7 @@ export async function issuePosInvoice(
     cashRegisterId: installation.cashRegisterId, registerCode: installation.registerCode,
     installationId: installation.installationId, installationNumber: installation.installationNumber,
     installationCode: installation.installationCode, deviceId: installation.deviceId,
+    installationSequence: installation.seriesVersion === 2 ? installation.installationSequence : undefined,
     ticketId: payload.ticket.id, saleId: payload.sale.id, paymentId: payload.payment?.id ?? null,
     invoiceId: crypto.randomUUID(), invoiceType: recipient ? 'F1' : 'F2', recipient,
     description: 'Venta de bienes y servicios', system: installation.system, timezone: installation.timezone,

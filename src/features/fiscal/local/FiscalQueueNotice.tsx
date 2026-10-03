@@ -1,52 +1,55 @@
 import { useEffect } from 'react'
 import type { CashSession, TenantContext } from '../../../types/index.ts'
 import { startFiscalEconomicSyncWhileOpen } from './economicSync.ts'
-import { fiscalBridgeAccessToken, loadFiscalInstallation } from './installation.ts'
+import { fiscalBridgeAccessToken } from './installation.ts'
+import { listLocalFiscalScopes } from './localLedger.ts'
 import { localFiscalMode } from './mode.ts'
-import { recoverServerConfirmedFiscalChain } from './serverRecovery.ts'
+import { loadFiscalPosSettings } from './settings.ts'
 import { startFiscalSyncWhileOpen } from './sync.ts'
 
-export function FiscalQueueNotice(props: { context: TenantContext | null; cashSession: CashSession | null }) {
+/** Synchronization is independent of permission to issue, including retired installations. */
+export function FiscalQueueNotice({ context, cashSession }: { context: TenantContext | null; cashSession: CashSession | null }) {
   const mode = localFiscalMode()
-  const { context, cashSession } = props
-
   useEffect(() => {
-    if (mode !== 'production' || !context || !cashSession) return
+    if (mode === 'disabled' || !context || !cashSession) return
     let active = true
-    let stopBridge: (() => void) | null = null
-    let stopEconomic: (() => void) | null = null
+    let running = false
+    let bridgeUrl: string | null = null
+    const workers = new Map<string, () => void>()
     const refresh = async () => {
+      if (running) return
+      running = true
       try {
-        const installation = await loadFiscalInstallation(context, cashSession)
-        const scope = { tenantId: installation.tenantId, fiscalSubjectId: installation.fiscalSubjectId,
-          installationId: installation.installationId }
+        const scopes = await listLocalFiscalScopes(context, cashSession.cashRegisterId)
         if (!active) return
-        if (!installation.bridgeUrl && stopBridge) {
-          stopBridge()
-          stopBridge = null
+        // Economic sync does not need bridge configuration or an active emission identity.
+        for (const scope of scopes) {
+          const key = `economic:${scope.installationId}`
+          if (!workers.has(key)) workers.set(key, startFiscalEconomicSyncWhileOpen(scope))
         }
-        if (!stopEconomic) {
-          try { await recoverServerConfirmedFiscalChain(installation) } catch { /* Issuance remains local during an outage. */ }
-          if (!active) return
-          stopEconomic = startFiscalEconomicSyncWhileOpen(scope)
+        const settings = await loadFiscalPosSettings(context.tenantId)
+        if (!active) return
+        if (bridgeUrl !== (settings.bridge_url || null)) {
+          for (const [key, stop] of workers) if (key.startsWith('bridge:')) { stop(); workers.delete(key) }
+          bridgeUrl = settings.bridge_url || null
         }
-        if (!stopBridge && installation.bridgeUrl) stopBridge = startFiscalSyncWhileOpen({ ...scope, mode: 'production',
-          baseUrl: installation.bridgeUrl, getAccessToken: fiscalBridgeAccessToken })
-      } catch { /* Background recovery retries on the next interval or connectivity event. */ }
+        if (bridgeUrl) for (const scope of scopes) {
+          const key = `bridge:${scope.installationId}`
+          if (!workers.has(key)) workers.set(key, startFiscalSyncWhileOpen({ ...scope, mode: 'production', baseUrl: bridgeUrl, getAccessToken: fiscalBridgeAccessToken }))
+        }
+      } catch { /* Pending scopes remain durable and retry on connectivity changes. */ }
+      finally { running = false }
     }
     void refresh()
     const timer = window.setInterval(() => void refresh(), 15000)
     window.addEventListener('online', refresh)
     document.addEventListener('visibilitychange', refresh)
     return () => {
-      active = false
-      window.clearInterval(timer)
+      active = false; window.clearInterval(timer)
       window.removeEventListener('online', refresh)
       document.removeEventListener('visibilitychange', refresh)
-      stopBridge?.()
-      stopEconomic?.()
+      for (const stop of workers.values()) stop()
     }
   }, [mode, context, cashSession])
-
   return null
 }

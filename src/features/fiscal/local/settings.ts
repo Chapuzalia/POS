@@ -22,8 +22,15 @@ function storageKey(tenantId: string): string {
   return `tickit:fiscal-pos-settings:v1:${tenantId}`
 }
 
+export const FISCAL_SETTINGS_CHANGED = 'tickit:fiscal-settings-changed'
+
+function cacheSettings(settings: FiscalPosSettings) {
+  try { window.localStorage.setItem(storageKey(settings.tenant_id), JSON.stringify(settings)) } catch { /* Public metadata only. */ }
+  window.dispatchEvent(new CustomEvent(FISCAL_SETTINGS_CHANGED, { detail: settings.tenant_id }))
+}
+
 /** The cached values are public invoice metadata, never transport credentials. */
-export async function loadFiscalPosSettings(tenantId: string): Promise<FiscalPosSettings> {
+export async function loadFiscalPosSettings(tenantId: string, allowCached = true): Promise<FiscalPosSettings> {
   if (!supabase) throw new Error('Supabase no está configurado.')
   const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
     .select('tenant_id,bridge_url,aeat_environment,producer_name,producer_nif,system_id,system_version')
@@ -35,7 +42,8 @@ export async function loadFiscalPosSettings(tenantId: string): Promise<FiscalPos
     try { window.localStorage.setItem(storageKey(tenantId), JSON.stringify(settings)) } catch { /* The ledger checks durable storage. */ }
     return settings
   }
-  try {
+  if (!allowCached) throw new Error('No se puede confirmar en Supabase el entorno fiscal. Reintenta la comprobación con conexión.')
+  if (allowCached) try {
     const cached = window.localStorage.getItem(storageKey(tenantId))
     if (cached) {
       const settings = settingsSchema.parse(JSON.parse(cached))
@@ -53,6 +61,20 @@ export async function saveFiscalPosSettings(settings: FiscalPosSettings): Promis
     .select('tenant_id,bridge_url,aeat_environment,producer_name,producer_nif,system_id,system_version').single()
   if (error) throw error
   const saved = settingsSchema.parse(data)
-  try { window.localStorage.setItem(storageKey(saved.tenant_id), JSON.stringify(saved)) } catch { /* No secret stored. */ }
+  cacheSettings(saved)
+  return saved
+}
+
+/** Save this switch immediately without overwriting unsaved producer form fields. */
+export async function saveFiscalAeatEnvironment(tenantId: string, environment: FiscalPosSettings['aeat_environment']): Promise<FiscalPosSettings> {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const tenant = z.uuid().parse(tenantId)
+  const aeatEnvironment = settingsSchema.shape.aeat_environment.parse(environment)
+  const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
+    .update({ aeat_environment: aeatEnvironment }).eq('tenant_id', tenant)
+    .select('tenant_id,bridge_url,aeat_environment,producer_name,producer_nif,system_id,system_version').single()
+  if (error) throw error
+  const saved = settingsSchema.parse(data)
+  cacheSettings(saved)
   return saved
 }

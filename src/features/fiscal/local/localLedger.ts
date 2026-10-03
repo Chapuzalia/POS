@@ -27,11 +27,11 @@ export type RestorableFiscalCopy = { entry: LocalFiscalEntry; economicPayload: S
 const dbName = 'tickit-verifactu-local-v1'
 const dbVersion = 4
 
-function request<T>(req: IDBRequest<T>): Promise<T> {
+export function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error) })
 }
 
-function transactionDone(tx: IDBTransaction): Promise<void> {
+export function transactionDone(tx: IDBTransaction): Promise<void> {
   const done = new Promise<void>((resolve, reject) => {
     tx.oncomplete = () => resolve()
     tx.onabort = () => reject(tx.error ?? new Error('IndexedDB canceló la emisión fiscal.'))
@@ -41,7 +41,7 @@ function transactionDone(tx: IDBTransaction): Promise<void> {
   return done
 }
 
-async function openLedger(): Promise<IDBDatabase> {
+export async function openLedger(): Promise<IDBDatabase> {
   if (!globalThis.indexedDB) throw new Error('IndexedDB no está disponible. No se puede expedir.')
   const opening = indexedDB.open(dbName, dbVersion)
   opening.onupgradeneeded = () => {
@@ -92,6 +92,7 @@ type IssueInputBase = {
   venueId: string; venueCode: string; cashRegisterId: string; registerCode: string; installationCode: string
   installationId: string; deviceId: string; ticketId: string; saleId: string; paymentId: string | null
   installationNumber?: string
+  installationSequence?: number
   invoiceId: string; invoiceType: 'F1' | 'F2'; recipient?: { name: string; nif: string }
   description: string; system: FiscalSystem; timezone: string
   clockSample?: FiscalClockSample
@@ -186,7 +187,7 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
         assertProductionSaleMatchesInvoice(input, sale, totalCents)
       } else if (input.clockSample) assertFiscalClock(input.clockSample, Date.now(), performance.now())
       const time = localDateParts(new Date(), input.timezone)
-      const series = fiscalSeries({ venueCode: input.venueCode, registerCode: input.registerCode, kind: input.invoiceType === 'F1' ? 'complete' : 'simplified', exercise: time.exercise })
+      const series = fiscalSeries({ venueCode: input.venueCode, registerCode: input.registerCode, installationSequence: input.installationSequence, kind: input.invoiceType === 'F1' ? 'complete' : 'simplified', exercise: time.exercise })
       const { chain, number } = await loadCursors(db, scope, series)
       const nextNumber = number.lastNumber + 1
       if (!Number.isSafeInteger(nextNumber)) throw new Error('Contador fiscal agotado.')
@@ -272,7 +273,7 @@ export function rectificativeLineAmounts(line: BridgeInvoiceSnapshot['lines'][nu
 
 export type LocalRectificativeLineSelection = { lineId: string; quantity: number; originalQuantity?: number }
 export type LocalRectificativeInput = {
-  installation: { tenantId: string; fiscalSubjectId: string; issuerNif: string; issuerName: string; venueId: string; cashRegisterId: string; venueCode: string; registerCode: string; installationId: string; deviceId: string; installationNumber?: string }
+  installation: { tenantId: string; fiscalSubjectId: string; issuerNif: string; issuerName: string; venueId: string; cashRegisterId: string; venueCode: string; registerCode: string; installationId: string; deviceId: string; installationNumber?: string; installationSequence?: number; seriesVersion?: 1 | 2 }
   lease?: FiscalLease
   original: LocalFiscalEntry
   type: 'R1' | 'R5'
@@ -297,7 +298,7 @@ export async function buildLocalRectificative(input: LocalRectificativeInput): P
     const db = await openLedger()
     try {
       const time = localDateParts(new Date(), input.timezone)
-      const series = fiscalSeries({ venueCode: input.installation.venueCode, registerCode: input.installation.registerCode, kind: 'corrective', exercise: time.exercise, rectificative: true })
+      const series = fiscalSeries({ venueCode: input.installation.venueCode, registerCode: input.installation.registerCode, installationSequence: input.installation.seriesVersion === 2 ? input.installation.installationSequence : undefined, kind: 'corrective', exercise: time.exercise, rectificative: true })
       const { chain, number } = await loadCursors(db, scope, series)
       const nextNumber = number.lastNumber + 1
       const hasSelections = Boolean(input.selectedLines)
@@ -425,6 +426,26 @@ export async function listLocalFiscalEntries(scopeInput: { tenantId: string; fis
     }
     await done
     return combined.sort((a, b) => a.record.chainPosition - b.record.chainPosition)
+  } finally { db.close() }
+}
+
+/** Discover pending historical scopes without asking the server for a new emission identity. */
+export async function listLocalFiscalScopes(context: { tenantId: string; venueId: string; deviceId: string }, cashRegisterId: string): Promise<{ tenantId: string; fiscalSubjectId: string; installationId: string }[]> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction(['bindings', 'entries'], 'readonly')
+    const done = transactionDone(tx)
+    const bindings = await request(tx.objectStore('bindings').getAll()) as DeviceBinding[]
+    const scopes: { tenantId: string; fiscalSubjectId: string; installationId: string }[] = []
+    for (const binding of bindings) {
+      if (binding.deviceId !== context.deviceId || !binding.scope.startsWith(`${context.tenantId}:`)) continue
+      const entry = await request(tx.objectStore('entries').index('scope').get(binding.scope)) as StoredFiscalDocument | undefined
+      if (!entry || entry.record.tenantId !== context.tenantId || entry.record.venueId !== context.venueId
+        || entry.record.cashRegisterId !== cashRegisterId || entry.record.deviceId !== context.deviceId) continue
+      scopes.push({ tenantId: entry.record.tenantId, fiscalSubjectId: entry.record.fiscalSubjectId, installationId: entry.record.installationId })
+    }
+    await done
+    return scopes
   } finally { db.close() }
 }
 

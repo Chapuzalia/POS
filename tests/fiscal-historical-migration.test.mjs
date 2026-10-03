@@ -99,12 +99,16 @@ create table public.venues (
   tenant_id uuid not null references public.tenants(id) on delete restrict,
   name text,
   legal_name text,
+  fiscal_code text,
   tax_id text,
   address text,
   timezone text,
   created_at timestamptz not null default now(),
   unique (tenant_id, id)
 );
+
+create unique index venues_tenant_fiscal_code_idx on public.venues (tenant_id, fiscal_code)
+where fiscal_code is not null;
 
 create table public.devices (
   id uuid primary key default gen_random_uuid(),
@@ -118,6 +122,7 @@ create table public.cash_registers (
   id uuid primary key default gen_random_uuid(),
   tenant_id uuid not null references public.tenants(id) on delete restrict,
   venue_id uuid not null references public.venues(id) on delete restrict,
+  is_active boolean not null default true,
   created_at timestamptz not null default now(),
   unique (tenant_id, id)
 );
@@ -268,7 +273,7 @@ create table public.offline_event_log (
 
 create table public.fiscal_pos_bridge_settings (
   tenant_id uuid primary key references public.tenants(id) on delete restrict,
-  bridge_url text not null check (bridge_url ~ '^https://[^/?#@]+/?$' and length(bridge_url) <= 255),
+  bridge_url text check (bridge_url ~ '^https://[^/?#@]+/?$' and length(bridge_url) <= 255),
   producer_name text not null check (length(trim(producer_name)) between 1 and 120),
   producer_nif text not null check (producer_nif ~ '^[A-Z0-9]{9}$'),
   system_id text not null check (system_id ~ '^[A-Z0-9]{2}$'),
@@ -328,7 +333,7 @@ grant select on public.fiscal_subjects, public.fiscal_sif_installations, public.
 `
 
 /**
- * Append-only guards from 20260928120000. Installed on demand: they are the reason the
+ * Append-only guards from 20260928120000. They are the reason the
  * neighbouring repair migrations run `alter table ... disable trigger user`, so the total
  * reconstruction has to cope with them too.
  */
@@ -401,7 +406,7 @@ const SERIES = 'VEN-REG-2026-S'
 // Harness
 // ---------------------------------------------------------------------------
 
-async function createDatabase({ appendOnly = false } = {}) {
+async function createDatabase({ appendOnly = true } = {}) {
   const db = new PGlite()
   await db.exec(SCHEMA_SQL)
   if (appendOnly) await db.exec(APPEND_ONLY_SQL)
@@ -652,11 +657,187 @@ test('la reconstrucción compila y no rebuilda nada cuando no hay tickets', asyn
   const [installation] = await rows(db, `select fiscal_subject_id::text, retired_at::text from public.fiscal_sif_installations`)
   assert.equal(installation.fiscal_subject_id, ID.subject, 'la instalación válida debe conservar su sujeto')
   assert.equal(installation.retired_at, null, 'no debe retirar la instalación activa')
+  const [settings] = await rows(db, `select producer_name, system_id, bridge_url, aeat_environment from public.fiscal_pos_bridge_settings`)
+  assert.deepEqual(settings, {
+    producer_name: 'Tickit', system_id: '01', bridge_url: 'https://bridge.example.com/', aeat_environment: 'test',
+  }, 'no debe sobrescribir la configuración existente')
+})
+
+test('la adaptación histórica incluye el secuencial cuando se ejecuta sobre una instalación PWA nueva', async () => {
+  const db = await createDatabase()
+  try {
+    await seedTenant(db, ID.tenant)
+    await db.exec(`update fiscal_sif_installations set installation_sequence=2,series_version=2,installation_number='VEN-REG-2'`)
+    await seedTicket(db,{ticketId:ID.ticket1,tenantId:ID.tenant,venueId:ID.venueA,deviceId:ID.deviceA,registerId:ID.registerA,status:'paid',ticketNumber:'1',totalCents:1210,createdAt:'2026-03-02T10:15:00Z'})
+    await seedSale(db,{saleId:ID.sale1,tenantId:ID.tenant,ticketId:ID.ticket1,venueId:ID.venueA,registerId:ID.registerA,totalCents:1210,paymentId:ID.payment1})
+    await seedLine(db,{lineId:ID.line1,tenantId:ID.tenant,ticketId:ID.ticket1,grossCents:1000,netCents:1000,baseCents:1000,taxCents:210,lineTotalCents:1210,taxRate:21})
+    await rewrite(db)
+    const [record] = await records(db)
+    assert.equal(record.invoice_snapshot.series,'VEN-REG-2-2026-S')
+    assert.equal(record.canonical_record.RegistroAlta.IDFactura.NumSerieFactura,'VEN-REG-2-2026-S/1')
+    assert.equal(record.canonical_record.RegistroAlta.SistemaInformatico.NumeroInstalacion,'VEN-REG-2')
+  } finally {await db.close()}
+})
+
+test('genera la configuración del productor donde falta y la usa en el registro histórico', async () => {
+  const db = await createDatabase()
+  try {
+    await seedTenant(db, ID.tenant)
+    await db.exec('delete from public.fiscal_pos_bridge_settings')
+    await seedTicket(db, {
+      ticketId: ID.ticket1, tenantId: ID.tenant, venueId: ID.venueA, deviceId: ID.deviceA,
+      registerId: ID.registerA, status: 'paid', ticketNumber: '1', totalCents: 1210,
+      createdAt: '2026-03-02T10:15:00Z',
+    })
+    await seedSale(db, {
+      saleId: ID.sale1, tenantId: ID.tenant, ticketId: ID.ticket1, venueId: ID.venueA,
+      registerId: ID.registerA, totalCents: 1210, paymentId: ID.payment1,
+    })
+    await seedLine(db, {
+      lineId: ID.line1, tenantId: ID.tenant, ticketId: ID.ticket1, grossCents: 1210,
+      netCents: 1210, baseCents: 1000, taxCents: 210, lineTotalCents: 1210, taxRate: 21,
+    })
+    assert.equal(Number((await rewrite(db)).rebuilt), 1)
+    const [settings] = await rows(db, `select producer_name, producer_nif, system_id, system_version, bridge_url from public.fiscal_pos_bridge_settings`)
+    assert.deepEqual(settings, {
+      producer_name: 'Alteil Solutions, S.L.', producer_nif: 'B12345678',
+      system_id: 'TK', system_version: '1.0.0', bridge_url: null,
+    })
+    const [record] = await records(db)
+    const system = record.canonical_record.RegistroAlta.SistemaInformatico
+    assert.equal(system.NombreRazon, settings.producer_name)
+    assert.equal(system.NIF, settings.producer_nif)
+    assert.equal(system.NombreSistemaInformatico, 'Tickit')
+    assert.equal(system.IdSistemaInformatico, settings.system_id)
+    assert.equal(system.Version, settings.system_version)
+  } finally {
+    await db.close()
+  }
 })
 
 // ---------------------------------------------------------------------------
 // (2) paid without fiscal_invoice, complete line snapshot, stale record at position 9
 // ---------------------------------------------------------------------------
+
+test('reconstruye una venta de importe cero sin inventar un pago', async () => {
+  const db = await createDatabase()
+  try {
+    await seedTenant(db, ID.tenant)
+    await seedTicket(db, {
+      ticketId: ID.ticket1, tenantId: ID.tenant, venueId: ID.venueA, deviceId: ID.deviceA,
+      registerId: ID.registerA, status: 'paid', ticketNumber: '1', totalCents: 0,
+      createdAt: '2026-03-02T10:15:00Z',
+    })
+    await db.query(`insert into public.sales(id,tenant_id,ticket_id,venue_id,cash_register_id,total_cents)
+      values($1,$2,$3,$4,$5,0)`, [ID.sale1, ID.tenant, ID.ticket1, ID.venueA, ID.registerA])
+    await seedLine(db, {
+      lineId: ID.line1, tenantId: ID.tenant, ticketId: ID.ticket1,
+      grossCents: 0, netCents: 0, baseCents: 0, taxCents: 0, lineTotalCents: 0, taxRate: 21,
+    })
+    assert.equal(Number((await rewrite(db)).rebuilt), 1)
+    const [record] = await records(db)
+    assert.equal(record.invoice_snapshot.totalCents, 0)
+    assert.equal(record.invoice_snapshot.paymentId, null)
+    assert.equal(record.canonical_record.RegistroAlta.ImporteTotal, '0.00')
+    assert.equal(record.canonical_record.RegistroAlta.CuotaTotal, '0.00')
+    assert.deepEqual(await rows(db, 'select id from public.sale_payments'), [])
+    const [sale] = await rows(db, 'select total_cents from public.sales where id=$1', [ID.sale1])
+    assert.equal(sale.total_cents, 0)
+  } finally {
+    await db.close()
+  }
+})
+
+test('genera instalaciones II=1 y numera cajas activas por local antes de las archivadas', async () => {
+  const db = await createDatabase()
+  try {
+    await seedTenant(db, ID.tenant)
+    await db.exec(`delete from public.fiscal_sif_installations;
+      update public.venues set name='Nicols' where id='${ID.venueA}';
+      update public.cash_registers set created_at='2026-01-01' where id='${ID.registerA}'`)
+    const addPaid = async (venueId, registerId, deviceId, createdAt) => {
+      const [{ ticket_id: ticketId, sale_id: saleId, payment_id: paymentId, line_id: lineId }] = await rows(db,
+        'select gen_random_uuid() as ticket_id, gen_random_uuid() as sale_id, gen_random_uuid() as payment_id, gen_random_uuid() as line_id')
+      await seedTicket(db, { ticketId, tenantId: ID.tenant, venueId, registerId, deviceId,
+        status: 'paid', ticketNumber: '1', totalCents: 1210, createdAt })
+      await seedSale(db, { saleId, tenantId: ID.tenant, ticketId, venueId, registerId, totalCents: 1210, paymentId })
+      await seedLine(db, { lineId, tenantId: ID.tenant, ticketId, grossCents: 1210,
+        netCents: 1210, baseCents: 1000, taxCents: 210, lineTotalCents: 1210, taxRate: 21 })
+    }
+    const [{ id: secondRegister }] = await rows(db,
+      `insert into public.cash_registers(tenant_id,venue_id,created_at) values($1,$2,'2026-02-01') returning id`,
+      [ID.tenant, ID.venueA])
+    const [{ id: secondDevice }] = await rows(db,
+      'insert into public.devices(tenant_id,venue_id) values($1,$2) returning id', [ID.tenant, ID.venueA])
+    // C2 has the earlier ticket: register numbering must not depend on ticket order.
+    await addPaid(ID.venueA, secondRegister, secondDevice, '2026-03-01T10:00:00Z')
+    await addPaid(ID.venueA, ID.registerA, ID.deviceA, '2026-03-02T10:00:00Z')
+    for (const name of ['Mess', 'Loft']) {
+      const [{ id: venueId }] = await rows(db,
+        'insert into public.venues(tenant_id,name,legal_name,tax_id,timezone) values($1,$2,$3,$4,$5) returning id',
+        [ID.tenant, name, 'Central Bar SL', NIF, TIMEZONE])
+      await db.query(`insert into public.cash_registers(tenant_id,venue_id,created_at,is_active)
+        values($1,$2,'2025-01-01',false),($1,$2,'2025-02-01',false)`, [ID.tenant,venueId])
+      const [{ id: unusedRegister }] = await rows(db,
+        `insert into public.cash_registers(tenant_id,venue_id,created_at) values($1,$2,'2026-01-01') returning id`,
+        [ID.tenant, venueId])
+      assert.ok(unusedRegister)
+      const [{ id: registerId }] = await rows(db,
+        `insert into public.cash_registers(tenant_id,venue_id,created_at) values($1,$2,'2026-02-01') returning id`,
+        [ID.tenant, venueId])
+      const [{ id: deviceId }] = await rows(db,
+        'insert into public.devices(tenant_id,venue_id) values($1,$2) returning id', [ID.tenant, venueId])
+      await addPaid(venueId, registerId, deviceId, '2026-03-03T10:00:00Z')
+    }
+    assert.equal(Number((await rewrite(db)).rebuilt), 4)
+    const installations = await rows(db,
+      `select venue_code,register_code from public.fiscal_sif_installations order by venue_code,register_code`)
+    assert.deepEqual(installations, [
+      { venue_code: 'LOF', register_code: 'C2' },
+      { venue_code: 'MES', register_code: 'C2' },
+      { venue_code: 'NIC', register_code: 'C1' },
+      { venue_code: 'NIC', register_code: 'C2' },
+    ])
+    const venues = await rows(db, 'select name,fiscal_code from public.venues order by name')
+    assert.deepEqual(venues, [
+      { name: 'Loft', fiscal_code: 'LOF' }, { name: 'Mess', fiscal_code: 'MES' }, { name: 'Nicols', fiscal_code: 'NIC' },
+    ])
+    const series = await rows(db, 'select series from public.fiscal_local_series order by series')
+    assert.deepEqual(series.map(row => row.series), ['LOF-C2-1-2026-S', 'MES-C2-1-2026-S', 'NIC-C1-1-2026-S', 'NIC-C2-1-2026-S'])
+    const activeCodes = await rows(db, `select venue.name,register.fiscal_code from public.cash_registers register
+      join public.venues venue on venue.id=register.venue_id where register.is_active order by venue.name,register.fiscal_code`)
+    assert.deepEqual(activeCodes.map(row=>`${row.name}-${row.fiscal_code}`), ['Loft-C1','Loft-C2','Mess-C1','Mess-C2','Nicols-C1','Nicols-C2'])
+    const identities = await rows(db, `select installation_number,installation_sequence,series_version
+      from public.fiscal_sif_installations order by installation_number`)
+    assert.deepEqual(identities.map(row=>row.installation_number), ['LOF-C2-1','MES-C2-1','NIC-C1-1','NIC-C2-1'])
+    assert.ok(identities.every(row=>row.installation_sequence===1 && row.series_version===2))
+    for (const record of await records(db)) {
+      assert.equal(record.canonical_record.RegistroAlta.IDFactura.NumSerieFactura, `${record.invoice_snapshot.series}/1`)
+      assert.equal(record.canonical_record.RegistroAlta.SistemaInformatico.NumeroInstalacion, record.invoice_snapshot.series.replace(/-2026-S$/, ''))
+    }
+  } finally {
+    await db.close()
+  }
+})
+
+test('una colisión de código local aborta sin asignar una identidad duplicada', async () => {
+  const db = await createDatabase()
+  try {
+    await seedTenant(db, ID.tenant)
+    await db.exec(`delete from public.fiscal_sif_installations;
+      update public.venues set name='Nicols' where id='${ID.venueA}'`)
+    await db.query('insert into public.venues(tenant_id,name,fiscal_code) values($1,$2,$3)', [ID.tenant, 'Nicolas', 'NIC'])
+    await seedTicket(db, { ticketId: ID.ticket1, tenantId: ID.tenant, venueId: ID.venueA,
+      registerId: ID.registerA, deviceId: ID.deviceA, status: 'paid', ticketNumber: '1',
+      totalCents: 1210, createdAt: '2026-03-02T10:00:00Z' })
+    await assert.rejects(rewrite(db), /FISCAL_VENUE_CODE_COLLISION/)
+    assert.deepEqual(await rows(db, 'select id from public.fiscal_sif_installations'), [])
+    const [venue] = await rows(db, 'select fiscal_code from public.venues where id=$1', [ID.venueA])
+    assert.equal(venue.fiscal_code, null)
+  } finally {
+    await db.close()
+  }
+})
 
 test('un ticket paid sin fiscal_invoice se reconstruye desde el snapshot de línea y sanea el ledger', async () => {
   const db = await createDatabase()
@@ -698,11 +879,17 @@ test('un ticket paid sin fiscal_invoice se reconstruye desde el snapshot de lín
     registerId: ID.registerA, chainPosition: 9, hash: SHA_A, generatedAt: '2026-03-01T09:00:00Z',
   })
   let guardedError = null
+  await seedStaleSeries(guarded, {
+    tenantId: ID.tenant, subjectId: ID.subject, installationId: ID.installA, venueId: ID.venueA,
+    registerId: ID.registerA, deviceId: ID.deviceA, series: SERIES,
+  })
   try {
     await rewrite(guarded)
   } catch (error) {
     guardedError = error
   }
+  const [{ enabled: seriesGuardEnabled }] = await rows(guarded,
+    `select tgenabled as enabled from pg_trigger where tgname = 'fiscal_local_series_identity'`)
   await guarded.close()
 
   const s = spec()
@@ -779,6 +966,7 @@ test('un ticket paid sin fiscal_invoice se reconstruye desde el snapshot de lín
   })
   check('rebuild con los guards append-only reales', () => {
     assert.equal(guardedError, null, `el rebuild total abortó con los guards append-only: ${guardedError?.message}`)
+    assert.equal(seriesGuardEnabled, 'O', 'el guard de series debe quedar activo tras el rebuild')
   })
 
   await db.close()

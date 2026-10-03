@@ -3,6 +3,11 @@
 set lock_timeout = '5s';
 set statement_timeout = '5min';
 
+-- Metadata is needed during the reconstruction, before the PWA activation expand.
+alter table public.fiscal_sif_installations add column if not exists installation_sequence integer;
+alter table public.fiscal_sif_installations add column if not exists series_version integer;
+alter table public.cash_registers add column if not exists fiscal_code text;
+
 create or replace function public.rewrite_historical_fiscal_test_data()
 returns jsonb
 language plpgsql security definer set search_path = '' as $$
@@ -14,7 +19,8 @@ declare
   offline_payload jsonb;
   subject_nif text; subject_name text; recipient_name text; recipient_nif text;
   series_name text; number_text text; number_value bigint; invoice_type text; issue_date_text text;
-  document_kind_value text; exercise_value integer;
+  venue_code_value text; register_code_value text;
+  document_kind_value text; exercise_value integer; installation_sequence_value integer;
   generated_at timestamptz; generated_text text; issued_text text; timezone_name text;
   previous_hash text; hash_value text; hash_source text; previous_identity jsonb;
   position_value bigint; invoice_id_value uuid; record_id_value uuid; payment_id_value uuid;
@@ -29,7 +35,38 @@ begin
   perform pg_advisory_xact_lock(hashtextextended('historical-fiscal-sif-rewrite', 0));
   lock table public.fiscal_local_records, public.tickets, public.ticket_lines, public.sales,
     public.sale_payments, public.fiscal_subjects, public.fiscal_sif_installations,
-    public.fiscal_invoices, public.offline_event_log in share row exclusive mode;
+    public.fiscal_invoices, public.offline_event_log, public.venues,
+    public.cash_registers, public.devices in share row exclusive mode;
+
+  -- Bootstrap missing tenant settings before rebuilding their historical records.
+  -- Preserve configurations already saved in Staging; no transport origin is required.
+  insert into public.fiscal_pos_bridge_settings
+    (tenant_id, bridge_url, producer_name, producer_nif, system_id, system_version)
+  select tenant.id, null, 'Alteil Solutions, S.L.', 'B12345678', 'TK', '1.0.0'
+  from public.tenants tenant
+  on conflict (tenant_id) do nothing;
+
+  -- Active boxes start at C1 within each venue. Archived boxes follow them and
+  -- keep distinct codes when their historical tickets also need reconstruction.
+  -- UUID breaks ties when multiple boxes share the same creation timestamp.
+  create temporary table _fiscal_register_codes on commit drop as
+  select register.tenant_id, register.venue_id, register.id as cash_register_id,
+    'C' || row_number() over (
+      partition by register.tenant_id, register.venue_id
+      order by case when register.is_active then 0 else 1 end, register.created_at, register.id
+    )::text as register_code
+  from public.cash_registers register;
+
+  -- Reserve codes also for active boxes without tickets so first PWA activation
+  -- on the other box cannot skip or consume its logical code.
+  update public.cash_registers register set fiscal_code=(
+    select installation.register_code from public.fiscal_sif_installations installation
+    where installation.tenant_id=register.tenant_id and installation.cash_register_id=register.id
+    order by installation.created_at desc,installation.id desc limit 1
+  ) where register.fiscal_code is null;
+  update public.cash_registers register set fiscal_code=codes.register_code
+  from _fiscal_register_codes codes where register.id=codes.cash_register_id
+    and register.tenant_id=codes.tenant_id and register.fiscal_code is null;
 
   create temporary table _fiscal_stage
     (like public.fiscal_local_records including defaults) on commit drop;
@@ -83,6 +120,41 @@ begin
       where installation.tenant_id=t.tenant_id and installation.fiscal_subject_id=subject_row.id
         and installation.venue_id=t.venue_id and installation.cash_register_id=t.cash_register_id
         and installation.device_id=t.device_id and installation.retired_at is null;
+    if source_count=0 then
+      if exists (select 1 from public.fiscal_sif_installations installation
+        where installation.tenant_id=t.tenant_id and installation.retired_at is null
+          and (installation.cash_register_id=t.cash_register_id or installation.device_id=t.device_id)) then
+        raise exception 'FISCAL_INSTALLATION_SCOPE_CONFLICT ticket=%',t.id;
+      end if;
+      select coalesce(venue.fiscal_code, left(upper(regexp_replace(
+        translate(btrim(venue.name), 'áéíóúüñÁÉÍÓÚÜÑ', 'aeiouunAEIOUUN'),
+        '[^A-Za-z]', '', 'g')), 3)) into venue_code_value
+      from public.venues venue where venue.tenant_id=t.tenant_id and venue.id=t.venue_id;
+      if venue_code_value is null or venue_code_value !~ '^[A-Z0-9]{1,8}$' then
+        raise exception 'FISCAL_VENUE_CODE_INVALID venue=%',t.venue_id;
+      end if;
+      if exists (select 1 from public.venues venue where venue.tenant_id=t.tenant_id
+        and venue.id<>t.venue_id and venue.fiscal_code=venue_code_value) then
+        raise exception 'FISCAL_VENUE_CODE_COLLISION venue=% code=%',t.venue_id,venue_code_value;
+      end if;
+      update public.venues set fiscal_code=venue_code_value
+      where tenant_id=t.tenant_id and id=t.venue_id and fiscal_code is null;
+      select register.fiscal_code into register_code_value from public.cash_registers register
+      where register.tenant_id=t.tenant_id and register.venue_id=t.venue_id
+        and register.id=t.cash_register_id;
+      select coalesce(max(installation.installation_sequence), count(*), 0)::integer + 1
+        into installation_sequence_value from public.fiscal_sif_installations installation
+        where installation.tenant_id=t.tenant_id and installation.cash_register_id=t.cash_register_id;
+      insert into public.fiscal_sif_installations (
+        tenant_id,fiscal_subject_id,venue_id,cash_register_id,device_id,
+        installation_number,venue_code,register_code,installation_code,mode,installation_sequence,series_version
+      ) values (
+        t.tenant_id,subject_row.id,t.venue_id,t.cash_register_id,t.device_id,
+        venue_code_value||'-'||register_code_value||'-'||installation_sequence_value::text,venue_code_value,register_code_value,
+        'I'||upper(right(replace(t.device_id::text,'-',''),7)),'production',installation_sequence_value,2
+      );
+      source_count:=1;
+    end if;
     if source_count<>1 then raise exception 'FISCAL_INSTALLATION_AMBIGUOUS ticket=%',t.id; end if;
     select * into installation_row from public.fiscal_sif_installations installation
       where installation.tenant_id=t.tenant_id and installation.fiscal_subject_id=subject_row.id
@@ -135,7 +207,11 @@ begin
       when t.is_invoice then 'F1' else 'F2' end;
     document_kind_value:=case when invoice_type='F1' then 'complete' else 'simplified' end;
     exercise_value:=extract(year from coalesce(invoice_row.issued_at,t.local_created_at) at time zone timezone_name)::integer;
-    series_name:=installation_row.venue_code||'-'||installation_row.register_code||'-'||exercise_value||
+    -- Compatible both before and after the PWA-identity expand. Keep legacy
+    -- identities unchanged; a sequenced installation includes its own segment.
+    series_name:=installation_row.venue_code||'-'||installation_row.register_code||
+      case when (to_jsonb(installation_row)->>'series_version')::integer=2
+        then '-'||(to_jsonb(installation_row)->>'installation_sequence') else '' end||'-'||exercise_value||
       case when document_kind_value='complete' then '-F' else '-S' end;
     insert into _fiscal_series_stage(tenant_id,fiscal_subject_id,installation_id,venue_id,cash_register_id,device_id,
       document_kind,exercise,series,last_number)
@@ -144,7 +220,7 @@ begin
     on conflict(tenant_id,fiscal_subject_id,installation_id,document_kind,exercise)
     do update set last_number=_fiscal_series_stage.last_number+1
     returning last_number into number_value;
-    number_text:=number_value::text;
+    number_text:=case when (to_jsonb(installation_row)->>'series_version')::integer=2 then '/' else '' end||number_value::text;
     if nullif(btrim(series_name),'') is null or number_value<1 then raise exception 'FISCAL_NUMBER_INVALID ticket=%',t.id; end if;
     issue_date_text:=to_char(coalesce(invoice_row.issue_date,(t.local_created_at at time zone timezone_name)::date),'DD-MM-YYYY');
 
@@ -279,6 +355,7 @@ begin
   end loop;
 
   alter table public.fiscal_local_records disable trigger user;
+  alter table public.fiscal_local_series disable trigger fiscal_local_series_identity;
   delete from public.fiscal_local_records;
   delete from public.fiscal_local_series;
   insert into public.fiscal_local_records(id,tenant_id,fiscal_subject_id,installation_id,venue_id,cash_register_id,invoice_id,ticket_id,sale_id,client_event_id,rpc_result,record_kind,chain_position,previous_hash,hash,canonical_schema,canonical_record,record_envelope,invoice_snapshot,economic_snapshot,generated_at,idempotency_key)
@@ -295,9 +372,11 @@ begin
     series_stage.series,series_stage.last_number
   from _fiscal_series_stage series_stage;
   alter table public.fiscal_local_records enable trigger user;
+  alter table public.fiscal_local_series enable trigger fiscal_local_series_identity;
   return jsonb_build_object('rebuilt',staged_count,'rebuiltRecords',staged_count,'mode','development-full-history-rebuild');
 exception when others then
   alter table public.fiscal_local_records enable trigger user;
+  alter table public.fiscal_local_series enable trigger fiscal_local_series_identity;
   raise;
 end;
 $$;

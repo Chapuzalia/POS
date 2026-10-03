@@ -9,6 +9,7 @@ const saleMigration = await readFile(new URL('../supabase/migrations/20260928130
 const restaurantMigration = await readFile(new URL('../supabase/migrations/20260928140000_restaurant_local_verifactu_sale.sql', import.meta.url), 'utf8')
 const guardMigration = await readFile(new URL('../supabase/migrations/20260928150000_guard_issued_local_fiscal_sales.sql', import.meta.url), 'utf8')
 const seriesMigration = await readFile(new URL('../supabase/migrations/20260929190000_simplify_sif_series_identity.sql', import.meta.url), 'utf8')
+const pwaMigration = await readFile(new URL('../supabase/migrations/20261002191101_pwa_fiscal_installation_identity.sql', import.meta.url), 'utf8')
 const ids = {
   tenant: '11111111-1111-4111-8111-111111111111', venue: '22222222-2222-4222-8222-222222222222',
   device: '33333333-3333-4333-8333-333333333333', register: '44444444-4444-4444-8444-444444444444',
@@ -147,4 +148,56 @@ test('sale and fiscal record commit together, with idempotency, chain and legacy
     JSON.stringify({ ...secondInvoice, totalCents: 1220 })]), /IDEMPOTENCY_CONFLICT/)
   await assert.rejects(db.exec(`update public.tickets set status = 'voided' where id = '${secondTicket}'`), /LOCAL_FISCAL_INVOICE_IMMUTABLE/)
   await assert.rejects(db.exec(`delete from public.sales where id = '${secondSale}'`), /LOCAL_FISCAL_SALE_IMMUTABLE/)
+
+  // Expand after historical records exist: their original identities remain usable
+  // for pre-retirement pending synchronization, while new PWA series start at 1.
+  await db.exec(`alter table devices add column is_active boolean default true;
+    alter table devices add column can_take_payments boolean default true;
+    alter table cash_registers add column is_active boolean default true;
+    create table fiscal_pos_bridge_settings(tenant_id uuid,aeat_environment text);
+    insert into fiscal_pos_bridge_settings values('${ids.tenant}','test');
+    update venues set fiscal_code='L1'`)
+  for (const statement of pwaMigration.split(/(create (?:unique )?index concurrently[^;]+;)/i)) {
+    if (statement.trim()) await db.exec(statement)
+  }
+  const newInstallation = (await db.query('select activate_pwa_fiscal_installation($1,$2,$3,$4,$5,$6,false) as id',
+    [ids.tenant,ids.venue,ids.register,ids.device,crypto.randomUUID(),ids.installation])).rows[0].id
+  assert.equal((await db.query('select invoice_snapshot from fiscal_local_records where id=$1',[ids.record])).rows[0].invoice_snapshot.series,'L1-C1-2026-S')
+  await call() // Acknowledgment lost before replacement remains idempotent.
+  const previous = {issuerNif:'89890001K',seriesAndNumber:'L1-C1-2026-S/2',issueDate:'28-09-2026',hash:chained.hash}
+  async function freshArgs(installationId, series, number, position, prior, issuedAt = generatedAt) {
+    const ticketId = crypto.randomUUID(), saleId = crypto.randomUUID(), invoiceId = crypto.randomUUID()
+    const system = {...built.canonicalRecord.RegistroAlta.SistemaInformatico,
+      NumeroInstalacion: installationId === ids.installation ? 'INSTALL-1' : 'L1-C1-2'}
+    const canonical = await createAltaRecord({invoice:{issuerNif:'89890001K',seriesAndNumber:`${series}/${number}`,issueDate:'28-09-2026'},
+      issuerName:'Emisor ficticio',type:'F2',description:'Venta',details:built.canonicalRecord.RegistroAlta.Desglose.DetalleDesglose,
+      system,previous:prior ? {IDEmisorFactura:prior.issuerNif,NumSerieFactura:prior.seriesAndNumber,FechaExpedicionFactura:prior.issueDate,Huella:prior.hash}:null,
+      generatedAt:issuedAt,environment:'production'})
+    return [crypto.randomUUID(),JSON.stringify({...payload,ticket:{...payload.ticket,id:ticketId},sale:{id:saleId}}),
+      JSON.stringify({...record,idempotencyKey:crypto.randomUUID(),installationId,invoiceId,chainPosition:position,previous:prior,generatedAt:issuedAt,hash:canonical.hash,canonicalRecord:canonical.canonicalRecord}),
+      JSON.stringify({...invoice,invoiceId,ticketId,saleId,series,number,issuedAt})]
+  }
+  // Pending record generated BEFORE replacement can still commit on the retired chain.
+  await call(await freshArgs(ids.installation,'L1-C1-2026-S',3,3,previous))
+  const retirement = (await db.query('select retired_at from fiscal_sif_installations where id=$1',[ids.installation])).rows[0].retired_at
+  const afterRetirement = new Date(new Date(retirement).getTime()+1000).toISOString().slice(0,19)+'+00:00'
+  await assert.rejects(call(await freshArgs(ids.installation,'L1-C1-2026-S',4,4,previous,afterRetirement)),/INSTALLATION_FORBIDDEN/)
+  const newFirstArgs=await freshArgs(newInstallation,'L1-C1-2-2026-S',1,1,null)
+  await call(newFirstArgs)
+  await assert.rejects(call(await freshArgs(newInstallation,'L1-C1-2026-S',1,2,null)),/SERIES_MISMATCH/)
+  assert.equal((await db.query('select last_number from fiscal_local_series where installation_id=$1',[newInstallation])).rows[0].last_number,1)
+  const newFirst=JSON.parse(newFirstArgs[2])
+  const nextArgs=await freshArgs(newInstallation,'L1-C1-2-2026-S',2,2,{issuerNif:'89890001K',seriesAndNumber:'L1-C1-2-2026-S/1',issueDate:'28-09-2026',hash:newFirst.hash})
+  const nextInvoice=JSON.parse(nextArgs[3])
+  await db.exec(`create or replace function public.close_restaurant_order_checked_v2(uuid,text,integer,boolean,jsonb) returns jsonb language plpgsql as $$begin
+    insert into public.tickets(id,tenant_id,venue_id,cash_register_id,status) values('${nextInvoice.ticketId}','${ids.tenant}','${ids.venue}','${ids.register}','paid');
+    insert into public.sales(id,ticket_id,tenant_id,venue_id,cash_register_id,device_id) values('${nextInvoice.saleId}','${nextInvoice.ticketId}','${ids.tenant}','${ids.venue}','${ids.register}','${ids.device}');
+    return jsonb_build_object('requiresConfirmation',false,'ticketId','${nextInvoice.ticketId}','saleId','${nextInvoice.saleId}','paymentId',null,'totalCents',1210);
+  end$$`)
+  const badSystem=JSON.parse(nextArgs[2])
+  badSystem.canonicalRecord.RegistroAlta.SistemaInformatico.NumeroInstalacion='INSTALL-1'
+  await assert.rejects(restaurantCall(['close',restaurantArgs[1],JSON.stringify(badSystem),nextArgs[3]]),/INSTALLATION_IDENTITY_MISMATCH/)
+  assert.equal((await db.query('select count(*)::integer as n from tickets where id=$1',[nextInvoice.ticketId])).rows[0].n,0)
+  await restaurantCall(['close',restaurantArgs[1],nextArgs[2],nextArgs[3]])
+  assert.equal((await db.query('select last_number from fiscal_local_series where installation_id=$1',[newInstallation])).rows[0].last_number,2)
 })

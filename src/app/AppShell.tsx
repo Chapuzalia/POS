@@ -58,6 +58,8 @@ import { getReadableError } from '../utils/errors'
 import { AppRouter } from './AppRouter'
 import { isBackofficeUser, isCrmUser, isSuperadmin } from './app-permissions'
 import { useDomainErrors } from './useDomainErrors'
+import { FiscalInstallationGate } from '../features/fiscal/local/FiscalInstallationGate'
+import { FiscalQueueNotice } from '../features/fiscal/local/FiscalQueueNotice'
 
 const CrmPage = lazy(() => import('../components/crm/CrmPage').then((module) => ({ default: module.CrmPage })))
 const SuperAdminPage = lazy(() => import('../components/superadmin/SuperAdminPage').then((module) => ({ default: module.SuperAdminPage })))
@@ -476,7 +478,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
       printingClosingId={cash.printingClosingId}
       sessions={cash.options.sessions}
     /></PosStartupReveal>
-    return <PosStartupReveal><PosPage
+    return <PosStartupReveal><FiscalQueueNotice context={context} cashSession={cash.session} /><FiscalInstallationGate key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${cash.session?.cashRegisterId}`} context={context} cashSession={cash.session} onLogout={session.logout} onBusyChange={setAuxiliaryOperationBusy}><PosPage
       addFeedback={addFeedback}
       catalog={catalog}
       discounts={discounts}
@@ -516,7 +518,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
       selectedThemeId={themeId}
       setThemeId={setThemeId}
       themes={themes}
-    /></PosStartupReveal>
+    /></FiscalInstallationGate></PosStartupReveal>
   }}</AppRouter><AppUpdateBanner blocked={updateBlocked} status={versionStatus} /></>
 }
 

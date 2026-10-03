@@ -6,12 +6,18 @@ import { createBridgeClient } from './bridgeClient.ts'
 import { assertFiscalLease, createLocalFallbackLease, type FiscalLease } from './clock.ts'
 import { isFiscalTransportUnavailable } from './availability.ts'
 import { loadFiscalPosSettings, type FiscalPosSettings } from './settings.ts'
+import { FiscalIdentityMissingError, readFiscalIdentity, persistFiscalIdentity, fiscalActivationRequest, assertFiscalLedgerValid, clearFiscalActivationRequest } from './localIdentity.ts'
+import { recoverServerConfirmedFiscalChain } from './serverRecovery.ts'
+import { UserFacingError } from '../../../utils/UserFacingError.ts'
+
+export class FiscalActivationConfirmationError extends UserFacingError {}
 
 const installationSchema = z.object({
   id: z.uuid(), tenant_id: z.uuid(), fiscal_subject_id: z.uuid(), venue_id: z.uuid(),
   cash_register_id: z.uuid(), device_id: z.uuid(), installation_number: z.string().min(1),
   venue_code: z.string().regex(/^[A-Z0-9]{1,8}$/), register_code: z.string().regex(/^[A-Z0-9]{1,8}$/),
   installation_code: z.string().regex(/^[A-Z0-9]{1,8}$/), mode: z.literal('production'), retired_at: z.null(),
+  installation_sequence: z.number().int().positive(), series_version: z.union([z.literal(1), z.literal(2)]),
 })
 const subjectSchema = z.object({ id: z.uuid(), tenant_id: z.uuid(), legal_name: z.string().min(1), nif: z.string().regex(/^[A-Z0-9]{9}$/) })
 
@@ -19,6 +25,7 @@ export type FiscalInstallation = {
   tenantId: string; fiscalSubjectId: string; issuerName: string; issuerNif: string
   venueId: string; cashRegisterId: string; deviceId: string; installationId: string; installationNumber: string
   venueCode: string; registerCode: string; installationCode: string; timezone: string
+  installationSequence: number; seriesVersion: 1 | 2
   system: FiscalSystem; bridgeUrl: string | null; aeatEnvironment: 'test' | 'production'
 }
 
@@ -33,24 +40,42 @@ function publicSystem(installationNumber: string, settings: FiscalPosSettings): 
   }
 }
 
-function cacheKey(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>): string {
+export function fiscalIdentityKey(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>): string {
   return `tickit:fiscal-installation:v1:${context.tenantId}:${context.venueId}:${cashSession.cashRegisterId}:${context.deviceId}`
 }
 
 export async function loadFiscalInstallation(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>): Promise<FiscalInstallation> {
-  const key = cacheKey(context, cashSession)
-  if (!supabase) throw new Error('Supabase no está configurado para cargar la instalación fiscal.')
-  let cached: { installation: unknown; subject: unknown } | null = null
-  try {
-    const raw = window.localStorage.getItem(key)
-    if (raw) cached = JSON.parse(raw) as { installation: unknown; subject: unknown }
-  } catch { /* A damaged cache is ignored. */ }
+  const key = fiscalIdentityKey(context, cashSession)
+  const cached = snapshotSchema.parse(await readRequiredIdentity(key))
+  const snapshot = await fetchFiscalSnapshot(context, cashSession, cached.installation.id, cached)
+  const installation = await installationFromSnapshot(context, cashSession, snapshot)
+  await assertFiscalLedgerValid(fiscalLedgerScope(installation), context.deviceId, installation.seriesVersion === 1, installation.installationNumber)
+  return installation
+}
 
+const snapshotSchema = z.object({ installation: installationSchema, subject: subjectSchema })
+type Snapshot = z.infer<typeof snapshotSchema>
+const installationColumns = 'id,tenant_id,fiscal_subject_id,venue_id,cash_register_id,device_id,installation_number,venue_code,register_code,installation_code,mode,retired_at,installation_sequence,series_version'
+
+async function readRequiredIdentity(key: string): Promise<unknown> {
+  const identity = await readFiscalIdentity(key)
+  if (identity === null) throw new FiscalIdentityMissingError()
+  return identity
+}
+
+export function fiscalLedgerScope(installation: FiscalInstallation): string {
+  return `${installation.tenantId}:${installation.fiscalSubjectId}:${installation.installationId}`
+}
+
+async function fetchFiscalSnapshot(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, id: string, cached?: Snapshot): Promise<Snapshot> {
+  if (!supabase) throw new Error('Supabase no está configurado para cargar la instalación fiscal.')
   const installationResult = await supabase.from('fiscal_sif_installations')
-    .select('id,tenant_id,fiscal_subject_id,venue_id,cash_register_id,device_id,installation_number,venue_code,register_code,installation_code,mode,retired_at')
+    .select(installationColumns).eq('id', id)
     .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId)
     .eq('cash_register_id', cashSession.cashRegisterId).eq('device_id', context.deviceId)
     .is('retired_at', null).maybeSingle()
+  if (installationResult.error && (!cached || !isFiscalTransportUnavailable(installationResult.error))) throw installationResult.error
+  if (!installationResult.error && !installationResult.data) throw new UserFacingError('La instalación fiscal fue retirada o no está autorizada. Se bloquea la emisión; su sincronización pendiente puede continuar.')
   const installation = installationSchema.parse(installationResult.error ? cached?.installation : installationResult.data)
   if (installation.tenant_id !== context.tenantId || installation.venue_id !== context.venueId
     || installation.cash_register_id !== cashSession.cashRegisterId || installation.device_id !== context.deviceId) {
@@ -58,23 +83,67 @@ export async function loadFiscalInstallation(context: TenantContext, cashSession
   }
   const subjectResult = await supabase.from('fiscal_subjects')
     .select('id,tenant_id,legal_name,nif').eq('tenant_id', context.tenantId).eq('id', installation.fiscal_subject_id).maybeSingle()
+  if (subjectResult.error && (!cached || !isFiscalTransportUnavailable(subjectResult.error))) throw subjectResult.error
   const subject = subjectSchema.parse(subjectResult.error ? cached?.subject : subjectResult.data)
   if (subject.id !== installation.fiscal_subject_id || subject.tenant_id !== context.tenantId) {
     throw new Error('El titular fiscal no coincide con la instalación.')
   }
+  return { installation, subject }
+}
+
+async function installationFromSnapshot(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, { installation, subject }: Snapshot): Promise<FiscalInstallation> {
   const settings = await loadFiscalPosSettings(context.tenantId)
   bridgeUrls.set(context.tenantId, settings.bridge_url || null)
-  if (!installationResult.error && !subjectResult.error) {
-    try { window.localStorage.setItem(key, JSON.stringify({ installation, subject })) } catch { /* The fiscal ledger checks durable storage separately. */ }
-  }
   return {
     tenantId: context.tenantId, fiscalSubjectId: subject.id, issuerName: subject.legal_name, issuerNif: subject.nif,
     venueId: context.venueId, cashRegisterId: cashSession.cashRegisterId, deviceId: context.deviceId,
     installationId: installation.id, installationNumber: installation.installation_number,
     venueCode: installation.venue_code, registerCode: installation.register_code,
     installationCode: installation.installation_code, timezone: context.venueTimeZone || 'Europe/Madrid',
+    installationSequence: installation.installation_sequence, seriesVersion: installation.series_version,
     system: publicSystem(installation.installation_number, settings), bridgeUrl: settings.bridge_url || null, aeatEnvironment: settings.aeat_environment,
   }
+}
+
+/** Online preview for the confirmation dialog; never adopts the returned identity. */
+export async function latestFiscalInstallation(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>): Promise<{ id: string; number: string } | null> {
+  if (!supabase) throw new Error('Conéctate a Supabase para activar la instalación.')
+  const { data, error } = await supabase.from('fiscal_sif_installations').select('id,installation_number')
+    .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId)
+    .eq('cash_register_id', cashSession.cashRegisterId).is('retired_at', null).maybeSingle()
+  if (error) throw error
+  return data ? { id: z.uuid().parse(data.id), number: z.string().parse(data.installation_number) } : null
+}
+
+/** Temporary test-only recovery is checked again by the RPC, not just hidden in the UI. */
+export async function activateFiscalInstallation(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, expectedId: string | null, recoverForTesting = false): Promise<FiscalInstallation> {
+  if (!navigator.locks?.request) throw new Error('Web Locks no está disponible para activar la instalación fiscal.')
+  const key = fiscalIdentityKey(context, cashSession)
+  return navigator.locks.request(`tickit-fiscal-identity:${key}`, { mode: 'exclusive' }, async () => {
+    if (await readFiscalIdentity(key) !== null) throw new UserFacingError('Ya existe identidad local. Recarga o concilia su ledger antes de continuar.')
+    if (!supabase) throw new Error('Conéctate a Supabase para activar la instalación.')
+    const pending = await fiscalActivationRequest(key, expectedId, recoverForTesting)
+    const { data, error } = await supabase.rpc('activate_pwa_fiscal_installation', {
+      p_tenant_id: context.tenantId, p_venue_id: context.venueId, p_register_id: cashSession.cashRegisterId,
+      p_device_id: context.deviceId, p_request_id: pending.requestId,
+      p_expected_installation_id: pending.expectedInstallationId, p_recover_for_testing: recoverForTesting,
+    })
+    if (error) {
+      if (/FISCAL_ACTIVATION_CONFIRMATION_STALE|FISCAL_ACTIVATION_ALREADY_RETIRED/.test(error.message)) {
+        await clearFiscalActivationRequest(key)
+        throw new FiscalActivationConfirmationError('La instalación activa cambió. Vuelve a comprobar la caja y confirma su estado actual.')
+      }
+      throw error
+    }
+    const id = z.uuid().parse(data)
+    const snapshot = await fetchFiscalSnapshot(context, cashSession, id)
+    const installation = await installationFromSnapshot(context, cashSession, snapshot)
+    // A successful server read is mandatory here, including when recovering a completed request.
+    await recoverServerConfirmedFiscalChain(installation)
+    await persistFiscalIdentity(key, snapshot, fiscalLedgerScope(installation), context.deviceId)
+    await assertFiscalLedgerValid(fiscalLedgerScope(installation), context.deviceId, installation.seriesVersion === 1, installation.installationNumber)
+    return installation
+  })
 }
 
 export function fiscalBridgeBaseUrl(tenantId: string): string | null {

@@ -5,7 +5,7 @@ import { Button as UiButton } from '../../../../components/ui/Button'
 import { Checkbox as UiCheckbox } from '../../../../components/ui/Checkbox'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import type { TenantContext } from '../../../../types'
-import { loadFiscalPosSettings, saveFiscalPosSettings, type FiscalPosSettings } from '../../../fiscal/local/settings'
+import { loadFiscalPosSettings, saveFiscalPosSettings, saveFiscalAeatEnvironment, type FiscalPosSettings } from '../../../fiscal/local/settings'
 import { Field } from '../../shared/components/Field'
 import type { RunAction } from '../../shared/types'
 
@@ -20,6 +20,7 @@ export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Prop
   })
   const [exists, setExists] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [savingEnvironment, setSavingEnvironment] = useState(false)
 
   const refresh = useCallback(async () => {
     try {
@@ -38,6 +39,20 @@ export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Prop
 
   function update<K extends keyof FiscalPosSettings>(key: K, value: FiscalPosSettings[K]) {
     setSettings((current) => ({ ...current, [key]: value }))
+  }
+
+  async function changeEnvironment(checked: boolean) {
+    if (!canEdit || savingEnvironment) return
+    const environment = checked ? 'test' : 'production'
+    if (!exists) { update('aeat_environment', environment); return }
+    setSavingEnvironment(true)
+    try {
+      await runAction(async () => {
+        const saved = await saveFiscalAeatEnvironment(tenantContext.tenantId, environment)
+        update('aeat_environment', saved.aeat_environment)
+        sileo.success({ title: saved.aeat_environment === 'test' ? 'Entorno AEAT de pruebas guardado' : 'Entorno AEAT de producción guardado' })
+      })
+    } finally { setSavingEnvironment(false) }
   }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
@@ -71,14 +86,14 @@ export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Prop
       {loadError ? <p role="status" className="!m-0 !rounded-xl !bg-[var(--crm-blue-soft)] !px-4 !py-3 !text-xs !font-semibold !text-[var(--crm-blue)]">{loadError}</p> : null}
       <div className="!grid !grid-cols-1 !gap-4 lg:!grid-cols-2">
         <Field label="URL HTTPS del puente VPS (opcional)"><UiInput className={inputClass} disabled={disabled || !canEdit} onChange={(event) => update('bridge_url', event.target.value)} placeholder="https://fiscal.ejemplo.es/" type="url" value={settings.bridge_url} /></Field>
-        <div className="!flex !items-start !rounded-xl !bg-[var(--crm-surface-soft)] !px-3.5 !py-3"><UiCheckbox checked={settings.aeat_environment === 'test'} disabled={disabled || !canEdit} onChange={(checked) => update('aeat_environment', checked ? 'test' : 'production')}>Usar URL de pruebas de AEAT para el QR</UiCheckbox></div>
+        <div className="!grid !gap-2 !rounded-xl !bg-[var(--crm-surface-soft)] !px-3.5 !py-3"><UiCheckbox checked={settings.aeat_environment === 'test'} disabled={disabled || !canEdit || savingEnvironment} onChange={(checked) => void changeEnvironment(checked)}>Usar URL de pruebas de AEAT para el QR</UiCheckbox><p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">{exists ? 'Este cambio se guarda automáticamente y habilita la recuperación temporal de instalaciones en pruebas.' : 'Guarda la configuración para aplicar el entorno seleccionado.'}</p></div>
         <Field label="Razón social del productor SIF"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={120} onChange={(event) => update('producer_name', event.target.value)} required value={settings.producer_name} /></Field>
         <Field label="NIF del productor"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={9} onChange={(event) => update('producer_nif', event.target.value)} required value={settings.producer_nif} /></Field>
         <Field label="ID de sistema (2 caracteres)"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={2} onChange={(event) => update('system_id', event.target.value)} required value={settings.system_id} /></Field>
         <Field label="Versión del sistema"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={40} onChange={(event) => update('system_version', event.target.value)} required value={settings.system_version} /></Field>
       </div>
       <p className="!m-0 !flex !items-start !gap-2 !text-xs !leading-5 !text-[var(--crm-text-muted)]"><ShieldCheck className="!mt-0.5 !size-4 !shrink-0" />Sin URL, el POS numera, encadena, firma con huella y genera el QR, pero no remite a AEAT. No introduzcas certificados ni secretos del VPS. Una factura ya emitida conserva su propia copia.</p>
-      {canEdit ? <footer className="!flex !justify-end"><UiButton className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} type="submit"><Save className="!size-4" />{exists ? 'Guardar cambios' : 'Guardar configuración'}</UiButton></footer> : null}
+      {canEdit ? <footer className="!flex !justify-end"><UiButton className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || savingEnvironment} type="submit"><Save className="!size-4" />{exists ? 'Guardar cambios' : 'Guardar configuración'}</UiButton></footer> : null}
     </form>
   </section>
 }

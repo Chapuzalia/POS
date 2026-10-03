@@ -22,6 +22,14 @@ const installationSchema = z.object({
 export type FiscalSifSetup = z.infer<typeof setupSchema>
 export type FiscalSifInstallation = z.infer<typeof installationSchema>
 
+export async function saveFiscalPwaSetup(tenantId: string, input: { legalName: string; nif: string; venues: { venueId: string; venueCode: string }[] }): Promise<void> {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const setup = z.object({ legalName: z.string().trim().min(1).max(120), nif: z.string().trim().toUpperCase().regex(/^[A-Z0-9]{9}$/),
+    venues: z.array(z.object({ venueId: z.uuid(), venueCode: code })).min(1) }).parse(input)
+  const { error } = await supabase.rpc('save_fiscal_pwa_setup', { p_tenant_id: tenantId, p_legal_name: setup.legalName, p_nif: setup.nif, p_venues: setup.venues })
+  if (error) throw readableFiscalSetupError(error)
+}
+
 export async function loadFiscalSifInstallations(tenantId: string): Promise<FiscalSifInstallation[]> {
   if (!supabase) throw new Error('Supabase no está configurado.')
   const { data, error } = await supabase.from('fiscal_sif_installations')
