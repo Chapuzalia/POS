@@ -16,7 +16,7 @@ const inputClass = '!h-11 !w-full !rounded-[10px] !border !border-transparent !b
 export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Props) {
   const canEdit = tenantContext.role === 'owner'
   const [settings, setSettings] = useState<FiscalPosSettings>({
-    tenant_id: tenantContext.tenantId, bridge_url: '', aeat_environment: 'production', producer_name: '', producer_nif: '', system_id: '', system_version: '',
+    tenant_id: tenantContext.tenantId, bridge_url: '', aeat_environment: 'production', print_ticket_qr: true, producer_name: '', producer_nif: '', system_id: '', system_version: '',
   })
   const [exists, setExists] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -29,7 +29,7 @@ export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Prop
       setLoadError(null)
     } catch (error) {
       setExists(false)
-      setSettings({ tenant_id: tenantContext.tenantId, bridge_url: '', aeat_environment: 'production', producer_name: '', producer_nif: '', system_id: '', system_version: '' })
+      setSettings({ tenant_id: tenantContext.tenantId, bridge_url: '', aeat_environment: 'production', print_ticket_qr: true, producer_name: '', producer_nif: '', system_id: '', system_version: '' })
       setLoadError(error instanceof Error ? error.message : 'No se pudo cargar la configuración fiscal.')
     }
   }, [tenantContext.tenantId])
@@ -71,7 +71,10 @@ export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Prop
       {loadError ? <p role="status" className="!m-0 !rounded-xl !bg-[var(--crm-blue-soft)] !px-4 !py-3 !text-xs !font-semibold !text-[var(--crm-blue)]">{loadError}</p> : null}
       <div className="!grid !grid-cols-1 !gap-4 lg:!grid-cols-2">
         <Field label="URL HTTPS del puente VPS (opcional)"><UiInput className={inputClass} disabled={disabled || !canEdit} onChange={(event) => update('bridge_url', event.target.value)} placeholder="https://fiscal.ejemplo.es/" type="url" value={settings.bridge_url} /></Field>
-        <div className="!flex !items-start !rounded-xl !bg-[var(--crm-surface-soft)] !px-3.5 !py-3"><UiCheckbox checked={settings.aeat_environment === 'test'} disabled={disabled || !canEdit} onChange={(checked) => update('aeat_environment', checked ? 'test' : 'production')}>Usar URL de pruebas de AEAT para el QR</UiCheckbox></div>
+        <div className="!flex !flex-col !items-start !gap-3 !rounded-xl !bg-[var(--crm-surface-soft)] !px-3.5 !py-3">
+          <UiCheckbox checked={settings.aeat_environment === 'test'} disabled={disabled || !canEdit} onChange={(checked) => update('aeat_environment', checked ? 'test' : 'production')}>Usar URL de pruebas de AEAT para el QR</UiCheckbox>
+          <UiCheckbox checked={settings.print_ticket_qr} disabled={disabled || !canEdit} onChange={(checked) => update('print_ticket_qr', checked)}>Imprimir código QR en el ticket</UiCheckbox>
+        </div>
         <Field label="Razón social del productor SIF"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={120} onChange={(event) => update('producer_name', event.target.value)} required value={settings.producer_name} /></Field>
         <Field label="NIF del productor"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={9} onChange={(event) => update('producer_nif', event.target.value)} required value={settings.producer_nif} /></Field>
         <Field label="ID de sistema (2 caracteres)"><UiInput className={inputClass} disabled={disabled || !canEdit} maxLength={2} onChange={(event) => update('system_id', event.target.value)} required value={settings.system_id} /></Field>

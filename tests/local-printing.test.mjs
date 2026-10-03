@@ -20,7 +20,7 @@ import {
   getMovedRestaurantPrintLines,
   getRestaurantPrintSubtotal,
 } from '../src/features/restaurant/services/restaurantPrintPayload.ts'
-import { createCompiledHookRunner } from './helpers/component-harness.mjs'
+import { compileComponent, createCompiledHookRunner } from './helpers/component-harness.mjs'
 import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
 
 const layout80 = { columns: 48, paperWidth: 80, characterSet: 'CP858' }
@@ -627,6 +627,60 @@ test('la factura VERI*FACTU fuerza QR al principio, corrección M y leyenda aunq
   assert.equal(firstVisible.type, 'qr')
   assert.deepEqual(qr, { type: 'qr', data: verifactuUrl, size: 6, errorCorrection: 'M' })
   assert.ok(payload.elements.some((element) => element.type === 'text' && element.value === 'VERI*FACTU'))
+})
+
+test('desactivar el QR solo lo elimina de la impresión, incluidas copias y rectificativas', () => {
+  const issued = completeInvoiceSale()
+  issued.localFiscal = {
+    recordId: 'record', series: 'R', number: 4, issuedAt: issued.sale.createdAt,
+    documentKind: 'complete', issuerName: 'Emisor', issuerNif: 'B12345678', issuerAddress: '',
+    verifactuLegend: true,
+    rectifiedInvoice: { series: 'S', number: 3, issuedAt: issued.sale.createdAt },
+  }
+  const snapshot = structuredClone(issued)
+  for (const isReprint of [false, true]) {
+    const options = { sale: issued, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint }
+    const withQr = mapSaleToPrintRequest(options)
+    const withoutQr = mapSaleToPrintRequest({ ...options, printQr: false })
+    assert.equal(withQr.elements.filter((element) => element.type === 'qr').length, 1)
+    assert.equal(withoutQr.elements.filter((element) => element.type === 'qr').length, 0)
+    assert.equal(withoutQr.requestId, withQr.requestId)
+    assert.deepEqual(withoutQr.options, withQr.options)
+    const text = withoutQr.lines.join('\n')
+    assert.match(text, /VERI\*FACTU/)
+    assert.match(text, /FACTURA RECTIFICATIVA/)
+    assert.match(text, /S\/3/)
+    assert.match(text, /16,00 €/)
+    if (isReprint) assert.match(text, /COPIA/)
+  }
+  assert.deepEqual(issued, snapshot)
+})
+
+test('la impresión consulta la preferencia del tenant y conserva el QR si la configuración no está disponible', async () => {
+  const source = readFileSync(new URL('../src/features/local-printing/services/printCompletedSale.ts', import.meta.url), 'utf8')
+  const printed = []
+  const tenants = []
+  let setting = false
+  let unavailable = false
+  const { printCompletedSale } = compileComponent(source, {
+    '../../print-templates/service.ts': { resolvePrintTemplate: async () => ({ definition: getSafeDefaultPrintTemplate('invoice') }) },
+    '../../fiscal/local/settings.ts': { loadFiscalPosSettings: async (tenantId) => {
+      tenants.push(tenantId)
+      if (unavailable) throw new Error('Backend unavailable')
+      return { print_ticket_qr: setting }
+    } },
+    '../store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({ preferences: {}, printTicket: (payload) => { printed.push(payload); return payload } }) } },
+    './selectedPrinterLayout': { loadSelectedPrinterLayout: async () => ({ printer: { id: 'main' }, layout: layout80 }) },
+    './ticketPrintMapper': { mapSaleToPrintRequest },
+  })
+  const input = { sale: completeInvoiceSale(), establishment: { name: 'MESS' }, context: { tenantId: 'tenant', venueId: 'mess' } }
+  await printCompletedSale(input)
+  setting = true
+  await printCompletedSale({ ...input, isReprint: true })
+  unavailable = true
+  await printCompletedSale(input)
+  assert.deepEqual(tenants, ['tenant', 'tenant', 'tenant'])
+  assert.deepEqual(printed.map((payload) => payload.elements.some((element) => element.type === 'qr')), [false, true, true])
 })
 
 test('una plantilla de venta solo con texto libre no oculta los datos obligatorios ni desplaza el QR', () => {

@@ -7,6 +7,7 @@ const base = await readFile(new URL('../supabase/migrations/20260928120000_prepa
 const settings = await readFile(new URL('../supabase/migrations/20260928160000_fiscal_pos_bridge_settings.sql', import.meta.url), 'utf8')
 const optionalBridge = await readFile(new URL('../supabase/migrations/20260929150000_allow_local_fiscal_without_bridge.sql', import.meta.url), 'utf8')
 const aeatEnvironment = await readFile(new URL('../supabase/migrations/20260929180000_add_aeat_environment_setting.sql', import.meta.url), 'utf8')
+const ticketQr = await readFile(new URL('../supabase/migrations/20261003140000_add_ticket_qr_print_setting.sql', import.meta.url), 'utf8')
 
 test('CRM bridge metadata is scoped by tenant and rejects non-HTTPS origins', async (t) => {
   const db = new PGlite()
@@ -31,6 +32,7 @@ test('CRM bridge metadata is scoped by tenant and rejects non-HTTPS origins', as
   await db.exec(settings)
   await db.exec(optionalBridge)
   await db.exec(aeatEnvironment)
+  await db.exec(ticketQr)
   const row = "('11111111-1111-4111-8111-111111111111', 'https://fiscal.example.test/', 'Productor SL', 'B12345678', 'TK', '1.0')"
   await db.exec(`insert into public.fiscal_pos_bridge_settings
     (tenant_id, bridge_url, producer_name, producer_nif, system_id, system_version) values ${row};`)
@@ -40,6 +42,12 @@ test('CRM bridge metadata is scoped by tenant and rejects non-HTTPS origins', as
     where tenant_id = '11111111-1111-4111-8111-111111111111';`)
   const testEnvironment = await db.query('select aeat_environment from public.fiscal_pos_bridge_settings')
   assert.deepEqual(testEnvironment.rows, [{ aeat_environment: 'test' }])
+  const defaultQr = await db.query('select print_ticket_qr from public.fiscal_pos_bridge_settings')
+  assert.deepEqual(defaultQr.rows, [{ print_ticket_qr: true }])
+  await db.exec(`update public.fiscal_pos_bridge_settings set print_ticket_qr = false
+    where tenant_id = '11111111-1111-4111-8111-111111111111';`)
+  const disabledQr = await db.query('select print_ticket_qr, aeat_environment from public.fiscal_pos_bridge_settings')
+  assert.deepEqual(disabledQr.rows, [{ print_ticket_qr: false, aeat_environment: 'test' }])
   await assert.rejects(db.exec(`update public.fiscal_pos_bridge_settings set aeat_environment = 'sandbox'
     where tenant_id = '11111111-1111-4111-8111-111111111111';`), /check constraint/i)
   await assert.rejects(db.exec(`insert into public.fiscal_pos_bridge_settings
