@@ -37,7 +37,7 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
     let active = true
     let closing = false
     let leaseRequestInFlight = false
-    let idleTimeoutId: ReturnType<typeof window.setTimeout> | null = null
+    let idleTimeoutId: number | null = null
 
     const close = async (message: string, leaseBlocked: boolean) => {
       if (!active || closing) return

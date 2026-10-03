@@ -15,7 +15,7 @@ export function useReservationsRealtime({ context, enabled, isOnline, onRefresh 
 
   useEffect(() => {
     if (!context || !enabled || !isOnline) return undefined
-    let timer: ReturnType<typeof window.setTimeout> | null = null
+    let timer: number | null = null
     const schedule = () => {
       if (timer) window.clearTimeout(timer)
       timer = window.setTimeout(() => void refreshRef.current(), 250)
