@@ -4,7 +4,7 @@ import { startFiscalEconomicSyncWhileOpen } from './economicSync.ts'
 import { fiscalBridgeAccessToken } from './installation.ts'
 import { listLocalFiscalScopes } from './localLedger.ts'
 import { localFiscalMode } from './mode.ts'
-import { loadFiscalPosSettings } from './settings.ts'
+import { loadFiscalPosSettings, subscribeFiscalPosSettings } from './settings.ts'
 import { startFiscalSyncWhileOpen } from './sync.ts'
 
 /** Synchronization is independent of permission to issue, including retired installations. */
@@ -41,11 +41,13 @@ export function FiscalQueueNotice({ context, cashSession }: { context: TenantCon
       finally { running = false }
     }
     void refresh()
+    const stopSettings = subscribeFiscalPosSettings(context.tenantId, () => void refresh())
     const timer = window.setInterval(() => void refresh(), 15000)
     window.addEventListener('online', refresh)
     document.addEventListener('visibilitychange', refresh)
     return () => {
       active = false; window.clearInterval(timer)
+      stopSettings()
       window.removeEventListener('online', refresh)
       document.removeEventListener('visibilitychange', refresh)
       for (const stop of workers.values()) stop()

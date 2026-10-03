@@ -78,6 +78,10 @@ export function useCashSession(options: Options) {
   const [movements, setMovements] = useState<CashMovement[]>([])
   const [tickets, setTicketsState] = useState<SessionTicketRecord[]>([])
   const ticketsRef = useRef<SessionTicketRecord[]>([])
+  const saleRefreshGenerationRef = useRef(0)
+  const saleRefreshScopeRef = useRef('')
+  const saleRefreshScope = `${options.context?.tenantId}:${options.context?.venueId}:${options.context?.deviceId}:${options.context?.userId}:${session?.id}`
+  saleRefreshScopeRef.current = saleRefreshScope
   const [closeModalOpen, setCloseModalOpen] = useState(false)
   const [openOrderCount, setOpenOrderCount] = useState(0)
   const [movementModalOpen, setMovementModalOpen] = useState(false)
@@ -166,7 +170,8 @@ export function useCashSession(options: Options) {
     printOptions: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean } = {},
   ) => {
     if (!options.context) return
-    if (localFiscalMode() === 'production') {
+    const printState = usePrintAgentStore.getState()
+    if (localFiscalMode() === 'production' && printState.token && printState.selectedPrinterId) {
       const installation = await loadFiscalInstallation(options.context, { cashRegisterId: payload.ticket.cashRegisterId })
       const entry = await findLocalFiscalEntryByTicket(installation, payload.ticket.id)
       if (!entry) {
@@ -258,11 +263,13 @@ export function useCashSession(options: Options) {
 
   const refreshConfirmedSale = useCallback(async (ticketId: string, missingTicketTitle: string, shouldPrint = true) => {
     if (!options.context || !session) return
+    const generation = ++saleRefreshGenerationRef.current
     const [nextLedger, remoteTicket] = await Promise.all([
       loadSalesLedgerFromSupabase(options.context, session.id),
       loadSessionTicketFromSupabase(options.context, session.id, ticketId),
     ])
-    persistLedger(nextLedger)
+    if (saleRefreshScopeRef.current !== saleRefreshScope) return
+    if (generation === saleRefreshGenerationRef.current) persistLedger(nextLedger)
     const confirmedTicket = remoteTicket ? mergeRemotePrintStates([remoteTicket])[0] : null
     if (confirmedTicket) {
       persistTickets([
@@ -275,7 +282,7 @@ export function useCashSession(options: Options) {
     }
     if (confirmedTicket && shouldPrint) void printSale(confirmedTicket.payload)
     else if (!confirmedTicket) sileo.warning({ title: missingTicketTitle, description: 'No se ha podido recuperar el ticket confirmado.' })
-  }, [mergeRemotePrintStates, options.context, persistLedger, persistTickets, printSale, session])
+  }, [mergeRemotePrintStates, options.context, persistLedger, persistTickets, printSale, session, saleRefreshScope])
 
   const refreshLedger = useCallback(async () => {
     if (!cashContext || !session || !isOnline) return ledger

@@ -1,3 +1,5 @@
+import { applySessionLayout } from './layout-service'
+import type { SessionTableLayout } from './types'
 import { UserFacingError } from '../../utils/UserFacingError.ts'
 import { supabase } from '../../lib/supabase'
 import { quantityAmountCents } from '../../lib/format'
@@ -40,15 +42,22 @@ const mapLine = (row: OrderLineRow): RestaurantOrderLine => {
   return { id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, orderId: row.order_id, productId: row.product_id, variantId: row.variant_id, productName: row.product_name, variantName: row.variant_name, unitPriceCents: row.unit_price_cents, quantity: row.quantity, servedQuantity: Number(row.served_quantity), fullyServedAt: row.fully_served_at, modifiers: selection.modifiers, components: row.components?.length ? row.components : selection.components, catalogSnapshot: normalizeCatalogSnapshot(row.catalog_snapshot, { productId: row.product_id, productName: row.product_name, variantId: row.variant_id, variantName: row.variant_name, basePriceCents: row.unit_price_cents }), mixerProductId: selection.mixerProductId, mixer: selection.mixer, note: row.note, createdAt: row.created_at, updatedAt: row.updated_at }
 }
 
+const venueConfig = new Map<string, { enabled: boolean; expiresAt: number }>()
+
 export async function loadVenueTablesEnabled(context: TenantContext, venueId = context.venueId) {
+  const key = context.tenantId + ':' + venueId + ':' + context.userId
+  const cached = venueConfig.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.enabled
   const { data, error } = await requireSupabase().from('venues').select('tables_enabled').eq('tenant_id', context.tenantId).eq('id', venueId).single<{ tables_enabled: boolean }>()
   if (error) throw error
+  venueConfig.set(key, { enabled: data.tables_enabled, expiresAt: Date.now() + 60_000 })
   return data.tables_enabled
 }
 
 export async function setVenueTablesEnabled(venueId: string, enabled: boolean) {
   const { data, error } = await requireSupabase().rpc('set_venue_tables_enabled', { p_venue_id: venueId, p_enabled: enabled })
   if (error) throw error
+  venueConfig.clear()
   return Boolean(data)
 }
 
@@ -70,25 +79,36 @@ export async function loadRestaurantTables(context: TenantContext, venueId = con
 
 export async function loadRestaurantMap(context: TenantContext, cashSessionId?: string): Promise<RestaurantMap> {
   const client = requireSupabase()
-  const { data: venue, error: venueError } = await client.from('venues').select('timezone').eq('tenant_id', context.tenantId).eq('id', context.venueId).single<{ timezone: string }>()
-  if (venueError) throw venueError
-  const reservationRange = getDateRange(localDateKey(new Date(), venue.timezone), venue.timezone)
-  let tablesQuery = client.from('restaurant_tables').select(tableColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('is_active', true).order('sort_order')
-  tablesQuery = cashSessionId
-    ? tablesQuery.or(`cash_session_id.is.null,cash_session_id.eq.${cashSessionId}`)
-    : tablesQuery.is('cash_session_id', null)
-  const [loadedAreas, tablesResult, linksResult, ordersResult, equalSplitsResult, reservationsResult] = await Promise.all([
-    loadDiningAreas(context), tablesQuery,
-    client.from('order_tables').select('order_id, order_group_id, table_id, joined_at, released_at').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).is('released_at', null),
-    client.from('orders').select(orderColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).in('status', ['open', 'carried_forward']),
-    client.from('restaurant_order_equal_splits').select('order_group_id, paid_cents').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'open'),
-    client.from('reservation_tables').select('table_id, reservations!inner(id, customer_name, customer_phone, party_size, starts_at, ends_at, status)').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).in('reservations.status', ['confirmed', 'arrived', 'seated']).gte('reservations.starts_at', reservationRange.from).lt('reservations.starts_at', reservationRange.to).gt('reservations.ends_at', new Date().toISOString()),
-  ])
-  if (tablesResult.error) throw tablesResult.error
-  if (linksResult.error) throw linksResult.error
-  if (ordersResult.error) throw ordersResult.error
-  if (equalSplitsResult.error) throw equalSplitsResult.error
-  if (reservationsResult.error) throw reservationsResult.error
+  const response = await client.rpc('pos_restaurant_map', { p_tenant_id: context.tenantId, p_venue_id: context.venueId, p_cash_session_id: cashSessionId ?? null, p_include_production: hasTenantCapability(context, 'production') })
+  if (response.error && !['PGRST202','42883'].includes(response.error.code)) throw response.error
+  const snapshot = response.error ? null : response.data as { areas: AreaRow[]; tables: TableRow[]; orders: OrderRow[]; lines: OrderLineRow[]; links: OrderTableRow[]; splits: Array<{ order_group_id: string; paid_cents: number }>; reservations: ReservationMapRow[]; allocations: Array<{ current_order_line_id: string; ready_quantity: number }>; layout: SessionTableLayout | null }
+  let loadedAreas: DiningArea[] = snapshot ? snapshot.areas.map(mapArea) : []
+  let tablesResult = { data: (snapshot?.tables ?? []) as NonNullable<typeof snapshot>['tables'] | null, error: null as unknown }
+  let linksResult = { data: (snapshot?.links ?? []) as NonNullable<typeof snapshot>['links'] | null, error: null as unknown }
+  let ordersResult = { data: (snapshot?.orders ?? []) as NonNullable<typeof snapshot>['orders'] | null, error: null as unknown }
+  let equalSplitsResult = { data: (snapshot?.splits ?? []) as NonNullable<typeof snapshot>['splits'] | null, error: null as unknown }
+  let reservationsResult = { data: (snapshot?.reservations ?? []) as NonNullable<typeof snapshot>['reservations'] | null, error: null as unknown }
+  if (!snapshot) {
+    const { data: venue, error: venueError } = await client.from('venues').select('timezone').eq('tenant_id', context.tenantId).eq('id', context.venueId).single<{ timezone: string }>()
+    if (venueError) throw venueError
+    const reservationRange = getDateRange(localDateKey(new Date(), venue.timezone), venue.timezone)
+    let tablesQuery = client.from('restaurant_tables').select(tableColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('is_active', true).order('sort_order')
+    tablesQuery = cashSessionId
+      ? tablesQuery.or(`cash_session_id.is.null,cash_session_id.eq.${cashSessionId}`)
+      : tablesQuery.is('cash_session_id', null)
+    ;[loadedAreas, tablesResult, linksResult, ordersResult, equalSplitsResult, reservationsResult] = await Promise.all([
+      loadDiningAreas(context), tablesQuery,
+      client.from('order_tables').select('order_id, order_group_id, table_id, joined_at, released_at').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).is('released_at', null),
+      client.from('orders').select(orderColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).in('status', ['open', 'carried_forward']),
+      client.from('restaurant_order_equal_splits').select('order_group_id, paid_cents').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'open'),
+      client.from('reservation_tables').select('table_id, reservations!inner(id, customer_name, customer_phone, party_size, starts_at, ends_at, status)').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).in('reservations.status', ['confirmed', 'arrived', 'seated']).gte('reservations.starts_at', reservationRange.from).lt('reservations.starts_at', reservationRange.to).gt('reservations.ends_at', new Date().toISOString()),
+    ])
+    if (tablesResult.error) throw tablesResult.error
+    if (linksResult.error) throw linksResult.error
+    if (ordersResult.error) throw ordersResult.error
+    if (equalSplitsResult.error) throw equalSplitsResult.error
+    if (reservationsResult.error) throw reservationsResult.error
+  }
   const tables = ((tablesResult.data ?? []) as TableRow[]).map(mapTable)
   const hasVirtualArea = Boolean(cashSessionId && tables.some((table) => table.areaId === `virtual:${cashSessionId}`))
   const virtualArea: DiningArea | null = hasVirtualArea ? {
@@ -99,14 +119,14 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
   const areas = virtualArea ? [...loadedAreas, virtualArea] : loadedAreas
   const links = (linksResult.data ?? []) as OrderTableRow[]
   const orders = ((ordersResult.data ?? []) as OrderRow[]).map(mapOrder)
-  let lines: RestaurantOrderLine[] = []
-  if (orders.length) {
+  let lines: RestaurantOrderLine[] = snapshot ? snapshot.lines.map(mapLine) : []
+  if (orders.length && !snapshot) {
     const { data, error } = await client.from('order_lines').select(lineColumns).in('order_id', orders.map((order) => order.id))
     if (error) throw error
     lines = ((data ?? []) as OrderLineRow[]).map(mapLine)
   }
   const readyByLine = new Map<string, number>()
-  if (hasTenantCapability(context, 'production') && lines.length) {
+  if (!snapshot && hasTenantCapability(context, 'production') && lines.length) {
     const { data, error } = await client.from('production_line_allocations')
       .select('current_order_line_id, ready_quantity')
       .in('current_order_line_id', lines.map((line) => line.id))
@@ -115,6 +135,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
       readyByLine.set(allocation.current_order_line_id, (readyByLine.get(allocation.current_order_line_id) ?? 0) + Number(allocation.ready_quantity))
     })
   }
+  for (const allocation of snapshot?.allocations ?? []) readyByLine.set(allocation.current_order_line_id, (readyByLine.get(allocation.current_order_line_id) ?? 0) + Number(allocation.ready_quantity))
   const orderByGroup = new Map<string, RestaurantOrder[]>()
   orders.forEach((order) => orderByGroup.set(order.orderGroupId, [...(orderByGroup.get(order.orderGroupId) ?? []), order]))
   orderByGroup.forEach((groupOrders) => groupOrders.sort((a, b) => a.splitSequence - b.splitSequence))
@@ -150,11 +171,30 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
     const tableReservations = reservationsByTable.get(table.id) ?? []
     return { ...table, status: order ? 'occupied' : 'free', orderId: order?.id ?? null, orderOpenedAt: order?.openedAt ?? null, guestCount: order?.guestCount ?? null, totalCents: groupId ? Math.max(0, (totals.get(groupId) ?? 0) - (paidCents.get(groupId) ?? 0)) : 0, pendingUnits: groupId ? (pendingUnits.get(groupId) ?? 0) : 0, readyUnits: groupId ? (readyUnits.get(groupId) ?? 0) : 0, groupTableIds: groupId ? (tableIdsByGroup.get(groupId) ?? []) : [], nextReservation: tableReservations[0] ?? null, reservationCount: tableReservations.length }
   })
-  return { areas, tables: mappedTables }
+  const result = { areas, tables: mappedTables }
+  return snapshot?.layout ? applySessionLayout(result, snapshot.layout) : result
 }
 
+const orderReads = new Map<string, Promise<RestaurantOrderDetail>>()
 export async function loadRestaurantOrder(context: TenantContext, orderId: string): Promise<RestaurantOrderDetail> {
+  const key = [context.tenantId, context.venueId, context.userId, context.deviceId, orderId].join(':')
+  const current = orderReads.get(key)
+  if (current) return current
+  const pending = fetchRestaurantOrder(context, orderId)
+  orderReads.set(key, pending)
+  try { return await pending } finally { if (orderReads.get(key) === pending) orderReads.delete(key) }
+}
+
+async function fetchRestaurantOrder(context: TenantContext, orderId: string): Promise<RestaurantOrderDetail> {
   const client = requireSupabase()
+  const response = await client.rpc('pos_restaurant_order', { p_tenant_id: context.tenantId, p_venue_id: context.venueId, p_order_id: orderId })
+  if (!response.error) {
+    const value = response.data as { order: OrderRow; lines: OrderLineRow[]; tables: TableRow[]; registerName: string | null } | null
+    if (!value) throw new Error('La comanda no está disponible en este local.')
+    const lines = value.lines.map(mapLine)
+    return { order: mapOrder(value.order), lines, tables: value.tables.map(mapTable), cashRegisterName: value.registerName ?? 'Caja', totalCents: lines.reduce((sum, line) => sum + quantityAmountCents(line.unitPriceCents, line.quantity), 0) }
+  }
+  if (!['PGRST202','42883'].includes(response.error.code)) throw response.error
   const orderResult = await client.from('orders').select(orderColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('id', orderId).single<OrderRow>()
   if (orderResult.error) throw orderResult.error
   const [linesResult, linksResult] = await Promise.all([
@@ -523,6 +563,10 @@ export function subscribeToRestaurantMap(
 ) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`restaurant-map:${context.tenantId}:${context.venueId}`)
+  channel.on('postgres_changes', { event: '*', schema: 'public', table: 'venues', filter: `id=eq.${context.venueId}` }, () => {
+    venueConfig.clear()
+    onChange()
+  })
   ;(['order_groups', 'orders', 'order_tables', 'order_lines', 'restaurant_tables', 'restaurant_order_equal_splits', 'restaurant_order_equal_split_payments', 'reservations', 'reservation_tables', 'production_line_allocations'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
   channel.subscribe((status, error) => onStatus?.(status, error))
   return () => { void supabase?.removeChannel(channel) }

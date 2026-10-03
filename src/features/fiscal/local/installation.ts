@@ -5,8 +5,8 @@ import type { FiscalSystem } from './canonical.ts'
 import { createBridgeClient } from './bridgeClient.ts'
 import { assertFiscalLease, createLocalFallbackLease, type FiscalLease } from './clock.ts'
 import { isFiscalTransportUnavailable } from './availability.ts'
-import { loadFiscalPosSettings, type FiscalPosSettings } from './settings.ts'
-import { FiscalIdentityMissingError, readFiscalIdentity, persistFiscalIdentity, fiscalActivationRequest, assertFiscalLedgerValid, clearFiscalActivationRequest } from './localIdentity.ts'
+import { loadFiscalPosSettings, rememberFiscalPosSettings, type FiscalPosSettings } from './settings.ts'
+import { FiscalIdentityMissingError, readFiscalIdentity, persistFiscalIdentity, fiscalActivationRequest, assertFiscalLedgerHeadValid, clearFiscalActivationRequest } from './localIdentity.ts'
 import { recoverServerConfirmedFiscalChain } from './serverRecovery.ts'
 import { UserFacingError } from '../../../utils/UserFacingError.ts'
 
@@ -27,6 +27,7 @@ export type FiscalInstallation = {
   venueCode: string; registerCode: string; installationCode: string; timezone: string
   installationSequence: number; seriesVersion: 1 | 2
   system: FiscalSystem; bridgeUrl: string | null; aeatEnvironment: 'test' | 'production'
+  preparedServerHead?: { record: unknown }
 }
 
 const leases = new Map<string, FiscalLease>()
@@ -44,12 +45,46 @@ export function fiscalIdentityKey(context: TenantContext, cashSession: Pick<Cash
   return `tickit:fiscal-installation:v1:${context.tenantId}:${context.venueId}:${cashSession.cashRegisterId}:${context.deviceId}`
 }
 
+const installationLoads = new Map<string, Promise<FiscalInstallation>>()
 export async function loadFiscalInstallation(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>): Promise<FiscalInstallation> {
+  const key = fiscalIdentityKey(context, cashSession) + ':' + context.userId
+  const current = installationLoads.get(key)
+  if (current) return current
+  const pending = fetchFiscalInstallation(context, cashSession)
+  installationLoads.set(key, pending)
+  try { return await pending } finally { if (installationLoads.get(key) === pending) installationLoads.delete(key) }
+}
+
+async function fetchFiscalInstallation(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>): Promise<FiscalInstallation> {
   const key = fiscalIdentityKey(context, cashSession)
   const cached = snapshotSchema.parse(await readRequiredIdentity(key))
-  const snapshot = await fetchFiscalSnapshot(context, cashSession, cached.installation.id, cached)
-  const installation = await installationFromSnapshot(context, cashSession, snapshot)
-  await assertFiscalLedgerValid(fiscalLedgerScope(installation), context.deviceId, installation.seriesVersion === 1, installation.installationNumber)
+  if (supabase) {
+    const response = await supabase.rpc('pos_fiscal_preparation', {
+      p_tenant_id: context.tenantId, p_venue_id: context.venueId, p_register_id: cashSession.cashRegisterId,
+      p_device_id: context.deviceId, p_installation_id: cached.installation.id,
+    })
+    if (!response.error) {
+      if (!response.data) throw new UserFacingError('La instalación fiscal fue retirada o su configuración no está disponible. Se bloquea la emisión.')
+      const value = response.data as { installation: unknown; subject: unknown; settings: unknown; head: unknown }
+      const snapshot = snapshotSchema.parse(value)
+      if (snapshot.installation.tenant_id !== context.tenantId || snapshot.installation.venue_id !== context.venueId
+        || snapshot.installation.device_id !== context.deviceId || snapshot.installation.cash_register_id !== cashSession.cashRegisterId
+        || snapshot.subject.id !== snapshot.installation.fiscal_subject_id || snapshot.subject.tenant_id !== context.tenantId) throw new Error('La instalación fiscal no pertenece a esta caja y dispositivo.')
+      const settings = rememberFiscalPosSettings(value.settings, context.tenantId)
+      await assertFiscalLedgerHeadValid(`${context.tenantId}:${snapshot.installation.fiscal_subject_id}:${snapshot.installation.id}`, context.deviceId, snapshot.installation.series_version === 1, snapshot.installation.installation_number)
+      const installation = await installationFromSnapshot(context, cashSession, snapshot, settings)
+      installation.preparedServerHead = { record: value.head }
+      return installation
+    }
+    if (!['PGRST202','42883'].includes(response.error.code) && !isFiscalTransportUnavailable(response.error)) throw response.error
+  }
+  const [snapshot, settings] = await Promise.all([
+    fetchFiscalSnapshot(context, cashSession, cached.installation.id, cached),
+    loadFiscalPosSettings(context.tenantId),
+    assertFiscalLedgerHeadValid(`${context.tenantId}:${cached.installation.fiscal_subject_id}:${cached.installation.id}`,
+      context.deviceId, cached.installation.series_version === 1, cached.installation.installation_number),
+  ])
+  const installation = await installationFromSnapshot(context, cashSession, snapshot, settings)
   return installation
 }
 
@@ -91,8 +126,9 @@ async function fetchFiscalSnapshot(context: TenantContext, cashSession: Pick<Cas
   return { installation, subject }
 }
 
-async function installationFromSnapshot(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, { installation, subject }: Snapshot): Promise<FiscalInstallation> {
-  const settings = await loadFiscalPosSettings(context.tenantId)
+async function installationFromSnapshot(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, { installation, subject }: Snapshot,
+  settings?: FiscalPosSettings): Promise<FiscalInstallation> {
+  settings ??= await loadFiscalPosSettings(context.tenantId)
   bridgeUrls.set(context.tenantId, settings.bridge_url || null)
   return {
     tenantId: context.tenantId, fiscalSubjectId: subject.id, issuerName: subject.legal_name, issuerNif: subject.nif,
@@ -141,7 +177,7 @@ export async function activateFiscalInstallation(context: TenantContext, cashSes
     // A successful server read is mandatory here, including when recovering a completed request.
     await recoverServerConfirmedFiscalChain(installation)
     await persistFiscalIdentity(key, snapshot, fiscalLedgerScope(installation), context.deviceId)
-    await assertFiscalLedgerValid(fiscalLedgerScope(installation), context.deviceId, installation.seriesVersion === 1, installation.installationNumber)
+    await assertFiscalLedgerHeadValid(fiscalLedgerScope(installation), context.deviceId, installation.seriesVersion === 1, installation.installationNumber)
     return installation
   })
 }

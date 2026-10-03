@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode } from 'react'
 import type { CashSession, TenantContext } from '../../../types'
 import { AppModal } from '../../../components/ui/AppModal'
@@ -21,6 +21,8 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
   const [busy, setBusy] = useState(true)
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
+  const scopeRef = useRef({ context, cashSession })
+  scopeRef.current = { context, cashSession }
 
   useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false) }, [busy, onBusyChange])
 
@@ -48,6 +50,7 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
   useEffect(() => {
     let alive = true
     async function check() {
+      const { context, cashSession } = scopeRef.current
       setBusy(true); setError(null); setPreviewReady(false)
       if (!cashSession) { setBusy(false); return }
       if (localFiscalMode() === 'disabled') { if (alive) { setReady(true); setBusy(false) }; return }
@@ -69,7 +72,7 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
     }
     void check()
     return () => { alive = false }
-  }, [context, cashSession, attempt])
+  }, [context.tenantId, context.venueId, context.deviceId, context.userId, cashSession?.id, cashSession?.cashRegisterId, attempt])
 
   async function activate(recover: boolean) {
     if (!cashSession) return

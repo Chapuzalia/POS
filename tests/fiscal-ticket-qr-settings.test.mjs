@@ -34,7 +34,8 @@ function harness(row = settings) {
   }
   const service = compileComponent(source, { zod: { z }, '../../../lib/supabase.ts': { supabase } }, {
     URL,
-    window: { localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } },
+    CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail } },
+    window: { dispatchEvent() {}, localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } },
   })
   return { service, storage, filters, goOffline: () => { unavailable = true }, getSaved: () => saved }
 }

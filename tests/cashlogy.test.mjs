@@ -481,6 +481,7 @@ test('los servicios de cobro dividido entregan la identidad Cashlogy a la RPC id
     '../../lib/mixers': { splitLegacyMixerModifiers: () => ({ components: [], mixer: null, mixerProductId: null, modifiers: [] }) },
     '../catalog/services/catalogSnapshots': { normalizeCatalogSnapshot: () => null },
     './service-status': { getOrderPendingUnits: () => 0 },
+    './layout-service': { applySessionLayout: (map) => map },
     './order-line-payload': { buildCatalogOrderLinesPayload: () => [], buildRestaurantOrderLinesPayload: () => [] },
     './map-elements': { normalizeMapElements: (value) => value },
     '../reservations/domain/reservationAvailability': { getDateRange: () => ({}), localDateKey: () => '2026-09-12' },

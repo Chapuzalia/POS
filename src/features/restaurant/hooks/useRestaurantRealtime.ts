@@ -45,13 +45,32 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
   const loadedContextKeyRef = useRef<string | null>(null)
   const tablesEnabledRef = useRef(false)
   const wasOfflineRef = useRef(false)
+  const mapLoadsRef = useRef(new Map<string, { pending: Promise<RestaurantMap>; rerun: boolean }>())
   latestRef.current = options
 
   const loadCurrentMap = useCallback(async (activeContext: TenantContext, sessionId = options.activeCashSessionId) => {
-    const permanentMap = await loadRestaurantMap(activeContext, sessionId)
-    if (!sessionId) return { ...permanentMap, layoutRevision: 0 }
-    const layout = await loadSessionTableLayout(activeContext, sessionId)
-    return applySessionLayout(permanentMap, layout)
+    const key = `${activeContext.tenantId}:${activeContext.venueId}:${activeContext.deviceId}:${activeContext.userId}:${sessionId ?? ''}`
+    const current = mapLoadsRef.current.get(key)
+    if (current) {
+      // A mutation/Realtime event during a fetch needs a trailing fresh snapshot.
+      current.rerun = true
+      return current.pending
+    }
+    const load = { pending: Promise.resolve<RestaurantMap>({ areas: [], tables: [], layoutRevision: 0 }), rerun: false }
+    const pending = (async () => {
+      let nextMap: RestaurantMap
+      do {
+        load.rerun = false
+        const permanentMap = await loadRestaurantMap(activeContext, sessionId)
+        // The snapshot RPC includes layout. Older servers retain the existing fallback.
+        const currentLayout = sessionId && permanentMap.layoutRevision === undefined ? await loadSessionTableLayout(activeContext, sessionId) : null
+        nextMap = currentLayout ? applySessionLayout(permanentMap, currentLayout) : { ...permanentMap, layoutRevision: permanentMap.layoutRevision ?? 0 }
+      } while (load.rerun)
+      return nextMap
+    })()
+    load.pending = pending
+    mapLoadsRef.current.set(key, load)
+    try { return await pending } finally { if (mapLoadsRef.current.get(key) === load) mapLoadsRef.current.delete(key) }
   }, [options.activeCashSessionId])
 
   const refreshMap = useCallback(async () => {

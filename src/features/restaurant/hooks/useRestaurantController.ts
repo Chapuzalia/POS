@@ -17,7 +17,7 @@ import type {
 } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
-import { loadSessionTicketFromSupabase } from '../../../services/posService'
+import { loadTicketNumberFromSupabase } from '../../../services/posService'
 import {
   buildRestaurantPrintPayload,
   getEqualSplitPrintLines,
@@ -73,8 +73,9 @@ import {
 import type { CashlogyTransaction } from '../../local-printing/types'
 import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
 import { assertRealSaleAllowed, localFiscalMode } from '../../fiscal/local/mode.ts'
-import { issueRestaurantInvoice } from '../../fiscal/local/restaurantInvoice.ts'
-import { preflightFiscalInstallation } from '../../fiscal/local/posInvoice.ts'
+import { issueRestaurantInvoice, preflightRestaurantInvoice } from '../../fiscal/local/restaurantInvoice.ts'
+import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
+import { PRINT_AGENT_ENABLED } from '../../local-printing/constants/config'
 import { customerFiscalSnapshot } from '../../customers/customerValidation.ts'
 import { hasTenantCapability } from '../../platform/tenantFeatureAccess'
 import {
@@ -86,7 +87,9 @@ import {
 import type { OrderProductionState, ProductionSelection } from '../../production/types'
 
 async function loadTicketNumberForPrint(context: TenantContext, cashSession: CashSession, ticketId: string) {
-  return (await loadSessionTicketFromSupabase(context, cashSession.id, ticketId))?.ticketNumber
+  const printState = usePrintAgentStore.getState()
+  if (!PRINT_AGENT_ENABLED || !printState.token || !printState.selectedPrinterId) return undefined
+  return loadTicketNumberFromSupabase(context, cashSession.id, ticketId)
 }
 
 type PendingPayment = {
@@ -158,6 +161,9 @@ export function useRestaurantController(options: Options) {
   const onError = options.onError
   const reportError = onError
   const paymentLockRef = useRef(false)
+  const paymentScope = `${context?.tenantId}:${context?.venueId}:${context?.deviceId}:${context?.userId}:${cashSessionId}`
+  const paymentScopeRef = useRef(paymentScope)
+  paymentScopeRef.current = paymentScope
   const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
   const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null)
@@ -614,7 +620,9 @@ export function useRestaurantController(options: Options) {
         : calculateDiscountForLines(paymentLines.map((line) => ({
             productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
           })), effectiveDiscount).totalCents
-      if (localFiscalMode() !== 'disabled') await preflightFiscalInstallation(options.context, options.cashSession)
+      const fiscalSaleId = createId()
+      const fiscalInstallation = localFiscalMode() !== 'disabled'
+        ? await preflightRestaurantInvoice(options.context, options.cashSession, fiscalSaleId) : null
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
       const cashDrawerAlreadyRequested = requestEarlyCashDrawer({ requestId: `drawer:${equalSplit.id}:${createId()}`, payments: [{ method, amountCents }] })
       const production = localFiscalMode() !== 'disabled'
@@ -622,11 +630,11 @@ export function useRestaurantController(options: Options) {
         buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
           discount: effectiveDiscount, lines: paymentLines, paymentId: createId(), paymentMethod: method,
           receivedCents: cashlogy.receivedCents, changeCents: cashlogy.changeCents,
-          saleId: createId(), subtotalCents: getRestaurantPrintSubtotal(paymentLines), ticketId: createId(), totalCents: amountCents }),
+          saleId: fiscalSaleId, subtotalCents: getRestaurantPrintSubtotal(paymentLines), ticketId: createId(), totalCents: amountCents }),
         'equal_part', { splitId: equalSplit.id, method, receivedCents: cashlogy.receivedCents, allowPending,
           discount: withCalculationLines(discount, paymentLines), useDefaultDiscount,
           cashlogyRequestId: cashlogy.transaction?.requestId ?? null,
-          cashlogyTransactionId: cashlogy.transaction?.id ?? null }) : null
+          cashlogyTransactionId: cashlogy.transaction?.id ?? null }, fiscalInstallation) : null
       const result = production ? prepared!.result as PayRestaurantEqualPartResult
         : await payRestaurantEqualPart(equalSplit.id, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount, cashlogy.transaction)
       setEqualSplit(result.split)
@@ -657,8 +665,8 @@ export function useRestaurantController(options: Options) {
           ticketNumber,
           totalCents: result.paidAmountCents,
           fiscal,
-        }), { cashDrawerAlreadyRequested })
-        await refreshSales(result.ticketId, 'Pago completado sin imprimir', false)
+        }), { cashDrawerAlreadyRequested }).catch((error) => options.onError(getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentPrint' })))
+        void refreshSales(result.ticketId, 'Pago completado sin imprimir', false).catch((error) => options.onError(getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentRefresh' })))
         const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
         realtime.setMap(nextMap)
         if (result.completed) {
@@ -707,7 +715,9 @@ export function useRestaurantController(options: Options) {
       const amountCents = calculateDiscountForLines(paymentLines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), discount).totalCents
-      if (localFiscalMode() !== 'disabled') await preflightFiscalInstallation(options.context, options.cashSession)
+      const fiscalSaleId = createId()
+      const fiscalInstallation = localFiscalMode() !== 'disabled'
+        ? await preflightRestaurantInvoice(options.context, options.cashSession, fiscalSaleId) : null
       const cashlogy = await settlePayment(method, amountCents, receivedCents)
       const cashDrawerAlreadyRequested = requestEarlyCashDrawer({ requestId: `drawer:${saved.order.id}:${createId()}`, payments: [{ method, amountCents }] })
       const production = localFiscalMode() !== 'disabled'
@@ -715,13 +725,13 @@ export function useRestaurantController(options: Options) {
         buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
           discount, lines: paymentLines, paymentId: createId(), paymentMethod: method,
           receivedCents: cashlogy.receivedCents, changeCents: cashlogy.changeCents,
-          saleId: createId(), subtotalCents: getRestaurantPrintSubtotal(paymentLines), ticketId: createId(), totalCents: amountCents }),
+          saleId: fiscalSaleId, subtotalCents: getRestaurantPrintSubtotal(paymentLines), ticketId: createId(), totalCents: amountCents }),
         'selected_items', { orderId: saved.order.id, expectedRevision: saved.order.revision,
           moves: moves.map(move => ({ lineId: move.lineId, quantity: move.quantity })),
           method, receivedCents: cashlogy.receivedCents, allowPending,
           discount: withCalculationLines(discount, paymentLines),
           cashlogyRequestId: cashlogy.transaction?.requestId ?? null,
-          cashlogyTransactionId: cashlogy.transaction?.id ?? null }) : null
+          cashlogyTransactionId: cashlogy.transaction?.id ?? null }, fiscalInstallation) : null
       const result = production ? prepared!.result as PayRestaurantOrderItemsResult
         : await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), cashlogy.transaction)
       if (!result.requiresConfirmation) {
@@ -751,8 +761,8 @@ export function useRestaurantController(options: Options) {
           ticketNumber,
           totalCents: result.totalCents,
           fiscal,
-        }), { cashDrawerAlreadyRequested })
-        await refreshSales(result.ticketId, 'Cobro completado sin imprimir', false)
+        }), { cashDrawerAlreadyRequested }).catch((error) => options.onError(getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentPrint' })))
+        void refreshSales(result.ticketId, 'Cobro completado sin imprimir', false).catch((error) => options.onError(getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentRefresh' })))
         const [nextOrder, nextMap] = await Promise.all([
           cleanedAreaId ? Promise.resolve(null) : loadRestaurantOrder(options.context, saved.order.id),
           realtime.loadCurrentMap(options.context, options.cashSession.id),
@@ -878,7 +888,9 @@ export function useRestaurantController(options: Options) {
       const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), options.appliedDiscount).totalCents
-      if (localFiscalMode() !== 'disabled') await preflightFiscalInstallation(context, cashSession)
+      const fiscalSaleId = createId()
+      const fiscalInstallation = localFiscalMode() !== 'disabled'
+        ? await preflightRestaurantInvoice(context, cashSession, fiscalSaleId) : null
       const recoveredCashlogy = confirmedCashlogyTransaction ?? (forceWithPending ? pendingPayment?.cashlogyTransaction ?? null : null)
       const cashlogy = await settlePayment(method, amountCents, receivedCents, recoveredCashlogy)
       const cashDrawerAlreadyRequested = forceWithPending && pendingPayment?.cashDrawerAlreadyRequested === true
@@ -889,7 +901,7 @@ export function useRestaurantController(options: Options) {
         buildRestaurantPrintPayload({ cashSession, context, createdAt: nowIso(),
           discount: options.appliedDiscount, lines: saved.lines,
           paymentId: createId(), paymentMethod: method, receivedCents: cashlogy.receivedCents,
-          changeCents: cashlogy.changeCents, saleId: createId(),
+          changeCents: cashlogy.changeCents, saleId: fiscalSaleId,
           subtotalCents: getRestaurantPrintSubtotal(saved.lines), ticketId: createId(), totalCents: amountCents,
           invoice: invoiceCustomer ? { customerId: invoiceCustomer.id,
             customer: customerFiscalSnapshot(invoiceCustomer), series: null, number: null, issuedAt: null } : null }),
@@ -898,7 +910,7 @@ export function useRestaurantController(options: Options) {
           customerId: invoiceCustomer?.id ?? null,
           customerSnapshot: invoiceCustomer ? customerFiscalSnapshot(invoiceCustomer) : null,
           cashlogyRequestId: cashlogy.transaction?.requestId ?? null,
-          cashlogyTransactionId: cashlogy.transaction?.id ?? null }) : null
+          cashlogyTransactionId: cashlogy.transaction?.id ?? null }, fiscalInstallation) : null
       const result = production ? prepared!.result as Awaited<ReturnType<typeof closeRestaurantOrder>>
         : await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines), invoiceCustomer, cashlogy.transaction)
       if (result.requiresConfirmation) {
@@ -943,8 +955,8 @@ export function useRestaurantController(options: Options) {
 
       const refreshMapTask = (async () => {
         await cleanupVirtualRoomTable(saved, true)
-        const nextMap = await realtime.loadCurrentMap(context, cashSession.id)
-        realtime.setMap(nextMap)
+        // The committed result already updates these tables locally. Realtime
+        // reconciles other terminals; do not issue a second full-map refresh here.
       })()
       const refreshSalesTask = Promise.all([
         options.syncPendingEvents(),
@@ -979,18 +991,19 @@ export function useRestaurantController(options: Options) {
           invoice,
         }), { cashDrawerAlreadyRequested })
       })()
-      const tasks = await Promise.allSettled([refreshMapTask, refreshSalesTask, printTask])
-      const failures = tasks
-        .filter((task): task is PromiseRejectedResult => task.status === 'rejected')
-        .map((task) => getReadableError(task.reason, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
-      if (failures.length > 0) options.onError(failures.join(' '))
+      void Promise.allSettled([refreshMapTask, refreshSalesTask, printTask]).then((tasks) => {
+        const failures = tasks
+          .filter((task): task is PromiseRejectedResult => task.status === 'rejected')
+          .map((task) => getReadableError(task.reason, { operation: 'restaurant.action', cashSessionId: cashSession.id, operationId: saved.order.id, step: 'completePayment' }))
+        if (failures.length > 0 && paymentScopeRef.current === paymentScope) options.onError(failures.join(' '))
+      })
     } catch (error) {
       options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
     } finally {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, pendingPayment, realtime, refreshSales, settlePayment, invoiceOrderId])
+  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, paymentScope, pendingPayment, realtime, refreshSales, settlePayment, invoiceOrderId])
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false

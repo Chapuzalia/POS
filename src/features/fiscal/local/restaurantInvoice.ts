@@ -1,9 +1,14 @@
 import type { CashSession, SaleCreatedPayload, TenantContext } from '../../../types/index.ts'
 import { payRestaurantLocalFiscal } from '../../tables/service.ts'
-import { issuePosInvoice, printPayloadWithLocalFiscal } from './posInvoice.ts'
+import { issuePosInvoice, printPayloadWithLocalFiscal, preparedFiscalInstallation, preflightFiscalInstallation } from './posInvoice.ts'
+import type { PreparedFiscalInstallation } from './posInvoice.ts'
 import type { LocalFiscalEntry } from './localLedger.ts'
 
 type Action = 'close' | 'equal_part' | 'selected_items'
+
+export async function preflightRestaurantInvoice(context: TenantContext, session: CashSession, saleId: string): Promise<PreparedFiscalInstallation> {
+  return preparedFiscalInstallation(context, session, saleId, await preflightFiscalInstallation(context, session))
+}
 
 class ConfirmationRequired extends Error {
   readonly result: Record<string, unknown>
@@ -16,6 +21,7 @@ class ConfirmationRequired extends Error {
 export async function issueRestaurantInvoice(
   context: TenantContext, cashSession: CashSession, draft: SaleCreatedPayload,
   action: Action, params: Record<string, unknown>,
+  installation?: PreparedFiscalInstallation | null,
 ): Promise<{ result: Record<string, unknown>; entry: LocalFiscalEntry | null; payload: SaleCreatedPayload | null }> {
   let result: Record<string, unknown> | null = null
   let finalPayload: SaleCreatedPayload | null = null
@@ -43,7 +49,7 @@ export async function issueRestaurantInvoice(
       payment: draft.payment ? { ...draft.payment, id: paymentId || saleId, saleId } : null,
     }
     return finalPayload
-  }, 300000) } catch (error) {
+  }, 300000, installation) } catch (error) {
     if (error instanceof ConfirmationRequired) return { result: error.result, entry: null, payload: null }
     throw error
   }

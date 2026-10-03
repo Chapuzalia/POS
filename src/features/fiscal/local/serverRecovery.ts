@@ -2,7 +2,7 @@ import { z } from 'zod'
 import { supabase } from '../../../lib/supabase.ts'
 import type { BridgeRecord } from './bridgeClient.ts'
 import type { FiscalInstallation } from './installation.ts'
-import { listLocalFiscalEntries, reconcileLocalFiscalCopies, type LocalFiscalEntry,
+import { readLocalFiscalHead, readLocalFiscalRecord, reconcileLocalFiscalCopies, type LocalFiscalEntry,
   type RestorableFiscalCopy } from './localLedger.ts'
 
 const recordSchema = z.object({
@@ -62,24 +62,26 @@ function toCopy(row: Row, installation: FiscalInstallation): RestorableFiscalCop
 }
 
 /** Rebuilds a lost local tail from the immutable copy committed by the restaurant RPC. */
-async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstallation): Promise<number> {
+async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstallation, preparedHead?: { record: unknown }): Promise<number> {
   const client = supabase
   if (!client) throw new Error('No se puede conciliar sin Supabase.')
   const scope = { tenantId: installation.tenantId, fiscalSubjectId: installation.fiscalSubjectId,
     installationId: installation.installationId }
-  const local = await listLocalFiscalEntries(scope)
-  const lastLocal = local.at(-1)
+  const scopeKey = `${scope.tenantId}:${scope.fiscalSubjectId}:${scope.installationId}`
+  const { entry: lastLocal } = await readLocalFiscalHead(scopeKey)
   const scopeQuery = () => client.from('fiscal_local_records').select(
     'id,tenant_id,fiscal_subject_id,installation_id,ticket_id,sale_id,refund_request_id,record_kind,chain_position,hash,record_envelope,invoice_snapshot,economic_snapshot,rpc_result',
   ).eq('tenant_id', installation.tenantId).eq('fiscal_subject_id', installation.fiscalSubjectId)
     .eq('installation_id', installation.installationId)
-  const latest = await scopeQuery().order('chain_position', { ascending: false }).limit(1).maybeSingle()
+  const latest = preparedHead ? { data: preparedHead.record, error: null }
+    : await scopeQuery().order('chain_position', { ascending: false }).limit(1).maybeSingle()
   if (latest.error) throw latest.error
   if (!latest.data) return 0
   const lastServer = rowSchema.parse(latest.data)
   if (lastLocal && lastServer.chain_position <= lastLocal.record.chainPosition) {
-    const atServerPosition = local.find(entry => entry.record.chainPosition === lastServer.chain_position)
-    if (!atServerPosition || atServerPosition.id !== lastServer.id || atServerPosition.record.hash !== lastServer.hash) {
+    const atServerPosition = lastServer.chain_position === lastLocal.record.chainPosition
+      ? lastLocal : await readLocalFiscalRecord(scopeKey, lastServer.id)
+    if (!atServerPosition || atServerPosition.id !== lastServer.id || atServerPosition.record.chainPosition !== lastServer.chain_position || atServerPosition.record.hash !== lastServer.hash) {
       throw new Error('La cadena local no coincide con el último registro del servidor.')
     }
     return 0
@@ -100,11 +102,11 @@ async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstall
 
 const inFlightRecoveries = new Map<string, Promise<number>>()
 
-export function recoverServerConfirmedFiscalChain(installation: FiscalInstallation): Promise<number> {
+export function recoverServerConfirmedFiscalChain(installation: FiscalInstallation, preparedHead?: { record: unknown }): Promise<number> {
   const key = `${installation.tenantId}:${installation.fiscalSubjectId}:${installation.installationId}:${installation.deviceId}`
   const alreadyRunning = inFlightRecoveries.get(key)
   if (alreadyRunning) return alreadyRunning
-  const pending = runServerConfirmedFiscalChainRecovery(installation)
+  const pending = runServerConfirmedFiscalChainRecovery(installation, preparedHead)
   inFlightRecoveries.set(key, pending)
   const release = () => { if (inFlightRecoveries.get(key) === pending) inFlightRecoveries.delete(key) }
   void pending.then(release, release)

@@ -19,7 +19,7 @@ export type PreparedFiscalInstallation = {
 
 const PREPARED_INSTALLATION_MAX_AGE_MS = 60_000
 
-function preparedFiscalInstallation(
+export function preparedFiscalInstallation(
   context: TenantContext, cashSession: CashSession, saleId: string, installation: FiscalInstallation,
 ): PreparedFiscalInstallation {
   return {
@@ -82,7 +82,9 @@ export async function preflightFiscalInstallation(context: TenantContext, cashSe
   const installation = await loadFiscalInstallation(context, cashSession)
   await getFiscalInstallationLease(installation)
   try {
-    await recoverServerConfirmedFiscalChain(installation)
+    const head = installation.preparedServerHead
+    delete installation.preparedServerHead
+    await recoverServerConfirmedFiscalChain(installation, head)
   } catch (error) {
     if (!isFiscalTransportUnavailable(error)) throw error
   }

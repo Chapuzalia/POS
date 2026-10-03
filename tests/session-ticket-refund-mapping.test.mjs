@@ -43,6 +43,8 @@ async function loadRefund({ fiscal = {}, method = 'cash', originalFiscal = {} } 
         select() { return query },
         eq(column, value) { filters.push([table, column, value]); return query },
         filter() { return query },
+        in() { return query },
+        range() { return query },
         order() { return query },
         then(resolve) { return Promise.resolve({ data: table === 'tickets' ? [ticket] : [], error: null }).then(resolve) },
       }

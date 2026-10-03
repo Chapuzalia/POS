@@ -656,6 +656,30 @@ type SessionTicketQueryRow = {
   }> | null
 }
 
+async function loadLoggedSalePayloads(context: TenantContext, cashSessionId: string, ticketIds: string[]) {
+  if (!supabase || !ticketIds.length) return []
+  const rows: Array<{ payload: unknown }> = []
+  let legacy = false
+  for (let offset = 0; ; offset += 500) {
+    let query = supabase.from('offline_event_log').select('payload')
+      .eq('tenant_id', context.tenantId).eq('event_kind', 'sale_created')
+    query = legacy
+      ? query.filter('payload->ticket->>cashSessionId', 'eq', cashSessionId)
+      : query.eq('sale_cash_session_id', cashSessionId)
+    if (ticketIds.length <= 100) query = query.in(legacy ? 'payload->ticket->>id' : 'sale_ticket_id', ticketIds)
+    const { data, error } = await query.order('id').range(offset, offset + 499)
+    // N-1 compatibility when the expanded schema has not reached this deployment yet.
+    if (error && !legacy && ['42703', 'PGRST204'].includes(error.code)) {
+      legacy = true
+      offset = -500
+      continue
+    }
+    if (error) throw error
+    rows.push(...(data ?? []))
+    if ((data?.length ?? 0) < 500) return rows
+  }
+}
+
 async function loadSessionTicketRecordsFromSupabase(
   context: TenantContext,
   cashSessionId: string,
@@ -763,26 +787,13 @@ async function loadSessionTicketRecordsFromSupabase(
     `)
     .eq('tenant_id', context.tenantId)
     .eq('cash_session_id', cashSessionId)
-  let eventQuery = supabase
-    .from('offline_event_log')
-    .select('payload')
-    .eq('tenant_id', context.tenantId)
-    .eq('event_kind', 'sale_created')
-    .filter('payload->ticket->>cashSessionId', 'eq', cashSessionId)
-
   if (ticketIds) {
     ticketQuery = ticketQuery.in('id', ticketIds)
-    eventQuery = eventQuery.in('payload->ticket->>id', ticketIds)
   }
 
-  const [{ data: ticketData, error: ticketsError }, { data: eventData, error: eventsError }] = await Promise.all([
-    ticketQuery.order('local_created_at', { ascending: false }),
-    eventQuery,
-  ])
-
-  if (ticketsError || eventsError) {
-    throw ticketsError ?? eventsError
-  }
+  const { data: ticketData, error: ticketsError } = await ticketQuery.order('local_created_at', { ascending: false })
+  if (ticketsError) throw ticketsError
+  const eventData = await loadLoggedSalePayloads(context, cashSessionId, (ticketData ?? []).map(ticket => ticket.id))
 
   const loggedPayloads = new Map<string, SaleCreatedPayload>()
 
@@ -997,13 +1008,28 @@ export async function loadSessionTicketsFromSupabase(
   return loadSessionTicketRecordsFromSupabase(context, cashSessionId, ticketIds)
 }
 
+const ticketLoads = new Map<string, Promise<SessionTicketRecord | null>>()
+
+export async function loadTicketNumberFromSupabase(context: TenantContext, cashSessionId: string, ticketId: string): Promise<number | undefined> {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const { data, error } = await supabase.from('tickets').select('ticket_number')
+    .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId)
+    .eq('cash_session_id', cashSessionId).eq('id', ticketId).maybeSingle()
+  if (error) throw error
+  return data?.ticket_number == null ? undefined : Number(data.ticket_number)
+}
+
 export async function loadSessionTicketFromSupabase(
   context: TenantContext,
   cashSessionId: string,
   ticketId: string,
 ) {
-  const [ticket] = await loadSessionTicketRecordsFromSupabase(context, cashSessionId, [ticketId])
-  return ticket ?? null
+  const key = `${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}:${cashSessionId}:${ticketId}`
+  const current = ticketLoads.get(key)
+  if (current) return current
+  const pending = loadSessionTicketRecordsFromSupabase(context, cashSessionId, [ticketId]).then(([ticket]) => ticket ?? null)
+  ticketLoads.set(key, pending)
+  try { return await pending } finally { if (ticketLoads.get(key) === pending) ticketLoads.delete(key) }
 }
 
 type SessionTicketPageRow = {
@@ -1052,19 +1078,42 @@ export async function loadSessionTicketPageFromSupabase(
 }
 
 export async function loadProductSalesStatsFromSupabase(context: TenantContext): Promise<ProductSalesStat[]> {
+  return fetchProductSalesStats(context)
+}
+
+async function fetchProductSalesStats(context: TenantContext): Promise<ProductSalesStat[]> {
   if (!supabase) {
     return []
   }
 
-  const { data, error } = await supabase
-    .from('ticket_lines')
-    .select('product_id, quantity, allocated_quantity, line_total_cents, tickets!inner(status)')
-    .eq('tenant_id', context.tenantId)
-    .eq('tickets.status', 'paid')
-    .not('product_id', 'is', null)
-
-  if (error) {
-    throw error
+  const aggregated: ProductSalesStat[] = []
+  let afterProductId: string | null = null
+  for (;;) {
+    const { data, error } = await supabase.rpc('pos_product_sales_stats', {
+      p_tenant_id: context.tenantId, p_venue_id: context.venueId,
+      p_after_product_id: afterProductId, p_limit: 500,
+    })
+    if (error && ['PGRST202', '42883'].includes(error.code)) break
+    if (error) throw error
+    const page = (data ?? []) as Array<{ product_id: string; quantity: number | string; total_cents: number | string }>
+    for (const row of page) {
+      const quantity = Number(row.quantity), totalCents = Number(row.total_cents)
+      if (!Number.isFinite(quantity) || !Number.isSafeInteger(totalCents)) throw new Error('Estadísticas de ventas fuera de rango.')
+      aggregated.push({ productId: row.product_id, quantity, totalCents })
+    }
+    if (page.length < 500) return aggregated.sort((a, b) => b.quantity - a.quantity || b.totalCents - a.totalCents || a.productId.localeCompare(b.productId))
+    afterProductId = page[page.length - 1].product_id
+  }
+  // Older backends keep a complete, paginated fallback until the expand is deployed.
+  const data: TicketLineProductSalesRow[] = []
+  for (let offset = 0; ; offset += 500) {
+    const response = await supabase.from('ticket_lines')
+      .select('product_id, quantity, allocated_quantity, line_total_cents, tickets!inner(status,venue_id)')
+      .eq('tenant_id', context.tenantId).eq('tickets.status', 'paid').eq('tickets.venue_id', context.venueId)
+      .not('product_id', 'is', null).order('id').range(offset, offset + 499)
+    if (response.error) throw response.error
+    data.push(...(response.data ?? []) as TicketLineProductSalesRow[])
+    if ((response.data?.length ?? 0) < 500) break
   }
 
   const statsByProduct = new Map<string, ProductSalesStat>()

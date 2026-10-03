@@ -118,12 +118,12 @@ export function createRestaurantControllerHarness({
     },
     '../services/validateCashClosure': { getRestaurantCashClosureError: async () => null },
     '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => fiscalMode },
-    '../../fiscal/local/restaurantInvoice.ts': { issueRestaurantInvoice: async (...args) => {
+    '../../fiscal/local/restaurantInvoice.ts': { preflightRestaurantInvoice: async (_context, _session, saleId) => ({ saleId }), issueRestaurantInvoice: async (...args) => {
       calls.fiscalIssues.push(args)
       if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
       return fiscalIssue(...args)
     } },
-    '../../fiscal/local/posInvoice.ts': { preflightFiscalInstallation: async () => {} },
+    '../../local-printing/constants/config': { PRINT_AGENT_ENABLED: true },
     './useRestaurantDraft': { useRestaurantDraft: () => draft },
     './useRestaurantRealtime': { useRestaurantRealtime: () => realtime },
   }

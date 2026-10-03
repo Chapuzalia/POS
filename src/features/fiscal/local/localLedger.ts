@@ -16,7 +16,7 @@ export type LocalFiscalEntry = {
   delivery: { state: LocalFiscalState; attempts: number; lastError: string | null; nextAttemptAt: string | null; result: BridgeResult | null }
 }
 
-type Cursor = { scope: string; position: number; previous: { issuerNif: string; seriesAndNumber: string; issueDate: string; hash: string } | null }
+type Cursor = { scope: string; recordId?: string; position: number; previous: { issuerNif: string; seriesAndNumber: string; issueDate: string; hash: string } | null }
 type NumberCursor = { key: string; lastNumber: number }
 type DeviceBinding = { scope: string; deviceId: string }
 type StoredFiscalDocument = Omit<LocalFiscalEntry, 'delivery'>
@@ -78,13 +78,76 @@ export function assertInstallationBinding(binding: DeviceBinding | undefined, de
   }
 }
 
+/** Resolve the head. Old PWAs omit recordId; locate it once and backfill the cursor. */
+async function readHeadInTransaction(tx: IDBTransaction, scope: string): Promise<{ chain: Cursor; entry: StoredFiscalDocument | null }> {
+  const cursors = tx.objectStore('cursors')
+  const stored = await request(cursors.get(scope)) as Cursor | undefined
+  const chain = stored ?? { scope, position: 0, previous: null }
+  if (chain.scope !== scope || !Number.isSafeInteger(chain.position) || chain.position < 0) throw new Error('Cursor fiscal inválido; requiere conciliación.')
+  if (chain.position === 0) {
+    const existing = await request(tx.objectStore('entries').index('scope').openKeyCursor(scope))
+    if (existing || chain.previous !== null) throw new Error('Falta el cursor del último registro fiscal; requiere conciliación.')
+    return { chain, entry: null }
+  }
+  if (!chain.previous) throw new Error('Falta la huella del último registro fiscal.')
+  let entry: StoredFiscalDocument | undefined
+  if (chain.recordId) entry = await request(tx.objectStore('entries').get(chain.recordId)) as StoredFiscalDocument | undefined
+  else {
+    // Compatibility lookup, without auditing documents or upgrading IndexedDB.
+    entry = await new Promise<StoredFiscalDocument | undefined>((resolve, reject) => {
+      const lookup = tx.objectStore('entries').index('scope').openCursor(scope)
+      lookup.onerror = () => reject(lookup.error)
+      lookup.onsuccess = () => {
+        const cursor = lookup.result
+        if (!cursor) { resolve(undefined); return }
+        const document = cursor.value as StoredFiscalDocument
+        if (document.record.chainPosition === chain.position) resolve(document)
+        else cursor.continue()
+      }
+    })
+  }
+  if (!entry || entry.scope !== scope || entry.id !== entry.record.idempotencyKey
+    || entry.record.chainPosition !== chain.position || entry.record.hash !== chain.previous.hash
+    || `${entry.record.tenantId}:${entry.record.fiscalSubjectId}:${entry.record.installationId}` !== scope) {
+    throw new Error('El último registro fiscal no coincide con el cursor; requiere conciliación.')
+  }
+  if (!chain.recordId) { chain.recordId = entry.id; cursors.put(chain) }
+  return { chain, entry }
+}
+
+export async function readLocalFiscalHead(scope: string): Promise<{ chain: Cursor; entry: StoredFiscalDocument | null }> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction(['cursors', 'entries'], 'readwrite')
+    const done = transactionDone(tx)
+    const head = await readHeadInTransaction(tx, scope)
+    await done
+    return head
+  } finally { db.close() }
+}
+
+export async function readLocalFiscalRecord(scope: string, id: string): Promise<StoredFiscalDocument | null> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction('entries', 'readonly')
+    const done = transactionDone(tx)
+    const entry = await request(tx.objectStore('entries').get(id)) as StoredFiscalDocument | undefined
+    await done
+    if (entry && entry.scope !== scope) throw new Error('El registro fiscal pertenece a otra instalación.')
+    return entry ?? null
+  } finally { db.close() }
+}
+
 async function loadCursors(db: IDBDatabase, scope: string, series: string): Promise<{ chain: Cursor; number: NumberCursor }> {
-  const tx = db.transaction(['cursors', 'numbers'], 'readonly')
+  const tx = db.transaction(['cursors', 'entries', 'numbers'], 'readwrite')
   const done = transactionDone(tx)
-  const chain = await request(tx.objectStore('cursors').get(scope)) as Cursor | undefined
+  const { chain, entry } = await readHeadInTransaction(tx, scope)
   const number = await request(tx.objectStore('numbers').get(`${scope}:${series}`)) as NumberCursor | undefined
   await done
-  return { chain: chain ?? { scope, position: 0, previous: null }, number: number ?? { key: `${scope}:${series}`, lastNumber: 0 } }
+  if (number && (!Number.isSafeInteger(number.lastNumber) || number.lastNumber < 0)) throw new Error('Contador fiscal inválido.')
+  if (chain.position === 0 && number?.lastNumber) throw new Error('La numeración fiscal existe sin un registro anterior; requiere conciliación.')
+  if (entry?.invoice.series === series && number?.lastNumber !== entry.invoice.number) throw new Error('La numeración no coincide con el último registro fiscal.')
+  return { chain, number: number ?? { key: `${scope}:${series}`, lastNumber: 0 } }
 }
 
 type IssueInputBase = {
@@ -231,11 +294,11 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
       assertInstallationBinding(binding, input.deviceId)
       const savedChain = await request(tx.objectStore('cursors').get(scope)) as Cursor | undefined
       const savedNumber = await request(tx.objectStore('numbers').get(number.key)) as NumberCursor | undefined
-      if ((savedChain?.position ?? 0) !== chain.position || (savedNumber?.lastNumber ?? 0) !== number.lastNumber) {
+      if ((savedChain?.position ?? 0) !== chain.position || (savedChain?.previous?.hash ?? null) !== (chain.previous?.hash ?? null) || (savedNumber?.lastNumber ?? 0) !== number.lastNumber) {
         tx.abort()
         throw new Error('La cadena o numeración cambió durante la emisión. Reintenta tras conciliar.')
       }
-      tx.objectStore('cursors').put({ scope, position: entry.record.chainPosition, previous: { issuerNif: input.issuerNif, seriesAndNumber, issueDate: time.issueDate, hash: built.hash } } satisfies Cursor)
+      tx.objectStore('cursors').put({ scope, recordId: entry.id, position: entry.record.chainPosition, previous: { issuerNif: input.issuerNif, seriesAndNumber, issueDate: time.issueDate, hash: built.hash } } satisfies Cursor)
       tx.objectStore('numbers').put({ key: number.key, lastNumber: nextNumber } satisfies NumberCursor)
       tx.objectStore('bindings').put(binding ?? { scope, deviceId: input.deviceId } satisfies DeviceBinding)
       const { delivery, ...document } = entry
@@ -330,7 +393,7 @@ export async function persistLocalRectificative(entry: LocalFiscalEntry): Promis
     const tx = db.transaction(['cursors', 'numbers', 'bindings', 'entries', 'delivery'], 'readwrite')
     const done = transactionDone(tx)
     const series = entry.invoice.series
-    tx.objectStore('cursors').put({ scope: entry.scope, position: entry.record.chainPosition, previous: { issuerNif: entry.record.issuerNif, seriesAndNumber: `${series}/${entry.invoice.number}`, issueDate: entry.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-'), hash: entry.record.hash } } satisfies Cursor)
+    tx.objectStore('cursors').put({ scope: entry.scope, recordId: entry.id, position: entry.record.chainPosition, previous: { issuerNif: entry.record.issuerNif, seriesAndNumber: `${series}/${entry.invoice.number}`, issueDate: entry.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-'), hash: entry.record.hash } } satisfies Cursor)
     tx.objectStore('numbers').put({ key: `${entry.scope}:${series}`, lastNumber: entry.invoice.number } satisfies NumberCursor)
     const { delivery, ...document } = entry
     tx.objectStore('entries').put(document satisfies StoredFiscalDocument)
@@ -397,7 +460,7 @@ export async function persistLocalFiscalAnnulment(input: {
           ticketId: original.invoice.ticketId, saleId: original.invoice.saleId, reason: input.reason },
         delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null },
       }
-      tx.objectStore('cursors').put({ scope, position: entry.record.chainPosition, previous: {
+      tx.objectStore('cursors').put({ scope, recordId: entry.id, position: entry.record.chainPosition, previous: {
         issuerNif: original.invoice.issuerNif, seriesAndNumber: `${original.invoice.series}/${original.invoice.number}`,
         issueDate: (input.canonicalRecord as { RegistroAnulacion: { IDFactura: { FechaExpedicionFacturaAnulada: string } } }).RegistroAnulacion.IDFactura.FechaExpedicionFacturaAnulada,
         hash: input.hash,
@@ -418,14 +481,27 @@ export async function listLocalFiscalEntries(scopeInput: { tenantId: string; fis
     const done = transactionDone(tx)
     const entries = await request(tx.objectStore('entries').index('scope').getAll(scopeKey(scopeInput))) as StoredFiscalDocument[]
     const combined: LocalFiscalEntry[] = []
-    for (const entry of entries) {
-      const status = await request(tx.objectStore('delivery').get(entry.id)) as StoredDelivery | undefined
+    const statuses = await Promise.all(entries.map(entry => request(tx.objectStore('delivery').get(entry.id)))) as (StoredDelivery | undefined)[]
+    for (const [index, entry] of entries.entries()) {
+      const status = statuses[index]
       if (!status) throw new Error('Falta el estado de un registro fiscal local.')
       const { id: _id, ...delivery } = status
       combined.push({ ...entry, delivery })
     }
     await done
     return combined.sort((a, b) => a.record.chainPosition - b.record.chainPosition)
+  } finally { db.close() }
+}
+
+/** Chain reconciliation needs immutable documents, not 1 delivery lookup per historical entry. */
+export async function readLocalFiscalChainDocuments(scopeInput: { tenantId: string; fiscalSubjectId: string; installationId: string }): Promise<StoredFiscalDocument[]> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction('entries', 'readonly')
+    const done = transactionDone(tx)
+    const entries = await request(tx.objectStore('entries').index('scope').getAll(scopeKey(scopeInput))) as StoredFiscalDocument[]
+    await done
+    return entries.sort((a, b) => a.record.chainPosition - b.record.chainPosition)
   } finally { db.close() }
 }
 
@@ -463,8 +539,6 @@ export async function reconcileLocalFiscalCopies(
       const done = transactionDone(tx)
       const binding = await request(tx.objectStore('bindings').get(scope)) as DeviceBinding | undefined
       assertInstallationBinding(binding, deviceId)
-      const local = await request(tx.objectStore('entries').index('scope').getAll(scope)) as StoredFiscalDocument[]
-      const localByPosition = new Map(local.map(entry => [entry.record.chainPosition, entry]))
       let cursor = await request(tx.objectStore('cursors').get(scope)) as Cursor | undefined
       cursor ??= { scope, position: 0, previous: null }
       let restored = 0
@@ -477,8 +551,8 @@ export async function reconcileLocalFiscalCopies(
           tx.abort(); throw new Error('El registro del servidor no pertenece a esta instalación fiscal.')
         }
         if (entry.record.chainPosition <= cursor.position) {
-          const existing = localByPosition.get(entry.record.chainPosition)
-          if (!existing || existing.id !== entry.id || existing.record.hash !== entry.record.hash) {
+          const existing = await request(tx.objectStore('entries').get(entry.id)) as StoredFiscalDocument | undefined
+          if (!existing || existing.scope !== scope || existing.record.chainPosition !== entry.record.chainPosition || existing.record.hash !== entry.record.hash) {
             tx.abort(); throw new Error('La cadena local difiere de la copia durable del servidor.')
           }
           continue
@@ -507,7 +581,7 @@ export async function reconcileLocalFiscalCopies(
         if (copy.economicPayload) tx.objectStore('economicSales').put({ id: entry.id, scope,
           payload: copy.economicPayload, eventId: copy.eventId ?? crypto.randomUUID(), synced: true } satisfies StoredEconomicSale)
         const previousIdentity = fiscalId.NumSerieFactura ?? fiscalId.NumSerieFacturaAnulada
-        cursor = { scope, position: entry.record.chainPosition,
+        cursor = { scope, recordId: entry.id, position: entry.record.chainPosition,
           previous: { issuerNif: entry.invoice.issuerNif,
             seriesAndNumber: typeof previousIdentity === 'string' ? previousIdentity : `${entry.invoice.series}/${entry.invoice.number}`, issueDate, hash: entry.record.hash } }
         tx.objectStore('cursors').put(cursor)
