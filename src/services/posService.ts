@@ -952,7 +952,7 @@ async function loadSessionTicketRecordsFromSupabase(
            lineTotalCents: refundLine.net_total_cents,
            discountAmountCents: refundLine.discount_cents,
            netTotalCents: refundLine.net_total_cents,
-           fiscalSnapshot: originalLine.fiscalSnapshot ? { ...originalLine.fiscalSnapshot, taxableBaseCents: refundLine.taxable_base_cents, taxAmountCents: refundLine.tax_amount_cents } : null,
+           fiscalSnapshot: mapFiscalSnapshot({ ...refundLine, line_total_cents: refundLine.net_total_cents }),
            modifiers: refundLine.modifiers ?? originalLine.modifiers,
          }
        }).filter((line): line is NonNullable<typeof line> => line !== null)
@@ -962,7 +962,7 @@ async function loadSessionTicketRecordsFromSupabase(
          ticket: { ...payload.ticket, id: request.id, totalCents: request.total_cents, subtotalCents: request.total_cents, discountAmountCents: 0, discount: null, createdAt: request.created_at, invoice: null },
          lines: refundLines,
          sale: { ...payload.sale, id: request.id, ticketId: request.id, totalCents: request.total_cents, paymentMethod: request.refund_method, createdAt: request.created_at },
-         payment: refundPayment ? { id: refundPayment.id, tenantId: ticket.tenant_id, saleId: request.id, method: refundPayment.method, amountCents: refundPayment.amount_cents, receivedCents: refundPayment.payment_snapshot?.receivedCents ?? null, changeCents: refundPayment.payment_snapshot?.changeCents ?? 0 } : null,
+         payment: refundPayment && (refundPayment.method === 'cash' || refundPayment.method === 'card') ? { id: refundPayment.id, tenantId: ticket.tenant_id, saleId: request.id, method: refundPayment.method, amountCents: refundPayment.amount_cents, receivedCents: refundPayment.payment_snapshot?.receivedCents ?? null, changeCents: refundPayment.payment_snapshot?.changeCents ?? 0 } : null,
           localFiscal: { recordId: request.fiscal_local_records?.[0]?.id ?? request.id, series: invoice.series, number: invoice.number, issuedAt: invoice.issuedAt, documentKind: invoice.recipient ? 'complete' : 'simplified', issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, issuerAddress: invoice.issuerAddress ?? '', verifactuLegend: true, rectifiedInvoice: { series: payload.localFiscal?.series ?? '', number: payload.localFiscal?.number ?? 0, issuedAt: payload.localFiscal?.issuedAt ?? ticket.local_created_at } },
          fiscal: { invoiceId: request.fiscal_local_records?.[0]?.invoice_id ?? request.id, provider: 'verifactu', status: 'pending', uuid: null, qrBase64: null, verificationUrl: invoice.qrUrl, externalCode: `${invoice.series}/${invoice.number}`, errorCode: null, errorMessage: null },
        }

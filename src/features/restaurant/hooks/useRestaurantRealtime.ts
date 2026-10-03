@@ -137,8 +137,8 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
     }
 
     void refresh(true)
-    let realtimeTimer: ReturnType<typeof window.setTimeout> | null = null
-    let fallbackTimer: ReturnType<typeof window.setInterval> | null = null
+    let realtimeTimer: number | null = null
+    let fallbackTimer: number | null = null
     const scheduleRefresh = () => {
       if (!active) return
       if (realtimeTimer) window.clearTimeout(realtimeTimer)

@@ -163,9 +163,9 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
   useEffect(() => {
     if (!isOnline || activeSection !== 'dashboard' || !venues.length) return undefined
     let active = true
-    let cashSessionTimer: ReturnType<typeof window.setTimeout> | null = null
-    let salesTimer: ReturnType<typeof window.setTimeout> | null = null
-    let fallbackTimer: ReturnType<typeof window.setInterval> | null = null
+    let cashSessionTimer: number | null = null
+    let salesTimer: number | null = null
+    let fallbackTimer: number | null = null
     const refreshCashSessions = () => {
       if (cashSessionTimer) window.clearTimeout(cashSessionTimer)
       cashSessionTimer = window.setTimeout(() => void refreshStatsRef.current({ silent: true }), 250)

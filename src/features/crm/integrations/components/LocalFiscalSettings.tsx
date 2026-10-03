@@ -16,7 +16,7 @@ const inputClass = '!h-11 !w-full !rounded-[10px] !border !border-transparent !b
 export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Props) {
   const canEdit = tenantContext.role === 'owner'
   const [settings, setSettings] = useState<FiscalPosSettings>({
-    tenant_id: tenantContext.tenantId, bridge_url: '', aeat_environment: 'production', producer_name: '', producer_nif: '', system_id: '', system_version: '',
+    tenant_id: tenantContext.tenantId, bridge_url: '', aeat_environment: 'production', print_ticket_qr: true, producer_name: '', producer_nif: '', system_id: '', system_version: '',
   })
   const [exists, setExists] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
@@ -30,7 +30,7 @@ export function LocalFiscalSettings({ disabled, runAction, tenantContext }: Prop
       setLoadError(null)
     } catch (error) {
       setExists(false)
-      setSettings({ tenant_id: tenantContext.tenantId, bridge_url: '', aeat_environment: 'production', producer_name: '', producer_nif: '', system_id: '', system_version: '' })
+      setSettings({ tenant_id: tenantContext.tenantId, bridge_url: '', aeat_environment: 'production', print_ticket_qr: true, producer_name: '', producer_nif: '', system_id: '', system_version: '' })
       setLoadError(error instanceof Error ? error.message : 'No se pudo cargar la configuración fiscal.')
     }
   }, [tenantContext.tenantId])

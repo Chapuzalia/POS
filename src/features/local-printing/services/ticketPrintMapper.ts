@@ -13,12 +13,12 @@ import type { PrintTemplateDefinition } from '../../print-templates/types.ts'
 
 type RenderedSaleDocument = ReturnType<typeof renderPrintTemplateWithFallback>
 
-function hasRequiredFiscalLayout(rendered: RenderedSaleDocument, sale: SaleCreatedPayload) {
+function hasRequiredFiscalLayout(rendered: RenderedSaleDocument, sale: SaleCreatedPayload, printQr: boolean) {
   const verificationUrl = sale.fiscal?.verificationUrl
   if (!sale.localFiscal || sale.fiscal?.provider !== 'verifactu' || !verificationUrl) return true
   const qrElements = rendered.elements.filter((element) => element.type === 'qr')
   const firstVisible = rendered.elements.find((element) => element.type === 'qr' || element.value.trim())
-  const hasExactQr = qrElements.length === 1 && qrElements[0].data === verificationUrl
+  const hasExactQr = !printQr ? qrElements.length === 0 : qrElements.length === 1 && qrElements[0].data === verificationUrl
     && qrElements[0].errorCorrection === 'M' && qrElements[0].size === 6
     && firstVisible?.type === 'qr'
   const hasLegend = rendered.elements.some((element) => element.type === 'text' && element.value.trim() === 'VERI*FACTU')
@@ -43,12 +43,14 @@ type MapperOptions = {
   cut?: boolean
   template?: PrintTemplateDefinition
   cashDrawerAlreadyRequested?: boolean
+  printQr?: boolean
 }
 
 export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
   const { sale } = options
   const isReprint = options.isReprint === true
   const isPreTicket = options.isPreTicket === true
+  const printQr = options.printQr !== false
   const copyNumber = Math.max(1, Math.trunc(options.copyNumber || 1))
   const payments = sale.payment && !isPreTicket
     ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }]
@@ -62,15 +64,15 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
   let rendered = renderPrintTemplateWithFallback(
     requestedTemplate,
     safeTemplate,
-    buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
+    buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label, printQr }),
     options.printerLayout,
   )
-  if (!hasRequiredFiscalLayout(rendered, sale)) {
+  if (!hasRequiredFiscalLayout(rendered, sale, printQr)) {
     rendered =
       renderPrintTemplateWithFallback(
         safeTemplate,
         safeTemplate,
-        buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label }),
+        buildSalePrintTemplateContext(sale, { ...options.establishment, footer: options.footer }, { label, printQr }),
         options.printerLayout,
       )
   }

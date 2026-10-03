@@ -30,6 +30,7 @@ export type PrintEstablishment = {
 
 export type SaleTicketLineOptions = {
   label?: 'COPIA' | 'PRE-TICKET'
+  printQr?: boolean
 }
 
 export type ClosingReportLineOptions = {
@@ -258,7 +259,7 @@ export function buildSaleTicketElements(
 ): PrintElement[] | undefined {
   const verificationUrl = sale.fiscal?.verificationUrl
   if (
-    options.label === 'PRE-TICKET' ||
+    options.label === 'PRE-TICKET' || options.printQr === false ||
     sale.fiscal?.provider !== 'verifactu' ||
     !verificationUrl
   ) return undefined
@@ -467,7 +468,7 @@ export function buildSalePrintTemplateContext(
       title: localFiscal ? '' : 'Fiscal',
       external_code: sale.fiscal.externalCode ?? '',
       verification_url: verificationUrl,
-      show_qr: sale.fiscal.provider === 'verifactu' && Boolean(verificationUrl),
+      show_qr: options.printQr !== false && sale.fiscal.provider === 'verifactu' && Boolean(verificationUrl),
       show_verifactu_legend: sale.fiscal.provider === 'verifactu' && Boolean(verificationUrl) && localFiscal?.verifactuLegend !== false,
       show_url: sale.fiscal.provider !== 'verifactu' && Boolean(verificationUrl),
       error: verificationUrl ? '' : fiscalError ?? '',

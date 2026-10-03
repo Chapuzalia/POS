@@ -386,7 +386,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
 
   useEffect(() => {
     if (!context || !isOnline || isBackofficeUser(context)) return undefined
-    let refreshTimer: ReturnType<typeof window.setTimeout> | null = null
+    let refreshTimer: number | null = null
     const scheduleRefresh = () => {
       if (refreshTimer) window.clearTimeout(refreshTimer)
       refreshTimer = window.setTimeout(() => void refreshCatalog(context), 200)
