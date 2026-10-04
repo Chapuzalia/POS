@@ -11,7 +11,8 @@ import { useQuickSale } from '../features/quick-sale'
 import { useCashlogyManagementStore, useCashlogyStore, usePrintAgentStore } from '../features/local-printing'
 import type { CatalogData } from '../features/catalog/domain/types'
 import { subscribeToCatalogTabChanges } from '../features/catalog/data/catalog-realtime'
-import { removeProductSalesStats } from '../features/quick-sale/services/productSalesStats'
+import { addConfirmedProductSalesStats, removeProductSalesStats } from '../features/quick-sale/services/productSalesStats'
+import { createProductSalesStatsRefresh, PRODUCT_SALES_STATS_REFRESH_MS } from '../features/quick-sale/services/productSalesStatsRefresh'
 import { useRestaurantController } from '../features/restaurant'
 import { useReservationsController } from '../features/reservations/hooks/useReservationsController'
 import { useLoginActivity, useTenantSession } from '../features/session'
@@ -52,6 +53,7 @@ import type {
   Discount,
   PaymentMethod,
   ProductSalesStat,
+  SessionTicketRecord,
   TenantContext,
   ThemeDefinition,
 } from '../types'
@@ -91,6 +93,9 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   })
   const [catalogStartTab, setCatalogStartTab] = useState<CatalogStartTab>(() => getCatalogStartTab())
   const [productSalesStats, setProductSalesStats] = useState<ProductSalesStat[]>([])
+  const productStatsRevisionRef = useRef(0)
+  const pendingProductStatsRef = useRef(0)
+  const productStatsRefreshBlockedRef = useRef(false)
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [isBusy, setIsBusy] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
@@ -174,6 +179,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   }, [featuresInitiallyLoaded, isOnline, tenantIdForFeatureSync, userIdForFeatureSync])
 
   const persistProductSalesStats = useCallback((stats: ProductSalesStat[]) => {
+    productStatsRevisionRef.current++
     setProductSalesStats(stats)
     if (context) saveCachedProductSalesStats(context.tenantId, stats)
   }, [context])
@@ -182,6 +188,14 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   ) => {
     persistProductSalesStats(removeProductSalesStats(productSalesStats, lines))
   }, [persistProductSalesStats, productSalesStats])
+  const addConfirmedProductStats = useCallback((ticket: SessionTicketRecord) => {
+    productStatsRevisionRef.current++
+    setProductSalesStats((current) => {
+      const next = addConfirmedProductSalesStats(current, ticket.payload.lines)
+      if (context) saveCachedProductSalesStats(context.tenantId, next)
+      return next
+    })
+  }, [context])
 
   const cash = useCashSession({
     context,
@@ -190,6 +204,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     refreshPendingCount: offline.refreshPendingCount,
     setBusy: setIsBusy,
     subtractProductSalesStats,
+    onConfirmedSale: addConfirmedProductStats,
     syncPendingEvents: offline.syncPendingEvents,
   })
   const promotionsEnabled = Boolean(context && hasTenantCapability(context, 'promotions'))
@@ -232,8 +247,12 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     onError: setRestaurantError,
     onPaidFeedback: setRestaurantPaidFeedback,
     printSale: cash.printSale,
-    refreshCashSales: cash.refreshConfirmedSale,
-    refreshProductSalesStats: quickSale.refreshProductStats,
+    refreshCashSales: async (ticketId, missingTicketTitle, shouldPrint) => {
+      productStatsRevisionRef.current++
+      pendingProductStatsRef.current++
+      try { await cash.refreshConfirmedSale(ticketId, missingTicketTitle, shouldPrint) }
+      finally { pendingProductStatsRef.current-- }
+    },
     setAppliedDiscount: quickSale.setDiscount,
     setBusy: setIsBusy,
     setMobileTicketOpen,
@@ -249,6 +268,38 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     onOpenOrder: async (orderId) => { await restaurant.openExistingOrder(orderId) },
     refreshOperationalMap: restaurant.reloadMap,
   })
+
+  useEffect(() => {
+    const blocked = isBusy || offline.isSyncing || offline.pendingCount > 0 || quickSale.paymentInFlight
+    productStatsRefreshBlockedRef.current = blocked
+    if (blocked) productStatsRevisionRef.current++
+  }, [isBusy, offline.isSyncing, offline.pendingCount, quickSale.paymentInFlight])
+
+  useEffect(() => {
+    if (!context || !isOnline || isBackofficeUser(context) || context.deviceMode === 'kds') return undefined
+    const controller = createProductSalesStatsRefresh({
+      load: () => loadProductSalesStatsFromSupabase(context),
+      apply: (stats) => {
+        setProductSalesStats(stats)
+        saveCachedProductSalesStats(context.tenantId, stats)
+      },
+      canRefresh: () => document.visibilityState === 'visible'
+        && !productStatsRefreshBlockedRef.current && pendingProductStatsRef.current === 0,
+      revision: () => productStatsRevisionRef.current,
+    })
+    const refresh = () => {
+      void controller.refreshIfStale().catch(() => {
+        // Keep the local ranking when the backend is temporarily unavailable.
+      })
+    }
+    const intervalId = window.setInterval(refresh, PRODUCT_SALES_STATS_REFRESH_MS)
+    document.addEventListener('visibilitychange', refresh)
+    return () => {
+      controller.dispose()
+      window.clearInterval(intervalId)
+      document.removeEventListener('visibilitychange', refresh)
+    }
+  }, [context, isOnline])
 
   useRejectedSaleRecovery({
     context,
@@ -317,6 +368,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     setManualDiscountEnabled(state.manualDiscountEnabled)
     setManualDiscountRequiresPin(state.manualDiscountRequiresPin)
     setDiscountSchedule(state.discountSchedule)
+    productStatsRevisionRef.current++
     setProductSalesStats(state.productSalesStats)
     quickSale.hydrate(isBackofficeUser(nextContext) ? [] : getCachedTicket(nextContext))
     const nextTickets = state.cashSession ? getSessionTickets(nextContext, state.cashSession.id) : []
@@ -346,6 +398,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     setManualDiscountEnabled(cachedCatalog?.manualDiscountEnabled ?? false)
     setManualDiscountRequiresPin(cachedCatalog?.manualDiscountRequiresPin ?? false)
     setDiscountSchedule(cachedCatalog?.discountSchedule ?? { dayChangeTime: null, timeZone: 'Europe/Madrid' })
+    productStatsRevisionRef.current++
     setProductSalesStats(getCachedProductSalesStats(cachedContext.tenantId))
     const cachedSession = getCachedCashSession(cachedContext)
     cash.hydrate(
@@ -379,23 +432,19 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     setIsLoading(true)
     setGeneralError(null)
     try {
-      const [nextCatalog, nextStats] = await Promise.all([
-        loadPosCatalogFromSupabase(activeContext, true),
-        loadProductSalesStatsFromSupabase(activeContext),
-      ])
+      const nextCatalog = await loadPosCatalogFromSupabase(activeContext, true)
       setCatalog(nextCatalog.catalog)
       setDiscounts(nextCatalog.discounts)
       setManualDiscountEnabled(nextCatalog.manualDiscountEnabled)
       setManualDiscountRequiresPin(nextCatalog.manualDiscountRequiresPin)
       setDiscountSchedule(nextCatalog.discountSchedule)
-      persistProductSalesStats(nextStats)
       saveCachedCatalog(activeContext, nextCatalog)
     } catch (refreshError) {
       setGeneralError(getReadableError(refreshError, { operation: 'app.AppShell' }))
     } finally {
       setIsLoading(false)
     }
-  }, [context, isOnline, persistProductSalesStats, setGeneralError])
+  }, [context, isOnline, setGeneralError])
 
   useEffect(() => {
     if (!context || !isOnline || isBackofficeUser(context)) return undefined

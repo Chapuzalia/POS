@@ -144,7 +144,6 @@ export function createRestaurantControllerHarness({
     onPaidFeedback: (method) => calls.paid.push(method),
     printSale: async (payload) => { calls.prints += 1; calls.printed.push(payload); await print.promise },
     refreshCashSales: async () => undefined,
-    refreshProductSalesStats: async () => undefined,
     setAppliedDiscount() {},
     setBusy: (value) => calls.busy.push(value),
     setMobileTicketOpen() {},

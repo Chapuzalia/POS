@@ -5,7 +5,6 @@ import { getDefaultProductLineSelection } from '../../catalog/services/saleLineB
 import { calculateDiscountForLines, resolveTicketDiscount, type DiscountScheduleContext } from '../../../lib/discounts'
 import { getLineTotal, getTicketTotal } from '../../../lib/format'
 import { saveCachedTicket } from '../../../lib/offlineStore'
-import { loadProductSalesStatsFromSupabase } from '../../../services/posService'
 import type {
   AppliedDiscount,
   CashSession,
@@ -222,10 +221,6 @@ export function useQuickSale(options: Options) {
     setProductDialog({ allowVariantSelection, item })
   }, [addLine, options.catalog])
 
-  const refreshProductStats = useCallback(async () => {
-    if (!options.context) return
-    options.persistProductSalesStats(await loadProductSalesStatsFromSupabase(options.context))
-  }, [options])
   const subtotalCents = useMemo(() => getTicketTotal(lines), [lines])
   const discountCalculation = useMemo(
     () => calculateDiscountForLines(lines.map((line) => ({ ...line, grossCents: getLineTotal(line) })), activeDiscount),
@@ -274,7 +269,6 @@ export function useQuickSale(options: Options) {
     paidFeedback,
     paymentInFlight,
     productDialog,
-    refreshProductStats,
     removeDiscount,
     removeInvoiceCustomer: () => setInvoiceCustomer(null),
     removeLine: (lineId: string) => updateLines((previous) => previous.filter((line) => line.id !== lineId)),

@@ -69,10 +69,12 @@ type Options = {
   refreshPendingCount: () => void
   setBusy: (busy: boolean) => void
   subtractProductSalesStats: (lines: Array<{ productId: string; quantity: number; lineTotalCents: number }>) => void
+  onConfirmedSale?: (ticket: SessionTicketRecord) => void
   syncPendingEvents: () => Promise<void>
 }
 
 export function useCashSession(options: Options) {
+  const onConfirmedSale = options.onConfirmedSale
   const [session, setSession] = useState<CashSession | null>(null)
   const [ledger, setLedger] = useState<SaleRecord[]>([])
   const [movements, setMovements] = useState<CashMovement[]>([])
@@ -272,6 +274,7 @@ export function useCashSession(options: Options) {
     if (generation === saleRefreshGenerationRef.current) persistLedger(nextLedger)
     const confirmedTicket = remoteTicket ? mergeRemotePrintStates([remoteTicket])[0] : null
     if (confirmedTicket) {
+      const alreadyKnown = ticketsRef.current.some((ticket) => ticket.payload.ticket.id === confirmedTicket.payload.ticket.id)
       persistTickets([
         confirmedTicket,
         ...ticketsRef.current.filter((ticket) => (
@@ -279,10 +282,11 @@ export function useCashSession(options: Options) {
           && ticket.payload.ticket.id !== confirmedTicket.payload.ticket.id
         )),
       ])
+      if (!alreadyKnown && confirmedTicket.status === 'active') onConfirmedSale?.(confirmedTicket)
     }
     if (confirmedTicket && shouldPrint) void printSale(confirmedTicket.payload)
     else if (!confirmedTicket) sileo.warning({ title: missingTicketTitle, description: 'No se ha podido recuperar el ticket confirmado.' })
-  }, [mergeRemotePrintStates, options.context, persistLedger, persistTickets, printSale, session, saleRefreshScope])
+  }, [mergeRemotePrintStates, options.context, onConfirmedSale, persistLedger, persistTickets, printSale, session, saleRefreshScope])
 
   const refreshLedger = useCallback(async () => {
     if (!cashContext || !session || !isOnline) return ledger

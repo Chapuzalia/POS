@@ -113,7 +113,6 @@ type Options = {
   onPaidFeedback: (method: PaymentMethod | null) => void
   printSale: (payload: SaleCreatedPayload, options?: { cashDrawerAlreadyRequested?: boolean }) => Promise<void>
   refreshCashSales: (ticketId: string, missingTicketTitle: string, shouldPrint?: boolean) => Promise<void>
-  refreshProductSalesStats: () => Promise<void>
   setAppliedDiscount: (discount: AppliedDiscount | null) => void
   setBusy: (busy: boolean) => void
   setMobileTicketOpen: (open: boolean) => void
@@ -587,10 +586,7 @@ export function useRestaurantController(options: Options) {
   }, [draft, options, invoiceOrderId])
 
   const refreshSales = useCallback(async (ticketId: string, missingTicketTitle: string, shouldPrint = true) => {
-    await Promise.all([
-      options.refreshCashSales(ticketId, missingTicketTitle, shouldPrint),
-      options.refreshProductSalesStats(),
-    ])
+    await options.refreshCashSales(ticketId, missingTicketTitle, shouldPrint)
   }, [options])
 
   const payEqualSplitPart = useCallback(async (
