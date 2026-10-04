@@ -111,11 +111,12 @@ La excepción está inactiva por defecto. No acredita la seguridad del SQL: solo
 
 Para activarla, después de hacer commit de los cambios revisados en `Staging`, configurar estas **repository variables** en GitHub, en Settings → Secrets and variables → Actions → Variables:
 
-- `MIGRATION_SAFETY_EXCEPTION_BASE_SHA`: SHA completo de `main`, que debe coincidir con el último despliegue correcto.
+- `MIGRATION_SAFETY_EXCEPTION_BASE_SHA`: SHA completo del último despliegue correcto (baseline de producción).
 - `MIGRATION_SAFETY_EXCEPTION_HEAD_SHA`: SHA completo final de `Staging`, incluyendo los cambios de estos workflows.
+- `MIGRATION_SAFETY_EXCEPTION_MERGE_BASE_SHA`: opcional; SHA completo del `main` actual cuando avanzó tras un despliegue fallido. Debe descender del baseline. Si está vacía, se usa `MIGRATION_SAFETY_EXCEPTION_BASE_SHA` como primer padre.
 
-Abrir o actualizar el PR `Staging` → `main` y usar **Create a merge commit**. La excepción exige esos dos commits como padres, en ese orden, tanto en el merge de prueba del PR como en producción. Squash, rebase, cambios posteriores en cualquiera de las ramas, forks y otros eventos no quedan exentos. Si el PR ya tenía un check fallido, volver a ejecutar el workflow después de configurar las variables.
+Abrir o actualizar el PR `Staging` → `main` y usar **Create a merge commit**. La excepción exige el `main` fijado y el `Staging` fijado como padres, en ese orden, tanto en el merge de prueba del PR como en producción; el baseline de producción debe seguir coincidiendo exactamente con `MIGRATION_SAFETY_EXCEPTION_BASE_SHA`. El SHA sintético que aparece como `merged PR` no es el HEAD de `Staging`. Squash, rebase, cambios posteriores en cualquiera de las ramas, forks y otros eventos no quedan exentos. Si el PR ya tenía un check fallido, volver a ejecutar el workflow después de configurar las variables.
 
-La ejecución deja una advertencia y un resumen con los commits exentos. Tras un despliegue correcto, el baseline avanza y la excepción deja de aplicarse a futuras promociones. Eliminar ambas variables después de confirmar el despliegue; si falla, los reintentos del mismo merge pueden seguir usando la excepción mientras el baseline anterior permanezca vigente.
+La ejecución deja una advertencia y un resumen con los commits exentos. Si la excepción no coincide, registra los SHA esperados y los padres reales para diagnosticarlo. Tras un despliegue correcto, el baseline avanza y la excepción deja de aplicarse a futuras promociones. Eliminar las variables de excepción después de confirmar el despliegue; si falla, los reintentos del mismo merge pueden seguir usando la excepción mientras el baseline anterior permanezca vigente.
 
 Para la promoción revisada el 2026-10-04, el baseline observado es `17aea9a3a9c92316ae5aa06c18648266e95df3cf`. El SHA de `Staging` debe obtenerse después del commit definitivo; no utilizar el SHA anterior a la preparación de la excepción. No cambiar `PRODUCTION_BASE_SHA` para saltarse validaciones.

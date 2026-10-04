@@ -65,6 +65,7 @@ jobs:
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
           APPROVED_BASE_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_BASE_SHA }}
           APPROVED_HEAD_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_HEAD_SHA }}
+          APPROVED_MERGE_BASE_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_MERGE_BASE_SHA }}
         run: node scripts/check-migration-safety-exception.mjs
 
       - name: Run migration safety checker
