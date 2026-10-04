@@ -20,6 +20,7 @@ import { shouldResetTenantState } from '../features/session/session-state'
 import { useAddProductFeedback } from '../hooks/useAddProductFeedback'
 import { useThemeTokens } from '../hooks/useThemeTokens'
 import { hasTenantCapability } from '../features/platform/tenantFeatureAccess'
+import { createTenantFeatureRefresh, subscribeTenantFeatureRefresh } from '../features/platform/tenantFeatureRefresh'
 import {
   clearSaleLedger,
   clearSessionTickets,
@@ -124,16 +125,36 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   const floatingTicketButtonRef = useRef<HTMLButtonElement>(null)
   const addFeedback = useAddProductFeedback(floatingTicketButtonRef)
   const tenantIdForFeatureSync = context && !isSuperadmin(context) ? context.tenantId : null
+  const userIdForFeatureSync = context?.userId ?? null
+  const featuresInitiallyLoaded = context?.features !== undefined
+  const featureRefreshRef = useRef<{
+    tenantId: string
+    userId: string
+    controller: ReturnType<typeof createTenantFeatureRefresh>
+  } | null>(null)
 
   useEffect(() => {
-    if (!tenantIdForFeatureSync || !isOnline) return undefined
+    if (!tenantIdForFeatureSync || !userIdForFeatureSync) {
+      featureRefreshRef.current = null
+      return undefined
+    }
+    if (!isOnline) return undefined
+    if (featureRefreshRef.current?.tenantId !== tenantIdForFeatureSync
+      || featureRefreshRef.current.userId !== userIdForFeatureSync) {
+      featureRefreshRef.current = {
+        tenantId: tenantIdForFeatureSync,
+        userId: userIdForFeatureSync,
+        controller: createTenantFeatureRefresh(() => loadTenantFeatures(tenantIdForFeatureSync), featuresInitiallyLoaded),
+      }
+    }
+    const controller = featureRefreshRef.current.controller
     let active = true
     const refreshFeatures = async () => {
       try {
-        const features = await loadTenantFeatures(tenantIdForFeatureSync)
+        const features = await controller.refreshIfStale()
         if (!active || features === undefined) return
         setContext((current) => {
-          if (!current || current.tenantId !== tenantIdForFeatureSync) return current
+          if (!current || current.tenantId !== tenantIdForFeatureSync || current.userId !== userIdForFeatureSync) return current
           const unchanged = current.features?.length === features.length
             && current.features.every((feature, index) => feature === features[index])
           if (unchanged) return current
@@ -145,20 +166,12 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
         // A temporary refresh failure must not interrupt an active POS session.
       }
     }
-    const handleFocus = () => { void refreshFeatures() }
-    const handleVisibility = () => {
-      if (document.visibilityState === 'visible') void refreshFeatures()
-    }
-    const intervalId = window.setInterval(() => void refreshFeatures(), 60_000)
-    window.addEventListener('focus', handleFocus)
-    document.addEventListener('visibilitychange', handleVisibility)
+    const unsubscribe = subscribeTenantFeatureRefresh(refreshFeatures)
     return () => {
       active = false
-      window.clearInterval(intervalId)
-      window.removeEventListener('focus', handleFocus)
-      document.removeEventListener('visibilitychange', handleVisibility)
+      unsubscribe()
     }
-  }, [isOnline, tenantIdForFeatureSync])
+  }, [featuresInitiallyLoaded, isOnline, tenantIdForFeatureSync, userIdForFeatureSync])
 
   const persistProductSalesStats = useCallback((stats: ProductSalesStat[]) => {
     setProductSalesStats(stats)

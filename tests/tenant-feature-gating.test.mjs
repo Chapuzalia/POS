@@ -55,8 +55,8 @@ test('CRM and POS hide or disable every optional feature surface', () => {
 
   assert.match(appShell, /hasTenantCapability\(context, 'restaurant'\)/)
   assert.match(appShell, /hasTenantCapability\(context, 'reservations'\)/)
-  assert.match(appShell, /setInterval\(\(\) => void refreshFeatures\(\), 60_000\)/)
-  assert.match(appShell, /addEventListener\('focus', handleFocus\)/)
+  assert.match(appShell, /subscribeTenantFeatureRefresh\(refreshFeatures\)/)
+  assert.match(appShell, /controller\.refreshIfStale\(\)/)
   assert.match(posPage, /allowDiscount=\{props\.manualDiscountEnabled \|\| promotionsEnabled\}/)
   assert.match(posPage, /quickSale\.discountModalOpen/)
   assert.match(posPage, /reservationsEnabled && props\.reservations\.isOpen/)
