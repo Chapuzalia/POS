@@ -103,6 +103,8 @@ No se fuerzan siempre tres releases. El contract puede ir en el segundo release 
 
 El pipeline calcula el rango desde el último deploy completo correcto. Si un deploy falla, esas migraciones se vuelven a revisar. En el primer despliegue protegido, `PRODUCTION_BASE_SHA` debe señalar el commit realmente desplegado; después, el último workflow de producción correcto actúa como baseline.
 
+Las migraciones nuevas deben guardarse en UTF-8 sin BOM. `scripts/prepare-production-migrations.mjs` elimina el BOM inicial únicamente de la copia SQL que se empaqueta para producción, conservando las fuentes históricas y el resto de bytes. PostgreSQL rechaza ese marcador con `SQLSTATE 42601` antes de ejecutar la primera sentencia; una migración posterior no puede corregir ese fallo de lectura.
+
 ## Excepción revisada para una única promoción
 
 La excepción está inactiva por defecto. No acredita la seguridad del SQL: solo omite el checker del PR y del despliegue para un merge previamente revisado. Conserva las pruebas del checker, lint, tests, build, backup y ejecución de migraciones.

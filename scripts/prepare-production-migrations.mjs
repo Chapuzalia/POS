@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { cp, readFile, writeFile } from 'node:fs/promises'
+import { cp, readFile, readdir, writeFile } from 'node:fs/promises'
 import { basename, join } from 'node:path'
 import { pathToFileURL } from 'node:url'
 
@@ -24,6 +24,17 @@ export async function prepareProductionMigrations(sourceDirectory, outputDirecto
     force: false,
     errorOnExist: true,
   })
+
+  // PostgreSQL treats a leading UTF-8 BOM as SQL, rather than an encoding marker.
+  // Normalize only the deployment copy; historical migration sources stay immutable.
+  for (const entry of await readdir(outputDirectory, { withFileTypes: true })) {
+    if (!entry.isFile() || !entry.name.endsWith('.sql')) continue
+    const outputPath = join(outputDirectory, entry.name)
+    const contents = await readFile(outputPath)
+    if (contents[0] === 0xef && contents[1] === 0xbb && contents[2] === 0xbf) {
+      await writeFile(outputPath, contents.subarray(3))
+    }
+  }
 
   const migrationPath = join(outputDirectory, LEGACY_PIPELINE_MIGRATION)
   const migration = await readFile(migrationPath, 'utf8')
