@@ -3,7 +3,7 @@ import { getReadableError } from '../utils/errors.ts'
 import { Button as UiButton } from '../components/ui/Button'
 import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
 import {
   CashPaymentModal,
@@ -45,7 +45,6 @@ import { CustomerInvoiceModal } from '../features/customers'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { finishCashlogyPayment, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
-import { loadInventoryPreparations } from '../features/inventory/preparationsService'
 import {
   isActiveCashlogyError,
   POS_TRANSIENT_ERROR_DURATION_MS,
@@ -163,30 +162,7 @@ export function PosPage(props: Props) {
   const reservationsEnabled = hasTenantCapability(props.context, 'reservations')
   const inventoryRecipesEnabled = hasTenantCapability(props.context, 'costing')
   const cashlogyEnabled = hasTenantCapability(props.context, 'cashlogy')
-  const [hasInventoryPreparations, setHasInventoryPreparations] = useState(false)
   const appliedDiscount = promotionsEnabled ? quickSale.discount : null
-  const refreshInventoryPreparations = useCallback(async () => {
-    if (!inventoryRecipesEnabled || !props.isOnline) {
-      setHasInventoryPreparations(false)
-      return
-    }
-
-    try {
-      const preparations = await loadInventoryPreparations(props.context.venueId)
-      const hasPreparations = preparations.length > 0
-      setHasInventoryPreparations(hasPreparations)
-      if (!hasPreparations) setPreparationsOpen(false)
-    } catch {
-      setHasInventoryPreparations(false)
-    }
-  }, [inventoryRecipesEnabled, props.context.venueId, props.isOnline])
-
-  useEffect(() => {
-    void refreshInventoryPreparations()
-    const handleFocus = () => void refreshInventoryPreparations()
-    window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
-  }, [refreshInventoryPreparations])
 
   useEffect(() => {
     onUpdateBlockingOperationChange(preparationBusy)
@@ -484,7 +460,7 @@ export function PosPage(props: Props) {
         canManageCash={canManageCash && !cashlogyPaymentLocked}
         canOpenCashDrawer={canManageCash && !cashlogyPaymentLocked}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
-        canOpenPreparations={inventoryRecipesEnabled && hasInventoryPreparations}
+        canOpenPreparations={inventoryRecipesEnabled}
         cashlogyConnected={cashlogyEnabled && cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
@@ -730,7 +706,7 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
-      {inventoryRecipesEnabled && hasInventoryPreparations && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={closePreparations}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onBusyChange={setPreparationBusy} onClose={closePreparations} /></Suspense></div></AppModal> : null}
+      {inventoryRecipesEnabled && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={closePreparations}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onBusyChange={setPreparationBusy} onClose={closePreparations} /></Suspense></div></AppModal> : null}
       {quickSaleExitOpen ? <QuickSaleExitModal
         canSave={Boolean(props.context.canTakeOrders && cash.session)}
         defaultName={quickSaleExitName}
