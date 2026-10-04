@@ -105,6 +105,8 @@ El pipeline calcula el rango desde el último deploy completo correcto. Si un de
 
 Las migraciones nuevas deben guardarse en UTF-8 sin BOM. `scripts/prepare-production-migrations.mjs` elimina el BOM inicial únicamente de la copia SQL que se empaqueta para producción, conservando las fuentes históricas y el resto de bytes. PostgreSQL rechaza ese marcador con `SQLSTATE 42601` antes de ejecutar la primera sentencia; una migración posterior no puede corregir ese fallo de lectura.
 
+La CLI de producción ejecuta migraciones en pipeline, donde PostgreSQL rechaza `CREATE INDEX CONCURRENTLY` con `SQLSTATE 25001`. La preparación adapta únicamente los tres índices de `20260912222539_paginate_pos_session_tickets.sql` y los dos de `20261003183458_optimize_pos_sale_latency.sql` a índices normales en la copia de despliegue. Comprueba el número esperado de índices y conserva los timeouts y las fuentes. Esta excepción de compatibilidad puede bloquear escrituras mientras se crean los índices; `lock_timeout = '5s'` limita la espera para adquirir el bloqueo y `statement_timeout = '5min'` limita la ejecución.
+
 ## Excepción revisada para una única promoción
 
 La excepción está inactiva por defecto. No acredita la seguridad del SQL: solo omite el checker del PR y del despliegue para un merge previamente revisado. Conserva las pruebas del checker, lint, tests, build, backup y ejecución de migraciones.
