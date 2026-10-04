@@ -28,6 +28,8 @@ export function useCashlogyScope(context: TenantContext | null, cashSessionId: s
         && !payment.isPolling
         && !payment.isStarting
         && !payment.isCancelling
+        && !payment.isRecovering
+        && !payment.missingTransaction
         && (!payment.transaction || cashlogyActiveStatuses.has(payment.transaction.status))
       if (paymentNeedsRecovery) {
         try { await useCashlogyStore.getState().recover(abortController.signal) } catch { /* permanece recuperable */ }

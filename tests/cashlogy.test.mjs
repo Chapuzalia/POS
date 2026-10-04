@@ -286,6 +286,34 @@ test('dar cambio Cashlogy empieza a 0 y exige elegir las denominaciones manualme
   assert.match(selector, /Poner todo a 0/)
 })
 
+test('el límite de espera detiene consultas sin declarar cancelado un cobro activo', async () => {
+  let calls = 0
+  const updates = []
+  await assert.rejects(pollCashlogyTransaction(
+    async () => { calls++; return { transaction: transaction('processing') } },
+    transaction('processing'),
+    { intervalMs: 1, timeoutMs: 20, onUpdate: (value) => updates.push(value.status) },
+  ), (error) => error.code === 'CASHLOGY_CONNECTION_TIMEOUT' && /sigue pendiente/.test(error.message))
+  const callsAtTimeout = calls
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.ok(calls > 0)
+  assert.equal(calls, callsAtTimeout)
+  assert.ok(updates.every((status) => status === 'processing'))
+})
+
+test('una consulta colgada también expira y su respuesta tardía no actualiza el cobro', async () => {
+  let respond
+  const updates = []
+  await assert.rejects(pollCashlogyTransaction(
+    () => new Promise((resolve) => { respond = resolve }),
+    transaction('dispensing_change'),
+    { intervalMs: 1, timeoutMs: 20, onUpdate: (value) => updates.push(value) },
+  ), (error) => error.code === 'CASHLOGY_CONNECTION_TIMEOUT')
+  respond({ transaction: transaction('completed') })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(updates, [])
+})
+
 test('los pollings terminan solo en estados terminales y permiten la fase awaiting_dispense', async () => {
   const transactionSequence = ['processing', 'dispensing_change', 'completed']
   let transactionCalls = 0
@@ -518,7 +546,8 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
   assert.match(modal, /finalizeGiveChangeAdmission/)
   assert.match(modal, /Cancelar operación/)
   assert.match(modal, /management\.cancel\(\)/)
-  assert.match(modal, /Volver al TPV/)
+  assert.doesNotMatch(modal, /Volver al TPV|Cerrar y revisar Cashlogy|onCloseReviewed/)
+  assert.match(modal, /dismissDisabled=\{Boolean\(management\.intent\)\}/)
   assert.match(modal, /rows\.map\(\(row\) => renderDenominationRow\(row, showStacker\)\)/)
   assert.doesNotMatch(modal, /<DenominationRow/)
   assert.doesNotMatch(modal, /suggestCashlogyDenominations/)

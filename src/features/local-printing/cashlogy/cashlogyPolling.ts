@@ -4,6 +4,7 @@ import type {
   CashlogyTransaction,
   CashlogyTransactionStatus,
 } from '../types.ts'
+import { CashlogyError } from './cashlogyError.ts'
 
 export const cashlogyActiveStatuses = new Set<CashlogyTransactionStatus>([
   'queued', 'connecting', 'initializing', 'starting_acceptance', 'waiting_for_cash',
@@ -31,6 +32,7 @@ export const cashlogyManagementTerminalStatuses = new Set<CashlogyCashManagement
 ])
 
 function delay(ms: number, signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.reject(signal.reason)
   return new Promise<void>((resolve, reject) => {
     const finish = () => {
       signal?.removeEventListener('abort', abort)
@@ -48,16 +50,34 @@ function delay(ms: number, signal?: AbortSignal) {
 export async function pollCashlogyTransaction(
   getTransaction: (transactionId: string, signal?: AbortSignal) => Promise<{ transaction: CashlogyTransaction }>,
   transaction: CashlogyTransaction,
-  options: { intervalMs?: number; signal?: AbortSignal; onUpdate?: (transaction: CashlogyTransaction) => void } = {},
+  options: { intervalMs?: number; timeoutMs?: number; signal?: AbortSignal; onUpdate?: (transaction: CashlogyTransaction) => void } = {},
 ) {
-  let current = transaction
-  const intervalMs = options.intervalMs ?? 500
-  while (cashlogyActiveStatuses.has(current.status)) {
-    await delay(intervalMs, options.signal)
-    current = (await getTransaction(current.id, options.signal)).transaction
-    options.onUpdate?.(current)
+  const controller = new AbortController()
+  const signal = options.signal ? AbortSignal.any([options.signal, controller.signal]) : controller.signal
+  let timer: ReturnType<typeof globalThis.setTimeout> | undefined
+  const timeout = new Promise<never>((_, reject) => {
+    if (options.timeoutMs === undefined) return
+    timer = globalThis.setTimeout(() => {
+      const error = new CashlogyError({ code: 'CASHLOGY_CONNECTION_TIMEOUT', message: 'Cashlogy no ha confirmado el final del movimiento a tiempo. El cobro sigue pendiente. Consulta su estado o vuelve a intentar la cancelación; no inicies otro cobro hasta resolverlo.' })
+      controller.abort(error)
+      reject(error)
+    }, options.timeoutMs)
+  })
+  const poll = async () => {
+    let current = transaction
+    while (cashlogyActiveStatuses.has(current.status)) {
+      await delay(options.intervalMs ?? 500, signal)
+      current = (await getTransaction(current.id, signal)).transaction
+      signal.throwIfAborted()
+      options.onUpdate?.(current)
+    }
+    return current
   }
-  return current
+  try {
+    return await Promise.race([poll(), timeout])
+  } finally {
+    globalThis.clearTimeout(timer)
+  }
 }
 
 

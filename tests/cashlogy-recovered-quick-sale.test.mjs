@@ -130,7 +130,7 @@ function nodes(tree) {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve))
 
-test('el modal muestra el fallo al aplicar y permite volver al TPV conservando el cobro', async () => {
+test('el modal muestra el fallo al aplicar y ofrece cancelación sin ocultar un cobro pendiente', async () => {
   const h = harness({ lines: [] })
   h.state.hide = () => { h.state.modalOpen = false }
   const render = modalHarness(h.state, (transaction) => h.pay('cash', null, transaction))
@@ -141,10 +141,10 @@ test('el modal muestra el fallo al aplicar y permite volver al TPV conservando e
   const alert = after.find((node) => node.props?.role === 'alert')
   assert.ok(alert)
   assert.match(alert.props.children.props.children, /No hay productos/)
-  const back = after.find((node) => node.type === 'button' && node.props.children === 'Volver al TPV')
-  assert.equal(back.props.disabled, false)
-  back.props.onClick()
-  assert.equal(h.state.modalOpen, false)
+  assert.equal(after.some((node) => node.type === 'button' && node.props.children === 'Volver al TPV'), false)
+  const cancel = after.find((node) => node.type === 'button' && node.props.variant === 'dangerSoft')
+  assert.equal(cancel.props.disabled, false)
+  assert.equal(h.state.modalOpen, true)
   assert.ok(h.state.intent)
   assert.equal(h.calls.finishes, 0)
   assert.equal(h.calls.charges, 0)
@@ -167,9 +167,8 @@ test('el botón Aplicar registra la venta recuperada y cierra el modal', async (
 test('un estado incierto solo permite aplicar o repetir después de revisión manual', async () => {
   const h = harness()
   h.state.transaction.status = 'unknown'
-  const calls = { closed: 0, finalized: 0, retries: [] }
-  h.state.closeReviewed = () => { calls.closed += 1 }
-  h.state.startPayment = async (...args) => {
+  const calls = { finalized: 0, retries: [] }
+  h.state.retryPayment = async (...args) => {
     calls.retries.push(args)
     return { ...h.transaction, id: 'retry', status: 'completed' }
   }
@@ -187,7 +186,6 @@ test('un estado incierto solo permite aplicar o repetir después de revisión ma
   retry.props.onClick()
   await flush()
 
-  assert.equal(calls.closed, 1)
-  assert.deepEqual(calls.retries, [[600, 'sale']])
+  assert.deepEqual(calls.retries, [[true]])
   assert.equal(calls.finalized, 1)
 })

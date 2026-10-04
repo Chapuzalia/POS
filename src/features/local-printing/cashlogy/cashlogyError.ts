@@ -7,9 +7,10 @@ export type CashlogyErrorCode =
   | 'CASHLOGY_STATUS_UNKNOWN' | 'CASHLOGY_RECONCILIATION_MISMATCH'
   | 'CASHLOGY_CANCEL_ON_CONNECTOR_SCREEN' | 'CASHLOGY_NOT_READY' | 'CASHLOGY_INVALID_STATE'
   | 'CASHLOGY_NETWORK_ERROR' | 'CASHLOGY_CASH_MANAGEMENT_NOT_FOUND' | 'CASHLOGY_CASH_MANAGEMENT_NOT_ACTIVE'
-  | 'CASHLOGY_OPERATION_FAILED'
+  | 'CASHLOGY_OPERATION_FAILED' | 'CASHLOGY_TRANSACTION_NOT_FOUND'
 
 const messages: Record<CashlogyErrorCode, string> = {
+  CASHLOGY_TRANSACTION_NOT_FOUND: 'El agente no conoce este cobro. Puedes cancelarlo o crear un nuevo intento.',
   CASHLOGY_BAD_DATA: 'Los datos enviados a Cashlogy no son válidos.',
   CASHLOGY_DISABLED: 'Cashlogy está deshabilitado en el servidor local.',
   CASHLOGY_NOT_CONFIGURED: 'Cashlogy no está configurado en el servidor local.',
@@ -70,6 +71,11 @@ export function isUncertainCashlogyError(error: unknown): boolean {
   if (error instanceof CashlogyError) return ['CASHLOGY_NETWORK_ERROR', 'CASHLOGY_CONNECTION_LOST', 'CASHLOGY_STATUS_UNKNOWN'].includes(error.code) || isUncertainCashlogyError(error.cause)
   return error instanceof PrintAgentError
     && (['NETWORK_ERROR', 'TIMEOUT', 'ABORTED'].includes(error.code) || error.status === 502)
+}
+
+export function isMissingCashlogyTransaction(error: unknown): boolean {
+  if (error instanceof CashlogyError) return error.code === 'CASHLOGY_TRANSACTION_NOT_FOUND' || isMissingCashlogyTransaction(error.cause)
+  return error instanceof PrintAgentError && error.status === 404
 }
 
 export function getBlockingCashlogyTransactionId(error: unknown): string | null {

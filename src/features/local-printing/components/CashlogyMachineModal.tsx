@@ -153,6 +153,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
   }, [loadDashboard, managementOperation])
 
   function closeModal() {
+    if (useCashlogyManagementStore.getState().intent) return
     management.hide()
     onClose()
   }
@@ -209,7 +210,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
       : view === 'confirm_stacker' ? 'Retirar stacker' : 'Máquina de efectivo'
 
   return <>
-    <AppModal label={title} maxWidth={980} onClose={closeModal}>
+    <AppModal dismissDisabled={Boolean(management.intent)} label={title} maxWidth={980} onClose={closeModal}>
     <section className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col overflow-hidden">
       <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
         <div className="min-w-0">
@@ -224,7 +225,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
             {health?.device?.serialNumber ? ` · ${health.device.serialNumber}` : ''}
           </p>
         </div>
-        <Button aria-label="Cerrar" onClick={closeModal} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
+        {!management.intent ? <Button aria-label="Cerrar" onClick={closeModal} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button> : null}
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
@@ -233,7 +234,6 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
           chosenDenominations={chosenDenominations}
           denominationOptions={denominationOptions}
           management={management}
-          onCloseReviewed={closeModal}
           onCloseResolved={closeResolvedOperation}
           onClearQuantities={clearDenominationSelection}
           onQuantitiesChange={changeDenominationQuantity}
@@ -345,7 +345,6 @@ type OperationViewProps = {
     | 'intent' | 'operation' | 'error' | 'isStarting' | 'isPolling' | 'isMutating' | 'isCancelling'
     | 'isRecordingStackerCollection' | 'stackerCollectionPending' | 'missingIntent'
     | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'cancel' | 'recover' | 'discardMissingIntent'>
-  onCloseReviewed: () => void
   onCloseResolved: () => void
   onClearQuantities: () => void
   onQuantitiesChange: (valueCents: number, quantity: number) => void
@@ -367,7 +366,6 @@ function OperationView(props: OperationViewProps) {
     <CashlogyOperationStatus error={management.error} isCancelling={management.isCancelling} isPending={busy || management.isPolling} operation={operation} type={type} />
 
     {type === 'refill' && operation?.status === 'accepting' ? <div className="flex flex-wrap justify-end gap-2">
-      <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
       {canCancel ? <Button disabled={busy} onClick={() => void management.cancel().catch(() => undefined)} size="lg" variant="danger">
         {management.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Cancelar operación
       </Button> : null}
@@ -377,7 +375,6 @@ function OperationView(props: OperationViewProps) {
     </div> : null}
 
     {type === 'give_change' && operation?.status === 'accepting' ? <div className="flex flex-wrap justify-end gap-2">
-      <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
       {canCancel ? <Button disabled={busy} onClick={() => void management.cancel().catch(() => undefined)} size="lg" variant="danger">
         {management.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Cancelar operación
       </Button> : null}
@@ -406,14 +403,13 @@ function OperationView(props: OperationViewProps) {
         size="lg"
         variant="primary"
       >Entregar cambio</Button>
-      <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
     </div> : null}
 
     {active && !critical && !['accepting', 'awaiting_dispense'].includes(operation?.status ?? '') ? <div className="flex flex-wrap justify-end gap-2">
+      <Button disabled={busy} onClick={() => void management.recover().catch(() => undefined)} variant="primary">Consultar estado</Button>
       {canCancel ? <Button disabled={busy} onClick={() => void management.cancel().catch(() => undefined)} variant="danger">
         {management.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Ban className="h-4 w-4" />} Cancelar operación
       </Button> : null}
-      <Button onClick={props.onCloseReviewed} variant="tertiary">Volver al TPV</Button>
     </div> : null}
 
     {critical ? <div className="flex flex-wrap justify-end gap-2">
@@ -428,7 +424,6 @@ function OperationView(props: OperationViewProps) {
       <Button disabled={management.isPolling || management.isMutating} onClick={() => void management.recover().catch(() => undefined)} variant="primary">
         {management.isPolling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Consultar estado de nuevo
       </Button>
-      <Button onClick={props.onCloseReviewed} variant="tertiary">Cerrar y revisar Cashlogy</Button>
     </div> : null}
 
     {operation && !active && !critical ? <div className="flex justify-end">
