@@ -140,6 +140,7 @@ export function PosPage(props: Props) {
   const [shiftSummaryError, setShiftSummaryError] = useState<string | null>(null)
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
   const [paymentProgress, setPaymentProgress] = useState<{ method: PaymentMethod | null } | null>(null)
+  const [pendingCashApproval, setPendingCashApproval] = useState<string | null>(null)
   const mobileTableMapLayout = useMobileTableMapLayout()
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -246,6 +247,8 @@ export function PosPage(props: Props) {
     : quickSale.paidFeedback
   const confirmedPayment = props.restaurantPaidFeedback ?? quickSale.paidFeedback
   const paymentProcessing = paymentProgress !== null && activeLines.length > 0
+    && (restaurant.posView.type !== 'table_order' || restaurant.paymentProcessing)
+  const paymentOrderScope = `${props.context.tenantId}:${props.context.venueId}:${props.context.userId}:${cash.session?.id}:${restaurant.order?.order.id}`
   const tableMapVisible = restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map'
   const cashlogyPendingNotice = cashlogyPaymentIntent && !cashlogyPaymentModalOpen
     ? <section className="flex items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] p-3 text-[var(--foreground)]">
@@ -380,6 +383,7 @@ export function PosPage(props: Props) {
       props.onSetError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
       return
     }
+    if (restaurant.posView.type === 'table_order' && restaurant.requestPendingPaymentConfirmation(method, null)) return
     if (method === 'cash') {
       if (cashlogyEnabled && cashlogyConfigured) {
         if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', null))
@@ -649,6 +653,12 @@ export function PosPage(props: Props) {
             <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45" onClick={() => {
               const payment = restaurant.pendingPayment
               restaurant.setPendingPayment(null)
+              if (payment?.method === 'cash' && payment.receivedCents === null
+                && !payment.cashlogyTransaction && !(cashlogyEnabled && cashlogyConfigured)) {
+                setPendingCashApproval(paymentOrderScope)
+                quickSale.openCashPayment()
+                return
+              }
               if (payment) void showPaymentProgress(payment.method, () => restaurant.completePayment(payment.method, payment.receivedCents, true))
             }} type="button">Cobrar igualmente</UiButton>
           </div>
@@ -694,10 +704,15 @@ export function PosPage(props: Props) {
       /> : null}
       {quickSale.cashPaymentOpen ? <CashPaymentModal
         isBusy={props.isBusy}
-        onCancel={quickSale.closeCashPayment}
+        onCancel={() => {
+          setPendingCashApproval(null)
+          quickSale.closeCashPayment()
+        }}
         onConfirm={(receivedCents) => {
           quickSale.closeCashPayment()
-          if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', receivedCents))
+          const forceWithPending = pendingCashApproval === paymentOrderScope
+          setPendingCashApproval(null)
+          if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', receivedCents, forceWithPending))
           else void showPaymentProgress('cash', () => quickSale.completePayment('cash', receivedCents))
         }}
         totalCents={totalCents}

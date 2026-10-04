@@ -25,6 +25,7 @@ import {
   getRestaurantPrintSubtotal,
 } from '../services/restaurantPrintPayload'
 import { applySessionLayout, saveSessionTableLayout } from '../../tables/layout-service'
+import { getOrderPendingUnits } from '../../tables/service-status'
 import {
   cancelEmptyRestaurantOrder,
   cleanupVirtualRoomRestaurantTable,
@@ -166,6 +167,7 @@ export function useRestaurantController(options: Options) {
   const [posView, setPosView] = useState<PosView>({ type: 'quick_sale' })
   const [moveOrderId, setMoveOrderId] = useState<string | null>(null)
   const [pendingPayment, setPendingPayment] = useState<PendingPayment | null>(null)
+  const [paymentProcessing, setPaymentProcessing] = useState(false)
   const [invoiceCustomer, setInvoiceCustomer] = useState<Customer | null>(null)
   const [pendingLineRemoval, setPendingLineRemoval] = useState<RestaurantOrderDetail['lines'][number] | null>(null)
   const [splitOrderGroup, setSplitOrderGroup] = useState<RestaurantOrderGroupDetail | null>(null)
@@ -852,6 +854,15 @@ export function useRestaurantController(options: Options) {
     setSplitOrderGroup(null)
   }, [draft, options, splitOrderGroup])
 
+  const requestPendingPaymentConfirmation = useCallback((method: PaymentMethod | null, receivedCents: number | null) => {
+    const currentOrder = draft.getCurrentOrder()
+    if (!options.context?.canTakePayments || !options.cashSession || !options.isOnline || paymentLockRef.current || !currentOrder) return false
+    const pendingUnits = getOrderPendingUnits(currentOrder.lines)
+    if (pendingUnits <= 0) return false
+    setPendingPayment({ method, receivedCents, pendingUnits })
+    return true
+  }, [draft, options.context, options.cashSession, options.isOnline])
+
   const completePayment = useCallback(async (
     method: PaymentMethod | null,
     receivedCents: number | null,
@@ -867,6 +878,7 @@ export function useRestaurantController(options: Options) {
       return
     }
     if (!context?.canTakePayments || !cashSession || !draft.getCurrentOrder() || !options.isOnline || paymentLockRef.current) return
+    if (!forceWithPending && requestPendingPaymentConfirmation(method, receivedCents)) return
     paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
@@ -881,6 +893,7 @@ export function useRestaurantController(options: Options) {
           return
         }
       }
+      setPaymentProcessing(true)
       const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), options.appliedDiscount).totalCents
@@ -996,10 +1009,11 @@ export function useRestaurantController(options: Options) {
     } catch (error) {
       options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
     } finally {
+      setPaymentProcessing(false)
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, paymentScope, pendingPayment, realtime, refreshSales, settlePayment, invoiceOrderId])
+  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, paymentScope, pendingPayment, realtime, refreshSales, requestPendingPaymentConfirmation, settlePayment, invoiceOrderId])
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false
@@ -1262,6 +1276,8 @@ export function useRestaurantController(options: Options) {
     paySelectedOrderItems,
     pendingLineRemoval,
     pendingPayment,
+    paymentProcessing,
+    requestPendingPaymentConfirmation,
     posView,
     prepareMove,
     requestCloseCash,

@@ -1,6 +1,7 @@
 import { readFile } from 'node:fs/promises'
 
 import { createCompiledHookRunner } from './component-harness.mjs'
+import { getOrderPendingUnits } from '../../src/features/tables/service-status.ts'
 
 const source = await readFile(new URL('../../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 
@@ -32,6 +33,7 @@ export function createRestaurantControllerHarness({
     cashlogySettlements: [],
     close: 0,
     fiscalIssues: [],
+    fiscalPreflights: [],
     drafts: [],
     errors: [],
     paid: [],
@@ -108,7 +110,7 @@ export function createRestaurantControllerHarness({
     '../../production/service': { loadOrderProductionState() {}, sendProductionBatch() {}, subscribeToOrderProduction() {} },
     '../../tables/layout-service': { applySessionLayout() {}, saveSessionTableLayout() {} },
     '../../tables/service': tableService,
-    '../../tables/service-status': { canDecreaseLineQuantity: () => true },
+    '../../tables/service-status': { canDecreaseLineQuantity: () => true, getOrderPendingUnits },
     '../draft-policy': { isRestaurantRevisionConflict: () => false, requiresConfirmedRestaurantLineRemoval: () => false, shouldSaveBeforeLeavingOrder: () => false },
     '../services/restaurantPrintPayload': {
       buildRestaurantPrintPayload: (payload) => payload,
@@ -118,7 +120,7 @@ export function createRestaurantControllerHarness({
     },
     '../services/validateCashClosure': { getRestaurantCashClosureError: async () => null },
     '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => fiscalMode },
-    '../../fiscal/local/restaurantInvoice.ts': { preflightRestaurantInvoice: async (_context, _session, saleId) => ({ saleId }), issueRestaurantInvoice: async (...args) => {
+    '../../fiscal/local/restaurantInvoice.ts': { preflightRestaurantInvoice: async (_context, _session, saleId) => { calls.fiscalPreflights.push(saleId); return { saleId } }, issueRestaurantInvoice: async (...args) => {
       calls.fiscalIssues.push(args)
       if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
       return fiscalIssue(...args)
