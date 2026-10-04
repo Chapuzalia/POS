@@ -1,4 +1,5 @@
 import { notifyOperationalError } from '../utils/notifications.ts'
+import { Check } from 'lucide-react'
 import { getReadableError } from '../utils/errors.ts'
 import { Button as UiButton } from '../components/ui/Button'
 import { AppModal } from '../components/ui/AppModal'
@@ -138,6 +139,7 @@ export function PosPage(props: Props) {
   const [shiftSummaryLoading, setShiftSummaryLoading] = useState(false)
   const [shiftSummaryError, setShiftSummaryError] = useState<string | null>(null)
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
+  const [paymentProgress, setPaymentProgress] = useState<{ method: PaymentMethod | null } | null>(null)
   const mobileTableMapLayout = useMobileTableMapLayout()
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -242,6 +244,8 @@ export function PosPage(props: Props) {
   const paidFeedback = restaurant.posView.type === 'table_order'
     ? props.restaurantPaidFeedback
     : quickSale.paidFeedback
+  const confirmedPayment = props.restaurantPaidFeedback ?? quickSale.paidFeedback
+  const paymentProcessing = paymentProgress !== null && activeLines.length > 0
   const tableMapVisible = restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map'
   const cashlogyPendingNotice = cashlogyPaymentIntent && !cashlogyPaymentModalOpen
     ? <section className="flex items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] p-3 text-[var(--foreground)]">
@@ -361,6 +365,12 @@ export function PosPage(props: Props) {
         onSetUnitPrice={quickSale.setUnitPrice}
       />
 
+  const showPaymentProgress = async (method: PaymentMethod | null, action: () => Promise<unknown>) => {
+    const progress = { method }
+    setPaymentProgress(progress)
+    try { await action() }
+    finally { setPaymentProgress((current) => current === progress ? null : current) }
+  }
   const handlePayment = (method: PaymentMethod | null) => {
     if (cashlogyPaymentLocked) {
       showCashlogyPayment()
@@ -372,15 +382,15 @@ export function PosPage(props: Props) {
     }
     if (method === 'cash') {
       if (cashlogyEnabled && cashlogyConfigured) {
-        if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', null)
-        else void quickSale.completePayment('cash', null)
+        if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', null))
+        else void showPaymentProgress('cash', () => quickSale.completePayment('cash', null))
         return
       }
       quickSale.openCashPayment()
       return
     }
-    if (restaurant.posView.type === 'table_order') void restaurant.completePayment(method, null)
-    else void quickSale.completePayment(method, null)
+    if (restaurant.posView.type === 'table_order') void showPaymentProgress(method, () => restaurant.completePayment(method, null))
+    else void showPaymentProgress(method, () => quickSale.completePayment(method, null))
   }
 
   const requestReturnFromQuickSale = () => {
@@ -448,6 +458,7 @@ export function PosPage(props: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
+      {confirmedPayment && !paymentProcessing ? <div role="status" className="pointer-events-none fixed bottom-[max(2rem,env(safe-area-inset-bottom))] left-1/2 z-[80] -translate-x-1/2"><div className="flex items-center gap-2 rounded-full border border-[var(--success)] bg-[var(--success-soft)] px-5 py-3 font-bold text-[var(--success)] shadow-lg motion-safe:animate-[ticket-feedback-success_320ms_ease-out]"><Check aria-hidden="true" className="size-5" strokeWidth={3} />Cobro registrado</div></div> : null}
       {restaurantEnabled && cash.session ? <CarryoverNotice
         key={cash.session.id}
         context={props.context} session={cash.session} isOnline={props.isOnline}
@@ -567,7 +578,9 @@ export function PosPage(props: Props) {
             allowDiscount={props.manualDiscountEnabled || promotionsEnabled}
             discount={appliedDiscount}
             disabled={!canSell}
-            feedback={paidFeedback}
+            feedback={paymentProcessing ? null : paidFeedback}
+            processing={paymentProcessing}
+            pendingMethod={paymentProgress?.method}
             heading={undefined}
             onOpenDiscount={quickSale.openDiscountModal}
             onPayment={handlePayment}
@@ -606,7 +619,9 @@ export function PosPage(props: Props) {
               allowDiscount={props.manualDiscountEnabled || promotionsEnabled}
               discount={appliedDiscount}
               disabled={!canSell}
-              feedback={paidFeedback}
+              feedback={paymentProcessing ? null : paidFeedback}
+              processing={paymentProcessing}
+              pendingMethod={paymentProgress?.method}
               heading={undefined}
               onOpenDiscount={quickSale.openDiscountModal}
               onPayment={handlePayment}
@@ -634,7 +649,7 @@ export function PosPage(props: Props) {
             <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45" onClick={() => {
               const payment = restaurant.pendingPayment
               restaurant.setPendingPayment(null)
-              if (payment) void restaurant.completePayment(payment.method, payment.receivedCents, true)
+              if (payment) void showPaymentProgress(payment.method, () => restaurant.completePayment(payment.method, payment.receivedCents, true))
             }} type="button">Cobrar igualmente</UiButton>
           </div>
         </section>
@@ -682,8 +697,8 @@ export function PosPage(props: Props) {
         onCancel={quickSale.closeCashPayment}
         onConfirm={(receivedCents) => {
           quickSale.closeCashPayment()
-          if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', receivedCents)
-          else void quickSale.completePayment('cash', receivedCents)
+          if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', receivedCents))
+          else void showPaymentProgress('cash', () => quickSale.completePayment('cash', receivedCents))
         }}
         totalCents={totalCents}
       /> : null}
