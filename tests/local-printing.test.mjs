@@ -7,6 +7,8 @@ import { normalizePrintAgentUrl } from '../src/features/local-printing/utils/nor
 import { sanitizePrintDiagnostics } from '../src/features/local-printing/utils/sanitizePrintDiagnostics.ts'
 import { getAutomaticSaleHardwareAction, shouldOpenCashDrawer } from '../src/features/local-printing/services/cashDrawerRules.ts'
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
+import { getSafeDefaultPrintTemplate } from '../src/features/print-templates/defaults.ts'
+import { isRegulatedSaleTemplateType, resolveSafeTemplateDefinition } from '../src/features/print-templates/saleTemplateGuard.ts'
 import { buildSalePayload } from '../src/features/quick-sale/services/salePayload.ts'
 import { pollPrintJob } from '../src/features/local-printing/services/jobPolling.ts'
 import { recoverSelectedPrinter } from '../src/features/local-printing/services/printerSelectionRecovery.ts'
@@ -18,7 +20,7 @@ import {
   getMovedRestaurantPrintLines,
   getRestaurantPrintSubtotal,
 } from '../src/features/restaurant/services/restaurantPrintPayload.ts'
-import { createCompiledHookRunner } from './helpers/component-harness.mjs'
+import { compileComponent, createCompiledHookRunner } from './helpers/component-harness.mjs'
 import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
 
 const layout80 = { columns: 48, paperWidth: 80, characterSet: 'CP858' }
@@ -98,7 +100,7 @@ function buildQuickSalePayload(...args) {
   }
 }
 
-function quickSalePaymentHarness({ isOnline }) {
+function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssue = null, fiscalPreflight = null }) {
   const sync = deferred()
   const calls = []
   const printed = []
@@ -131,6 +133,20 @@ function quickSalePaymentHarness({ isOnline }) {
       settleCashlogyPaymentIfConfigured: async () => null,
     },
     '../../local-printing/services/earlyCashDrawer': earlyCashDrawerMock,
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => fiscalMode },
+    '../../fiscal/local/posInvoice.ts': { issuePosInvoice: async (...args) => {
+      calls.push('issueFiscal')
+      if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
+      return fiscalIssue(...args)
+    }, preflightPosInvoice: async (...args) => {
+      calls.push('preflightFiscal')
+      return fiscalPreflight ? fiscalPreflight(...args) : undefined
+    },
+    printPayloadWithLocalFiscal: (payload) => ({ ...payload, localFiscal: { series: 'L1-C1-I1-2026-S', number: 1 },
+      fiscal: { verificationUrl: 'https://aeat.example.invalid/qr' } }) },
+    '../../fiscal/local/economicSync.ts': { synchronizeFiscalEconomicSales: async () => {} },
+    '../../fiscal/local/sync.ts': { synchronizeLocalFiscalQueue: async () => {} },
+    '../../fiscal/local/installation.ts': { fiscalBridgeAccessToken: async () => '', fiscalBridgeBaseUrl: () => '' },
   }, { window: { crypto } })
   const options = {
     cashSession: quickSaleCashSession,
@@ -207,7 +223,7 @@ test('distingue timeout, error de red, HTTP, token ausente y respuesta no JSON',
   await assert.rejects(anonymous.getServerInfo(), (error) => error.code === 'UNAUTHORIZED')
 })
 
-test('reintenta con lines cuando un servidor antiguo no admite elements', async () => {
+test('bloquea la impresión fiscal si un agente antiguo no admite el QR estructurado', async () => {
   const payload = mapSaleToPrintRequest({
     sale: completeInvoiceSale(), establishment: { name: 'MESS' },
     printerId: 'main-bar', printerLayout: layout80,
@@ -222,12 +238,30 @@ test('reintenta con lines cuando un servidor antiguo no admite elements', async 
         : new Response(JSON.stringify({ ok: true, jobId: 'legacy-job', status: 'printed' }), { status: 200 })
     },
   })
-  const response = await client.printTicket(payload)
+  await assert.rejects(client.printTicket(payload), (error) => error.code === 'FISCAL_QR_UNSUPPORTED')
+  assert.equal(bodies.length, 1)
+  assert.ok(bodies[0].elements.some((element) => element.type === 'qr'))
+})
+
+test('conserva el fallback de texto para documentos sin QR', async () => {
+  const bodies = []
+  const client = createPrintAgentClient({
+    baseUrl: 'https://tpv-printer.local:8443', token: 'secret',
+    fetchImpl: async (_url, init) => {
+      bodies.push(JSON.parse(String(init?.body)))
+      return bodies.length === 1
+        ? new Response(JSON.stringify({ code: 'INVALID_REQUEST' }), { status: 400 })
+        : new Response(JSON.stringify({ ok: true, jobId: 'legacy-job', status: 'printed' }), { status: 200 })
+    },
+  })
+  const response = await client.printTicket({
+    requestId: 'test-legacy', printerId: 'main-bar', force: false, lines: ['Documento'],
+    elements: [{ type: 'text', value: 'Documento' }],
+    options: { cut: true, openCashDrawer: false, copies: 1 },
+  })
   assert.equal(response.jobId, 'legacy-job')
   assert.equal(bodies.length, 2)
-  assert.ok(bodies[0].elements.some((element) => element.type === 'qr'))
   assert.equal(bodies[1].elements, undefined)
-  assert.ok(bodies[1].lines.join('').includes('prewww2.aeat.es'))
 })
 
 test('permite cancelar una consulta mediante AbortSignal', async () => {
@@ -308,7 +342,7 @@ test('una factura completa sustituye el enlace VeriFactu por un QR con el conten
     payload.elements.some((element) => element.type === 'text' && element.value.includes('prewww2.aeat.es')),
     false,
   )
-  assert.equal(printRequestSchema.parse(payload).elements[0].type, 'text')
+  assert.equal(printRequestSchema.parse(payload).elements[0].type, 'qr')
 })
 
 test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipos', () => {
@@ -332,7 +366,7 @@ test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipo
   assert.match(text, /Base imponible[ ]+20,00 €/)
   assert.match(text, /IVA 10 %[ ]+1,00 €/)
   assert.match(text, /IVA 21 %[ ]+2,10 €/)
-  assert.match(text, /TOTAL[ ]+23,10 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+23,10 €/)
 })
 
 test('la venta rapida reparte el descuento y recalcula el IVA final de cada tipo', () => {
@@ -360,7 +394,7 @@ test('la venta rapida reparte el descuento y recalcula el IVA final de cada tipo
   assert.match(text, /Descuento[ ]+-4,62 €/)
   assert.match(text, /IVA 10 %[ ]+0,80 €/)
   assert.match(text, /IVA 21 %[ ]+1,68 €/)
-  assert.match(text, /TOTAL[ ]+18,48 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+18,48 €/)
 })
 
 test('omite todo el desglose fiscal si alguna linea de venta rapida no tiene IVA', () => {
@@ -379,7 +413,7 @@ test('omite todo el desglose fiscal si alguna linea de venta rapida no tiene IVA
   const text = request.lines.join('\n')
   assert.match(text, /Subtotal[ ]+17,10 €/)
   assert.match(text, /Descuento[ ]+-3,42 €/)
-  assert.match(text, /TOTAL[ ]+13,68 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+13,68 €/)
   assert.doesNotMatch(text, /\nIVA \d/u)
 })
 
@@ -404,7 +438,7 @@ test('la venta rapida aplica el IVA predeterminado del local a productos que lo 
   assert.match(text, /Subtotal[ ]+100,00 €/)
   assert.match(text, /Base imponible[ ]+82,64 €/)
   assert.match(text, /IVA 21 %[ ]+17,36 €/)
-  assert.match(text, /TOTAL[ ]+100,00 €/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+100,00 €/)
 })
 
 test('la reimpresion usa COPIA, un ID de copia y nunca abre el cajon', () => {
@@ -442,8 +476,7 @@ test('la venta rápida libera la interfaz y espera la fiscalización antes de im
 
   online.sync.resolve()
   await payment
-  assert.deepEqual(online.calls, ['persist', 'reset', 'sync', 'fiscal', 'print'])
-  assert.equal(online.printed[0].fiscal.status, 'accepted')
+  assert.deepEqual(online.calls, ['persist', 'reset', 'sync', 'print'])
 
   const offline = quickSalePaymentHarness({ isOnline: false })
   await offline.pay('card', null)
@@ -469,7 +502,7 @@ test('construye el ticket de mesa localmente en cuanto la RPC devuelve sus IDs',
   assert.equal(request.requestId, 'print:sale-table:original')
   assert.match(request.lines.join('\n'), /1 x Brugal Cubata/)
   assert.match(request.lines.join('\n'), /Coca-Cola/)
-  assert.doesNotMatch(request.lines.join('\n'), /IVA /)
+  assert.doesNotMatch(request.lines.join('\n'), /\nIVA \d/u)
   assert.equal(request.options.openCashDrawer, true)
 })
 
@@ -525,7 +558,7 @@ test('la venta rapida online persiste, solicita cajon temprano, sincroniza y mar
   assert.deepEqual(harness.calls.slice(0, 3), ['persist', 'earlyDrawer', 'reset'])
   harness.sync.resolve()
   await payment
-  assert.deepEqual(harness.calls, ['persist', 'earlyDrawer', 'reset', 'sync', 'fiscal', 'print'])
+  assert.deepEqual(harness.calls, ['persist', 'earlyDrawer', 'reset', 'sync', 'print'])
   assert.equal(harness.earlyDrawerCalls.length, 1)
   assert.match(harness.earlyDrawerCalls[0], /^drawer:[^:]+:payment$/u)
   assert.equal(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
@@ -539,8 +572,231 @@ test('la venta rapida online con tarjeta no solicita cajon temprano', async () =
   assert.deepEqual(harness.earlyDrawerCalls, [])
   harness.sync.resolve()
   await payment
-  assert.deepEqual(harness.calls, ['persist', 'reset', 'sync', 'fiscal', 'print'])
+  assert.deepEqual(harness.calls, ['persist', 'reset', 'sync', 'print'])
   assert.notEqual(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
+})
+
+test('la factura fiscal reimprime la base y cuota históricas sin recalcular el desglose', () => {
+  const issued = structuredClone(sale)
+  issued.localFiscal = { recordId: 'record-1', series: 'L1-C1-I1-2026-S', number: 3,
+    issuedAt: '2026-07-18T16:30:00+02:00', documentKind: 'simplified',
+    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1',
+    verifactuLegend: false }
+  issued.lines[0].fiscalSnapshot = { taxRate: 21, taxableBaseCents: 1323, taxAmountCents: 277, grossTotalCents: 1600 }
+  issued.fiscal = { invoiceId: 'invoice-1', provider: 'verifactu', status: 'pending',
+    externalCode: 'L1-C1-I1-2026-S/3', qrBase64: null, verificationUrl: verifactuUrl }
+  const payload = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80 })
+  const text = payload.lines.join('\n')
+  assert.match(text, /Base imponible[ ]+13,23 €/)
+  assert.match(text, /IVA 21 %[ ]+2,77 €/)
+  assert.ok(payload.elements.some((element) => element.type === 'qr' && element.data === verifactuUrl))
+  assert.equal(payload.elements.find((element) => element.type === 'qr' || element.value.trim()).type, 'qr')
+  assert.doesNotMatch(text, /VERI\*FACTU/)
+})
+
+test('la rectificativa fuerza en la impresión la referencia a la factura original aunque la plantilla personalizada la omita', () => {
+  const issued = structuredClone(sale)
+  issued.localFiscal = { recordId: 'refund-record', series: 'MES-C2-2026-R', number: 4,
+    issuedAt: '2026-09-30T19:44:45+02:00', documentKind: 'simplified', issuerName: 'Emisor', issuerNif: 'B12345678', issuerAddress: '',
+    verifactuLegend: true, rectifiedInvoice: { series: 'MES-C2-2026-S', number: 123, issuedAt: '2026-09-30T16:46:00+02:00' } }
+  issued.fiscal = { invoiceId: 'refund-invoice', provider: 'verifactu', status: 'pending', externalCode: 'MES-C2-2026-R/4', qrBase64: null, verificationUrl: verifactuUrl }
+  const request = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, template: { version: 1, blocks: [{ id: 'qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' }] } })
+  const text = request.lines.join('\\n')
+  assert.match(text, /FACTURA RECTIFICATIVA/)
+  assert.ok(text.includes('MES-C2-2026-S/123'))
+  assert.match(text, /Fecha factura original/)
+})
+
+test('la factura VERI*FACTU fuerza QR al principio, corrección M y leyenda aunque la plantilla fiscal sea incompleta', () => {
+  const issued = structuredClone(sale)
+  issued.localFiscal = { recordId: 'record-2', series: 'L1-C1-I1-2026-S', number: 4,
+    issuedAt: '2026-07-18T16:31:00+02:00', documentKind: 'simplified',
+    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1',
+    verifactuLegend: true }
+  issued.fiscal = { invoiceId: 'invoice-2', provider: 'verifactu', status: 'pending',
+    externalCode: 'L1-C1-I1-2026-S/4', qrBase64: null, verificationUrl: verifactuUrl }
+  const payload = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS' },
+    printerId: 'main-bar', printerLayout: layout80,
+    template: { version: 1, blocks: [
+      { id: 'venue', type: 'text', value: '{{venue.name}}' },
+      { id: 'late-qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' },
+    ] } })
+  const firstVisible = payload.elements.find((element) => element.type === 'qr' || element.value.trim())
+  const qr = payload.elements.find((element) => element.type === 'qr')
+  assert.equal(firstVisible.type, 'qr')
+  assert.deepEqual(qr, { type: 'qr', data: verifactuUrl, size: 6, errorCorrection: 'M' })
+  assert.ok(payload.elements.some((element) => element.type === 'text' && element.value === 'VERI*FACTU'))
+})
+
+test('desactivar el QR solo lo elimina de la impresión, incluidas copias y rectificativas', () => {
+  const issued = completeInvoiceSale()
+  issued.localFiscal = {
+    recordId: 'record', series: 'R', number: 4, issuedAt: issued.sale.createdAt,
+    documentKind: 'complete', issuerName: 'Emisor', issuerNif: 'B12345678', issuerAddress: '',
+    verifactuLegend: true,
+    rectifiedInvoice: { series: 'S', number: 3, issuedAt: issued.sale.createdAt },
+  }
+  const snapshot = structuredClone(issued)
+  for (const isReprint of [false, true]) {
+    const options = { sale: issued, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint }
+    const withQr = mapSaleToPrintRequest(options)
+    const withoutQr = mapSaleToPrintRequest({ ...options, printQr: false })
+    assert.equal(withQr.elements.filter((element) => element.type === 'qr').length, 1)
+    assert.equal(withoutQr.elements.filter((element) => element.type === 'qr').length, 0)
+    assert.equal(withoutQr.requestId, withQr.requestId)
+    assert.deepEqual(withoutQr.options, withQr.options)
+    const text = withoutQr.lines.join('\n')
+    assert.match(text, /VERI\*FACTU/)
+    assert.match(text, /FACTURA RECTIFICATIVA/)
+    assert.match(text, /S\/3/)
+    assert.match(text, /16,00 €/)
+    if (isReprint) assert.match(text, /COPIA/)
+  }
+  assert.deepEqual(issued, snapshot)
+})
+
+test('la impresión consulta la preferencia del tenant y conserva el QR si la configuración no está disponible', async () => {
+  const source = readFileSync(new URL('../src/features/local-printing/services/printCompletedSale.ts', import.meta.url), 'utf8')
+  const printed = []
+  const tenants = []
+  let setting = false
+  let unavailable = false
+  const { printCompletedSale } = compileComponent(source, {
+    '../../print-templates/service.ts': { resolvePrintTemplate: async () => ({ definition: getSafeDefaultPrintTemplate('invoice') }) },
+    '../../fiscal/local/settings.ts': { loadFiscalPosSettings: async (tenantId) => {
+      tenants.push(tenantId)
+      if (unavailable) throw new Error('Backend unavailable')
+      return { print_ticket_qr: setting }
+    } },
+    '../store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({ preferences: {}, printTicket: (payload) => { printed.push(payload); return payload } }) } },
+    './selectedPrinterLayout': { loadSelectedPrinterLayout: async () => ({ printer: { id: 'main' }, layout: layout80 }) },
+    './ticketPrintMapper': { mapSaleToPrintRequest },
+  })
+  const input = { sale: completeInvoiceSale(), establishment: { name: 'MESS' }, context: { tenantId: 'tenant', venueId: 'mess' } }
+  await printCompletedSale(input)
+  setting = true
+  await printCompletedSale({ ...input, isReprint: true })
+  unavailable = true
+  await printCompletedSale(input)
+  assert.deepEqual(tenants, ['tenant', 'tenant', 'tenant'])
+  assert.deepEqual(printed.map((payload) => payload.elements.some((element) => element.type === 'qr')), [false, true, true])
+})
+
+test('una plantilla de venta solo con texto libre no oculta los datos obligatorios ni desplaza el QR', () => {
+  const issued = structuredClone(sale)
+  issued.localFiscal = { recordId: 'record-guard', series: 'L1-C1-I1-2026-S', number: 7,
+    issuedAt: '2026-07-18T16:40:00+02:00', documentKind: 'simplified',
+    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1', verifactuLegend: true }
+  issued.fiscal = { invoiceId: 'invoice-guard', provider: 'verifactu', status: 'pending',
+    externalCode: 'L1-C1-I1-2026-S/7', qrBase64: null, verificationUrl: verifactuUrl }
+  const payload = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS', taxId: 'B12345678' },
+    printerId: 'main', printerLayout: layout80, template: { version: 1, blocks: [
+      { id: 'saludo', type: 'text', value: 'Síguenos en @restaurante' },
+    ] } })
+  const firstVisible = payload.elements.find((element) => element.type === 'qr' || element.value.trim())
+  assert.equal(firstVisible.type, 'qr')
+  assert.deepEqual(payload.elements.find((element) => element.type === 'qr'),
+    { type: 'qr', data: verifactuUrl, size: 6, errorCorrection: 'M' })
+  const text = payload.lines.join('\n')
+  assert.match(text, /VERI\*FACTU/)
+  assert.match(text, /FACTURA SIMPLIFICADA/)
+  assert.match(text, /NIF\/CIF B12345678/)
+  assert.match(text, /Número fiscal[ ]+L1-C1-I1-2026-S\/7/)
+  assert.match(text, /Fecha expedición[ ]+2026-07-18 16:40:00/)
+  assert.match(text, /Brugal/)
+  assert.match(text, /TOTAL \(IVA incluido\)[ ]+16,00 €/)
+  assert.match(text, /Código: L1-C1-I1-2026-S\/7/)
+  assert.doesNotMatch(text, /Gracias por su visita/)
+  assert.deepEqual(payload.elements.at(-1), { type: 'text', value: 'Síguenos en @restaurante' })
+})
+
+test('el guard de venta restaura la estructura legal y deduplica el texto propio del local', () => {
+  const structural = getSafeDefaultPrintTemplate('simplified_invoice')
+  const resolved = resolveSafeTemplateDefinition('simplified_invoice', { version: 1, blocks: [
+    { id: 'titulo', type: 'text', value: 'PRODUCTOS' },
+     { id: 'saludo', type: 'text', value: '  Bienvenidos  ' },
+     { id: 'saludo-2', type: 'text', value: 'bienvenidos' },
+     { id: 'custom-text:after_document:1', type: 'text', value: 'Entre documento y productos' },
+    { id: 'variable', type: 'text', value: 'Total {{ticket.number}}' },
+    { id: 'falso-qr', type: 'qr', value: 'https://example.test/falso' },
+    { id: 'falsa-fila', type: 'row', label: 'TOTAL', value: '0,00 €' },
+    { id: 'falso-bucle', type: 'repeat', source: 'items', blocks: [{ id: 'item', type: 'text', value: 'gratis' }] },
+    { id: 'condicionado', type: 'text', value: 'Solo con cliente', when: 'customer.name' },
+  ] })
+  const mandatoryIds = new Set(structural.blocks.map((block) => block.id))
+  assert.deepEqual(resolved.blocks.filter((block) => mandatoryIds.has(block.id)), structural.blocks)
+  assert.deepEqual(resolved.blocks.filter((block) => !mandatoryIds.has(block.id)), [
+    { id: 'custom-text:after_document:1', type: 'text', value: 'Entre documento y productos' },
+    { id: 'saludo', type: 'text', value: 'Bienvenidos' },
+  ])
+  const documentIndex = resolved.blocks.findIndex((block) => block.id === 'ticket-date')
+  const customIndex = resolved.blocks.findIndex((block) => block.id === 'custom-text:after_document:1')
+  const itemsIndex = resolved.blocks.findIndex((block) => block.id === 'items')
+  assert.ok(documentIndex < customIndex && customIndex < itemsIndex)
+  assert.deepEqual(resolveSafeTemplateDefinition('simplified_invoice', resolved), resolved)
+})
+
+test('una plantilla de venta manipulada queda reducida a la estructura obligatoria mas su texto literal', () => {
+  const structural = getSafeDefaultPrintTemplate('invoice')
+  const resolved = resolveSafeTemplateDefinition('invoice', { version: 1, blocks: [
+    { id: 'nota', type: 'text', value: 'Gracias' },
+    { id: 'leyenda', type: 'text', value: 'VERI*FACTU' },
+  ] })
+  assert.equal(resolved.blocks[0].id, 'fiscal-qr')
+  assert.deepEqual(resolved.blocks.slice(0, structural.blocks.length), structural.blocks)
+  assert.deepEqual(resolved.blocks.at(-1), { id: 'nota', type: 'text', value: 'Gracias' })
+  assert.equal(resolveSafeTemplateDefinition('invoice', undefined).blocks.length, structural.blocks.length)
+})
+
+test('los tipos de plantilla ajenos a la venta conservan su definicion', () => {
+  const kds = { version: 1, blocks: [
+    { id: 'kds-order', type: 'text', value: 'COMANDA #{{order.number}}', bold: true, size: 'large' },
+  ] }
+  assert.equal(isRegulatedSaleTemplateType('simplified_invoice'), true)
+  assert.equal(isRegulatedSaleTemplateType('invoice'), true)
+  assert.equal(isRegulatedSaleTemplateType('cash_closure'), false)
+  assert.deepEqual(resolveSafeTemplateDefinition('kds', kds), kds)
+  assert.deepEqual(resolveSafeTemplateDefinition('cash_closure', undefined), getSafeDefaultPrintTemplate('cash_closure'))
+})
+
+test('la venta rápida en modo producción emite localmente y conserva el envío pendiente', async () => {
+  const harness = quickSalePaymentHarness({ isOnline: false, fiscalMode: 'production',
+    fiscalIssue: async () => ({ id: 'fiscal-record', record: {
+      tenantId: quickSaleContext.tenantId, fiscalSubjectId: 'subject', installationId: 'installation',
+    } }) })
+  await harness.pay('card', null)
+  assert.deepEqual(harness.calls.filter(item => ['preflightFiscal', 'issueFiscal', 'print'].includes(item)),
+    ['preflightFiscal', 'issueFiscal', 'print'])
+  assert.equal(harness.calls.includes('persist'), false)
+  assert.equal(harness.printed[0].localFiscal.number, 1)
+  assert.equal(harness.printed[0].fiscal.verificationUrl, 'https://aeat.example.invalid/qr')
+})
+
+test('la venta rápida entrega a la emisión la instalación fiscal preparada en el mismo cobro', async () => {
+  const issued = []
+  const harness = quickSalePaymentHarness({ isOnline: false, fiscalMode: 'production',
+    fiscalPreflight: async (context, cashSession, preview) => ({
+      tenantId: context.tenantId, venueId: context.venueId, deviceId: context.deviceId,
+      cashRegisterId: cashSession.cashRegisterId, cashSessionId: cashSession.id, saleId: preview.sale.id,
+      installation: { installationId: 'installation' }, preparedAt: 1, preparedMonotonicAt: 1,
+    }),
+    fiscalIssue: async (context, cashSession, payload, economicAlreadySynced, resolveSale, simplifiedLimitCents, prepared) => {
+      issued.push({ payload, economicAlreadySynced, resolveSale, simplifiedLimitCents, prepared })
+      return { id: 'fiscal-record', record: {
+        tenantId: quickSaleContext.tenantId, fiscalSubjectId: 'subject', installationId: 'installation',
+      } }
+    } })
+  await harness.pay('card', null)
+
+  assert.deepEqual(harness.calls.filter(item => ['preflightFiscal', 'issueFiscal', 'print'].includes(item)),
+    ['preflightFiscal', 'issueFiscal', 'print'])
+  assert.equal(issued.length, 1)
+  assert.equal(issued[0].prepared.saleId, issued[0].payload.sale.id)
+  assert.equal(issued[0].prepared.installation.installationId, 'installation')
+  assert.equal(issued[0].economicAlreadySynced, false)
+  assert.equal(issued[0].resolveSale, undefined)
+  assert.equal(issued[0].simplifiedLimitCents, undefined)
 })
 
 test('el mapper suprime openCashDrawer cuando el cajon ya fue solicitado y conserva el comportamiento normal', () => {

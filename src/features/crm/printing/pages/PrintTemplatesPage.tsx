@@ -1,8 +1,11 @@
 import {
   ArrowLeft,
+  ChevronDown,
   ChevronRight,
+  ChevronUp,
   CopyPlus,
   GripVertical,
+  Lock,
   Plus,
   RotateCcw,
   Save,
@@ -10,6 +13,7 @@ import {
   Trash2,
   X,
 } from "lucide-react";
+import QRCode from "qrcode";
 import { useEffect, useMemo, useState, type ReactNode } from "react";
 import { AppModal, Button, Input, TextArea } from "../../../../components/ui";
 import type { PrinterLayout } from "../../../local-printing/types.ts";
@@ -21,7 +25,16 @@ import {
   PRINT_TEMPLATE_VARIABLES,
   getMockPrintTemplateContext,
 } from "../../../print-templates/catalog.ts";
-import { getSafeDefaultPrintTemplate } from "../../../print-templates/defaults.ts";
+import {
+  getSafeDefaultPrintTemplate,
+  SALE_MANDATORY_GROUPS,
+  SALE_TEMPLATE_SLOTS,
+  type SaleTemplateSlot,
+} from "../../../print-templates/defaults.ts";
+import {
+  extractSafeSaleCustomization,
+  isRegulatedSaleTemplateType,
+} from "../../../print-templates/saleTemplateGuard.ts";
 import {
   renderPrintTemplate,
   renderPrintTemplateWithFallback,
@@ -63,6 +76,183 @@ const previewLayout = {
   characterSet: "CP858",
 };
 
+type PersonalizationTextBlock = Extract<PrintTemplateBlock, { type: "text" }>;
+
+type PersonalizationEntry = {
+  block: PersonalizationTextBlock;
+  index: number;
+};
+
+type MandatoryGroup = {
+  id: string;
+  label: string;
+  blockIds: readonly string[];
+};
+
+const mandatorySaleGroups: readonly MandatoryGroup[] = [
+  { id: "fiscal", label: "Verificación fiscal", blockIds: SALE_MANDATORY_GROUPS.fiscal },
+  { id: "issuer", label: "Emisor", blockIds: SALE_MANDATORY_GROUPS.issuer },
+  { id: "document", label: "Identificación del documento fiscal", blockIds: SALE_MANDATORY_GROUPS.document },
+  { id: "rectification_customer", label: "Rectificación y cliente (cuando aplique)", blockIds: ["rectified-document", "rectified-invoice", "rectified-date", "cash-register", "employee", "customer-gap", "customer-title", "customer-separator", "customer-name", "customer-tax-id", "customer-address", "customer-postal-code", "customer-city", "customer-province", "customer-country"] },
+  { id: "items", label: "Productos", blockIds: SALE_MANDATORY_GROUPS.items },
+  { id: "totals", label: "Impuestos y totales", blockIds: SALE_MANDATORY_GROUPS.totals },
+  { id: "footer", label: "Pago y pie fiscal", blockIds: ["payment-gap", "payment-title", "payment-separator", "payment", "fiscal-footer-gap", "fiscal-footer", "footer-gap", "footer"] },
+];
+
+const slotLabels: Record<SaleTemplateSlot, string> = {
+  top: "Antes de la verificación fiscal",
+  after_issuer: "Después del emisor",
+  after_document: "Después de la identificación fiscal",
+  before_items: "Antes de productos",
+  after_items: "Después de productos",
+  after_totals: "Después de impuestos y totales",
+  bottom: "Al final del ticket",
+};
+
+/**
+ * Same literal rule enforced by the print-template service guard: any template
+ * braces mark a block as structural, so it is never editable as personalization.
+ */
+const templateBracesPattern = /\{\{|\}\}/u;
+
+function hasTemplateBraces(value: string) {
+  return templateBracesPattern.test(value);
+}
+
+/** Personalization is literal text only, and never part of the regulated structure. */
+function isPersonalizationText(
+  block: PrintTemplateBlock,
+  regulatedBlockIds: ReadonlySet<string>,
+): block is PersonalizationTextBlock {
+  return (
+    block.type === "text" &&
+    !block.when &&
+    !block.unless &&
+    !hasTemplateBraces(block.value) &&
+    !regulatedBlockIds.has(block.id)
+  );
+}
+
+function selectPersonalizationEntries(
+  blocks: PrintTemplateBlock[],
+  regulatedBlockIds: ReadonlySet<string>,
+): PersonalizationEntry[] {
+  return blocks.reduce<PersonalizationEntry[]>((entries, block, index) => {
+    if (isPersonalizationText(block, regulatedBlockIds)) {
+      entries.push({ block, index });
+    }
+    return entries;
+  }, []);
+}
+
+/** Mirrors the service guard so a text the service would drop is never saved silently. */
+function getPersonalizationSlot(id: string): SaleTemplateSlot {
+  const match = /^custom-text:([a-z_]+):\d+$/u.exec(id);
+  return match && SALE_TEMPLATE_SLOTS.includes(match[1] as SaleTemplateSlot)
+    ? (match[1] as SaleTemplateSlot)
+    : "bottom";
+}
+
+function assembleSaleBlocks(
+  structural: PrintTemplateBlock[],
+  personalizations: PersonalizationEntry[],
+): PrintTemplateBlock[] {
+  const bySlot = new Map<SaleTemplateSlot, PrintTemplateBlock[]>();
+  SALE_TEMPLATE_SLOTS.forEach((slot) => bySlot.set(slot, []));
+  personalizations.forEach(({ block }) => bySlot.get(getPersonalizationSlot(block.id))?.push(block));
+  const anchors: Record<SaleTemplateSlot, string | undefined> = {
+    top: "fiscal-top-gap",
+    after_issuer: "venue-address",
+    after_document: "ticket-date",
+    before_items: "customer-country",
+    after_items: "items",
+    after_totals: "totals",
+    bottom: undefined,
+  };
+  const result: PrintTemplateBlock[] = [];
+  for (const block of structural) {
+    result.push(block);
+    for (const slot of SALE_TEMPLATE_SLOTS) {
+      if (anchors[slot] === block.id) result.push(...(bySlot.get(slot) ?? []));
+    }
+  }
+  result.push(...(bySlot.get("bottom") ?? []));
+  return result;
+}
+
+function findBlockedPersonalizationId(
+  personalizations: PersonalizationEntry[],
+  regulatedDefinition: PrintTemplateDefinition,
+): string | null {
+  const candidates = personalizations.filter(
+    ({ block }) => block.value.trim().length > 0,
+  );
+  if (!candidates.length) return null;
+  const accepted = extractSafeSaleCustomization(
+    { version: 1, blocks: candidates.map(({ block }) => block) },
+    regulatedDefinition,
+  );
+  const acceptedBlocks = Object.values(accepted).flat();
+  if (acceptedBlocks.length === candidates.length) return null;
+  const acceptedIds = new Set(acceptedBlocks.map((block) => block.id));
+  const blocked = candidates.find(({ block }) => !acceptedIds.has(block.id));
+  return blocked?.block.id ?? null;
+}
+
+/** Personalization-only definition; the service layer merges the regulated structure. */
+function toPersonalizationDefinition(
+  blocks: PrintTemplateBlock[],
+  regulatedBlockIds: ReadonlySet<string>,
+): PrintTemplateDefinition {
+  const entries = selectPersonalizationEntries(blocks, regulatedBlockIds)
+    .map(({ block }) => block)
+    .filter((block) => block.value.trim().length > 0);
+  return {
+    version: 1,
+    blocks: entries.length
+      ? entries
+      : [{ id: newBlockId(), type: "text", value: "" }],
+  };
+}
+
+function updatePersonalizationTextAt(
+  blocks: PrintTemplateBlock[],
+  index: number,
+  value: string,
+): PrintTemplateBlock[] {
+  return blocks.map((block, position) =>
+    position === index && block.type === "text" ? { ...block, value } : block,
+  );
+}
+
+function removePersonalizationAt(
+  blocks: PrintTemplateBlock[],
+  index: number,
+): PrintTemplateBlock[] {
+  return blocks.filter((_, position) => position !== index);
+}
+
+function movePersonalization(
+  blocks: PrintTemplateBlock[],
+  from: number,
+  to: number,
+  regulatedBlockIds: ReadonlySet<string>,
+): PrintTemplateBlock[] {
+  const positions = blocks.flatMap((block, index) =>
+    isPersonalizationText(block, regulatedBlockIds) ? [index] : [],
+  );
+  if (from === to || from < 0 || to < 0) return blocks;
+  if (from >= positions.length || to >= positions.length) return blocks;
+  const group = positions.map((position) => blocks[position]);
+  const [moved] = group.splice(from, 1);
+  group.splice(to, 0, moved);
+  const next = [...blocks];
+  positions.forEach((position, offset) => {
+    next[position] = group[offset];
+  });
+  return next;
+}
+
 export function PrintTemplatesCrm({
   context,
   disabled,
@@ -75,11 +265,13 @@ export function PrintTemplatesCrm({
   );
   const [isCustom, setIsCustom] = useState(false);
   const [editing, setEditing] = useState<EditingTarget | null>(null);
+  const [variableNotice, setVariableNotice] = useState(false);
   const scope = useMemo(
     () => ({ tenantId: context.tenantId, venueId }),
     [context.tenantId, venueId],
   );
   const mockContext = useMemo(() => getMockPrintTemplateContext(type), [type]);
+  const isSale = isRegulatedSaleTemplateType(type);
 
   useEffect(() => {
     let active = true;
@@ -88,6 +280,7 @@ export function PrintTemplatesCrm({
       if (!active) return;
       setDefinition(structuredClone(resolved.definition));
       setIsCustom(resolved.isCustom);
+      setVariableNotice(false);
     });
     return () => {
       active = false;
@@ -95,20 +288,46 @@ export function PrintTemplatesCrm({
   }, [runAction, scope, type]);
 
   const fallback = useMemo(() => getSafeDefaultPrintTemplate(type), [type]);
+  const regulatedBlockIds = useMemo(
+    () => new Set(fallback.blocks.map((block) => block.id)),
+    [fallback],
+  );
+  const personalizations = useMemo(
+    () => selectPersonalizationEntries(definition.blocks, regulatedBlockIds),
+    [definition.blocks, regulatedBlockIds],
+  );
+  const assembledSaleDefinition = useMemo<PrintTemplateDefinition>(
+    () => ({ version: 1, blocks: assembleSaleBlocks(fallback.blocks, personalizations) }),
+    [fallback.blocks, personalizations],
+  );
   const preview = useMemo(
     () =>
       renderPrintTemplateWithFallback(
-        definition,
+        isSale ? assembledSaleDefinition : definition,
         fallback,
         mockContext,
         previewLayout,
       ),
-    [definition, fallback, mockContext],
+    [assembledSaleDefinition, definition, fallback, isSale, mockContext],
+  );
+  const blockedPersonalizationId = useMemo(
+    () =>
+      isSale
+        ? findBlockedPersonalizationId(personalizations, fallback)
+        : null,
+    [isSale, personalizations, fallback],
   );
 
   const persist = () =>
     runAction(async () => {
-      await savePrintTemplate(scope, type, definition);
+      if (isSale && blockedPersonalizationId) return;
+      await savePrintTemplate(
+        scope,
+        type,
+        isSale
+          ? toPersonalizationDefinition(definition.blocks, regulatedBlockIds)
+          : definition,
+      );
       setIsCustom(true);
     });
 
@@ -131,6 +350,51 @@ export function PrintTemplatesCrm({
       type: "text",
       value: `{{${path}}}`,
     });
+
+  const addPersonalizationText = (slot: SaleTemplateSlot = "bottom") =>
+    setDefinition((current) => ({
+      ...current,
+      blocks: [...current.blocks, { ...newBlock("text"), id: `custom-text:${slot}:${Date.now()}` }],
+    }));
+
+  const updatePersonalizationText = (index: number, value: string) => {
+    if (hasTemplateBraces(value)) {
+      setVariableNotice(true);
+      return;
+    }
+    setVariableNotice(false);
+    setDefinition((current) => ({
+      ...current,
+      blocks: updatePersonalizationTextAt(current.blocks, index, value),
+    }));
+  };
+
+  const removePersonalizationText = (index: number) =>
+    setDefinition((current) => ({
+      ...current,
+      blocks: removePersonalizationAt(current.blocks, index),
+    }));
+
+  const movePersonalizationText = (from: number, to: number) =>
+    setDefinition((current) => ({
+      ...current,
+      blocks: movePersonalization(
+        current.blocks,
+        from,
+        to,
+        regulatedBlockIds,
+      ),
+    }));
+
+  const movePersonalizationSlot = (index: number, slot: SaleTemplateSlot) =>
+    setDefinition((current) => ({
+      ...current,
+      blocks: current.blocks.map((block, position) =>
+        position === personalizations[index]?.index && block.type === "text"
+          ? { ...block, id: `custom-text:${slot}:${index + 1}` }
+          : block,
+      ),
+    }));
 
   const edited = useMemo(
     () =>
@@ -170,9 +434,9 @@ export function PrintTemplatesCrm({
           <div>
             <h2 className="text-lg font-black">Plantillas de impresión</h2>
             <p className="mt-1 max-w-3xl text-sm text-[var(--crm-text-muted)]">
-              Edita bloques lógicos; el TPV resuelve datos fiscales y de negocio
-              antes de aplicar el diseño. No se admiten scripts ni comandos
-              ESC/POS.
+              {isSale
+                ? "La aplicación fija la estructura fiscal obligatoria en grupos protegidos. Solo puedes insertar textos comerciales literales entre esos grupos; no se admiten variables, condiciones, códigos QR ni bloques estructurales."
+                : "Edita bloques lógicos; el TPV resuelve datos fiscales y de negocio antes de aplicar el diseño. No se admiten scripts ni comandos ESC/POS."}
             </p>
           </div>
           <span
@@ -191,7 +455,7 @@ export function PrintTemplatesCrm({
             value={type}
           />
           <Button
-            disabled={disabled}
+            disabled={disabled || blockedPersonalizationId !== null}
             onClick={() => void persist()}
             type="button"
             variant="primary"
@@ -209,6 +473,23 @@ export function PrintTemplatesCrm({
         </div>
       </section>
 
+      {isSale ? (
+        <SaleTemplateSections
+          blockedId={blockedPersonalizationId}
+          context={mockContext}
+          disabled={disabled}
+          layout={previewLayout}
+          onAdd={addPersonalizationText}
+          onChangeText={updatePersonalizationText}
+          onMove={movePersonalizationText}
+          onMoveSlot={movePersonalizationSlot}
+          onRemove={removePersonalizationText}
+          personalizations={personalizations}
+           regulatedDefinition={assembledSaleDefinition}
+
+          variableNotice={variableNotice}
+        />
+      ) : (
       <div className="grid items-start gap-5 xl:grid-cols-[220px_minmax(360px,1fr)_300px]">
         <section className="rounded-2xl bg-[var(--crm-surface)] p-4 shadow-[var(--crm-shadow-card)] xl:sticky xl:top-0">
           <div className="mb-4 flex items-center gap-2">
@@ -322,8 +603,9 @@ export function PrintTemplatesCrm({
           </section>
         </div>
       </div>
+      )}
 
-      {editing && edited ? (
+      {!isSale && editing && edited ? (
         <BlockModal
           block={edited.block}
           canGoBack={editing.path.length > 1}
@@ -344,6 +626,281 @@ export function PrintTemplatesCrm({
           path={editing.path}
         />
       ) : null}
+    </div>
+  );
+}
+
+function ReceiptQr({ data, size = 150 }: { data: string; size?: number }) {
+  const [dataUrl, setDataUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    setDataUrl(null);
+    void QRCode.toDataURL(data, {
+      errorCorrectionLevel: "M",
+      margin: 1,
+      width: size,
+    }).then((nextDataUrl) => {
+      if (!cancelled) setDataUrl(nextDataUrl);
+    }).catch(() => {
+      if (!cancelled) setDataUrl(null);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [data, size]);
+
+  return (
+    <div className="my-2 flex justify-center" style={{ minHeight: size }}>
+      {dataUrl ? (
+        <img
+          alt="Código QR de verificación fiscal"
+          className="block max-w-full"
+          height={size}
+          src={dataUrl}
+          style={{ imageRendering: "pixelated" }}
+          width={size}
+        />
+      ) : (
+        <div aria-label="Generando código QR" className="bg-slate-100" style={{ height: size, width: size }} />
+      )}
+    </div>
+  );
+}
+
+function AssembledSalePreview({
+  definition,
+  context,
+  layout,
+  qrSize = 150,
+}: { definition: PrintTemplateDefinition; context: PrintTemplateContext; layout: PrinterLayout; qrSize?: number }) {
+  const elements = renderPrintTemplate(definition, context, layout).elements;
+  return elements.map((element, index) => {
+    if (element.type === "qr") {
+      return <ReceiptQr data={element.data} key={`qr-${index}-${element.data}`} size={qrSize} />;
+    }
+    const align = element.align ?? "left";
+    return (
+      <div
+        className="whitespace-pre"
+        key={`text-${index}-${element.value}`}
+        style={{
+          fontSize: element.size === "large" ? "1.25em" : undefined,
+          fontWeight: element.bold ? 700 : 400,
+          minHeight: element.value ? undefined : "1.45em",
+          textAlign: align,
+          whiteSpace: "pre",
+        }}
+      >
+        {element.value || " "}
+      </div>
+    );
+  });
+}
+
+function SaleTemplateSections({
+  blockedId,
+  context,
+  disabled,
+  layout,
+  onAdd,
+  onChangeText,
+  onMove,
+  onMoveSlot,
+  onRemove,
+  personalizations,
+  regulatedDefinition,
+  variableNotice,
+}: {
+  blockedId: string | null;
+  context: PrintTemplateContext;
+  disabled: boolean;
+  layout: PrinterLayout;
+  onAdd: (slot?: SaleTemplateSlot) => void;
+  onChangeText: (index: number, value: string) => void;
+  onMove: (from: number, to: number) => void;
+  onMoveSlot: (index: number, slot: SaleTemplateSlot) => void;
+  onRemove: (index: number) => void;
+  personalizations: PersonalizationEntry[];
+  regulatedDefinition: PrintTemplateDefinition;
+  variableNotice: boolean;
+}) {
+  return (
+    <div className="grid items-start gap-5 xl:grid-cols-[minmax(320px,1fr)_minmax(320px,1fr)]">
+      <section className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]">
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="flex items-center gap-2">
+            <Lock className="h-4 w-4 text-[var(--crm-blue)]" />
+            <h3 className="font-black">Estructura fiscal obligatoria</h3>
+          </div>
+          <span className="rounded-full bg-[var(--crm-surface-soft)] px-3 py-1 text-[11px] font-bold text-[var(--crm-text-muted)]">
+              {mandatorySaleGroups.length} grupos fijos
+          </span>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-[var(--crm-text-muted)]">
+          La aplicación fija el contenido y el orden de estos bloques fiscales.
+          No se pueden editar, añadir, reordenar ni eliminar.
+        </p>
+        <ul className="mt-3 space-y-2 text-xs leading-relaxed text-[var(--crm-text)]">
+          <li className="rounded-xl bg-[var(--crm-surface-soft)] p-3">
+            <strong>RD 1619/2012, arts. 6 y 7</strong>: contenido mínimo de la
+            factura simplificada (identificación del emisor, número y fecha de
+            expedición, descripción de la operación, base imponible, cuota de IVA
+            e importe total).
+          </li>
+          <li className="rounded-xl bg-[var(--crm-surface-soft)] p-3">
+            <strong>Orden HAC/1177/2024, arts. 20 y 21</strong>: huella y
+            encadenamiento del registro de facturación, y código QR de
+            verificación con NIF, serie/número, fecha e importe.
+          </li>
+        </ul>
+        <div className="mt-3 space-y-2">
+          {mandatorySaleGroups.map((group) => {
+            const blocks = regulatedDefinition.blocks.filter((block) => group.blockIds.includes(block.id));
+            const elements = renderPrintTemplate({ version: 1, blocks }, context, layout).elements;
+             if (!elements.some((element) => element.type === "qr" || element.value.trim())) return null;
+             return <div className="rounded-xl bg-[var(--crm-surface-soft)] p-3" key={group.id}><strong>{group.label}</strong><div className="mt-1 font-mono"><AssembledSalePreview definition={{ version: 1, blocks }} context={context} layout={layout} qrSize={96} /></div></div>;
+
+          })}
+        </div>
+        <div className="mt-4">
+          <p className="mb-2 text-[11px] font-black text-[var(--crm-text-muted)] uppercase">
+            Vista previa regulada (datos de ejemplo)
+          </p>
+          <div className="rounded-xl bg-[var(--crm-surface-soft)] p-3">
+            <div className="mx-auto min-h-[420px] w-full max-w-[360px] overflow-x-auto bg-white px-5 py-7 font-mono text-[10px] leading-[1.45] text-black shadow-[0_2px_12px_rgba(0,0,0,0.14)]">
+              <AssembledSalePreview definition={regulatedDefinition} context={context} layout={layout} />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section className="rounded-2xl bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]">
+        <div className="flex items-center gap-2">
+          <Settings2 className="h-4 w-4 text-[var(--crm-blue)]" />
+          <h3 className="font-black">Personalización</h3>
+        </div>
+        <p className="mt-2 text-xs leading-relaxed text-[var(--crm-text-muted)]">
+          Solo textos comerciales literales, que puedes insertar entre grupos,
+           sin variables, condiciones, códigos QR ni bloques estructurales. Logo/imagen:
+           requiere actualización compatible del agente de impresión.
+        </p>
+        <div className="mt-3 flex flex-wrap gap-2">
+          {SALE_TEMPLATE_SLOTS.map((slot) => <Button disabled={disabled} key={slot} onClick={() => onAdd(slot)} size="sm" type="button" variant="secondary"><Plus className="h-3.5 w-3.5" /> {slotLabels[slot]}</Button>)}
+        </div>
+        {personalizations.length ? (
+          <ul className="mt-3 space-y-2">
+            {personalizations.map(({ block, index }, position) => {
+              return (
+                <li
+                  className="rounded-xl border border-[var(--crm-border-subtle)] bg-[var(--crm-input-bg)] p-3"
+                  key={block.id}
+                >
+                  <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                    <span className="text-[11px] font-black text-[var(--crm-text-muted)] uppercase">
+                      Texto comercial {position + 1}
+                    </span>
+                    <div className="flex items-center gap-1">
+                      <button
+                        aria-label="Subir texto"
+                        className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--crm-text-muted)] transition-colors hover:bg-[var(--crm-surface-hover)] disabled:opacity-30"
+                        disabled={disabled || position === 0}
+                        onClick={() => onMove(position, position - 1)}
+                        type="button"
+                      >
+                        <ChevronUp className="h-4 w-4" />
+                      </button>
+                      <button
+                        aria-label="Bajar texto"
+                        className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--crm-text-muted)] transition-colors hover:bg-[var(--crm-surface-hover)] disabled:opacity-30"
+                        disabled={
+                          disabled || position === personalizations.length - 1
+                        }
+                        onClick={() => onMove(position, position + 1)}
+                        type="button"
+                      >
+                        <ChevronDown className="h-4 w-4" />
+                      </button>
+                      <button
+                        aria-label="Eliminar texto"
+                        className="flex h-10 w-10 items-center justify-center rounded-lg text-[var(--crm-text-muted)] transition-colors hover:bg-[var(--crm-surface-hover)] disabled:opacity-30"
+                        disabled={disabled}
+                        onClick={() => onRemove(index)}
+                        type="button"
+                      >
+                        <Trash2 className="h-4 w-4" />
+                      </button>
+                    </div>
+                  </div>
+                  <div className="mb-2">
+                    <p className="mb-1 text-[11px] font-black text-[var(--crm-text-muted)] uppercase">
+                      Posición en el ticket
+                    </p>
+                    <CrmSelect
+                      ariaLabel={`Posición del texto comercial ${position + 1}`}
+                      compact
+                      disabled={disabled}
+                      onChange={(value) =>
+                        onMoveSlot(position, value as SaleTemplateSlot)
+                      }
+                      options={SALE_TEMPLATE_SLOTS.map((slot) => ({
+                        label: slotLabels[slot],
+                        value: slot,
+                      }))}
+                      value={getPersonalizationSlot(block.id)}
+                    />
+                  </div>
+                  <TextArea
+                    className="!min-h-20 !w-full !rounded-[10px] !border !border-[var(--crm-input-border)] !bg-[var(--crm-input-bg)] !px-3.5 !py-3 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none placeholder:!text-[var(--crm-text-muted)] focus:!border-[var(--crm-blue)] focus:!shadow-[0_0_0_3px_var(--crm-blue-soft)]"
+                    disabled={disabled}
+                    maxLength={240}
+                    onChange={(event) => onChangeText(index, event.target.value)}
+                    placeholder="Texto comercial, por ejemplo: ¡Gracias por su compra!"
+                    value={block.value}
+                  />
+                  {block.id === blockedId ? (
+                    <p className="mt-1.5 text-[11px] font-bold text-red-600">
+                      Este texto no se guardará tal cual: debe ser literal, no
+                      vacío, sin variables, distinto de los textos de la
+                      estructura obligatoria y sin la leyenda VERI*FACTU.
+                    </p>
+                  ) : null}
+                </li>
+              );
+            })}
+          </ul>
+        ) : (
+          <p className="mt-3 rounded-xl bg-[var(--crm-surface-soft)] p-3 text-xs text-[var(--crm-text-muted)]">
+            Sin textos de personalización. Solo se imprimirá la estructura fiscal
+            obligatoria.
+          </p>
+        )}
+        {variableNotice ? (
+          <p className="mt-3 rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">
+            Las variables {"{{...}}"} no están permitidas en facturas: este texto
+            debe ser literal.
+          </p>
+        ) : null}
+        {blockedId ? (
+          <p className="mt-3 rounded-xl bg-red-50 p-3 text-xs font-bold text-red-700">
+            Corrige o elimina el texto marcado para poder guardar.
+          </p>
+        ) : null}
+        <Button
+          className="mt-3"
+          disabled={disabled}
+          fullWidth
+          onClick={() => onAdd("bottom")}
+          type="button"
+          variant="secondary"
+        >
+          <Plus className="h-4 w-4" /> Añadir texto
+        </Button>
+        <p className="mt-3 text-[11px] leading-relaxed text-[var(--crm-text-muted)]">
+          Al guardar, la aplicación combina estos textos con la estructura fiscal
+          obligatoria.
+        </p>
+      </section>
     </div>
   );
 }

@@ -18,6 +18,8 @@ export function createRestaurantControllerHarness({
   cashlogyConfigured = false,
   closeResult,
   currentOrder: initialOrder,
+  fiscalMode = 'disabled',
+  fiscalIssue = null,
   pendingUnits = 0,
   tableService: tableServiceOverrides = {},
 } = {}) {
@@ -29,11 +31,13 @@ export function createRestaurantControllerHarness({
     cashlogyFinished: [],
     cashlogySettlements: [],
     close: 0,
+    fiscalIssues: [],
     drafts: [],
     errors: [],
     paid: [],
     pendingChecks: 0,
     prints: 0,
+    printed: [],
     replaced: [],
     setMap: [],
   }
@@ -91,6 +95,7 @@ export function createRestaurantControllerHarness({
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../catalog/services/saleLineBuilder': { buildSaleLine() {} },
     '../../customers/service': { loadTicketInvoice: async () => null },
+    '../../customers/customerValidation.ts': { customerFiscalSnapshot: (customer) => customer },
     '../../fiscal/service': { autoIssueFiscalTicket: async () => ({ fiscal: null }), loadFiscalReceiptData: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': {
       finishCashlogyPayment: (transaction) => calls.cashlogyFinished.push(transaction),
@@ -112,6 +117,13 @@ export function createRestaurantControllerHarness({
       getRestaurantPrintSubtotal: () => 600,
     },
     '../services/validateCashClosure': { getRestaurantCashClosureError: async () => null },
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => fiscalMode },
+    '../../fiscal/local/restaurantInvoice.ts': { preflightRestaurantInvoice: async (_context, _session, saleId) => ({ saleId }), issueRestaurantInvoice: async (...args) => {
+      calls.fiscalIssues.push(args)
+      if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
+      return fiscalIssue(...args)
+    } },
+    '../../local-printing/constants/config': { PRINT_AGENT_ENABLED: true },
     './useRestaurantDraft': { useRestaurantDraft: () => draft },
     './useRestaurantRealtime': { useRestaurantRealtime: () => realtime },
   }
@@ -130,7 +142,7 @@ export function createRestaurantControllerHarness({
     onAddFeedback() {},
     onError: (error) => calls.errors.push(error),
     onPaidFeedback: (method) => calls.paid.push(method),
-    printSale: async () => { calls.prints += 1; await print.promise },
+    printSale: async (payload) => { calls.prints += 1; calls.printed.push(payload); await print.promise },
     refreshCashSales: async () => undefined,
     refreshProductSalesStats: async () => undefined,
     setAppliedDiscount() {},

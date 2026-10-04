@@ -1,5 +1,6 @@
 import type { SaleCreatedPayload, TenantContext } from '../../../types'
 import { resolvePrintTemplate } from '../../print-templates/service.ts'
+import { loadFiscalPosSettings } from '../../fiscal/local/settings.ts'
 import { usePrintAgentStore } from '../store/usePrintAgentStore'
 import type { PrintEstablishment } from './documentLineBuilders'
 import { loadSelectedPrinterLayout } from './selectedPrinterLayout'
@@ -16,6 +17,9 @@ export async function printCompletedSale(input: {
   const state = usePrintAgentStore.getState()
   const { printer, layout } = await loadSelectedPrinterLayout()
   const template = await resolvePrintTemplate(input.context, input.sale.ticket.invoice ? 'invoice' : 'simplified_invoice')
+  const printQr = input.sale.fiscal?.provider === 'verifactu'
+    ? await loadFiscalPosSettings(input.context.tenantId).then((settings) => settings.print_ticket_qr).catch(() => true)
+    : true
   const payload = mapSaleToPrintRequest({
     ...input,
     printerId: printer.id,
@@ -25,6 +29,7 @@ export async function printCompletedSale(input: {
     cashlogyConfigured: state.cashlogyConfigured,
     cut: state.preferences.cut,
     template: template.definition,
+    printQr,
     cashDrawerAlreadyRequested: input.cashDrawerAlreadyRequested,
 
   })

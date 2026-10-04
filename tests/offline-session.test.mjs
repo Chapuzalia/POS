@@ -208,6 +208,11 @@ test('4 y 7: venta offline en la caja existente, validar → lease → sincroniz
     '../../local-printing/cashlogy/useCashlogyStore': { getCashlogyPaymentAmounts: () => ({}), finishCashlogyPayment() {} },
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => 'disabled' },
+    '../../fiscal/local/posInvoice.ts': { issuePosInvoice: async () => { throw new Error('production disabled') }, printPayloadWithLocalFiscal: (payload) => payload },
+    '../../fiscal/local/economicSync.ts': { synchronizeFiscalEconomicSales: async () => {} },
+    '../../fiscal/local/sync.ts': { synchronizeLocalFiscalQueue: async () => {} },
+    '../../fiscal/local/installation.ts': { fiscalBridgeAccessToken: async () => '', fiscalBridgeBaseUrl: () => '' },
   }, h.globals).useQuickSalePayment
   const paymentInFlightChanges = []
   const payment = paymentRunner.render(pay, {

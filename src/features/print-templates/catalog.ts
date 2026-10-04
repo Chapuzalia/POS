@@ -82,21 +82,23 @@ export const PRINT_TEMPLATE_VARIABLES: Record<PrintTemplateType, VariableGroup[]
 }
 
 const mockSale = {
-  venue: { name: 'Restaurante Ejemplo', legal_name: 'Ejemplo Hostelería SL', tax_id: 'B12345678', address: 'Calle Mayor 12' },
-  document: { title: '', label: '', number_label: 'Ticket', date_label: 'Fecha' },
-  ticket: { number: 'F-2026-0124', date: '02/09/2026', time: '14:32', datetime: '02/09/2026 14:32' },
-  cash_register: { name: 'Caja principal' }, employee: { name: 'María' },
+  venue: { name: 'Restaurante Ejemplo', legal_name: 'Ejemplo Hostelería SL', tax_id: 'B12345678', address: 'Calle Mayor 12, 28001 Madrid' },
+  document: { title: 'FACTURA SIMPLIFICADA', label: '', number_label: 'Número fiscal', date_label: 'Fecha expedición' },
+  ticket: { number: 'L1-C1-I1-2026-S/124', date: '02/09/2026', time: '14:32', datetime: '02/09/2026 14:32' },
+  cash_register: { name: 'Caja principal' }, employee: { name: 'María García' },
   customer: {},
   items: [
     { quantity: '2', name: 'Ensalada de la casa', total: '18,00 €', details: [{ text: '  + Sin cebolla' }] },
     { quantity: '1', name: 'Croquetas', total: '9,50 €', details: [] },
   ],
-  totals: { subtotal: '25,00 €', tax: '2,50 €', total: '27,50 €', rows: [{ label: 'Base imponible', value: '25,00 €' }, { label: 'IVA 10 %', value: '2,50 €' }, { label: 'TOTAL', value: '27,50 €' }] },
-  payment: { rows: [{ label: 'Tarjeta', value: '27,50 €' }] }, fiscal: {}, footer: { text: 'Gracias por su visita' },
+  totals: { subtotal: '25,00 €', tax: '2,50 €', total: '27,50 €', rows: [{ label: 'Base imponible', value: '25,00 €' }, { label: 'IVA 10 %', value: '2,50 €' }, { label: 'TOTAL (IVA incluido)', value: '27,50 €' }] },
+  payment: { rows: [{ label: 'Tarjeta', value: '27,50 €' }] },
+  fiscal: { title: 'VERI*FACTU', external_code: 'L1-C1-I1-2026-S/124', verification_url: 'https://verifactu.example/qr/L1-C1-I1-2026-S-124', show_qr: true, show_verifactu_legend: true, show_url: true },
+  footer: { text: '' },
 }
 
 export function getMockPrintTemplateContext(type: PrintTemplateType): PrintTemplateContext {
-  if (type === 'invoice') return { ...structuredClone(mockSale), document: { ...mockSale.document, title: 'FACTURA', number_label: 'Factura' }, customer: { name: 'Cliente Ejemplo SL', tax_id: 'B87654321', address: 'Avenida Central 4', postal_city: '28001 Madrid', province: 'Madrid' } }
+  if (type === 'invoice') return { ...structuredClone(mockSale), document: { ...mockSale.document, title: 'FACTURA', number_label: 'Número fiscal' }, customer: { name: 'Cliente Ejemplo SL', tax_id: 'B87654321', address: 'Avenida Central 4', postal_city: '28001 Madrid', province: 'Madrid', country: 'España', show_country: true } }
   if (type === 'simplified_invoice') return structuredClone(mockSale)
   if (type === 'cash_closure') return {
     venue: mockSale.venue, document: { title: 'INFORME Z', id: 'close-124', generated_at: '02/09/2026 23:15' },

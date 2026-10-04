@@ -74,7 +74,7 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
   useEffect(() => {
     let cancelled = false
     let inFlight = false
-    let retryTimer: ReturnType<typeof window.setTimeout> | undefined
+    let retryTimer: number | undefined
     const restoreOnlineState = async () => {
       if (cancelled || inFlight) return
       window.clearTimeout(retryTimer)

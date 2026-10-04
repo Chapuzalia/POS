@@ -51,6 +51,11 @@ function harness({ saleId = null, lines = [{ quantity: 1 }], intentPatch = {}, b
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': cashlogy,
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => 'disabled' },
+    '../../fiscal/local/posInvoice.ts': { issuePosInvoice: async () => { throw new Error('production disabled') }, printPayloadWithLocalFiscal: (payload) => payload },
+    '../../fiscal/local/economicSync.ts': { synchronizeFiscalEconomicSales: async () => {} },
+    '../../fiscal/local/sync.ts': { synchronizeLocalFiscalQueue: async () => {} },
+    '../../fiscal/local/installation.ts': { fiscalBridgeAccessToken: async () => '', fiscalBridgeBaseUrl: () => '' },
   })
   const pay = createPayment({ context: { tenantId: 'tenant' }, cashSession: { id: 'session' }, lines,
     ledger: [], tickets: [], isOnline: true, persistLedger() {}, persistTickets() {}, persistLines() {},

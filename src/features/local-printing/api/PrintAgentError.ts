@@ -4,6 +4,7 @@ export type PrintAgentErrorCode =
   | 'PRINT_FAILED' | 'PRINT_STATUS_UNKNOWN' | 'DISCOVERY_FAILED' | 'TLS_CONFIGURATION_ERROR'
   | 'CERTIFICATE_EXPIRED' | 'CASH_DRAWER_FAILED' | 'DUPLICATE_REQUEST' | 'NETWORK_ERROR'
   | 'TIMEOUT' | 'ABORTED' | 'HTTP_ERROR' | 'INVALID_RESPONSE' | 'CONFIGURATION_ERROR'
+  | 'FISCAL_QR_UNSUPPORTED'
 
 const messages: Partial<Record<PrintAgentErrorCode, string>> = {
   INVALID_REQUEST: 'Los datos enviados al servidor de impresión no son válidos.',
@@ -25,6 +26,7 @@ const messages: Partial<Record<PrintAgentErrorCode, string>> = {
   ABORTED: 'La operación de impresión se ha cancelado.',
   INVALID_RESPONSE: 'El servidor de impresión ha devuelto una respuesta no válida.',
   CONFIGURATION_ERROR: 'La configuración del servidor de impresión no es válida.',
+  FISCAL_QR_UNSUPPORTED: 'El agente de impresión no admite el QR fiscal. Actualízalo antes de imprimir esta factura.',
 }
 
 export class PrintAgentError extends Error {

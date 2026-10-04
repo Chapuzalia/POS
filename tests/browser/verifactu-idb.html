@@ -1,0 +1,118 @@
+<!doctype html>
+<html lang="es"><meta charset="utf-8"><title>Tickit fiscal IndexedDB smoke test</title><body>RUNNING
+<script type="module">
+  import { issueLocalInvoice, issueSyntheticTestInvoice, listLocalFiscalEntries, reconcileLocalFiscalCopies,
+    listPendingFiscalEconomicSales, openLedger, readLocalFiscalHead, request, transactionDone } from '/src/features/fiscal/local/localLedger.ts'
+  import { assertFiscalLedgerHeadValid } from '/src/features/fiscal/local/localIdentity.ts'
+  import { printPayloadWithLocalFiscal } from '/src/features/fiscal/local/posInvoice.ts'
+  const assert = (condition, message) => { if (!condition) throw new Error(message) }
+  const installationId = crypto.randomUUID()
+  const installationCode = installationId.slice(0, 8).toUpperCase()
+  const tenantId = crypto.randomUUID()
+  const fiscalSubjectId = crypto.randomUUID()
+  const system = { NombreRazon: 'Productor ficticio', NIF: '89890001K', NombreSistemaInformatico: 'Tickit',
+    IdSistemaInformatico: 'TK', Version: '0.0.0-test', NumeroInstalacion: installationId,
+    TipoUsoPosibleSoloVerifactu: 'S', TipoUsoPosibleMultiOT: 'S', IndicadorMultiplesOT: 'S' }
+  const base = { environment: 'test', syntheticData: true, tenantId, fiscalSubjectId, issuerNif: '89890001K',
+    issuerName: 'Emisor ficticio', venueId: crypto.randomUUID(), venueCode: 'L1', cashRegisterId: crypto.randomUUID(),
+    registerCode: 'C1', installationCode, installationId, deviceId: crypto.randomUUID(),
+    invoiceType: 'F2', description: 'Servicio ficticio', system, timezone: 'Europe/Madrid', paymentId: null,
+    lines: [{ description: 'Servicio ficticio', grossCents: 1210, discountCents: 0, baseCents: 1000, taxCents: 210, taxRate: '21.00' }] }
+  const issue = (id, overrides = {}) => issueSyntheticTestInvoice({ ...base, ticketId: id, saleId: id, invoiceId: id, ...overrides })
+  try {
+    document.body.dataset.state = 'running'
+    setTimeout(() => { if (document.body.dataset.state === 'running') document.body.textContent = 'FAIL IndexedDB no respondió en 10 segundos' }, 10000)
+    const [first, second] = await Promise.all([issue(crypto.randomUUID()), issue(crypto.randomUUID())])
+    const ordered = [first, second].sort((a, b) => a.record.chainPosition - b.record.chainPosition)
+    assert(ordered[0].record.chainPosition === 1 && ordered[1].record.chainPosition === 2, 'chain positions')
+    assert(ordered[0].invoice.number === 1 && ordered[1].invoice.number === 2, 'invoice numbers')
+    assert(ordered[1].record.previous.hash === ordered[0].record.hash, 'previous hash')
+    await issue(crypto.randomUUID(), { lines: [{ ...base.lines[0], baseCents: 999 }] })
+      .then(() => { throw new Error('invalid tax amounts accepted') }, () => {})
+    const third = await issue(crypto.randomUUID())
+    assert(third.invoice.number === 3 && third.record.chainPosition === 3, 'failed transaction consumed counter')
+    await issue(crypto.randomUUID(), { deviceId: crypto.randomUUID() }).then(() => { throw new Error('duplicate installation accepted') }, () => {})
+    const stored = await listLocalFiscalEntries({ tenantId, fiscalSubjectId, installationId })
+    assert(stored.length === 3 && stored.every(entry => entry.delivery.state === 'LOCAL_PENDING'), 'local records')
+    assert(stored[0].record.canonicalRecord.RegistroAlta.Huella === ordered[0].record.hash, 'immutable original')
+    const productionInstallationId = crypto.randomUUID()
+    const productionDeviceId = crypto.randomUUID()
+    const productionTicketId = crypto.randomUUID()
+    const productionSaleId = crypto.randomUUID()
+    const productionScope = { tenantId, fiscalSubjectId, installationId: productionInstallationId }
+    const productionPayload = {
+      ticket: { id: productionTicketId, tenantId, venueId: base.venueId, cashRegisterId: base.cashRegisterId,
+        deviceId: productionDeviceId, totalCents: 1210, invoice: null },
+      sale: { id: productionSaleId, totalCents: 1210 }, payment: null,
+      lines: [{ productName: 'Servicio ficticio', variantName: '', lineTotalCents: 1210,
+        discountAmountCents: 0, fiscalSnapshot: { taxableBaseCents: 1000, taxAmountCents: 210, taxRate: 21 } }],
+    }
+    const wallNow = Date.now()
+    const issued = await issueLocalInvoice({ ...base, ...productionScope, environment: 'production',
+      installationCode: productionInstallationId.slice(0, 8).toUpperCase(), deviceId: productionDeviceId,
+      system: { ...system, NumeroInstalacion: productionInstallationId },
+      ticketId: productionTicketId, saleId: productionSaleId, invoiceId: crypto.randomUUID(),
+      salePayload: productionPayload, transmissionMode: 'bridge',
+      lease: { leaseId: 'fictitious-browser-test', installationId: productionInstallationId, deviceId: productionDeviceId,
+        fencingToken: 1, expiresAt: new Date(wallNow + 60000).toISOString(),
+        clock: { serverUtcAtReceipt: new Date(wallNow).toISOString(), wallUtcAtReceipt: wallNow,
+          monotonicAtReceipt: performance.now() } },
+    })
+    assert(issued.delivery.state === 'LOCAL_PENDING', 'production issue pending bridge')
+    assert((await listPendingFiscalEconomicSales(productionScope)).length === 1, 'production economic sale persisted')
+    const reprint = printPayloadWithLocalFiscal(productionPayload, issued)
+    assert(reprint.fiscal.verificationUrl === issued.invoice.qrUrl && reprint.localFiscal.number === 1,
+      'reprint preserves QR and number')
+    await assertFiscalLedgerHeadValid(issued.scope, productionDeviceId, false, productionInstallationId)
+    const db = await openLedger()
+    const legacyTx = db.transaction('cursors', 'readwrite')
+    const legacyDone = transactionDone(legacyTx)
+    const legacyCursor = await request(legacyTx.objectStore('cursors').get(issued.scope))
+    delete legacyCursor.recordId
+    legacyTx.objectStore('cursors').put(legacyCursor)
+    await legacyDone
+    const migratedHead = await readLocalFiscalHead(issued.scope)
+    assert(migratedHead.chain.recordId === issued.id, 'legacy head pointer migrated')
+    await assertFiscalLedgerHeadValid(issued.scope, productionDeviceId, false, productionInstallationId)
+    const edit = async (storeName, key, change) => {
+      const editing = db.transaction(storeName, 'readwrite')
+      const done = transactionDone(editing)
+      const value = await request(editing.objectStore(storeName).get(key))
+      editing.objectStore(storeName).put(change(value))
+      await done
+    }
+    const mustReject = async (operation, label) => operation.then(() => { throw new Error(label) }, () => {})
+    await mustReject(assertFiscalLedgerHeadValid(issued.scope, crypto.randomUUID(), false, productionInstallationId), 'wrong device accepted')
+    await edit('numbers', `${issued.scope}:${issued.invoice.series}`, value => ({ ...value, lastNumber: 99 }))
+    await mustReject(assertFiscalLedgerHeadValid(issued.scope, productionDeviceId, false, productionInstallationId), 'wrong number accepted')
+    await edit('numbers', `${issued.scope}:${issued.invoice.series}`, value => ({ ...value, lastNumber: 1 }))
+    await edit('entries', issued.id, value => {
+      value.record.canonicalRecord.RegistroAlta.Huella = '0'.repeat(64)
+      return value
+    })
+    await mustReject(assertFiscalLedgerHeadValid(issued.scope, productionDeviceId, false, productionInstallationId), 'corrupt head accepted')
+    await edit('entries', issued.id, value => {
+      value.record.canonicalRecord = structuredClone(issued.record.canonicalRecord)
+      return value
+    })
+    await edit('cursors', issued.scope, value => ({ ...value, recordId: crypto.randomUUID() }))
+    await mustReject(readLocalFiscalHead(issued.scope), 'missing head accepted')
+    await edit('cursors', issued.scope, value => ({ ...value, recordId: issued.id }))
+    const tx = db.transaction(['entries', 'delivery', 'cursors', 'numbers', 'bindings', 'economicSales'], 'readwrite')
+    tx.objectStore('entries').delete(issued.id)
+    tx.objectStore('delivery').delete(issued.id)
+    tx.objectStore('cursors').delete(issued.scope)
+    tx.objectStore('numbers').delete(`${issued.scope}:${issued.invoice.series}`)
+    tx.objectStore('bindings').delete(issued.scope)
+    tx.objectStore('economicSales').delete(issued.id)
+    await new Promise((resolve, reject) => { tx.oncomplete = resolve; tx.onabort = () => reject(tx.error); tx.onerror = () => reject(tx.error) })
+    db.close()
+    const restored = await reconcileLocalFiscalCopies(productionScope, productionDeviceId,
+      [{ entry: issued, economicPayload: productionPayload, eventId: crypto.randomUUID() }])
+    assert(restored === 1 && (await listLocalFiscalEntries(productionScope))[0].record.hash === issued.record.hash,
+      'server-confirmed original restored without rehash')
+    await assertFiscalLedgerHeadValid(issued.scope, productionDeviceId, false, productionInstallationId)
+    document.body.dataset.state = 'passed'
+    document.body.textContent = 'PASS IndexedDB chain, production sale, pending bridge, reprint and recovery'
+  } catch (error) { document.body.dataset.state = 'failed'; document.body.textContent = `FAIL ${error.message}` }
+</script></body></html>

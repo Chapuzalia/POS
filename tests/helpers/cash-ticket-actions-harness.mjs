@@ -9,7 +9,7 @@ export function createCashTicketActionsHarness({
   offlineQueue = [],
   settleCashlogyPaymentIfConfigured = async () => null,
   syncPendingEvents = async () => undefined,
-  voidTicketWithFiscalCancellation = async () => undefined,
+  prepareLocalFiscalAnnulment = async () => undefined,
 } = {}) {
   const calls = { busy: [], enqueued: [], errors: [], finished: [], forgotten: [], historyOpen: [], ledgers: [], stats: 0, sync: 0, tickets: [] }
   const ticket = {
@@ -32,16 +32,20 @@ export function createCashTicketActionsHarness({
     '../../../services/posService': {
       loadSessionTicketPageFromSupabase: async () => ({ currentPage: 1, tickets: [], totalResults: 0 }),
     },
+    '../../../lib/supabase.ts': { supabase: null },
     '../../../utils/dates': { nowIso: () => '2026-09-12T00:00:00Z' },
     '../../../utils/errors': { getReadableError: (error) => error?.message ?? String(error) },
-    '../../fiscal/service': { voidTicketWithFiscalCancellation },
+    '../../fiscal/local/annulment.ts': { prepareLocalFiscalAnnulment },
+    '../../fiscal/local/installation.ts': { getFiscalInstallationLease: async () => null, loadFiscalInstallation: async () => null },
+    '../../fiscal/local/localLedger.ts': { buildLocalRectificative: async () => null, findLocalFiscalEntryByTicket: async () => null, persistLocalRectificative: async () => undefined },
+    '../../fiscal/local/clock.ts': { assertFiscalLease: () => undefined },
     '../../local-printing': { nextPrintCopyNumber: () => 1, usePrintAgentStore: { getState: () => ({}) } },
     '../../local-printing/cashlogy/useCashlogyStore': {
       finishCashlogyPayment: (transaction) => calls.finished.push(transaction),
       getCashlogyPaymentAmounts: (transaction, totalCents) => ({ changeCents: transaction?.changeCents ?? 0, receivedCents: transaction?.receivedCents ?? totalCents }),
       settleCashlogyPaymentIfConfigured,
     },
-  }, { window: { confirm: () => true } })
+  }, { window: { confirm: () => true, prompt: () => 'Anulación solicitada' } })
   const options = {
     cashSession: { id: 'cash' },
     context: { role: 'owner', tenantId: 'tenant' },

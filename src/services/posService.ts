@@ -1,8 +1,6 @@
-import { reportOperationError } from '../lib/observability.ts'
 import { UserFacingError } from '../utils/UserFacingError.ts'
 import { loadPosCatalog } from '../features/catalog/data/load-pos-catalog.ts'
 import { normalizeCatalogSnapshot } from '../features/catalog/services/catalogSnapshots.ts'
-import { autoIssueFiscalTicket, voidTicketWithFiscalCancellation } from '../features/fiscal/service.ts'
 import { hasLocalSupabaseSession, supabase } from '../lib/supabase'
 import { isInvalidAuthError } from '../features/session/services/sessionValidity'
 export { summarizeSales } from '../features/cash-registers/services/cashSummary.ts'
@@ -534,8 +532,39 @@ type SessionTicketQueryRow = {
   venue_id: string
   device_id: string
   user_id: string
-  status: 'paid' | 'void'
-  subtotal_cents: number
+   status: 'paid' | 'void'
+   refund_requests: Array<{
+     id: string
+     original_ticket_id: string
+     total_cents: number
+     refund_method: HistoricalPaymentMethod
+     created_at: string
+     fiscal_rectificative_record: unknown
+     refund_lines: Array<{
+       id: string
+       original_ticket_line_id: string
+       quantity: number
+       gross_cents: number
+       discount_cents: number
+       net_total_cents: number
+       product_name: string
+       variant_name: string
+       modifiers: TicketLineModifier[] | null
+       tax_rate: number | null
+       taxable_base_cents: number | null
+       tax_amount_cents: number | null
+     }> | null
+     refund_payments: Array<{ id: string; method: HistoricalPaymentMethod; amount_cents: number; payment_snapshot: { receivedCents?: number; changeCents?: number } | null }> | null
+     fiscal_local_records: Array<{
+       id: string
+       invoice_id: string
+       invoice_snapshot: { issuerName: string; issuerNif: string; issuerAddress?: string; series: string; number: number; issuedAt: string; qrUrl: string; recipient: { name: string; nif: string } | null }
+       record_envelope: unknown
+     }> | null
+   }> | null
+
+   subtotal_cents: number
+
   discount_id: string | null
   discount_name: string | null
   discount_type: 'percentage' | 'fixed' | 'manual' | null
@@ -562,6 +591,21 @@ type SessionTicketQueryRow = {
   invoice_number: string | null
    invoice_issued_at: string | null
    ticket_number: number | string
+   fiscal_local_records: Array<{
+     id: string
+     invoice_id: string
+     record_kind: 'alta' | 'anulacion'
+     invoice_snapshot: {
+       issuerName: string
+       issuerNif: string
+       issuerAddress?: string
+       series: string
+       number: number
+       issuedAt: string
+       qrUrl: string
+       recipient: { name: string; nif: string } | null
+     }
+   }> | null
    ticket_lines: Array<{
     id: string
     product_id: string | null
@@ -610,17 +654,30 @@ type SessionTicketQueryRow = {
       cashlogy_transaction_id: string | null
     }> | null
   }> | null
-  fiscal_invoices: Array<{
-    id: string
-    provider: 'verifactu' | 'ticketbai'
-    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-    external_uuid: string | null
-    external_code: string | null
-    qr_base64: string | null
-    verification_url: string | null
-    error_code: string | null
-    error_message: string | null
-  }> | null
+}
+
+async function loadLoggedSalePayloads(context: TenantContext, cashSessionId: string, ticketIds: string[]) {
+  if (!supabase || !ticketIds.length) return []
+  const rows: Array<{ payload: unknown }> = []
+  let legacy = false
+  for (let offset = 0; ; offset += 500) {
+    let query = supabase.from('offline_event_log').select('payload')
+      .eq('tenant_id', context.tenantId).eq('event_kind', 'sale_created')
+    query = legacy
+      ? query.filter('payload->ticket->>cashSessionId', 'eq', cashSessionId)
+      : query.eq('sale_cash_session_id', cashSessionId)
+    if (ticketIds.length <= 100) query = query.in(legacy ? 'payload->ticket->>id' : 'sale_ticket_id', ticketIds)
+    const { data, error } = await query.order('id').range(offset, offset + 499)
+    // N-1 compatibility when the expanded schema has not reached this deployment yet.
+    if (error && !legacy && ['42703', 'PGRST204'].includes(error.code)) {
+      legacy = true
+      offset = -500
+      continue
+    }
+    if (error) throw error
+    rows.push(...(data ?? []))
+    if ((data?.length ?? 0) < 500) return rows
+  }
 }
 
 async function loadSessionTicketRecordsFromSupabase(
@@ -657,12 +714,26 @@ async function loadSessionTicketRecordsFromSupabase(
          ticket_number,
          local_created_at,
          is_invoice,
-        customer_id,
-        customer_snapshot,
+         customer_id,
+         customer_snapshot,
+          refund_requests (
+            id, original_ticket_id, total_cents, refund_method, created_at, fiscal_rectificative_record,
+            refund_lines (id, original_ticket_line_id, quantity, gross_cents, discount_cents, net_total_cents, product_name, variant_name, modifiers, tax_rate, taxable_base_cents, tax_amount_cents),
+            refund_payments (id, method, amount_cents, payment_snapshot),
+            fiscal_local_records (id, invoice_id, invoice_snapshot, record_envelope)
+          ),
+
+
         invoice_series,
         invoice_number,
-        invoice_issued_at,
-        discount_rule_kind,
+         invoice_issued_at,
+         fiscal_local_records (
+     id,
+     invoice_id,
+     record_kind,
+     invoice_snapshot
+         ),
+         discount_rule_kind,
         discount_scope,
         discount_automatic,
         discount_snapshot,
@@ -712,33 +783,17 @@ async function loadSessionTicketRecordsFromSupabase(
             cashlogy_request_id,
             cashlogy_transaction_id
           )
-        ),
-        fiscal_invoices (
-          id, provider, status, external_uuid, external_code, qr_base64, verification_url, error_code, error_message
         )
     `)
     .eq('tenant_id', context.tenantId)
     .eq('cash_session_id', cashSessionId)
-  let eventQuery = supabase
-    .from('offline_event_log')
-    .select('payload')
-    .eq('tenant_id', context.tenantId)
-    .eq('event_kind', 'sale_created')
-    .filter('payload->ticket->>cashSessionId', 'eq', cashSessionId)
-
   if (ticketIds) {
     ticketQuery = ticketQuery.in('id', ticketIds)
-    eventQuery = eventQuery.in('payload->ticket->>id', ticketIds)
   }
 
-  const [{ data: ticketData, error: ticketsError }, { data: eventData, error: eventsError }] = await Promise.all([
-    ticketQuery.order('local_created_at', { ascending: false }),
-    eventQuery,
-  ])
-
-  if (ticketsError || eventsError) {
-    throw ticketsError ?? eventsError
-  }
+  const { data: ticketData, error: ticketsError } = await ticketQuery.order('local_created_at', { ascending: false })
+  if (ticketsError) throw ticketsError
+  const eventData = await loadLoggedSalePayloads(context, cashSessionId, (ticketData ?? []).map(ticket => ticket.id))
 
   const loggedPayloads = new Map<string, SaleCreatedPayload>()
 
@@ -791,6 +846,8 @@ async function loadSessionTicketRecordsFromSupabase(
         catalogSnapshot: normalizeCatalogSnapshot(loggedLine?.catalogSnapshot ?? { saleFormatId: line.sale_format_id, saleFormatName: line.sale_format_name_snapshot ?? line.variant_name, categoryId: line.category_id_snapshot, categoryName: line.category_name_snapshot ?? '', catalogTabId: line.catalog_tab_id_snapshot, catalogTabName: line.catalog_tab_name_snapshot ?? '' }, { productId: line.product_id ?? loggedLine?.productId ?? null, productName: line.product_name, variantId: line.variant_id ?? loggedLine?.variantId ?? null, variantName: line.variant_name, basePriceCents: loggedLine?.basePriceCents ?? line.base_price_cents ?? line.unit_price_cents }),
       }
     })
+    const localFiscalRecord = ticket.fiscal_local_records?.find((record) => record.record_kind === 'alta')
+    const localFiscalInvoice = localFiscalRecord?.invoice_snapshot
     const payload: SaleCreatedPayload = {
        ticket: {
          id: ticket.id,
@@ -863,30 +920,82 @@ async function loadSessionTicketRecordsFromSupabase(
         cashlogyRequestId: payment.cashlogy_request_id,
         cashlogyTransactionId: payment.cashlogy_transaction_id,
       } : null,
-      ...(ticket.fiscal_invoices?.[0] ? {
+      ...(localFiscalRecord && localFiscalInvoice ? {
+        localFiscal: {
+          recordId: localFiscalRecord.id,
+          series: localFiscalInvoice.series,
+          number: localFiscalInvoice.number,
+          issuedAt: localFiscalInvoice.issuedAt,
+          documentKind: localFiscalInvoice.recipient ? 'complete' as const : 'simplified' as const,
+          issuerName: localFiscalInvoice.issuerName,
+          issuerNif: localFiscalInvoice.issuerNif,
+          issuerAddress: localFiscalInvoice.issuerAddress ?? '',
+          verifactuLegend: true,
+        },
         fiscal: {
-          invoiceId: ticket.fiscal_invoices[0].id,
-          provider: ticket.fiscal_invoices[0].provider,
-          status: ticket.fiscal_invoices[0].status,
-          uuid: ticket.fiscal_invoices[0].external_uuid,
-          externalCode: ticket.fiscal_invoices[0].external_code,
-          qrBase64: ticket.fiscal_invoices[0].qr_base64,
-          verificationUrl: ticket.fiscal_invoices[0].verification_url,
-          errorCode: ticket.fiscal_invoices[0].error_code,
-          errorMessage: ticket.fiscal_invoices[0].error_message,
+          invoiceId: localFiscalRecord.invoice_id,
+          provider: 'verifactu' as const,
+          status: 'pending' as const,
+          uuid: null,
+          qrBase64: null,
+          verificationUrl: localFiscalInvoice.qrUrl,
+          externalCode: `${localFiscalInvoice.series}/${localFiscalInvoice.number}`,
+          errorCode: null,
+          errorMessage: null,
         },
       } : {}),
     }
 
+     const refundDocuments = (ticket.refund_requests ?? []).map((request) => {
+       const invoice = request.fiscal_local_records?.[0]?.invoice_snapshot
+       if (!invoice) return null
+       const refundLines = (request.refund_lines ?? []).map((refundLine) => {
+         const originalLine = lines.find((line) => line.id === refundLine.original_ticket_line_id)
+         if (!originalLine) return null
+         return {
+           ...originalLine,
+           id: refundLine.id,
+           ticketId: request.id,
+           productName: refundLine.product_name,
+           variantName: refundLine.variant_name,
+           quantity: -refundLine.quantity,
+           grossBeforeDiscountCents: -Math.abs(originalLine.grossBeforeDiscountCents * refundLine.quantity),
+           lineTotalCents: refundLine.net_total_cents,
+           discountAmountCents: refundLine.discount_cents,
+           netTotalCents: refundLine.net_total_cents,
+           fiscalSnapshot: mapFiscalSnapshot({ ...refundLine, line_total_cents: refundLine.net_total_cents }),
+           modifiers: refundLine.modifiers ?? originalLine.modifiers,
+         }
+       }).filter((line): line is NonNullable<typeof line> => line !== null)
+       const refundPayment = request.refund_payments?.[0]
+       const refundPayload: SaleCreatedPayload = {
+         ...payload,
+         ticket: { ...payload.ticket, id: request.id, totalCents: request.total_cents, subtotalCents: request.total_cents, discountAmountCents: 0, discount: null, createdAt: request.created_at, invoice: null },
+         lines: refundLines,
+         sale: { ...payload.sale, id: request.id, ticketId: request.id, totalCents: request.total_cents, paymentMethod: request.refund_method, createdAt: request.created_at },
+         payment: refundPayment && (refundPayment.method === 'cash' || refundPayment.method === 'card') ? { id: refundPayment.id, tenantId: ticket.tenant_id, saleId: request.id, method: refundPayment.method, amountCents: refundPayment.amount_cents, receivedCents: refundPayment.payment_snapshot?.receivedCents ?? null, changeCents: refundPayment.payment_snapshot?.changeCents ?? 0 } : null,
+          localFiscal: { recordId: request.fiscal_local_records?.[0]?.id ?? request.id, series: invoice.series, number: invoice.number, issuedAt: invoice.issuedAt, documentKind: invoice.recipient ? 'complete' : 'simplified', issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, issuerAddress: invoice.issuerAddress ?? '', verifactuLegend: true, rectifiedInvoice: { series: payload.localFiscal?.series ?? '', number: payload.localFiscal?.number ?? 0, issuedAt: payload.localFiscal?.issuedAt ?? ticket.local_created_at } },
+         fiscal: { invoiceId: request.fiscal_local_records?.[0]?.invoice_id ?? request.id, provider: 'verifactu', status: 'pending', uuid: null, qrBase64: null, verificationUrl: invoice.qrUrl, externalCode: `${invoice.series}/${invoice.number}`, errorCode: null, errorMessage: null },
+       }
+       return { id: request.id, createdAt: request.created_at, payload: refundPayload }
+     }).filter((document): document is NonNullable<typeof document> => document !== null)
+
      return {
        id: saleId,
-       ticketNumber: Number(ticket.ticket_number),
-       cashSessionId: ticket.cash_session_id,
+         ticketNumber: Number(ticket.ticket_number) || undefined,
+        cashSessionId: ticket.cash_session_id,
       paymentMethod,
       totalCents: ticket.total_cents,
       createdAt,
-      status: ticket.status === 'void' ? 'voided' : 'active',
-      payload,
+       status: ticket.status === 'void' ? 'voided' : 'active',
+        isRefund: false,
+        originalTicketId: null,
+        refundTicketId: null,
+        linkedDocumentRole: ticket.refund_requests?.length ? 'original' : null,
+         linkedDocumentIds: (ticket.refund_requests ?? []).map((request) => request.id),
+         refundDocuments,
+        payload,
+
     }
   })
 }
@@ -899,13 +1008,28 @@ export async function loadSessionTicketsFromSupabase(
   return loadSessionTicketRecordsFromSupabase(context, cashSessionId, ticketIds)
 }
 
+const ticketLoads = new Map<string, Promise<SessionTicketRecord | null>>()
+
+export async function loadTicketNumberFromSupabase(context: TenantContext, cashSessionId: string, ticketId: string): Promise<number | undefined> {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const { data, error } = await supabase.from('tickets').select('ticket_number')
+    .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId)
+    .eq('cash_session_id', cashSessionId).eq('id', ticketId).maybeSingle()
+  if (error) throw error
+  return data?.ticket_number == null ? undefined : Number(data.ticket_number)
+}
+
 export async function loadSessionTicketFromSupabase(
   context: TenantContext,
   cashSessionId: string,
   ticketId: string,
 ) {
-  const [ticket] = await loadSessionTicketRecordsFromSupabase(context, cashSessionId, [ticketId])
-  return ticket ?? null
+  const key = `${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}:${cashSessionId}:${ticketId}`
+  const current = ticketLoads.get(key)
+  if (current) return current
+  const pending = loadSessionTicketRecordsFromSupabase(context, cashSessionId, [ticketId]).then(([ticket]) => ticket ?? null)
+  ticketLoads.set(key, pending)
+  try { return await pending } finally { if (ticketLoads.get(key) === pending) ticketLoads.delete(key) }
 }
 
 type SessionTicketPageRow = {
@@ -954,19 +1078,42 @@ export async function loadSessionTicketPageFromSupabase(
 }
 
 export async function loadProductSalesStatsFromSupabase(context: TenantContext): Promise<ProductSalesStat[]> {
+  return fetchProductSalesStats(context)
+}
+
+async function fetchProductSalesStats(context: TenantContext): Promise<ProductSalesStat[]> {
   if (!supabase) {
     return []
   }
 
-  const { data, error } = await supabase
-    .from('ticket_lines')
-    .select('product_id, quantity, allocated_quantity, line_total_cents, tickets!inner(status)')
-    .eq('tenant_id', context.tenantId)
-    .eq('tickets.status', 'paid')
-    .not('product_id', 'is', null)
-
-  if (error) {
-    throw error
+  const aggregated: ProductSalesStat[] = []
+  let afterProductId: string | null = null
+  for (;;) {
+    const { data, error } = await supabase.rpc('pos_product_sales_stats', {
+      p_tenant_id: context.tenantId, p_venue_id: context.venueId,
+      p_after_product_id: afterProductId, p_limit: 500,
+    })
+    if (error && ['PGRST202', '42883'].includes(error.code)) break
+    if (error) throw error
+    const page = (data ?? []) as Array<{ product_id: string; quantity: number | string; total_cents: number | string }>
+    for (const row of page) {
+      const quantity = Number(row.quantity), totalCents = Number(row.total_cents)
+      if (!Number.isFinite(quantity) || !Number.isSafeInteger(totalCents)) throw new Error('Estadísticas de ventas fuera de rango.')
+      aggregated.push({ productId: row.product_id, quantity, totalCents })
+    }
+    if (page.length < 500) return aggregated.sort((a, b) => b.quantity - a.quantity || b.totalCents - a.totalCents || a.productId.localeCompare(b.productId))
+    afterProductId = page[page.length - 1].product_id
+  }
+  // Older backends keep a complete, paginated fallback until the expand is deployed.
+  const data: TicketLineProductSalesRow[] = []
+  for (let offset = 0; ; offset += 500) {
+    const response = await supabase.from('ticket_lines')
+      .select('product_id, quantity, allocated_quantity, line_total_cents, tickets!inner(status,venue_id)')
+      .eq('tenant_id', context.tenantId).eq('tickets.status', 'paid').eq('tickets.venue_id', context.venueId)
+      .not('product_id', 'is', null).order('id').range(offset, offset + 499)
+    if (response.error) throw response.error
+    data.push(...(response.data ?? []) as TicketLineProductSalesRow[])
+    if ((response.data?.length ?? 0) < 500) break
   }
 
   const statsByProduct = new Map<string, ProductSalesStat>()
@@ -1050,14 +1197,6 @@ export async function syncEvent(event: OfflineEvent) {
       throw error
     }
 
-    try {
-      await autoIssueFiscalTicket(event.tenantId, event.payload.ticket.id)
-    } catch (fiscalError) {
-      // The sale is already immutable and synchronized. Fiscal errors are persisted
-      // by the backend and must not cause the sale event itself to be replayed.
-      reportOperationError(fiscalError, { operation: 'sale.fiscal_submission', integration: 'verifacti', ticketId: event.payload.ticket.id, saleId: event.payload.sale.id })
-    }
-
     return
   }
 
@@ -1067,46 +1206,32 @@ export async function syncEvent(event: OfflineEvent) {
       if (!cashlogyRequestId || !cashlogyTransactionId || paymentMethod !== 'cash' || receivedCents === null) {
         throw new Error('La identidad del cobro Cashlogy está incompleta.')
       }
-      const { error } = await supabase.rpc('change_sale_payment_method_cashlogy', {
-        p_sale_id: saleId,
-        p_payment_id: paymentId,
-        p_received_cents: receivedCents,
-        p_change_cents: changeCents,
-        p_cashlogy_request_id: cashlogyRequestId,
-        p_cashlogy_transaction_id: cashlogyTransactionId,
-      })
-      if (error) throw error
-      return
     }
-    const { error: saleError } = await supabase
-      .from('sales')
-      .update({ payment_method: paymentMethod })
-      .eq('tenant_id', event.tenantId)
-      .eq('id', saleId)
-
-    if (saleError) {
-      throw saleError
-    }
-
-    const { error: paymentError } = await supabase
-      .from('sale_payments')
-      .update({
-        method: paymentMethod,
-        received_cents: receivedCents,
-        change_cents: changeCents,
-      })
-      .eq('tenant_id', event.tenantId)
-      .eq('id', paymentId)
-
-    if (paymentError) {
-      throw paymentError
-    }
+    const { error } = await supabase.rpc('change_sale_payment_method_safe', {
+      p_event_id: event.id,
+      p_tenant_id: event.tenantId,
+      p_sale_id: saleId,
+      p_payment_id: paymentId,
+      p_payment_method: paymentMethod,
+      p_received_cents: receivedCents,
+      p_change_cents: changeCents,
+      p_payload: event.payload,
+      p_cashlogy_request_id: cashlogyRequestId ?? null,
+      p_cashlogy_transaction_id: cashlogyTransactionId ?? null,
+    })
+    if (error) throw error
 
     return
   }
 
   if (event.kind === 'sale_voided') {
-    await voidTicketWithFiscalCancellation(event.tenantId, event.payload.ticketId)
+    const { error } = await supabase
+      .from('tickets')
+      .update({ status: 'void' })
+      .eq('tenant_id', event.tenantId)
+      .eq('id', event.payload.ticketId)
+      .eq('status', 'paid')
+    if (error) throw error
     return
   }
 

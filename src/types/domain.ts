@@ -354,6 +354,12 @@ export type SaleRecord = {
   createdAt: string
 }
 
+export type RefundDocument = {
+  id: string
+  createdAt: string
+  payload: SaleCreatedPayload
+}
+
 export type SessionTicketRecord = {
   id: string
   ticketNumber?: number
@@ -363,12 +369,18 @@ export type SessionTicketRecord = {
   createdAt: string
   status: 'active' | 'voided'
   payload: SaleCreatedPayload
+  refundDocuments?: RefundDocument[]
   printStatus?: 'not_requested' | 'pending' | 'printed' | 'failed' | 'unknown'
   printJobId?: string | null
   printRequestId?: string | null
   printedAt?: string | null
   printErrorCode?: string | null
   printAttempts?: number
+  isRefund?: boolean
+  originalTicketId?: string | null
+  refundTicketId?: string | null
+  linkedDocumentRole?: 'original' | 'refund' | null
+  linkedDocumentIds?: string[]
 }
 
 export type ProductSalesStat = {
@@ -454,14 +466,26 @@ export type SaleCreatedPayload = {
     cashlogyRequestId?: string | null
     cashlogyTransactionId?: string | null
   } | null
+  localFiscal?: {
+    recordId: string
+    series: string
+    number: number
+    issuedAt: string
+    documentKind: 'simplified' | 'complete'
+    issuerName: string
+    issuerNif: string
+    issuerAddress: string
+    verifactuLegend?: boolean
+    rectifiedInvoice?: { series: string; number: number; issuedAt: string }
+  }
   fiscal?: {
     invoiceId: string
-    provider: 'verifactu' | 'ticketbai'
+    provider: 'verifactu'
     status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-    uuid: string | null
-    qrBase64: string | null
-    verificationUrl: string | null
-    externalCode: string | null
+    uuid: null
+    qrBase64: null
+    verificationUrl: string
+    externalCode: string
     errorCode: string | null
     errorMessage: string | null
   }
@@ -684,9 +708,54 @@ export type CrmStats = {
   }>
 }
 
+export type CrmSalesReportFiscal = {
+  provider: 'verifactu' | 'ticketbai'
+  status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
+  documentKind: 'simplified' | 'complete' | 'normal' | 'corrective'
+  series: string
+  number: string
+  issuedAt: string
+  verificationUrl: string | null
+  externalCode: string | null
+  errorCode: string | null
+  errorMessage: string | null
+  verifactuLegend: boolean
+}
+
+export type CrmSalesReportRefundDocument = {
+  id: string
+  series: string | null
+  number: string | null
+  issuedAt: string
+  verificationUrl: string | null
+  status: string | null
+  method: HistoricalPaymentMethod
+  totalCents: number
+  taxableBaseCents: number
+  taxAmountCents: number
+  rectifies: {
+    issuerNif: string
+    seriesAndNumber: string
+    issueDate: string
+  } | null
+  lines: Array<{
+    name: string
+    variantName: string
+    quantity: number
+    amountCents: number
+  }>
+}
+
 export type CrmSalesReportTicket = {
   id: string
   ticketNumber: number
+  isRefund?: boolean
+  originalTicketId?: string | null
+  refundTicketId?: string | null
+  linkedDocumentRole?: 'original' | 'refund' | null
+  linkedDocumentIds?: string[]
+  refundDocuments: CrmSalesReportRefundDocument[]
+  fiscal: CrmSalesReportFiscal | null
   createdAt: string
   lineCount: number
   lines: Array<{
@@ -723,24 +792,7 @@ export type CrmSalesReportTicket = {
   status: 'paid' | 'void'
   subtotalCents: number
   totalCents: number
-  fiscal: {
-    id: string
-    provider: 'verifactu' | 'ticketbai'
-    environment: 'test' | 'production'
-    invoiceType: 'normal' | 'simplified' | 'corrective'
-    series: string
-    number: string
-    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-    externalUuid: string | null
-    externalCode: string | null
-    qrBase64: string | null
-    verificationUrl: string | null
-    errorCode: string | null
-    errorMessage: string | null
-    attempts: number
-    sentAt: string | null
-    confirmedAt: string | null
-  } | null
+  invoice?: TicketInvoice | null
 }
 
 export type CrmSalesReportAggregate = {

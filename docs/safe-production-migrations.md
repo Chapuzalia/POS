@@ -102,3 +102,18 @@ No se fuerzan siempre tres releases. El contract puede ir en el segundo release 
 - Confirmar antes del contract que la versión N-1 ya no usa la API o estructura retirada.
 
 El pipeline calcula el rango desde el último deploy completo correcto. Si un deploy falla, esas migraciones se vuelven a revisar. En el primer despliegue protegido, `PRODUCTION_BASE_SHA` debe señalar el commit realmente desplegado; después, el último workflow de producción correcto actúa como baseline.
+
+## Excepción revisada para una única promoción
+
+La excepción está inactiva por defecto. No acredita la seguridad del SQL: solo omite el checker del PR y del despliegue para un merge previamente revisado. Conserva las pruebas del checker, lint, tests, build, backup y ejecución de migraciones.
+
+Para activarla, después de hacer commit de los cambios revisados en `Staging`, configurar estas **repository variables** en GitHub, en Settings → Secrets and variables → Actions → Variables:
+
+- `MIGRATION_SAFETY_EXCEPTION_BASE_SHA`: SHA completo de `main`, que debe coincidir con el último despliegue correcto.
+- `MIGRATION_SAFETY_EXCEPTION_HEAD_SHA`: SHA completo final de `Staging`, incluyendo los cambios de estos workflows.
+
+Abrir o actualizar el PR `Staging` → `main` y usar **Create a merge commit**. La excepción exige esos dos commits como padres, en ese orden, tanto en el merge de prueba del PR como en producción. Squash, rebase, cambios posteriores en cualquiera de las ramas, forks y otros eventos no quedan exentos. Si el PR ya tenía un check fallido, volver a ejecutar el workflow después de configurar las variables.
+
+La ejecución deja una advertencia y un resumen con los commits exentos. Tras un despliegue correcto, el baseline avanza y la excepción deja de aplicarse a futuras promociones. Eliminar ambas variables después de confirmar el despliegue; si falla, los reintentos del mismo merge pueden seguir usando la excepción mientras el baseline anterior permanezca vigente.
+
+Para la promoción revisada el 2026-10-04, el baseline observado es `17aea9a3a9c92316ae5aa06c18648266e95df3cf`. El SHA de `Staging` debe obtenerse después del commit definitivo; no utilizar el SHA anterior a la preparación de la excepción. No cambiar `PRODUCTION_BASE_SHA` para saltarse validaciones.

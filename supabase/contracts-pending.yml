@@ -11,3 +11,9 @@ contracts:
     allowed_operations:
       - DROP
     created_at: 2026-09-16
+  - id: legacy-verifacti-ticketbai-removal
+    expand_migration: 20260929120000_add_local_fiscal_annulments_and_retire_legacy.sql
+    description: Remove legacy VeriFacti/TicketBAI tables, routines, Edge Functions and accounting dependencies after the N-1 compatibility window and historical-data migration.
+    allowed_operations:
+      - DROP
+    created_at: 2026-09-29

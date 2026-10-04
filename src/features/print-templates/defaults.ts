@@ -1,17 +1,34 @@
 import type { PrintTemplateBlock, PrintTemplateDefinition, PrintTemplateType } from './types.ts'
 
+export const SALE_TEMPLATE_SLOTS = ['top', 'after_issuer', 'after_document', 'before_items', 'after_items', 'after_totals', 'bottom'] as const
+export type SaleTemplateSlot = typeof SALE_TEMPLATE_SLOTS[number]
+
+export const SALE_MANDATORY_GROUPS = Object.freeze({
+  fiscal: ['fiscal-qr', 'fiscal-verifactu-legend', 'fiscal-top-gap'],
+  issuer: ['venue-name', 'venue-legal-name', 'venue-tax-id', 'venue-address'],
+  document: ['invoice-heading-gap', 'invoice-heading', 'copy-label-gap', 'copy-label', 'header-gap', 'ticket-number', 'ticket-date'],
+  items: ['items-gap', 'items-title', 'items-separator', 'items'],
+  totals: ['totals-gap', 'totals-separator', 'totals'],
+} as const)
+
 const saleBlocks: PrintTemplateBlock[] = [
+  { id: 'fiscal-qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' },
+  { id: 'fiscal-verifactu-legend', type: 'text', value: 'VERI*FACTU', align: 'center', when: 'fiscal.show_verifactu_legend' },
+  { id: 'fiscal-top-gap', type: 'spacer', when: 'fiscal.show_qr' },
   { id: 'venue-name', type: 'text', value: '{{venue.name}}', align: 'center' },
   { id: 'venue-legal-name', type: 'text', value: '{{venue.legal_name}}', align: 'center', when: 'venue.legal_name' },
   { id: 'venue-tax-id', type: 'text', value: 'NIF/CIF {{venue.tax_id}}', align: 'center', when: 'venue.tax_id' },
   { id: 'venue-address', type: 'text', value: '{{venue.address}}', align: 'center', when: 'venue.address' },
   { id: 'invoice-heading-gap', type: 'spacer', when: 'document.title' },
-  { id: 'invoice-heading', type: 'text', value: '{{document.title}}', align: 'center', when: 'document.title' },
+  { id: 'invoice-heading', type: 'text', value: '{{document.title}}', align: 'center', when: 'document.title', unless: 'ticket.is_rectificative' },
   { id: 'copy-label-gap', type: 'spacer', when: 'document.label' },
   { id: 'copy-label', type: 'text', value: '{{document.label}}', align: 'center', when: 'document.label' },
   { id: 'header-gap', type: 'spacer' },
   { id: 'ticket-number', type: 'row', label: '{{document.number_label}}', value: '{{ticket.number}}' },
   { id: 'ticket-date', type: 'row', label: '{{document.date_label}}', value: '{{ticket.datetime}}' },
+  { id: 'rectified-document', type: 'text', value: 'FACTURA RECTIFICATIVA', align: 'center', when: 'ticket.is_rectificative' },
+  { id: 'rectified-invoice', type: 'row', label: 'Rectifica factura', value: '{{ticket.rectified_invoice}}', when: 'ticket.rectified_invoice' },
+  { id: 'rectified-date', type: 'row', label: 'Fecha factura original', value: '{{ticket.rectified_invoice_date}}', when: 'ticket.rectified_invoice_date' },
   { id: 'cash-register', type: 'row', label: 'Caja', value: '{{cash_register.name}}', when: 'cash_register.name' },
   { id: 'employee', type: 'row', label: 'Empleado', value: '{{employee.name}}', when: 'employee.name' },
   { id: 'customer-gap', type: 'spacer', when: 'customer.name' },
@@ -47,7 +64,6 @@ const saleBlocks: PrintTemplateBlock[] = [
   { id: 'fiscal-title', type: 'text', value: '{{fiscal.title}}', when: 'fiscal.title' },
   { id: 'fiscal-separator', type: 'separator', when: 'fiscal.title' },
   { id: 'fiscal-code', type: 'text', value: 'Código: {{fiscal.external_code}}', when: 'fiscal.external_code' },
-  { id: 'fiscal-qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' },
   { id: 'fiscal-url', type: 'text', value: '{{fiscal.verification_url}}', when: 'fiscal.show_url' },
   { id: 'fiscal-unavailable', type: 'text', value: 'QR no disponible.', when: 'fiscal.error' },
   { id: 'fiscal-error', type: 'text', value: 'Motivo: {{fiscal.error}}', when: 'fiscal.error' },

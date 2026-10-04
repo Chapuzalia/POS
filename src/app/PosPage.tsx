@@ -807,7 +807,9 @@ export function PosPage(props: Props) {
         onChangePayment={cash.ticketActions.changePayment}
         onClose={() => cash.setHistoryOpen(false)}
         onReprint={(ticket) => void cash.ticketActions.reprint(ticket)}
+        onRefund={cash.ticketActions.refund}
         onVoidTicket={cash.ticketActions.voidTicket}
+
       /> : null}
       {cash.completedClosing ? <CashClosingResultModal
         canReprint={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}

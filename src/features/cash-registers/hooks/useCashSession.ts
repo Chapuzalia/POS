@@ -28,6 +28,10 @@ import type {
   TenantContext,
 } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
+import { localFiscalMode } from '../../fiscal/local/mode.ts'
+import { loadFiscalInstallation } from '../../fiscal/local/installation.ts'
+import { findLocalFiscalEntryByTicket } from '../../fiscal/local/localLedger.ts'
+import { printPayloadWithLocalFiscal } from '../../fiscal/local/posInvoice.ts'
 import { usePrintAgentScope } from '../../local-printing/hooks/usePrintAgentScope'
 import { useCashlogyScope } from '../../local-printing/cashlogy/useCashlogyScope'
 import { loadActiveCashlogyCashBalance } from '../../local-printing/cashlogy/cashlogyCashBalance'
@@ -74,6 +78,10 @@ export function useCashSession(options: Options) {
   const [movements, setMovements] = useState<CashMovement[]>([])
   const [tickets, setTicketsState] = useState<SessionTicketRecord[]>([])
   const ticketsRef = useRef<SessionTicketRecord[]>([])
+  const saleRefreshGenerationRef = useRef(0)
+  const saleRefreshScopeRef = useRef('')
+  const saleRefreshScope = `${options.context?.tenantId}:${options.context?.venueId}:${options.context?.deviceId}:${options.context?.userId}:${session?.id}`
+  saleRefreshScopeRef.current = saleRefreshScope
   const [closeModalOpen, setCloseModalOpen] = useState(false)
   const [openOrderCount, setOpenOrderCount] = useState(0)
   const [movementModalOpen, setMovementModalOpen] = useState(false)
@@ -162,10 +170,20 @@ export function useCashSession(options: Options) {
     printOptions: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean } = {},
   ) => {
     if (!options.context) return
+    const printState = usePrintAgentStore.getState()
+    if (localFiscalMode() === 'production' && printState.token && printState.selectedPrinterId) {
+      const installation = await loadFiscalInstallation(options.context, { cashRegisterId: payload.ticket.cashRegisterId })
+      const entry = await findLocalFiscalEntryByTicket(installation, payload.ticket.id)
+      if (!entry) {
+        if (!printOptions.isReprint || !payload.fiscal || payload.localFiscal) {
+          throw new UserFacingError('No se puede imprimir una factura sin su registro fiscal local.')
+        }
+      } else payload = printPayloadWithLocalFiscal(payload, entry)
+    }
     if (!printOptions.isReprint && !ticketsRef.current.some((ticket) => ticket.id === payload.sale.id)) {
       persistTickets([{
          id: payload.sale.id,
-         ticketNumber: payload.ticket.ticketNumber ?? 0,
+         ticketNumber: payload.ticket.ticketNumber,
          cashSessionId: payload.sale.cashSessionId,
         paymentMethod: payload.sale.paymentMethod,
         totalCents: payload.sale.totalCents,
@@ -245,11 +263,13 @@ export function useCashSession(options: Options) {
 
   const refreshConfirmedSale = useCallback(async (ticketId: string, missingTicketTitle: string, shouldPrint = true) => {
     if (!options.context || !session) return
+    const generation = ++saleRefreshGenerationRef.current
     const [nextLedger, remoteTicket] = await Promise.all([
       loadSalesLedgerFromSupabase(options.context, session.id),
       loadSessionTicketFromSupabase(options.context, session.id, ticketId),
     ])
-    persistLedger(nextLedger)
+    if (saleRefreshScopeRef.current !== saleRefreshScope) return
+    if (generation === saleRefreshGenerationRef.current) persistLedger(nextLedger)
     const confirmedTicket = remoteTicket ? mergeRemotePrintStates([remoteTicket])[0] : null
     if (confirmedTicket) {
       persistTickets([
@@ -262,7 +282,7 @@ export function useCashSession(options: Options) {
     }
     if (confirmedTicket && shouldPrint) void printSale(confirmedTicket.payload)
     else if (!confirmedTicket) sileo.warning({ title: missingTicketTitle, description: 'No se ha podido recuperar el ticket confirmado.' })
-  }, [mergeRemotePrintStates, options.context, persistLedger, persistTickets, printSale, session])
+  }, [mergeRemotePrintStates, options.context, persistLedger, persistTickets, printSale, session, saleRefreshScope])
 
   const refreshLedger = useCallback(async () => {
     if (!cashContext || !session || !isOnline) return ledger

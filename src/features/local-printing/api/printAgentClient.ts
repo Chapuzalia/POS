@@ -177,6 +177,9 @@ export function createPrintAgentClient(options: ClientOptions) {
           error.code !== 'INVALID_REQUEST' ||
           !structured?.elements?.length
         ) throw error
+        if (structured.elements.some((element) => element.type === 'qr')) {
+          throw new PrintAgentError({ code: 'FISCAL_QR_UNSUPPORTED', cause: error })
+        }
         const { elements: _unsupportedElements, ...legacyPayload } = structured
         return request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/print', {
           body: legacyPayload,

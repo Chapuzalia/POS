@@ -48,7 +48,15 @@ const ticketSelect = `
     tenant_id,
     venue_id,
     status,
-  subtotal_cents,
+    refund_requests (
+      id, original_ticket_id, total_cents, refund_method, created_at, fiscal_series, fiscal_status,
+      fiscal_rectificative_record,
+      refund_lines (id, original_ticket_line_id, quantity, gross_cents, discount_cents, net_total_cents, product_name, variant_name, modifiers, tax_rate, taxable_base_cents, tax_amount_cents),
+      refund_payments (id, method, amount_cents, payment_snapshot),
+      fiscal_local_records (id, invoice_id, invoice_snapshot, canonical_record, record_envelope)
+    ),
+   subtotal_cents,
+
   discount_id,
   discount_name,
   discount_type,
@@ -56,9 +64,16 @@ const ticketSelect = `
   discount_value,
   discount_rounding_increment_cents,
   discount_amount_cents,
-  total_cents,
-  local_created_at,
-  ticket_lines (
+    total_cents,
+    local_created_at,
+    is_invoice,
+    customer_id,
+    customer_snapshot,
+    invoice_series,
+    invoice_number,
+    invoice_issued_at,
+    fiscal_local_records (record_kind, invoice_snapshot),
+    ticket_lines (
     id,
     product_id,
     variant_id,
@@ -84,14 +99,9 @@ const ticketSelect = `
       quantity, price_delta_cents, sort_order, metadata
     )
   ),
-  sales (
-    payment_method
-  ),
-  fiscal_invoices (
-    id, provider, environment, invoice_type, series, number, status,
-    external_uuid, external_code, qr_base64, verification_url,
-    error_code, error_message, attempts, sent_at, confirmed_at
-  )
+    sales (
+      payment_method
+    )
 `
 
 export type SalesReportLineRow = {
@@ -141,8 +151,23 @@ export type SalesReportTicketRow = {
   venue_id: string
   local_created_at: string
   sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
-  status: 'paid' | 'void'
-  subtotal_cents: number
+   status: 'paid' | 'void'
+     refund_requests: Array<{
+       id: string
+       original_ticket_id: string
+       total_cents: number
+       refund_method: HistoricalPaymentMethod
+       created_at: string
+       fiscal_series: string | null
+       fiscal_status: string | null
+       fiscal_rectificative_record: Record<string, unknown> | null
+       refund_lines: Array<{ id: string; original_ticket_line_id: string; quantity: number; gross_cents: number; discount_cents: number; net_total_cents: number; product_name: string; variant_name: string; modifiers: SalesReportLineRow['modifiers']; tax_rate: number | null; taxable_base_cents: number | null; tax_amount_cents: number | null }> | null
+       refund_payments: Array<{ id: string; method: HistoricalPaymentMethod; amount_cents: number; payment_snapshot: Record<string, unknown> | null }> | null
+        fiscal_local_records: Array<{ id: string; invoice_id: string; invoice_snapshot: Record<string, unknown> | null; canonical_record: Record<string, unknown> | null; record_envelope: Record<string, unknown> | null }> | null
+      }>
+
+    subtotal_cents: number
+
   discount_id: string | null
   discount_name: string | null
   discount_type: 'percentage' | 'fixed' | 'manual' | null
@@ -151,26 +176,19 @@ export type SalesReportTicketRow = {
   discount_rounding_increment_cents: 5 | 10 | 50 | 100 | null
   discount_amount_cents: number | null
   ticket_lines: SalesReportLineRow[] | null
-  total_cents: number
-  fiscal_invoices: Array<{
-    id: string
-    provider: 'verifactu' | 'ticketbai'
-    environment: 'test' | 'production'
-    invoice_type: 'normal' | 'simplified' | 'corrective'
-    series: string
-    number: string
-    status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
-    external_uuid: string | null
-    external_code: string | null
-    qr_base64: string | null
-    verification_url: string | null
-    error_code: string | null
-    error_message: string | null
-    attempts: number
-    sent_at: string | null
-    confirmed_at: string | null
-  }> | null
-}
+   total_cents: number
+   is_invoice: boolean
+   customer_id: string | null
+   customer_snapshot: Record<string, unknown> | null
+   invoice_series: string | null
+   invoice_number: string | null
+   invoice_issued_at: string | null
+    fiscal_local_records: Array<{
+     record_kind: 'alta' | 'anulacion'
+     invoice_snapshot: Record<string, unknown>
+   }> | null
+ }
+
 
 export type NameRow = {
   id: string
@@ -239,16 +257,74 @@ async function loadTicketRows(context: TenantContext, venueId: string | undefine
 
     const { data, error } = await query
     if (error) throw error
-    for (const row of (data ?? []) as SalesReportTicketRow[]) rowsById.set(row.id, row)
+    for (const row of (data ?? []) as unknown as SalesReportTicketRow[]) rowsById.set(row.id, row)
   }
 
   return ticketIds.map((ticketId) => rowsById.get(ticketId)).filter((row): row is SalesReportTicketRow => Boolean(row))
 }
 
+function mapFiscalRecord(ticket: SalesReportTicketRow): CrmSalesReportTicket['fiscal'] {
+  const localRecord = ticket.fiscal_local_records?.find((record) => record.record_kind === 'alta')
+  const localInvoice = localRecord?.invoice_snapshot
+  if (localInvoice) {
+    const series = typeof localInvoice.series === 'string' ? localInvoice.series : null
+    const number = typeof localInvoice.number === 'number' ? String(localInvoice.number) : null
+    const issuedAt = typeof localInvoice.issuedAt === 'string' ? localInvoice.issuedAt : null
+    const verificationUrl = typeof localInvoice.qrUrl === 'string' ? localInvoice.qrUrl : null
+    const transmissionMode = localInvoice.transmissionMode
+    if (series && number && issuedAt) {
+      return {
+        provider: 'verifactu', status: 'pending', documentKind: ticket.customer_id ? 'complete' : 'simplified',
+        series, number, issuedAt, verificationUrl, externalCode: `${series}/${number}`,
+        errorCode: null, errorMessage: null, verifactuLegend: transmissionMode !== 'local-only',
+      }
+    }
+  }
+  return null
+}
+
+function mapRefundDocuments(ticket: SalesReportTicketRow): CrmSalesReportTicket['refundDocuments'] {
+  return (ticket.refund_requests ?? []).filter((request): request is NonNullable<typeof request> => Boolean(request)).map((request) => {
+    const localRecord = request.fiscal_local_records?.[0]
+    const invoice = localRecord?.invoice_snapshot ?? {}
+    const canonical = localRecord?.canonical_record ?? request.fiscal_rectificative_record
+    const alta = canonical?.RegistroAlta as Record<string, unknown> | undefined
+    const identity = alta?.FacturasRectificadas as { IDFacturaRectificada?: Array<Record<string, unknown>> } | undefined
+    const original = identity?.IDFacturaRectificada?.[0]
+    const number = typeof invoice.number === 'number' || typeof invoice.number === 'string' ? String(invoice.number) : null
+    const issuedAt = typeof invoice.issuedAt === 'string' ? invoice.issuedAt : request.created_at
+    const lines = request.refund_lines ?? []
+    return {
+      id: request.id,
+      series: request.fiscal_series ?? (typeof invoice.series === 'string' ? invoice.series : null),
+      number,
+      issuedAt,
+      verificationUrl: typeof invoice.qrUrl === 'string' ? invoice.qrUrl : null,
+      status: request.fiscal_status,
+      method: request.refund_method,
+      totalCents: -Math.abs(request.total_cents),
+      taxableBaseCents: -Math.abs(lines.reduce((sum, line) => sum + (line.taxable_base_cents ?? 0), 0)),
+      taxAmountCents: -Math.abs(lines.reduce((sum, line) => sum + (line.tax_amount_cents ?? 0), 0)),
+      rectifies: original && typeof original.IDEmisorFactura === 'string' && typeof original.NumSerieFactura === 'string' && typeof original.FechaExpedicionFactura === 'string'
+        ? { issuerNif: original.IDEmisorFactura, seriesAndNumber: original.NumSerieFactura, issueDate: original.FechaExpedicionFactura }
+        : null,
+      lines: lines.map((line) => ({ name: line.product_name, variantName: line.variant_name, quantity: Math.abs(line.quantity), amountCents: -Math.abs(line.net_total_cents) })),
+    }
+  })
+}
+
 function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicket {
   return {
     id: ticket.id,
-    ticketNumber: Number(ticket.ticket_number),
+     ticketNumber: Number(ticket.ticket_number),
+      isRefund: false,
+      originalTicketId: null,
+      refundTicketId: null,
+      linkedDocumentRole: ticket.refund_requests?.length ? 'original' : null,
+       linkedDocumentIds: (ticket.refund_requests ?? []).filter((request): request is NonNullable<typeof request> => Boolean(request)).map((request) => request.id),
+       refundDocuments: mapRefundDocuments(ticket),
+      fiscal: mapFiscalRecord(ticket),
+
     createdAt: ticket.local_created_at,
     lineCount: ticket.ticket_lines?.length ?? 0,
     lines: (ticket.ticket_lines ?? []).map((line) => {
@@ -311,25 +387,15 @@ function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicke
     quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + Number(line.allocated_quantity ?? line.quantity), 0),
     status: ticket.status,
     subtotalCents: ticket.subtotal_cents,
-    totalCents: ticket.total_cents,
-    fiscal: ticket.fiscal_invoices?.[0] ? {
-      id: ticket.fiscal_invoices[0].id,
-      provider: ticket.fiscal_invoices[0].provider,
-      environment: ticket.fiscal_invoices[0].environment,
-      invoiceType: ticket.fiscal_invoices[0].invoice_type,
-      series: ticket.fiscal_invoices[0].series,
-      number: ticket.fiscal_invoices[0].number,
-      status: ticket.fiscal_invoices[0].status,
-      externalUuid: ticket.fiscal_invoices[0].external_uuid,
-      externalCode: ticket.fiscal_invoices[0].external_code,
-      qrBase64: ticket.fiscal_invoices[0].qr_base64,
-      verificationUrl: ticket.fiscal_invoices[0].verification_url,
-      errorCode: ticket.fiscal_invoices[0].error_code,
-      errorMessage: ticket.fiscal_invoices[0].error_message,
-      attempts: ticket.fiscal_invoices[0].attempts,
-      sentAt: ticket.fiscal_invoices[0].sent_at,
-      confirmedAt: ticket.fiscal_invoices[0].confirmed_at,
-    } : null,
+     totalCents: ticket.total_cents,
+     invoice: ticket.is_invoice && ticket.customer_id && ticket.customer_snapshot ? {
+       customerId: ticket.customer_id,
+       customer: ticket.customer_snapshot as SalesReportTicketRow['customer_snapshot'] & { legalName: string; taxId: string; address: string; postalCode: string; city: string; province: string; country: string; email: string | null; phone: string | null },
+       series: ticket.invoice_series,
+       number: ticket.invoice_number,
+       issuedAt: ticket.invoice_issued_at,
+     } : null,
+
   }
 }
 
