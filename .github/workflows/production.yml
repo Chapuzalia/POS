@@ -85,7 +85,16 @@ jobs:
 
           echo "Found $migration_count migration files."
 
+      - name: Resolve reviewed one-release migration exception
+        id: migration-exception
+        env:
+          BASE_SHA: ${{ steps.release.outputs.base_sha }}
+          APPROVED_BASE_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_BASE_SHA }}
+          APPROVED_HEAD_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_HEAD_SHA }}
+        run: node scripts/check-migration-safety-exception.mjs
+
       - name: Check migrations for destructive operations
+        if: steps.migration-exception.outputs.approved != 'true'
         env:
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
           HEAD_SHA: ${{ github.sha }}

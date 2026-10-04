@@ -59,7 +59,16 @@ jobs:
         with:
           node-version: 22.19.0
 
+      - name: Resolve reviewed one-release migration exception
+        id: migration-exception
+        env:
+          BASE_SHA: ${{ steps.release.outputs.base_sha }}
+          APPROVED_BASE_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_BASE_SHA }}
+          APPROVED_HEAD_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_HEAD_SHA }}
+        run: node scripts/check-migration-safety-exception.mjs
+
       - name: Run migration safety checker
+        if: steps.migration-exception.outputs.approved != 'true'
         env:
           BASE_SHA: ${{ steps.release.outputs.base_sha }}
           HEAD_SHA: ${{ github.sha }}
@@ -72,4 +81,4 @@ jobs:
           bash scripts/check-pr-migrations.sh "$BASE_SHA" "$HEAD_SHA"
 
       - name: Run checker regression tests
-        run: node --test tests/migration-safety.test.mjs
+        run: node --test tests/migration-safety.test.mjs tests/migration-safety-exception.test.mjs
