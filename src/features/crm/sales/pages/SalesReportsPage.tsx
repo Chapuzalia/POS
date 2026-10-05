@@ -9,13 +9,15 @@ import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { KpiCard } from '../../dashboard/pages/DashboardPage'
 import { formatMoney, formatTicketNumber, normalizeText } from '../../../../lib/format'
-import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
+import { getOperationalDateKey, getOperationalDayRangeIso, shiftIsoDate } from '../../../../lib/operationalDay'
 import { loadAccountingTickets, type AccountingTicketRow } from '../services/accountingExportService'
 import { buildCsv, downloadCsv } from '../../../../lib/csv'
 import { sileo } from 'sileo'
-import { loadCrmSalesReportFilterOptions, loadCrmSalesReportPage, loadCrmSalesReportAggregatePage, type CrmSalesReportAggregatePage, type CrmSalesReportFilterOptions, type CrmSalesReportFilters, type CrmSalesReportPage } from '../services/salesReportsService'
+import { loadCrmSalesReportTicketDetail, loadCrmSalesReportPage, loadCrmSalesReportAggregatePage, type CrmSalesReportAggregatePage, type CrmSalesReportTicketListItem, type CrmSalesReportFilters, type CrmSalesReportPage } from '../services/salesReportsService'
 import { buildSalesReportTicketTotals, crmReportDateTimeFormatter, paymentLabels, salesReportTabs, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
 import { useSalesReportSummary } from '../hooks/useSalesReportSummary'
+import { useSalesReportSuggestions } from '../hooks/useSalesReportSuggestions'
+import { getReadableError } from '../../../../utils/errors'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type RunAction } from '../../shared/types'
@@ -61,10 +63,13 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   const [activeView, setActiveView] = useState<SalesReportView>('tickets')
   const [categoryQuery, setCategoryQuery] = useState('')
   const [currentPage, setCurrentPage] = useState(1)
-  const [dateFrom, setDateFrom] = useState('')
-  const [dateTo, setDateTo] = useState('')
+  const [initialDateRange] = useState(() => {
+    const today = getOperationalDateKey(new Date(), { dayChangeTime, timeZone })
+    return { dateFrom: shiftIsoDate(today, -6), dateTo: today }
+  })
+  const [dateFrom, setDateFrom] = useState(initialDateRange.dateFrom)
+  const [dateTo, setDateTo] = useState(initialDateRange.dateTo)
   const [discountFilter, setDiscountFilter] = useState('all')
-  const [filterOptions, setFilterOptions] = useState<CrmSalesReportFilterOptions | null>(null)
   const [isFiltersOpen, setIsFiltersOpen] = useState(false)
   const [isReportLoading, setIsReportLoading] = useState(true)
   const [isExporting, setIsExporting] = useState(false)
@@ -78,6 +83,8 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   const debouncedProductQuery = useDebouncedFilter(productQuery)
   const debouncedCategoryQuery = useDebouncedFilter(categoryQuery)
   const requestVersion = useRef(0)
+  const pageAbort = useRef<AbortController | null>(null)
+  const isFilterPending = productQuery !== debouncedProductQuery || categoryQuery !== debouncedCategoryQuery
   const operationalDayConfig = useMemo(() => ({ dayChangeTime, timeZone }), [dayChangeTime, timeZone])
   const reportFilters = useMemo<CrmSalesReportFilters>(() => ({
     categoryQuery: normalizeText(debouncedCategoryQuery.trim()),
@@ -86,8 +93,13 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
     discountFilter,
     productQuery: normalizeText(debouncedProductQuery.trim()),
   }), [dateFrom, dateTo, debouncedCategoryQuery, debouncedProductQuery, discountFilter, operationalDayConfig])
-  const { summary: reportTotals, error: summaryError, isLoading: isSummaryLoading } = useSalesReportSummary(tenantContext, selectedVenueId, reportFilters, summaryRevision)
+  const { summary: reportTotals, error: summaryError, isLoading: isSummaryLoading } = useSalesReportSummary(tenantContext, selectedVenueId, reportFilters, summaryRevision, !isFilterPending)
+  const { options: filterOptions, error: suggestionsError, isLoading: isSuggestionsLoading } = useSalesReportSuggestions(tenantContext, selectedVenueId, reportFilters, isFiltersOpen && !isFilterPending, summaryRevision)
   const refresh = useCallback(async () => {
+    pageAbort.current?.abort()
+    if (isFilterPending || !selectedVenueId) return
+    const controller = new AbortController()
+    pageAbort.current = controller
     const version = requestVersion.current + 1
     requestVersion.current = version
     setIsReportLoading(true)
@@ -102,21 +114,24 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
           CRM_PAGE_SIZE,
           sortKey,
           sortDirection,
+          controller.signal,
         )
-        if (requestVersion.current !== version) return
+        if (controller.signal.aborted || requestVersion.current !== version) return
         setTicketPage(nextPage)
         setAggregatePage(null)
         return
       }
 
-      const nextPage = await loadCrmSalesReportAggregatePage(tenantContext, selectedVenueId, reportFilters, activeView, currentPage, sortKey, sortDirection)
-      if (requestVersion.current !== version) return
+      const nextPage = await loadCrmSalesReportAggregatePage(tenantContext, selectedVenueId, reportFilters, activeView, currentPage, sortKey, sortDirection, controller.signal)
+      if (controller.signal.aborted || requestVersion.current !== version) return
       setAggregatePage(nextPage)
       setTicketPage(null)
+    } catch (error) {
+      if (!controller.signal.aborted) throw error
     } finally {
-      if (requestVersion.current === version) setIsReportLoading(false)
+      if (!controller.signal.aborted && requestVersion.current === version) setIsReportLoading(false)
     }
-  }, [activeView, currentPage, reportFilters, selectedVenueId, tenantContext, sortDirection, sortKey])
+  }, [activeView, currentPage, isFilterPending, reportFilters, selectedVenueId, tenantContext, sortDirection, sortKey])
 
   const refreshAll = useCallback(async () => {
     setSummaryRevision((current) => current + 1)
@@ -126,24 +141,14 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   useEffect(() => {
     setAggregatePage(null)
     setTicketPage(null)
-    setFilterOptions(null)
     setCurrentPage(1)
     setSelectedTicketId(null)
   }, [selectedVenueId, tenantContext])
 
   useEffect(() => {
     void runAction(refresh)
+    return () => pageAbort.current?.abort()
   }, [refresh, runAction])
-
-  useEffect(() => {
-    if (!isFiltersOpen || filterOptions) return
-    let cancelled = false
-    void runAction(async () => {
-      const options = await loadCrmSalesReportFilterOptions(tenantContext, selectedVenueId)
-      if (!cancelled) setFilterOptions(options)
-    })
-    return () => { cancelled = true }
-  }, [filterOptions, isFiltersOpen, runAction, selectedVenueId, tenantContext])
 
   const totalResults = activeView === 'tickets' ? ticketPage?.totalResults ?? 0 : aggregatePage?.totalResults ?? 0
   const totalPages = Math.max(1, Math.ceil(totalResults / CRM_PAGE_SIZE))
@@ -151,7 +156,6 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
   const visibleTickets = ticketPage?.tickets ?? []
   const visibleAggregates = aggregatePage?.items ?? []
   const activeTab = salesReportTabs.find((tab) => tab.id === activeView) ?? salesReportTabs[0]
-  const selectedTicket = ticketPage?.tickets.find((ticket) => ticket.id === selectedTicketId) ?? null
   const productOptions = filterOptions?.products ?? []
   const categoryOptions = filterOptions?.categories ?? []
   const discountOptions = filterOptions?.discounts ?? []
@@ -283,6 +287,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
 
         {isFiltersOpen ? (
         <div className="!grid !grid-cols-1 !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !px-[18px] !py-4 sm:!grid-cols-2 lg:!grid-cols-5 md:!px-[22px]" id="crm-sales-report-filters">
+          {isSuggestionsLoading || suggestionsError ? <p className="!text-xs !text-[var(--crm-text-muted)] sm:!col-span-2 lg:!col-span-5" role={suggestionsError ? 'alert' : 'status'}>{suggestionsError ?? 'Cargando sugerencias del periodo…'}</p> : null}
           <Field label="Día operativo desde">
             <UiInput
               className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150"
@@ -390,31 +395,74 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
         <CrmPagination currentPage={visiblePage} onPageChange={setCurrentPage} totalResults={totalResults} />
       </section>
 
-      {selectedTicket ? (
-        <SalesReportTicketModal
+      {selectedTicketId ? (
+        <SalesReportTicketDetail
+          key={`${selectedVenueId}:${selectedTicketId}`}
            onClose={() => setSelectedTicketId(null)}
-
+          venueId={selectedVenueId}
           tenantContext={tenantContext}
-          ticket={selectedTicket}
+          ticketId={selectedTicketId}
         />
       ) : null}
     </div>
   )
 }
 
-function getReportDiscountLabel(ticket: CrmSalesReports['tickets'][number]) {
+export function SalesReportTicketDetail({ tenantContext, venueId, ticketId, onClose }: {
+  tenantContext: TenantContext
+  venueId: string
+  ticketId: string
+  onClose: () => void
+}) {
+  const [result, setResult] = useState<{
+    context: TenantContext
+    ticket: CrmSalesReports['tickets'][number] | null
+    error: string | null
+  } | null>(null)
+  const [revision, setRevision] = useState(0)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    void loadCrmSalesReportTicketDetail(tenantContext, venueId, ticketId, controller.signal).then(
+      (ticket) => {
+        if (controller.signal.aborted) return
+        setResult({ context: tenantContext, ticket, error: ticket ? null : 'El ticket ya no está disponible en este local.' })
+      },
+      (error: unknown) => {
+        if (controller.signal.aborted) return
+        getReadableError(error, { operation: 'crm.sales.ticketDetail' })
+        setResult({ context: tenantContext, ticket: null, error: 'No se pudo cargar el ticket. Vuelve a intentarlo.' })
+      },
+    )
+    return () => controller.abort()
+  }, [revision, tenantContext, ticketId, venueId])
+
+  const current = result?.context === tenantContext ? result : null
+  if (current?.ticket) return <SalesReportTicketModal onClose={onClose} tenantContext={tenantContext} ticket={current.ticket} />
+
+  return <CrmModal label="Detalle del ticket" onClose={onClose}>
+    <div className="!grid !gap-4 !p-6">
+      <h2 className="!text-lg !font-semibold">Detalle del ticket</h2>
+      <p role={current?.error ? 'alert' : 'status'}>{current?.error ?? 'Cargando ticket…'}</p>
+      {current?.error ? <UiButton onClick={() => { setResult(null); setRevision((value) => value + 1) }} type="button">Reintentar</UiButton> : null}
+      <UiButton onClick={onClose} type="button">Cerrar</UiButton>
+    </div>
+  </CrmModal>
+}
+
+function getReportDiscountLabel(ticket: Pick<CrmSalesReportTicketListItem, 'discountName' | 'discountAmountCents' | 'paymentMethod'>) {
   if (ticket.discountName) {
     return `−${formatMoney(ticket.discountAmountCents)}`
   }
   return ticket.paymentMethod === 'invitation' ? 'Invitación (histórico)' : '—'
 }
 
-function getReportPaymentLabel(ticket: CrmSalesReports['tickets'][number]) {
+function getReportPaymentLabel(ticket: Pick<CrmSalesReportTicketListItem, 'totalCents' | 'paymentMethod'>) {
   if (ticket.totalCents === 0 && !ticket.paymentMethod) return 'No requerido'
   return ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'
 }
 
-function getDisplayedTicketNumber(ticket: CrmSalesReports['tickets'][number]) {
+function getDisplayedTicketNumber(ticket: Pick<CrmSalesReportTicketListItem, 'fiscal' | 'ticketNumber'>) {
   return ticket.fiscal ? `${ticket.fiscal.series}/${ticket.fiscal.number}` : formatTicketNumber(ticket.ticketNumber ?? 0)
 }
 
@@ -431,7 +479,7 @@ export function SalesReportTicketsTable({
   onSort: (sortKey: SalesReportSortKey, direction?: SalesReportSortDirection) => void
   sortDirection: SalesReportSortDirection
   sortKey: SalesReportSortKey
-  tickets: CrmSalesReports['tickets']
+  tickets: CrmSalesReportTicketListItem[]
 }) {
   return (
     <div className="!overflow-x-auto">
@@ -492,7 +540,7 @@ export function SalesReportTicketsTable({
                 </span>
               </td>
               <td className="!whitespace-nowrap !px-[22px] !py-4 !font-mono !text-[13px] !font-bold !text-[var(--crm-text)]">
-                {formatMoney(ticket.totalCents + ticket.refundDocuments.reduce((sum, document) => sum + document.totalCents, 0))}
+                {formatMoney(ticket.netTotalCents)}
               </td>
             </tr>
           ))}

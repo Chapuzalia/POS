@@ -18,9 +18,32 @@ export type CrmSalesReportSummary = {
 }
 
 export type CrmSalesReportPage = {
-  tickets: CrmSalesReportTicket[]
+  tickets: CrmSalesReportTicketListItem[]
   totalResults: number
 }
+
+export type CrmSalesReportTicketListItem = Pick<CrmSalesReportTicket,
+  'id' | 'ticketNumber' | 'createdAt' | 'lineCount' | 'quantity' | 'paymentMethod' |
+  'status' | 'discountName' | 'discountAmountCents' | 'totalCents' | 'linkedDocumentRole'
+> & {
+  fiscal: Pick<NonNullable<CrmSalesReportTicket['fiscal']>, 'series' | 'number'> | null
+  netTotalCents: number
+}
+
+type SalesReportTicketListRow = Pick<SalesReportTicketRow,
+  'id' | 'ticket_number' | 'local_created_at' | 'status' | 'total_cents' |
+  'discount_name' | 'discount_amount_cents' | 'sales'
+> & {
+  ticket_lines: Array<{ quantity: number; allocated_quantity: number | null }> | null
+  refund_requests: Array<{ id: string; total_cents: number }> | null
+  fiscal_local_records: Array<{ record_kind: string; series: string | null; number: number | null; issued_at: string | null }> | null
+}
+
+const ticketListSelect = `
+  id, ticket_number, local_created_at, status, total_cents, discount_name, discount_amount_cents,
+  sales(payment_method), ticket_lines(quantity, allocated_quantity), refund_requests(id, total_cents),
+  fiscal_local_records(record_kind, series:invoice_snapshot->>series, number:invoice_snapshot->number, issued_at:invoice_snapshot->>issuedAt)
+`
 
 export type CrmSalesReportAggregatePage = {
   items: CrmSalesReportAggregate[]
@@ -230,23 +253,27 @@ async function loadSalesReportPageRows(
   sortKey: string,
   sortDirection: 'asc' | 'desc',
   includeSummary = false,
+  signal?: AbortSignal,
 ) {
-  const { data, error } = await requireSupabase().rpc(
+  signal?.throwIfAborted()
+  let query = requireSupabase().rpc(
     'crm_sales_report_ticket_page',
     pageRpcArgs(context, venueId, filters, page, pageSize, sortKey, sortDirection, includeSummary),
   )
+  if (signal) query = query.abortSignal(signal)
+  const { data, error } = await query
   if (error) throw error
   return (data ?? []) as SalesReportPageRow[]
 }
 
-async function loadTicketRows(context: TenantContext, venueId: string | undefined, ticketIds: string[]) {
+async function loadTicketRows(context: TenantContext, venueId: string | undefined, ticketIds: string[], signal?: AbortSignal) {
   if (!ticketIds.length) return []
 
-  // Keep nested-detail GETs below gateway URL limits even if a future caller
-  // requests a larger page. The CRM table currently requests twelve IDs.
+  // The modal requests one ticket. Keep batches bounded for future callers.
   const detailBatchSize = 50
   const rowsById = new Map<string, SalesReportTicketRow>()
   for (let offset = 0; offset < ticketIds.length; offset += detailBatchSize) {
+    signal?.throwIfAborted()
     let query = requireSupabase()
       .from('tickets')
       .select(ticketSelect)
@@ -254,6 +281,7 @@ async function loadTicketRows(context: TenantContext, venueId: string | undefine
       .in('id', ticketIds.slice(offset, offset + detailBatchSize))
 
     if (venueId) query = query.eq('venue_id', venueId)
+    if (signal) query = query.abortSignal(signal)
 
     const { data, error } = await query
     if (error) throw error
@@ -407,28 +435,80 @@ export async function loadCrmSalesReportPage(
   pageSize: number,
   sortKey: string,
   sortDirection: 'asc' | 'desc',
+  signal?: AbortSignal,
 ): Promise<CrmSalesReportPage> {
-  let pageRows = await loadSalesReportPageRows(context, venueId, filters, page, pageSize, sortKey, sortDirection)
+  let pageRows = await loadSalesReportPageRows(context, venueId, filters, page, pageSize, sortKey, sortDirection, false, signal)
   if (!pageRows.length && page > 1) {
-    pageRows = await loadSalesReportPageRows(context, venueId, filters, 1, pageSize, sortKey, sortDirection)
+    pageRows = await loadSalesReportPageRows(context, venueId, filters, 1, pageSize, sortKey, sortDirection, false, signal)
   }
   const firstRow = pageRows[0]
-  const ticketRows = await loadTicketRows(context, venueId, pageRows.map((row) => row.ticket_id))
+  signal?.throwIfAborted()
+  if (!pageRows.length) return { tickets: [], totalResults: 0 }
+  const rowsById = new Map<string, SalesReportTicketListRow>()
+  for (let offset = 0; offset < pageRows.length; offset += 50) {
+    signal?.throwIfAborted()
+    let query = requireSupabase().from('tickets').select(ticketListSelect)
+      .eq('tenant_id', context.tenantId).in('id', pageRows.slice(offset, offset + 50).map((row) => row.ticket_id))
+    if (venueId) query = query.eq('venue_id', venueId)
+    if (signal) query = query.abortSignal(signal)
+    const { data, error } = await query
+    if (error) throw error
+    for (const row of (data ?? []) as unknown as SalesReportTicketListRow[]) rowsById.set(row.id, row)
+  }
 
   return {
-    tickets: ticketRows.map(mapSalesReportTicket),
+    tickets: pageRows.flatMap(({ ticket_id }) => {
+      const row = rowsById.get(ticket_id)
+      if (!row) return []
+      const fiscal = row.fiscal_local_records?.find((record) => record.record_kind === 'alta')
+      return [{
+        id: row.id,
+        ticketNumber: Number(row.ticket_number),
+        createdAt: row.local_created_at,
+        status: row.status,
+        totalCents: row.total_cents,
+        netTotalCents: row.total_cents - (row.refund_requests ?? []).reduce((sum, refund) => sum + Math.abs(refund.total_cents), 0),
+        discountName: row.discount_name,
+        discountAmountCents: row.discount_amount_cents ?? 0,
+        paymentMethod: row.sales?.[0]?.payment_method ?? null,
+        lineCount: row.ticket_lines?.length ?? 0,
+        quantity: (row.ticket_lines ?? []).reduce((sum, line) => sum + Number(line.allocated_quantity ?? line.quantity), 0),
+        linkedDocumentRole: row.refund_requests?.length ? 'original' as const : null,
+        fiscal: fiscal?.series && typeof fiscal.number === 'number' && fiscal.issued_at
+          ? { series: fiscal.series, number: String(fiscal.number) } : null,
+      }]
+    }),
     totalResults: Number(firstRow?.total_count ?? 0),
   }
+}
+
+export async function loadCrmSalesReportTicketDetail(context: TenantContext, venueId: string, ticketId: string, signal?: AbortSignal) {
+  const [row] = await loadTicketRows(context, venueId, [ticketId], signal)
+  return row ? mapSalesReportTicket(row) : null
 }
 
 export async function loadCrmSalesReportSummary(
   context: TenantContext,
   venueId: string | undefined,
   filters: CrmSalesReportFilters,
+  signal?: AbortSignal,
 ): Promise<CrmSalesReportSummary> {
-  // The existing RPC returns totals for the full filtered set on each row.
-  // Request just one row and never hydrate its ticket detail for the cards.
-  const [row] = await loadSalesReportPageRows(context, venueId, filters, 1, 1, 'createdAt', 'desc', true)
+  signal?.throwIfAborted()
+  let query = requireSupabase().rpc('crm_sales_report_summary', {
+    p_tenant_id: context.tenantId,
+    p_venue_id: venueId || null,
+    p_date_from: filters.dateFromIso,
+    p_date_to: filters.dateToIso,
+    p_product_query: filters.productQuery || null,
+    p_category_query: filters.categoryQuery || null,
+    p_discount_filter: filters.discountFilter,
+  })
+  if (signal) query = query.abortSignal(signal)
+  const { data, error } = await query
+  if (error) throw error
+  const [row] = (data ?? []) as Array<Pick<SalesReportPageRow,
+    'paid_ticket_count' | 'summary_subtotal_cents' | 'summary_tax_amount_cents' | 'summary_total_cents'
+  >>
   return {
     paidTicketCount: Number(row?.paid_ticket_count ?? 0),
     subtotalCents: Number(row?.summary_subtotal_cents ?? 0),
@@ -445,8 +525,10 @@ export async function loadCrmSalesReportAggregatePage(
   page: number,
   sortKey: string,
   sortDirection: 'asc' | 'desc',
+  signal?: AbortSignal,
 ): Promise<CrmSalesReportAggregatePage> {
-  const { data, error } = await requireSupabase().rpc('crm_sales_report_aggregate_page', {
+  signal?.throwIfAborted()
+  let query = requireSupabase().rpc('crm_sales_report_aggregate_page', {
     p_tenant_id: context.tenantId,
     p_venue_id: venueId || null,
     p_view: view,
@@ -459,6 +541,8 @@ export async function loadCrmSalesReportAggregatePage(
     p_sort_direction: sortDirection,
     p_page: page,
   })
+  if (signal) query = query.abortSignal(signal)
+  const { data, error } = await query
   if (error) throw error
   const result = data as CrmSalesReportAggregatePage | null
   return {
@@ -472,11 +556,18 @@ export async function loadCrmSalesReportAggregatePage(
   }
 }
 
-export async function loadCrmSalesReportFilterOptions(context: TenantContext, venueId?: string): Promise<CrmSalesReportFilterOptions> {
-  const { data, error } = await requireSupabase().rpc('crm_sales_report_filter_options', {
+export async function loadCrmSalesReportFilterOptions(context: TenantContext, venueId: string, filters: Pick<CrmSalesReportFilters, 'dateFromIso' | 'dateToIso' | 'productQuery' | 'categoryQuery'>, signal?: AbortSignal): Promise<CrmSalesReportFilterOptions> {
+  signal?.throwIfAborted()
+  let query = requireSupabase().rpc('crm_sales_report_filter_suggestions', {
     p_tenant_id: context.tenantId,
     p_venue_id: venueId || null,
+    p_date_from: filters.dateFromIso,
+    p_date_to: filters.dateToIso,
+    p_product_query: filters.productQuery,
+    p_category_query: filters.categoryQuery,
   })
+  if (signal) query = query.abortSignal(signal)
+  const { data, error } = await query
   if (error) throw error
 
   const value = (data ?? {}) as Partial<CrmSalesReportFilterOptions>
