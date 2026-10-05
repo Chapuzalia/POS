@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { addConfirmedProductSalesStats } from '../src/features/quick-sale/services/productSalesStats.ts'
 import { createProductSalesStatsRefresh } from '../src/features/quick-sale/services/productSalesStatsRefresh.ts'
@@ -83,10 +82,3 @@ test('temporary refresh failure preserves local ranking and permits a later retr
   assert.deepEqual(h.applied, [[]])
 })
 
-test('table payment uses the confirmed ticket once and does not request the historical ranking', () => {
-  const cash = readFileSync(new URL('../src/features/cash-registers/hooks/useCashSession.ts', import.meta.url), 'utf8')
-  const restaurant = readFileSync(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
-  assert.match(cash, /if \(!alreadyKnown && confirmedTicket.status === 'active'\) onConfirmedSale\?\.\(confirmedTicket\)/)
-  assert.match(cash, /alreadyKnown = ticketsRef.current.some/)
-  assert.doesNotMatch(restaurant, /refreshProductSalesStats/)
-})

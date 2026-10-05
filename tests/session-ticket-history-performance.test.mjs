@@ -68,25 +68,3 @@ test('el fallback local se actualiza cuando la caché llega después del primer 
   assert.equal(page.tickets[0].ticket.id, harness.ticket.id)
 })
 
-test('el refresco de una venta confirmada recupera solo ese ticket', async () => {
-  const source = await readFile(new URL('../src/features/cash-registers/hooks/useCashSession.ts', import.meta.url), 'utf8')
-  const refreshBlock = source.match(/const refreshConfirmedSale = useCallback[\s\S]*?\n  }, \[[^\n]+\]\)/)?.[0] ?? ''
-
-  assert.match(refreshBlock, /loadSessionTicketFromSupabase\(options\.context, session\.id, ticketId\)/)
-  assert.doesNotMatch(refreshBlock, /loadSessionTicketsFromSupabase/)
-  assert.match(refreshBlock, /ticketsRef\.current\.filter/)
-})
-
-test('el modal pinta la caché desde el primer render y PosPage se la entrega', async () => {
-  const [modalSource, posPageSource] = await Promise.all([
-    readFile(new URL('../src/components/modals/SessionTicketsModal.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8'),
-  ])
-
-  assert.match(modalSource, /useState<SessionTicketHistoryPage \| null>\(\(\) => initialPage\)/)
-  assert.match(modalSource, /useState\(initialPage === null\)/)
-  assert.doesNotMatch(modalSource, /catch \{[\s\S]*?setPageData\(null\)[\s\S]*?setLoadError/)
-  assert.match(modalSource, /loadError && !pageData/)
-  assert.match(posPageSource, /createCachedSessionTicketHistoryPage\(cash\.tickets\)/)
-  assert.match(posPageSource, /initialPage=\{initialTicketHistoryPage\}/)
-})

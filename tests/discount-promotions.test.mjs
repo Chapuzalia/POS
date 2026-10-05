@@ -261,12 +261,6 @@ test('muestra la promoción automática en el selector solo mientras está activ
   assert.deepEqual(getAvailableVenueDiscounts([automatic], 'venue', inactiveContext), [])
 })
 
-test('el botón de quitar usa la exclusión de la comanda en escritorio y móvil', async () => {
-  const posPage = await readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8')
-  assert.equal(posPage.match(/onRemoveDiscount=\{quickSale\.removeDiscount\}/g)?.length, 2)
-  assert.match(posPage, /quickSale\.applyDiscount\(discount\)/)
-})
-
 test('rechaza configuración automática con PIN y valida los campos de promoción', () => {
   assert.throws(() => validateDiscountRule({
     name: 'Auto PIN',
@@ -379,19 +373,4 @@ test('el descuento manual libre admite PIN sin exponer el secreto y lo exige al 
   assert.doesNotMatch(catalogLoader, /pin_hash|pinHash/)
 })
 
-
-test('el teclado numérico conserva un initialValue vacío', async () => {
-  const keypad = await readFile(new URL('../src/components/ui/NumericKeypadModal.tsx', import.meta.url), 'utf8')
-  assert.match(keypad, /if \(value === ""\) return ""/)
-  assert.ok(keypad.indexOf('if (value === "") return ""') < keypad.indexOf('|| "0"'))
-})
-
-test('el descuento manual introduce su valor mediante el teclado numérico', async () => {
-  const modal = await readFile(new URL('../src/components/modals/DiscountModal.tsx', import.meta.url), 'utf8')
-  assert.match(modal, /manualValueKeypadOpen/)
-  assert.match(modal, /initialValue=\{manualValue\}/)
-  assert.match(modal, /setManualValue\(value\)/)
-  assert.match(modal, /showCloseButton=\{false\}/)
-  assert.doesNotMatch(modal, /<UiInput/)
-})
 

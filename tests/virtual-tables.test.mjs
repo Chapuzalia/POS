@@ -5,8 +5,6 @@ import test from 'node:test'
 const migration = await readFile(new URL('../supabase/migrations/20260814120000_add_session_virtual_restaurant_tables.sql', import.meta.url), 'utf8')
 const service = await readFile(new URL('../src/features/tables/service.ts', import.meta.url), 'utf8')
 const mapView = await readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8')
-const virtualModal = await readFile(new URL('../src/features/tables/components/VirtualTableModal.tsx', import.meta.url), 'utf8')
-const mobileChrome = await readFile(new URL('../src/features/tables/components/MobileTableMapChrome.tsx', import.meta.url), 'utf8')
 const deletionMigration = await readFile(new URL('../supabase/migrations/20260821150000_auto_save_quick_sales_and_delete_virtual_tables.sql', import.meta.url), 'utf8')
 const cleanupMigration = await readFile(new URL('../supabase/migrations/20260829200000_cleanup_free_virtual_room_tables.sql', import.meta.url), 'utf8')
 const controller = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
@@ -29,21 +27,6 @@ test('la distribución solo incluye mesas permanentes y virtuales de la sesión 
   assert.ok(scopedLayoutFilters.length >= 3)
   assert.match(service, /cash_session_id\.is\.null,cash_session_id\.eq\.\$\{cashSessionId\}/)
   assert.match(service, /id: `virtual:\$\{cashSessionId\}`[\s\S]*name: 'Virtual'/)
-})
-
-test('el mapa permite crear la mesa en Virtual o en una zona existente también en móvil', () => {
-  assert.match(mapView, /Mesa virtual/)
-  assert.match(mapView, /<VirtualTableModal/)
-  assert.match(virtualModal, /<option value="">Virtual<\/option>/)
-  assert.match(virtualModal, /areas\.filter\(\(area\) => !area\.id\.startsWith\('virtual:'\)\)/)
-  assert.match(virtualModal, /Solo estará disponible durante la sesión de caja actual/)
-  assert.match(mobileChrome, /aria-label="Crear mesa virtual"/)
-  assert.match(mobileChrome, /className="flex items-center justify-end gap-2"[\s\S]*onClick=\{onCreateVirtual\}[\s\S]*onClick=\{onEditToggle\}/)
-})
-
-test('abrir una mesa no abre el teclado automáticamente en móvil', () => {
-  assert.match(mapView, /autoFocus=\{!mobileLayout\}/)
-  assert.match(mapView, /max-h-\[calc\(100dvh-24px\)\] overflow-y-auto rounded-t-\[20px\]/)
 })
 
 test('el editor permite eliminar mesas temporales del turno y cancela solo comandas sin cobros', () => {

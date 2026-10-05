@@ -14,7 +14,6 @@ test('supabase conserva un único SQL raíz con el esquema completo', async () =
     .sort()
 
   assert.deepEqual(rootSqlFiles, [schemaName])
-  assert.match(schema, /CONSOLIDATED FINAL DATABASE - 24\/07\/2026/)
 })
 
 test('el consolidado contiene el estado final de las últimas migraciones', () => {

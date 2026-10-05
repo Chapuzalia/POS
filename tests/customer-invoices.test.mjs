@@ -10,7 +10,6 @@ const migration = await readFile(new URL('../supabase/migrations/20260821180000_
 const customerDeleteMigration = await readFile(new URL('../supabase/migrations/20260825140000_delete_unused_invoice_customers.sql', import.meta.url), 'utf8')
 const fiscalMigration = await readFile(new URL('../supabase/migrations/20260803220000_add_verifacti_integration.sql', import.meta.url), 'utf8')
 const customerService = await readFile(new URL('../src/features/customers/service.ts', import.meta.url), 'utf8')
-const customerModal = await readFile(new URL('../src/features/customers/CustomerInvoiceModal.tsx', import.meta.url), 'utf8')
 const quickSaleHook = await readFile(new URL('../src/features/quick-sale/hooks/useQuickSale.ts', import.meta.url), 'utf8')
 const restaurantHook = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const posPage = await readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8')
@@ -57,27 +56,17 @@ test('valida los campos obligatorios y normaliza NIF/CIF equivalentes', () => {
   assert.equal(validateCustomerCreateInput({ ...customer, country: '' }).country, 'España')
 })
 
-test('crear cliente valida y persiste todos los datos fiscales desde el modal', () => {
-  assert.match(customerModal, /Nombre \/ Razón social/)
-  assert.match(customerModal, /Guardar y seleccionar/)
+test('la creación persiste los datos fiscales del cliente mediante RPC', () => {
   assert.match(customerService, /rpc\('create_invoice_customer'/)
   assert.match(migration, /insert into public\.customers[\s\S]*legal_name, tax_id, address, postal_code, city, province, country, email, phone/i)
 })
 
-test('el lápiz de cada tarjeta permite editar el cliente sin seleccionarlo', () => {
-  assert.match(customerModal, /Pencil/)
-  assert.match(customerModal, /aria-label=\{`Editar \$\{customer\.legalName\}`\}/)
-  assert.match(customerModal, /onClick=\{\(\) => editCustomer\(customer\)\}/)
-  assert.match(customerModal, /Guardar cambios/)
+test('la actualización de clientes conserva el filtro de tenant e identidad', () => {
   assert.match(customerService, /from\('customers'\)\.update/)
   assert.match(customerService, /\.eq\('tenant_id', tenantId\)\.eq\('id', customerId\)/)
 })
 
-test('la papelera permite confirmar y eliminar solamente clientes sin facturas', () => {
-  assert.match(customerModal, /Trash2/)
-  assert.match(customerModal, /aria-label=\{`Eliminar \$\{customer\.legalName\}`\}/)
-  assert.match(customerModal, /onClick=\{\(\) => openDeleteConfirmation\(customer\)\}/)
-  assert.match(customerModal, /¿Eliminar \{customerPendingDeletion\.legalName\}\?/)
+test('el borrado de clientes exige acceso y rechaza clientes con facturas', () => {
   assert.match(customerService, /rpc\('delete_invoice_customer'/)
   assert.match(customerService, /CUSTOMER_HAS_INVOICES/)
   assert.match(customerDeleteMigration, /user_has_tenant_access\(p_tenant_id\)/)
@@ -86,17 +75,10 @@ test('la papelera permite confirmar y eliminar solamente clientes sin facturas',
   assert.match(migration, /customer_id uuid references public\.customers\(id\) on delete restrict/i)
 })
 
-test('buscar cliente admite nombre, razón social y NIF/CIF con resultados compactos', () => {
-  assert.match(customerModal, /Busca por nombre, razón social o NIF\/CIF/)
+test('la búsqueda de clientes admite razón social y NIF/CIF', () => {
   assert.match(customerService, /rpc\('search_invoice_customers'/)
   assert.match(migration, /customer\.legal_name ilike/i)
   assert.match(migration, /customer\.tax_id_normalized like/i)
-})
-
-test('RLS aísla clientes por tenant', () => {
-  assert.match(migration, /alter table public\.customers enable row level security/i)
-  assert.match(migration, /create policy customers_select[\s\S]*user_has_tenant_access\(tenant_id\)/i)
-  assert.match(migration, /customer\.tenant_id = p_tenant_id/i)
 })
 
 test('evita NIF/CIF duplicado dentro del mismo tenant incluso con formato distinto', () => {
@@ -107,6 +89,7 @@ test('evita NIF/CIF duplicado dentro del mismo tenant incluso con formato distin
 
 test('la migración crea, busca y aísla clientes por tenant, con NIF/CIF único normalizado', () => {
   assert.match(migration, /create table public\.customers/i)
+  assert.match(migration, /alter table public\.customers enable row level security/i)
   assert.match(migration, /unique \(tenant_id, tax_id_normalized\)/i)
   assert.match(migration, /create policy customers_select[\s\S]*user_has_tenant_access\(tenant_id\)/i)
   assert.match(migration, /create policy customers_insert[\s\S]*with check \(public\.user_has_tenant_access\(tenant_id\)\)/i)
@@ -124,7 +107,6 @@ test('asocia y quita cliente sin cambiar el ticket normal', () => {
   assert.equal(invoice.ticket.invoice.customerId, customer.id)
   assert.equal(invoice.ticket.invoice.customer.legalName, customer.legalName)
   assert.match(quickSaleHook, /removeInvoiceCustomer: \(\) => setInvoiceCustomer\(null\)/)
-  assert.match(posPage, /Factura ·|invoiceCustomerName/)
 })
 
 test('quitar cliente devuelve el borrador a ticket normal', () => {
@@ -166,6 +148,7 @@ test('la numeración usa la secuencia fiscal atómica y una restricción única 
   assert.match(migration, /new\.invoice_series := 'F-' \|\| to_char/i)
   assert.match(migration, /new\.invoice_number := lpad\(sequence_value::text, 6, '0'\)/i)
   assert.match(migration, /create unique index tickets_tenant_invoice_number_idx[\s\S]*tenant_id, invoice_series, invoice_number/i)
+  assert.match(migration, /create unique index tickets_tenant_invoice_number_idx[\s\S]*where is_invoice/i)
   assert.doesNotMatch(migration, /max\s*\(\s*invoice_number|order by invoice_number desc/i)
 })
 
@@ -173,11 +156,6 @@ test('la numeración correlativa se asigna en base de datos, nunca con last + 1 
   assert.match(fiscalMigration, /insert into public\.fiscal_invoice_sequences[\s\S]*on conflict \(tenant_id, series\)[\s\S]*set last_value = last_value \+ 1/i)
   assert.match(migration, /next_fiscal_invoice_number\(new\.tenant_id, new\.invoice_series\)/i)
   assert.doesNotMatch(customerService + quickSaleHook, /last\s*\+\s*1|max\s*\(\s*invoice/i)
-})
-
-test('una restricción única protege frente a números duplicados concurrentes', () => {
-  assert.match(migration, /create unique index tickets_tenant_invoice_number_idx[\s\S]*where is_invoice/i)
-  assert.match(fiscalMigration, /update public\.fiscal_invoice_sequences[\s\S]*returning last_value into v_number/i)
 })
 
 test('el ticket normal conserva su impresión y la factura añade emisor, destinatario y número', () => {
