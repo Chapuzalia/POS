@@ -10,6 +10,7 @@ import { appendFrozenQueueEvent, recordQueueEventFailure } from '../src/features
 import { isClosedCashSaleRejection } from '../src/features/offline/services/cashSessionRejection.ts'
 import { buildSalePayload } from '../src/features/quick-sale/services/salePayload.ts'
 import { backendFetch } from '../src/lib/backendFetch.ts'
+import { isCrmUser } from '../src/app/app-permissions.ts'
 
 const compiled = new Map()
 function load(path, modules, globals = {}) {
@@ -246,6 +247,7 @@ test('6: un heartbeat fallido conserva el lease y la sesión; false confirmado s
   const runner = hooks()
   const useActivity = load('features/session/hooks/useLoginActivity', {
     react: runner.react, '../../../services/loginLeaseService': h.lease,
+    '../../../app/app-permissions': { isCrmUser },
   }, h.globals).useLoginActivity
   const closed = []
   const activityOptions = { context, isOnline: true, onSessionClosed: async (...args) => closed.push(args) }

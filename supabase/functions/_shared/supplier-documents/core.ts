@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { extractProfileMetadata } from './documentMetadata.ts'
 import { reconstructMergedTables } from './tableGeometry.ts'
+import { documentFinancialSummarySchema, enrichDocumentFinancials, validateDocumentFinancials } from './documentFinancials.ts'
 
 const nullableText = z.string().trim().max(500).nullable()
 const nullableMoney = z.number().finite().nonnegative().nullable()
@@ -208,6 +209,7 @@ export const supplierDocumentExtractionSchema = z.object({
     number: nullableText,
     date: nullableText,
     total: nullableMoney,
+    financialSummary: documentFinancialSummarySchema.optional(),
   }).strict(),
   supplier: z.object({
     name: z.string().trim().min(1).max(160).nullable(),
@@ -870,6 +872,12 @@ export function profileRequiredTextsMeetConfidence(rules: SupplierProfileRules, 
       else flush()
     }
     flush()
+    // A table label is independent evidence only when its own confidence is
+    // supplied. Page averages never upgrade an unscored or doubtful marker.
+    for (const table of page.tables) for (const cell of table.cells) {
+      if (cell.confidence !== undefined && cell.confidence >= MINIMUM_PROFILE_FINGERPRINT_WORD_CONFIDENCE)
+        segments.push(normalizeDocumentText(cell.text))
+    }
     return segments
   })
   return rules.requiredTexts.every((text) => reliableSegments.some((segment) => fingerprintTextMatches(segment, text)))
@@ -949,8 +957,21 @@ function roundMoney(value: number) {
 // ambiguous headers are described using the same rules that actually run.
 export function inspectProfileHeader(rawHeaders: string[], rules: SupplierProfileRules) {
   const headers = rawHeaders.map(normalizeDocumentText)
+  const exactLabel = (value: string) => normalizeDocumentText(value).replace(/[^\p{L}\p{N}]+/gu, ' ').trim()
+  const isOtherTaxHeader = (value: string) => /^(IBEE|I B E E|ISPV|I S P V|PUNTO VERDE)$/i.test(exactLabel(value))
   const columns = rules.columns.map((column) => {
-    const scores = headers.map((header) => Math.min(...column.headerAliases.map((alias) => labelMatchDistance(header, alias))))
+    // An exact Precio must win over the containing Precio+Imp. Bilingual labels
+    // may independently survive OCR: require one unique header, never a guess.
+    const aliasScore = (header: string, alias: string) => {
+      if (column.field === 'taxRate' && isOtherTaxHeader(header)) return Infinity
+      if (exactLabel(header) === exactLabel(alias)) return 0
+      const distance = labelMatchDistance(header, alias)
+      if (Number.isFinite(distance)) return distance === 0 ? 1 : 2
+      const parts = alias.split('/').map(exactLabel).filter((part) => part.length >= 6)
+      const headerParts = header.split('/').map(exactLabel)
+      return parts.some((part) => headerParts.includes(part)) ? 3 : Infinity
+    }
+    const scores = rawHeaders.map((header) => Math.min(...column.headerAliases.map((alias) => aliasScore(header, alias))))
     const best = Math.min(...scores)
     const ambiguous = Number.isFinite(best) && scores.filter((score) => score === best).length > 1
     const index = Number.isFinite(best) && !ambiguous ? scores.indexOf(best) : null
@@ -969,6 +990,7 @@ export function inspectProfileHeader(rawHeaders: string[], rules: SupplierProfil
       if (
         !column.aliases.length &&
         index < headers.length &&
+        !(column.field === 'taxRate' && isOtherTaxHeader(rawHeaders[index])) &&
         !claimedIndexes.has(index)
       ) {
         Object.assign(column, {
@@ -1206,14 +1228,12 @@ export function runDeterministicParser(
   const ocr = ocrDocumentSchema.parse(ocrInput)
   const lines = runDeterministicLineParser(rules, ocr, trace)
   const metadata = extractProfileMetadata(ocr, rules)
-  return supplierDocumentExtractionSchema.parse({
+  const extraction = supplierDocumentExtractionSchema.parse({
     document: {
       type: defaults.documentType,
       number: metadata.number.value,
       date: metadata.date.value,
-      total: lines.every((line) => line.lineTotal !== null)
-        ? lines.reduce((sum, line) => sum + (line.lineTotal ?? 0), 0)
-        : null,
+      total: null,
     },
     supplier: {
       name: defaults.supplierName,
@@ -1228,6 +1248,11 @@ export function runDeterministicParser(
     proposedProfile: null,
     confidence: ocr.confidence,
   })
+  const enriched = enrichDocumentFinancials(extraction, ocr)
+  if (!enriched.document.financialSummary && lines.every((line) => line.lineTotal !== null)) {
+    enriched.document.total = lines.reduce((sum, line) => sum + Math.round((line.lineTotal ?? 0) * 100), 0) / 100
+  }
+  return enriched
 }
 
 export type MathValidation = {
@@ -1259,10 +1284,13 @@ export function validateExtractionMath(extractionInput: SupplierDocumentExtracti
           Math.abs(taxInclusiveTotal - extraction.document.total),
         )
       })()
-  const documentAllowed = extraction.document.total === null ? 0 : Math.max(0.05, extraction.document.total * tolerance)
+  const financials = validateDocumentFinancials(extraction)
+  // Document totals have a cents rounding allowance, not a percentage that
+  // could hide omitted taxes or charges. Legacy payloads remain readable.
+  const documentAllowed = 0.05
   return {
-    coherent: invalidLineIndexes.length === 0 && (documentDifference === null || documentDifference <= documentAllowed),
-    documentDifference,
+    coherent: invalidLineIndexes.length === 0 && (financials ? financials.coherent : documentDifference === null || documentDifference <= documentAllowed),
+    documentDifference: financials?.documentDifference ?? documentDifference,
     invalidLineIndexes,
   }
 }
@@ -1270,6 +1298,7 @@ export function validateExtractionMath(extractionInput: SupplierDocumentExtracti
 export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierDocumentExtraction) {
   if (!interpreted.proposedProfile) return { candidate: false, reason: 'PROFILE_NOT_PROPOSED' as const, parsed: null }
   try {
+    interpreted = enrichDocumentFinancials(interpreted, ocr)
     const rules = supplierProfileRulesSchema.parse(interpreted.proposedProfile)
     const documentNumber = normalizeDocumentText(interpreted.document.number ?? '')
     if (rules.requiredTexts.some((text) => {
@@ -1317,6 +1346,7 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
         && sameMoney(line.grossCost, expected.grossCost)
         && sameMoney(line.netCost, expected.netCost)
         && sameMoney(line.lineTotal, expected.lineTotal)
+        && (!parsed.document.financialSummary?.taxes.length || line.taxRate === expected.taxRate)
     })
     return {
       candidate: parserMath.coherent && interpretationMath.coherent && comparable,

@@ -19,6 +19,7 @@ export type PurchaseDocument = {
   status: SupplierDocumentStatus
   processingMode: 'archive' | 'scan'
   affectsStock: boolean
+  stockAppliedAt: string | null
   storageBucket: string | null
   storagePath: string | null
   originalFileName: string | null

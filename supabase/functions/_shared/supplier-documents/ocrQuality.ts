@@ -150,6 +150,7 @@ export type OcrAttempt = {
   sanityReasons: string[]
   metrics: ReturnType<typeof validateOcrSanity>['metrics'] | null
   providerErrorCode?: string
+  providerHttpStatus?: number
 }
 
 export class OcrQualityError extends Error {
@@ -188,9 +189,12 @@ export async function analyzeOcrWithQuality(
       const invalidStructure = error instanceof SyntaxError
         || (error instanceof Error && error.name === 'ZodError')
         || /^MISTRAL_OCR_(EMPTY|MODEL_MISSING|PAGE_INDEX_INVALID|PAGE_TEXT_MISSING|DIMENSIONS_MISSING|CONFIDENCE_MISSING|BLOCK_INVALID)$/.test(code)
+      const statusMatch = error instanceof Error ? error.message.match(/^[A-Z][A-Z0-9_]{0,79}:(\d{3})(?::|$)/) : null
+      const httpStatus = statusMatch ? Number(statusMatch[1]) : null
       attempts.push({ provider: name, accepted: false, metrics: null,
         sanityReasons: [invalidStructure ? 'invalid_ocr_structure' : 'ocr_provider_error'],
         providerErrorCode: /^[A-Z][A-Z0-9_]{0,79}$/.test(code) ? code : 'OCR_PROVIDER_FAILED',
+        ...(httpStatus !== null && httpStatus >= 400 && httpStatus <= 599 ? { providerHttpStatus: httpStatus } : {}),
       })
       if (invalidStructure) return null
       // Availability/authentication errors are not evidence of corrupt OCR and

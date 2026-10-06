@@ -1,6 +1,7 @@
 import { reportOperationError, operationBreadcrumb } from '../../../lib/observability.ts'
 import { useEffect, useRef } from 'react'
 import type { TenantContext } from '../../../types'
+import { isCrmUser } from '../../../app/app-permissions'
 import { claimLoginLease, checkLoginLease, heartbeatLoginLease } from '../../../services/loginLeaseService'
 
 const inactivityMs = 4 * 60 * 60 * 1000
@@ -12,7 +13,7 @@ type UseLoginActivityOptions = {
   onSessionClosed: (message: string, leaseBlocked: boolean) => Promise<void>
 }
 
-/** Tracks local inactivity and validates the activity-based login lease. */
+/** Tracks local inactivity outside CRM and validates the activity-based login lease. */
 export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLoginActivityOptions) {
   const activityRef = useRef({
     context: null as TenantContext | null,
@@ -38,6 +39,7 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
     let closing = false
     let leaseRequestInFlight = false
     let idleTimeoutId: number | null = null
+    const closesOnInactivity = !isCrmUser(context)
 
     const close = async (message: string, leaseBlocked: boolean) => {
       if (!active || closing) return
@@ -45,13 +47,14 @@ export function useLoginActivity({ context, isOnline, onSessionClosed }: UseLogi
       await onSessionClosed(message, leaseBlocked)
     }
     const scheduleIdleClose = () => {
+      if (!closesOnInactivity) return
       if (idleTimeoutId) window.clearTimeout(idleTimeoutId)
       const remainingMs = Math.max(0, inactivityMs - (Date.now() - activity.lastActivityAt))
       idleTimeoutId = window.setTimeout(() => void close('La sesión se ha cerrado tras 4 horas sin actividad.', false), remainingMs)
     }
     const validateLease = async (heartbeatOnActivity = false) => {
       if (!active || closing || leaseRequestInFlight) return
-      if (Date.now() - activity.lastActivityAt >= inactivityMs) {
+      if (closesOnInactivity && Date.now() - activity.lastActivityAt >= inactivityMs) {
         await close('La sesión se ha cerrado tras 4 horas sin actividad.', false)
         return
       }
