@@ -1,3 +1,4 @@
+import { appConfirm } from '../../../components/ui/appDialogStore'
 import { NativeSelect as UiNativeSelect } from '../../../components/ui/NativeSelect'
 import { Input as UiInput } from '../../../components/ui/Input'
 import { Checkbox as UiCheckbox } from '../../../components/ui/Checkbox'
@@ -40,9 +41,9 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
   }
 
   async function runForcedCashlogyRecovery() {
-    const confirmed = window.confirm(
+    const confirmed = (await appConfirm(
       'La recuperación forzada reiniciará y volverá a inicializar Cashlogy. Si existe una operación monetaria activa, su resultado quedará como desconocido y tendrás que revisar físicamente el efectivo y la contabilidad. ¿Quieres continuar?',
-    )
+    ))
     if (!confirmed) return
     setFeedback(null)
     try {
@@ -149,14 +150,14 @@ export function PrintAgentSettings({ canConfigure, canOpenDrawer }: { canConfigu
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><div className="flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-3"><Printer className="h-5 w-5" /><div><h3 className="font-black">Impresoras</h3><p className="text-sm text-[var(--muted)]">Descubrimiento gestionado por el agente local.</p></div></div><div className="flex gap-2"><Button disabled={busy} onClick={() => void run(agent.loadPrinters, 'Lista de impresoras actualizada.')} size="sm"><RefreshCw className={`h-4 w-4 ${agent.isLoadingPrinters ? 'animate-spin' : ''}`} />Actualizar</Button><Button disabled={busy || !canConfigure} onClick={() => void run(agent.discoverPrinters, 'Descubrimiento completado.')} size="sm" variant="primary"><Network className={`h-4 w-4 ${agent.isDiscovering ? 'animate-pulse' : ''}`} />Descubrir</Button></div></div>
       {agent.discoveryProgress ? <p className="my-3 font-mono text-xs text-[var(--muted)]">Progreso: {agent.discoveryProgress.scanned ?? '-'} / {agent.discoveryProgress.total ?? '-'} · {agent.discoveryProgress.found ?? agent.printers.length} encontradas</p> : null}
       <div className="mt-4"><PrinterList disabled={busy || !canConfigure} onSelect={(id) => void run(() => agent.selectPrinter(id), 'Impresora seleccionada.')} onTest={(id) => void run(() => agent.testPrinter(id), 'Ticket de prueba enviado.')} printers={agent.printers} selectedPrinterId={agent.selectedPrinterId} /></div>
-      <div className="mt-4 flex flex-wrap gap-2"><Button disabled={busy || !agent.selectedPrinterId} onClick={() => void run(agent.testPrinter, 'Ticket de prueba enviado.')}><TestTube2 className={`h-4 w-4 ${agent.isTestingPrinter ? 'animate-spin' : ''}`} />Imprimir prueba</Button>{!agent.cashlogyConfigured ? <Button disabled={busy || !canOpenDrawer || !agent.selectedPrinterId} onClick={() => { if (window.confirm('¿Quieres abrir el cajón manualmente?')) void run(() => agent.openCashDrawer(), 'Cajón abierto.') }}><WalletCards className={`h-4 w-4 ${agent.isOpeningCashDrawer ? 'animate-pulse' : ''}`} />Abrir cajón</Button> : null}</div>
+      <div className="mt-4 flex flex-wrap gap-2"><Button disabled={busy || !agent.selectedPrinterId} onClick={() => void run(agent.testPrinter, 'Ticket de prueba enviado.')}><TestTube2 className={`h-4 w-4 ${agent.isTestingPrinter ? 'animate-spin' : ''}`} />Imprimir prueba</Button>{!agent.cashlogyConfigured ? <Button disabled={busy || !canOpenDrawer || !agent.selectedPrinterId} onClick={async () => { if ((await appConfirm('¿Quieres abrir el cajón manualmente?'))) void run(() => agent.openCashDrawer(), 'Cajón abierto.') }}><WalletCards className={`h-4 w-4 ${agent.isOpeningCashDrawer ? 'animate-pulse' : ''}`} />Abrir cajón</Button> : null}</div>
     </section>
 
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><h3 className="font-black">Preferencias</h3><div className="mt-3 grid gap-3 sm:grid-cols-2">{!agent.cashlogyConfigured ? <UiCheckbox checked={agent.preferences.autoOpenCashDrawer} className="min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} onChange={(checked) => agent.updatePreferences({ autoOpenCashDrawer: checked })}>Abrir cajón automáticamente con efectivo</UiCheckbox> : null}<UiCheckbox checked={agent.preferences.cut} className="min-h-12 rounded-[var(--radius)] border border-[var(--separator)] px-3" disabled={!canConfigure} onChange={(checked) => agent.updatePreferences({ cut: checked })}>Cortar papel</UiCheckbox><label className="sm:col-span-2"><span className="mb-2 block text-sm font-bold">Pie del ticket</span><UiInput className="min-h-12 w-full rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3" disabled={!canConfigure} maxLength={500} onChange={(event) => agent.updatePreferences({ footer: event.target.value })} value={agent.preferences.footer} /></label></div></section>
 
     <section className="rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4"><div className="flex items-center justify-between gap-3"><h3 className="font-black">Trabajos recientes</h3><Button disabled={agent.isLoadingJobs} onClick={() => void run(agent.loadJobs, 'Trabajos actualizados.')} size="sm">{agent.isLoadingJobs ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}Ver trabajos</Button></div><div className="mt-3"><PrintJobsTable jobs={agent.jobs} /></div></section>
 
-    {canConfigure ? <Button onClick={() => { if (window.confirm('¿Borrar URL, token e impresora de esta terminal?')) { agent.resetConfiguration(); setFeedback({ message: 'Configuración local borrada.', tone: 'success' }) } }} variant="danger"><RotateCcw className="h-4 w-4" />Borrar configuración</Button> : null}
+    {canConfigure ? <Button onClick={async () => { if ((await appConfirm('¿Borrar URL, token e impresora de esta terminal?'))) { agent.resetConfiguration(); setFeedback({ message: 'Configuración local borrada.', tone: 'success' }) } }} variant="danger"><RotateCcw className="h-4 w-4" />Borrar configuración</Button> : null}
     {wizardOpen ? <PrintAgentSetupWizard canOpenDrawer={canOpenDrawer && !agent.cashlogyConfigured} onClose={() => setWizardOpen(false)} /> : null}
     {certificateHelpOpen ? <CertificateHelpDialog baseUrl={agent.baseUrl} onClose={() => setCertificateHelpOpen(false)} /> : null}
   </div>

@@ -108,7 +108,7 @@ export function ReservationDetailPanel(props: Props) {
             </div>
             <UiButton
               aria-label="Cerrar detalle"
-              className="grid size-11 shrink-0 place-items-center rounded-xl border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)]"
+              className="grid shrink-0 place-items-center border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
               onClick={props.onClose}
               type="button"
             >

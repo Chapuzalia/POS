@@ -1,3 +1,4 @@
+import { appConfirm } from '../../../../components/ui/appDialogStore'
 import { Input as UiInput } from "../../../../components/ui/Input";
 import { Button as UiButton } from "../../../../components/ui/Button";
 import {
@@ -20,6 +21,7 @@ import type {
 } from "../../../catalog/domain/types";
 import { formatMoney, parseMoneyToCents } from "../../../../lib/format";
 import { CrmModal } from "../../shared/components/CrmModal";
+import { useCrmModalBusy } from "../../shared/components/CrmModalBusyContext";
 import {
   CrmSelect,
   type CrmSelectFilterOption,
@@ -79,6 +81,8 @@ export function CatalogMenuEditor({
   onClose,
   product,
 }: Props) {
+  const modalBusy = useCrmModalBusy(disabled)
+
   const variants = useMemo(
     () =>
       catalog.variants.filter((variant) => variant.productId === product?.id),
@@ -395,9 +399,9 @@ export function CatalogMenuEditor({
       (assignment) => assignment.groupId === group.id && assignment.active,
     ).length;
     if (
-      !window.confirm(
+      !(await appConfirm(
         `Este curso ya se usa en ${affected} ${affected === 1 ? "menú" : "menús"}. Los cambios futuros afectarán a todos. ¿Continuar?`,
-      )
+      ))
     )
       return;
     const saved = await mutate(() =>
@@ -418,7 +422,7 @@ export function CatalogMenuEditor({
   }
 
   return (
-    <CrmModal
+    <CrmModal dismissDisabled={modalBusy}
       label={product ? `Editar menú ${product.name}` : "Crear menú"}
       onClose={onClose}
       size="large"
@@ -433,9 +437,9 @@ export function CatalogMenuEditor({
               General → Composición → Revisar y publicar
             </p>
           </div>
-          <UiButton
+          <UiButton disabled={modalBusy}
             aria-label="Cerrar"
-            className={secondaryButton}
+            className={`${secondaryButton} !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0`}
             onClick={onClose}
             type="button"
           >
@@ -1017,7 +1021,7 @@ function DraftCourseEditor({
 
                   ? ` · ${option.supplementCents > 0 ? "+" : ""}${formatMoney(option.supplementCents)}`
                   : " · Incluido"}
-                <button
+                <button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
                   aria-label="Quitar opción"
                   onClick={() =>
                     setCourses((current) =>
@@ -1169,7 +1173,7 @@ function ExistingCourseCard({
     }
   }
   async function removeCourse() {
-    if (!window.confirm(`¿Quitar “${displayName}” de este menú?`)) return;
+    if (!(await appConfirm(`¿Quitar “${displayName}” de este menú?`))) return;
     await mutate(() =>
       usageCount === 1
         ? catalogAdminService.batch(catalog.venueId, [
@@ -1573,7 +1577,7 @@ function ExistingOptionRow({
         >
           <Save className="size-4" />
         </UiButton>
-        <UiButton
+        <UiButton aria-label="Cerrar"
           className={secondaryButton}
           onClick={() => setEditing(false)}
           type="button"

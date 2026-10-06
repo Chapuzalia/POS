@@ -16,13 +16,13 @@ export function CashClosingResultModal({ canReprint, closing, isPrinting, onClos
   const unknown = closing.printStatus === 'unknown'
   const amounts = getCashClosingAmounts(closing.printSnapshot)
   return <AppModal containerClassName="!p-4" maxWidth={672} dismissDisabled={isPrinting} label="Cierre completado" onClose={onClose}>
-    <section className="w-full max-w-2xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
+    <section className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 shadow-[var(--shadow)]">
       <div className="flex items-start justify-between gap-4">
         <div className="flex items-start gap-3">
           <CheckCircle2 className="mt-1 h-7 w-7 text-emerald-600" />
           <div><h2 className="text-2xl font-black">Cierre completado</h2><p className="text-sm text-[var(--muted)]">El cierre se ha guardado. La impresión es independiente.</p></div>
         </div>
-        <Button disabled={isPrinting} onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
+        <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" disabled={isPrinting} onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
       </div>
       <div className="mt-5 grid gap-3 sm:grid-cols-3">
         <Metric label="Total ventas" value={formatMoney(closing.printSnapshot.summary.totalSalesCents)} />
@@ -45,7 +45,7 @@ export function CashClosingResultModal({ canReprint, closing, isPrinting, onClos
       {unknown ? <p className="mt-4 rounded-[var(--radius)] border border-amber-500/40 bg-amber-500/10 p-3 text-sm font-bold text-amber-700">No se puede confirmar si el cierre se imprimió. Comprueba físicamente el papel antes de solicitar una copia. Si el trabajo sigue en curso, espera a que termine.</p> : null}
       {closing.printStatus === 'failed' ? <p className="mt-4 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-3 text-sm font-bold text-red-700">El cierre se ha guardado, pero no se ha podido imprimir. Puedes crear una copia con un identificador nuevo.</p> : null}
       <div className="mt-5 flex flex-wrap justify-end gap-2">
-        <Button onClick={onClose} type="button" variant="secondary">Cerrar</Button>
+        <Button disabled={isPrinting} onClick={onClose} type="button" variant="secondary">Cerrar</Button>
         {unknown ? <Button disabled={isPrinting || !canReprint} onClick={onConfirmedReprint} type="button" variant="primary">He comprobado que no se imprimió · Crear copia</Button> : <Button disabled={isPrinting || printed || (closing.printStatus === 'failed' && !canReprint)} onClick={onPrint} type="button" variant="primary">
           {isPrinting ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <Printer className="h-4 w-4" />}
           {isPrinting ? 'Imprimiendo...' : printed ? 'Cierre impreso' : closing.printStatus === 'failed' ? 'Reintentar como copia' : 'Imprimir cierre'}

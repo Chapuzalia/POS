@@ -3,7 +3,13 @@ import { getStoredTheme, saveStoredTheme } from '../lib/offlineStore'
 import type { ThemeDefinition } from '../types'
 
 export function useThemeTokens(themes: ThemeDefinition[], defaultThemeId: string) {
-  const [themeId, setThemeId] = useState(() => getStoredTheme(defaultThemeId))
+  const [themeId, setThemeId] = useState(() => {
+    const storedThemeId = getStoredTheme(defaultThemeId)
+    return themes.find((theme) => theme.id === storedThemeId)?.id
+      ?? themes.find((theme) => theme.id === defaultThemeId)?.id
+      ?? themes[0]?.id
+      ?? defaultThemeId
+  })
   const selectedTheme = themes.find((theme) => theme.id === themeId) ?? themes[0]
 
   useEffect(() => {

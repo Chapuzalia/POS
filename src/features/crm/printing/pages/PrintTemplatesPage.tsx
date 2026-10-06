@@ -1090,7 +1090,7 @@ function BlockModal({
   return (
     <AppModal
       containerClassName="!p-0 sm:!p-4"
-      dialogClassName="!border-[var(--crm-border)] !bg-[var(--crm-surface)] !text-[var(--crm-text)]"
+      theme="crm"
       label={`Configurar: ${label}`}
       maxWidth={640}
       onClose={onClose}
@@ -1115,7 +1115,7 @@ function BlockModal({
           </h2>
           <button
             aria-label="Cerrar"
-            className="ml-auto rounded-lg p-1.5 text-[var(--crm-text-muted)] transition-colors hover:bg-[var(--crm-surface-soft)]"
+            className="ml-auto p-1.5 text-[var(--crm-text-muted)] transition-colors hover:bg-[var(--crm-surface-soft)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
             onClick={onClose}
             type="button"
           >

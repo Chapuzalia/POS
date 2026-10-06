@@ -1,3 +1,4 @@
+import { appAlert, appConfirm, appPrompt } from '../../../../components/ui/appDialogStore'
 import { notifyOperationalError } from '../../../../utils/notifications.ts'
 import { getReadableError } from '../../../../utils/errors.ts'
 import { Input as UiInput } from '../../../../components/ui/Input'
@@ -93,7 +94,7 @@ export function CatalogFormatsCrm({ catalog, disabled, inventoryFeatureEnabled, 
     }
     const unit = inventoryUnits.find((candidate) => candidate.id === draft.unitId)
     if (!unit) {
-      window.alert('Selecciona la unidad consumida por este formato.')
+      (await appAlert('Selecciona la unidad consumida por este formato.'))
       return
     }
     try {
@@ -110,7 +111,7 @@ export function CatalogFormatsCrm({ catalog, disabled, inventoryFeatureEnabled, 
 
   async function renameFormat(id: string, currentName: string) {
     const format = catalog.saleFormats.find((item) => item.id === id)
-    const nextName = window.prompt('Nombre del formato', currentName)?.trim()
+    const nextName = (await appPrompt('Nombre del formato', currentName))?.trim()
     if (!format || !nextName || nextName === currentName) return
     await mutate(() => catalogAdminService.saveSaleFormat(catalog.venueId, { ...format, name: nextName }))
   }
@@ -118,10 +119,10 @@ export function CatalogFormatsCrm({ catalog, disabled, inventoryFeatureEnabled, 
   async function deleteFormat(id: string, formatName: string) {
     const usage = usageByFormat.get(id) ?? 0
     if (usage > 0) {
-      window.alert(`“${formatName}” se utiliza en ${usage} variantes. Cambia esas variantes antes de eliminar el formato.`)
+      (await appAlert(`“${formatName}” se utiliza en ${usage} variantes. Cambia esas variantes antes de eliminar el formato.`))
       return
     }
-    if (window.confirm(`¿Eliminar definitivamente el formato “${formatName}”?`)) {
+    if ((await appConfirm(`¿Eliminar definitivamente el formato “${formatName}”?`))) {
       await mutate(() => catalogAdminService.deleteSaleFormat(catalog.venueId, id))
     }
   }

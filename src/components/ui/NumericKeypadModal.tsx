@@ -175,22 +175,22 @@ export function NumericKeypadModal({
   });
 
   const keyClassName =
-    "!h-16 !min-h-16 select-none w-full !p-0 !font-mono !text-2xl !font-black tabular-nums active:!scale-[0.97] !rounded-xl";
+    "!h-16 !min-h-16 select-none w-full !p-0 !font-mono !text-2xl !font-black tabular-nums active:!scale-[0.97] !rounded-xl [@media(max-height:500px)]:!h-11 [@media(max-height:500px)]:!min-h-11";
 
   return (
     <AppModal
       containerClassName="!p-3"
       dismissDisabled={disabled}
-      label={title ?? "Teclado numérico"}
+      label={title || "Teclado numérico"}
       maxWidth={430}
       onClose={onCancel}
     >
       <section
         aria-labelledby="numeric-keypad-title"
-        className="w-full bg-[var(--surface)] p-5 text-[var(--foreground)] sm:p-5"
+        className="w-full bg-[var(--surface)] p-5 text-[var(--foreground)] [@media(max-height:500px)]:p-3"
       >
         <header className="flex items-start justify-between gap-4">
-          <div className="min-w-0 mb-4">
+          <div className="min-w-0 mb-4 [@media(max-height:500px)]:mb-1">
             <h2 className="text-xl font-bold" id="numeric-keypad-title">
               {title}
             </h2>
@@ -209,7 +209,7 @@ export function NumericKeypadModal({
           {showCloseButton ? (
             <Button
               aria-label="Cerrar teclado numérico"
-              className="shrink-0 !rounded-none mb-4"
+              className="shrink-0 mb-4 [@media(max-height:500px)]:mb-1 !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
               disabled={disabled}
               onClick={onCancel}
               size="lg"
@@ -223,7 +223,7 @@ export function NumericKeypadModal({
 
         <output
           aria-live="polite"
-          className="mt-0 flex min-h-20 items-center justify-end gap-3 overflow-hidden rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-5 py-3 text-right text-[var(--field-foreground)]"
+          className="mt-0 flex min-h-20 items-center justify-end gap-3 overflow-hidden rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-5 py-3 text-right text-[var(--field-foreground)] [@media(max-height:500px)]:min-h-12 [@media(max-height:500px)]:px-3 [@media(max-height:500px)]:py-1"
         >
           <span className="min-w-0 overflow-hidden text-ellipsis whitespace-nowrap font-mono text-4xl font-black tabular-nums">
             {password ? "*".repeat(value.length) : value}
@@ -237,10 +237,10 @@ export function NumericKeypadModal({
         <div className="flex ">
           <div
             aria-label="Teclado numérico"
-            className="flex flex-row  w-full pt-4 gap-4"
+            className="grid w-full grid-cols-[minmax(0,1fr)_minmax(64px,0.25fr)] gap-3 pt-4 [@media(max-height:500px)]:pt-3"
             role="group"
           >
-            <div className="col-span-3 grid grid-cols-3 gap-2 w-full ">
+            <div className="grid min-w-0 grid-cols-3 gap-2">
               {digitKeys.map((digit) => (
                 <Button
                   aria-label={`Número ${digit}`}
@@ -277,7 +277,7 @@ export function NumericKeypadModal({
                 </Button>
               ) : null}
             </div>
-            <div className="flex grow flex-col gap-2 w-1/4 h-full items-center justify-between">
+            <div className="flex min-h-0 flex-col gap-2">
               <Button
                 aria-label="Borrar último número"
                 className={`${keyClassName} flex !items-center !justify-items-center`}
@@ -289,7 +289,7 @@ export function NumericKeypadModal({
                 <Delete aria-hidden="true" className="h-6 w-6" />
               </Button>
               <Button
-                className={`${keyClassName} !col-start-4 !row-span-4 !row-start-2  !min-h-auto !text-base h-auto grow`}
+                className="!h-auto !min-h-11 w-full flex-1 !rounded-xl !p-1 !text-sm !font-bold active:!scale-[0.97]"
                 disabled={disabled}
                 onClick={confirmValue}
                 type="button"

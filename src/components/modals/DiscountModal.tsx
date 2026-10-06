@@ -215,7 +215,7 @@ export function DiscountModal({
       >
         <section
           aria-labelledby="discount-title"
-          className="max-h-[85svh] w-full max-w-xl overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]"
+          className="max-h-[85svh] w-full overflow-y-auto rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]"
         >
           <div className="flex items-start justify-between gap-4">
             <div>
@@ -226,7 +226,7 @@ export function DiscountModal({
             </div>
             <button
               aria-label="Cerrar"
-              className="grid h-9 w-9 shrink-0 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)]"
+              className="grid shrink-0 place-items-center border border-[var(--separator)] bg-[var(--background)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
               disabled={isBusy}
               onClick={onCancel}
               type="button"

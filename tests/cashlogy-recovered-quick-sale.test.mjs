@@ -114,6 +114,7 @@ function modalHarness(state, onFinalizeRecovered) {
     'lucide-react': { AlertTriangle: 'icon', Ban: 'icon', CheckCircle2: 'icon', LoaderCircle: 'icon' },
     'zustand/react/shallow': { useShallow: (selector) => selector },
     '../../../components/ui': { AppModal: 'modal', Button: 'button', Metric: 'metric' },
+    '../../../components/ui/appDialogStore': { appConfirm: async () => true },
     '../../../lib/format': { formatMoney: String },
     '../cashlogy/cashlogyPresentation': { shouldShowCashlogyOperationDetails: () => false },
     '../cashlogy/cashlogyError': { isUncertainCashlogyError: () => false },

@@ -1,3 +1,4 @@
+import { appConfirm } from '../../../../components/ui/appDialogStore'
 import { Input as UiInput } from "../../../../components/ui/Input";
 import { Button as UiButton } from "../../../../components/ui/Button";
 import { Checkbox as UiCheckbox } from "../../../../components/ui/Checkbox";
@@ -30,6 +31,7 @@ import {
   type TenantContext,
 } from "../../../../types";
 import { CrmModal } from "../../shared/components/CrmModal";
+import { useCrmModalBusy } from "../../shared/components/CrmModalBusyContext";
 import { CrmSelect } from "../../shared/components/CrmSelect";
 import { EmptyList } from "../../shared/components/EmptyList";
 import { Field } from "../../shared/components/Field";
@@ -74,6 +76,8 @@ export function AccessManagementCrm({
   runAction,
   tenantContext,
 }: AccessManagementCrmProps) {
+  const modalBusy = useCrmModalBusy(disabled)
+
   const [data, setData] = useState<CrmAccessData>({
     devices: [],
     users: [],
@@ -242,9 +246,9 @@ export function AccessManagementCrm({
   async function releaseDeviceLogin(device: CrmDevice) {
     if (!device.account) return;
     if (
-      !window.confirm(
+      !(await appConfirm(
         `¿Liberar la sesión de "${device.name}"? El dispositivo se desconectará en menos de 30 segundos.`,
-      )
+      ))
     )
       return;
 
@@ -256,9 +260,9 @@ export function AccessManagementCrm({
 
   async function removeDevice(device: CrmDevice) {
     if (
-      !window.confirm(
+      !(await appConfirm(
         `¿Eliminar definitivamente el dispositivo "${device.name}" y sus credenciales? Su histórico se conservará sin vincularlo al dispositivo.`,
-      )
+      ))
     )
       return;
 
@@ -568,7 +572,7 @@ export function AccessManagementCrm({
       </div>
 
       {isUserModalOpen ? (
-        <CrmModal
+        <CrmModal dismissDisabled={modalBusy}
           label="Añadir usuario CRM"
           onClose={() => setIsUserModalOpen(false)}
         >
@@ -582,8 +586,8 @@ export function AccessManagementCrm({
               </div>
               <UiButton
                 aria-label="Cerrar"
-                className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !shrink-0 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]"
-                disabled={disabled}
+                className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
+                disabled={modalBusy}
                 onClick={() => setIsUserModalOpen(false)}
                 type="button"
               >
@@ -646,7 +650,7 @@ export function AccessManagementCrm({
               <div className="!flex !flex-col-reverse !gap-2 sm:!flex-row sm:!justify-end">
                 <UiButton
                   className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !px-4 !text-[13px] !font-semibold"
-                  disabled={disabled}
+                  disabled={modalBusy}
                   onClick={() => setIsUserModalOpen(false)}
                   type="button"
                 >
@@ -671,7 +675,7 @@ export function AccessManagementCrm({
       ) : null}
 
       {editingManagerId ? (
-        <CrmModal
+        <CrmModal dismissDisabled={modalBusy}
           label="Locales del manager"
           onClose={() => setEditingManagerId(null)}
         >
@@ -686,8 +690,8 @@ export function AccessManagementCrm({
               </div>
               <UiButton
                 aria-label="Cerrar"
-                className="!inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0"
-                disabled={disabled}
+                className="!inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
+                disabled={modalBusy}
                 onClick={() => setEditingManagerId(null)}
                 type="button"
               >
@@ -706,7 +710,7 @@ export function AccessManagementCrm({
               <div className="!flex !justify-end !gap-2">
                 <UiButton
                   className="!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold"
-                  disabled={disabled}
+                  disabled={modalBusy}
                   onClick={() => setEditingManagerId(null)}
                   type="button"
                 >
@@ -727,7 +731,7 @@ export function AccessManagementCrm({
       ) : null}
 
       {generatedCredentials ? (
-        <CrmModal
+        <CrmModal dismissDisabled={modalBusy}
           label="Credenciales del nuevo dispositivo"
           onClose={() => setGeneratedCredentials(null)}
         >
@@ -740,7 +744,7 @@ export function AccessManagementCrm({
             </div>
             <UiButton
               aria-label="Cerrar"
-              className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
+              className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
               onClick={() => setGeneratedCredentials(null)}
               type="button"
             >

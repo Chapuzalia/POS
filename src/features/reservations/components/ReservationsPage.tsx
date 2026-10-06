@@ -51,6 +51,7 @@ function matchesFilter(reservation: Reservation, filter: ReservationFilter) {
 export function ReservationsPage({ controller, isOnline }: Props) {
   const [filter, setFilter] = useState<ReservationFilter>("all");
   const [areaId, setAreaId] = useState("all");
+  const mapView = controller.view === "map";
   const searching = Boolean(controller.query.trim());
   const displayed = useMemo(() => {
     const source = searching
@@ -111,8 +112,8 @@ export function ReservationsPage({ controller, isOnline }: Props) {
   ];
 
   return (
-    <main className="flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col gap-0 overflow-x-hidden overflow-y-auto overscroll-contain bg-[var(--background)] p-0 [-webkit-overflow-scrolling:touch] md:gap-3 md:p-4">
-      <header className="flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--separator)] bg-[var(--surface)] p-3 md:gap-3 md:rounded-2xl md:border md:shadow-sm">
+    <main className={`flex min-h-0 min-w-0 w-full max-w-full flex-1 flex-col bg-[var(--background)] ${mapView ? "gap-2 overflow-hidden p-2 md:p-3" : "gap-0 overflow-x-hidden overflow-y-auto overscroll-contain p-0 [-webkit-overflow-scrolling:touch] md:gap-3 md:p-4"}`}>
+      <header className={`flex shrink-0 flex-wrap items-center gap-2 border-b border-[var(--separator)] bg-[var(--surface)] md:gap-3 md:rounded-2xl md:border md:shadow-sm ${mapView ? "rounded-xl border p-2" : "p-3"}`}>
         <div className="flex min-w-0 flex-1 items-center gap-2 md:flex-none">
           <UiButton
             aria-label="Volver al POS"
@@ -200,9 +201,10 @@ export function ReservationsPage({ controller, isOnline }: Props) {
         </div>
       ) : null}
 
+      <div className={mapView ? "grid min-w-0 shrink-0 gap-2 rounded-xl border border-[var(--separator)] bg-[var(--surface)] p-2 xl:grid-cols-[auto_minmax(0,1fr)] xl:items-center" : "contents"}>
       <section
         aria-label="Filtros de reservas"
-        className="flex min-h-14 shrink-0 items-start gap-2 overflow-x-auto overscroll-x-contain px-3 pb-0.5 pt-3 [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden md:min-h-0 md:px-0 md:pt-0"
+        className={`flex min-w-0 shrink-0 items-center gap-2 overflow-x-auto overscroll-x-contain [-webkit-overflow-scrolling:touch] [scrollbar-width:none] [&::-webkit-scrollbar]:hidden ${mapView ? "min-h-11" : "min-h-14 px-3 pb-0.5 pt-3 md:min-h-0 md:px-0 md:pt-0"}`}
       >
         {filters.map((item) => (
           <UiButton
@@ -224,9 +226,9 @@ export function ReservationsPage({ controller, isOnline }: Props) {
 
       <section
         aria-label="Herramientas de reservas"
-        className="m-3 mb-0 flex lg:flex-row max-lg:flex-wrap shrink-0  items-center gap-2 rounded-xl border border-[var(--separator)] bg-[var(--surface)] p-2 md:m-0 md:rounded-2xl md:shadow-sm"
+        className={`flex min-w-0 shrink-0 items-center gap-2 ${mapView ? "flex-wrap md:flex-nowrap" : "m-3 mb-0 lg:flex-row max-lg:flex-wrap rounded-xl border border-[var(--separator)] bg-[var(--surface)] p-2 md:m-0 md:rounded-2xl md:shadow-sm"}`}
       >
-        <label className="flex min-h-11 w-full basis-full items-center gap-2 rounded-xl border-1 bg-[var(--surface-secondary)] px-3 text-[var(--muted)] focus-within:ring-2 focus-within:ring-[var(--accent)] md:min-w-60 md:flex-1 md:basis-auto">
+        <label className={`flex min-h-11 w-full basis-full items-center gap-2 rounded-xl border-1 bg-[var(--surface-secondary)] px-3 text-[var(--muted)] focus-within:ring-2 focus-within:ring-[var(--accent)] md:flex-1 md:basis-auto ${mapView ? "min-w-0" : "md:min-w-60"}`}>
           <Search aria-hidden="true" size={18} />
           <span className="sr-only">Buscar reservas</span>
           <UiInput
@@ -307,8 +309,9 @@ export function ReservationsPage({ controller, isOnline }: Props) {
           />
         </UiButton>
       </section>
+      </div>
 
-      <section className="relative flex min-h-0 min-w-0 w-full max-w-full flex-none gap-3 p-3 md:min-h-105 md:flex-1 md:p-0">
+      <section className={`relative flex min-h-0 min-w-0 w-full max-w-full gap-3 ${mapView ? "flex-1 overflow-hidden" : "flex-none p-3 md:min-h-105 md:flex-1 md:p-0"}`}>
         {controller.view === "list" ? (
           <ReservationList
             onSelect={controller.openDetail}
@@ -360,6 +363,7 @@ export function ReservationsPage({ controller, isOnline }: Props) {
           date={controller.date}
           disabled={!isOnline || controller.isLoading}
           loadReservations={controller.loadReservations}
+          isBusy={controller.isLoading}
           map={controller.map}
           onClose={() => controller.setEditor(null)}
           onSave={controller.save}

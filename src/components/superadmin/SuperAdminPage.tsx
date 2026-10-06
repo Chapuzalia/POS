@@ -1,3 +1,4 @@
+import { appConfirm } from '../ui/appDialogStore'
 import { notifyOperationalError } from '../../utils/notifications.ts'
 import { Input as UiInput } from '../ui/Input'
 import { Button as UiButton } from '../ui/Button'
@@ -50,18 +51,19 @@ type TenantModalState =
 
 type SuperAdminModalProps = {
   children: ReactNode
+  dismissDisabled?: boolean
   label: string
   onClose: () => void
   size?: 'compact' | 'large'
 }
 
-function SuperAdminModal({ children, label, onClose, size = 'compact' }: SuperAdminModalProps) {
+function SuperAdminModal({ children, label, onClose, dismissDisabled, size = 'compact' }: SuperAdminModalProps) {
   return (
     <AppModal
-      backdropClassName="crm-shell"
+      theme="crm"
       containerClassName="!p-3 sm:!p-6"
       maxWidth={size === 'large' ? 820 : 560}
-      dialogClassName="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !flex !max-h-[calc(100dvh-24px)] !flex-col !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] sm:!max-h-[calc(100dvh-48px)] sm:!rounded-[var(--crm-radius-lg)]"
+      dismissDisabled={dismissDisabled}
       label={label}
       onClose={onClose}
     >
@@ -200,7 +202,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
 
   async function toggleTenant(tenant: PlatformTenant) {
     const nextActive = !tenant.isActive
-    if (!window.confirm(`¿${nextActive ? 'Activar' : 'Desactivar'} el negocio "${tenant.name}"?`)) return
+    if (!(await appConfirm(`¿${nextActive ? 'Activar' : 'Desactivar'} el negocio "${tenant.name}"?`))) return
 
     await runAction(async () => {
       await setPlatformTenantActive(tenant.id, nextActive)
@@ -210,7 +212,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   }
 
   async function removeTenant(tenant: PlatformTenant) {
-    if (!window.confirm(`¿Eliminar "${tenant.name}" de forma permanente? Se borrarán todos sus locales, productos, ventas y usuarios exclusivos. Esta acción no se puede deshacer.`)) return
+    if (!(await appConfirm(`¿Eliminar "${tenant.name}" de forma permanente? Se borrarán todos sus locales, productos, ventas y usuarios exclusivos. Esta acción no se puede deshacer.`))) return
 
     await runAction(async () => {
       await deletePlatformTenant(tenant.id)
@@ -352,10 +354,10 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       </section>
 
       {tenantModal?.mode === 'create' ? (
-        <SuperAdminModal label="Crear nuevo negocio" onClose={() => setTenantModal(null)} size="large">
+        <SuperAdminModal dismissDisabled={isBusy} label="Crear nuevo negocio" onClose={() => setTenantModal(null)} size="large">
           <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4 sm:!px-6">
             <div><h2 className="!m-0 !text-lg !font-bold">Nuevo negocio</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Crea el tenant, su primer local y la cuenta propietaria.</p></div>
-            <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton>
+            <UiButton disabled={isBusy} aria-label="Cerrar" className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton>
           </div>
           <form className="!grid !min-h-0 !grid-cols-1 !gap-4 !overflow-y-auto !px-5 !py-5 sm:!grid-cols-2 sm:!px-6" onSubmit={(event) => void handleSubmit(event)}>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Nombre del negocio</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => { const name = event.target.value; setTenantName(name); if (!slugEdited) setTenantSlug(slugify(name)) }} required value={tenantName} /></label>
@@ -370,7 +372,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
               <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Dispositivos</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} min={0} onChange={(event) => setMaxDevices(Number(event.target.value))} required type="number" value={maxDevices} /></label>
             </fieldset>
             <div className="!col-span-full !flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !pt-4">
-              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cancelar</UiButton>
+              <UiButton disabled={isBusy} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cancelar</UiButton>
               <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={!isOnline || isBusy || !tenantSlug || ownerPassword.length < 8} type="submit"><Plus className="!size-4" />Crear negocio</UiButton>
             </div>
           </form>
@@ -378,10 +380,10 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       ) : null}
 
       {tenantModal?.mode === 'edit' ? (
-        <SuperAdminModal label={`Editar ${tenantModal.tenant.name}`} onClose={() => setTenantModal(null)} size="large">
+        <SuperAdminModal dismissDisabled={isBusy} label={`Editar ${tenantModal.tenant.name}`} onClose={() => setTenantModal(null)} size="large">
           <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
             <div><h2 className="!m-0 !text-lg !font-bold">Editar negocio</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Actualiza sus datos, límites del plan y módulos disponibles.</p></div>
-            <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton>
+            <UiButton disabled={isBusy} aria-label="Cerrar" className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton>
           </div>
           <form className="!grid !min-h-0 !gap-4 !overflow-y-auto !px-5 !py-5 sm:!grid-cols-2 sm:!px-6" onSubmit={(event) => void handleUpdateTenant(event, tenantModal.tenant)}>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Nombre del negocio</span><UiInput className={inputClassName} disabled={isBusy} onChange={(event) => setEditingTenantName(event.target.value)} required value={editingTenantName} /></label>
@@ -427,7 +429,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
               </div>
             </section>
             <div className="!col-span-full !flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !pt-4">
-              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cancelar</UiButton>
+              <UiButton disabled={isBusy} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cancelar</UiButton>
               <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={isBusy || !editingTenantName.trim() || !editingTenantSlug} type="submit"><Pencil className="!size-4" />Guardar cambios</UiButton>
             </div>
           </form>
@@ -435,10 +437,10 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       ) : null}
 
       {tenantModal?.mode === 'details' ? (
-        <SuperAdminModal label={`Detalles de ${tenantModal.tenant.name}`} onClose={() => setTenantModal(null)} size="large">
+        <SuperAdminModal dismissDisabled={isBusy} label={`Detalles de ${tenantModal.tenant.name}`} onClose={() => setTenantModal(null)} size="large">
           <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4 sm:!px-6">
             <div><h2 className="!m-0 !text-lg !font-bold">{tenantModal.tenant.name}</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Información general del negocio</p></div>
-            <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton>
+            <UiButton disabled={isBusy} aria-label="Cerrar" className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton>
           </div>
           <div className="!grid !min-h-0 !gap-5 !overflow-y-auto !px-5 !py-5 sm:!px-6">
             <div className="!grid !grid-cols-1 !gap-3 sm:!grid-cols-2 lg:!grid-cols-4">
@@ -455,7 +457,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
               ['Dispositivos', tenantModal.tenant.deviceCount, tenantModal.tenant.limits.devices],
             ].map(([label, usage, limit]) => <div className="!grid !gap-1 !rounded-[10px] !bg-[var(--crm-surface-soft)] !p-3" key={String(label)}><span className="!text-[10px] !font-semibold !uppercase !tracking-wide !text-[var(--crm-text-muted)]">{label}</span><strong className="!text-lg">{usage} / {limit}</strong></div>)}</div></div>
             <div className="!grid !gap-2"><h3 className="!m-0 !text-sm !font-bold">Locales ({tenantModal.tenant.venueCount})</h3><div className="!grid !gap-2 sm:!grid-cols-2">{tenantModal.tenant.venues.map((venue) => <div className="!flex !items-center !justify-between !gap-3 !rounded-[10px] !bg-[var(--crm-surface-soft)] !p-3" key={venue.id}><span className="!text-[13px] !font-semibold">{venue.name}</span><span className={venue.isActive ? '!text-[11px] !font-semibold !text-[var(--crm-green)]' : '!text-[11px] !font-semibold !text-[var(--crm-text-muted)]'}>{venue.isActive ? 'Activo' : 'Inactivo'}</span></div>)}{!tenantModal.tenant.venues.length ? <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">No hay locales configurados.</p> : null}</div></div>
-            <div className="!flex !justify-between !gap-3 !border-t !border-[var(--crm-border)] !pt-4"><code className="!self-center !text-[10px] !text-[var(--crm-text-muted)]">ID: {tenantModal.tenant.id}</code><UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cerrar</UiButton></div>
+            <div className="!flex !justify-between !gap-3 !border-t !border-[var(--crm-border)] !pt-4"><code className="!self-center !text-[10px] !text-[var(--crm-text-muted)]">ID: {tenantModal.tenant.id}</code><UiButton disabled={isBusy} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cerrar</UiButton></div>
           </div>
         </SuperAdminModal>
       ) : null}

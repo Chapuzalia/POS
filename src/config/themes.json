@@ -1,7 +1,7 @@
 [
   {
     "id": "hero-minimal",
-    "name": "Hero Minimal",
+    "name": "Claro",
     "description": "Claro, sobrio y táctil.",
     "mode": "light",
     "radius": "8px",
@@ -28,36 +28,8 @@
     }
   },
   {
-    "id": "shadcn-neutral",
-    "name": "ShadCN Neutral",
-    "description": "Denso, neutro y enfocado.",
-    "mode": "light",
-    "radius": "6px",
-    "borderWidth": "1px",
-    "shadow": "0 10px 30px rgba(24, 24, 27, 0.07)",
-    "tokens": {
-      "background": "#fafafa",
-      "surface": "#ffffff",
-      "surface-secondary": "#f4f4f5",
-      "foreground": "#18181b",
-      "muted": "#71717a",
-      "separator": "#d4d4d8",
-      "accent": "#0f766e",
-      "accent-soft": "#ccfbf1",
-      "accent-foreground": "#ffffff",
-      "success": "#15803d",
-      "success-soft": "#dcfce7",
-      "danger": "#b91c1c",
-      "danger-soft": "#fee2e2",
-      "warning": "#a16207",
-      "field": "#ffffff",
-      "field-border": "#d4d4d8",
-      "field-foreground": "#18181b"
-    }
-  },
-  {
     "id": "club-night",
-    "name": "Club Night",
+    "name": "Oscuro",
     "description": "Oscuro con acentos de sala.",
     "mode": "dark",
     "radius": "8px",
@@ -81,34 +53,6 @@
       "field": "#202228",
       "field-border": "#3f424c",
       "field-foreground": "#f4f4f5"
-    }
-  },
-  {
-    "id": "retro-brutal",
-    "name": "RetroUI Paper",
-    "description": "Crema, tinta negra y pegatinas retro.",
-    "mode": "light",
-    "radius": "22px",
-    "borderWidth": "4px",
-    "shadow": "8px 9px 0 #171713",
-    "tokens": {
-      "background": "#eee9d7",
-      "surface": "#fff7df",
-      "surface-secondary": "#efe4c6",
-      "foreground": "#171713",
-      "muted": "#706b60",
-      "separator": "#171713",
-      "accent": "#e85b55",
-      "accent-soft": "#ffe8b7",
-      "accent-foreground": "#171713",
-      "success": "#24925f",
-      "success-soft": "#c8f1cf",
-      "danger": "#e84d45",
-      "danger-soft": "#ffd7d0",
-      "warning": "#e8467e",
-      "field": "#fff9e8",
-      "field-border": "#171713",
-      "field-foreground": "#171713"
     }
   }
 ]

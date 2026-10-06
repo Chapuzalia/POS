@@ -53,14 +53,14 @@ export function RevoClosingImportModal({ venues, disabled, onClose, onImported }
   }
 
   return (
-    <CrmModal label="Importar cierres desde REVO" onClose={() => { if (!busy) onClose() }} size="large">
-      <section className="!flex !max-h-[85dvh] !flex-col">
+    <CrmModal dismissDisabled={busy} label="Importar cierres desde REVO" onClose={() => { if (!busy) onClose() }} size="large">
+      <section className="!flex !max-h-[calc(var(--visual-viewport-height,100dvh)-48px)] !min-h-0 !flex-col">
         <header className="!flex !items-center !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !p-5">
           <div>
             <h2 className="!text-lg !font-bold">Importar cierres desde REVO</h2>
             <p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Selecciona el local y revisa el historial antes de guardarlo.</p>
           </div>
-          <Button aria-label="Cerrar importación" disabled={busy} onClick={onClose} variant="tertiary"><X className="!size-5" /></Button>
+          <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar importación" disabled={busy} onClick={onClose} variant="tertiary"><X className="!size-5" /></Button>
         </header>
         <div className="!grid !auto-rows-max !gap-5 !overflow-y-auto !p-5">
           <div className="!grid !gap-4 sm:!grid-cols-2">

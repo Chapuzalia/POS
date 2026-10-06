@@ -1,4 +1,5 @@
 import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { CrmModalBusyContext } from '../../features/crm/shared/components/CrmModalBusyContext'
 import { CrmShell } from '../../features/crm/layout/CrmShell'
 import { canAccessCrm, canAccessCrmSection } from '../../features/crm/routing/crmPermissions'
 import { catalogSections, type CrmSection } from '../../features/crm/routing/crmNavigation'
@@ -233,7 +234,7 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
   if (!canAccessCrm(context.role)) return null
   const disabled = !isOnline || isBusy || (shouldLoadCatalog && isCatalogLoading)
 
-  return <CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
+  return <CrmModalBusyContext value={isBusy || (shouldLoadCatalog && isCatalogLoading)}><CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
     const inventorySectionBlocked = !inventoryEnabled && section.startsWith('inventory-') && section !== 'inventory-stock'
     if (canAccessCrmSection(context.role, section, context.features, selectedVenue) && !inventorySectionBlocked) setActiveSection(section)
   }} onVenueChange={(venueId) => {
@@ -244,5 +245,5 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
     <Suspense fallback={<section aria-busy="true" className="grid min-h-48 place-items-center rounded-2xl bg-[var(--crm-surface)] p-6 text-sm font-bold text-[var(--crm-text-muted)]" role="status">Cargando sección…</section>}>
       <CrmSectionContent activeSection={activeSection} catalog={catalog} comparisonStats={comparisonStats} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
     </Suspense>
-  </CrmShell>
+  </CrmShell></CrmModalBusyContext>
 }

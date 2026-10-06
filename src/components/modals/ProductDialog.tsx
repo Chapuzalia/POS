@@ -598,7 +598,7 @@ export function ProductDialog({
           <h2 className="text-2xl font-bold">
             {isChoosingVariant ? "Variante" : item.product.type === "menu" ? item.product.name : `${item.product.name} con`}
           </h2>
-          <Button
+          <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar"
             disabled={isBusy || hasSubmitted}
             onClick={onCancel}
             size="sm"

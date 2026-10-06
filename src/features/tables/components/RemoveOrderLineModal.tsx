@@ -13,13 +13,13 @@ type Props = {
 export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm, sentQuantity = 0 }: Props) {
   return (
     <AppModal containerClassName="!p-3 sm:!p-4" maxWidth={448} dismissDisabled={isBusy} label="Eliminar producto" onClose={onCancel} placement="center">
-      <section aria-labelledby="remove-order-line-title" className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-w-md">
+      <section aria-labelledby="remove-order-line-title" className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-xl font-bold" id="remove-order-line-title">Eliminar producto</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">Se eliminará {line.quantity}x {line.productName} de la comanda.</p>
           </div>
-          <Button aria-label="Cerrar" disabled={isBusy} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
+          <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" disabled={isBusy} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
         </div>
 
         <p className="mt-4 rounded-[var(--radius)] border border-[var(--warning)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">Este producto ya está marcado como servido. Confirma que quieres eliminarlo igualmente.</p>

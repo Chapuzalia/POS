@@ -1,3 +1,4 @@
+import { appConfirm } from '../ui/appDialogStore'
 import { Button as UiButton } from '../ui/Button'
 import { ArrowLeft, LayoutList, Palette, Printer, RefreshCw, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
@@ -37,7 +38,7 @@ export function ConfigModal({
   const [clearCacheError, setClearCacheError] = useState<string | null>(null)
 
   async function handleClearCache() {
-    if (clearingCache || !window.confirm('¿Borrar todos los datos locales de este TPV? Se eliminarán la sesión, las preferencias y los datos pendientes de sincronizar. Solo se conservarán la URL del backend de impresión y su token. La aplicación se recargará; necesitarás conexión para volver a entrar.')) return
+    if (clearingCache || !(await appConfirm('¿Borrar todos los datos locales de este TPV? Se eliminarán la sesión, las preferencias y los datos pendientes de sincronizar. Solo se conservarán la URL del backend de impresión y su token. La aplicación se recargará; necesitarás conexión para volver a entrar.'))) return
     setClearingCache(true)
     setClearCacheError(null)
     try {
@@ -53,10 +54,10 @@ export function ConfigModal({
   if (section === 'printing') {
     return (
       <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={1024} label="Configuración de impresión" onClose={onClose} placement="bottom">
-        <section className="flex max-h-[100svh] w-full flex-col bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[94svh] sm:max-w-5xl sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]">
+        <section className="flex max-h-[100svh] w-full flex-col bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[94svh] sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]">
           <div className="flex items-center justify-between gap-3 border-b border-[var(--separator)] p-4">
             <Button onClick={() => setSection('general')} size="sm" type="button" variant="tertiary"><ArrowLeft className="h-4 w-4" />Ajustes</Button>
-            <Button onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
+            <Button disabled={clearingCache} className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-4 sm:p-5"><PrintAgentSettings canConfigure={canManageHardware} canOpenDrawer={canManageHardware} /></div>
         </section>
@@ -65,14 +66,14 @@ export function ConfigModal({
   }
 
   return (
-    <AppModal label="Configuración" onClose={onClose}>
-      <section className="max-h-[calc(100dvh-24px)] w-full max-w-xl overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[calc(100dvh-48px)]">
+    <AppModal dismissDisabled={clearingCache} label="Configuración" maxWidth={880} onClose={onClose}>
+      <section className="max-h-[calc(100dvh-24px)] w-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[calc(100dvh-48px)]">
         <div className="flex items-start justify-between gap-4">
           <div>
             <h2 className="text-2xl font-bold">Configuración</h2>
             <p className="text-sm text-[var(--muted)]">Contexto local de este TPV.</p>
           </div>
-          <Button onClick={onClose} size="sm" type="button" variant="tertiary">
+          <Button disabled={clearingCache} className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" onClick={onClose} size="sm" type="button" variant="tertiary">
             <X className="h-4 w-4" />
           </Button>
         </div>
@@ -93,7 +94,7 @@ export function ConfigModal({
           Break the world
         </button>
 
-        <UiButton className="mt-5 flex min-h-14 w-full items-center justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-left transition hover:border-[var(--accent)]" onClick={() => setSection('printing')} type="button">
+        <UiButton disabled={clearingCache} className="mt-5 flex min-h-14 w-full items-center justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-left transition hover:border-[var(--accent)]" onClick={() => setSection('printing')} type="button">
           <span className="flex items-center gap-3"><Printer className="h-5 w-5 text-[var(--accent)]" /><span><strong className="block">Hardware · Impresión</strong><small className="text-[var(--muted)]">Agente local, impresoras, cajón y diagnóstico</small></span></span>
           <span aria-hidden="true">›</span>
         </UiButton>

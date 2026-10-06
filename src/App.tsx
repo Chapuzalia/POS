@@ -1,5 +1,6 @@
 import { Suspense } from 'react'
 import { AppShell } from './app/AppShell'
+import { AppDialogHost } from './components/ui/AppDialogHost'
 import { LoadingScreen } from './components/screens/StateScreens'
 import { useAppVersionStatus } from './hooks/useAppVersionStatus'
 import { useIOSPWAViewportFix } from './hooks/useIOSPWAViewportFix'
@@ -15,5 +16,6 @@ export default function App() {
     <Suspense fallback={<LoadingScreen />}>
       <AppShell networkOnline={isOnline} versionStatus={versionStatus} />
     </Suspense>
+    <AppDialogHost />
   </div>
 }

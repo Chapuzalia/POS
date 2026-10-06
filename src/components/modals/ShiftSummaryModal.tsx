@@ -30,7 +30,7 @@ export function ShiftSummaryModal({
           <h2 className="text-2xl font-black">Resumen de turno</h2>
           <p className="mt-1 text-sm text-[var(--muted)]">{cashSession.cashRegisterName} · desde {new Date(cashSession.openedAt).toLocaleTimeString('es-ES', { hour: '2-digit', minute: '2-digit' })}</p>
         </div>
-        <Button aria-label="Cerrar resumen de turno" disabled={isLoading} onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
+        <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar resumen de turno" disabled={isLoading} onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
       </header>
 
       <div className="mt-5 grid gap-3 sm:grid-cols-2">

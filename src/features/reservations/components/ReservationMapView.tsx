@@ -1,10 +1,10 @@
 import { Button as UiButton } from '../../../components/ui/Button'
 import { Armchair, CalendarPlus, Check, CircleCheck, ShieldAlert, Users, X } from 'lucide-react'
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import { useLayoutEffect, useMemo, useRef, useState } from 'react'
+import type { PointerEvent } from 'react'
 import type { RestaurantTableMapItem } from '../../tables/types'
-import { MapViewportControls } from '../../tables/components/MapViewportControls'
-import { useMapViewport } from '../../tables/useMapViewport'
-import { getMapPlaneSize } from '../../tables/viewport'
+import { getAreaSwipeTarget, getAreaSwipeVisualFeedback } from '../../tables/area-swipe'
+import { contentBounds, fitBoundsToViewport, getMapPlaneSize } from '../../tables/viewport'
 import { getNextReservationForTable } from '../domain/reservationAvailability'
 import type { Reservation, ReservationMap } from '../types'
 
@@ -29,18 +29,16 @@ export function ReservationMapView(props: Props) {
   const [areaId, setAreaId] = useState(props.map.areas[0]?.id)
   const [selectedTableId, setSelectedTableId] = useState<string | null>(null)
   const canvasRef = useRef<HTMLElement>(null)
+  const [canvasSize, setCanvasSize] = useState({ width: 0, height: 0 })
+  const swipeRef = useRef<{ pointerId: number; startX: number; startY: number } | null>(null)
   const area = props.map.areas.find((candidate) => candidate.id === areaId) ?? props.map.areas[0]
   const sourceTables = props.selection ? props.map.tables : props.map.operationalMap?.tables ?? props.map.tables
   const tables = useMemo(() => sourceTables.filter((table) => table.areaId === area?.id), [area?.id, sourceTables])
   const mapElements = useMemo(() => area?.mapElements ?? [], [area?.mapElements])
   const fittedItems = useMemo(() => [...tables, ...mapElements], [mapElements, tables])
-  const viewportApi = useMapViewport(`reservation-map:${props.date}:${area?.id ?? 'default'}`)
-  const viewport = viewportApi.viewport
-  const fitViewport = viewportApi.fit
-  const autoFit = Boolean(props.selection)
   const planeSize = getMapPlaneSize(
-    canvasRef.current?.clientWidth ?? 1200,
-    canvasRef.current?.clientHeight ?? 700,
+    canvasSize.width,
+    canvasSize.height,
     area?.canvasWidth ?? 1200,
     area?.canvasHeight ?? 800,
   )
@@ -54,34 +52,64 @@ export function ReservationMapView(props: Props) {
     props.selection?.selectedTableIds.length
       && props.selection.selectedCapacity < props.selection.partySize,
   )
+  const viewport = useMemo(() => fitBoundsToViewport(
+    contentBounds(fittedItems), canvasSize.width, canvasSize.height,
+    planeSize.width, planeSize.height,
+  ), [canvasSize.height, canvasSize.width, fittedItems, planeSize.height, planeSize.width])
   const conflictTableIds = new Set(props.selection?.conflictTableIds ?? [])
-  const fitSelectionToCanvas = useCallback(() => {
-    const canvas = canvasRef.current
-    if (!autoFit || !canvas || !fittedItems.length) return
-    const fittedPlaneSize = getMapPlaneSize(
-      canvas.clientWidth,
-      canvas.clientHeight,
-      area?.canvasWidth ?? 1200,
-      area?.canvasHeight ?? 800,
-    )
-    fitViewport(canvas, fittedItems, fittedPlaneSize)
-  }, [area?.canvasHeight, area?.canvasWidth, autoFit, fitViewport, fittedItems])
-
   useLayoutEffect(() => {
     const canvas = canvasRef.current
-    if (!autoFit || !canvas) return
-    fitSelectionToCanvas()
-    let animationFrame = 0
-    const observer = new ResizeObserver(() => {
-      cancelAnimationFrame(animationFrame)
-      animationFrame = requestAnimationFrame(fitSelectionToCanvas)
+    if (!canvas) return
+    const updateSize = () => setCanvasSize((current) => {
+      const width = canvas.clientWidth, height = canvas.clientHeight
+      return current.width === width && current.height === height ? current : { width, height }
     })
+    updateSize()
+    const observer = new ResizeObserver(updateSize)
     observer.observe(canvas)
-    return () => {
-      cancelAnimationFrame(animationFrame)
-      observer.disconnect()
-    }
-  }, [autoFit, fitSelectionToCanvas])
+    return () => observer.disconnect()
+  }, [])
+
+  function changeArea(nextAreaId: string) {
+    setAreaId(nextAreaId)
+    setSelectedTableId(null)
+  }
+
+  function resetSwipeVisual() {
+    canvasRef.current?.style.setProperty('--reservation-swipe-x', '0px')
+    canvasRef.current?.style.setProperty('--reservation-swipe-opacity', '1')
+  }
+
+  function startSwipe(event: PointerEvent<HTMLElement>) {
+    if (props.map.areas.length < 2 || swipeRef.current || event.button !== 0
+      || (event.target as HTMLElement).closest('button')) return
+    swipeRef.current = { pointerId: event.pointerId, startX: event.clientX, startY: event.clientY }
+    event.currentTarget.setPointerCapture(event.pointerId)
+  }
+
+  function moveSwipe(event: PointerEvent<HTMLElement>) {
+    const swipe = swipeRef.current
+    if (!swipe || swipe.pointerId !== event.pointerId) return
+    const feedback = getAreaSwipeVisualFeedback(event.clientX - swipe.startX, event.clientY - swipe.startY, canvasSize.width)
+    event.currentTarget.style.setProperty('--reservation-swipe-x', `${feedback.offsetX}px`)
+    event.currentTarget.style.setProperty('--reservation-swipe-opacity', String(feedback.opacity))
+  }
+
+  function finishSwipe(event: PointerEvent<HTMLElement>) {
+    const swipe = swipeRef.current
+    if (!swipe || swipe.pointerId !== event.pointerId) return
+    swipeRef.current = null
+    const next = getAreaSwipeTarget(props.map.areas.map((candidate) => candidate.id), area?.id,
+      event.clientX - swipe.startX, event.clientY - swipe.startY, canvasSize.width)
+    resetSwipeVisual()
+    if (next) changeArea(next)
+  }
+
+  function cancelSwipe(event: PointerEvent<HTMLElement>) {
+    if (swipeRef.current?.pointerId !== event.pointerId) return
+    swipeRef.current = null
+    resetSwipeVisual()
+  }
 
   function selectTable(tableId: string) {
     setSelectedTableId(tableId)
@@ -93,35 +121,33 @@ export function ReservationMapView(props: Props) {
   }
 
   return (
-    <div className={`flex min-h-0 min-w-0 flex-1 gap-3 ${props.selection ? 'max-md:flex-col' : 'flex-col'}`}>
+    <div className="flex min-h-0 min-w-0 flex-1 gap-2 max-md:flex-col">
       <nav
         aria-label="Zonas"
-        className={`relative z-10 flex min-h-12 shrink-0 items-center gap-2 overscroll-contain [-webkit-overflow-scrolling:touch] [&>button]:h-auto [&>button]:shrink-0 [&>button]:border [&>button]:border-[var(--separator)] [&>button]:bg-[var(--surface)] [&>button]:font-extrabold [&>button]:text-[var(--foreground)] ${props.selection ? 'overflow-x-auto rounded-xl border border-[var(--separator)] bg-[var(--surface)] p-2 max-md:w-full max-md:border-0 max-md:bg-transparent max-md:p-0 md:w-19 md:flex-col md:overflow-y-auto [&>button]:min-h-15 [&>button]:w-full [&>button]:min-w-0 [&>button]:flex-col [&>button]:gap-1 [&>button]:overflow-hidden [&>button]:rounded-xl [&>button]:px-1 [&>button]:text-xs' : 'overflow-x-auto overflow-y-hidden py-1 [&>button]:min-h-11 [&>button]:whitespace-nowrap [&>button]:rounded-full [&>button]:px-[18px]'}`}
+        className="relative z-10 flex shrink-0 items-center gap-2 overflow-x-auto overscroll-contain rounded-xl border border-[var(--separator)] bg-[var(--surface)] p-2 [-webkit-overflow-scrolling:touch] max-md:min-h-12 max-md:border-0 max-md:bg-transparent max-md:p-0 md:w-22 md:flex-col md:overflow-x-hidden md:overflow-y-auto [&>button]:h-auto [&>button]:min-h-11 [&>button]:min-w-0 [&>button]:shrink-0 [&>button]:gap-1 [&>button]:rounded-xl [&>button]:border [&>button]:border-[var(--separator)] [&>button]:bg-[var(--surface)] [&>button]:px-3 [&>button]:font-extrabold [&>button]:text-[var(--foreground)] md:[&>button]:min-h-15 md:[&>button]:w-full md:[&>button]:flex-col md:[&>button]:px-1 md:[&>button]:text-xs"
       >
         {props.selection ? (
           <span className="px-1 pb-1 pt-0.5 text-center text-[10px] font-black uppercase tracking-wider text-[var(--muted)] max-md:hidden">
             Zonas
           </span>
         ) : null}
-        {props.map.areas.map((candidate) => <UiButton className={candidate.id === area?.id ? 'border-[var(--accent)] bg-[var(--accent)] text-[var(--accent-foreground)]' : ''} key={candidate.id} onClick={() => {
-          setAreaId(candidate.id)
-          setSelectedTableId(null)
-        }} type="button">
-          {props.selection ? <Armchair aria-hidden="true" size={17} /> : null}
-          <span className={props.selection ? 'max-w-full truncate' : undefined}>{candidate.name}</span>
+        {props.map.areas.map((candidate) => <UiButton aria-current={candidate.id === area?.id ? 'page' : undefined} className={candidate.id === area?.id ? '!border-[var(--accent)] !bg-[var(--accent)] !text-[var(--accent-foreground)]' : ''} key={candidate.id} onClick={() => changeArea(candidate.id)} type="button">
+          <Armchair aria-hidden="true" size={17} />
+          <span className="max-w-full truncate">{candidate.name}</span>
         </UiButton>)}
       </nav>
-      <div className={`flex min-w-0 flex-1 gap-3 max-md:flex-col ${props.selection ? 'min-h-112 md:min-h-0' : 'min-h-112'}`}>
+      <div className={`flex min-w-0 flex-1 gap-2 max-md:flex-col ${props.selection ? 'min-h-112 md:min-h-0' : 'min-h-0'}`}>
         <section
-          className={`relative flex-1 overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] shadow-[var(--shadow)] ${props.selection ? 'min-h-105 cursor-default md:min-h-0' : 'min-h-105 touch-none cursor-grab active:cursor-grabbing md:min-h-112'}`}
-          onPointerDown={props.selection ? undefined : viewportApi.startBackgroundPointer}
-          onPointerMove={props.selection ? undefined : viewportApi.moveBackgroundPointer}
-          onPointerUp={props.selection ? undefined : viewportApi.endBackgroundPointer}
-          onPointerCancel={props.selection ? undefined : viewportApi.endBackgroundPointer}
-          onWheel={props.selection ? undefined : viewportApi.onWheel}
+          aria-label={`Mapa de ${area?.name ?? 'mesas'}`}
+          className={`relative flex-1 touch-none overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[radial-gradient(var(--separator)_1px,transparent_1px)] bg-[length:22px_22px] bg-[var(--surface-secondary)] shadow-[var(--shadow)] ${props.selection ? 'min-h-105 md:min-h-0' : 'min-h-0'}`}
+          onPointerDown={startSwipe}
+          onPointerMove={moveSwipe}
+          onPointerUp={finishSwipe}
+          onPointerCancel={cancelSwipe}
+          onLostPointerCapture={cancelSwipe}
           ref={canvasRef}
         >
-          <div className="map-transform-layer absolute z-[2]" style={{ width: planeSize.width * viewport.zoom, height: planeSize.height * viewport.zoom, left: viewport.panX, top: viewport.panY }}>
+          <div className="map-transform-layer absolute z-[2]" style={{ width: planeSize.width * viewport.zoom, height: planeSize.height * viewport.zoom, left: viewport.panX, top: viewport.panY, transform: 'translateX(var(--reservation-swipe-x, 0px))', opacity: 'var(--reservation-swipe-opacity, 1)' }}>
             {mapElements.map((element) => <div
               aria-hidden="true"
               className={`pointer-events-none absolute z-0 ${element.kind === 'wall' ? 'rounded-[3px] bg-[repeating-linear-gradient(90deg,#64748b_0_18px,#94a3b8_18px_20px)] shadow-[inset_0_0_0_1px_rgba(15,23,42,.28)]' : element.kind === 'column' ? 'box-border rounded-full border-[3px] border-[#64748b] bg-[repeating-linear-gradient(45deg,#cbd5e1_0_5px,#94a3b8_5px_7px)]' : 'flex items-center justify-center overflow-hidden text-center font-black tracking-[.04em] text-[var(--muted)] [&>span]:truncate'}`}
@@ -137,33 +163,29 @@ export function ReservationMapView(props: Props) {
               const primary = next?.tables[0]?.id === table.id
               const selected = props.selection?.selectedTableIds.includes(table.id) ?? selectedTableId === table.id
               const conflict = conflictTableIds.has(table.id)
+              const compact = planeSize.height * viewport.zoom * table.height / 100 < 72
+                || planeSize.width * viewport.zoom * table.width / 100 < 88
               return <UiButton
+                aria-label={`Mesa ${table.name}, ${table.capacity} plazas${next ? ', con reserva' : ''}${conflict ? ', conflicto' : ''}`}
                 aria-pressed={props.selection ? selected : undefined}
-                className={`absolute flex min-h-15 min-w-18 flex-col items-center justify-center gap-1 overflow-hidden border-2 border-[var(--separator)] bg-[var(--surface)] p-1.5 text-[var(--foreground)] shadow-[0_5px_14px_rgba(17,24,39,0.11)] disabled:opacity-40 [&>strong]:truncate [&>span]:truncate [&>small]:truncate [&>em]:truncate [&>small]:flex [&>small]:items-center [&>small]:gap-1 [&>small]:text-[var(--muted)] [&>span]:flex [&>span]:items-center [&>span]:gap-1 [&>span]:rounded-md [&>span]:bg-[color-mix(in_srgb,var(--warning)_13%,var(--surface))] [&>span]:px-1.5 [&>span]:py-1 [&>span]:text-[10px] [&>span]:font-extrabold [&>em]:text-[9px] [&>em]:not-italic [&>em]:font-extrabold [&>em]:text-[var(--danger)] ${table.shape === 'round' ? 'rounded-full' : table.shape === 'square' ? 'rounded-xl' : 'rounded-lg'} ${selected ? 'outline-4 outline-[color-mix(in_srgb,var(--accent)_35%,transparent)]' : ''} ${conflict ? 'border-[var(--warning)]' : ''} ${!props.selection && props.map.operationalMap && operational.status === 'occupied' ? 'border-[var(--danger)]' : ''}`}
+                className={`absolute flex min-h-0 min-w-0 flex-col items-center justify-center gap-1 overflow-hidden border-2 border-[var(--separator)] bg-[var(--surface)] p-1.5 text-[var(--foreground)] shadow-[0_5px_14px_rgba(17,24,39,0.11)] disabled:opacity-40 [&>strong]:truncate [&>span]:truncate [&>small]:truncate [&>em]:truncate [&>small]:flex [&>small]:items-center [&>small]:gap-1 [&>small]:text-[var(--muted)] [&>span]:flex [&>span]:items-center [&>span]:gap-1 [&>span]:rounded-md [&>span]:bg-[color-mix(in_srgb,var(--warning)_13%,var(--surface))] [&>span]:px-1.5 [&>span]:py-1 [&>span]:text-[10px] [&>span]:font-extrabold [&>em]:text-[9px] [&>em]:not-italic [&>em]:font-extrabold [&>em]:text-[var(--danger)] ${table.shape === 'round' ? 'rounded-full' : table.shape === 'square' ? 'rounded-xl' : 'rounded-lg'} ${selected ? 'outline-4 outline-[color-mix(in_srgb,var(--accent)_35%,transparent)]' : ''} ${conflict ? 'border-[var(--warning)]' : ''} ${!props.selection && props.map.operationalMap && operational.status === 'occupied' ? 'border-[var(--danger)]' : ''}`}
                 disabled={props.selection?.disabled || !table.isActive}
                 key={table.id}
                 onClick={() => selectTable(table.id)}
-                style={{ left: `${table.positionX}%`, top: `${table.positionY}%`, width: `${table.width}%`, height: `${table.height}%` }}
+                style={{ left: `${table.positionX}%`, top: `${table.positionY}%`, width: `${table.width}%`, height: `${table.height}%`, padding: compact ? 0 : undefined, gap: compact ? 0 : undefined }}
                 type="button"
               >
-                <strong className="flex items-center gap-1">{selected && props.selection ? <Check size={13} /> : null}{table.name}</strong>
-                <small><Users size={13} /> {table.capacity}</small>
-                {next ? <span>{primary ? `${new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit' }).format(new Date(next.startsAt))} · ${next.customerName.split(' ')[0]}` : 'Vinculada'}{tableReservations.length > 1 ? <b>+{tableReservations.length - 1}</b> : null}</span> : null}
-                {conflict ? <em>Conflicto</em> : null}
-                {!props.selection && props.map.operationalMap && operational.status === 'occupied' ? <em>Ocupada ahora</em> : null}
+                <strong className={`flex min-h-0 max-w-full shrink-0 items-center gap-1 ${compact ? 'text-xs leading-none' : ''}`}>{selected && props.selection ? <Check size={13} /> : null}{table.name}{compact && next ? <span aria-hidden="true" className="size-1.5 shrink-0 rounded-full bg-[var(--warning)]" /> : null}{compact && conflict ? <ShieldAlert aria-hidden="true" size={12} /> : null}</strong>
+                {!compact ? <small><Users size={13} /> {table.capacity}</small> : null}
+                {next && !compact ? <span>{primary ? `${new Intl.DateTimeFormat('es', { hour: '2-digit', minute: '2-digit' }).format(new Date(next.startsAt))} · ${next.customerName.split(' ')[0]}` : 'Vinculada'}{tableReservations.length > 1 ? <b>+{tableReservations.length - 1}</b> : null}</span> : null}
+                {conflict && !compact ? <em>Conflicto</em> : null}
+                {!compact && !props.selection && props.map.operationalMap && operational.status === 'occupied' ? <em>Ocupada ahora</em> : null}
               </UiButton>
             })}
           </div>
           {!tables.length ? <div className="absolute inset-0 grid place-items-center font-extrabold text-[var(--muted)]">No hay mesas activas en esta zona.</div> : null}
-          {!props.selection ? <MapViewportControls
-            onFit={() => canvasRef.current && fitViewport(canvasRef.current, fittedItems, planeSize)}
-            onReset={() => viewportApi.setViewport({ zoom: 1, panX: 0, panY: 0 })}
-            onZoomIn={() => canvasRef.current && viewportApi.zoomBy(1.2, canvasRef.current)}
-            onZoomOut={() => canvasRef.current && viewportApi.zoomBy(1 / 1.2, canvasRef.current)}
-            zoom={viewport.zoom}
-          /> : null}
         </section>
-        <aside className={`w-full max-h-64 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 md:max-h-none md:w-64 lg:w-72 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:border-b [&>header]:border-[var(--separator)] [&>header]:pb-2.5 [&_h3]:m-0 [&_p]:m-0 [&_p]:text-xs [&_p]:text-[var(--muted)] [&>header_span]:text-xs [&>header_span]:text-[var(--muted)] [&>button]:grid [&>button]:h-auto [&>button]:min-h-16 [&>button]:shrink-0 [&>button]:w-full [&>button]:whitespace-normal [&>button]:leading-normal [&>button]:items-center [&>button]:gap-2 [&>button]:rounded-none [&>button]:border-0 [&>button]:border-b [&>button]:border-[var(--separator)] [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-3 [&>button]:text-left [&>button]:text-[var(--foreground)] [&>button_time]:font-black [&>button_span]:min-w-0 [&>button_span]:grid [&>button_strong]:break-words [&>button_span]:gap-1 [&>button_small]:text-[var(--muted)] ${props.selection ? '[&>button]:grid-cols-[minmax(0,1fr)_auto] [&>button]:items-center [&>button_span]:min-w-0 [&>button_svg]:justify-self-end' : '[&>button]:grid-cols-[3.5rem_minmax(0,1fr)]'}`}>
+        {props.selection || selectedTableId ? <aside className={`w-full max-h-36 shrink-0 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 md:max-h-none md:w-64 lg:w-72 [&>header]:flex [&>header]:items-center [&>header]:justify-between [&>header]:gap-2 [&>header]:border-b [&>header]:border-[var(--separator)] [&>header]:pb-2.5 [&_h3]:m-0 [&_p]:m-0 [&_p]:text-xs [&_p]:text-[var(--muted)] [&>header_span]:text-xs [&>header_span]:text-[var(--muted)] [&>button]:grid [&>button]:h-auto [&>button]:min-h-16 [&>button]:shrink-0 [&>button]:w-full [&>button]:whitespace-normal [&>button]:leading-normal [&>button]:items-center [&>button]:gap-2 [&>button]:rounded-none [&>button]:border-0 [&>button]:border-b [&>button]:border-[var(--separator)] [&>button]:bg-transparent [&>button]:px-1 [&>button]:py-3 [&>button]:text-left [&>button]:text-[var(--foreground)] [&>button_time]:font-black [&>button_span]:min-w-0 [&>button_span]:grid [&>button_strong]:break-words [&>button_span]:gap-1 [&>button_small]:text-[var(--muted)] ${props.selection ? '[&>button]:grid-cols-[minmax(0,1fr)_auto] [&>button]:items-center [&>button_span]:min-w-0 [&>button_svg]:justify-self-end' : '[&>button]:grid-cols-[3.5rem_minmax(0,1fr)]'}`}>
           {props.selection ? <>
             <header>
               <div><h3>Mesas seleccionadas</h3><span>{selectedTables.length} elegidas</span></div>
@@ -208,7 +230,7 @@ export function ReservationMapView(props: Props) {
             </UiButton>)}
             {!selectedReservations.length ? <p>Esta mesa no tiene reservas para la fecha seleccionada.</p> : null}
           </> : <p>Selecciona una mesa para consultar sus reservas o crear una nueva.</p>}
-        </aside>
+        </aside> : null}
       </div>
     </div>
   )
