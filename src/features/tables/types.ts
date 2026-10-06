@@ -1,5 +1,6 @@
 import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TicketLine, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
 import type { ReservationStatus } from '../reservations/types'
+import type { AssistSnapshot } from '../assist/types'
 
 export type RestaurantTableShape = 'square' | 'rectangle' | 'round'
 export type RestaurantMapElementKind = 'wall' | 'column' | 'text'
@@ -15,7 +16,7 @@ export type TableLayoutEntry = { positionX: number; positionY: number; groupId: 
 export type SessionTableLayout = { cashSessionId: string; revision: number; updatedAt: string; tables: Record<string, TableLayoutEntry> }
 export type RestaurantTableReservation = { id: string; customerName: string; customerPhone: string; partySize: number; startsAt: string; endsAt: string; status: ReservationStatus }
 export type RestaurantTableMapItem = RestaurantTable & { status: RestaurantTableStatus; orderId: string | null; orderOpenedAt: string | null; guestCount: number | null; totalCents: number; pendingUnits: number; readyUnits: number; groupTableIds: string[]; nextReservation: RestaurantTableReservation | null; reservationCount: number; layoutGroupId?: string | null; layoutGroupTableIds?: string[] }
-export type RestaurantMap = { areas: DiningArea[]; tables: RestaurantTableMapItem[]; layoutRevision?: number }
+export type RestaurantMap = { areas: DiningArea[]; tables: RestaurantTableMapItem[]; layoutRevision?: number; assist?: AssistSnapshot }
 export type RestaurantOrderDetail = { order: RestaurantOrder; cashRegisterName: string; lines: RestaurantOrderLine[]; tables: RestaurantTable[]; totalCents: number }
 export type RestaurantOrderGroupDetail = { id: string; orders: RestaurantOrderDetail[]; tables: RestaurantTable[] }
 export type RestaurantOrderLineMove = { lineId: string; quantity: number }

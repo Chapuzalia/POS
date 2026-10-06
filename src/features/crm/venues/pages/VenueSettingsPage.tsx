@@ -82,6 +82,15 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
     })
   }
 
+  async function configureAssist(venue: CrmVenue, enabled: boolean, sensitivity: string) {
+    await runAction(async () => {
+      const { error } = await requireSupabase().rpc('set_tickit_assist_venue', { p_venue_id: venue.id, p_enabled: enabled, p_sensitivity: sensitivity })
+      if (error) throw error
+      await onVenuesChanged()
+      sileo.success({ title: 'Tickit Assist actualizado', description: venue.name })
+    })
+  }
+
   async function submitVenueSettings(event: FormEvent<HTMLFormElement>, venue: CrmVenue) {
     event.preventDefault()
     const formData = new FormData(event.currentTarget)
@@ -200,10 +209,20 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
                 <div className="md:!col-span-2 xl:!col-span-3"><Field label="Dirección"><UiTextArea autoComplete="street-address" className={`${inputClassName} !min-h-20 !resize-y !py-3`} defaultValue={venue.address} disabled={disabled} maxLength={300} name="address" placeholder="Calle, número, localidad" rows={2} /></Field></div>
                 <section className="!overflow-hidden !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] md:!col-span-2 xl:!col-span-3">
                   <button aria-expanded={addonsExpanded} className="!flex !min-h-14 !w-full !items-center !gap-3 !border-0 !bg-transparent !px-4 !py-3 !text-left hover:!bg-[var(--crm-surface-hover)]" onClick={() => setExpandedAddonVenueId(addonsExpanded ? null : venue.id)} type="button"><Settings2 className="!size-4 !text-[var(--crm-blue)]" /><span className="!flex-1"><strong className="!block !text-xs">Addons del local</strong><span className="!text-[11px] !text-[var(--crm-text-muted)]">{activeAddons.length} activos de {contractedAddons.length} contratados</span></span><ChevronDown className={`!size-4 !text-[var(--crm-text-muted)] !transition-transform ${addonsExpanded ? '!rotate-180' : ''}`} /></button>
-                  {addonsExpanded ? <div className="!grid !border-t !border-[var(--crm-border-subtle)] sm:!grid-cols-2 xl:!grid-cols-3">{contractedAddons.map((addon) => {
-                    const enabled = hasTenantVenueAddon({ features: tenantContext.features, venue }, addon.key)
-                    return <label className="!flex !min-h-[78px] !cursor-pointer !items-start !gap-3 !border-b !border-[var(--crm-border-subtle)] !p-3.5 hover:!bg-[var(--crm-surface-hover)] sm:[&:nth-child(odd)]:!border-r xl:[&:nth-child(odd)]:!border-r-0 xl:[&:not(:nth-child(3n))]:!border-r" key={addon.key}><input checked={enabled} className="!mt-0.5 !size-4 !accent-[var(--crm-blue)]" disabled={disabled || !isOwner} onChange={(event) => void toggleVenueAddon(venue, addon.key, event.target.checked)} type="checkbox" /><span className="!min-w-0"><strong className="!flex !items-center !gap-1.5 !text-xs">{enabled ? <Check className="!size-3.5 !text-[var(--crm-green)]" /> : null}{addon.name}</strong><span className="!mt-1 !block !text-[11px] !leading-4 !text-[var(--crm-text-muted)]">{addon.description}</span>{addon.requires.length ? <span className="!mt-1 !block !text-[10px] !font-semibold !text-[var(--crm-blue)]">Requiere {addon.requires.map((key) => tenantAddonCatalog.find((item) => item.key === key)?.name ?? key).join(' + ')}</span> : null}</span></label>
-                  })}</div> : null}
+                  {addonsExpanded ? <>
+                    <div className="!grid !border-t !border-[var(--crm-border-subtle)] sm:!grid-cols-2 xl:!grid-cols-3">{contractedAddons.filter((addon) => addon.key !== 'tickit_assist').map((addon) => {
+                      const enabled = hasTenantVenueAddon({ features: tenantContext.features, venue }, addon.key)
+                      return <label className="!flex !min-h-[78px] !cursor-pointer !items-start !gap-3 !border-b !border-[var(--crm-border-subtle)] !p-3.5 hover:!bg-[var(--crm-surface-hover)] sm:[&:nth-child(odd)]:!border-r xl:[&:nth-child(odd)]:!border-r-0 xl:[&:not(:nth-child(3n))]:!border-r" key={addon.key}><input checked={enabled} className="!mt-0.5 !size-4 !accent-[var(--crm-blue)]" disabled={disabled || !isOwner} onChange={(event) => void toggleVenueAddon(venue, addon.key, event.target.checked)} type="checkbox" /><span className="!min-w-0"><strong className="!flex !items-center !gap-1.5 !text-xs">{enabled ? <Check className="!size-3.5 !text-[var(--crm-green)]" /> : null}{addon.name}</strong><span className="!mt-1 !block !text-[11px] !leading-4 !text-[var(--crm-text-muted)]">{addon.description}</span>{addon.requires.length ? <span className="!mt-1 !block !text-[10px] !font-semibold !text-[var(--crm-blue)]">Requiere {addon.requires.map((key) => tenantAddonCatalog.find((item) => item.key === key)?.name ?? key).join(' + ')}</span> : null}</span></label>
+                    })}</div>
+                    <section className="space-y-3 border-t border-[var(--crm-border-subtle)] p-4">
+                      <h3 className="text-sm font-bold">Tickit Assist</h3>
+                      {hasTenantAddon(tenantContext, 'tickit_assist') ? <>
+                        <label className="flex min-h-11 items-center gap-3 text-sm"><input type="checkbox" checked={venue.assistEnabled === true} disabled={disabled} onChange={(event) => void configureAssist(venue, event.target.checked, venue.assistSensitivity ?? 'normal')} />Activar asistencia operativa en este local</label>
+                        <Field label="Sensibilidad"><CrmSelect disabled={disabled} value={venue.assistSensitivity ?? 'normal'} onChange={(value) => void configureAssist(venue, venue.assistEnabled === true, value)} options={[{ value: 'low', label: 'Baja' }, { value: 'normal', label: 'Normal' }, { value: 'high', label: 'Alta' }]} /></Field>
+                        <p className="text-xs text-[var(--crm-text-muted)]">Detecciones orientativas, sin decisiones automáticas. Se guarda al instante.</p>
+                      </> : <p className="text-sm text-[var(--crm-text-muted)]">Tickit Assist no está disponible para este negocio. Su habilitación corresponde a superadmin.</p>}
+                    </section>
+                  </> : null}
                 </section>
                 <div className="!flex !items-center !justify-between !gap-3 md:!col-span-2 xl:!col-span-3"><p className="!m-0 !text-[11px] !text-[var(--crm-text-muted)]">Los cambios de addons se guardan al instante. Los datos generales se guardan con el botón.</p><UiButton className="!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} type="submit"><Save className="h-4 w-4" /> Guardar local</UiButton></div>
               </form> : null}

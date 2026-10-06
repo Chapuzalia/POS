@@ -1,16 +1,16 @@
 import type { CrmVenue, TenantContext } from '../../types'
 
-export const tenantAddonKeys = ['analytics_advanced', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'document_ai', 'promotions', 'cashlogy'] as const
+export const tenantAddonKeys = ['analytics_advanced', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'document_ai', 'promotions', 'cashlogy', 'tickit_assist'] as const
 export const tenantCapabilityKeys = ['analytics_basic', 'analytics_advanced', 'profitability', 'purchase_analytics', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'replenishment', 'document_ai', 'manual_discounts', 'promotions', 'cashlogy'] as const
 
 export type TenantAddonKey = typeof tenantAddonKeys[number]
 export type TenantCapabilityKey = typeof tenantCapabilityKeys[number]
 
 type FeatureContext = Pick<TenantContext, 'features'>
-type VenueFeatureContext = FeatureContext & { venue?: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled'> }
+type VenueFeatureContext = FeatureContext & { venue?: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled' | 'assistEnabled'> }
 
-export function withTenantVenueActivations(context: TenantContext, venue: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled'>): TenantContext {
-  return { ...context, venueAddonActivations: venue.addonActivations }
+export function withTenantVenueActivations(context: TenantContext, venue: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled' | 'assistEnabled'>): TenantContext {
+  return { ...context, venueAddonActivations: { ...venue.addonActivations, tickit_assist: venue.assistEnabled === true } }
 }
 
 const legacyAddonAliases: Readonly<Record<string, TenantAddonKey>> = {
@@ -35,6 +35,7 @@ export const tenantAddonCatalog: ReadonlyArray<{
   { key: 'purchases', name: 'Compras & Proveedores', description: 'Proveedores, documentos, archivo e histórico de precios.', requires: [] },
   { key: 'document_ai', name: 'Escaneo inteligente', description: 'OCR, extracción de líneas e identificación y actualización desde documentos.', requires: ['purchases', 'inventory'] },
   { key: 'promotions', name: 'Promociones avanzadas', description: 'Reglas, autoaplicación, horarios, targets, PIN y redondeos.', requires: [] },
+  { key: 'tickit_assist', name: 'Tickit Assist', description: 'Asistencia operativa orientativa durante el servicio.', requires: [] },
   { key: 'cashlogy', name: 'Cashlogy', description: 'Configuración y operativa de la integración Cashlogy.', requires: [] },
 ]
 
@@ -49,7 +50,7 @@ export function normalizeTenantFeatures(value: unknown): TenantAddonKey[] {
   return tenantAddonKeys.filter((feature) => requested.has(feature))
 }
 
-const legacyCachedAddonKeys = tenantAddonKeys.filter((key) => key !== 'analytics_advanced' && key !== 'cashlogy')
+const legacyCachedAddonKeys = tenantAddonKeys.filter((key) => key !== 'analytics_advanced' && key !== 'cashlogy' && key !== 'tickit_assist')
 
 function resolvedAddons(context: FeatureContext) {
   return context.features === undefined ? new Set<TenantAddonKey>(legacyCachedAddonKeys) : new Set(normalizeTenantFeatures(context.features))
@@ -61,6 +62,7 @@ export function hasTenantAddon(context: FeatureContext, addon: TenantAddonKey) {
 
 function isVenueAddonEnabled(context: VenueFeatureContext, addon: TenantAddonKey) {
   if (!hasTenantAddon(context, addon) || !context.venue) return hasTenantAddon(context, addon)
+  if (addon === 'tickit_assist') return context.venue.assistEnabled === true
   const assigned = context.venue.addonActivations?.[addon] ?? true
   if (!assigned) return false
   if (addon === 'inventory') return context.venue.inventoryEnabled

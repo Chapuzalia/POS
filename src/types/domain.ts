@@ -188,6 +188,8 @@ export type LoginInput = {
 }
 
 export type CrmVenue = {
+  assistEnabled?: boolean
+  assistSensitivity?: 'low' | 'normal' | 'high'
   id: string
   name: string
   catalogProfile: CatalogProfile

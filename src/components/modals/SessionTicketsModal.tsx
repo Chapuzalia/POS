@@ -1,8 +1,9 @@
-import { ChevronLeft, ChevronRight, CreditCard, LoaderCircle, Printer, Search, Trash2, X } from 'lucide-react'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { Banknote, ChevronLeft, ChevronRight, CreditCard, LoaderCircle, Minus, Plus, Printer, RotateCcw, Search, Trash2, X } from 'lucide-react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { formatMoney, formatTicketNumber } from '../../lib/format'
 import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from '../../types'
 import { AppModal, Button, Input } from '../ui'
+import { NumericKeypadModal } from '../ui/NumericKeypadModal'
 import { usePrintAgent } from '../../features/local-printing'
 import {
   getVisibleTicketPages,
@@ -38,6 +39,38 @@ function getSessionTicketLabel(ticket: SessionTicketRecord) {
   return ticket.ticketNumber ? formatTicketNumber(ticket.ticketNumber) : 'Pendiente de numeración'
 }
 
+function TicketModificationModal({ children, dismissDisabled = false, maxWidth = 480, onClose, ticket, title }: {
+  children: ReactNode
+  dismissDisabled?: boolean
+  maxWidth?: number
+  onClose: () => void
+  ticket: SessionTicketRecord
+  title: string
+}) {
+  return (
+    <AppModal containerClassName="!p-4" dismissDisabled={dismissDisabled} label={title} maxWidth={maxWidth} onClose={onClose}>
+      <section className="flex max-h-[calc(100dvh-48px)] min-w-0 flex-col bg-[var(--surface)] text-[var(--foreground)]">
+        <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
+          <div className="min-w-0">
+            <h2 className="text-2xl font-bold">{title}</h2>
+            <p className="mt-1 break-words text-sm font-semibold text-[var(--muted)]">Ticket {getSessionTicketLabel(ticket)}</p>
+          </div>
+          <Button aria-label="Cerrar" className="min-h-11 min-w-11 shrink-0" disabled={dismissDisabled} onClick={onClose} size="sm" type="button" variant="tertiary">
+            <X className="h-5 w-5" />
+          </Button>
+        </header>
+        <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 [-webkit-overflow-scrolling:touch]">
+          <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4">
+            <span className="text-sm font-semibold text-[var(--muted)]">{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Pago no requerido'}</span>
+            <span className="font-mono text-2xl font-black tabular-nums">{formatMoney(ticket.totalCents)}</span>
+          </div>
+          {children}
+        </div>
+      </section>
+    </AppModal>
+  )
+}
+
 export function SessionTicketsModal({
   canReprint,
   initialPage,
@@ -61,6 +94,8 @@ export function SessionTicketsModal({
   const [refundTicket, setRefundTicket] = useState<SessionTicketRecord | null>(null)
   const [refundQuantities, setRefundQuantities] = useState<Record<string, number>>({})
   const [refundPaymentMethod, setRefundPaymentMethod] = useState<PaymentMethod>('cash')
+  const [refundQuantityLineId, setRefundQuantityLineId] = useState<string | null>(null)
+  const refundQuantityLine = refundTicket?.payload.lines.find((line) => line.id === refundQuantityLineId)
   const requestVersion = useRef(0)
   const totalResults = pageData?.totalResults ?? 0
   const visibleTickets = pageData?.tickets ?? []
@@ -290,64 +325,107 @@ disabled={isBusy || ticket.status !== 'active' || Boolean(ticket.linkedDocumentR
         </div>
       </section>
       {actionTicket ? (
-        <AppModal label="Modificar ticket" maxWidth={420} onClose={() => setActionTicket(null)}>
-          <div className="grid gap-4 p-5">
-            <div>
-              <h3 className="text-xl font-bold">Modificar ticket</h3>
-              <p className="mt-1 text-sm text-[var(--muted)]">Elige una acción para este ticket.</p>
-            </div>
-            <Button className="min-h-12 justify-start" onClick={() => { setPaymentChoiceTicket(actionTicket); setActionTicket(null) }} type="button" variant="secondary">
-              <CreditCard className="h-5 w-5" /> Cambiar forma de pago
+        <TicketModificationModal title="Modificar ticket" ticket={actionTicket} onClose={() => setActionTicket(null)}>
+          <div className="grid gap-3">
+            <p className="text-sm text-[var(--muted)]">Elige una acción para este ticket.</p>
+            <Button fullWidth className="min-h-16 justify-start !whitespace-normal rounded-[var(--radius)] border border-[var(--separator)] !bg-[var(--background)] px-4 text-left font-bold !text-[var(--foreground)]" onClick={() => { setPaymentChoiceTicket(actionTicket); setActionTicket(null) }} type="button" variant="secondary">
+              <CreditCard className="h-6 w-6 shrink-0 text-[var(--accent)]" /> Cambiar forma de pago
             </Button>
-            <Button className="min-h-12 justify-start" onClick={() => { setRefundQuantities(Object.fromEntries(actionTicket.payload.lines.map((line) => [line.id, line.quantity]))); setRefundPaymentMethod('cash'); setPaymentChoiceTicket(null); setActionTicket(null); setRefundTicket(actionTicket) }} type="button" variant="secondary">
-              Devolución
+            <Button fullWidth className="min-h-16 justify-start !whitespace-normal rounded-[var(--radius)] border border-[var(--separator)] !bg-[var(--background)] px-4 text-left font-bold !text-[var(--foreground)]" onClick={() => { setRefundQuantities(Object.fromEntries(actionTicket.payload.lines.map((line) => [line.id, line.quantity]))); setRefundPaymentMethod('cash'); setPaymentChoiceTicket(null); setActionTicket(null); setRefundTicket(actionTicket) }} type="button" variant="secondary">
+              <RotateCcw className="h-6 w-6 shrink-0 text-[var(--accent)]" /> Devolución
             </Button>
           </div>
-        </AppModal>
+        </TicketModificationModal>
       ) : null}
       {paymentChoiceTicket ? (
-        <AppModal label="Cambiar forma de pago" maxWidth={420} onClose={() => setPaymentChoiceTicket(null)}>
-          <div className="grid gap-4 p-5">
-            <h3 className="text-xl font-bold">Cambiar forma de pago</h3>
+        <TicketModificationModal title="Cambiar forma de pago" ticket={paymentChoiceTicket} onClose={() => setPaymentChoiceTicket(null)}>
+          <div className="grid gap-4">
             <div className="grid grid-cols-2 gap-3">
               {paymentMethods.map((method) => (
-                <Button className="min-h-14" key={method} onClick={() => { void changePayment(paymentChoiceTicket, method); setPaymentChoiceTicket(null) }} type="button" variant={paymentChoiceTicket.paymentMethod === method ? 'primary' : 'secondary'}>
+                <Button fullWidth className="min-h-20 flex-col gap-2 rounded-[var(--radius)] border border-[var(--separator)]" key={method} onClick={() => { void changePayment(paymentChoiceTicket, method); setPaymentChoiceTicket(null) }} type="button" variant={paymentChoiceTicket.paymentMethod === method ? 'primary' : 'secondary'}>
+                  {method === 'cash' ? <Banknote className="h-6 w-6" /> : <CreditCard className="h-6 w-6" />}
                   {paymentLabels[method]}
                 </Button>
               ))}
             </div>
           </div>
-        </AppModal>
+        </TicketModificationModal>
       ) : null}
       {refundTicket ? (
-        <AppModal label="Devolución" maxWidth={560} onClose={() => setRefundTicket(null)}>
-          <div className="grid max-h-[calc(100svh-48px)] gap-4 overflow-y-auto p-5">
-            <div>
-              <h3 className="text-xl font-bold">Devolución</h3>
-              <p className="mt-1 text-sm text-[var(--muted)]">Selecciona las cantidades que quieres devolver.</p>
-            </div>
+        <TicketModificationModal dismissDisabled={Boolean(refundQuantityLine)} title="Devolución" ticket={refundTicket} maxWidth={560} onClose={() => setRefundTicket(null)}>
+          <div className="grid gap-4">
+            <p className="text-sm text-[var(--muted)]">Selecciona las cantidades que quieres devolver.</p>
             <div className="grid gap-2">
               {refundTicket.payload.lines.map((line) => (
-                <label className="flex min-h-14 items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3" key={line.id}>
-                  <span className="min-w-0 truncate text-sm font-semibold">{line.productName} <span className="text-[var(--muted)]">(máx. {line.quantity})</span></span>
-                  <Input aria-label={`Cantidad a devolver de ${line.productName}`} className="w-24 text-center" max={line.quantity} min={0} onChange={(event) => setRefundQuantities((current) => ({ ...current, [line.id]: Math.min(line.quantity, Math.max(0, Number(event.target.value) || 0)) }))} type="number" value={refundQuantities[line.id] ?? 0} />
-                </label>
+                <div className="grid min-w-0 gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-center" key={line.id}>
+                  <div className="min-w-0">
+                    <p className="break-words text-sm font-semibold">{line.productName}</p>
+                    <p className="mt-1 text-xs text-[var(--muted)]">Máximo: {line.quantity}</p>
+                  </div>
+                  <div aria-label={`Cantidad a devolver de ${line.productName}`} className="grid grid-cols-[48px_72px_48px] items-center gap-2" role="group">
+                    <Button
+                      aria-label={`Reducir cantidad de ${line.productName}`}
+                      className="min-h-12 !p-0"
+                      disabled={(refundQuantities[line.id] ?? 0) <= 0}
+                      fullWidth
+                      onClick={() => setRefundQuantities((current) => ({ ...current, [line.id]: Math.max(0, (current[line.id] ?? 0) - 1) }))}
+                      type="button"
+                      variant="secondary"
+                    >
+                      <Minus aria-hidden="true" className="h-5 w-5" />
+                    </Button>
+                    <Button
+                      aria-label={`Editar cantidad de ${line.productName}`}
+                      className="min-h-12 overflow-hidden border border-[var(--field-border)] !bg-[var(--field)] !px-2 font-mono text-lg font-bold tabular-nums !text-[var(--foreground)]"
+                      fullWidth
+                      onClick={() => setRefundQuantityLineId(line.id)}
+                      type="button"
+                      variant="secondary"
+                    >
+                      <span className="truncate">{refundQuantities[line.id] ?? 0}</span>
+                    </Button>
+                    <Button
+                      aria-label={`Aumentar cantidad de ${line.productName}`}
+                      className="min-h-12 !p-0"
+                      disabled={(refundQuantities[line.id] ?? 0) >= line.quantity}
+                      fullWidth
+                      onClick={() => setRefundQuantities((current) => ({ ...current, [line.id]: Math.min(line.quantity, (current[line.id] ?? 0) + 1) }))}
+                      type="button"
+                      variant="secondary"
+                    >
+                      <Plus aria-hidden="true" className="h-5 w-5" />
+                    </Button>
+                  </div>
+                </div>
               ))}
             </div>
             <div className="grid gap-2">
               <span className="text-sm font-bold">Forma de devolución</span>
               <div className="grid grid-cols-2 gap-3">
                 {paymentMethods.map((method) => (
-                  <Button className="min-h-12" key={method} onClick={() => setRefundPaymentMethod(method)} type="button" variant={refundPaymentMethod === method ? 'primary' : 'secondary'}>{paymentLabels[method]}</Button>
+                  <Button fullWidth className="min-h-12" key={method} onClick={() => setRefundPaymentMethod(method)} type="button" variant={refundPaymentMethod === method ? 'primary' : 'secondary'}>{paymentLabels[method]}</Button>
                 ))}
               </div>
             </div>
-            <div className="flex justify-end gap-2">
+            <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--separator)] pt-4">
               <Button onClick={() => setRefundTicket(null)} type="button" variant="tertiary">Cancelar</Button>
-              <Button disabled={!Object.values(refundQuantities).some((quantity) => quantity > 0) || !onRefund} onClick={() => { const lines = refundTicket.payload.lines.map((line) => ({ lineId: line.id, quantity: refundQuantities[line.id] ?? 0 })).filter((line) => line.quantity > 0); if (onRefund && lines.length) void onRefund(refundTicket, lines, refundPaymentMethod); setRefundTicket(null) }} type="button">Confirmar devolución</Button>
+              <Button disabled={!Object.values(refundQuantities).some((quantity) => quantity > 0) || !onRefund} onClick={() => { const lines = refundTicket.payload.lines.map((line) => ({ lineId: line.id, quantity: refundQuantities[line.id] ?? 0 })).filter((line) => line.quantity > 0); if (onRefund && lines.length) void onRefund(refundTicket, lines, refundPaymentMethod); setRefundTicket(null) }} type="button" variant="primary">Confirmar devolución</Button>
             </div>
           </div>
-        </AppModal>
+        </TicketModificationModal>
+      ) : null}
+      {refundQuantityLine ? (
+        <NumericKeypadModal
+          initialValue={String(refundQuantities[refundQuantityLine.id] ?? 0)}
+          onCancel={() => setRefundQuantityLineId(null)}
+          onConfirm={(value) => {
+            const quantity = Math.min(refundQuantityLine.quantity, Math.max(0, Number(value.replace(',', '.')) || 0))
+            setRefundQuantities((current) => ({ ...current, [refundQuantityLine.id]: quantity }))
+            setRefundQuantityLineId(null)
+          }}
+          subtitle={`${refundQuantityLine.productName} · Máximo: ${refundQuantityLine.quantity}`}
+          title="Cantidad a devolver"
+        />
       ) : null}
     </AppModal>
   )
