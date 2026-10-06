@@ -7,6 +7,7 @@ const APP_SHELL = [
   '/',
   '/index.html',
   '/manifest.webmanifest',
+  '/crm.webmanifest',
   '/favicon.svg',
   '/icons/apple-touch-icon.png',
   '/icons/pwa-192x192.png',
