@@ -3,6 +3,7 @@ import { Input as UiInput } from "../../../../components/ui/Input";
 import { Checkbox as UiCheckbox } from "../../../../components/ui/Checkbox";
 import { Button as UiButton } from "../../../../components/ui/Button";
 import { CrmModal } from "../../shared/components/CrmModal";
+import { useCrmModalBusy } from "../../shared/components/CrmModalBusyContext";
 import { CrmSelect } from "../../shared/components/CrmSelect";
 import { EmptyList } from "../../shared/components/EmptyList";
 import { Field } from "../../shared/components/Field";
@@ -379,6 +380,8 @@ export function DiscountEditor({
   targetOptions: DiscountTargetProductOption[];
   tenantContext: TenantContext;
 }) {
+  const modalBusy = useCrmModalBusy(disabled)
+
   const [name, setName] = useState(discount?.name ?? "");
   const [ruleKind, setRuleKind] = useState<DiscountRuleKind>(
     discount?.ruleKind ?? "discount",
@@ -513,7 +516,7 @@ export function DiscountEditor({
   }
 
   return (
-    <CrmModal
+    <CrmModal dismissDisabled={modalBusy}
       label={discount ? "Editar regla" : "Añadir regla"}
       onClose={onClose}
     >
@@ -527,9 +530,9 @@ export function DiscountEditor({
               Una regla activa por ticket
             </small>
           </div>
-          <UiButton
+          <UiButton disabled={modalBusy}
             aria-label="Cerrar"
-            className="size-10 rounded-[10px] border-0 bg-[var(--crm-surface-soft)] p-0"
+            className="border-0 bg-[var(--crm-surface-soft)] p-0 !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
             onClick={onClose}
             type="button"
           >

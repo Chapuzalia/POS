@@ -1,3 +1,4 @@
+import { appConfirm } from '../../components/ui/appDialogStore'
 import { getReadableError } from '../../utils/errors.ts'
 import { NativeSelect as UiNativeSelect } from '../../components/ui/NativeSelect'
 import { Input as UiInput } from '../../components/ui/Input'
@@ -63,13 +64,13 @@ export function TableManagementPage({ context, disabled, venueId, onError }: Pro
   async function addTable(source?: RestaurantTable) { if (!selectedArea) return; await run(async () => { const created = await createRestaurantTable(context, { venueId, areaId: selectedArea.id, name: source ? `${source.name} copia` : `Mesa ${areaTables.length + 1}`, capacity: source?.capacity ?? 2, shape: source?.shape ?? 'square', positionX: Math.min((source?.positionX ?? 6) + (source ? 3 : 0), 84), positionY: Math.min((source?.positionY ?? 8) + (source ? 3 : 0), 84), width: source?.width ?? 12, height: source?.height ?? 12, sortOrder: tables.length }); await refresh(); setSelectedTableId(created.id) }) }
   async function saveSelectedTable() { if (selectedTable) await run(async () => { await updateRestaurantTable(context, selectedTable.id, selectedTable); await refresh() }) }
   async function removeSelectedTable() {
-    if (!selectedTable || !window.confirm(`¿Eliminar definitivamente la mesa “${selectedTable.name}”? Su nombre se conservará en el histórico de comandas y reservas.`)) return
+    if (!selectedTable || !(await appConfirm(`¿Eliminar definitivamente la mesa “${selectedTable.name}”? Su nombre se conservará en el histórico de comandas y reservas.`))) return
     await run(async () => { await deleteRestaurantTable(context, selectedTable.id); setSelectedTableId(null); await refresh() })
   }
   async function removeSelectedArea() {
     if (!selectedArea) return
     if (areaTables.length) { onError(`No se puede eliminar “${selectedArea.name}” porque contiene ${areaTables.length} ${areaTables.length === 1 ? 'mesa' : 'mesas'}. Elimínalas primero.`); return }
-    if (!window.confirm(`¿Eliminar definitivamente la zona “${selectedArea.name}”? Esta acción no se puede deshacer.`)) return
+    if (!(await appConfirm(`¿Eliminar definitivamente la zona “${selectedArea.name}”? Esta acción no se puede deshacer.`))) return
     await run(async () => { await deleteDiningArea(context, selectedArea.id); setSelectedAreaId(''); setSelectedElementId(null); await refresh() })
   }
   function patchSelectedTable(patch: Partial<RestaurantTable>) { if (selectedTableId) setTables((current) => current.map((table) => table.id === selectedTableId ? { ...table, ...patch } : table)) }

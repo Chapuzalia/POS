@@ -1,3 +1,4 @@
+import { appConfirm } from '../../../components/ui/appDialogStore'
 import { reportOperationError } from '../../../lib/observability.ts'
 import { getReadableError } from '../../../utils/errors.ts'
 import {
@@ -225,7 +226,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
             {health?.device?.serialNumber ? ` · ${health.device.serialNumber}` : ''}
           </p>
         </div>
-        {!management.intent ? <Button aria-label="Cerrar" onClick={closeModal} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button> : null}
+        {!management.intent ? <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" onClick={closeModal} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button> : null}
       </header>
 
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5">
@@ -415,8 +416,8 @@ function OperationView(props: OperationViewProps) {
     {critical ? <div className="flex flex-wrap justify-end gap-2">
       {management.missingIntent ? <Button
         disabled={busy}
-        onClick={() => {
-          if (!window.confirm('Descarta solo esta referencia si has comprobado que Cashlogy no está aceptando ni entregando efectivo. ¿Continuar?')) return
+        onClick={async () => {
+          if (!(await appConfirm('Descarta solo esta referencia si has comprobado que Cashlogy no está aceptando ni entregando efectivo. ¿Continuar?'))) return
           void management.discardMissingIntent().catch(() => undefined)
         }}
         variant="dangerSoft"

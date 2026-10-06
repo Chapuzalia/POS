@@ -1147,7 +1147,7 @@ export function SupplierReceiptsCrm({
               disabled={isConfirmedDocument} maxLength={80} value={documentNumber}
               onChange={(event) => setDocumentNumber(event.target.value)} />
           </div>
-          <Button
+          <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
             aria-label="Cerrar documento"
             onClick={() => {
               setDetail(null);
@@ -1345,7 +1345,7 @@ export function SupplierReceiptsCrm({
       </div> : null}
 
       {reparseConfirmation ? (
-        <CrmModal label="Actualizar líneas con este proveedor" onClose={() => setReparseConfirmation(false)}>
+        <CrmModal dismissDisabled={busy} label="Actualizar líneas con este proveedor" onClose={() => setReparseConfirmation(false)}>
           <div className="grid gap-4 p-5">
             <h3 className="text-lg font-bold">Recalcular las líneas</h3>
             <p className="text-sm text-[var(--crm-text-muted)]">Hay correcciones manuales. Las líneas detectadas se recalcularán con el proveedor seleccionado y pueden sobrescribir los cambios no confirmados.</p>
@@ -1357,7 +1357,7 @@ export function SupplierReceiptsCrm({
         </CrmModal>
       ) : null}
       {editingLine && draft ? (
-        <CrmModal
+        <CrmModal dismissDisabled={busy}
           label={`Revisar ${editingLine.descriptionRaw}`}
           onClose={() => setEditingLineId(null)}
         >
@@ -1371,7 +1371,7 @@ export function SupplierReceiptsCrm({
                   {editingLine.descriptionRaw}
                 </h2>
               </div>
-              <Button
+              <Button disabled={busy} className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
                 aria-label="Cerrar"
                 onClick={() => setEditingLineId(null)}
                 type="button"
@@ -1638,7 +1638,7 @@ export function SupplierReceiptsCrm({
             </div>
             {!creatingItem ? (
               <footer className="grid grid-cols-2 gap-2 border-t border-[var(--crm-border-subtle)] p-4 pb-[max(16px,env(safe-area-inset-bottom))]">
-                <Button
+                <Button disabled={busy}
                   onClick={() => setEditingLineId(null)}
                   type="button"
                   variant="tertiary"

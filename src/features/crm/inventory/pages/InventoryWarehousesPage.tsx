@@ -6,6 +6,7 @@ import { Monitor, Plus, Save, Trash2, Warehouse, X } from 'lucide-react'
 import { useCallback, useEffect, useState } from 'react'
 import type { TenantContext } from '../../../../types'
 import { CrmModal } from '../../shared/components/CrmModal'
+import { useCrmModalBusy } from '../../shared/components/CrmModalBusyContext'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
@@ -154,6 +155,8 @@ function WarehouseDeleteModal({
   warehouse: InventoryWarehouse
   warehouses: InventoryWarehouse[]
 }) {
+  const modalBusy = useCrmModalBusy(disabled)
+
   const [targetWarehouseId, setTargetWarehouseId] = useState('')
   const needsTransfer = stockProductCount > 0
   const targetWarehouses = warehouses.filter((candidate) => (
@@ -174,13 +177,13 @@ function WarehouseDeleteModal({
   }
 
   return (
-    <CrmModal label={`Eliminar ${warehouse.name}`} onClose={onClose}>
+    <CrmModal dismissDisabled={modalBusy} label={`Eliminar ${warehouse.name}`} onClose={onClose}>
       <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]">
         <div className="!min-w-0">
           <h2 className="!m-0 !truncate !text-lg !font-bold">Eliminar {warehouse.name}</h2>
           <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">Esta operación también eliminará sus asignaciones a los TPV.</p>
         </div>
-        <UiButton aria-label="Cerrar" className="!inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" disabled={disabled} onClick={onClose} type="button"><X className="!size-4" /></UiButton>
+        <UiButton aria-label="Cerrar" className="!inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" disabled={modalBusy} onClick={onClose} type="button"><X className="!size-4" /></UiButton>
       </div>
 
       <div className="!grid !gap-4 !px-[18px] !py-5 md:!px-[22px]">
@@ -208,7 +211,7 @@ function WarehouseDeleteModal({
       </div>
 
       <div className="!flex !justify-end !gap-2 !border-t !border-[var(--crm-border-subtle)] !px-[18px] !py-4 md:!px-[22px]">
-        <UiButton className="!inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)]" disabled={disabled} onClick={onClose} type="button">Cancelar</UiButton>
+        <UiButton className="!inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)]" disabled={modalBusy} onClick={onClose} type="button">Cancelar</UiButton>
         <UiButton className="!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-red)]" disabled={disabled || (needsTransfer && !targetWarehouseId)} onClick={() => { void remove() }} type="button"><Trash2 className="!size-4" /> Eliminar almacén</UiButton>
       </div>
     </CrmModal>
@@ -391,6 +394,8 @@ function WarehouseEditor({ disabled, onClose, onSaved, runAction, selectedVenueI
   selectedVenueId: string
   tenantContext: TenantContext
 }) {
+  const modalBusy = useCrmModalBusy(disabled)
+
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
   const [validationError, setValidationError] = useState<string | null>(null)
@@ -407,10 +412,10 @@ function WarehouseEditor({ disabled, onClose, onSaved, runAction, selectedVenueI
   }
 
   return (
-    <CrmModal label="Nuevo almacén" onClose={onClose}>
+    <CrmModal dismissDisabled={modalBusy} label="Nuevo almacén" onClose={onClose}>
       <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] bg-transparent p-3 text-[var(--crm-text)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:text-[15px] [&_span]:font-bold [&_small]:truncate [&_small]:text-xs [&_small]:font-medium [&_small]:text-[var(--crm-text-muted)] !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[18px] !py-5 md:!px-[22px]">
         <div><span>Nuevo almacén</span><small>Ubicación física del stock de este local</small></div>
-        <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-muted)] shadow-none transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={onClose} type="button"><X className="!size-4" /></UiButton>
+        <UiButton disabled={modalBusy} aria-label="Cerrar" className="inline-flex items-center justify-center border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-muted)] shadow-none transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" onClick={onClose} type="button"><X className="!size-4" /></UiButton>
       </div>
       <form className="!grid !gap-4 !px-[22px] !py-5" onSubmit={(event) => { event.preventDefault(); void save() }}>
         <Field label="Nombre"><UiInput autoFocus className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px]" maxLength={80} onChange={(event) => { setName(event.target.value); setValidationError(null) }} placeholder="Barra principal" value={name} /></Field>

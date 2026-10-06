@@ -1,3 +1,4 @@
+import { appConfirm } from '../../../components/ui/appDialogStore'
 import { AlertTriangle, Ban, CheckCircle2, LoaderCircle } from 'lucide-react'
 import { useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -85,12 +86,12 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
     }
   }
 
-  const cancelPayment = () => {
+  const cancelPayment = async () => {
     const closingAcceptance = status === 'finalizing_acceptance' || status === 'dispensing_change' || status === 'processing'
     const requiresReview = critical || status === 'completed' || closingAcceptance
-    if (requiresReview && !reviewed && !window.confirm(closingAcceptance
+    if (requiresReview && !reviewed && !(await appConfirm(closingAcceptance
       ? 'Cashlogy ya está terminando el movimiento de efectivo y no puede interrumpirlo. Se esperará al resultado antes de cerrar este intento. Cancelar no devuelve dinero ni registra una venta: comprueba el efectivo. ¿Quieres continuar?'
-      : 'Comprueba la máquina y el efectivo antes de continuar. Cancelar este intento no devuelve dinero ni registra una venta. ¿Has revisado el efectivo y quieres cancelar el intento?')) return
+      : 'Comprueba la máquina y el efectivo antes de continuar. Cancelar este intento no devuelve dinero ni registra una venta. ¿Has revisado el efectivo y quieres cancelar el intento?'))) return
     void state.cancel(requiresReview).catch(() => undefined)
   }
 

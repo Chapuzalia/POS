@@ -112,7 +112,7 @@ export function MobileTicketModal({
                   {itemCount} {itemCount === 1 ? 'producto' : 'productos'} - {formatMoney(totalCents)}
                 </p>
               </div>
-              <Button aria-label={`Cerrar ${title.toLowerCase()}`} onClick={onClose} ref={closeButtonRef} size="sm" type="button" variant="tertiary">
+              <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label={`Cerrar ${title.toLowerCase()}`} onClick={onClose} ref={closeButtonRef} size="sm" type="button" variant="tertiary">
                 <X className="h-5 w-5" />
               </Button>
             </header>

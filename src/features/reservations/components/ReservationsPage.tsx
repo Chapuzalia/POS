@@ -360,6 +360,7 @@ export function ReservationsPage({ controller, isOnline }: Props) {
           date={controller.date}
           disabled={!isOnline || controller.isLoading}
           loadReservations={controller.loadReservations}
+          isBusy={controller.isLoading}
           map={controller.map}
           onClose={() => controller.setEditor(null)}
           onSave={controller.save}

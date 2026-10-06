@@ -4,6 +4,7 @@ import { Button, Input } from "../../../../components/ui";
 import { DataTable } from "../../../../components/ui/DataTable";
 import type { TenantContext } from "../../../../types";
 import { CrmModal } from "../../shared/components/CrmModal";
+import { useCrmModalBusy } from "../../shared/components/CrmModalBusyContext";
 import { EmptyList } from "../../shared/components/EmptyList";
 import type { RunAction } from "../../shared/types";
 import {
@@ -51,6 +52,8 @@ export function InventoryStockCrm({
   selectedVenueId,
   tenantContext,
 }: Props) {
+  const modalBusy = useCrmModalBusy(disabled)
+
   const [snapshot, setSnapshot] = useState<InventorySnapshot>(emptySnapshot);
   const [query, setQuery] = useState("");
   const [selectedId, setSelectedId] = useState<string | null>(null);
@@ -321,7 +324,7 @@ export function InventoryStockCrm({
       )}
 
       {selected ? (
-        <CrmModal
+        <CrmModal dismissDisabled={modalBusy}
           label={`Stock de ${selected.name}`}
           onClose={() => setSelectedId(null)}
         >
@@ -332,7 +335,7 @@ export function InventoryStockCrm({
                 Unidad física: {selectedUnit?.name ?? "Sin unidad"}
               </p>
             </div>
-            <Button
+            <Button disabled={modalBusy} className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
               aria-label="Cerrar"
               onClick={() => setSelectedId(null)}
               type="button"
@@ -509,7 +512,7 @@ export function InventoryStockCrm({
           </div>
 
           <div className="flex justify-end gap-2 border-t border-[var(--crm-border-subtle)] p-4">
-            <Button
+            <Button disabled={modalBusy}
               onClick={() => setSelectedId(null)}
               type="button"
               variant="tertiary"

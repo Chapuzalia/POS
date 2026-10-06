@@ -37,6 +37,7 @@ type Props = {
   conflicts: ReservationConflict[];
   date: string;
   disabled: boolean;
+  isBusy?: boolean;
   loadReservations: (date: string) => Promise<Reservation[]>;
   map: ReservationMap;
   onClose: () => void;
@@ -447,7 +448,8 @@ export function ReservationFormModal(props: Props) {
   }, [date, isCreateFlow, loadReservations, props.date, props.reservations, step]);
 
   function requestClose() {
-    if (dirty && !props.disabled) setDiscardConfirmation(true);
+    if (props.isBusy ?? props.disabled) return;
+    if (dirty) setDiscardConfirmation(true);
     else props.onClose();
   }
 
@@ -553,7 +555,7 @@ export function ReservationFormModal(props: Props) {
       <AppModal
         containerClassName={`!items-end !p-0 md:!items-center ${isCreateFlow && step === 2 ? "md:!p-3" : "md:!p-6"}`}
         dialogClassName={`!max-h-[calc(100dvh-3.5rem)] !rounded-b-none !rounded-t-2xl !border-x-0 !border-b-0 md:!rounded-2xl md:!border ${isCreateFlow && step === 2 ? "md:!max-h-[calc(100dvh-1.5rem)]" : "md:!max-h-[calc(100dvh-3rem)]"}`}
-        dismissDisabled={props.disabled}
+        dismissDisabled={props.isBusy ?? props.disabled}
         label={props.reservation ? "Editar reserva" : "Nueva reserva"}
         maxWidth={isCreateFlow && step === 2 ? 1440 : 1200}
         onClose={requestClose}
@@ -574,7 +576,7 @@ export function ReservationFormModal(props: Props) {
             </div>
             <UiButton
               aria-label="Cerrar formulario"
-              className="grid size-10 shrink-0 place-items-center rounded-full border-0 bg-[var(--background)] text-[var(--muted)] md:size-11 md:rounded-xl md:border md:border-[var(--separator)] md:bg-[var(--surface)] md:text-[var(--foreground)]"
+              className="grid shrink-0 place-items-center border-0 bg-[var(--background)] text-[var(--muted)] md:border md:border-[var(--separator)] md:bg-[var(--surface)] md:text-[var(--foreground)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
               onClick={requestClose}
               type="button"
             >

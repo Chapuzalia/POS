@@ -1,3 +1,4 @@
+import { appAlert, appConfirm, appPrompt } from '../../../../components/ui/appDialogStore'
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { ArrowDown, ArrowUp, Eye, EyeOff, Link2, Pencil, Plus, Trash2 } from 'lucide-react'
@@ -79,19 +80,19 @@ export function CatalogStructureCrm({ catalog, disabled, mutate }: Props) {
   async function removeCategory(id: string, name: string) {
     const impact = placementsByCategory.get(id) ?? 0
     if (impact > 0) {
-      window.alert(`“${name}” se usa en ${impact} apariciones. Muévelas o elimínalas antes de borrar la categoría.`)
+      (await appAlert(`“${name}” se usa en ${impact} apariciones. Muévelas o elimínalas antes de borrar la categoría.`))
       return
     }
-    if (window.confirm(`¿Eliminar definitivamente la categoría “${name}”?`)) await mutate(() => catalogAdminService.deleteCategory(catalog.venueId, id))
+    if ((await appConfirm(`¿Eliminar definitivamente la categoría “${name}”?`))) await mutate(() => catalogAdminService.deleteCategory(catalog.venueId, id))
   }
 
   async function removeTab(id: string, label: string) {
     const impact = placementsByTab.get(id) ?? 0
     if (impact > 0) {
-      window.alert(`“${label}” contiene ${impact} apariciones. Muévelas o elimínalas antes de borrar la pestaña.`)
+      (await appAlert(`“${label}” contiene ${impact} apariciones. Muévelas o elimínalas antes de borrar la pestaña.`))
       return
     }
-    if (window.confirm(`¿Eliminar definitivamente la pestaña “${label}”?`)) await mutate(() => catalogAdminService.deleteTab(catalog.venueId, id))
+    if ((await appConfirm(`¿Eliminar definitivamente la pestaña “${label}”?`))) await mutate(() => catalogAdminService.deleteTab(catalog.venueId, id))
   }
 
   return (
@@ -105,7 +106,7 @@ export function CatalogStructureCrm({ catalog, disabled, mutate }: Props) {
               <div className="flex min-w-0 items-center justify-end gap-[7px]">
                 <UiButton aria-label="Subir categoría" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || index === 0} onClick={() => void move('categories', catalog.categories, category.id, -1)} type="button"><ArrowUp className="!size-4" /></UiButton>
                 <UiButton aria-label="Bajar categoría" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || index === catalog.categories.length - 1} onClick={() => void move('categories', catalog.categories, category.id, 1)} type="button"><ArrowDown className="!size-4" /></UiButton>
-                <UiButton aria-label="Editar categoría" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => { const name = window.prompt('Nombre de la categoría', category.name)?.trim(); if (name) void mutate(() => catalogAdminService.saveCategory(catalog.venueId, { ...category, name })) }} type="button"><Pencil className="!size-4" /></UiButton>
+                <UiButton aria-label="Editar categoría" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={async () => { const name = (await appPrompt('Nombre de la categoría', category.name))?.trim(); if (name) void mutate(() => catalogAdminService.saveCategory(catalog.venueId, { ...category, name })) }} type="button"><Pencil className="!size-4" /></UiButton>
                 <UiButton aria-label={category.active ? 'Desactivar categoría' : 'Activar categoría'} className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled} onClick={() => void mutate(() => catalogAdminService.saveCategory(catalog.venueId, { ...category, active: !category.active }))} type="button">{category.active ? <EyeOff className="!size-4" /> : <Eye className="!size-4" />}</UiButton>
                 <UiButton aria-label="Eliminar categoría" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-red-soft)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-red)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:brightness-95" disabled={disabled} onClick={() => void removeCategory(category.id, category.name)} type="button"><Trash2 className="!size-4" /></UiButton>
               </div>

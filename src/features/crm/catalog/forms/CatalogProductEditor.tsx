@@ -1,3 +1,4 @@
+import { appConfirm } from '../../../../components/ui/appDialogStore'
 import { TextArea as UiTextArea } from "../../../../components/ui/TextArea";
 import { Input as UiInput } from "../../../../components/ui/Input";
 import { Checkbox as UiCheckbox } from "../../../../components/ui/Checkbox";
@@ -19,6 +20,7 @@ import type {
 } from "../../../catalog/domain/types.ts";
 import { formatMoney, parseMoneyToCents } from "../../../../lib/format.ts";
 import { CrmModal } from "../../shared/components/CrmModal.tsx";
+import { useCrmModalBusy } from "../../shared/components/CrmModalBusyContext";
 import { CrmSelect } from "../../shared/components/CrmSelect.tsx";
 import { Field } from "../../shared/components/Field.tsx";
 import { catalogAdminService } from "../services/catalogAdminService.ts";
@@ -64,6 +66,8 @@ export function CatalogProductEditor({
   onClose,
   product,
 }: Props) {
+  const modalBusy = useCrmModalBusy(disabled)
+
   const activeFormats = useMemo(
     () => catalog.saleFormats.filter((format) => format.active),
     [catalog.saleFormats],
@@ -191,10 +195,10 @@ export function CatalogProductEditor({
     setFormError(null);
   }
 
-  function closeSafely() {
+  async function closeSafely() {
     if (
       !dirty ||
-      window.confirm("Hay cambios sin guardar. ¿Cerrar de todos modos?")
+      (await appConfirm("Hay cambios sin guardar. ¿Cerrar de todos modos?"))
     )
       onClose();
   }
@@ -444,7 +448,7 @@ export function CatalogProductEditor({
       : catalog.modifierGroups;
 
   return (
-    <CrmModal
+    <CrmModal dismissDisabled={modalBusy}
       label={product ? `Editar ${product.name}` : "Crear producto"}
       onClose={closeSafely}
       size="large"
@@ -456,9 +460,9 @@ export function CatalogProductEditor({
           </h2>
           
         </div>
-        <UiButton
+        <UiButton disabled={modalBusy}
           aria-label="Cerrar"
-          className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]"
+          className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-xs font-semibold text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
           onClick={closeSafely}
           type="button"
         >

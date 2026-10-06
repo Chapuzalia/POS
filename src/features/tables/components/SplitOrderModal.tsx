@@ -167,7 +167,7 @@ export function SplitOrderModal({
     <AppModal containerClassName="!p-0 sm:!p-4" dismissDisabled={isBusy || paying} maxWidth={step === 'select' ? 760 : 560} label={step === 'select' ? 'Seleccionar productos' : 'Cobrar selección'} onClose={onClose}>
       <section
         aria-labelledby="split-order-title"
-        className={`w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 max-h-[calc(100svh-2.5rem)] overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] ${
+        className={`w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 max-h-[calc(100svh-2.5rem)] overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] ${
           step === 'select'
             ? '!w-[min(760px,100%)]'
             : '!w-[min(560px,100%)]'
@@ -189,7 +189,7 @@ export function SplitOrderModal({
 
           <UiButton
             aria-label="Cerrar"
-            className="grid size-11 place-items-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] disabled:opacity-45"
+            className="grid place-items-center border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] disabled:opacity-45 !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
             disabled={isBusy || paying}
             onClick={onClose}
             type="button"
@@ -460,7 +460,7 @@ export function SplitOrderModal({
         <AppModal containerClassName="!p-4" maxWidth={448} dismissDisabled={isBusy || paying} label="Productos pendientes" onClose={() => setPendingPayment(null)}>
           <section
             aria-labelledby="split-items-pending-title"
-            className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5 max-w-md"
+            className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5"
           >
             <h2 id="split-items-pending-title">Productos pendientes</h2>
             <p>

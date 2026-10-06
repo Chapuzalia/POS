@@ -183,7 +183,7 @@ export function LoginScreen({
           <section
             aria-describedby="login-conflict-description"
             aria-labelledby="login-conflict-title"
-            className="w-full max-w-lg rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)]"
+            className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)]"
           >
             <div className="flex items-start gap-4">
               <span className="grid h-12 w-12 shrink-0 place-items-center rounded-full bg-[var(--danger-soft)] text-[var(--danger)]">

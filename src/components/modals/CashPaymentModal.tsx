@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Pencil } from "lucide-react";
 import { centsToInput, formatMoney, parseMoneyToCents } from "../../lib/format";
 import { cx } from "../../utils/cx";
 import { AppModal, Button } from "../ui";
@@ -74,28 +75,29 @@ export function CashPaymentModal({
         label="Cobro en efectivo"
         onClose={onCancel}
       >
-        <section className="w-full max-w-xl rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
-          <div className="mt-0 flex flex-row items-center justify-between gap-2">
-            <div className="rounded-[var(--radius)] w-full border border-[var(--separator)] bg-[var(--background)] p-4">
+        <section className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-4 text-[var(--foreground)] shadow-[var(--shadow)] sm:p-5">
+          <div className="mt-0 grid grid-cols-1 gap-2 min-[400px]:grid-cols-2">
+            <div className="min-w-0 rounded-[var(--radius)] w-full border border-[var(--separator)] bg-[var(--background)] p-3 sm:p-4">
               <p className="text-sm font-semibold text-[var(--muted)]">
                 Total a cobrar
               </p>
-              <p className="mt-1 font-mono text-4xl font-black tabular-nums">
+              <p className="mt-1 break-words font-mono text-3xl font-black tabular-nums sm:text-4xl">
                 {formatMoney(totalCents)}
               </p>
             </div>
 
             <button
               aria-label="Introducir dinero entregado"
-              className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4 text-left disabled:cursor-not-allowed"
+              className="min-w-0 w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3 text-left disabled:cursor-not-allowed sm:p-4"
               disabled={isBusy}
               onClick={() => setDeliveredKeypadOpen(true)}
               type="button"
             >
-              <p className="text-sm font-semibold text-[var(--muted)]">
-                Entregado
-              </p>
-              <p className="mt-1 font-mono text-4xl font-black tabular-nums">
+              <div className="flex items-center justify-between gap-2 text-[var(--muted)]">
+                <p className="text-sm font-semibold">Entregado</p>
+                <Pencil aria-hidden="true" className="h-4 w-4 shrink-0" />
+              </div>
+              <p className="mt-1 break-words font-mono text-3xl font-black tabular-nums sm:text-4xl">
                 {formatMoney(deliveredCents)}
               </p>
             </button>
@@ -103,6 +105,7 @@ export function CashPaymentModal({
 
           <div className="mt-4 grid grid-cols-3 gap-2 sm:grid-cols-4">
             <Button
+              disabled={isBusy}
               onClick={selectExactAmount}
               type="button"
               className="!text-xl !rounded-lg w-full border-1 min-h-12"
@@ -113,6 +116,7 @@ export function CashPaymentModal({
             </Button>
             {cashDenominationsCents.map((amount) => (
               <Button
+                disabled={isBusy}
                 key={amount}
                 className="bg-(--field) !text-xl !rounded-lg border-1 w-full min-h-12"
                 onClick={() => addDenomination(amount)}
@@ -127,7 +131,7 @@ export function CashPaymentModal({
 
           <div
             className={cx(
-              "mt-4 rounded-[var(--radius)] border p-4",
+              "mt-4 rounded-[var(--radius)] border p-3 sm:p-4",
               difference >= 0
                 ? "border-[var(--success)] bg-[var(--success-soft)] text-[var(--success)]"
                 : "border-[var(--danger)] bg-[var(--danger-soft)] text-[var(--danger)]",

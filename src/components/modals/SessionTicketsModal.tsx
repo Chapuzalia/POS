@@ -55,7 +55,7 @@ function TicketModificationModal({ children, dismissDisabled = false, maxWidth =
             <h2 className="text-2xl font-bold">{title}</h2>
             <p className="mt-1 break-words text-sm font-semibold text-[var(--muted)]">Ticket {getSessionTicketLabel(ticket)}</p>
           </div>
-          <Button aria-label="Cerrar" className="min-h-11 min-w-11 shrink-0" disabled={dismissDisabled} onClick={onClose} size="sm" type="button" variant="tertiary">
+          <Button aria-label="Cerrar" className="shrink-0 !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" disabled={dismissDisabled} onClick={onClose} size="sm" type="button" variant="tertiary">
             <X className="h-5 w-5" />
           </Button>
         </header>
@@ -156,7 +156,7 @@ export function SessionTicketsModal({
 
   return (
     <AppModal containerClassName="!p-4" maxWidth={768} dismissDisabled={isBusy} label="Tickets de la sesión" onClose={onClose}>
-      <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]">
+      <section className="flex max-h-[calc(100svh-32px)] w-full flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]">
         <div className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
           <div>
             <h2 className="text-2xl font-bold">Histórico de tickets</h2>
@@ -164,7 +164,7 @@ export function SessionTicketsModal({
               {isLoading && !pageData ? 'Cargando…' : `${totalResults} ${requestedQuery ? 'coincidencias' : 'tickets'}`}
             </p>
           </div>
-          <Button disabled={isBusy} onClick={onClose} size="sm" type="button" variant="tertiary">
+          <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" disabled={isBusy} onClick={onClose} size="sm" type="button" variant="tertiary">
             <X className="h-4 w-4" />
           </Button>
         </div>

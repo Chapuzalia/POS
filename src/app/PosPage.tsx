@@ -649,7 +649,7 @@ export function PosPage(props: Props) {
       /> : null}
 
       {restaurantEnabled && restaurant.pendingPayment ? <AppModal containerClassName="!p-4" maxWidth={448} dismissDisabled={props.isBusy} label="Productos pendientes" onClose={() => restaurant.setPendingPayment(null)}>
-        <section className="w-full max-w-[440px] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">
+        <section className="w-full rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-6 text-[var(--foreground)] shadow-[var(--shadow)] [&_h2]:mb-2 [&_h2]:mt-0 [&_p]:mb-[18px] [&_p]:mt-0 [&_p]:leading-6 [&_p]:text-[var(--muted)] [&_label]:grid [&_label]:gap-[7px] [&_label]:font-extrabold [&_input]:min-h-12 [&_input]:rounded-[var(--radius)] [&_input]:border [&_input]:border-[var(--field-border)] [&_input]:bg-[var(--field)] [&_input]:px-3 [&_input]:text-lg [&_input]:text-[var(--field-foreground)] [&>div]:mt-[22px] [&>div]:flex [&>div]:justify-end [&>div]:gap-2.5">
           <h2 id="pending-service-title">Productos pendientes</h2>
           <p>Quedan {restaurant.pendingPayment.pendingUnits} {restaurant.pendingPayment.pendingUnits === 1 ? 'producto pendiente' : 'productos pendientes'} de servir.</p>
           <div>
@@ -740,7 +740,7 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
-      {inventoryRecipesEnabled && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={closePreparations}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onBusyChange={setPreparationBusy} onClose={closePreparations} /></Suspense></div></AppModal> : null}
+      {inventoryRecipesEnabled && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={closePreparations}><div className="max-h-[94svh] w-full overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onBusyChange={setPreparationBusy} onClose={closePreparations} /></Suspense></div></AppModal> : null}
       {quickSaleExitOpen ? <QuickSaleExitModal
         canSave={Boolean(props.context.canTakeOrders && cash.session)}
         defaultName={quickSaleExitName}

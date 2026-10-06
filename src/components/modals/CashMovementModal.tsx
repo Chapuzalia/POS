@@ -5,6 +5,7 @@ import {
   ArrowUpFromLine,
   CreditCard,
   LoaderCircle,
+  Pencil,
   X,
 } from "lucide-react";
 import { useRef, useState } from "react";
@@ -150,7 +151,7 @@ export function CashMovementModal({
       >
         <section
           aria-labelledby="cash-movement-title"
-          className="flex max-h-[calc(100dvh-2rem)] min-w-0 max-w-full flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]"
+          className="flex max-h-[calc(100dvh-2rem)] min-w-0 flex-col overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]"
         >
         <header className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
           <div className="min-w-0">
@@ -163,7 +164,7 @@ export function CashMovementModal({
           </div>
           <Button
             aria-label="Cerrar"
-            className="shrink-0"
+            className="shrink-0 !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
             disabled={busy}
             onClick={onCancel}
             size="sm"
@@ -229,6 +230,7 @@ export function CashMovementModal({
                   <span className="min-w-0 flex-1 px-2 font-mono">
                     {amount || "0,00"}
                   </span>
+                  <Pencil aria-hidden="true" className="mr-3 h-4 w-4 shrink-0 text-[var(--muted)]" />
                 </button>
               </div>
               <label>

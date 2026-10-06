@@ -597,7 +597,7 @@ export function SalesReportTicketModal({
         </div>
         <UiButton
           aria-label="Cerrar detalle del ticket"
-          className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-muted)] shadow-none transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,transform] !duration-150"
+          className="inline-flex items-center justify-center border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-muted)] shadow-none transition-colors duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !border-0 !bg-transparent !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,transform] !duration-150 !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
           onClick={onClose}
           type="button"
         >

@@ -151,7 +151,7 @@ export function CustomerInvoiceModal({ isBusy, onClose, onSelect, tenantId }: Pr
             <h2 className="text-xl font-black">{mode === 'search' ? 'Generar factura' : isEditing ? 'Editar cliente' : isDeleting ? 'Eliminar cliente' : 'Nuevo cliente'}</h2>
             <p className="mt-1 text-sm text-[var(--muted)]">{mode === 'search' ? 'Busca por nombre, razón social o NIF/CIF.' : isEditing ? 'Actualiza sus datos fiscales.' : isDeleting ? 'Confirma que quieres borrar este cliente.' : 'Datos fiscales que quedarán asociados a la factura.'}</p>
           </div>
-          <Button aria-label="Cerrar" disabled={busy} onClick={onClose} size="sm" type="button"><X className="h-4 w-4" /></Button>
+          <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" disabled={busy} onClick={onClose} size="sm" type="button"><X className="h-4 w-4" /></Button>
         </header>
 
         {mode === 'search' ? (

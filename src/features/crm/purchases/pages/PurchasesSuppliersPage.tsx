@@ -1,6 +1,7 @@
 import { Building2, LoaderCircle, Pencil, Plus, X } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
-import { AppModal, Button, Input } from '../../../../components/ui'
+import { Button, Input } from '../../../../components/ui'
+import { CrmModal } from '../../shared/components/CrmModal'
 import type { TenantContext } from '../../../../types'
 import { getReadableError } from '../../../../utils/errors'
 import { loadVenueSuppliers, saveVenueSupplier } from '../services/supplierService'
@@ -127,14 +128,14 @@ export function PurchasesSuppliersCrm({ disabled, selectedVenueId, tenantContext
       </div>
 
       {isFormOpen ? (
-        <AppModal dismissDisabled={saving} label={editingSupplier ? 'Editar proveedor' : 'Añadir proveedor'} maxWidth={520} onClose={closeForm}>
+        <CrmModal dismissDisabled={saving} label={editingSupplier ? 'Editar proveedor' : 'Añadir proveedor'} onClose={closeForm}>
           <form onSubmit={submit}>
             <header className="flex items-start justify-between gap-3 border-b border-[var(--separator)] p-5">
               <div>
                 <h2 className="text-xl font-black">{editingSupplier ? 'Editar proveedor' : 'Nuevo proveedor'}</h2>
                 <p className="mt-1 text-sm text-[var(--muted)]">Solo el nombre es obligatorio. El CIF/NIF ayuda al parser a identificarlo con precisión.</p>
               </div>
-              <Button aria-label="Cerrar" disabled={saving} onClick={closeForm} size="sm" type="button"><X className="size-4" /></Button>
+              <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" disabled={saving} onClick={closeForm} size="sm" type="button"><X className="size-4" /></Button>
             </header>
             <div className="grid gap-4 p-5">
               <label>
@@ -152,7 +153,7 @@ export function PurchasesSuppliersCrm({ disabled, selectedVenueId, tenantContext
               <Button disabled={saving || !draft.name.trim()} type="submit" variant="primary">{saving ? <LoaderCircle className="size-4 animate-spin" /> : null} Guardar</Button>
             </footer>
           </form>
-        </AppModal>
+        </CrmModal>
       ) : null}
     </section>
   )

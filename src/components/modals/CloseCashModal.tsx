@@ -1,5 +1,5 @@
 import { TextArea as UiTextArea } from "../ui/TextArea";
-import { X } from "lucide-react";
+import { Pencil, X } from "lucide-react";
 import { useState } from "react";
 import { centsToInput, formatMoney, parseMoneyToCents } from "../../lib/format";
 import type { CashClosedPayload, CashSession, CashSummary } from "../../types";
@@ -94,13 +94,13 @@ export function CloseCashModal({
         onClose={onCancel}
         maxWidth={600}
       >
-        <section className="max-h-[calc(100svh-32px)] w-full max-w-3xl overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
+        <section className="max-h-[calc(100svh-32px)] w-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]">
           <div className="flex items-start justify-between gap-4">
             <div>
               <h2 className="text-2xl font-bold">Cierre de caja</h2>
               
             </div>
-            <Button
+            <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar"
               disabled={isBusy}
               onClick={onCancel}
               size="sm"
@@ -169,6 +169,9 @@ export function CloseCashModal({
                       ? "••••"
                       : value}
                   </span>
+                  {field !== "cash" || cashlogyCashCents === null ? (
+                    <Pencil aria-hidden="true" className="mr-3 h-4 w-4 shrink-0 text-[var(--muted)]" />
+                  ) : null}
                 </button>
               </div>
             ))}

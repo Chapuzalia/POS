@@ -279,7 +279,7 @@ function CashClosingDetailModal({
     >
       <section
         aria-labelledby="cash-closing-detail-title"
-        className="!max-h-[calc(100svh-32px)] !w-full !max-w-4xl !overflow-y-auto !rounded-2xl !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-2xl sm:!p-6"
+        className="!max-h-[calc(100svh-32px)] !w-full !overflow-y-auto !rounded-2xl !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-2xl sm:!p-6"
       >
         <header className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border-subtle)] !pb-4">
           <div>
@@ -307,7 +307,7 @@ function CashClosingDetailModal({
             ) : null}
             <UiButton
               aria-label="Cerrar detalle del cierre"
-              className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !grid !size-10 !shrink-0 !place-items-center !rounded-xl !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)]"
+              className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !grid !place-items-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
               disabled={isSaving}
               onClick={onClose}
               type="button"

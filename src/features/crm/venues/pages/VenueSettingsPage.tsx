@@ -5,6 +5,7 @@ import { COMMON_TAX_RATES } from '../../../../lib/tax'
 import { EmptyList } from '../../shared/components/EmptyList'
 import { Field } from '../../shared/components/Field'
 import { CrmModal } from '../../shared/components/CrmModal'
+import { useCrmModalBusy } from '../../shared/components/CrmModalBusyContext'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { Building2, Check, ChevronDown, KeyRound, Plus, Save, Settings2, X } from 'lucide-react'
 import { sileo } from 'sileo'
@@ -52,6 +53,8 @@ const inputClassName = 'h-11 min-h-11 w-full rounded-[10px] border border-transp
 const activeAddonClassName = '!bg-[var(--crm-green-soft)] !text-[var(--crm-green)]'
 
 export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantContext, venues }: SettingsCrmProps) {
+  const modalBusy = useCrmModalBusy(disabled)
+
   const [plan, setPlan] = useState<CrmPlan | null>(null)
   const [isCreateOpen, setIsCreateOpen] = useState(false)
   const [newVenueName, setNewVenueName] = useState('')
@@ -281,13 +284,13 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
       </section>
 
       {isOwner && isCreateOpen ? (
-        <CrmModal label="Crear nuevo local" onClose={() => setIsCreateOpen(false)}>
+        <CrmModal dismissDisabled={modalBusy} label="Crear nuevo local" onClose={() => setIsCreateOpen(false)}>
           <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
             <div>
               <h2 className="!m-0 !text-lg !font-bold">Nuevo local</h2>
               <p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Elige una plantilla para preparar su catálogo inicial.</p>
             </div>
-            <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-9 !items-center !justify-center !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !p-0 !text-[var(--crm-text-muted)]" onClick={() => setIsCreateOpen(false)} type="button"><X className="!size-4" /></UiButton>
+            <UiButton disabled={modalBusy} aria-label="Cerrar" className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" onClick={() => setIsCreateOpen(false)} type="button"><X className="!size-4" /></UiButton>
           </div>
           <form className="!grid !gap-4 !px-5 !py-5" onSubmit={(event) => void submitNewVenue(event)}>
             <Field label="Nombre del local">
@@ -307,7 +310,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
               <div><strong className="!text-[13px]">{selectedTemplate.label}</strong><p className="!mt-1 !mb-0 !text-xs !leading-5 !text-[var(--crm-text-muted)]">{selectedTemplate.description}</p></div>
             </div>
             <div className="!flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !pt-4">
-              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setIsCreateOpen(false)} type="button">Cancelar</UiButton>
+              <UiButton disabled={modalBusy} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setIsCreateOpen(false)} type="button">Cancelar</UiButton>
               <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled || !newVenueName.trim() || !hasVenueCapacity} type="submit"><Plus className="!size-4" />Crear local</UiButton>
             </div>
           </form>

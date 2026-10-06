@@ -284,13 +284,13 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venues, venueNam
       </div> : null}
     </section>
 
-    {isConfirmingImport && ownDocument && ownSummary ? <CrmModal label="Confirmar importación de catálogo" onClose={() => { if (!isOwnImporting) setIsConfirmingImport(false) }}>
+    {isConfirmingImport && ownDocument && ownSummary ? <CrmModal dismissDisabled={isOwnImporting} label="Confirmar importación de catálogo" onClose={() => { if (!isOwnImporting) setIsConfirmingImport(false) }}>
       <div className="!flex !items-center !justify-between !border-b !border-[var(--crm-border)] !px-5 !py-4">
         <div className="!flex !items-center !gap-3">
           <span className="!grid !size-9 !place-items-center !rounded-full !bg-amber-500/15 !text-amber-500"><AlertTriangle className="!size-5" /></span>
           <div><h2 className="!font-bold">Sustituir catálogo del local</h2><p className="!text-xs !text-[var(--crm-text-muted)]">Esta operación se realiza de forma transaccional.</p></div>
         </div>
-        <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || isOwnImporting} onClick={() => setIsConfirmingImport(false)} type="button"><X className="!size-4" /></UiButton>
+        <UiButton aria-label="Cerrar" className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" disabled={disabled || isOwnImporting} onClick={() => setIsConfirmingImport(false)} type="button"><X className="!size-4" /></UiButton>
       </div>
       <div className="!overflow-y-auto !p-5">
         <p className="!text-sm">El catálogo actual de <strong>{venueName}</strong> será reemplazado por el contenido de <strong>{ownFileName}</strong>.</p>
@@ -304,13 +304,13 @@ export function CatalogTransferCrm({ catalog, disabled, mutate, venues, venueNam
       </div>
     </CrmModal> : null}
 
-    {isConfirmingClear ? <CrmModal label="Confirmar borrado completo del catálogo" onClose={() => { if (!isClearingCatalog) setIsConfirmingClear(false) }}>
+    {isConfirmingClear ? <CrmModal dismissDisabled={isClearingCatalog} label="Confirmar borrado completo del catálogo" onClose={() => { if (!isClearingCatalog) setIsConfirmingClear(false) }}>
       <div className="!flex !items-center !justify-between !border-b !border-red-500/25 !px-5 !py-4">
         <div className="!flex !items-center !gap-3">
           <span className="!grid !size-9 !place-items-center !rounded-full !bg-red-500/15 !text-red-500"><Trash2 className="!size-5" /></span>
           <div><h2 className="!font-bold">Borrar el catálogo de {venueName}</h2><p className="!text-xs !text-red-500">Esta acción no se puede deshacer desde la aplicación.</p></div>
         </div>
-        <UiButton aria-label="Cerrar" className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)]" disabled={disabled || isClearingCatalog} onClick={() => setIsConfirmingClear(false)} type="button"><X className="!size-4" /></UiButton>
+        <UiButton aria-label="Cerrar" className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" disabled={disabled || isClearingCatalog} onClick={() => setIsConfirmingClear(false)} type="button"><X className="!size-4" /></UiButton>
       </div>
       <div className="!overflow-y-auto !p-5">
         <p className="!text-sm">Se borrará todo el catálogo operativo de este local: productos, variantes y precios, imágenes, pestañas, categorías, formatos, apariciones, selecciones y modificadores.</p>

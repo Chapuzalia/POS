@@ -126,7 +126,7 @@ export function AssistIndicator({ context, snapshot, isOnline, busy }: Props) {
   return <>
     <span ref={triggerContainer} className="inline-flex shrink-0">
     <Popover isOpen={open} onOpenChange={setOpen}>
-      <Button type="button" className={`relative !size-11 !min-w-11 !shrink-0 !rounded-xl !p-0 ${tone}`} aria-label={`Tickit Assist · ${status}`} title={`Tickit Assist · ${status}`}>
+      <Button type="button" className={`relative !size-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0 ${tone}`} aria-label={`Tickit Assist · ${status}`} title={`Tickit Assist · ${status}`}>
         <Icon aria-hidden="true" className="size-5" />
         {situations.length ? <span aria-hidden="true" className="absolute -right-1 -top-1 flex min-h-5 min-w-5 items-center justify-center rounded-full bg-[var(--foreground)] px-1 text-[10px] font-bold text-[var(--surface)]">{situations.length}</span> : null}
       </Button>

@@ -16,10 +16,10 @@ export function CashClosingsHistoryModal({ canReprint, closings, printingClosing
   onReprint: (closing: CashClosingRecord, confirmedNotPrinted?: boolean) => void
 }) {
   return <AppModal containerClassName="!p-4" maxWidth={896} dismissDisabled={Boolean(printingClosingId)} label="Histórico de cierres" onClose={onClose}>
-    <section className="flex max-h-[calc(100svh-32px)] w-full max-w-4xl flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
+    <section className="flex max-h-[calc(100svh-32px)] w-full flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
       <div className="flex items-start justify-between gap-4 border-b border-[var(--separator)] p-5">
         <div><h2 className="text-2xl font-black">Histórico de cierres</h2><p className="text-sm text-[var(--muted)]">Las copias se generan desde la instantánea guardada al cerrar.</p></div>
-        <Button onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
+        <Button disabled={Boolean(printingClosingId)} className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
       </div>
       <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-5">
         <div className="grid gap-3">
