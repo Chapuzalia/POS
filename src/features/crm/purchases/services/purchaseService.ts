@@ -1,6 +1,8 @@
 import { strToU8, zipSync } from 'fflate'
+import { z } from 'zod'
 import type { TenantContext } from '../../../../types'
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
+import { UserFacingError } from '../../../../utils/UserFacingError'
 import { resolveUnambiguousPurchaseCategories } from '../purchaseCategoryModel'
 import type { PurchaseDocument, PurchaseLine } from '../types'
 
@@ -54,7 +56,7 @@ export async function loadPurchaseDocuments(
 ): Promise<PurchaseDocument[]> {
   const client = requireSupabase()
   let query = client.from('supplier_documents')
-    .select('id, supplier_id, document_type, document_number, document_date, status, processing_mode, affects_stock, storage_bucket, storage_path, original_file_name, original_mime_type')
+    .select('id, supplier_id, document_type, document_number, document_date, status, processing_mode, affects_stock, stock_applied_at, storage_bucket, storage_path, original_file_name, original_mime_type')
     .eq('tenant_id', context.tenantId).eq('venue_id', venueId)
   query = options.includeUnconfirmed
     ? query.or(`and(document_date.gte.${startDate},document_date.lte.${endDate}),document_date.is.null`)
@@ -113,6 +115,7 @@ export async function loadPurchaseDocuments(
       documentDate: row.document_date == null ? null : String(row.document_date), status: row.status as PurchaseDocument['status'],
       processingMode: row.processing_mode === 'archive' ? 'archive' : 'scan',
       affectsStock: row.affects_stock !== false,
+      stockAppliedAt: row.stock_applied_at == null ? null : String(row.stock_applied_at),
       storageBucket: row.storage_bucket == null ? null : String(row.storage_bucket),
       storagePath: row.storage_path == null ? null : String(row.storage_path),
       originalFileName: row.original_file_name == null ? null : String(row.original_file_name),
@@ -134,6 +137,21 @@ export async function downloadPurchaseOriginal(document: PurchaseDocument) {
   anchor.download = document.originalFileName ?? `documento-${document.id}`
   anchor.click()
   URL.revokeObjectURL(url)
+}
+
+const deletionResultSchema = z.object({ documentId: z.string(), stockReversed: z.boolean(), storageDeleted: z.boolean() })
+export type PurchaseDocumentDeletion = z.infer<typeof deletionResultSchema>
+
+export async function deletePurchaseDocument(
+  context: Pick<TenantContext, 'tenantId'>, venueId: string, documentId: string, reverseStock: boolean | null,
+): Promise<PurchaseDocumentDeletion> {
+  const { data, error } = await requireSupabase().functions.invoke('delete-supplier-document', {
+    body: { documentId, venueId, tenantId: context.tenantId, reverseStock },
+  })
+  if (error) throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, 'No se pudo eliminar el documento.'))
+  const result = deletionResultSchema.safeParse(data)
+  if (!result.success || result.data.documentId !== documentId) throw new UserFacingError('No se pudo comprobar la eliminación del documento. Actualiza el listado antes de volver a intentarlo.')
+  return result.data
 }
 
 export async function exportPurchaseDocuments(documents: PurchaseDocument[], startDate: string, endDate: string) {
