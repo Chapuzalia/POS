@@ -41,7 +41,7 @@ export async function loadCrmAccessData(
     client
       .from("venues")
       .select(
-        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, production_enabled, default_tax_rate, timezone, catalog_profile",
+        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, production_enabled, default_tax_rate, timezone, catalog_profile, tickit_assist_enabled, tickit_assist_sensitivity",
       )
       .eq("tenant_id", context.tenantId)
       .order("sort_order").order("created_at").order("id"),
@@ -112,6 +112,8 @@ export async function loadCrmAccessData(
       inventoryEnabled: venue.inventory_enabled as boolean,
       tablesEnabled: venue.tables_enabled as boolean,
       productionEnabled: venue.production_enabled as boolean,
+      assistEnabled: venue.tickit_assist_enabled === true,
+      assistSensitivity: venue.tickit_assist_sensitivity as CrmVenue["assistSensitivity"],
       addonActivations: activationsByVenue.get(venue.id as string) ?? {},
       defaultTaxRate: Number(venue.default_tax_rate),
       timeZone: venue.timezone as string,
@@ -137,7 +139,7 @@ export async function loadCrmVenues(
     client
       .from("venues")
       .select(
-        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, production_enabled, default_tax_rate, timezone, catalog_profile",
+        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, production_enabled, default_tax_rate, timezone, catalog_profile, tickit_assist_enabled, tickit_assist_sensitivity",
       )
       .eq("tenant_id", context.tenantId)
       .order("sort_order").order("created_at").order("id"),
@@ -182,6 +184,8 @@ export async function loadCrmVenues(
     inventoryEnabled: venue.inventory_enabled as boolean,
     tablesEnabled: venue.tables_enabled as boolean,
     productionEnabled: venue.production_enabled as boolean,
+    assistEnabled: venue.tickit_assist_enabled === true,
+    assistSensitivity: venue.tickit_assist_sensitivity as CrmVenue["assistSensitivity"],
     addonActivations: activationsByVenue.get(venue.id as string) ?? {},
     defaultTaxRate: Number(venue.default_tax_rate),
     timeZone: venue.timezone as string,

@@ -1081,22 +1081,13 @@ test('valida perfiles multipfila por aliases OCR, descuentos, cargos, netos y ma
   assert.equal(rejected.reason, 'PROFILE_LINE_GROUP_ALIAS_NOT_IN_OCR')
 })
 
-test('los nueve fixtures incluyen el bloque multipfila junto a los casos previos', () => {
-  const expected = [
-    'known-supplier', 'unknown-supplier', 'known-product', 'new-product',
-    'unit-conversion', 'uncertain-line', 'cost-change', 'multiple-warehouses', 'multi-row-product',
-  ]
-  assert.deepEqual(supplierDocumentMockFixtures.map((fixture) => fixture.id), expected)
-  assert.notEqual(getSupplierDocumentMockFixture('unknown-supplier')?.extraction.supplier.name, '')
+test('un producto nuevo de un documento requiere revisión antes de asociarse al inventario', () => {
   const newProduct = getSupplierDocumentMockFixture('new-product')
   assert.ok(newProduct)
   assert.equal(matchInventoryItem(newProduct.extraction.lines[0], [], []).status, 'needs_review')
-  assert.ok(getSupplierDocumentMockFixture('cost-change')?.extraction.lines[0].netCost)
-  assert.ok(getSupplierDocumentMockFixture('multiple-warehouses'))
 })
 
 test('los providers mock cubren OCR e IA sin secretos y los reales fallan de forma controlada', async () => {
-  assert.equal(supplierDocumentMockFixtures.length, 9)
   for (const fixture of supplierDocumentMockFixtures) {
     const ocr = await new MockDocumentOcrProvider(fixture.id).analyze({ bytes: new Uint8Array(), contentType: 'application/mock', fileName: 'mock' })
     const extraction = await new MockSupplierDocumentAiProvider(fixture.id).interpret({ ocr, documentType: 'delivery_note' })

@@ -1,4 +1,8 @@
 import { applySessionLayout } from './layout-service'
+import { buildAssistSnapshot } from '../assist/snapshot'
+import type { AssistAllocation } from '../assist/snapshot'
+import type { AssistConfiguration } from '../assist/types'
+import { saveCachedAssistConfiguration } from '../../lib/offlineStore'
 import type { SessionTableLayout } from './types'
 import { UserFacingError } from '../../utils/UserFacingError.ts'
 import { supabase } from '../../lib/supabase'
@@ -171,7 +175,21 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
     const tableReservations = reservationsByTable.get(table.id) ?? []
     return { ...table, status: order ? 'occupied' : 'free', orderId: order?.id ?? null, orderOpenedAt: order?.openedAt ?? null, guestCount: order?.guestCount ?? null, totalCents: groupId ? Math.max(0, (totals.get(groupId) ?? 0) - (paidCents.get(groupId) ?? 0)) : 0, pendingUnits: groupId ? (pendingUnits.get(groupId) ?? 0) : 0, readyUnits: groupId ? (readyUnits.get(groupId) ?? 0) : 0, groupTableIds: groupId ? (tableIdsByGroup.get(groupId) ?? []) : [], nextReservation: tableReservations[0] ?? null, reservationCount: tableReservations.length }
   })
-  const result = { areas, tables: mappedTables }
+  const assistSource = snapshot as (typeof snapshot & { assistConfiguration?: AssistConfiguration; observedAt?: string })
+  const configuration = assistSource?.assistConfiguration
+  if (configuration) saveCachedAssistConfiguration(context, configuration)
+  const result: RestaurantMap = { areas, tables: mappedTables }
+  if (configuration) {
+    try {
+      const scope = `${context.tenantId}:${context.venueId}`
+      const observedAt = assistSource?.observedAt ?? new Date().toISOString()
+      result.assist = configuration.tenantEnabled && configuration.venueEnabled
+        ? buildAssistSnapshot(configuration, orders, lines, mappedTables, (snapshot?.allocations ?? []) as AssistAllocation[], observedAt, scope)
+        : { configuration, orders: [], observedAt, contextKey: scope }
+      const zoneNames = new Map(areas.map((area) => [area.id, area.name]))
+      for (const order of result.assist.orders) order.zoneName = zoneNames.get(order.zoneId ?? '')
+    } catch { /* Secondary projection failure must never prevent loading tables. */ }
+  }
   return snapshot?.layout ? applySessionLayout(result, snapshot.layout) : result
 }
 

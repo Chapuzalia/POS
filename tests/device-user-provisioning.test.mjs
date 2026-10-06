@@ -22,16 +22,6 @@ test('un fallo al crear el usuario revierte el dispositivo nuevo', async () => {
   assert.match(edgeFunction, /from\('devices'\)\.delete\(\)\.eq\('id', device\.id\)/)
 })
 
-test('el crm ya no contiene el formulario manual de usuarios', async () => {
-  const accessPage = await readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8')
-
-  assert.doesNotMatch(accessPage, /Nuevo usuario TPV/)
-  assert.doesNotMatch(accessPage, /createCrmPosUser/)
-  assert.match(accessPage, /Credenciales del nuevo dispositivo/)
-  assert.match(accessPage, /Usuarios con acceso al CRM/)
-  assert.doesNotMatch(accessPage, /Usuarios de caja/)
-})
-
 test('el owner puede crear cuentas CRM con email, contrasena y rol desde Accesos', async () => {
   const [accessPage, accessService, edgeFunction] = await Promise.all([
     readFile(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8'),

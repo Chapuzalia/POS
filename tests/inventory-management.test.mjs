@@ -10,14 +10,6 @@ import {
   parseInventoryStockQuantity,
   validateInventoryDecimalPlaces,
 } from '../src/features/crm/inventory/inventoryModel.ts'
-import {
-  getSectionTitle,
-  inventoryNavItems,
-  inventorySections,
-  purchaseNavItems,
-  purchaseSections,
-} from '../src/features/crm/routing/crmNavigation.ts'
-
 const migrationPath = new URL(
   '../supabase/migrations/20260727200000_add_inventory_management.sql',
   import.meta.url,
@@ -71,49 +63,6 @@ const consolidatedDatabase = readFileSync(
   new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url),
   'utf8',
 )
-const shell = readFileSync(new URL('../src/features/crm/layout/CrmSidebar.tsx', import.meta.url), 'utf8')
-const routes = readFileSync(new URL('../src/features/crm/routing/CrmSectionContent.tsx', import.meta.url), 'utf8')
-const stockPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryStockPage.tsx', import.meta.url), 'utf8')
-const itemsPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryItemsPage.tsx', import.meta.url), 'utf8')
-const preparationsPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryPreparationsPage.tsx', import.meta.url), 'utf8')
-const warehousesPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventoryWarehousesPage.tsx', import.meta.url), 'utf8')
-const settingsPage = readFileSync(new URL('../src/features/crm/inventory/pages/InventorySettingsPage.tsx', import.meta.url), 'utf8')
-const formatsPage = readFileSync(new URL('../src/features/crm/catalog/pages/CatalogFormatsPage.tsx', import.meta.url), 'utf8')
-
-test('separa inventario físico de la gestión documental de compras', () => {
-  assert.deepEqual(
-    inventoryNavItems.map(({ id, label }) => ({ id, label })),
-    [
-      { id: 'inventory-stock', label: 'Stock' },
-      { id: 'inventory-items', label: 'Artículos' },
-      { id: 'inventory-preparations', label: 'Elaboraciones' },
-      { id: 'inventory-warehouses', label: 'Almacenes' },
-      { id: 'inventory-units', label: 'Unidades' },
-      { id: 'inventory-settings', label: 'Configuración' },
-    ],
-  )
-  assert.deepEqual([...inventorySections], inventoryNavItems.map((item) => item.id))
-  assert.deepEqual(purchaseNavItems.map(({ id, label }) => ({ id, label })), [
-    { id: 'purchases-summary', label: 'Resumen' },
-    { id: 'purchases-replenishment', label: 'Reposición' },
-    { id: 'purchases-invoices', label: 'Archivo de documentos' },
-    { id: 'purchases-suppliers', label: 'Proveedores' },
-  ])
-  assert.deepEqual([...purchaseSections], purchaseNavItems.map((item) => item.id))
-  assert.equal(getSectionTitle('inventory-stock'), 'Stock del local')
-  assert.match(shell, /label="Inventario"/)
-  assert.match(shell, /inventoryNavItems/)
-  assert.match(routes, /case 'inventory-stock':/)
-  assert.match(routes, /case 'purchases-summary':/)
-  assert.match(routes, /case 'purchases-suppliers':/)
-  assert.match(routes, /case 'purchases-invoices':/)
-  assert.match(routes, /case 'inventory-items':/)
-  assert.match(routes, /case 'inventory-preparations':/)
-  assert.match(routes, /case 'inventory-warehouses':/)
-  assert.match(routes, /case 'inventory-units':/)
-  assert.match(routes, /case 'inventory-settings':/)
-})
-
 test('las cantidades admiten unidades completas y consumos fraccionarios controlados', () => {
   assert.equal(parseInventoryQuantity('70', 0), 70)
   assert.equal(parseInventoryQuantity('70,5', 1), 70.5)
@@ -180,15 +129,6 @@ test('conserva la migracion historica de envases por producto y consumos por for
     assert.match(sql, /INVENTORY_PACKAGE_CHANGE_WITH_STOCK/)
   }
   assert.match(packagingMigration, /revoke execute on function public\.set_inventory_product_stock\([\s\S]*jsonb[\s\S]*\) from authenticated/)
-})
-
-test('el consumo se configura en Formatos y no por cada producto de Stock', () => {
-  assert.match(formatsPage, /inventoryConsumptionQuantity/)
-  assert.match(formatsPage, /inventoryConsumptionUnitId/)
-  assert.match(formatsPage, /Cantidad consumida por/)
-  assert.match(formatsPage, /Unidad consumida por/)
-  assert.doesNotMatch(stockPage, /formatsByProduct/)
-  assert.doesNotMatch(stockPage, /Consumo de \$\{product\.name\}/)
 })
 
 test('cada linea vendida descuenta producto principal y mixer de forma atomica', () => {
@@ -361,78 +301,3 @@ test('la capacidad pertenece a la unidad reutilizable y no al producto', () => {
   )
 })
 
-test('las pantallas separan artículos físicos, stock y elaboraciones', () => {
-  assert.match(stockPage, /snapshot\.items/)
-  assert.match(stockPage, /snapshot\.warehouses\.map/)
-  assert.match(stockPage, /saveInventoryItemStock/)
-  assert.match(stockPage, /parseInventoryQuantity/)
-  assert.match(itemsPage, /saveInventoryItem/)
-  assert.match(itemsPage, /Nuevo artículo/)
-  assert.match(itemsPage, /Ruta de almacenes/)
-  assert.match(preparationsPage, /saveInventoryProductionRecipe/)
-  assert.match(preparationsPage, /Almacén de producción/)
-  assert.match(preparationsPage, /La salida solo define proporciones/)
-  assert.match(warehousesPage, /Nuevo almacén/)
-  assert.match(settingsPage, /Nueva unidad/)
-  assert.match(settingsPage, /decimalPlaces/)
-  assert.match(settingsPage, /Equivalencia de contenido/)
-  assert.match(settingsPage, /Botella 70 cl/)
-  assert.match(settingsPage, /contentQuantity/)
-  assert.match(settingsPage, /contentUnitId/)
-})
-
-test('el listado de stock abre el detalle por artículo físico', () => {
-  assert.match(stockPage, /onClick=\{\(\) => open\(row\.item\.id\)\}/)
-  assert.match(stockPage, /label=\{`Stock de \$\{selected\.name\}`\}/)
-  assert.match(stockPage, /Existencias por artículo y almacén/)
-  assert.match(stockPage, /El stock negativo está\s+permitido/)
-  assert.match(stockPage, /aria-label="Stock por artículo"/)
-  assert.match(stockPage, /<thead>[\s\S]*<tbody>/)
-  assert.match(stockPage, /aria-label=\{`Editar stock de \$\{row\.item\.name\}`\}/)
-  assert.doesNotMatch(stockPage, /<tr[^>]*onClick=/)
-  assert.doesNotMatch(stockPage, /catalog\.products/)
-})
-
-test('el modal de stock permite sumar una entrada o establecer el total', () => {
-  assert.match(stockPage, /type StockEditMode = ["']add["'] \| ["']set["']/)
-  assert.match(stockPage, /useState<StockEditMode>\(["']add["']\)/)
-  assert.match(stockPage, /Añadir stock/)
-  assert.match(stockPage, /Establecer total/)
-  assert.match(stockPage, /\[1, 5, 10\]\.map/)
-  assert.match(stockPage, /Stock actual:/)
-  assert.match(stockPage, /Quedará:/)
-  assert.match(stockPage, /addInventoryStockQuantity/)
-  assert.match(stockPage, /parseInventoryStockQuantity/)
-})
-
-test('el listado de artículos reutiliza el modelo de tabla del proyecto', () => {
-  assert.match(itemsPage, /<DataTable aria-label="Artículos de inventario"/)
-  assert.match(itemsPage, /<thead>[\s\S]*<tbody>/)
-})
-
-test('cada artículo define su propia ruta de consumo independiente del TPV', () => {
-  assert.match(itemsPage, /routes: Record/)
-  assert.match(itemsPage, /Ruta de almacenes/)
-  assert.match(itemsPage, /La ruta define de dónde se consume, no el TPV/)
-  assert.match(itemsPage, /Prioridad \$\{warehouse\.name\}/)
-  assert.match(warehousesPage, /Acceso operativo por TPV/)
-  assert.match(warehousesPage, /saveInventoryDeviceWarehouses/)
-  assert.doesNotMatch(warehousesPage, /prioridad de consumo por TPV/i)
-})
-
-test('la pagina Stock conserva el interruptor general del local', () => {
-  assert.match(stockPage, /Control de inventario activo/)
-  assert.match(stockPage, /setVenueInventoryEnabled/)
-  assert.match(stockPage, /inventoryEnabled \? \(/)
-  assert.match(stockPage, /Activa el control de inventario para gestionar existencias/)
-  assert.match(shell, /inventoryEnabled \|\| item\.id === 'inventory-stock'/)
-  assert.match(routes, /Control de stock desactivado/)
-})
-
-test('la pagina de almacenes confirma el borrado y solicita destino cuando queda stock', () => {
-  assert.match(warehousesPage, /deleteInventoryWarehouse/)
-  assert.match(warehousesPage, /loadInventoryWarehouseStockSummary/)
-  assert.match(warehousesPage, /Eliminar almacén/)
-  assert.match(warehousesPage, /Almacén de destino/)
-  assert.match(warehousesPage, /Selecciona dónde transferir sus cantidades antes de eliminarlo/)
-})

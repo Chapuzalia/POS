@@ -1,4 +1,4 @@
-import { CheckCircle2, Coins, CreditCard, X, Percent, type LucideIcon } from 'lucide-react'
+import { CheckCircle2, Coins, CreditCard, LoaderCircle, X, Percent, type LucideIcon } from 'lucide-react'
 import { formatDiscountValue, getDiscountLabel } from '../../lib/discounts'
 import { formatMoney } from '../../lib/format'
 import type { AppliedDiscount, PaymentMethod } from '../../types'
@@ -15,6 +15,8 @@ type PaymentPanelProps = {
   discount: AppliedDiscount | null
   disabled: boolean
   feedback: PaymentMethod | null
+  processing?: boolean
+  pendingMethod?: PaymentMethod | null
   heading?: string
   onOpenDiscount: () => void
   onPayment: (method: PaymentMethod | null) => void
@@ -28,6 +30,8 @@ export function PaymentPanel({
   discount,
   disabled,
   feedback,
+  processing = false,
+  pendingMethod = null,
   heading,
   onOpenDiscount,
   onPayment,
@@ -35,7 +39,7 @@ export function PaymentPanel({
   subtotalCents,
   totalCents,
 }: PaymentPanelProps) {
-  if (disabled) {
+  if (disabled && !processing) {
     return null
   }
 
@@ -88,20 +92,27 @@ export function PaymentPanel({
       }
     >
       {paymentOptions.map((payment) => {
+        const isProcessing = processing && pendingMethod === payment.id
+        const isConfirmed = feedback === payment.id
         const Icon =
-          feedback === payment.id
+          isProcessing
+            ? LoaderCircle
+            : isConfirmed
             ? CheckCircle2
             : payment.icon
 
         return (
           <PosCatalogTab
-            active={feedback === payment.id}
-            disabled={disabled || totalCents === 0}
+            active={isProcessing || isConfirmed}
+            busy={isProcessing}
+            disabled={disabled || processing || totalCents === 0}
             icon={Icon}
+            iconClassName={isProcessing ? 'motion-safe:animate-spin' : undefined}
             key={payment.id}
-            label={payment.label}
+            label={isProcessing ? 'Cobrando…' : isConfirmed ? 'Cobrado' : payment.label}
             onSelect={() => onPayment(payment.id)}
             size="lg"
+            tone={isConfirmed ? 'success' : 'default'}
           />
         )
       })}
@@ -110,7 +121,7 @@ export function PaymentPanel({
         <PosCatalogTab
           active={Boolean(discount)}
           ariaLabel={discount ? 'Eliminar descuento' : 'Añadir descuento'}
-          disabled={discount ? disabled : disabled || totalCents === 0}
+          disabled={processing || (discount ? disabled : disabled || totalCents === 0)}
           icon={discount ? X : Percent}
           label={discount ? getDiscountLabel(discount) : 'Descuento'}
           onSelect={discount ? onRemoveDiscount : onOpenDiscount}
@@ -122,14 +133,14 @@ export function PaymentPanel({
 
     {totalCents === 0 ? (
       <Button
-        disabled={disabled}
+        disabled={disabled || processing}
         fullWidth
         onClick={() => onPayment(null)}
         size="lg"
         type="button"
         variant="primary"
       >
-        Finalizar sin cobro
+        {processing ? 'Finalizando…' : 'Finalizar sin cobro'}
       </Button>
     ) : null}
   </section>

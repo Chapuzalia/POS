@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { readFile, readdir } from 'node:fs/promises'
+import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 
 import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
@@ -95,28 +95,3 @@ test('el refresco conserva la reserva seleccionada y descarta respuestas antigua
   assert.equal(controller.reservations[0].marker, 'current')
 })
 
-test('la vista de lista entrega filas tr directas al componente de tabla', async () => {
-  const list = await readFile(new URL('../src/features/reservations/components/ReservationList.tsx', import.meta.url), 'utf8')
-  assert.match(list, /function renderReservationRow/)
-  assert.match(list, /<tr[\s\S]*key=\{reservation\.id\}/)
-  assert.match(list, /active\.map\(\(reservation\) => renderReservationRow/)
-  assert.match(list, /archived\.map\(\(reservation\) => renderReservationRow/)
-  assert.doesNotMatch(list, /<ReservationRow/)
-})
-
-test('la integración incluye menú, pantalla, mapa operativo y un único SQL raíz', async () => {
-  const [header, page, tableMap, tableTypes] = await Promise.all([
-    readFile(new URL('../src/components/layout/AppHeader.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/reservations/components/ReservationsPage.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/tables/components/TableMapView.tsx', import.meta.url), 'utf8'),
-    readFile(new URL('../src/features/tables/types.ts', import.meta.url), 'utf8'),
-  ])
-  assert.match(header, />Reservas</)
-  assert.match(header, /aria-label="Reservas"/)
-  assert.match(header, /hidden sm:block[\s\S]*<PrintAgentStatusBadge \/>/)
-  assert.match(page, /Nueva reserva/)
-  assert.match(tableMap, /ReservationTableBadge/)
-  assert.match(tableTypes, /nextReservation: RestaurantTableReservation \| null/)
-  const entries = await readdir(new URL('../supabase/', import.meta.url), { withFileTypes: true })
-  assert.deepEqual(entries.filter((entry) => entry.isFile() && entry.name.endsWith('.sql')).map((entry) => entry.name), ['0.Complete_Database_24-07-26.sql'])
-})

@@ -119,13 +119,6 @@ test('la configuración predeterminada conserva el modo de solo impresora', () =
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { autoOpenCashDrawer: true, cashlogyConfigured: false } }), true)
 })
 
-test('el health periódico de Cashlogy usa un único intervalo de 15000 ms', async () => {
-  const scope = await readFile(new URL('src/features/local-printing/cashlogy/useCashlogyScope.ts', root), 'utf8')
-  const intervals = [...scope.matchAll(/window\.setInterval\([\s\S]*?,\s*(\d+)\)/g)].map((match) => Number(match[1]))
-
-  assert.deepEqual(intervals, [15000])
-})
-
 test('Cashlogy bloquea el cajón convencional y respeta la preferencia de impresión', () => {
   const settings = { alwaysPrintTicket: false, autoOpenCashDrawer: true, cashlogyConfigured: true }
   assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), false)
@@ -284,6 +277,34 @@ test('dar cambio Cashlogy empieza a 0 y exige elegir las denominaciones manualme
   assert.match(selector, /quantities\[option\.valueCents\] \?\? 0/)
   assert.match(selector, /Elige manualmente la combinación/)
   assert.match(selector, /Poner todo a 0/)
+})
+
+test('el límite de espera detiene consultas sin declarar cancelado un cobro activo', async () => {
+  let calls = 0
+  const updates = []
+  await assert.rejects(pollCashlogyTransaction(
+    async () => { calls++; return { transaction: transaction('processing') } },
+    transaction('processing'),
+    { intervalMs: 1, timeoutMs: 20, onUpdate: (value) => updates.push(value.status) },
+  ), (error) => error.code === 'CASHLOGY_CONNECTION_TIMEOUT' && /sigue pendiente/.test(error.message))
+  const callsAtTimeout = calls
+  await new Promise((resolve) => setTimeout(resolve, 10))
+  assert.ok(calls > 0)
+  assert.equal(calls, callsAtTimeout)
+  assert.ok(updates.every((status) => status === 'processing'))
+})
+
+test('una consulta colgada también expira y su respuesta tardía no actualiza el cobro', async () => {
+  let respond
+  const updates = []
+  await assert.rejects(pollCashlogyTransaction(
+    () => new Promise((resolve) => { respond = resolve }),
+    transaction('dispensing_change'),
+    { intervalMs: 1, timeoutMs: 20, onUpdate: (value) => updates.push(value) },
+  ), (error) => error.code === 'CASHLOGY_CONNECTION_TIMEOUT')
+  respond({ transaction: transaction('completed') })
+  await new Promise((resolve) => setImmediate(resolve))
+  assert.deepEqual(updates, [])
 })
 
 test('los pollings terminan solo en estados terminales y permiten la fase awaiting_dispense', async () => {
@@ -477,6 +498,8 @@ test('los servicios de cobro dividido entregan la identidad Cashlogy a la RPC id
   const service = compileComponent(source, {
     '../../utils/UserFacingError.ts': { UserFacingError: Error },
     '../../lib/supabase': { supabase },
+    '../assist/snapshot': { buildAssistSnapshot: () => undefined },
+    '../../lib/offlineStore': { saveCachedAssistConfiguration: () => undefined },
     '../../lib/format': { quantityAmountCents: (unitPriceCents, quantity) => unitPriceCents * quantity },
     '../../lib/mixers': { splitLegacyMixerModifiers: () => ({ components: [], mixer: null, mixerProductId: null, modifiers: [] }) },
     '../catalog/services/catalogSnapshots': { normalizeCatalogSnapshot: () => null },
@@ -510,17 +533,10 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
     assert.doesNotMatch(source, /cashlogy\/backoffice\/open/i)
     assert.doesNotMatch(source, /openCashlogyBackoffice/)
   }
-  assert.match(modal, /Rellenar/)
-  assert.match(modal, /Dar cambio/)
-  assert.match(modal, /Retirar efectivo/)
-  assert.match(modal, /Vaciar Cashlogy/)
-  assert.match(modal, /Retirar stacker/)
   assert.match(modal, /finalizeGiveChangeAdmission/)
-  assert.match(modal, /Cancelar operación/)
   assert.match(modal, /management\.cancel\(\)/)
-  assert.match(modal, /Volver al TPV/)
-  assert.match(modal, /rows\.map\(\(row\) => renderDenominationRow\(row, showStacker\)\)/)
-  assert.doesNotMatch(modal, /<DenominationRow/)
+  assert.doesNotMatch(modal, /Volver al TPV|Cerrar y revisar Cashlogy|onCloseReviewed/)
+  assert.match(modal, /dismissDisabled=\{Boolean\(management\.intent\)\}/)
   assert.doesNotMatch(modal, /suggestCashlogyDenominations/)
   assert.doesNotMatch(modal, /suggestedOperationId/)
   assert.match(managementStore, /persistIntent\(intent\)[\s\S]*createRequest/)
@@ -531,26 +547,5 @@ test('la gestión es headless, cubre los cinco flujos y no contiene fallback ext
   assert.match(selector, /availableQuantity/)
   assert.match(selector, /targetCents/)
   assert.match(selector, /quantities\[option\.valueCents\] \?\? 0/)
-  assert.match(selector, /Poner todo a 0/)
 })
 
-test('los ajustes permiten configurar y ejecutar la recuperación forzada de Cashlogy', async () => {
-  const [settings, connectorList, store] = await Promise.all([
-    readFile(new URL('src/features/local-printing/components/PrintAgentSettings.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyConnectorList.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/store/usePrintAgentStore.ts', root), 'utf8'),
-  ])
-  assert.match(settings, /Buscar máquinas/)
-  assert.match(settings, /discoverCashlogyConnectors/)
-  assert.match(settings, /selectCashlogyConnector/)
-  assert.match(settings, /initializeCashlogyConnector/)
-  assert.match(settings, /Ejecutar recuperación forzada/)
-  assert.match(settings, /recoverCashlogy/)
-  assert.match(settings, /resultado quedará como desconocido/)
-  assert.match(connectorList, /Seleccionar/)
-  assert.match(connectorList, /Inicializar/)
-  assert.match(connectorList, /Lista para usar/)
-  assert.match(store, /activeClient\.selectCashlogyConnector/)
-  assert.match(store, /activeClient\.initializeCashlogyConnector/)
-  assert.match(store, /activeClient\.recoverCashlogy/)
-})

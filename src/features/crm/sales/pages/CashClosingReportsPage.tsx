@@ -70,8 +70,8 @@ function exportClosureRowsToCsv(rows: AccountingClosureRow[], timeZone: string) 
     const formatDateTime = (value: string) => dateFormatter.format(new Date(value))
     return [
       formatDateTime(row.opened_at), formatDateTime(row.closed_at), row.venue_name, row.cash_register_name, row.shift_label,
-      row.first_ticket_number === null ? '' : String(row.first_ticket_number).padStart(6, '0'),
-      row.last_ticket_number === null ? '' : String(row.last_ticket_number).padStart(6, '0'), row.ticket_count,
+      row.first_ticket_code ?? '',
+      row.last_ticket_code ?? '', row.ticket_count,
       ...rates.flatMap((rate) => { const tax = taxes.get(rate); return [formatCents(tax?.baseCents ?? 0), formatCents(tax?.taxCents ?? 0)] }),
       formatCents(otherBase), formatCents(otherTax), formatCents(row.total_sales_cents), formatCents(row.cash_cents), formatCents(row.card_cents), formatCents(row.other_payment_cents), formatCents(row.refunds_cents), formatCents(row.discounts_cents), formatCents(row.tips_cents),
     ]

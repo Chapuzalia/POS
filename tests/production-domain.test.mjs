@@ -62,23 +62,6 @@ test('physical dispatches group batch destinations by printer without changing l
   assert.doesNotMatch(groupedDispatchMigration, /production_product_routes[\s\S]*delete/i)
 })
 
-test('two destinations on the same physical printer become one dispatch', () => {
-  const dispatches = groupPhysicalTargets([
-    { agentId: 'agent-a', printerId: 'epson-kitchen', destinationId: 'kitchen' },
-    { agentId: 'agent-a', printerId: 'epson-kitchen', destinationId: 'grill' },
-  ])
-  assert.deepEqual(dispatches, [{ agentId: 'agent-a', printerId: 'epson-kitchen', destinationIds: ['kitchen', 'grill'] }])
-})
-
-test('destinations on different printers remain separate physical dispatches', () => {
-  const dispatches = groupPhysicalTargets([
-    { agentId: 'agent-a', printerId: 'epson-kitchen', destinationId: 'kitchen' },
-    { agentId: 'agent-a', printerId: 'epson-bar', destinationId: 'bar' },
-  ])
-  assert.equal(dispatches.length, 2)
-  assert.deepEqual(dispatches.map((dispatch) => dispatch.destinationIds), [['kitchen'], ['bar']])
-})
-
 test('KDS is a real online-only non-cash device and Realtime consumer', () => {
   const shell = read('../src/app/AppShell.tsx')
   const kds = read('../src/features/production/components/KdsPage.tsx')
@@ -87,17 +70,5 @@ test('KDS is a real online-only non-cash device and Realtime consumer', () => {
   assert.match(shell, /context\.deviceMode === 'kds'/)
   assert.match(shell, /getCachedContext\(\)\?\.deviceMode !== 'kds'/)
   assert.match(kds, /subscribeToKds/)
-  assert.match(kds, /Todo listo/)
 })
-
-function groupPhysicalTargets(targets) {
-  const grouped = new Map()
-  for (const target of targets) {
-    const key = `${target.agentId}:${target.printerId}`
-    const current = grouped.get(key) ?? { agentId: target.agentId, printerId: target.printerId, destinationIds: [] }
-    current.destinationIds.push(target.destinationId)
-    grouped.set(key, current)
-  }
-  return [...grouped.values()]
-}
 

@@ -5,13 +5,20 @@ function sortStats(stats: ProductSalesStat[]) {
 }
 
 export function addProductSalesStats(currentStats: ProductSalesStat[], lines: TicketLine[]) {
+  return addConfirmedProductSalesStats(currentStats, lines.map((line) => ({
+    productId: line.productId, quantity: line.quantity, lineTotalCents: line.unitPriceCents * line.quantity,
+  })))
+}
+
+export function addConfirmedProductSalesStats(currentStats: ProductSalesStat[], lines: Array<{ productId: string; quantity: number; lineTotalCents: number }>) {
   const statsByProduct = new Map(currentStats.map((stat) => [stat.productId, stat]))
   for (const line of lines) {
+    if (!line.productId) continue
     const current = statsByProduct.get(line.productId) ?? { productId: line.productId, quantity: 0, totalCents: 0 }
     statsByProduct.set(line.productId, {
       ...current,
       quantity: current.quantity + line.quantity,
-      totalCents: current.totalCents + line.unitPriceCents * line.quantity,
+      totalCents: current.totalCents + line.lineTotalCents,
     })
   }
   return sortStats([...statsByProduct.values()])

@@ -1,10 +1,13 @@
 import { notifyOperationalError } from '../utils/notifications.ts'
+import { Check } from 'lucide-react'
 import { getReadableError } from '../utils/errors.ts'
 import { Button as UiButton } from '../components/ui/Button'
 import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
-import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
+import { isAssistEnabled } from '../features/assist/engine'
+import { AssistBoundary } from '../features/assist/AssistBoundary'
 import {
   CashPaymentModal,
   CashClosingResultModal,
@@ -45,7 +48,6 @@ import { CustomerInvoiceModal } from '../features/customers'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { finishCashlogyPayment, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
-import { loadInventoryPreparations } from '../features/inventory/preparationsService'
 import {
   isActiveCashlogyError,
   POS_TRANSIENT_ERROR_DURATION_MS,
@@ -62,6 +64,7 @@ import type {
 } from '../types'
 
 const ReservationsPage = lazy(() => import('../features/reservations/components/ReservationsPage').then((module) => ({ default: module.ReservationsPage })))
+const AssistIndicator = lazy(() => import('../features/assist/AssistIndicator').then((module) => ({ default: module.AssistIndicator })))
 const InventoryPreparationsPanel = lazy(() => import('../features/inventory/InventoryPreparationsPanel').then((module) => ({ default: module.InventoryPreparationsPanel })))
 
 type CashController = ReturnType<typeof useCashSession>
@@ -139,6 +142,8 @@ export function PosPage(props: Props) {
   const [shiftSummaryLoading, setShiftSummaryLoading] = useState(false)
   const [shiftSummaryError, setShiftSummaryError] = useState<string | null>(null)
   const [customerModalOpen, setCustomerModalOpen] = useState(false)
+  const [paymentProgress, setPaymentProgress] = useState<{ method: PaymentMethod | null } | null>(null)
+  const [pendingCashApproval, setPendingCashApproval] = useState<string | null>(null)
   const mobileTableMapLayout = useMobileTableMapLayout()
   const restaurant = props.restaurant
   const quickSale = props.quickSale
@@ -163,30 +168,7 @@ export function PosPage(props: Props) {
   const reservationsEnabled = hasTenantCapability(props.context, 'reservations')
   const inventoryRecipesEnabled = hasTenantCapability(props.context, 'costing')
   const cashlogyEnabled = hasTenantCapability(props.context, 'cashlogy')
-  const [hasInventoryPreparations, setHasInventoryPreparations] = useState(false)
   const appliedDiscount = promotionsEnabled ? quickSale.discount : null
-  const refreshInventoryPreparations = useCallback(async () => {
-    if (!inventoryRecipesEnabled || !props.isOnline) {
-      setHasInventoryPreparations(false)
-      return
-    }
-
-    try {
-      const preparations = await loadInventoryPreparations(props.context.venueId)
-      const hasPreparations = preparations.length > 0
-      setHasInventoryPreparations(hasPreparations)
-      if (!hasPreparations) setPreparationsOpen(false)
-    } catch {
-      setHasInventoryPreparations(false)
-    }
-  }, [inventoryRecipesEnabled, props.context.venueId, props.isOnline])
-
-  useEffect(() => {
-    void refreshInventoryPreparations()
-    const handleFocus = () => void refreshInventoryPreparations()
-    window.addEventListener('focus', handleFocus)
-    return () => window.removeEventListener('focus', handleFocus)
-  }, [refreshInventoryPreparations])
 
   useEffect(() => {
     onUpdateBlockingOperationChange(preparationBusy)
@@ -266,6 +248,10 @@ export function PosPage(props: Props) {
   const paidFeedback = restaurant.posView.type === 'table_order'
     ? props.restaurantPaidFeedback
     : quickSale.paidFeedback
+  const confirmedPayment = props.restaurantPaidFeedback ?? quickSale.paidFeedback
+  const paymentProcessing = paymentProgress !== null && activeLines.length > 0
+    && (restaurant.posView.type !== 'table_order' || restaurant.paymentProcessing)
+  const paymentOrderScope = `${props.context.tenantId}:${props.context.venueId}:${props.context.userId}:${cash.session?.id}:${restaurant.order?.order.id}`
   const tableMapVisible = restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map'
   const cashlogyPendingNotice = cashlogyPaymentIntent && !cashlogyPaymentModalOpen
     ? <section className="flex items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] p-3 text-[var(--foreground)]">
@@ -385,6 +371,12 @@ export function PosPage(props: Props) {
         onSetUnitPrice={quickSale.setUnitPrice}
       />
 
+  const showPaymentProgress = async (method: PaymentMethod | null, action: () => Promise<unknown>) => {
+    const progress = { method }
+    setPaymentProgress(progress)
+    try { await action() }
+    finally { setPaymentProgress((current) => current === progress ? null : current) }
+  }
   const handlePayment = (method: PaymentMethod | null) => {
     if (cashlogyPaymentLocked) {
       showCashlogyPayment()
@@ -394,17 +386,18 @@ export function PosPage(props: Props) {
       props.onSetError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
       return
     }
+    if (restaurant.posView.type === 'table_order' && restaurant.requestPendingPaymentConfirmation(method, null)) return
     if (method === 'cash') {
       if (cashlogyEnabled && cashlogyConfigured) {
-        if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', null)
-        else void quickSale.completePayment('cash', null)
+        if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', null))
+        else void showPaymentProgress('cash', () => quickSale.completePayment('cash', null))
         return
       }
       quickSale.openCashPayment()
       return
     }
-    if (restaurant.posView.type === 'table_order') void restaurant.completePayment(method, null)
-    else void quickSale.completePayment(method, null)
+    if (restaurant.posView.type === 'table_order') void showPaymentProgress(method, () => restaurant.completePayment(method, null))
+    else void showPaymentProgress(method, () => quickSale.completePayment(method, null))
   }
 
   const requestReturnFromQuickSale = () => {
@@ -472,19 +465,21 @@ export function PosPage(props: Props) {
   return (
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
+      {confirmedPayment && !paymentProcessing ? <div role="status" className="pointer-events-none fixed bottom-[max(2rem,env(safe-area-inset-bottom))] left-1/2 z-[80] -translate-x-1/2"><div className="flex items-center gap-2 rounded-full border border-[var(--success)] bg-[var(--success-soft)] px-5 py-3 font-bold text-[var(--success)] shadow-lg motion-safe:animate-[ticket-feedback-success_320ms_ease-out]"><Check aria-hidden="true" className="size-5" strokeWidth={3} />Cobro registrado</div></div> : null}
       {restaurantEnabled && cash.session ? <CarryoverNotice
         key={cash.session.id}
         context={props.context} session={cash.session} isOnline={props.isOnline}
         disabled={posInteractionBlocked} onRecovered={restaurant.returnToMap}
       /> : null}
       <AppHeader
+        assistAction={isAssistEnabled(restaurant.map.assist?.configuration, props.context.features) && restaurant.map.assist?.contextKey === `${props.context.tenantId}:${props.context.venueId}` ? <AssistBoundary key={`${props.context.tenantId}:${props.context.venueId}:${props.context.deviceId}:${props.context.userId}`}><Suspense fallback={null}><AssistIndicator context={props.context} snapshot={restaurant.map.assist} isOnline={props.isOnline} busy={posInteractionBlocked} /></Suspense></AssistBoundary> : null}
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true && !cashlogyPaymentLocked}
         canGenerateInvoice={Boolean(cash.session && activeLines.length > 0 && props.context.canTakePayments && !posInteractionBlocked)}
         canManageCash={canManageCash && !cashlogyPaymentLocked}
         canOpenCashDrawer={canManageCash && !cashlogyPaymentLocked}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
-        canOpenPreparations={inventoryRecipesEnabled && hasInventoryPreparations}
+        canOpenPreparations={inventoryRecipesEnabled}
         cashlogyConnected={cashlogyEnabled && cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
         compactMobile={props.context.deviceMode === 'satellite'}
         isLoading={props.isLoading}
@@ -591,7 +586,9 @@ export function PosPage(props: Props) {
             allowDiscount={props.manualDiscountEnabled || promotionsEnabled}
             discount={appliedDiscount}
             disabled={!canSell}
-            feedback={paidFeedback}
+            feedback={paymentProcessing ? null : paidFeedback}
+            processing={paymentProcessing}
+            pendingMethod={paymentProgress?.method}
             heading={undefined}
             onOpenDiscount={quickSale.openDiscountModal}
             onPayment={handlePayment}
@@ -630,7 +627,9 @@ export function PosPage(props: Props) {
               allowDiscount={props.manualDiscountEnabled || promotionsEnabled}
               discount={appliedDiscount}
               disabled={!canSell}
-              feedback={paidFeedback}
+              feedback={paymentProcessing ? null : paidFeedback}
+              processing={paymentProcessing}
+              pendingMethod={paymentProgress?.method}
               heading={undefined}
               onOpenDiscount={quickSale.openDiscountModal}
               onPayment={handlePayment}
@@ -658,7 +657,13 @@ export function PosPage(props: Props) {
             <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45" onClick={() => {
               const payment = restaurant.pendingPayment
               restaurant.setPendingPayment(null)
-              if (payment) void restaurant.completePayment(payment.method, payment.receivedCents, true)
+              if (payment?.method === 'cash' && payment.receivedCents === null
+                && !payment.cashlogyTransaction && !(cashlogyEnabled && cashlogyConfigured)) {
+                setPendingCashApproval(paymentOrderScope)
+                quickSale.openCashPayment()
+                return
+              }
+              if (payment) void showPaymentProgress(payment.method, () => restaurant.completePayment(payment.method, payment.receivedCents, true))
             }} type="button">Cobrar igualmente</UiButton>
           </div>
         </section>
@@ -703,11 +708,16 @@ export function PosPage(props: Props) {
       /> : null}
       {quickSale.cashPaymentOpen ? <CashPaymentModal
         isBusy={props.isBusy}
-        onCancel={quickSale.closeCashPayment}
+        onCancel={() => {
+          setPendingCashApproval(null)
+          quickSale.closeCashPayment()
+        }}
         onConfirm={(receivedCents) => {
           quickSale.closeCashPayment()
-          if (restaurant.posView.type === 'table_order') void restaurant.completePayment('cash', receivedCents)
-          else void quickSale.completePayment('cash', receivedCents)
+          const forceWithPending = pendingCashApproval === paymentOrderScope
+          setPendingCashApproval(null)
+          if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', receivedCents, forceWithPending))
+          else void showPaymentProgress('cash', () => quickSale.completePayment('cash', receivedCents))
         }}
         totalCents={totalCents}
       /> : null}
@@ -730,7 +740,7 @@ export function PosPage(props: Props) {
         canManage={canManageCash}
         onClose={() => setCashlogyMachineOpen(false)}
       /> : null}
-      {inventoryRecipesEnabled && hasInventoryPreparations && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={closePreparations}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onBusyChange={setPreparationBusy} onClose={closePreparations} /></Suspense></div></AppModal> : null}
+      {inventoryRecipesEnabled && preparationsOpen ? <AppModal containerClassName="!p-3" maxWidth={1100} label="Preparaciones de inventario" onClose={closePreparations}><div className="max-h-[94svh] w-full max-w-6xl overflow-y-auto"><Suspense fallback={<DeferredPanelFallback label="preparaciones" />}><InventoryPreparationsPanel context={props.context} isOnline={props.isOnline} onBusyChange={setPreparationBusy} onClose={closePreparations} /></Suspense></div></AppModal> : null}
       {quickSaleExitOpen ? <QuickSaleExitModal
         canSave={Boolean(props.context.canTakeOrders && cash.session)}
         defaultName={quickSaleExitName}

@@ -232,3 +232,29 @@ Se ejecutaron los advisors de seguridad: señalaron los permisos conservados
 de `anon` y `authenticated` sobre esta función `SECURITY DEFINER`. Es una
 función de trigger; esta migración no amplía ni cambia esos permisos.
 Producción no se ha actualizado.
+
+## Coste final calculado una sola vez
+
+La migración `20261004190253_optimize_ticket_line_cost_snapshot.sql`, aplicada
+a staging, elimina el coste provisional de variante en BEFORE INSERT. El
+trigger existente AFTER INSERT sigue calculando el coste completo después de
+capturar componentes y persistiéndolo en la misma transacción. La migración
+aborta si ese trigger final no está habilitado. Firmas y permisos se conservan.
+Los UPDATE posteriores siguen protegiendo el snapshot histórico; los costes
+enviados por clientes se ignoran. No se recalcula el histórico ni se cambia la
+resolución de ingredientes, compras, modificadores o conversiones.
+
+Cuando el coste sigue siendo desconocido (false/null), se evita el UPDATE
+redundante y sus triggers. Un coste conocido de cero se guarda como true/0.
+Cuatro pruebas nuevas cubren cálculo único después de capturar componentes,
+costes manipulados por el cliente, protección histórica, unknown/zero y
+rollback si falla el cálculo final. La batería completa pasa: **622/622**.
+
+El perfil de staging, con el mismo script de diagnóstico y rollback, confirma
+cero llamadas a `theoretical_variant_cost`, una al cálculo final por línea y
+dos llamadas al trigger fiscal/IVA en lugar de tres en esta muestra. Tres
+ejecuciones de una línea con tarjeta: **233,351 / 32,325 / 34,721 ms** dentro
+de la RPC. El cálculo final tardó **64,747 / 6,211 / 7,339 ms**; la primera
+muestra incluye calentamiento y variación de carga. Estas muestras no permiten
+prometer una mejora porcentual ni equivalen al tiempo HTTP: no incluyen red
+ni commit final. Se ejecutaron los advisors de seguridad después del cambio.

@@ -2,6 +2,7 @@ import { reportOperationError } from './observability.ts'
 import type { PosCatalogState } from '../features/catalog/data/load-pos-catalog.ts'
 import { appendFrozenQueueEvent, recordQueueEventFailure } from '../features/offline/services/offlineQueueState.ts'
 import { getAppRoute, type AppRoute } from '../app/app-routes'
+import type { AssistConfiguration, AssistSituation } from '../features/assist/types'
 
 import type {
   CashSession,
@@ -16,6 +17,41 @@ import type {
 
 const prefix = 'clubpos:v1'
 const OFFLINE_QUEUE_SCHEMA_VERSION = 1 as const
+
+function assistKey(context: TenantContext, suffix: string) {
+  return `${prefix}:assist:v1:${getAppRoute()}:${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}:${suffix}`
+}
+
+export function getCachedAssistConfiguration(context: TenantContext): AssistConfiguration | undefined {
+  const value = readJson<AssistConfiguration | null>(assistKey(context, 'config'), null)
+  if (!value || typeof value.tenantEnabled !== 'boolean' || typeof value.venueEnabled !== 'boolean' || !['low', 'normal', 'high'].includes(value.sensitivity)) return undefined
+  return value
+}
+
+export function saveCachedAssistConfiguration(context: TenantContext, value: AssistConfiguration) {
+  try {
+    if (JSON.stringify(getCachedAssistConfiguration(context)) !== JSON.stringify(value)) writeJson(assistKey(context, 'config'), value)
+  } catch { /* Assist storage must never break restaurant synchronization. */ }
+}
+
+export function getAssistJournal(context: TenantContext): AssistSituation[] {
+  const value = readJson<AssistSituation[]>(assistKey(context, 'journal'), [])
+  if (!Array.isArray(value)) return []
+  return value.filter((event) => event && typeof event.key === 'string' && typeof event.episodeId === 'string' && Number.isFinite(Date.parse(event.startedAt)) && Date.now() - Date.parse(event.startedAt) < 24 * 60 * 60_000).slice(-128)
+}
+
+export function saveAssistJournal(context: TenantContext, value: AssistSituation[]) {
+  try { writeJson(assistKey(context, 'journal'), value.slice(-128)) } catch { /* Best effort secondary journal. */ }
+}
+
+export function getAssistEpisodes(context: TenantContext) {
+  const value = readJson<AssistSituation[]>(assistKey(context, 'episodes'), [])
+  return Array.isArray(value) ? value.filter((event) => event && typeof event.key === 'string' && typeof event.episodeId === 'string' && ['INFO', 'ATTENTION', 'ACTION'].includes(event.severity) && Date.parse(event.expiresAt) > Date.now()).slice(-64) : []
+}
+
+export function saveAssistEpisodes(context: TenantContext, value: AssistSituation[]) {
+  try { writeJson(assistKey(context, 'episodes'), value.slice(-64)) } catch { /* Best effort secondary cache. */ }
+}
 
 function hasStorage() {
   return typeof window !== 'undefined' && 'localStorage' in window

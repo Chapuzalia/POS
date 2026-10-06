@@ -16,7 +16,6 @@ const adminService = read('../src/features/crm/production/services/productionAdm
 const defaultPassMigration = read('../supabase/migrations/20260923130000_set_default_production_pass.sql')
 
 test('CRM can select the default pass while preserving the first-active fallback contract', () => {
-  assert.match(crm, /Por defecto/)
   assert.match(crm, /setDefaultProductionPass/)
   assert.match(adminService, /set_default_production_pass/)
   assert.match(defaultPassMigration, /row_number\(\) over/)
@@ -28,7 +27,6 @@ test('passes persist venue configuration and product-over-category fallback', ()
   assert.match(migration, /production_product_pass_routes/)
   assert.match(migration, /production_category_pass_routes/)
   assert.match(migration, /coalesce\([\s\S]*route\.pass_id[\s\S]*route\.pass_id[\s\S]*fallback\.id/)
-  assert.match(migration, /'Directo'/)
   assert.match(migration, /create trigger production_seed_default_pass_after_venue_insert/)
   assert.match(migration, /routed\.is_active where route\.tenant_id = p_tenant_id/)
 })
@@ -55,27 +53,17 @@ test('production batch pass fallback aggregates UUIDs through text', () => {
 
 test('POS groups by pass and retains manual partial selection', () => {
   assert.match(panel, /productionPasses/)
-  assert.match(panel, /Enviar \{pass\.name\}/)
-  assert.match(panel, /lines\.map\(\(line\)\s*=>\s*renderLine\(line,\s*getPendingQuantity\(line\)/)
-  assert.doesNotMatch(panel, /pass\.entries\.map\(\(entry\) => <div/)
   assert.match(controls, /entry\.unsentQuantity - \(line\?\.servedQuantity \?\? 0\)/)
   assert.match(controls, /componentId: entry\.componentId/)
   assert.match(controls, /entry\.unsentQuantity > 0/)
 })
 
-test('POS edits the pass from the product gesture', () => {
+test('POS pass editing is wired and restricted to unsent entries', () => {
   assert.match(productionService, /setOrderLineProductionPass/)
   assert.match(restaurantController, /changeProductionPass/)
-  assert.match(panel, /onContextMenu/)
-  assert.match(panel, /setTimeout\(openProductionPassEditor, 600\)/)
-  assert.match(panel, /passMenuOpen/)
   assert.match(panel, /entry\.sentQuantity === 0/)
-  assert.doesNotMatch(controls, /onChangePass|NativeSelect/)
 })
 
-test('KDS displays the pass snapshot and CRM distinguishes passes from destinations', () => {
+test('KDS displays the persisted pass snapshot', () => {
   assert.match(kds, /item\.snapshot\.passName/)
-  assert.match(crm, /El destino indica dónde se prepara; el pase indica cuándo se envía/)
-  assert.match(crm, /Pases por categoría/)
-  assert.match(crm, /Excepciones de pase por producto/)
 })

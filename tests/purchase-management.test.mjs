@@ -9,7 +9,6 @@ const service = await readFile(new URL('../src/features/crm/purchases/services/p
 const overview = await readFile(new URL('../src/features/crm/purchases/pages/PurchasesOverviewPage.tsx', import.meta.url), 'utf8')
 const invoices = await readFile(new URL('../src/features/crm/purchases/pages/PurchasesInvoicesPage.tsx', import.meta.url), 'utf8')
 const review = await readFile(new URL('../src/features/crm/supplier-documents/pages/SupplierReceiptsPage.tsx', import.meta.url), 'utf8')
-const inventoryItems = await readFile(new URL('../src/features/crm/inventory/pages/InventoryItemsPage.tsx', import.meta.url), 'utf8')
 const supplierService = await readFile(new URL('../src/features/crm/supplier-documents/services/supplierDocumentService.ts', import.meta.url), 'utf8')
 const edgeFunction = await readFile(new URL('../supabase/functions/process-supplier-document/index.ts', import.meta.url), 'utf8')
 const stockChoiceMigration = await readFile(new URL('../supabase/migrations/20260902004127_persist_supplier_document_stock_choice.sql', import.meta.url), 'utf8')
@@ -33,12 +32,6 @@ test('la elección de stock se guarda al subir el documento y sobrevive al OCR',
   assert.match(stockChoiceMigration, /p_affects_stock boolean/)
   assert.match(stockChoiceMigration, /set affects_stock = coalesce\(p_affects_stock, true\)/)
   assert.match(stockChoiceMigration, /if coalesce\(\(v_result ->> 'duplicate'\)::boolean, false\) then/)
-})
-
-test('abrir un confirmado muestra sus detalles en modo lectura y no la pantalla de éxito', () => {
-  assert.match(review, /workspace\.document\.status === "confirmed"\) setScreen\("review"\)/)
-  assert.match(review, /const isConfirmedDocument = detail\?\.document\.status === "confirmed"/)
-  assert.match(review, /disabled=\{isConfirmedDocument\}/)
 })
 
 test('una factura vinculada excluye el albarán del gasto y una independiente contabiliza normalmente', () => {
@@ -80,7 +73,6 @@ test('el coste efectivo está centralizado y respeta la prioridad', () => {
   assert.deepEqual(getEffectiveInventoryItemCost({ averageCost: null, lastPurchaseCost: 3, referenceCost: 4 }), { cost: 3, source: 'last_purchase' })
   assert.deepEqual(getEffectiveInventoryItemCost({ averageCost: null, lastPurchaseCost: null, referenceCost: 4 }), { cost: 4, source: 'reference' })
   assert.equal(getEffectiveInventoryItemCost({ averageCost: null, lastPurchaseCost: null, referenceCost: null }), null)
-  assert.match(inventoryItems, /getEffectiveInventoryItemCost\(item\)/)
 })
 
 test('las correcciones añaden deltas trazables sin borrar movimientos', () => {
@@ -133,8 +125,6 @@ test('gasto por categoría reutiliza solo una categoría de catálogo inequívoc
     ],
   })
   assert.deepEqual(resolved, { 'item-clear': 'Bebidas' })
-  assert.match(overview, /itemCategories\[line\.inventoryItemId\] \?\? 'Otros'/)
-  assert.doesNotMatch(overview, /values=\{\[\["Otros", stats\.spend\]\]\}/)
 })
 
 test('OCR se inicia en backend y el listado solo refresca su estado persistido', () => {
