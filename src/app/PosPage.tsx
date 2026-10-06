@@ -6,6 +6,8 @@ import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
+import { isAssistEnabled } from '../features/assist/engine'
+import { AssistBoundary } from '../features/assist/AssistBoundary'
 import {
   CashPaymentModal,
   CashClosingResultModal,
@@ -62,6 +64,7 @@ import type {
 } from '../types'
 
 const ReservationsPage = lazy(() => import('../features/reservations/components/ReservationsPage').then((module) => ({ default: module.ReservationsPage })))
+const AssistIndicator = lazy(() => import('../features/assist/AssistIndicator').then((module) => ({ default: module.AssistIndicator })))
 const InventoryPreparationsPanel = lazy(() => import('../features/inventory/InventoryPreparationsPanel').then((module) => ({ default: module.InventoryPreparationsPanel })))
 
 type CashController = ReturnType<typeof useCashSession>
@@ -469,6 +472,7 @@ export function PosPage(props: Props) {
         disabled={posInteractionBlocked} onRecovered={restaurant.returnToMap}
       /> : null}
       <AppHeader
+        assistAction={isAssistEnabled(restaurant.map.assist?.configuration, props.context.features) && restaurant.map.assist?.contextKey === `${props.context.tenantId}:${props.context.venueId}` ? <AssistBoundary key={`${props.context.tenantId}:${props.context.venueId}:${props.context.deviceId}:${props.context.userId}`}><Suspense fallback={null}><AssistIndicator context={props.context} snapshot={restaurant.map.assist} isOnline={props.isOnline} busy={posInteractionBlocked} /></Suspense></AssistBoundary> : null}
         cashSession={cash.session}
         canCloseCash={props.context.canCloseCashSession === true && !cashlogyPaymentLocked}
         canGenerateInvoice={Boolean(cash.session && activeLines.length > 0 && props.context.canTakePayments && !posInteractionBlocked)}

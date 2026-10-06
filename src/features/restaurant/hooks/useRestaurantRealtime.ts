@@ -1,4 +1,5 @@
 import { operationBreadcrumb } from '../../../lib/observability.ts'
+import { getCachedAssistConfiguration } from '../../../lib/offlineStore'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { applySessionLayout, loadSessionTableLayout, subscribeToSessionTableLayout } from '../../tables/layout-service'
 import {
@@ -93,6 +94,11 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
     }
     if (!isOnline) {
       wasOfflineRef.current = true
+      setMap((current) => {
+        if (loadedContextKeyRef.current === `${context.tenantId}:${context.venueId}`) return current
+        const configuration = getCachedAssistConfiguration(context)
+        return { areas: [], tables: [], layoutRevision: 0, assist: configuration ? { configuration, orders: [], observedAt: '', contextKey: `${context.tenantId}:${context.venueId}` } : undefined }
+      })
       setConfigLoaded(true)
       return undefined
     }
