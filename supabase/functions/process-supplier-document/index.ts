@@ -8,6 +8,7 @@ import {
   normalizePurchaseToBase,
   ocrDocumentSchema,
   parseSupplierDocumentExtraction,
+  profileRequiredTextsMeetConfidence,
   resolveSupplierCandidate,
   resolveSupplierFromOcr,
   runDeterministicParser,
@@ -21,6 +22,7 @@ import {
   type SupplierCandidate,
   type SupplierDocumentExtraction,
 } from '../_shared/supplier-documents/core.ts'
+import { enrichDocumentFinancials } from '../_shared/supplier-documents/documentFinancials.ts'
 import { getSupplierDocumentMockFixture } from '../_shared/supplier-documents/fixtures.ts'
 import {
   createDocumentOcrProvider,
@@ -276,7 +278,9 @@ function tryKnownProfiles(
         rules: diagnosis.rules,
       }
       if (profile.status === 'candidate') {
-        if (isBetter(extraction, candidate)) candidate = parsedProfile
+        const reliable = profileRequiredTextsMeetConfidence(parsedProfile.rules, ocr)
+        const currentReliable = candidate ? profileRequiredTextsMeetConfidence(candidate.rules, ocr) : false
+        if ((reliable && !currentReliable) || (reliable === currentReliable && isBetter(extraction, candidate))) candidate = parsedProfile
       } else if (isBetter(extraction, selected)) selected = parsedProfile
     } catch (error) {
       diagnosis.classification = 'diagnostic_error'
@@ -1179,9 +1183,9 @@ async function processSupplierDocumentRequest(request: Request) {
         }
       }
     }
-    extraction = parseSupplierDocumentExtraction(
+    extraction = enrichDocumentFinancials(parseSupplierDocumentExtraction(
       groundSupplierExtractionInOcr(extraction, ocr),
-    )
+    ), ocr)
     const requestedDocumentType = document.document_type
     const documentTypeCorrected =
       extraction.document.type !== requestedDocumentType
@@ -1248,7 +1252,7 @@ async function processSupplierDocumentRequest(request: Request) {
         )
 
         const candidate = {
-          ...revised,
+          ...enrichDocumentFinancials(revised, ocr),
           proposedProfile: extraction.proposedProfile,
         }
 
@@ -1465,6 +1469,7 @@ async function processSupplierDocumentRequest(request: Request) {
             0,
           ),
           math,
+          documentFinancialSummary: extraction.document.financialSummary ?? null,
           profileValidation:
             failedParser && parserMode === 'ai'
               ? { candidate: false, reason: 'PROFILE_REPAIR_PENDING' }
