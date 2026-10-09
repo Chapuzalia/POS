@@ -1,6 +1,6 @@
 import {
   ocrDocumentSchema, supplierDocumentExtractionSchema, supplierProfileRulesSchema,
-  profileFingerprint, profileRequiredTextsMeetConfidence, inspectParserTables, runDeterministicParser, validateExtractionMath,
+  profileFingerprint, profileRequiredTextsMeetConfidence, inspectParserTables, runDeterministicParser, validateProductExtraction,
   type OcrDocument, type SupplierDocumentExtraction, type SupplierProfileRules, type ParserExecutionTrace, type MathValidation,
 } from './core.ts'
 import { extractProfileMetadata, groundAiDocumentMetadata, normalizeMetadataValue } from './documentMetadata.ts'
@@ -115,20 +115,19 @@ export function diagnoseParser(profile: ParserProfile, ocrInput: OcrDocument, do
         supplier: { name: null, legalName: null, taxId: null, email: null, phone: null, address: null },
         supplierResolution: { supplierId: null, confidence: 'unresolved', signals: [], reasons: [] },
         lines, proposedProfile: null, confidence: ocr.confidence }
-      const math = validateExtractionMath(mathInput)
+      const math = validateProductExtraction(mathInput)
       result.math = { ...math, source: result.extraction ? 'parsed' : 'partial', lines: lines.map((line, index) => {
-        const expected = line.unitPrice === null ? null : line.quantity * line.unitPrice - line.discountAmount + line.chargesAmount
-        return { index, expected, actual: line.lineTotal,
-          difference: expected === null || line.lineTotal === null ? null : expected - line.lineTotal,
-          tolerance: line.lineTotal === null ? null : Math.max(0.02, Math.abs(line.lineTotal) * 0.03) }
+        const expected = line.unitPrice === null ? null : line.quantity * line.unitPrice
+        return { index, expected, actual: line.grossCost,
+          difference: expected === null || line.grossCost === null ? null : expected - line.grossCost,
+          tolerance: expected === null ? null : Math.max(0.02, Math.abs(expected) * 0.03) }
       }) }
       if (!math.coherent) fail('math', 'LINE_MATH_MISMATCH')
-      if (lines.some((line) => line.unitPrice === null || line.lineTotal === null)) fail('lines', 'LINE_AMOUNTS_MISSING')
+      if (lines.some((line) => line.unitPrice === null)) fail('lines', 'LINE_AMOUNTS_MISSING')
     }
     if (target && result.extraction) {
       const comparable = (items: SupplierDocumentExtraction['lines']) => items.map((line) => [line.supplierReference,
-        line.description, line.barcode, line.quantity, line.purchaseUnit, line.unitPrice, line.discountAmount,
-        line.chargesAmount, line.lineTotal, line.taxRate])
+        line.description, line.barcode, line.quantity, line.purchaseUnit, line.unitPrice, line.discountAmount])
       if (JSON.stringify(comparable(lines)) !== JSON.stringify(comparable(target.lines))) fail('lines', 'LINE_OUTPUT_MISMATCH')
     }
     if (result.execution.headers.some((header) => header.selected && header.rejectedRows.some((row) => row.reason.startsWith('LINE_SCHEMA_INVALID')))) {

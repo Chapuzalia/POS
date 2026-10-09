@@ -16,7 +16,8 @@ import {
   supplierHintSelection,
   supplierSelection,
   supplierProfileRulesSchema,
-  validateExtractionMath,
+  validateProductExtraction,
+  productNetCost,
   validateProposedProfile,
   type InventoryUnitDefinition,
   type SupplierCandidate,
@@ -208,6 +209,7 @@ function tryKnownProfiles(
     globalProfileId: string
     globalSupplierId: string
     rules: NonNullable<ParserDiagnosis['rules']>
+    successfulSamples: number
   }
   let selected: SelectedProfile | null = null
   let candidate: SelectedProfile | null = null
@@ -217,11 +219,14 @@ function tryKnownProfiles(
   const isBetter = (
     extraction: SupplierDocumentExtraction,
     current: SelectedProfile | null,
+    successfulSamples: number,
   ) =>
     !current ||
     missing(extraction) < missing(current.extraction) ||
     (missing(extraction) === missing(current.extraction) &&
-      extraction.lines.length > current.extraction.lines.length)
+      (extraction.lines.length > current.extraction.lines.length ||
+        (extraction.lines.length === current.extraction.lines.length &&
+          successfulSamples > current.successfulSamples)))
   for (const profile of profiles) {
     if (profile.global_supplier_id !== supplier.id) continue
     if (profile.document_type !== documentType) continue
@@ -276,12 +281,13 @@ function tryKnownProfiles(
         globalProfileId: String(profile.id),
         globalSupplierId: String(supplier.id),
         rules: diagnosis.rules,
+        successfulSamples: Math.max(0, Number(profile.success_count ?? 0) - Number(profile.correction_count ?? 0)),
       }
       if (profile.status === 'candidate') {
         const reliable = profileRequiredTextsMeetConfidence(parsedProfile.rules, ocr)
         const currentReliable = candidate ? profileRequiredTextsMeetConfidence(candidate.rules, ocr) : false
-        if ((reliable && !currentReliable) || (reliable === currentReliable && isBetter(extraction, candidate))) candidate = parsedProfile
-      } else if (isBetter(extraction, selected)) selected = parsedProfile
+        if ((reliable && !currentReliable) || (reliable === currentReliable && isBetter(extraction, candidate, parsedProfile.successfulSamples))) candidate = parsedProfile
+      } else if (isBetter(extraction, selected, parsedProfile.successfulSamples)) selected = parsedProfile
     } catch (error) {
       diagnosis.classification = 'diagnostic_error'
       diagnosis.repairEligible = false
@@ -458,7 +464,7 @@ function buildLineRows(
   document: DocumentRow,
   inventory: Awaited<ReturnType<typeof loadInventoryContext>>,
 ) {
-  const math = validateExtractionMath(extraction)
+  const math = validateProductExtraction(extraction)
   return extraction.lines.map((line, index) => {
     const match = matchInventoryItem(line, inventory.items, inventory.aliases)
     const item =
@@ -480,14 +486,7 @@ function buildLineRows(
     const warehouseId = item
       ? chooseDefaultWarehouse(item.id, inventory.routes, inventory.warehouses)
       : null
-    const netCost =
-      line.netCost ??
-      line.lineTotal ??
-      (line.unitPrice === null
-        ? null
-        : line.quantity * line.unitPrice -
-          line.discountAmount +
-          line.chargesAmount)
+    const netCost = productNetCost(line)
     const normalizedUnitCost =
       normalized && netCost !== null
         ? Math.round((netCost / normalized.baseQuantity) * 1_000_000) /
@@ -1150,7 +1149,7 @@ async function processSupplierDocumentRequest(request: Request) {
           const validation = validateProposedProfile(ocr, {
             ...interpreted,
             proposedProfile: attempted.candidate.rules,
-          })
+          }, { existingProfile: true })
           candidateProfileValidation = {
             profileId: attempted.candidate.globalProfileId,
             aiConfirmed: validation.candidate,
@@ -1189,7 +1188,7 @@ async function processSupplierDocumentRequest(request: Request) {
     const requestedDocumentType = document.document_type
     const documentTypeCorrected =
       extraction.document.type !== requestedDocumentType
-    let math = validateExtractionMath(extraction)
+    let math = validateProductExtraction(extraction)
 
     let profileValidation =
       parserMode === 'ai' ? validateProposedProfile(ocr, extraction) : null
@@ -1261,7 +1260,7 @@ async function processSupplierDocumentRequest(request: Request) {
         if (validation.candidate) {
           extraction = candidate
           profileValidation = validation
-          math = validateExtractionMath(extraction)
+          math = validateProductExtraction(extraction)
         }
       } catch (error) {
         interpretationRetryError =
@@ -1278,7 +1277,7 @@ async function processSupplierDocumentRequest(request: Request) {
       : appliedProfileRules
 
     const parsedRules =
-      supplierProfileRulesSchema.safeParse(appliedProfileRules)
+      supplierProfileRulesSchema.safeParse(lineParserProfile)
     const documentMetadata = await resolveDocumentMetadata({
       ocr,
       rules: parsedRules.success ? parsedRules.data : null,
