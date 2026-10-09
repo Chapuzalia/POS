@@ -1,8 +1,19 @@
 import { sentryVitePlugin } from "@sentry/vite-plugin";
-import { defineConfig } from 'vite'
+import { resolve } from 'node:path'
+import { defineConfig, type PreviewServer, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
 import tailwindcss from '@tailwindcss/vite'
 import { validateBuildEnvironment } from './build/validateBuildEnvironment.ts'
+
+// Match the production redirect before Vite's SPA fallback chooses an HTML entry.
+function configureCrmCanonicalRedirect(server: ViteDevServer | PreviewServer) {
+  server.middlewares.use((request, response, next) => {
+    const url = new URL(request.url ?? '/', 'http://localhost')
+    if (url.pathname !== '/crm') return next()
+    response.writeHead(308, { Location: `/crm/${url.search}` })
+    response.end()
+  })
+}
 
 const appVersion = process.env.APP_VERSION
   ?? process.env.VERCEL_GIT_COMMIT_SHA
@@ -28,6 +39,10 @@ export default defineConfig({
     __APP_VERSION__: JSON.stringify(appVersion),
   },
   plugins: [react(), tailwindcss(), {
+    name: 'crm-canonical-entry',
+    configureServer: configureCrmCanonicalRedirect,
+    configurePreviewServer: configureCrmCanonicalRedirect,
+  }, {
     name: 'validate-build-environment',
     configResolved(config) {
       if (config.command === 'build') validateBuildEnvironment(config.env)
@@ -56,6 +71,10 @@ export default defineConfig({
     chunkSizeWarningLimit: 1000,
     sourcemap: true,
     rolldownOptions: {
+      input: {
+        pos: resolve(import.meta.dirname, 'index.html'),
+        crm: resolve(import.meta.dirname, 'crm/index.html'),
+      },
       output: {
         codeSplitting: {
           groups: [
@@ -83,7 +102,9 @@ export default defineConfig({
                   || id.includes('/node_modules/@supabase/')
               },
               priority: 30,
-              includeDependenciesRecursively: false,
+              // Keep SDK helpers in this chunk when both HTML entries share the app.
+              // Otherwise Rolldown can create a cycle through the app's Supabase client.
+              includeDependenciesRecursively: true,
             },
             {
               name: 'vendor-validation',

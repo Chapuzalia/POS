@@ -8,5 +8,5 @@ export function getAppRoute(pathname = window.location.pathname): AppRoute {
 
 export function getAppRoutePath(route: AppRoute): string {
   if (route === 'superadmin') return '/superadmin'
-  return route === 'crm' ? '/crm' : '/'
+  return route === 'crm' ? '/crm/' : '/'
 }
