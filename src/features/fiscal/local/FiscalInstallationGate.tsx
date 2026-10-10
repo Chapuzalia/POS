@@ -11,14 +11,14 @@ import { localFiscalMode } from './mode.ts'
 
 type Props = { context: TenantContext; cashSession: CashSession | null; children: ReactNode; onLogout: () => Promise<void>; onBusyChange?: (busy: boolean) => void }
 
-/** All checkout entry points remain behind the same local identity gate. */
+/** Satellites join a checkout's session without owning a fiscal identity or ledger. */
 export function FiscalInstallationGate({ context, cashSession, children, onLogout, onBusyChange }: Props) {
   const [ready, setReady] = useState(false)
   const [missing, setMissing] = useState(false)
   const [preview, setPreview] = useState<{ id: string; number: string } | null>(null)
   const [previewReady, setPreviewReady] = useState(false)
   const [testRecovery, setTestRecovery] = useState(false)
-  const [busy, setBusy] = useState(true)
+  const [busy, setBusy] = useState(context.deviceMode !== 'satellite')
   const [error, setError] = useState<string | null>(null)
   const [attempt, setAttempt] = useState(0)
   const scopeRef = useRef({ context, cashSession })
@@ -27,7 +27,7 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
   useEffect(() => { onBusyChange?.(busy); return () => onBusyChange?.(false) }, [busy, onBusyChange])
 
   useEffect(() => {
-    if (!missing || ready || busy) return
+    if (context.deviceMode === 'satellite' || !missing || ready || busy) return
     const refresh = () => { if (document.visibilityState === 'visible') setAttempt(value => value + 1) }
     const changed = (event: Event) => {
       if (event instanceof CustomEvent && event.detail !== context.tenantId) return
@@ -45,12 +45,14 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
       window.removeEventListener('storage', refresh)
       window.clearInterval(timer)
     }
-  }, [missing, ready, busy, context.tenantId])
+  }, [missing, ready, busy, context.tenantId, context.deviceMode])
 
   useEffect(() => {
     let alive = true
     async function check() {
       const { context, cashSession } = scopeRef.current
+      // Skip identity reads, activation previews and ledger validation for service devices.
+      if (context.deviceMode === 'satellite') { setBusy(false); return }
       setBusy(true); setError(null); setPreviewReady(false)
       if (!cashSession) { setBusy(false); return }
       if (localFiscalMode() === 'disabled') { if (alive) { setReady(true); setBusy(false) }; return }
@@ -72,10 +74,10 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
     }
     void check()
     return () => { alive = false }
-  }, [context.tenantId, context.venueId, context.deviceId, context.userId, cashSession?.id, cashSession?.cashRegisterId, attempt])
+  }, [context.tenantId, context.venueId, context.deviceId, context.deviceMode, context.userId, cashSession?.id, cashSession?.cashRegisterId, attempt])
 
   async function activate(recover: boolean) {
-    if (!cashSession) return
+    if (context.deviceMode === 'satellite' || !cashSession) return
     setBusy(true); setError(null)
     try {
       await activateFiscalInstallation(context, cashSession, preview?.id ?? null, recover)
@@ -87,7 +89,7 @@ export function FiscalInstallationGate({ context, cashSession, children, onLogou
     finally { setBusy(false) }
   }
 
-  if (!cashSession || ready) return children
+  if (context.deviceMode === 'satellite' || !cashSession || ready) return children
   return <AppModal label="Instalación fiscal de esta PWA" maxWidth={620} dismissDisabled onClose={() => {}}>
     <div className="grid max-h-[calc(100dvh-48px)] gap-4 overflow-y-auto p-6">
       <h2 className="m-0 text-xl font-semibold">{missing ? 'Activar instalación fiscal' : 'Comprobar instalación fiscal'}</h2>

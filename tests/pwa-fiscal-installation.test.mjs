@@ -93,6 +93,15 @@ test('legacy adaptation preserves identity and reserves its sequence even after 
   assert.equal((await db.query('select fiscal_installation_series_prefix(i) as prefix from fiscal_sif_installations i where id=$1',[legacy])).rows[0].prefix,'BCN-C1')
 })
 
+test('devices without payment permission cannot activate or recover a fiscal installation', async t => {
+  const db = await database(t, true)
+  await db.query('update devices set can_take_payments=false where id=$1', [device])
+  await assert.rejects(activate(db, { expected: legacy }), /FISCAL_ACTIVATION_FORBIDDEN/)
+  await assert.rejects(activate(db, { expected: legacy, recover: true }), /FISCAL_ACTIVATION_FORBIDDEN/)
+  assert.equal((await db.query('select count(*)::integer as n from fiscal_sif_installations')).rows[0].n, 1)
+  assert.equal((await db.query('select retired_at from fiscal_sif_installations where id=$1', [legacy])).rows[0].retired_at, null)
+})
+
 test('test recovery never retires or creates an installation and is rejected for production or other tenants', async t => {
   const db = await database(t,true)
   assert.equal(await activate(db,{expected:legacy,recover:true}),legacy)

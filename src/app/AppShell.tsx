@@ -540,7 +540,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
       printingClosingId={cash.printingClosingId}
       sessions={cash.options.sessions}
     /></PosStartupReveal>
-    return <PosStartupReveal><FiscalQueueNotice context={context} cashSession={cash.session} /><FiscalInstallationGate key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${cash.session?.cashRegisterId}`} context={context} cashSession={cash.session} onLogout={session.logout} onBusyChange={setAuxiliaryOperationBusy}><PosPage
+    return <PosStartupReveal><FiscalQueueNotice context={context} cashSession={cash.session} /><FiscalInstallationGate key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${context.deviceMode}:${cash.session?.cashRegisterId}`} context={context} cashSession={cash.session} onLogout={session.logout} onBusyChange={setAuxiliaryOperationBusy}><PosPage
       addFeedback={addFeedback}
       catalog={catalog}
       discounts={discounts}
