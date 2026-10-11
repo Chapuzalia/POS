@@ -73,6 +73,7 @@ test('aplica el cobro recuperado sin saleId remoto usando la identidad persistid
   assert.equal(h.calls.events[0].payload.payment.cashlogyTransactionId, 'tx')
   assert.equal(h.calls.charges, 0)
   assert.equal(h.calls.finishes, 1)
+  await new Promise(setImmediate)
   assert.equal(h.calls.prints, 1)
   assert.equal(h.state.intent, null)
   assert.equal(h.state.modalOpen, false)

@@ -1,10 +1,11 @@
 import { z } from 'zod'
 import { supabase } from '../../../lib/supabase.ts'
+import { UserFacingError } from '../../../utils/UserFacingError.ts'
+import { isFiscalBridgeOrigin } from './bridgeUrl.ts'
+import { readFiscalBackend } from './backendRead.ts'
 
-const bridgeUrlSchema = z.url().refine((value) => {
-  const url = new URL(value)
-  return url.protocol === 'https:' && !url.username && !url.password && !url.search && !url.hash && url.pathname === '/'
-}, 'La URL del puente debe ser un origen HTTPS sin credenciales ni parámetros.')
+const bridgeUrlSchema = z.url().refine(isFiscalBridgeOrigin,
+  'La URL del puente debe usar HTTPS, o HTTP en localhost, 127.0.0.1 o [::1], sin rutas, credenciales ni parámetros.')
 
 const settingsSchema = z.object({
   tenant_id: z.uuid(),
@@ -70,9 +71,10 @@ const settingsLoads = new Map<string, Promise<FiscalPosSettings>>()
 
 async function fetchFiscalPosSettings(tenantId: string, allowCached: boolean): Promise<FiscalPosSettings> {
   if (!supabase) throw new Error('Supabase no está configurado.')
-  const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
+  const client = supabase
+  const { data, error } = await readFiscalBackend(signal => client.from('fiscal_pos_bridge_settings')
     .select('*')
-    .eq('tenant_id', tenantId).maybeSingle()
+    .eq('tenant_id', tenantId).abortSignal(signal).maybeSingle())
   if (!error) {
     if (!data) throw new Error('Configura el puente y el productor SIF en Integraciones del CRM antes de facturar.')
     const settings = rememberFiscalPosSettings(data, tenantId)
@@ -92,7 +94,22 @@ async function fetchFiscalPosSettings(tenantId: string, allowCached: boolean): P
 
 export async function saveFiscalPosSettings(settings: FiscalPosSettings): Promise<FiscalPosSettings> {
   if (!supabase) throw new Error('Supabase no está configurado.')
-  const validated = settingsSchema.parse(settings)
+  const validation = settingsSchema.safeParse(settings)
+  if (!validation.success) {
+    const messages: Record<string, string> = {
+      tenant_id: 'No se reconoce la empresa activa. Vuelve a iniciar sesión.',
+      bridge_url: 'URL del puente: usa HTTPS, o HTTP en localhost, 127.0.0.1 o [::1] para desarrollo local, sin rutas, credenciales ni parámetros (por ejemplo, http://localhost:3000/).',
+      aeat_environment: 'Selecciona un entorno AEAT válido: pruebas o producción.',
+      print_ticket_qr: 'Selecciona si deseas imprimir el código QR en el ticket.',
+      producer_name: 'Razón social del productor SIF: introduce entre 1 y 120 caracteres.',
+      producer_nif: 'NIF del productor: introduce exactamente 9 letras o números.',
+      system_id: 'ID de sistema: introduce exactamente 2 letras o números.',
+      system_version: 'Versión del sistema: introduce entre 1 y 40 caracteres.',
+    }
+    const fields = [...new Set(validation.error.issues.map(issue => String(issue.path[0])))]
+    throw new UserFacingError(fields.map(field => messages[field] ?? 'Revisa los datos de la configuración fiscal.').join(' '))
+  }
+  const validated = validation.data
   const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
     .upsert({ ...validated, bridge_url: validated.bridge_url || null }, { onConflict: 'tenant_id' })
     .select('*').single()

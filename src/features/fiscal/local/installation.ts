@@ -9,6 +9,7 @@ import { loadFiscalPosSettings, rememberFiscalPosSettings, type FiscalPosSetting
 import { FiscalIdentityMissingError, readFiscalIdentity, persistFiscalIdentity, fiscalActivationRequest, assertFiscalLedgerHeadValid, clearFiscalActivationRequest } from './localIdentity.ts'
 import { recoverServerConfirmedFiscalChain } from './serverRecovery.ts'
 import { UserFacingError } from '../../../utils/UserFacingError.ts'
+import { readFiscalBackend } from './backendRead.ts'
 
 export class FiscalActivationConfirmationError extends UserFacingError {}
 
@@ -18,6 +19,7 @@ const installationSchema = z.object({
   venue_code: z.string().regex(/^[A-Z0-9]{1,8}$/), register_code: z.string().regex(/^[A-Z0-9]{1,8}$/),
   installation_code: z.string().regex(/^[A-Z0-9]{1,8}$/), mode: z.literal('production'), retired_at: z.null(),
   installation_sequence: z.number().int().positive(), series_version: z.union([z.literal(1), z.literal(2)]),
+  bridge_requested: z.boolean().default(false),
 })
 const subjectSchema = z.object({ id: z.uuid(), tenant_id: z.uuid(), legal_name: z.string().min(1), nif: z.string().regex(/^[A-Z0-9]{9}$/) })
 
@@ -59,10 +61,11 @@ async function fetchFiscalInstallation(context: TenantContext, cashSession: Pick
   const key = fiscalIdentityKey(context, cashSession)
   const cached = snapshotSchema.parse(await readRequiredIdentity(key))
   if (supabase) {
-    const response = await supabase.rpc('pos_fiscal_preparation', {
+    const client = supabase
+    const response = await readFiscalBackend(signal => client.rpc('pos_fiscal_preparation', {
       p_tenant_id: context.tenantId, p_venue_id: context.venueId, p_register_id: cashSession.cashRegisterId,
       p_device_id: context.deviceId, p_installation_id: cached.installation.id,
-    })
+    }).abortSignal(signal))
     if (!response.error) {
       if (!response.data) throw new UserFacingError('La instalación fiscal fue retirada o su configuración no está disponible. Se bloquea la emisión.')
       const value = response.data as { installation: unknown; subject: unknown; settings: unknown; head: unknown }
@@ -90,7 +93,7 @@ async function fetchFiscalInstallation(context: TenantContext, cashSession: Pick
 
 const snapshotSchema = z.object({ installation: installationSchema, subject: subjectSchema })
 type Snapshot = z.infer<typeof snapshotSchema>
-const installationColumns = 'id,tenant_id,fiscal_subject_id,venue_id,cash_register_id,device_id,installation_number,venue_code,register_code,installation_code,mode,retired_at,installation_sequence,series_version'
+const installationColumns = 'id,tenant_id,fiscal_subject_id,venue_id,cash_register_id,device_id,installation_number,venue_code,register_code,installation_code,mode,retired_at,installation_sequence,series_version,bridge_requested'
 
 async function readRequiredIdentity(key: string): Promise<unknown> {
   const identity = await readFiscalIdentity(key)
@@ -104,11 +107,12 @@ export function fiscalLedgerScope(installation: FiscalInstallation): string {
 
 async function fetchFiscalSnapshot(context: TenantContext, cashSession: Pick<CashSession, 'cashRegisterId'>, id: string, cached?: Snapshot): Promise<Snapshot> {
   if (!supabase) throw new Error('Supabase no está configurado para cargar la instalación fiscal.')
-  const installationResult = await supabase.from('fiscal_sif_installations')
+  const client = supabase
+  const installationResult = await readFiscalBackend(signal => client.from('fiscal_sif_installations')
     .select(installationColumns).eq('id', id)
     .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId)
     .eq('cash_register_id', cashSession.cashRegisterId).eq('device_id', context.deviceId)
-    .is('retired_at', null).maybeSingle()
+    .is('retired_at', null).abortSignal(signal).maybeSingle())
   if (installationResult.error && (!cached || !isFiscalTransportUnavailable(installationResult.error))) throw installationResult.error
   if (!installationResult.error && !installationResult.data) throw new UserFacingError('La instalación fiscal fue retirada o no está autorizada. Se bloquea la emisión; su sincronización pendiente puede continuar.')
   const installation = installationSchema.parse(installationResult.error ? cached?.installation : installationResult.data)
@@ -116,8 +120,8 @@ async function fetchFiscalSnapshot(context: TenantContext, cashSession: Pick<Cas
     || installation.cash_register_id !== cashSession.cashRegisterId || installation.device_id !== context.deviceId) {
     throw new Error('La instalación fiscal no pertenece a esta caja y dispositivo.')
   }
-  const subjectResult = await supabase.from('fiscal_subjects')
-    .select('id,tenant_id,legal_name,nif').eq('tenant_id', context.tenantId).eq('id', installation.fiscal_subject_id).maybeSingle()
+  const subjectResult = await readFiscalBackend(signal => client.from('fiscal_subjects')
+    .select('id,tenant_id,legal_name,nif').eq('tenant_id', context.tenantId).eq('id', installation.fiscal_subject_id).abortSignal(signal).maybeSingle())
   if (subjectResult.error && (!cached || !isFiscalTransportUnavailable(subjectResult.error))) throw subjectResult.error
   const subject = subjectSchema.parse(subjectResult.error ? cached?.subject : subjectResult.data)
   if (subject.id !== installation.fiscal_subject_id || subject.tenant_id !== context.tenantId) {
@@ -137,7 +141,7 @@ async function installationFromSnapshot(context: TenantContext, cashSession: Pic
     venueCode: installation.venue_code, registerCode: installation.register_code,
     installationCode: installation.installation_code, timezone: context.venueTimeZone || 'Europe/Madrid',
     installationSequence: installation.installation_sequence, seriesVersion: installation.series_version,
-    system: publicSystem(installation.installation_number, settings), bridgeUrl: settings.bridge_url || null, aeatEnvironment: settings.aeat_environment,
+    system: publicSystem(installation.installation_number, settings), bridgeUrl: installation.bridge_requested ? settings.bridge_url || null : null, aeatEnvironment: settings.aeat_environment,
   }
 }
 
@@ -193,7 +197,9 @@ export async function fiscalBridgeAccessToken(): Promise<string> {
 }
 
 export async function getFiscalInstallationLease(installation: FiscalInstallation): Promise<FiscalLease> {
-  if (!installation.bridgeUrl) return createLocalFallbackLease(installation.installationId, installation.deviceId)
+  if (!installation.bridgeUrl || (typeof navigator !== 'undefined' && navigator.onLine === false)) {
+    return createLocalFallbackLease(installation.installationId, installation.deviceId)
+  }
   const leaseKey = `${installation.installationId}:${installation.bridgeUrl}`
   const existing = leases.get(leaseKey)
   if (existing) {

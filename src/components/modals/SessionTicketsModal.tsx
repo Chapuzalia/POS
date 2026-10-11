@@ -24,6 +24,8 @@ type SessionTicketsModalProps = {
   canReprint: boolean
   initialPage: SessionTicketHistoryPage | null
   isBusy: boolean
+  pendingTicketIds?: ReadonlySet<string>
+  pendingSaleIds?: ReadonlySet<string>
   loadPage: (page: number, query: string) => Promise<SessionTicketHistoryPage>
   onChangePayment: (ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => void | Promise<void>
   onRefund?: (ticket: SessionTicketRecord, lines: Array<{ lineId: string; quantity: number }>, paymentMethod: PaymentMethod) => void | Promise<void>
@@ -75,6 +77,8 @@ export function SessionTicketsModal({
   canReprint,
   initialPage,
   isBusy,
+  pendingTicketIds,
+  pendingSaleIds,
   loadPage,
   onChangePayment,
   onRefund,
@@ -163,6 +167,7 @@ export function SessionTicketsModal({
             <p className="text-sm text-[var(--muted)]">
               {isLoading && !pageData ? 'Cargando…' : `${totalResults} ${requestedQuery ? 'coincidencias' : 'tickets'}`}
             </p>
+            {pageData?.source === 'local' ? <p className="text-xs text-[var(--muted)]">Tickets guardados en este TPV</p> : null}
           </div>
           <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" disabled={isBusy} onClick={onClose} size="sm" type="button" variant="tertiary">
             <X className="h-4 w-4" />
@@ -220,6 +225,9 @@ export function SessionTicketsModal({
                       <p className="mt-1 text-xs font-bold text-[var(--muted)]">
                         Impresión: {ticket.printStatus || 'no solicitada'}{ticket.printErrorCode ? ` · ${ticket.printErrorCode}` : ''}
                       </p>
+                      {pendingTicketIds?.has(ticket.payload.ticket.id) || pendingSaleIds?.has(ticket.payload.sale.id) ? (
+                        <p className="mt-1 text-xs font-semibold text-[var(--warning)]">Pendiente de sincronizar</p>
+                      ) : null}
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">

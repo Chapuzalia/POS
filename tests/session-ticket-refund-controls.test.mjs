@@ -20,7 +20,7 @@ function harness() {
   const ticket = {
     id: 'sale', totalCents: 240, status: 'active', paymentMethod: 'cash', ticketNumber: 42,
     createdAt: '2026-10-06T12:00:00Z',
-    payload: { ticket: {}, lines: [
+    payload: { ticket: { id: 'ticket-id' }, sale: { id: 'sale' }, lines: [
       { id: 'whole', productName: '1906', quantity: 1, modifiers: [], lineTotalCents: 160 },
       { id: 'fraction', productName: 'Producto fraccionado', quantity: 1.5, modifiers: [], lineTotalCents: 80 },
     ] },
@@ -36,8 +36,17 @@ function harness() {
   const button = name => render().find(node => node.type === 'button' && (node.props['aria-label'] === name || text(node.props.children).trim() === name))
   button('Modificar').props.onClick()
   button('Devolución').props.onClick()
-  return { button, refunds, render }
+  return { button, refunds, render, props }
 }
+
+test('ticket history marks pending tickets discreetly and clears the mark after synchronization', () => {
+  const h = harness()
+  h.props.pendingTicketIds = new Set(['ticket-id'])
+  const pending = () => h.render().filter(node => node.type === 'p' && node.props.children === 'Pendiente de sincronizar')
+  assert.equal(pending().length, 1)
+  h.props.pendingTicketIds = new Set(['other-ticket'])
+  assert.equal(pending().length, 0)
+})
 
 test('refund touch controls respect zero and original quantities and omit unselected lines', () => {
   const h = harness()

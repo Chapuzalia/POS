@@ -114,7 +114,7 @@ export function AppHeader({
 
   return (
     <header className={`shrink-0 border-b border-[var(--separator)] bg-[var(--surface)] ${compactMobile ? 'pt-[max(.5rem,env(safe-area-inset-top))] pb-2' : 'pt-[max(.75rem,env(safe-area-inset-top))] pb-3'}`}>
-      <div className={`mx-auto flex min-h-11 max-w-[1600px] items-center justify-between ${compactMobile ? 'flex-nowrap gap-1 px-2' : 'flex-wrap gap-3 px-4'}`}>
+      <div className={`mx-auto flex min-h-11 max-w-[1600px] items-center justify-between ${compactMobile ? `${pendingCount ? 'flex-wrap' : 'flex-nowrap'} gap-1 px-2` : 'flex-wrap gap-3 px-4'}`}>
         <div className="flex min-w-0 flex-row items-center gap-2">
           <Dropdown>
             <Dropdown.Trigger aria-label="Abrir menú principal de TICKIT" className="inline-flex min-h-11 items-center gap-2 rounded-[var(--radius)] px-2 text-[var(--foreground)] transition-colors hover:bg-[var(--surface-muted)]">
@@ -147,7 +147,7 @@ export function AppHeader({
           ) : null}
         </div>
 
-        <div className={`flex items-center justify-end ${compactMobile ? 'flex-nowrap gap-1' : 'flex-wrap gap-2'}`}>
+        <div className={`flex items-center justify-end ${compactMobile ? `${pendingCount ? 'flex-wrap' : 'flex-nowrap'} gap-1` : 'flex-wrap gap-2'}`}>
           {assistAction}
           {cashSession ? <Chip>{`Caja: ${cashSession.cashRegisterName}`}</Chip> : null}
           <div className="flex items-center gap-2">
@@ -158,7 +158,7 @@ export function AppHeader({
             <PrintAgentStatusBadge />
           </div>
           <Chip icon={isOnline ? Wifi : WifiOff} tone={isOnline ? 'success' : 'danger'} />
-          {pendingCount ? <div className={compactMobile ? 'hidden' : 'contents'}><Chip tone="warning">{`${pendingCount} pendientes`}</Chip></div> : null}
+          {pendingCount ? <Chip tone="warning">{`${pendingCount} pendientes`}</Chip> : null}
         </div>
       </div>
     </header>

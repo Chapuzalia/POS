@@ -13,7 +13,7 @@ export type LocalFiscalEntry = {
   record: BridgeRecord
   invoice: BridgeInvoiceSnapshot
   annulment?: BridgeAnnulmentSnapshot
-  delivery: { state: LocalFiscalState; attempts: number; lastError: string | null; nextAttemptAt: string | null; result: BridgeResult | null }
+  delivery: { state: LocalFiscalState; attempts: number; lastError: string | null; nextAttemptAt: string | null; result: BridgeResult | null; incidence?: boolean }
 }
 
 type Cursor = { scope: string; recordId?: string; position: number; previous: { issuerNif: string; seriesAndNumber: string; issueDate: string; hash: string } | null }
@@ -26,6 +26,11 @@ export type RestorableFiscalCopy = { entry: LocalFiscalEntry; economicPayload: S
 
 const dbName = 'tickit-verifactu-local-v1'
 const dbVersion = 4
+export const FISCAL_DELIVERY_CHANGED = 'tickit:fiscal-delivery-changed'
+
+function deliveryChanged() {
+  if (typeof window !== 'undefined') window.dispatchEvent(new Event(FISCAL_DELIVERY_CHANGED))
+}
 
 export function request<T>(req: IDBRequest<T>): Promise<T> {
   return new Promise((resolve, reject) => { req.onsuccess = () => resolve(req.result); req.onerror = () => reject(req.error) })
@@ -138,16 +143,17 @@ export async function readLocalFiscalRecord(scope: string, id: string): Promise<
   } finally { db.close() }
 }
 
-async function loadCursors(db: IDBDatabase, scope: string, series: string): Promise<{ chain: Cursor; number: NumberCursor }> {
-  const tx = db.transaction(['cursors', 'entries', 'numbers'], 'readwrite')
+async function loadCursors(db: IDBDatabase, scope: string, series: string): Promise<{ chain: Cursor; number: NumberCursor; incidence: boolean }> {
+  const tx = db.transaction(['cursors', 'entries', 'numbers', 'delivery'], 'readwrite')
   const done = transactionDone(tx)
   const { chain, entry } = await readHeadInTransaction(tx, scope)
   const number = await request(tx.objectStore('numbers').get(`${scope}:${series}`)) as NumberCursor | undefined
+  const delivery = entry ? await request(tx.objectStore('delivery').get(entry.id)) as StoredDelivery | undefined : undefined
   await done
   if (number && (!Number.isSafeInteger(number.lastNumber) || number.lastNumber < 0)) throw new Error('Contador fiscal inválido.')
   if (chain.position === 0 && number?.lastNumber) throw new Error('La numeración fiscal existe sin un registro anterior; requiere conciliación.')
   if (entry?.invoice.series === series && number?.lastNumber !== entry.invoice.number) throw new Error('La numeración no coincide con el último registro fiscal.')
-  return { chain, number: number ?? { key: `${scope}:${series}`, lastNumber: 0 } }
+  return { chain, number: number ?? { key: `${scope}:${series}`, lastNumber: 0 }, incidence: delivery?.state === 'LOCAL_PENDING' && delivery.incidence === true }
 }
 
 type IssueInputBase = {
@@ -251,7 +257,7 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
       } else if (input.clockSample) assertFiscalClock(input.clockSample, Date.now(), performance.now())
       const time = localDateParts(new Date(), input.timezone)
       const series = fiscalSeries({ venueCode: input.venueCode, registerCode: input.registerCode, installationSequence: input.installationSequence, kind: input.invoiceType === 'F1' ? 'complete' : 'simplified', exercise: time.exercise })
-      const { chain, number } = await loadCursors(db, scope, series)
+      const { chain, number, incidence } = await loadCursors(db, scope, series)
       const nextNumber = number.lastNumber + 1
       if (!Number.isSafeInteger(nextNumber)) throw new Error('Contador fiscal agotado.')
       const seriesAndNumber = `${series}/${nextNumber}`
@@ -277,7 +283,8 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
           issuedAt: time.generatedAt, qrUrl: built.qrUrl, ticketId: input.ticketId, saleId: input.saleId,
           paymentId: input.paymentId, lines: structuredClone(input.lines), recipient: input.recipient ?? null, totalCents, taxCents,
           transmissionMode: input.environment === 'production' ? input.transmissionMode : undefined },
-        delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null },
+        delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null,
+          ...(input.environment === 'production' && input.transmissionMode === 'bridge' && (navigator.onLine === false || incidence) ? { incidence: true } : {}) },
       }
       let economicPayload = input.environment === 'production' ? input.salePayload : null
       if (resolveSale) {
@@ -310,6 +317,7 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
           eventId: crypto.randomUUID(), synced: resolveSale !== undefined || input.economicAlreadySynced === true } satisfies StoredEconomicSale)
       }
       await done
+      deliveryChanged()
       return entry
     } finally { db.close() }
   })
@@ -351,18 +359,34 @@ export type LocalRectificativeInput = {
 }
 
 export async function buildLocalRectificative(input: LocalRectificativeInput): Promise<LocalFiscalEntry> {
+  if (!navigator.locks?.request) throw new Error('Web Locks no está disponible. No se puede preparar la emisión fiscal.')
+  return navigator.locks.request(`tickit-fiscal:${scopeKey(input.installation)}`, { mode: 'exclusive' }, () => buildRectificativeUnderLock(input))
+}
+
+/** Keep preparation, economic confirmation and local commit serialized with sales. */
+export async function confirmLocalRectificative(input: LocalRectificativeInput, confirm: (entry: LocalFiscalEntry) => Promise<void>): Promise<LocalFiscalEntry> {
+  if (!navigator.locks?.request) throw new Error('Web Locks no está disponible. No se puede preparar la emisión fiscal.')
+  return navigator.locks.request(`tickit-fiscal:${scopeKey(input.installation)}`, { mode: 'exclusive' }, async () => {
+    const entry = await buildRectificativeUnderLock(input)
+    await confirm(entry)
+    await persistLocalRectificative(entry)
+    return entry
+  })
+}
+
+async function buildRectificativeUnderLock(input: LocalRectificativeInput): Promise<LocalFiscalEntry> {
   if (!input.reason.trim()) throw new Error('La rectificativa requiere un motivo fiscal explícito.')
   if (input.environment === 'test' && input.syntheticData !== true) throw new Error('Solo se admiten datos ficticios en el entorno de pruebas.')
   if (input.environment === 'production' && !input.lease) throw new Error('La rectificativa requiere una autorización fiscal.')
+  if (input.lease) assertFiscalLease(input.lease, input.installation.installationId, input.installation.deviceId, Date.now(), performance.now())
   if (!navigator.locks?.request) throw new Error('Web Locks no está disponible. No se puede preparar la emisión fiscal.')
   if (input.original.record.tenantId !== input.installation.tenantId || input.original.record.fiscalSubjectId !== input.installation.fiscalSubjectId || input.original.record.installationId !== input.installation.installationId) throw new Error('La factura original no pertenece a esta instalación fiscal.')
   const scope = scopeKey(input.installation)
-  return navigator.locks.request(`tickit-fiscal:${scope}`, { mode: 'exclusive' }, async () => {
     const db = await openLedger()
     try {
       const time = localDateParts(new Date(), input.timezone)
       const series = fiscalSeries({ venueCode: input.installation.venueCode, registerCode: input.installation.registerCode, installationSequence: input.installation.seriesVersion === 2 ? input.installation.installationSequence : undefined, kind: 'corrective', exercise: time.exercise, rectificative: true })
-      const { chain, number } = await loadCursors(db, scope, series)
+      const { chain, number, incidence } = await loadCursors(db, scope, series)
       const nextNumber = number.lastNumber + 1
       const hasSelections = Boolean(input.selectedLines)
       const lines = input.original.invoice.lines.flatMap((line, index) => {
@@ -378,13 +402,14 @@ export async function buildLocalRectificative(input: LocalRectificativeInput): P
       if (!lines.length) throw new Error('La rectificativa carece de líneas seleccionadas.')
       const details = [...new Set(lines.map(line => line.taxRate))].map(rate => ({ Impuesto: '01' as const, ClaveRegimen: '01' as const, CalificacionOperacion: 'S1' as const, TipoImpositivo: rate, BaseImponibleOimporteNoSujeto: centsToAeat(lines.filter(line => line.taxRate === rate).reduce((sum, line) => sum + line.baseCents, 0)), CuotaRepercutida: centsToAeat(lines.filter(line => line.taxRate === rate).reduce((sum, line) => sum + line.taxCents, 0)) }))
       const invoice = { issuerNif: input.installation.issuerNif, seriesAndNumber: `${series}/${nextNumber}`, issueDate: time.issueDate }
-      const built = await createRectificativeRecord({ invoice, originalInvoice: { issuerNif: input.original.invoice.issuerNif, seriesAndNumber: `${input.original.invoice.series}/${input.original.invoice.number}`, issueDate: input.original.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-') }, issuerName: input.installation.issuerName, type: input.type, description: input.reason, details, system: input.system, previous: chain?.previous ? { IDEmisorFactura: chain.previous.issuerNif, NumSerieFactura: chain.previous.seriesAndNumber, FechaExpedicionFactura: chain.previous.issueDate, Huella: chain.previous.hash } : null, generatedAt: time.generatedAt, environment: input.qrEnvironment ?? input.environment })
+      const originalAlta = input.original.record.canonicalRecord.RegistroAlta as { FechaOperacion?: string } | undefined
+      const built = await createRectificativeRecord({ invoice, originalInvoice: { issuerNif: input.original.invoice.issuerNif, seriesAndNumber: `${input.original.invoice.series}/${input.original.invoice.number}`, issueDate: input.original.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-') }, operationDate: originalAlta?.FechaOperacion ?? input.original.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-'), recipient: input.original.invoice.recipient ?? undefined, issuerName: input.installation.issuerName, type: input.type, description: input.reason, details, system: input.system, previous: chain?.previous ? { IDEmisorFactura: chain.previous.issuerNif, NumSerieFactura: chain.previous.seriesAndNumber, FechaExpedicionFactura: chain.previous.issueDate, Huella: chain.previous.hash } : null, generatedAt: time.generatedAt, environment: input.qrEnvironment ?? input.environment })
       const id = crypto.randomUUID()
       const totalCents = lines.reduce((sum, line) => sum + line.baseCents + line.taxCents, 0)
       const refundRequestId = input.refundRequestId ?? id
-      return { id, scope, record: { ...input.original.record, idempotencyKey: id, invoiceId: id, chainPosition: chain.position + 1, previous: chain.previous, hash: built.hash, generatedAt: time.generatedAt, canonicalRecord: built.canonicalRecord }, invoice: { ...input.original.invoice, issuerName: input.installation.issuerName, issuerNif: input.installation.issuerNif, series, number: nextNumber, issuedAt: time.generatedAt, qrUrl: built.qrUrl, ticketId: refundRequestId, saleId: refundRequestId, paymentId: null, lines, totalCents, taxCents: lines.reduce((sum, line) => sum + line.taxCents, 0), transmissionMode: input.environment === 'production' ? 'bridge' : 'local-only' }, delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null } }
+      const transmissionMode = input.original.invoice.transmissionMode ?? 'local-only'
+      return { id, scope, record: { ...input.original.record, ...(input.lease ? { lease: { leaseId: input.lease.leaseId, fencingToken: input.lease.fencingToken } } : {}), idempotencyKey: id, invoiceId: id, chainPosition: chain.position + 1, previous: chain.previous, hash: built.hash, generatedAt: time.generatedAt, canonicalRecord: built.canonicalRecord }, invoice: { ...input.original.invoice, issuerName: input.installation.issuerName, issuerNif: input.installation.issuerNif, series, number: nextNumber, issuedAt: time.generatedAt, qrUrl: built.qrUrl, ticketId: refundRequestId, saleId: refundRequestId, paymentId: null, lines, totalCents, taxCents: lines.reduce((sum, line) => sum + line.taxCents, 0), transmissionMode }, delivery: { state: 'LOCAL_PENDING', attempts: 0, lastError: null, nextAttemptAt: null, result: null, ...(transmissionMode === 'bridge' && (incidence || navigator.onLine === false) ? { incidence: true } : {}) } }
     } finally { db.close() }
-  })
 }
 
 export async function persistLocalRectificative(entry: LocalFiscalEntry): Promise<void> {
@@ -393,19 +418,25 @@ export async function persistLocalRectificative(entry: LocalFiscalEntry): Promis
     const tx = db.transaction(['cursors', 'numbers', 'bindings', 'entries', 'delivery'], 'readwrite')
     const done = transactionDone(tx)
     const series = entry.invoice.series
+    const { chain } = await readHeadInTransaction(tx, entry.scope)
+    if (chain.position + 1 !== entry.record.chainPosition || chain.previous?.hash !== entry.record.previous?.hash) {
+      tx.abort()
+      throw new Error('La cadena fiscal cambió durante la devolución; requiere conciliación con el servidor.')
+    }
+    const binding = await request(tx.objectStore('bindings').get(entry.scope)) as DeviceBinding | undefined
+    assertInstallationBinding(binding, entry.record.deviceId)
     tx.objectStore('cursors').put({ scope: entry.scope, recordId: entry.id, position: entry.record.chainPosition, previous: { issuerNif: entry.record.issuerNif, seriesAndNumber: `${series}/${entry.invoice.number}`, issueDate: entry.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-'), hash: entry.record.hash } } satisfies Cursor)
     tx.objectStore('numbers').put({ key: `${entry.scope}:${series}`, lastNumber: entry.invoice.number } satisfies NumberCursor)
     const { delivery, ...document } = entry
     tx.objectStore('entries').put(document satisfies StoredFiscalDocument)
     tx.objectStore('delivery').put({ id: entry.id, ...delivery } satisfies StoredDelivery)
     await done
+    deliveryChanged()
   } finally { db.close() }
 }
 
 export async function issueLocalRectificative(input: LocalRectificativeInput): Promise<LocalFiscalEntry> {
-  const entry = await buildLocalRectificative(input)
-  await persistLocalRectificative(entry)
-  return entry
+  return confirmLocalRectificative(input, async () => {})
 }
 
 export async function persistLocalFiscalAnnulment(input: {
@@ -618,20 +649,45 @@ export async function updateLocalFiscalDelivery(id: string, update: LocalFiscalE
     const done = transactionDone(tx)
     const entry = await request(tx.objectStore('entries').get(id)) as StoredFiscalDocument | undefined
     if (!entry) { tx.abort(); throw new Error('Registro fiscal local no encontrado.') }
-    tx.objectStore('delivery').put({ id, ...update } satisfies StoredDelivery)
+    const stored = await request(tx.objectStore('delivery').get(id)) as StoredDelivery | undefined
+    tx.objectStore('delivery').put({ id, ...update,
+      ...(stored?.incidence || update.incidence ? { incidence: true } : {}) } satisfies StoredDelivery)
     await done
+    deliveryChanged()
   } finally { db.close() }
 }
 
-export async function listPendingFiscalEconomicSales(scopeInput: { tenantId: string; fiscalSubjectId: string; installationId: string }): Promise<StoredEconomicSale[]> {
+/** Mark all affected unsent records atomically without changing their fiscal content. */
+export async function markLocalFiscalIncidence(scopeInput: { tenantId: string; fiscalSubjectId: string; installationId: string }): Promise<void> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction(['entries', 'delivery'], 'readwrite')
+    const done = transactionDone(tx)
+    const entries = await request(tx.objectStore('entries').index('scope').getAll(scopeKey(scopeInput))) as StoredFiscalDocument[]
+    for (const entry of entries) {
+      if (entry.invoice.transmissionMode !== 'bridge') continue
+      const delivery = await request(tx.objectStore('delivery').get(entry.id)) as StoredDelivery | undefined
+      if (delivery?.state === 'LOCAL_PENDING') tx.objectStore('delivery').put({ ...delivery, incidence: true } satisfies StoredDelivery)
+    }
+    await done
+    deliveryChanged()
+  } finally { db.close() }
+}
+
+/** Synced economic snapshots remain available for offline ticket history. */
+export async function listLocalFiscalEconomicSales(scopeInput: { tenantId: string; fiscalSubjectId: string; installationId: string }): Promise<StoredEconomicSale[]> {
   const db = await openLedger()
   try {
     const tx = db.transaction('economicSales', 'readonly')
     const done = transactionDone(tx)
     const stored = await request(tx.objectStore('economicSales').index('scope').getAll(scopeKey(scopeInput))) as StoredEconomicSale[]
     await done
-    return stored.filter(sale => !sale.synced)
+    return stored
   } finally { db.close() }
+}
+
+export async function listPendingFiscalEconomicSales(scopeInput: { tenantId: string; fiscalSubjectId: string; installationId: string }): Promise<StoredEconomicSale[]> {
+  return (await listLocalFiscalEconomicSales(scopeInput)).filter(sale => !sale.synced)
 }
 
 export async function markFiscalEconomicSaleSynced(id: string): Promise<void> {

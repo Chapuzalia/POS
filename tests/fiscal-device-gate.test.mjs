@@ -107,16 +107,18 @@ test('a mode change cancels an in-flight checkout check before a satellite rende
   runner.unmount()
 })
 
-test('satellites still synchronize durable records from historical installations without an emission identity', async () => {
+for (const linked of [true, false]) test(`satellites preserve economic sync and only send linked historical installations to bridge (${linked})`, async () => {
   const calls = []
   const scopes = [{ installationId: 'retired-installation' }]
   const window = new EventTarget()
   window.setInterval = () => 1
   window.clearInterval = () => {}
-  const runner = createCompiledHookRunner(source('../src/features/fiscal/local/FiscalQueueNotice.tsx'), 'FiscalQueueNotice', {
+  const runner = createCompiledHookRunner(source('../src/features/fiscal/local/useFiscalQueue.ts'), 'useFiscalQueue', {
+    'react/jsx-runtime': jsxRuntime,
     './economicSync.ts': { startFiscalEconomicSyncWhileOpen: scope => { calls.push(['economic', scope]); return () => calls.push(['stop-economic']) } },
     './installation.ts': { fiscalBridgeAccessToken: async () => 'token' },
-    './localLedger.ts': { listLocalFiscalScopes: async (ctx, register) => { assert.equal(ctx.deviceMode, 'satellite'); assert.equal(register, 'register'); return scopes } },
+    './bridgeEligibility.ts': { fiscalBridgeEligible: async () => linked },
+    './localLedger.ts': { FISCAL_DELIVERY_CHANGED: 'fiscal-delivery-changed', listLocalFiscalEntries: async () => [], listLocalFiscalScopes: async (ctx, register) => { assert.equal(ctx.deviceMode, 'satellite'); assert.equal(register, 'register'); return scopes } },
     './mode.ts': { localFiscalMode: () => 'production' },
     './settings.ts': {
       loadFiscalPosSettings: async () => ({ bridge_url: 'https://bridge.example' }),
@@ -126,7 +128,46 @@ test('satellites still synchronize durable records from historical installations
   }, { window, document: new EventTarget() })
   runner.render({ context: context('satellite'), cashSession })
   await settle()
-  assert.deepEqual(calls, [['economic', scopes[0]], ['bridge', 'retired-installation']])
+  assert.deepEqual(calls, [['economic', scopes[0]], ...(linked ? [['bridge', 'retired-installation']] : [])])
   runner.unmount()
-  assert.deepEqual(calls.slice(2), [['stop-economic'], ['stop-bridge']])
+  assert.deepEqual(calls.slice(linked ? 2 : 1), [['stop-economic'], ...(linked ? [['stop-bridge']] : [])])
+})
+
+test('fiscal pending tickets stay visible after economic sync and clear only after final delivery', async () => {
+  const entries = [
+    { invoice: { ticketId: 'offline-sale', transmissionMode: 'bridge' }, delivery: { state: 'LOCAL_PENDING', incidence: true } },
+    { invoice: { ticketId: 'stored-sale', transmissionMode: 'bridge' }, delivery: { state: 'VPS_STORED' } },
+    { invoice: { ticketId: 'local-sale', transmissionMode: 'local-only' }, delivery: { state: 'LOCAL_PENDING', incidence: true } },
+    { invoice: { ticketId: 'accepted-sale', transmissionMode: 'bridge' }, delivery: { state: 'AEAT_ACCEPTED', incidence: true } },
+  ]
+  entries.forEach((entry, index) => {
+    Object.assign(entry.invoice, { issuerNif: '89890001K', series: 'S', number: index + 1 })
+    entry.record = { canonicalRecord: { RegistroAlta: {} } }
+  })
+  entries.push({ invoice: { ticketId: 'refund-request', issuerNif: '89890001K', series: 'R', number: 1, transmissionMode: 'bridge' },
+    record: { canonicalRecord: { RegistroAlta: { TipoFactura: 'R5', FacturasRectificadas: { IDFacturaRectificada: [{ IDEmisorFactura: '89890001K', NumSerieFactura: 'S/4' }] } } } },
+    delivery: { state: 'LOCAL_PENDING' } })
+  const window = new EventTarget()
+  window.setInterval = () => 1; window.clearInterval = () => {}
+  const runner = createCompiledHookRunner(source('../src/features/fiscal/local/useFiscalQueue.ts'), 'useFiscalQueue', {
+    'react/jsx-runtime': jsxRuntime,
+    './economicSync.ts': { startFiscalEconomicSyncWhileOpen: () => () => {} },
+    './installation.ts': { fiscalBridgeAccessToken: async () => 'token' },
+    './bridgeEligibility.ts': { fiscalBridgeEligible: async () => true },
+    './localLedger.ts': { FISCAL_DELIVERY_CHANGED: 'fiscal-delivery-changed', listLocalFiscalEntries: async () => entries, listLocalFiscalScopes: async () => [{ installationId: 'linked' }] },
+    './mode.ts': { localFiscalMode: () => 'production' },
+    './settings.ts': { loadFiscalPosSettings: async () => ({ bridge_url: 'http://localhost:3000/' }), subscribeFiscalPosSettings: () => () => {} },
+    './sync.ts': { startFiscalSyncWhileOpen: () => () => {} },
+  }, { window, document: new EventTarget() })
+  const props = { context: context('checkout'), cashSession }
+  runner.render(props); await settle()
+  assert.deepEqual(Array.from(runner.render(props)), ['accepted-sale', 'offline-sale', 'stored-sale'], 'a pending refund marks its original ticket')
+  // Switching tenants never shows the previous scope while the new read is pending.
+  assert.deepEqual(Array.from(runner.render({ ...props, context: { ...props.context, tenantId: 'other' } })), [])
+  runner.render(props); await settle()
+  entries[0].delivery.state = 'AEAT_ACCEPTED'; entries[1].delivery.state = 'AEAT_ACCEPTED'
+  entries[4].delivery.state = 'AEAT_ACCEPTED'
+  window.dispatchEvent(new Event('fiscal-delivery-changed')); await settle()
+  assert.deepEqual(Array.from(runner.render(props)), [])
+  runner.unmount()
 })

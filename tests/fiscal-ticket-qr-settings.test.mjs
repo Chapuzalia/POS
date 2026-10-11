@@ -5,6 +5,9 @@ import { z } from 'zod'
 
 import { compileComponent } from './helpers/component-harness.mjs'
 import { analyzeMigration } from '../scripts/check-migrations.mjs'
+import { UserFacingError } from '../src/utils/UserFacingError.ts'
+import { isFiscalBridgeOrigin } from '../src/features/fiscal/local/bridgeUrl.ts'
+import { readFiscalBackend } from '../src/features/fiscal/local/backendRead.ts'
 
 const tenantId = '11111111-1111-4111-8111-111111111111'
 const otherTenantId = '22222222-2222-4222-8222-222222222222'
@@ -26,13 +29,14 @@ function harness(row = settings) {
         select() { return query },
         eq(column, value) { filters.push([column, value]); return query },
         upsert(value) { saved = value; return query },
+        abortSignal() { return query },
         maybeSingle: async () => ({ data: row, error: unavailable ? new Error('Offline') : null }),
         single: async () => ({ data: saved, error: null }),
       }
       return query
     },
   }
-  const service = compileComponent(source, { zod: { z }, '../../../lib/supabase.ts': { supabase } }, {
+  const service = compileComponent(source, { './backendRead.ts': { readFiscalBackend }, zod: { z }, '../../../lib/supabase.ts': { supabase }, '../../../utils/UserFacingError.ts': { UserFacingError }, './bridgeUrl.ts': { isFiscalBridgeOrigin } }, {
     URL,
     CustomEvent: class { constructor(type, options) { this.type = type; this.detail = options.detail } },
     window: { dispatchEvent() {}, localStorage: { getItem: (key) => storage.get(key) ?? null, setItem: (key, value) => storage.set(key, value) } },

@@ -16,10 +16,31 @@ const record = {
       taxCents: 210, taxRate: '21.00' }], recipient: null, totalCents: 1210, taxCents: 210 },
 }
 
-test('production transport requires HTTPS and never accepts test records', async () => {
+test('remote transport requires HTTPS and production transport never accepts test records', async () => {
   const production = createBridgeClient({ mode: 'production', baseUrl: 'https://bridge.example/', getAccessToken: async () => 'token' })
   await assert.rejects(production.deliver([record]), /entorno del registro/)
   assert.throws(() => createBridgeClient({ mode: 'test', baseUrl: 'http://bridge.example/', getAccessToken: async () => 'token' }), /HTTPS/)
+})
+
+test('local HTTP delivers production POS envelopes without changing authentication or payload', async t => {
+  const productionRecord = { ...record, environment: 'production' }
+  for (const baseUrl of ['http://localhost:3000/', 'http://127.0.0.1:3000', 'http://[::1]:3000/']) {
+    t.mock.method(globalThis, 'fetch', async (url, init) => {
+      assert.equal(String(url), new URL('/v1/records', baseUrl).href)
+      assert.equal(init.headers.Authorization, 'Bearer local-session')
+      assert.deepEqual(JSON.parse(init.body).records, [productionRecord])
+      return new Response(JSON.stringify({ contract: 'tickit-verifactu-bridge', version: 1, results: [{
+        idempotencyKey: record.idempotencyKey, state: 'VPS_STORED', code: null, description: null,
+        csv: null, responseRef: null, vpsStoredAt: '2024-01-01T18:20:33Z', aeatRespondedAt: null,
+      }] }), { status: 200 })
+    })
+    const client = createBridgeClient({ mode: 'production', baseUrl, getAccessToken: async () => 'local-session' })
+    assert.equal((await client.deliver([productionRecord]))[0].state, 'VPS_STORED')
+    t.mock.restoreAll()
+  }
+  for (const baseUrl of ['http://localhost.evil:3000/', 'http://192.168.1.10:3000/', 'http://127.1:3000/', 'http://user:pass@localhost:3000/', 'http://localhost:3000/path', 'http://localhost:3000/?', 'http://localhost:3000/#', 'http://localhost:99999/', 'ftp://localhost:3000/']) {
+    assert.throws(() => createBridgeClient({ mode: 'production', baseUrl, getAccessToken: async () => 'token' }), /HTTPS/)
+  }
 })
 
 test('test bridge refuses production records before any network call', async () => {

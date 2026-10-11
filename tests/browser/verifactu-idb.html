@@ -3,6 +3,8 @@
 <script type="module">
   import { issueLocalInvoice, issueSyntheticTestInvoice, listLocalFiscalEntries, reconcileLocalFiscalCopies,
     listPendingFiscalEconomicSales, openLedger, readLocalFiscalHead, request, transactionDone } from '/src/features/fiscal/local/localLedger.ts'
+  import { confirmLocalRectificative, buildLocalRectificative, markLocalFiscalIncidence } from '/src/features/fiscal/local/localLedger.ts'
+  import { createLocalFallbackLease } from '/src/features/fiscal/local/clock.ts'
   import { assertFiscalLedgerHeadValid } from '/src/features/fiscal/local/localIdentity.ts'
   import { printPayloadWithLocalFiscal } from '/src/features/fiscal/local/posInvoice.ts'
   const assert = (condition, message) => { if (!condition) throw new Error(message) }
@@ -112,7 +114,48 @@
     assert(restored === 1 && (await listLocalFiscalEntries(productionScope))[0].record.hash === issued.record.hash,
       'server-confirmed original restored without rehash')
     await assertFiscalLedgerHeadValid(issued.scope, productionDeviceId, false, productionInstallationId)
+    const originalBeforeRefund = JSON.stringify(issued.record)
+    const refundInput = { installation: { ...base, ...productionScope, deviceId: productionDeviceId },
+      lease: createLocalFallbackLease(productionInstallationId, productionDeviceId), original: issued,
+      type: 'R5', reason: 'Devolución parcial ficticia', system: { ...system, NumeroInstalacion: productionInstallationId },
+      timezone: 'Europe/Madrid', environment: 'production', qrEnvironment: 'test',
+      selectedLines: [{ lineId: '0', quantity: 1, originalQuantity: 2 }], refundRequestId: crypto.randomUUID() }
+    await confirmLocalRectificative(refundInput, async () => { throw new Error('Economic rejection') })
+      .then(() => { throw new Error('Unconfirmed refund persisted') }, () => {})
+    assert((await readLocalFiscalHead(issued.scope)).chain.position === 1, 'rejected refund consumed position')
+    await markLocalFiscalIncidence(productionScope)
+    let releaseConfirmation, enteredConfirmation
+    const confirmationStarted = new Promise(resolve => { enteredConfirmation = resolve })
+    const confirmation = new Promise(resolve => { releaseConfirmation = resolve })
+    let notifications = 0
+    window.addEventListener('tickit:fiscal-delivery-changed', () => { notifications++ })
+    const refundTask = confirmLocalRectificative(refundInput, async prepared => {
+      assert(prepared.record.lease.leaseId === refundInput.lease.leaseId, 'refund reused original lease')
+      enteredConfirmation(); await confirmation
+    })
+    await confirmationStarted
+    const nextTicketId = crypto.randomUUID(), nextSaleId = crypto.randomUUID()
+    const afterRefundSale = issueLocalInvoice({ ...base, ...productionScope, environment: 'production',
+      deviceId: productionDeviceId, system: refundInput.system, invoiceId: crypto.randomUUID(),
+      ticketId: nextTicketId, saleId: nextSaleId, salePayload: { ...productionPayload,
+        ticket: { ...productionPayload.ticket, id: nextTicketId }, sale: { ...productionPayload.sale, id: nextSaleId } },
+      transmissionMode: 'bridge', lease: refundInput.lease })
+    await new Promise(resolve => setTimeout(resolve, 20))
+    assert((await readLocalFiscalHead(issued.scope)).chain.position === 1, 'sale overtook unconfirmed refund')
+    releaseConfirmation()
+    const [refund, following] = await Promise.all([refundTask, afterRefundSale])
+    assert(refund.record.chainPosition === 2 && following.record.chainPosition === 3, 'refund and sale chain order')
+    assert(following.record.previous.hash === refund.record.hash, 'sale does not reference refund')
+    assert(refund.invoice.totalCents === -605 && refund.invoice.taxCents === -105, 'partial refund amounts')
+    assert(refund.record.canonicalRecord.RegistroAlta.TipoFactura === 'R5', 'refund type')
+    assert(refund.record.canonicalRecord.RegistroAlta.FacturasRectificadas.IDFacturaRectificada[0].NumSerieFactura === `${issued.invoice.series}/1`, 'refund original reference')
+    assert(refund.delivery.incidence === true && notifications >= 2, 'refund incidence and queue notification')
+    const storedAfterRefund = await listLocalFiscalEntries(productionScope)
+    assert(JSON.stringify(storedAfterRefund[0].record) === originalBeforeRefund, 'refund changed immutable original')
+    const legacyRefund = await buildLocalRectificative({ ...refundInput, original: { ...issued, invoice: { ...issued.invoice, transmissionMode: 'local-only' } } })
+    assert(legacyRefund.invoice.transmissionMode === 'local-only', 'refund enrolled legacy installation')
+    window.refundEvidence = { record: refund.record, invoice: refund.invoice }
     document.body.dataset.state = 'passed'
-    document.body.textContent = 'PASS IndexedDB chain, production sale, pending bridge, reprint and recovery'
+    document.body.textContent = 'PASS IndexedDB chain, production sale, pending bridge, reprint, recovery and partial refund serialization'
   } catch (error) { document.body.dataset.state = 'failed'; document.body.textContent = `FAIL ${error.message}` }
 </script></body></html>

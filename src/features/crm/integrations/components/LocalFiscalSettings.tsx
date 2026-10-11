@@ -139,9 +139,10 @@ export function LocalFiscalSettings({
           SIF local de Tickit y puente VERI*FACTU
         </h2>
         <p className="!mt-1 !mb-0 !text-xs !font-medium !text-[var(--crm-text-muted)]">
-          Configura los datos públicos del productor. La URL HTTPS del VPS es
+          Configura los datos públicos del productor. La URL del puente es
           opcional mientras la remisión no esté activada; los registros quedarán
-          pendientes en la caja.
+          pendientes en la caja. Usa HTTPS en producción; HTTP se permite en
+          localhost, 127.0.0.1 o [::1] para desarrollo local.
         </p>
       </header>
       <form
@@ -157,7 +158,7 @@ export function LocalFiscalSettings({
           </p>
         ) : null}
         <div className="!grid !grid-cols-1 !gap-4 lg:!grid-cols-2">
-          <Field label="URL HTTPS del puente VPS (opcional)">
+          <Field label="URL del puente VPS (opcional)">
             <UiInput
               className={inputClass}
               disabled={disabled || !canEdit}

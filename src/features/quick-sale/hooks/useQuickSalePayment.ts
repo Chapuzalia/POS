@@ -45,6 +45,8 @@ type Options = {
 
 export function useQuickSalePayment(options: Options) {
   const paymentInFlightRef = useRef(false)
+  const latestOptionsRef = useRef(options)
+  latestOptionsRef.current = options
 
   const completePayment = useCallback(async (
     paymentMethod: PaymentMethod | null,
@@ -146,7 +148,9 @@ export function useQuickSalePayment(options: Options) {
     try {
       if (!fiscalEntry) enqueueOfflineEvent({ id: createId(), kind: 'sale_created', tenantId: context.tenantId, createdAt: payload.sale.createdAt, attempts: 0, payload })
       options.persistLedger([...options.ledger, saleRecord])
-      options.persistTickets([ticketRecord, ...options.tickets])
+      const savedTickets = [ticketRecord, ...options.tickets]
+      options.persistTickets(savedTickets)
+      latestOptionsRef.current = { ...options, tickets: savedTickets }
       options.mergeProductStats(lines)
       options.persistLines([])
       options.refreshPendingCount()
@@ -161,48 +165,62 @@ export function useQuickSalePayment(options: Options) {
     })
     options.resetUi(paymentMethod)
     finishCashlogyPayment(cashlogyTransaction)
-    if (fiscalEntry) {
-      const scope = { tenantId: fiscalEntry.record.tenantId, fiscalSubjectId: fiscalEntry.record.fiscalSubjectId,
-        installationId: fiscalEntry.record.installationId }
-      void synchronizeFiscalEconomicSales(scope).catch(() => { /* Saved in IndexedDB for retry. */ })
-      const bridgeUrl = fiscalBridgeBaseUrl(context.tenantId)
-      if (bridgeUrl) void synchronizeLocalFiscalQueue({ ...scope, mode: 'production', baseUrl: bridgeUrl,
-        getAccessToken: fiscalBridgeAccessToken }).catch(() => { /* LOCAL_PENDING is retained. */ })
-    }
-    let printPayload = fiscalPayload
-    if (options.isOnline && !fiscalEntry) {
-      await options.syncPendingEvents()
-      try {
-        const persistedTicket = await (options.loadPersistedTicket
-          ? options.loadPersistedTicket(payload.ticket.id)
-          : loadSessionTicketFromSupabase(context, cashSession.id, payload.ticket.id))
-        if (persistedTicket) printPayload = persistedTicket.payload
-        const invoice = options.invoiceCustomer
-          ? await loadTicketInvoice(context.tenantId, payload.ticket.id)
-          : null
-        if (options.invoiceCustomer && !invoice) {
-          options.onError('La venta ha quedado pendiente de sincronizar. No se imprimirá una factura sin número definitivo.')
-          return
-        }
-        if (invoice) {
-          printPayload = { ...printPayload, ticket: { ...printPayload.ticket, invoice } }
-        }
-        if (persistedTicket || invoice) {
-          options.persistTickets([{
-            ...(persistedTicket ?? ticketRecord),
-            payload: printPayload,
-          }, ...options.tickets.filter((ticket) => ticket.id !== payload.sale.id)])
-        }
-      } catch (fiscalError) {
-        reportOperationError(fiscalError, { operation: 'sale.fiscal_receipt', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'before_print' })
-        if (options.invoiceCustomer) {
-          options.onError('No se ha podido confirmar el número de factura. Revisa la sincronización antes de imprimir.')
-          return
+    // The economic transaction is durable. Network and hardware work must not
+    // keep the payment UI (or Cashlogy recovery) waiting for acknowledgement.
+    void (async () => {
+      if (fiscalEntry) {
+        const scope = { tenantId: fiscalEntry.record.tenantId, fiscalSubjectId: fiscalEntry.record.fiscalSubjectId,
+          installationId: fiscalEntry.record.installationId }
+        void synchronizeFiscalEconomicSales(scope).catch(() => { /* Saved in IndexedDB for retry. */ })
+        const bridgeUrl = fiscalBridgeBaseUrl(context.tenantId)
+        if (bridgeUrl) void synchronizeLocalFiscalQueue({ ...scope, mode: 'production', baseUrl: bridgeUrl,
+          getAccessToken: fiscalBridgeAccessToken }).catch(() => { /* LOCAL_PENDING is retained. */ })
+      }
+      let printPayload = fiscalPayload
+      if (options.isOnline && !fiscalEntry) {
+        await options.syncPendingEvents()
+        try {
+          const persistedTicket = await (options.loadPersistedTicket
+            ? options.loadPersistedTicket(payload.ticket.id)
+            : loadSessionTicketFromSupabase(context, cashSession.id, payload.ticket.id))
+          if (persistedTicket) printPayload = persistedTicket.payload
+          const invoice = options.invoiceCustomer
+            ? await loadTicketInvoice(context.tenantId, payload.ticket.id)
+            : null
+          if (options.invoiceCustomer && !invoice) {
+            options.onError('La venta ha quedado pendiente de sincronizar. No se imprimirá una factura sin número definitivo.')
+            return
+          }
+          if (invoice) {
+            printPayload = { ...printPayload, ticket: { ...printPayload.ticket, invoice } }
+          }
+          if (persistedTicket || invoice) {
+            const current = latestOptionsRef.current
+            if (current.context?.tenantId === context.tenantId
+              && current.context.venueId === context.venueId
+              && current.context.deviceId === context.deviceId
+              && current.cashSession?.id === cashSession.id
+              && current.tickets.some(ticket => ticket.id === payload.sale.id)) {
+              current.persistTickets(current.tickets.map(ticket => ticket.id === payload.sale.id
+                ? { ...ticket, ticketNumber: persistedTicket?.ticketNumber ?? ticket.ticketNumber,
+                    payload: { ...ticket.payload, ticket: printPayload.ticket,
+                      fiscal: printPayload.fiscal, localFiscal: printPayload.localFiscal } } : ticket))
+            }
+          }
+        } catch (fiscalError) {
+          reportOperationError(fiscalError, { operation: 'sale.fiscal_receipt', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'before_print' })
+          if (options.invoiceCustomer) {
+            options.onError('No se ha podido confirmar el número de factura. Revisa la sincronización antes de imprimir.')
+            return
+          }
         }
       }
-    }
-    const printTask = options.printSale(printPayload, { cashDrawerAlreadyRequested })
-    await printTask
+      await options.printSale(printPayload, { cashDrawerAlreadyRequested })
+    })().catch(error => {
+      reportOperationError(error, { operation: 'sale.payment', saleId: payload.sale.id,
+        ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'after_persist', recoverable: true })
+      options.onError('La venta está guardada. No se ha podido completar la sincronización o la impresión; revisa su estado antes de reimprimir.')
+    })
   }, [options])
 
   return useCallback(async (
