@@ -14,6 +14,14 @@ const dispatchedRequestIds = new Set<string>()
 const MAX_DISPATCHED_REQUEST_IDS = 200
 
 export function requestEarlyCashDrawer({ requestId, payments }: EarlyCashDrawerInput): boolean {
+  try { return dispatchCashDrawer({ requestId, payments }) }
+  catch (error) {
+    reportOperationError(error, { operation: 'sale.payment', integration: 'print-agent', operationId: requestId, step: 'drawer', recoverable: true })
+    return false
+  }
+}
+
+function dispatchCashDrawer({ requestId, payments }: EarlyCashDrawerInput): boolean {
   if (dispatchedRequestIds.has(requestId)) return false
   const state = usePrintAgentStore.getState()
   if (!shouldOpenCashDrawer({

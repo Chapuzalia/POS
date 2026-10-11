@@ -317,6 +317,7 @@ export type CashlogyManagementIntent = {
 }
 
 export type CashlogyIntent = {
+  paymentOperationKey?: string
   recoveredFromConflict?: boolean
   requestId: string
   saleId: string | null

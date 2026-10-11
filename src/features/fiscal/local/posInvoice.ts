@@ -1,5 +1,5 @@
 import type { SaleCreatedPayload } from '../../../types/index.ts'
-import { issueLocalInvoice, type LocalFiscalEntry, type ResolveFiscalSale } from './localLedger.ts'
+import { assertRestaurantPaymentsReconciled, findLocalFiscalEntryByTicket, issueLocalInvoice, type LocalFiscalEntry, type ResolveFiscalSale } from './localLedger.ts'
 import { getFiscalInstallationLease, loadFiscalInstallation, type FiscalInstallation } from './installation.ts'
 import { isFiscalTransportUnavailable } from './availability.ts'
 import { recoverServerConfirmedFiscalChain } from './serverRecovery.ts'
@@ -75,11 +75,12 @@ export async function preflightPosInvoice(
   }
   fiscalLines(payload)
   const installation = await preflightFiscalInstallation(context, cashSession)
+  await assertRestaurantPaymentsReconciled(installation)
   return preparedFiscalInstallation(context, cashSession, payload.sale.id, installation)
 }
 
 export async function preflightFiscalInstallation(context: TenantContext, cashSession: CashSession): Promise<FiscalInstallation> {
-  const installation = await loadFiscalInstallation(context, cashSession)
+  const installation = await loadFiscalInstallation(context, cashSession, true)
   await getFiscalInstallationLease(installation)
   try {
     const head = installation.preparedServerHead
@@ -100,7 +101,16 @@ export async function issuePosInvoice(
   prepared?: PreparedFiscalInstallation | null,
 ): Promise<LocalFiscalEntry> {
   const installation = reusablePreparedInstallation(prepared, context, cashSession, payload.sale.id)
-    ?? await loadFiscalInstallation(context, cashSession)
+    ?? await loadFiscalInstallation(context, cashSession, true)
+  if (!resolveSale) {
+    const existing = await findLocalFiscalEntryByTicket(installation, payload.ticket.id)
+    if (existing) {
+      if (existing.annulment || existing.invoice.saleId !== payload.sale.id || existing.invoice.totalCents !== payload.sale.totalCents) {
+        throw new Error('La identidad fiscal recuperada no coincide con esta venta.')
+      }
+      return existing
+    }
+  }
   const lease = await getFiscalInstallationLease(installation)
   try {
     await recoverServerConfirmedFiscalChain(installation)
@@ -158,7 +168,7 @@ export function printPayloadWithLocalFiscal(payload: SaleCreatedPayload, entry: 
     },
     fiscal: {
       invoiceId: entry.record.invoiceId, provider: 'verifactu', status, uuid: null,
-      qrBase64: null, verificationUrl: entry.invoice.qrUrl,
+      qrBase64: null, verificationUrl: entry.invoice.transmissionMode === 'local-only' ? '' : entry.invoice.qrUrl,
       externalCode: `${entry.invoice.series}/${entry.invoice.number}`,
       errorCode: delivery.result?.code ?? null, errorMessage: delivery.result?.description ?? null,
     },

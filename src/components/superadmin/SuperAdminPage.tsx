@@ -20,6 +20,8 @@ import {
 import type { TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 import { tenantAddonCatalog, updateTenantAddons } from '../../features/platform/tenantFeatureAccess'
+import { loadPlatformVerifactuIntegrations, type VerifactuIntegration } from '../../features/fiscal/local/integration'
+import { VerifactuConfiguration } from './VerifactuConfiguration'
 
 type SuperAdminPageProps = {
   context: TenantContext
@@ -75,6 +77,7 @@ function SuperAdminModal({ children, label, onClose, dismissDisabled, size = 'co
 export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: SuperAdminPageProps) {
   useEffect(() => { if (error) notifyOperationalError(error) }, [error])
   const [tenants, setTenants] = useState<PlatformTenant[]>([])
+  const [verifactuIntegrations, setVerifactuIntegrations] = useState<VerifactuIntegration[]>([])
   const [platformFeatures, setPlatformFeatures] = useState<PlatformFeature[]>([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [tenantModal, setTenantModal] = useState<TenantModalState>(null)
@@ -96,9 +99,10 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [editingTenantFeatures, setEditingTenantFeatures] = useState<PlatformTenantFeature[]>([])
 
   const refresh = useCallback(async () => {
-    const platform = await loadPlatformTenants()
+    const [platform, integrations] = await Promise.all([loadPlatformTenants(), loadPlatformVerifactuIntegrations()])
     setTenants(platform.tenants)
     setPlatformFeatures(platform.features)
+    setVerifactuIntegrations(integrations)
   }, [])
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
@@ -119,6 +123,12 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       void runAction(refresh)
     }
   }, [isOnline, refresh, runAction])
+
+  useEffect(() => {
+    if (!isOnline) return
+    const timer = window.setInterval(() => { void loadPlatformVerifactuIntegrations().then(setVerifactuIntegrations).catch(() => { /* Manual refresh reports errors. */ }) }, 15000)
+    return () => window.clearInterval(timer)
+  }, [isOnline])
 
   useEffect(() => {
     if (!isSidebarOpen) return undefined
@@ -225,6 +235,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const inputClassName = 'h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none !transition-[border-color,box-shadow,background-color] !duration-150'
   const coreFeatures = platformFeatures.filter((feature) => feature.isCore)
   const optionalFeatures = tenantAddonCatalog
+  const pendingVerifactu = verifactuIntegrations.filter(integration => integration.requested_at && !integration.enabled_at)
 
   return (
     <div className="crm-shell !flex !h-full !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased">
@@ -315,6 +326,13 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
         {!isOnline ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">La administración global requiere conexión.</div> : null}
 
         <main className="!mx-auto !min-h-0 !w-full !max-w-[1720px] !flex-1 !overflow-auto !px-4 !pt-[26px] !pb-7 md:!px-7 md:!pt-[42px] md:!pb-9">
+          {pendingVerifactu.length ? <div role="status" className="!mb-4 !grid !gap-2 !rounded-[12px] !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !text-[var(--crm-yellow)]">
+            <strong>{pendingVerifactu.length} solicitudes de Verifactu pendientes</strong>
+            <div className="!flex !flex-wrap !gap-2">{pendingVerifactu.map(integration => {
+              const tenant = tenants.find(item => item.id === integration.tenant_id)
+              return tenant ? <UiButton key={tenant.id} disabled={isBusy} onClick={() => setTenantModal({ mode: 'details', tenant })}>{tenant.name} · Configurar Verifactu</UiButton> : null
+            })}</div>
+          </div> : null}
           <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !w-full !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
             <div className="flex items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] bg-[var(--crm-surface)] p-3 max-[760px]:flex-col max-[760px]:items-stretch !flex !flex-col !items-stretch !justify-between !gap-[18px] !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 sm:!flex-row sm:!items-center md:!px-[22px]">
               <div className="min-w-0 [&_h2]:m-0 [&_h2]:text-[17px] [&_h2]:font-bold [&_h2]:tracking-[-0.02em] [&_h2]:text-[var(--crm-text)] [&_p]:mt-1 [&_p]:mb-0 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)]"><h2>Negocios</h2><p>{tenants.length} tenants configurados</p></div>
@@ -331,7 +349,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
               <tbody>
                 {tenants.map((tenant) => (
                   <tr className="!min-h-[76px] !border-b !border-[var(--crm-border)] !text-xs !font-medium !text-[var(--crm-text-secondary)] last:!border-b-0" key={tenant.id}>
-                    <td className="!min-w-[170px] !px-[22px] !py-3"><div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{tenant.name}</strong><span>{tenant.slug}</span></div></td>
+                    <td className="!min-w-[170px] !px-[22px] !py-3"><div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{tenant.name}</strong><span>{tenant.slug}</span>{pendingVerifactu.some(integration => integration.tenant_id === tenant.id) ? <strong className="!text-xs !text-[var(--crm-yellow)]">Verifactu solicitado</strong> : null}</div></td>
                     <td className="!min-w-[220px] !px-3 !py-3"><div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]"><strong>{tenant.owner?.fullName || 'Sin OWNER'}</strong><span>{tenant.owner?.email || 'Cuenta no configurada'}</span></div></td>
                     <td className="!w-[75px] !px-3 !py-3" data-sort-value={tenant.venueCount}>{tenant.venueCount}</td>
                     <td className="!w-[80px] !px-3 !py-3" data-sort-value={tenant.memberCount}>{tenant.memberCount}</td>
@@ -443,6 +461,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
             <UiButton disabled={isBusy} aria-label="Cerrar" className="inline-flex items-center justify-center gap-2 border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !text-[var(--crm-text-muted)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" onClick={() => setTenantModal(null)} type="button"><X className="!size-4" /></UiButton>
           </div>
           <div className="!grid !min-h-0 !gap-5 !overflow-y-auto !px-5 !py-5 sm:!px-6">
+            <VerifactuConfiguration tenantId={tenantModal.tenant.id} disabled={!isOnline || isBusy} runAction={runAction} onSaved={refresh} />
             <div className="!grid !grid-cols-1 !gap-3 sm:!grid-cols-2 lg:!grid-cols-4">
               {[
                 ['Estado', tenantModal.tenant.isActive ? 'Activo' : 'Inactivo'],

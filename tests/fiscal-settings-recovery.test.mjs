@@ -101,9 +101,11 @@ test('missing-identity popup refreshes on CRM changes and shows/hides recovery u
     '../../../components/ui/Button': { Button: 'button' },
     '../../../utils/errors': { getReadableError: error => error.message },
     './localIdentity.ts': { FiscalIdentityMissingError: Missing },
+    './installationRevocation.ts': { FISCAL_INSTALLATION_REVOKED: 'installation-revoked', checkFiscalInstallationRevocation: async () => {} },
     './installation.ts': { loadFiscalInstallation: async()=>{throw new Missing()}, latestFiscalInstallation: async()=>({id:'installation',number:'MES-C1-1'}), FiscalActivationConfirmationError: class extends Error {} },
-    './mode.ts': { localFiscalMode:()=> 'production' },
-    './settings.ts': { FISCAL_SETTINGS_CHANGED:'tickit:fiscal-settings-changed', loadFiscalPosSettings:async(id,allowCached)=>{
+    './tenantMode.ts': { resolveLocalFiscalMode:async()=> 'production' },
+    './settings.ts': { FISCAL_SETTINGS_CHANGED:'tickit:fiscal-settings-changed' },
+    './integration.ts': { loadVerifactuIntegration:async(id,allowCached)=>{
       assert.equal(id,tenant); assert.equal(allowCached,false); return {aeat_environment:environment}
     } },
   }, globals)

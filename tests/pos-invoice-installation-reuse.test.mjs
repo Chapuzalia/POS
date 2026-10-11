@@ -44,13 +44,18 @@ function createPosInvoiceHarness({ transportUnavailable = false } = {}) {
   const source = readFileSync(new URL('../src/features/fiscal/local/posInvoice.ts', import.meta.url), 'utf8')
   const service = compileComponent(source, {
     './localLedger.ts': {
+      assertRestaurantPaymentsReconciled: async () => {},
+      findLocalFiscalEntryByTicket: async () => null,
       issueLocalInvoice: async (draft) => {
         calls.drafts.push(draft)
         return { id: 'fiscal-record', invoice: { ticketId: draft.ticketId, saleId: draft.saleId }, record: { id: 'fiscal-record' } }
       },
     },
     './installation.ts': {
-      loadFiscalInstallation: async () => { calls.reads += 1; return installation },
+      loadFiscalInstallation: async (_context, _cashSession, requireBridgeIdentity) => {
+        assert.equal(requireBridgeIdentity, true)
+        calls.reads += 1; return installation
+      },
       getFiscalInstallationLease: async (value) => {
         calls.leases += 1
         return {

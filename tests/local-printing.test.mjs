@@ -122,19 +122,21 @@ function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssu
     '../../../lib/observability.ts': { operationBreadcrumb() {}, reportOperationError() {} },
     '../../../utils/errors.ts': { getReadableError: (error) => error?.message ?? String(error) },
     '../../../lib/format': { createId: () => 'event-1' },
-    '../../../lib/offlineStore': { enqueueOfflineEvent: () => calls.push('persist') },
+    '../../../lib/durableSales.ts': createDurableSalesHarness(enqueue => calls.push(enqueue ? 'persist' : 'persistFiscal')),
     '../services/salePayload': { buildSalePayload: (...args) => buildQuickSalePayload(...args) },
     '../../fiscal/service': { loadFiscalReceiptData: async () => { calls.push('fiscal'); return { status: 'accepted', verificationUrl: 'https://verify.local' } } },
     '../../customers/service': { loadTicketInvoice: async () => null },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': {
+      isCashlogyPaymentConfigured: () => false,
       finishCashlogyPayment() {},
       getCashlogyPaymentAmounts: () => ({ changeCents: null, receivedCents: null }),
       getCashlogyPaymentSaleId: () => null,
       settleCashlogyPaymentIfConfigured: async () => null,
     },
     '../../local-printing/services/earlyCashDrawer': earlyCashDrawerMock,
-    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => fiscalMode },
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {} },
+    '../../fiscal/local/tenantMode.ts': { assertRealSaleAllowed() {}, resolveLocalFiscalMode: async () => fiscalMode },
     '../../fiscal/local/posInvoice.ts': { issuePosInvoice: async (...args) => {
       calls.push('issueFiscal')
       if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
@@ -664,7 +666,7 @@ test('la venta rapida online con tarjeta no solicita cajon temprano', async () =
   assert.notEqual(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
 })
 
-test('la factura fiscal reimprime la base y cuota históricas sin recalcular el desglose', () => {
+test('el ticket local conserva numeración y desglose históricos sin imprimir QR ni leyenda Verifactu', () => {
   const issued = structuredClone(sale)
   issued.localFiscal = { recordId: 'record-1', series: 'L1-C1-I1-2026-S', number: 3,
     issuedAt: '2026-07-18T16:30:00+02:00', documentKind: 'simplified',
@@ -678,9 +680,32 @@ test('la factura fiscal reimprime la base y cuota históricas sin recalcular el 
   const text = payload.lines.join('\n')
   assert.match(text, /Base imponible[ ]+13,23 €/)
   assert.match(text, /IVA 21 %[ ]+2,77 €/)
-  assert.ok(payload.elements.some((element) => element.type === 'qr' && element.data === verifactuUrl))
-  assert.equal(payload.elements.find((element) => element.type === 'qr' || element.value.trim()).type, 'qr')
+  assert.ok(!payload.elements.some((element) => element.type === 'qr'))
+  assert.doesNotMatch(text, /www\.aeat|QR tributario/)
+  assert.equal(issued.fiscal.verificationUrl, verifactuUrl, 'printing must not mutate the saved snapshot')
   assert.doesNotMatch(text, /VERI\*FACTU/)
+})
+
+test('la copia de un ticket local usa su snapshot aunque la instalación haya sido retirada', async () => {
+  const hookSource = readFileSync(new URL('../src/features/cash-registers/hooks/useCashSession.ts', import.meta.url), 'utf8')
+  const callback = hookSource.match(/const printSale = useCallback\(async [\s\S]*?\}, \[options\.context, persistTickets, session, updateTicketPrintState\]\)/)?.[0]
+  assert.ok(callback)
+  const original = structuredClone(sale)
+  original.localFiscal = { recordId: 'old-record', series: 'DIS-C1-1-2026-S', number: 2, verifactuLegend: false }
+  let printed, reads = 0
+  const { printSale } = compileComponent(`export ${callback}`, {}, {
+    useCallback: action => action,
+    options: { context: { tenantId: 'tenant' } },
+    usePrintAgentStore: { getState: () => ({ token: 'paired', selectedPrinterId: 'main' }) },
+    loadFiscalInstallation: async () => { reads++; throw new Error('La instalación está retirada') },
+    printTicket: async value => { printed = value }, session: { id: 'cash' },
+    ticketsRef: { current: [] }, updateTicketPrintState() {}, persistTickets: () => assert.fail('Copies must not persist a new sale'),
+  })
+  await printSale(original, { isReprint: true, copyNumber: 2 })
+  assert.equal(reads, 0)
+  assert.equal(printed.payload, original)
+  assert.equal(printed.payload.localFiscal.series, 'DIS-C1-1-2026-S')
+  assert.equal(printed.options.copyNumber, 2)
 })
 
 test('la rectificativa fuerza en la impresión la referencia a la factura original aunque la plantilla personalizada la omita', () => {
@@ -892,3 +917,4 @@ test('el mapper suprime openCashDrawer cuando el cajon ya fue solicitado y conse
   assert.equal(mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true, cashDrawerAlreadyRequested: true }).options.openCashDrawer, false)
   assert.equal(mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true }).options.openCashDrawer, true)
 })
+import { createDurableSalesHarness } from './helpers/durable-sales-harness.mjs'

@@ -1,4 +1,5 @@
 import { reportOperationError } from './observability.ts'
+import { cachedDurableEvents, updateDurableEvent } from './durableSales.ts'
 import type { PosCatalogState } from '../features/catalog/data/load-pos-catalog.ts'
 import { appendFrozenQueueEvent, recordQueueEventFailure } from '../features/offline/services/offlineQueueState.ts'
 import { getAppRoute, type AppRoute } from '../app/app-routes'
@@ -241,11 +242,14 @@ export function clearSessionTickets(context: TenantContext, cashSessionId: strin
 }
 
 export function getOfflineQueue() {
-  return readJson<OfflineEvent[]>(queueKey(), [])
+  const merged = new Map(readJson<OfflineEvent[]>(queueKey(), []).map(event => [event.id, event]))
+  for (const event of cachedDurableEvents()) merged.set(event.id, event)
+  return [...merged.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt))
 }
 
 export function saveOfflineQueue(events: OfflineEvent[]) {
-  writeJson(queueKey(), events)
+  const durableIds = new Set(cachedDurableEvents().map(event => event.id))
+  writeJson(queueKey(), events.filter(event => !durableIds.has(event.id)))
 }
 
 export function enqueueOfflineEvent(event: OfflineEvent) {
@@ -255,10 +259,12 @@ export function enqueueOfflineEvent(event: OfflineEvent) {
   }))
 }
 
-export function forgetOfflineEvent(eventId: string) {
+export async function forgetOfflineEvent(eventId: string) {
+  await updateDurableEvent(eventId)
   saveOfflineQueue(getOfflineQueue().filter((event) => event.id !== eventId))
 }
 
-export function markOfflineEventFailed(eventId: string, error: string) {
+export async function markOfflineEventFailed(eventId: string, error: string) {
+  if (cachedDurableEvents().some(event => event.id === eventId)) { await updateDurableEvent(eventId, error); return }
   saveOfflineQueue(recordQueueEventFailure(getOfflineQueue(), eventId, error))
 }

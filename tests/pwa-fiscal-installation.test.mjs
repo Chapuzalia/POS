@@ -150,8 +150,11 @@ function identityHarness({ readError = false } = {}) {
 test('IndexedDB read failures never mean missing identity, and pending retries preserve their original confirmation', async()=>{
   const normal = identityHarness()
   assert.equal(await normal.service.readFiscalIdentity('box'),null)
+  assert.equal(await normal.service.readPendingFiscalActivation('box'),null)
   await assert.rejects(identityHarness({readError:true}).service.readFiscalIdentity('box'),/read failed/)
+  await assert.rejects(identityHarness({readError:true}).service.readPendingFiscalActivation('box'),/read failed/)
   const first = await normal.service.fiscalActivationRequest('box','old',false)
+  assert.equal((await normal.service.readPendingFiscalActivation('box')).requestId,first.requestId)
   const retry = await normal.service.fiscalActivationRequest('box','other',false)
   assert.equal(first.requestId,retry.requestId)
   assert.equal(retry.expectedInstallationId,'old')

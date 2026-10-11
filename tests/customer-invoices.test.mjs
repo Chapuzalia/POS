@@ -207,7 +207,7 @@ test('un rechazo fiscal imprime un resumen breve en lugar del QR', () => {
   assert.match(text, /Motivo:[\s\S]*El NIF\/NOMBRE[\s\S]*no se encuentra registrado[\s\S]*Agencia Tributaria\./)
   assert.doesNotMatch(text, /Para personas jurídicas/)
   assert.ok(request.elements.every((element) => element.type === 'text'))
-  assert.match(restaurantHook, /issueRestaurantInvoice/)
+  assert.match(restaurantHook, /payRestaurantSale/)
 })
 
 test('la factura imprime descuentos y varios tipos de IVA desde los importes finales cobrados', () => {

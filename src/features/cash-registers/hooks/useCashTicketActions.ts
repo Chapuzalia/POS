@@ -1,6 +1,6 @@
 import { useCallback, useRef, useState } from 'react'
 import { createId } from '../../../lib/format'
-import { enqueueOfflineEvent, forgetOfflineEvent, getOfflineQueue, getSessionTickets, saveSessionTickets } from '../../../lib/offlineStore'
+import { enqueueOfflineEvent, getOfflineQueue, getSessionTickets, saveSessionTickets } from '../../../lib/offlineStore'
 import { isTransportError } from '../../../lib/observability.ts'
 import { loadSessionTicketPageFromSupabase } from '../../../services/posService'
 import type { CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
@@ -213,14 +213,7 @@ export function useCashTicketActions(options: Options) {
       } } } : item)
       options.persistTickets(nextTickets)
       options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod } : sale))
-      const pendingSale = getOfflineQueue().find((event) =>
-        event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
-      if (pendingSale) {
-        forgetOfflineEvent(pendingSale.id)
-        options.refreshPendingCount()
-        finishCashlogyPayment(cashlogyTransaction)
-        return
-      }
+      // Keep the accepted sale. Replay its creation before changing the payment.
       enqueueOfflineEvent({ id: createId(), kind: 'sale_payment_changed', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: {
         saleId: ticket.payload.sale.id,
         paymentId: currentPayment.id,

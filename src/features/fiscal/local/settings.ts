@@ -94,6 +94,17 @@ async function fetchFiscalPosSettings(tenantId: string, allowCached: boolean): P
 
 export async function saveFiscalPosSettings(settings: FiscalPosSettings): Promise<FiscalPosSettings> {
   if (!supabase) throw new Error('Supabase no está configurado.')
+  const validated = validateFiscalPosSettings(settings)
+  const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
+    .upsert({ ...validated, bridge_url: validated.bridge_url || null }, { onConflict: 'tenant_id' })
+    .select('*').single()
+  if (error) throw error
+  const saved = settingsSchema.parse(data)
+  cacheSettings(saved)
+  return saved
+}
+
+export function validateFiscalPosSettings(settings: FiscalPosSettings): FiscalPosSettings {
   const validation = settingsSchema.safeParse(settings)
   if (!validation.success) {
     const messages: Record<string, string> = {
@@ -109,14 +120,7 @@ export async function saveFiscalPosSettings(settings: FiscalPosSettings): Promis
     const fields = [...new Set(validation.error.issues.map(issue => String(issue.path[0])))]
     throw new UserFacingError(fields.map(field => messages[field] ?? 'Revisa los datos de la configuración fiscal.').join(' '))
   }
-  const validated = validation.data
-  const { data, error } = await supabase.from('fiscal_pos_bridge_settings')
-    .upsert({ ...validated, bridge_url: validated.bridge_url || null }, { onConflict: 'tenant_id' })
-    .select('*').single()
-  if (error) throw error
-  const saved = settingsSchema.parse(data)
-  cacheSettings(saved)
-  return saved
+  return validation.data
 }
 
 /** Save this switch immediately without overwriting unsaved producer form fields. */

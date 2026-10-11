@@ -1,9 +1,10 @@
 import { readFile } from 'node:fs/promises'
 
-import { createCompiledHookRunner } from './component-harness.mjs'
+import { compileComponent, createCompiledHookRunner } from './component-harness.mjs'
 import { getOrderPendingUnits } from '../../src/features/tables/service-status.ts'
 
 const source = await readFile(new URL('../../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
+const paymentSource = await readFile(new URL('../../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
 
 export const flush = () => new Promise((resolve) => setImmediate(resolve))
 
@@ -100,6 +101,7 @@ export function createRestaurantControllerHarness({
     '../../customers/customerValidation.ts': { customerFiscalSnapshot: (customer) => customer },
     '../../fiscal/service': { autoIssueFiscalTicket: async () => ({ fiscal: null }), loadFiscalReceiptData: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': {
+      isCashlogyPaymentConfigured: () => cashlogyConfigured,
       finishCashlogyPayment: (transaction) => calls.cashlogyFinished.push(transaction),
       getCashlogyPaymentAmounts: (transaction, totalCents) => ({ changeCents: transaction?.changeCents ?? null, receivedCents: transaction?.receivedCents ?? totalCents }),
       settleCashlogyPaymentIfConfigured: async (amountCents) => { calls.cashlogySettlements.push(amountCents); return cashlogyTransaction },
@@ -113,13 +115,18 @@ export function createRestaurantControllerHarness({
     '../../tables/service-status': { canDecreaseLineQuantity: () => true, getOrderPendingUnits },
     '../draft-policy': { isRestaurantRevisionConflict: () => false, requiresConfirmedRestaurantLineRemoval: () => false, shouldSaveBeforeLeavingOrder: () => false },
     '../services/restaurantPrintPayload': {
-      buildRestaurantPrintPayload: (payload) => payload,
+      buildRestaurantPrintPayload: (input) => ({ ...input,
+        ticket: { id: input.ticketId, totalCents: input.totalCents, invoice: input.invoice },
+        sale: { id: input.saleId, totalCents: input.totalCents, paymentMethod: input.paymentMethod },
+        payment: input.paymentMethod ? { id: input.paymentId, receivedCents: input.receivedCents, changeCents: input.changeCents } : null,
+      }),
       getEqualSplitPrintLines: () => [],
       getMovedRestaurantPrintLines: () => [],
       getRestaurantPrintSubtotal: () => 600,
     },
     '../services/validateCashClosure': { getRestaurantCashClosureError: async () => null },
-    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => fiscalMode },
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {} },
+    '../../fiscal/local/tenantMode.ts': { assertRealSaleAllowed() {}, resolveLocalFiscalMode: async () => fiscalMode },
     '../../fiscal/local/restaurantInvoice.ts': { preflightRestaurantInvoice: async (_context, _session, saleId) => { calls.fiscalPreflights.push(saleId); return { saleId } }, issueRestaurantInvoice: async (...args) => {
       calls.fiscalIssues.push(args)
       if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
@@ -129,6 +136,38 @@ export function createRestaurantControllerHarness({
     './useRestaurantDraft': { useRestaurantDraft: () => draft },
     './useRestaurantRealtime': { useRestaurantRealtime: () => realtime },
   }
+  const operations = new Map()
+  const paymentService = compileComponent(paymentSource, {
+    '../../../lib/durableSales.ts': {
+      paymentScope: () => 'scope', withPaymentLock: (_key, work) => work(),
+      loadPaymentOperation: async key => operations.get(key),
+      loadPendingPaymentOperations: async () => [],
+      preparePaymentOperation: async (key, fingerprint, payload, params) => {
+        const existing = operations.get(key)
+        if (existing && existing.fingerprint !== fingerprint && existing.state !== 'committed') throw new Error('Pending payment')
+        if (existing?.fingerprint === fingerprint) return existing
+        const operation = { key, fingerprint, payload, params, state: 'prepared', cashlogy: null, eventId: 'event' }
+        operations.set(key, operation); return operation
+      },
+      acceptPaymentOperation: async (operation, payload, cashlogy) => {
+        const next = { ...operation, payload, cashlogy, state: 'accepted' }; operations.set(next.key, next); return next
+      },
+      markPaymentCharging: async operation => ({ ...operation, state: 'charging' }),
+      discardPreparedPaymentOperation: async key => operations.delete(key),
+      commitPaymentOperation: async (operation, payload, _enqueue, result) => operations.set(operation.key, { ...operation, payload, result, state: 'committed' }),
+    },
+    '../../local-printing/cashlogy/useCashlogyStore.ts': modules['../../local-printing/cashlogy/useCashlogyStore'],
+    '../../fiscal/local/tenantMode.ts': modules['../../fiscal/local/tenantMode.ts'],
+    '../../fiscal/local/posInvoice.ts': { preflightPosInvoice: async (_context, _session, payload) => { calls.fiscalPreflights.push(payload.sale.id); return {} } },
+    '../../fiscal/local/restaurantInvoice.ts': modules['../../fiscal/local/restaurantInvoice.ts'],
+    '../../tables/service.ts': { payRestaurantIdempotent: async (_context, _id, action, params) => {
+      if (action === 'close') return tableService.closeRestaurantOrder(params.orderId, params.method, params.receivedCents, params.allowPending)
+      if (action === 'selected_items') return tableService.payRestaurantOrderItems(params.orderId, params.expectedRevision, params.moves, params.method, params.receivedCents, params.allowPending, params.discount, cashlogyTransaction)
+      if (action === 'equal_part') return tableService.payRestaurantEqualPart(params.splitId, params.method, params.receivedCents, params.allowPending, params.discount, params.useDefaultDiscount, cashlogyTransaction)
+      throw new Error('Unexpected payment action')
+    } },
+  }, { JSON })
+  modules['../services/payment.ts'] = paymentService
   const runner = createCompiledHookRunner(source, 'useRestaurantController', modules, {
     console,
     window: { confirm: () => true, setTimeout() { return 1 } },

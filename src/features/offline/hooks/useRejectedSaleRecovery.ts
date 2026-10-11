@@ -1,10 +1,6 @@
 import { useEffect, useRef } from 'react'
 import {
-  clearSessionTickets,
-  getCachedTicket,
-  removeSaleFromLedger,
   saveCachedCashSession,
-  saveCachedTicket,
 } from '../../../lib/offlineStore'
 import type {
   AppliedDiscount,
@@ -41,25 +37,13 @@ export function useRejectedSaleRecovery(options: Options) {
   useEffect(() => {
     if (!context || !rejectedSaleEvent || rejectedSaleEvent.tenantId !== context.tenantId) return
     const current = latestRef.current
-    const currentTicket = getCachedTicket(context)
-    const recovery = getRejectedSaleRecovery(rejectedSaleEvent, currentTicket.length > 0)
-    if (recovery.linesToRestore) {
-      current.setTicketLines(recovery.linesToRestore)
-      saveCachedTicket(context, recovery.linesToRestore)
-      current.setDiscount(recovery.discount)
-    }
+    const recovery = getRejectedSaleRecovery(rejectedSaleEvent)
     if (current.cashSession?.id === recovery.closedSessionId) {
       current.setCashSession(null)
       saveCachedCashSession(context, null)
     }
-    current.setSalesLedger((ledger) => ledger.filter((sale) => sale.id !== recovery.rejectedSaleId))
-    removeSaleFromLedger(context, recovery.rejectedSaleId)
-    current.setSessionTickets((tickets) => tickets.filter((ticket) => ticket.id !== recovery.rejectedSaleId))
-    clearSessionTickets(context, recovery.closedSessionId)
     current.resetCashUi()
-    current.setError(recovery.linesToRestore
-      ? 'La venta no se ha registrado porque la caja estaba cerrada. El ticket se ha recuperado para cobrarlo tras abrir una caja nueva.'
-      : 'La venta no se ha registrado porque la caja estaba cerrada. El ticket actual se ha conservado sin mezclarlo con la venta rechazada.')
+    current.setError('La caja original está cerrada. La venta y su cobro se conservan pendientes de conciliación. No vuelvas a cobrarla; el ticket actual se ha conservado.')
     current.clearRejectedSaleEvent()
   }, [context, rejectedSaleEvent])
 }

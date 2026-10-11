@@ -558,7 +558,7 @@ type SessionTicketQueryRow = {
      fiscal_local_records: Array<{
        id: string
        invoice_id: string
-       invoice_snapshot: { issuerName: string; issuerNif: string; issuerAddress?: string; series: string; number: number; issuedAt: string; qrUrl: string; recipient: { name: string; nif: string } | null }
+       invoice_snapshot: { issuerName: string; issuerNif: string; issuerAddress?: string; series: string; number: number; issuedAt: string; qrUrl: string; transmissionMode?: 'bridge' | 'local-only'; recipient: { name: string; nif: string } | null }
        record_envelope: unknown
      }> | null
    }> | null
@@ -603,6 +603,7 @@ type SessionTicketQueryRow = {
        number: number
        issuedAt: string
        qrUrl: string
+       transmissionMode?: 'bridge' | 'local-only'
        recipient: { name: string; nif: string } | null
      }
    }> | null
@@ -930,7 +931,7 @@ async function loadSessionTicketRecordsFromSupabase(
           issuerName: localFiscalInvoice.issuerName,
           issuerNif: localFiscalInvoice.issuerNif,
           issuerAddress: localFiscalInvoice.issuerAddress ?? '',
-          verifactuLegend: true,
+          verifactuLegend: localFiscalInvoice.transmissionMode !== 'local-only',
         },
         fiscal: {
           invoiceId: localFiscalRecord.invoice_id,
@@ -938,7 +939,7 @@ async function loadSessionTicketRecordsFromSupabase(
           status: 'pending' as const,
           uuid: null,
           qrBase64: null,
-          verificationUrl: localFiscalInvoice.qrUrl,
+          verificationUrl: localFiscalInvoice.transmissionMode === 'local-only' ? '' : localFiscalInvoice.qrUrl,
           externalCode: `${localFiscalInvoice.series}/${localFiscalInvoice.number}`,
           errorCode: null,
           errorMessage: null,
@@ -974,8 +975,8 @@ async function loadSessionTicketRecordsFromSupabase(
          lines: refundLines,
          sale: { ...payload.sale, id: request.id, ticketId: request.id, totalCents: request.total_cents, paymentMethod: request.refund_method, createdAt: request.created_at },
          payment: refundPayment && (refundPayment.method === 'cash' || refundPayment.method === 'card') ? { id: refundPayment.id, tenantId: ticket.tenant_id, saleId: request.id, method: refundPayment.method, amountCents: refundPayment.amount_cents, receivedCents: refundPayment.payment_snapshot?.receivedCents ?? null, changeCents: refundPayment.payment_snapshot?.changeCents ?? 0 } : null,
-          localFiscal: { recordId: request.fiscal_local_records?.[0]?.id ?? request.id, series: invoice.series, number: invoice.number, issuedAt: invoice.issuedAt, documentKind: invoice.recipient ? 'complete' : 'simplified', issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, issuerAddress: invoice.issuerAddress ?? '', verifactuLegend: true, rectifiedInvoice: { series: payload.localFiscal?.series ?? '', number: payload.localFiscal?.number ?? 0, issuedAt: payload.localFiscal?.issuedAt ?? ticket.local_created_at } },
-         fiscal: { invoiceId: request.fiscal_local_records?.[0]?.invoice_id ?? request.id, provider: 'verifactu', status: 'pending', uuid: null, qrBase64: null, verificationUrl: invoice.qrUrl, externalCode: `${invoice.series}/${invoice.number}`, errorCode: null, errorMessage: null },
+          localFiscal: { recordId: request.fiscal_local_records?.[0]?.id ?? request.id, series: invoice.series, number: invoice.number, issuedAt: invoice.issuedAt, documentKind: invoice.recipient ? 'complete' : 'simplified', issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, issuerAddress: invoice.issuerAddress ?? '', verifactuLegend: invoice.transmissionMode !== 'local-only', rectifiedInvoice: { series: payload.localFiscal?.series ?? '', number: payload.localFiscal?.number ?? 0, issuedAt: payload.localFiscal?.issuedAt ?? ticket.local_created_at } },
+         fiscal: { invoiceId: request.fiscal_local_records?.[0]?.invoice_id ?? request.id, provider: 'verifactu', status: 'pending', uuid: null, qrBase64: null, verificationUrl: invoice.transmissionMode === 'local-only' ? '' : invoice.qrUrl, externalCode: `${invoice.series}/${invoice.number}`, errorCode: null, errorMessage: null },
        }
        return { id: request.id, createdAt: request.created_at, payload: refundPayload }
      }).filter((document): document is NonNullable<typeof document> => document !== null)

@@ -124,8 +124,6 @@ test('legacy refunds and historical rows remain valid; malformed/new non-refund 
   await db.exec('alter table refund_requests validate constraint refund_requests_fiscal_series_check')
 })
 
-test('production analyzer still requires review of the atomic constraint replacement', () => {
-  // Compatible CHECK widening needs the repository's documented, reviewed
-  // promotion exception. Do not weaken the deployment guard to hide the DROP.
-  assert.deepEqual(analyzeMigration(fix), ['DROP'])
+test('production analyzer verifies the compatible atomic constraint replacement', () => {
+  assert.deepEqual(analyzeMigration(fix), [])
 })

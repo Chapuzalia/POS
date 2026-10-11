@@ -1,4 +1,5 @@
 import { UserFacingError } from '../src/utils/UserFacingError.ts'
+import { createDurableSalesHarness } from './helpers/durable-sales-harness.mjs'
 import * as observability from '../src/lib/observability.ts'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -78,7 +79,9 @@ async function harness({ online = true, boot = false, refreshError = null } = {}
   window.clearTimeout = (id) => timers.delete(id)
   window.localStorage = storage()
   const globals = { window, document, crypto, localStorage: window.localStorage, sessionStorage: storage() }
+  const durable = createDurableSalesHarness()
   const store = load('lib/offlineStore', {
+    './durableSales.ts': durable,
     '../app/app-routes': { getAppRoute: () => 'pos' },
     '../features/offline/services/offlineQueueState.ts': { appendFrozenQueueEvent, recordQueueEventFailure },
   }, globals)
@@ -122,6 +125,7 @@ async function harness({ online = true, boot = false, refreshError = null } = {}
   const syncRunner = hooks()
   const synced = []
   const syncHook = load('hooks/useOfflineSync', {
+    '../lib/durableSales.ts': durable,
     react: syncRunner.react, '../lib/offlineStore': store, '../lib/supabase': supabaseModule,
     '../services/posService': { syncEvent: async (event) => { calls.push('sync'); synced.push(event) } },
     '../utils/errors': { getReadableError: String },
@@ -157,7 +161,7 @@ async function harness({ online = true, boot = false, refreshError = null } = {}
   }
   render()
   await flush()
-  return { calls, faults, state, options, store, service, lease, globals, timers, synced, render, supabase, get actions() { return actions }, signOut: () => { raw = null; authListener('SIGNED_OUT') } }
+  return { durable, calls, faults, state, options, store, service, lease, globals, timers, synced, render, supabase, get actions() { return actions }, signOut: () => { raw = null; authListener('SIGNED_OUT') } }
 }
 
 test('1 y 5: el corte conserva usuario, local, caja y credenciales sin hidratar ni cerrar', async () => {
@@ -204,12 +208,14 @@ test('4 y 7: venta offline en la caja existente, validar → lease → sincroniz
   h.options.isOnline = false; h.render(); await flush()
   const paymentRunner = hooks()
   const pay = load('features/quick-sale/hooks/useQuickSalePayment', {
+    '../../../lib/durableSales.ts': h.durable,
     react: paymentRunner.react, '../../../lib/offlineStore': h.store,
     '../../../lib/format': { createId: () => crypto.randomUUID() }, '../services/salePayload': { buildSalePayload },
     '../../local-printing/cashlogy/useCashlogyStore': { getCashlogyPaymentAmounts: () => ({}), finishCashlogyPayment() {} },
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
-    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => 'disabled' },
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {} },
+    '../../fiscal/local/tenantMode.ts': { assertRealSaleAllowed() {}, resolveLocalFiscalMode: async () => 'disabled' },
     '../../fiscal/local/posInvoice.ts': { issuePosInvoice: async () => { throw new Error('production disabled') }, printPayloadWithLocalFiscal: (payload) => payload },
     '../../fiscal/local/economicSync.ts': { synchronizeFiscalEconomicSales: async () => {} },
     '../../fiscal/local/sync.ts': { synchronizeLocalFiscalQueue: async () => {} },

@@ -95,7 +95,7 @@ test('confirmed table checkout releases busy before refresh/printing and still r
   h.queueSync.resolve()
   h.mapRefresh.resolve({ areas: [], tables: [] })
   await flush()
-  assert.ok(h.calls.errors.includes('Printer unavailable'))
+  assert.ok(h.calls.errors.includes('El cobro está guardado. Printer unavailable'))
 })
 
 test('table checkout remains locked until the economic RPC confirms', async () => {

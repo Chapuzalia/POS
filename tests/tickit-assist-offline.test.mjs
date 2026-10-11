@@ -8,6 +8,7 @@ function store(){
   const values=new Map();let route='pos'
   const localStorage={getItem:key=>values.get(key)??null,setItem:(key,value)=>values.set(key,value),removeItem:key=>values.delete(key)}
   const exports=compileComponent(source,{
+    './durableSales.ts':{cachedDurableEvents:()=>[],updateDurableEvent:async()=>{}},
     './observability.ts':{reportOperationError:()=>undefined},
     '../features/offline/services/offlineQueueState.ts':{},
     '../app/app-routes':{getAppRoute:()=>route},

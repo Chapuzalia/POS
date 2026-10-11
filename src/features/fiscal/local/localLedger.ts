@@ -25,7 +25,7 @@ type StoredEconomicSale = { id: string; scope: string; payload: SaleCreatedPaylo
 export type RestorableFiscalCopy = { entry: LocalFiscalEntry; economicPayload: SaleCreatedPayload | null; eventId: string | null }
 
 const dbName = 'tickit-verifactu-local-v1'
-const dbVersion = 4
+const dbVersion = 5
 export const FISCAL_DELIVERY_CHANGED = 'tickit:fiscal-delivery-changed'
 
 function deliveryChanged() {
@@ -66,6 +66,19 @@ export async function openLedger(): Promise<IDBDatabase> {
       const economicSales = db.createObjectStore('economicSales', { keyPath: 'id' })
       economicSales.createIndex('scope', 'scope')
     }
+    const paymentOperations = db.objectStoreNames.contains('paymentOperations')
+      ? upgradeTx.objectStore('paymentOperations') : db.createObjectStore('paymentOperations', { keyPath: 'key' })
+    if (!paymentOperations.indexNames.contains('scope')) paymentOperations.createIndex('scope', 'scope')
+    if (!db.objectStoreNames.contains('durableSales')) {
+      const sales = db.createObjectStore('durableSales', { keyPath: 'id' })
+      sales.createIndex('scope', 'scope')
+    }
+    const durableEvents = db.objectStoreNames.contains('durableEvents')
+      ? upgradeTx.objectStore('durableEvents') : db.createObjectStore('durableEvents', { keyPath: 'id' })
+    if (!durableEvents.indexNames.contains('route')) durableEvents.createIndex('route', 'route')
+    const restaurantPayments = db.objectStoreNames.contains('restaurantPayments')
+      ? upgradeTx.objectStore('restaurantPayments') : db.createObjectStore('restaurantPayments', { keyPath: 'key' })
+    if (!restaurantPayments.indexNames.contains('scope')) restaurantPayments.createIndex('scope', 'entry.scope')
   }
   const db = await request(opening)
   db.onversionchange = () => db.close()
@@ -80,6 +93,13 @@ function scopeKey(input: { tenantId: string; fiscalSubjectId: string; installati
 export function assertInstallationBinding(binding: DeviceBinding | undefined, deviceId: string): void {
   if (!deviceId || (binding && binding.deviceId !== deviceId)) {
     throw new Error('La instalación SIF está vinculada a otro dispositivo; se bloquea la emisión.')
+  }
+}
+
+async function assertFiscalEmissionAllowed(bindings: IDBObjectStore, installationId: string, generatedAt?: string): Promise<void> {
+  const revocation = await request(bindings.get(`pwa-revoked:${installationId}`)) as { revokedAt: string } | undefined
+  if (revocation && (!generatedAt || !Number.isFinite(Date.parse(generatedAt)) || !Number.isFinite(Date.parse(revocation.revokedAt)) || Date.parse(generatedAt) >= Date.parse(revocation.revokedAt))) {
+    throw new Error('Esta instalación fiscal está revocada. Crea una instalación nueva antes de emitir.')
   }
 }
 
@@ -245,6 +265,8 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
     await requestFiscalPersistentStorage()
     const db = await openLedger()
     try {
+      await assertFiscalEmissionAllowed(db.transaction('bindings', 'readonly').objectStore('bindings'), input.installationId)
+      await assertNoUnresolvedRestaurantPayment(db, scope)
       const { details, totalCents, taxCents } = assertInvoice(input)
       if (input.environment === 'production') {
         assertFiscalLease(input.lease, input.installationId, input.deviceId, Date.now(), performance.now())
@@ -299,6 +321,7 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
       const done = transactionDone(tx)
       const binding = await request(tx.objectStore('bindings').get(scope)) as DeviceBinding | undefined
       assertInstallationBinding(binding, input.deviceId)
+      await assertFiscalEmissionAllowed(tx.objectStore('bindings'), input.installationId, entry.record.generatedAt)
       const savedChain = await request(tx.objectStore('cursors').get(scope)) as Cursor | undefined
       const savedNumber = await request(tx.objectStore('numbers').get(number.key)) as NumberCursor | undefined
       if ((savedChain?.position ?? 0) !== chain.position || (savedChain?.previous?.hash ?? null) !== (chain.previous?.hash ?? null) || (savedNumber?.lastNumber ?? 0) !== number.lastNumber) {
@@ -321,6 +344,26 @@ export async function issueLocalInvoice(input: LocalIssueInput, resolveSale?: Re
       return entry
     } finally { db.close() }
   })
+}
+
+async function assertNoUnresolvedRestaurantPayment(db: IDBDatabase, scope: string): Promise<void> {
+  const tx = db.transaction(['restaurantPayments', 'entries'], 'readonly')
+  const done = transactionDone(tx)
+  const pending = await request(tx.objectStore('restaurantPayments').index('scope').getAll(scope)) as { entry: LocalFiscalEntry }[]
+  for (const payment of pending) {
+    if (payment.entry.scope !== scope) continue
+    const stored = await request(tx.objectStore('entries').get(payment.entry.id))
+    if (!stored) {
+      await done
+      throw new Error('Hay un cobro de mesa pendiente de conciliar. Recupera su respuesta antes de emitir otra factura en esta instalación.')
+    }
+  }
+  await done
+}
+
+export async function assertRestaurantPaymentsReconciled(scopeInput: { tenantId: string; fiscalSubjectId: string; installationId: string }): Promise<void> {
+  const db = await openLedger()
+  try { await assertNoUnresolvedRestaurantPayment(db, scopeKey(scopeInput)) } finally { db.close() }
 }
 
 export async function issueSyntheticTestInvoice(input: TestIssueInput): Promise<LocalFiscalEntry> {
@@ -384,6 +427,7 @@ async function buildRectificativeUnderLock(input: LocalRectificativeInput): Prom
   const scope = scopeKey(input.installation)
     const db = await openLedger()
     try {
+      await assertFiscalEmissionAllowed(db.transaction('bindings', 'readonly').objectStore('bindings'), input.installation.installationId)
       const time = localDateParts(new Date(), input.timezone)
       const series = fiscalSeries({ venueCode: input.installation.venueCode, registerCode: input.installation.registerCode, installationSequence: input.installation.seriesVersion === 2 ? input.installation.installationSequence : undefined, kind: 'corrective', exercise: time.exercise, rectificative: true })
       const { chain, number, incidence } = await loadCursors(db, scope, series)
@@ -425,6 +469,7 @@ export async function persistLocalRectificative(entry: LocalFiscalEntry): Promis
     }
     const binding = await request(tx.objectStore('bindings').get(entry.scope)) as DeviceBinding | undefined
     assertInstallationBinding(binding, entry.record.deviceId)
+    await assertFiscalEmissionAllowed(tx.objectStore('bindings'), entry.record.installationId, entry.record.generatedAt)
     tx.objectStore('cursors').put({ scope: entry.scope, recordId: entry.id, position: entry.record.chainPosition, previous: { issuerNif: entry.record.issuerNif, seriesAndNumber: `${series}/${entry.invoice.number}`, issueDate: entry.invoice.issuedAt.slice(0, 10).split('-').reverse().join('-'), hash: entry.record.hash } } satisfies Cursor)
     tx.objectStore('numbers').put({ key: `${entry.scope}:${series}`, lastNumber: entry.invoice.number } satisfies NumberCursor)
     const { delivery, ...document } = entry
@@ -468,6 +513,7 @@ export async function persistLocalFiscalAnnulment(input: {
       const chain = await request(tx.objectStore('cursors').get(scope)) as Cursor | undefined
       const binding = await request(tx.objectStore('bindings').get(scope)) as DeviceBinding | undefined
       assertInstallationBinding(binding, installation.deviceId)
+      await assertFiscalEmissionAllowed(tx.objectStore('bindings'), installation.installationId)
       if (!chain?.previous || chain.previous.hash !== original.record.hash) {
         tx.abort()
         throw new Error('Solo puede anularse la última factura de la cadena fiscal en esta V1.')
@@ -585,6 +631,11 @@ export async function reconcileLocalFiscalCopies(
           const existing = await request(tx.objectStore('entries').get(entry.id)) as StoredFiscalDocument | undefined
           if (!existing || existing.scope !== scope || existing.record.chainPosition !== entry.record.chainPosition || existing.record.hash !== entry.record.hash) {
             tx.abort(); throw new Error('La cadena local difiere de la copia durable del servidor.')
+          }
+          if (copy.economicPayload) {
+            const stored = await request(tx.objectStore('economicSales').get(entry.id)) as StoredEconomicSale | undefined
+            if (!stored) tx.objectStore('economicSales').add({ id: entry.id, scope, payload: copy.economicPayload,
+              eventId: copy.eventId ?? crypto.randomUUID(), synced: true } satisfies StoredEconomicSale)
           }
           continue
         }

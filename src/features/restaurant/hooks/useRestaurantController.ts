@@ -43,8 +43,6 @@ import {
   moveRestaurantOrder,
   moveRestaurantOrderLines,
   openRestaurantOrder,
-  payRestaurantEqualPart,
-  payRestaurantOrderItems,
   removeRestaurantOrderLineConfirmed,
   saveQuickSaleAsExistingTable,
   saveQuickSaleAsVirtualTable,
@@ -68,13 +66,11 @@ import { getRestaurantCashClosureError } from '../services/validateCashClosure'
 import { useRestaurantRealtime } from './useRestaurantRealtime'
 import {
   finishCashlogyPayment,
-  getCashlogyPaymentAmounts,
-  settleCashlogyPaymentIfConfigured,
 } from '../../local-printing/cashlogy/useCashlogyStore'
 import type { CashlogyTransaction } from '../../local-printing/types'
 import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
-import { assertRealSaleAllowed, localFiscalMode } from '../../fiscal/local/mode.ts'
-import { issueRestaurantInvoice, preflightRestaurantInvoice } from '../../fiscal/local/restaurantInvoice.ts'
+import { assertRealSaleAllowed } from '../../fiscal/local/mode.ts'
+import { payRestaurantSale, recoverRestaurantPayments } from '../services/payment.ts'
 import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
 import { PRINT_AGENT_ENABLED } from '../../local-printing/constants/config'
 import { customerFiscalSnapshot } from '../../customers/customerValidation.ts'
@@ -112,7 +108,7 @@ type Options = {
   onAddFeedback: (input: { feedbackType: 'added' | 'updated'; productName: string; sourceElement?: HTMLElement | null }) => void
   onError: (message: string | null) => void
   onPaidFeedback: (method: PaymentMethod | null) => void
-  printSale: (payload: SaleCreatedPayload, options?: { cashDrawerAlreadyRequested?: boolean }) => Promise<void>
+  printSale: (payload: SaleCreatedPayload, options?: { cashDrawerAlreadyRequested?: boolean; fiscalMode?: 'legacy' | 'verifactu' }) => Promise<void>
   refreshCashSales: (ticketId: string, missingTicketTitle: string, shouldPrint?: boolean) => Promise<void>
   setAppliedDiscount: (discount: AppliedDiscount | null) => void
   setBusy: (busy: boolean) => void
@@ -161,6 +157,24 @@ export function useRestaurantController(options: Options) {
   const onError = options.onError
   const reportError = onError
   const paymentLockRef = useRef(false)
+  const recoveryScopeRef = useRef<string | null>(null)
+  useEffect(() => {
+    const { context, cashSession } = options
+    if (!options.enabled || !context || !cashSession) { recoveryScopeRef.current = null; return }
+    if (!options.isOnline || !context.canTakePayments) return
+    const scope = `${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}:${cashSession.id}`
+    if (recoveryScopeRef.current === scope) return
+    recoveryScopeRef.current = scope
+    void recoverRestaurantPayments(context, cashSession).then(async recovered => {
+      for (const payment of recovered) {
+        finishCashlogyPayment(payment.transaction)
+        if (payment.result.ticketId) await options.refreshCashSales(payment.result.ticketId, 'Cobro recuperado; revisa el histórico', false)
+      }
+    }).catch(error => {
+      reportOperationError(error, { operation: 'restaurant.action', step: 'restore_payment', recoverable: true })
+      options.onError('Hay un cobro pendiente de recuperar. Conserva el almacenamiento y vuelve a abrir esta caja para reintentar; no vuelvas a cobrarlo.')
+    })
+  }, [options])
   const paymentScope = `${context?.tenantId}:${context?.venueId}:${context?.deviceId}:${context?.userId}:${cashSessionId}`
   const paymentScopeRef = useRef(paymentScope)
   paymentScopeRef.current = paymentScope
@@ -208,24 +222,6 @@ export function useRestaurantController(options: Options) {
     })
   }, [cashSessionId, context, invoiceOrderId, isOnline, onError, productionAvailable, refreshProduction])
 
-  const settlePayment = useCallback(async (
-    method: PaymentMethod | null,
-    amountCents: number,
-    receivedCents: number | null,
-    confirmedTransaction: CashlogyTransaction | null = null,
-  ) => {
-    if (method !== 'cash') return { transaction: null, receivedCents, changeCents: null }
-    const transaction = confirmedTransaction ?? await settleCashlogyPaymentIfConfigured(amountCents)
-    if (transaction && transaction.requestedAmountCents !== amountCents) {
-      throw new Error('El importe del cobro confirmado en Cashlogy no coincide con la venta actual.')
-    }
-    const amounts = getCashlogyPaymentAmounts(transaction, amountCents)
-    return {
-      transaction,
-      receivedCents: transaction ? amounts.receivedCents : receivedCents,
-      changeCents: amounts.changeCents,
-    }
-  }, [])
   const replaceDraftOrder = draft.replaceOrder
   useEffect(() => {
     if (options.enabled) return
@@ -605,6 +601,7 @@ export function useRestaurantController(options: Options) {
     paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
+    let committedResult: PayRestaurantEqualPartResult | null = null
     try {
       const paymentLines = getEqualSplitPrintLines(current.lines, equalSplit)
       if (!allowPending) {
@@ -618,23 +615,21 @@ export function useRestaurantController(options: Options) {
         : calculateDiscountForLines(paymentLines.map((line) => ({
             productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
           })), effectiveDiscount).totalCents
-      const fiscalSaleId = createId()
-      const fiscalInstallation = localFiscalMode() !== 'disabled'
-        ? await preflightRestaurantInvoice(options.context, options.cashSession, fiscalSaleId) : null
-      const cashlogy = await settlePayment(method, amountCents, receivedCents)
-      const cashDrawerAlreadyRequested = requestEarlyCashDrawer({ requestId: `drawer:${equalSplit.id}:${createId()}`, payments: [{ method, amountCents }] })
-      const production = localFiscalMode() !== 'disabled'
-      const prepared = production ? await issueRestaurantInvoice(options.context, options.cashSession,
-        buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
+      const payment = await payRestaurantSale<PayRestaurantEqualPartResult>({
+        context: options.context, session: options.cashSession, action: 'equal_part', target: equalSplit.id, sequence: equalSplit.paidParts,
+        draft: buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
           discount: effectiveDiscount, lines: paymentLines, paymentId: createId(), paymentMethod: method,
-          receivedCents: cashlogy.receivedCents, changeCents: cashlogy.changeCents,
-          saleId: fiscalSaleId, subtotalCents: getRestaurantPrintSubtotal(paymentLines), ticketId: createId(), totalCents: amountCents }),
-        'equal_part', { splitId: equalSplit.id, method, receivedCents: cashlogy.receivedCents, allowPending,
-          discount: withCalculationLines(discount, paymentLines), useDefaultDiscount,
-          cashlogyRequestId: cashlogy.transaction?.requestId ?? null,
-          cashlogyTransactionId: cashlogy.transaction?.id ?? null }, fiscalInstallation) : null
-      const result = production ? prepared!.result as PayRestaurantEqualPartResult
-        : await payRestaurantEqualPart(equalSplit.id, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), useDefaultDiscount, cashlogy.transaction)
+          receivedCents, changeCents: null, saleId: createId(), subtotalCents: getRestaurantPrintSubtotal(paymentLines),
+          ticketId: createId(), totalCents: amountCents }),
+        params: { splitId: equalSplit.id, method, receivedCents, allowPending,
+          discount: withCalculationLines(discount, paymentLines), useDefaultDiscount },
+      })
+      const result = payment.result
+      if (!result.requiresConfirmation) committedResult = result
+      const cashlogy = payment
+      const prepared = { payload: payment.payload }
+      const production = Boolean(payment.payload?.localFiscal)
+      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + result.saleId + ':payment', payments: [{ method, amountCents }] })
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
         if (production && !prepared?.payload) throw new Error('Falta la factura fiscal del cobro confirmado.')
@@ -663,8 +658,8 @@ export function useRestaurantController(options: Options) {
           ticketNumber,
           totalCents: result.paidAmountCents,
           fiscal,
-        }), { cashDrawerAlreadyRequested }).catch((error) => options.onError(getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentPrint' })))
-        void refreshSales(result.ticketId, 'Pago completado sin imprimir', false).catch((error) => options.onError(getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentRefresh' })))
+        }), { cashDrawerAlreadyRequested, fiscalMode: production ? 'verifactu' : 'legacy' }).catch((error) => options.onError('El cobro está guardado. ' + getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentPrint' })))
+        void refreshSales(result.ticketId, 'Pago completado sin imprimir', false).catch((error) => options.onError('El cobro está guardado. ' + getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentRefresh' })))
         const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
         realtime.setMap(nextMap)
         if (result.completed) {
@@ -679,13 +674,18 @@ export function useRestaurantController(options: Options) {
       }
       return result
     } catch (error) {
+      if (committedResult) {
+        reportOperationError(error, { operation: 'restaurant.action', step: 'after_payment', recoverable: true })
+        options.onError('El cobro está guardado. No se pudo completar la actualización o la impresión. Revisa el histórico; no vuelvas a cobrarlo.')
+        return committedResult
+      }
       options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'payEqualSplitPart' }))
       throw error
     } finally {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [cleanupVirtualRoomTable, draft, equalSplit, options, realtime, refreshSales, settlePayment, invoiceOrderId])
+  }, [cleanupVirtualRoomTable, draft, equalSplit, options, realtime, refreshSales, invoiceOrderId])
 
   const paySelectedOrderItems = useCallback(async (
     moves: RestaurantOrderLineMove[],
@@ -701,6 +701,7 @@ export function useRestaurantController(options: Options) {
     paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
+    let committedResult: PayRestaurantOrderItemsResult | null = null
     try {
       const saved = await draft.flush()
       if (!saved) throw new Error('No se pudo guardar la comanda antes del cobro.')
@@ -713,25 +714,22 @@ export function useRestaurantController(options: Options) {
       const amountCents = calculateDiscountForLines(paymentLines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), discount).totalCents
-      const fiscalSaleId = createId()
-      const fiscalInstallation = localFiscalMode() !== 'disabled'
-        ? await preflightRestaurantInvoice(options.context, options.cashSession, fiscalSaleId) : null
-      const cashlogy = await settlePayment(method, amountCents, receivedCents)
-      const cashDrawerAlreadyRequested = requestEarlyCashDrawer({ requestId: `drawer:${saved.order.id}:${createId()}`, payments: [{ method, amountCents }] })
-      const production = localFiscalMode() !== 'disabled'
-      const prepared = production ? await issueRestaurantInvoice(options.context, options.cashSession,
-        buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
+      const payment = await payRestaurantSale<PayRestaurantOrderItemsResult>({
+        context: options.context, session: options.cashSession, action: 'selected_items', target: saved.order.id, sequence: saved.order.revision,
+        draft: buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
           discount, lines: paymentLines, paymentId: createId(), paymentMethod: method,
-          receivedCents: cashlogy.receivedCents, changeCents: cashlogy.changeCents,
-          saleId: fiscalSaleId, subtotalCents: getRestaurantPrintSubtotal(paymentLines), ticketId: createId(), totalCents: amountCents }),
-        'selected_items', { orderId: saved.order.id, expectedRevision: saved.order.revision,
-          moves: moves.map(move => ({ lineId: move.lineId, quantity: move.quantity })),
-          method, receivedCents: cashlogy.receivedCents, allowPending,
-          discount: withCalculationLines(discount, paymentLines),
-          cashlogyRequestId: cashlogy.transaction?.requestId ?? null,
-          cashlogyTransactionId: cashlogy.transaction?.id ?? null }, fiscalInstallation) : null
-      const result = production ? prepared!.result as PayRestaurantOrderItemsResult
-        : await payRestaurantOrderItems(saved.order.id, saved.order.revision, moves, method, cashlogy.receivedCents, allowPending, withCalculationLines(discount, paymentLines), cashlogy.transaction)
+          receivedCents, changeCents: null, saleId: createId(), subtotalCents: getRestaurantPrintSubtotal(paymentLines),
+          ticketId: createId(), totalCents: amountCents }),
+        params: { orderId: saved.order.id, expectedRevision: saved.order.revision,
+          moves: moves.map(move => ({ lineId: move.lineId, quantity: move.quantity })), method, receivedCents, allowPending,
+          discount: withCalculationLines(discount, paymentLines) },
+      })
+      const result = payment.result
+      if (!result.requiresConfirmation) committedResult = result
+      const cashlogy = payment
+      const prepared = { payload: payment.payload }
+      const production = Boolean(payment.payload?.localFiscal)
+      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + result.saleId + ':payment', payments: [{ method, amountCents }] })
       if (!result.requiresConfirmation) {
         if (production && !prepared?.payload) throw new Error('Falta la factura fiscal del cobro confirmado.')
         finishCashlogyPayment(cashlogy.transaction)
@@ -759,8 +757,8 @@ export function useRestaurantController(options: Options) {
           ticketNumber,
           totalCents: result.totalCents,
           fiscal,
-        }), { cashDrawerAlreadyRequested }).catch((error) => options.onError(getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentPrint' })))
-        void refreshSales(result.ticketId, 'Cobro completado sin imprimir', false).catch((error) => options.onError(getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentRefresh' })))
+        }), { cashDrawerAlreadyRequested, fiscalMode: production ? 'verifactu' : 'legacy' }).catch((error) => options.onError('El cobro está guardado. ' + getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentPrint' })))
+        void refreshSales(result.ticketId, 'Cobro completado sin imprimir', false).catch((error) => options.onError('El cobro está guardado. ' + getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentRefresh' })))
         const [nextOrder, nextMap] = await Promise.all([
           cleanedAreaId ? Promise.resolve(null) : loadRestaurantOrder(options.context, saved.order.id),
           realtime.loadCurrentMap(options.context, options.cashSession.id),
@@ -776,6 +774,11 @@ export function useRestaurantController(options: Options) {
       }
       return result
     } catch (error) {
+      if (committedResult) {
+        reportOperationError(error, { operation: 'restaurant.action', step: 'after_payment', recoverable: true })
+        options.onError('El cobro está guardado. No se pudo completar la actualización o la impresión. Revisa el histórico; no vuelvas a cobrarlo.')
+        return committedResult
+      }
       if (isRestaurantRevisionConflict(error)) {
         try {
           draft.replaceOrder(await loadRestaurantOrder(options.context, current.order.id))
@@ -791,7 +794,7 @@ export function useRestaurantController(options: Options) {
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [cleanupVirtualRoomTable, draft, options, realtime, refreshSales, settlePayment, invoiceOrderId])
+  }, [cleanupVirtualRoomTable, draft, options, realtime, refreshSales, invoiceOrderId])
   const splitOrder = useCallback(async (
     sourceOrderId: string,
     targetOrderId: string | null,
@@ -882,6 +885,7 @@ export function useRestaurantController(options: Options) {
     paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
+    let economicCommitted = false
     try {
       const saved = await draft.flush()
       if (!saved) return
@@ -897,35 +901,29 @@ export function useRestaurantController(options: Options) {
       const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
         productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
       })), options.appliedDiscount).totalCents
-      const fiscalSaleId = createId()
-      const fiscalInstallation = localFiscalMode() !== 'disabled'
-        ? await preflightRestaurantInvoice(context, cashSession, fiscalSaleId) : null
-      const recoveredCashlogy = confirmedCashlogyTransaction ?? (forceWithPending ? pendingPayment?.cashlogyTransaction ?? null : null)
-      const cashlogy = await settlePayment(method, amountCents, receivedCents, recoveredCashlogy)
-      const cashDrawerAlreadyRequested = forceWithPending && pendingPayment?.cashDrawerAlreadyRequested === true
-        ? true
-        : requestEarlyCashDrawer({ requestId: `drawer:${saved.order.id}:${createId()}`, payments: [{ method, amountCents }] })
-      const production = localFiscalMode() !== 'disabled'
-      const prepared = production ? await issueRestaurantInvoice(context, cashSession,
-        buildRestaurantPrintPayload({ cashSession, context, createdAt: nowIso(),
-          discount: options.appliedDiscount, lines: saved.lines,
-          paymentId: createId(), paymentMethod: method, receivedCents: cashlogy.receivedCents,
-          changeCents: cashlogy.changeCents, saleId: fiscalSaleId,
-          subtotalCents: getRestaurantPrintSubtotal(saved.lines), ticketId: createId(), totalCents: amountCents,
-          invoice: invoiceCustomer ? { customerId: invoiceCustomer.id,
-            customer: customerFiscalSnapshot(invoiceCustomer), series: null, number: null, issuedAt: null } : null }),
-        'close', { orderId: saved.order.id, method, receivedCents: cashlogy.receivedCents,
-          allowPending: forceWithPending, discount: withCalculationLines(options.appliedDiscount, saved.lines),
-          customerId: invoiceCustomer?.id ?? null,
-          customerSnapshot: invoiceCustomer ? customerFiscalSnapshot(invoiceCustomer) : null,
-          cashlogyRequestId: cashlogy.transaction?.requestId ?? null,
-          cashlogyTransactionId: cashlogy.transaction?.id ?? null }, fiscalInstallation) : null
-      const result = production ? prepared!.result as Awaited<ReturnType<typeof closeRestaurantOrder>>
-        : await closeRestaurantOrder(saved.order.id, method, cashlogy.receivedCents, forceWithPending, withCalculationLines(options.appliedDiscount, saved.lines), invoiceCustomer, cashlogy.transaction)
+      const payment = await payRestaurantSale<Awaited<ReturnType<typeof closeRestaurantOrder>>>({
+        context, session: cashSession, action: 'close', target: saved.order.id,
+        confirmedCashlogy: confirmedCashlogyTransaction ?? (forceWithPending ? pendingPayment?.cashlogyTransaction ?? null : null),
+        draft: buildRestaurantPrintPayload({ cashSession, context, createdAt: nowIso(),
+          discount: options.appliedDiscount, lines: saved.lines, paymentId: createId(), paymentMethod: method,
+          receivedCents, changeCents: null, saleId: createId(), subtotalCents: getRestaurantPrintSubtotal(saved.lines),
+          ticketId: createId(), totalCents: amountCents,
+          invoice: invoiceCustomer ? { customerId: invoiceCustomer.id, customer: customerFiscalSnapshot(invoiceCustomer),
+            series: null, number: null, issuedAt: null } : null }),
+        params: { orderId: saved.order.id, method, receivedCents, allowPending: forceWithPending,
+          discount: withCalculationLines(options.appliedDiscount, saved.lines), customerId: invoiceCustomer?.id ?? null,
+          customerSnapshot: invoiceCustomer ? customerFiscalSnapshot(invoiceCustomer) : null },
+      })
+      const result = payment.result
+      const cashlogy = payment
+      const prepared = { payload: payment.payload }
+      const production = Boolean(payment.payload?.localFiscal)
+      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + result.saleId + ':payment', payments: [{ method, amountCents }] })
       if (result.requiresConfirmation) {
         setPendingPayment({ method, receivedCents: cashlogy.receivedCents, pendingUnits: result.pendingUnits, cashlogyTransaction: cashlogy.transaction, cashDrawerAlreadyRequested })
         return
       }
+      economicCommitted = true
       if (production && !prepared?.payload) throw new Error('Falta la factura fiscal del cobro confirmado.')
       finishCashlogyPayment(cashlogy.transaction)
       const nextOrder = result.nextOrderId ? await loadRestaurantOrder(context, result.nextOrderId) : null
@@ -998,22 +996,24 @@ export function useRestaurantController(options: Options) {
            totalCents: result.totalCents,
            fiscal,
           invoice,
-        }), { cashDrawerAlreadyRequested })
+        }), { cashDrawerAlreadyRequested, fiscalMode: production ? 'verifactu' : 'legacy' })
       })()
       void Promise.allSettled([refreshMapTask, refreshSalesTask, printTask]).then((tasks) => {
         const failures = tasks
           .filter((task): task is PromiseRejectedResult => task.status === 'rejected')
           .map((task) => getReadableError(task.reason, { operation: 'restaurant.action', cashSessionId: cashSession.id, operationId: saved.order.id, step: 'completePayment' }))
-        if (failures.length > 0 && paymentScopeRef.current === paymentScope) options.onError(failures.join(' '))
+        if (failures.length > 0 && paymentScopeRef.current === paymentScope) options.onError('El cobro está guardado. ' + failures.join(' '))
       })
     } catch (error) {
-      options.onError(getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
+      options.onError(economicCommitted
+        ? 'El cobro está guardado. No se pudo completar la actualización o la impresión. Revisa el histórico; no vuelvas a cobrarlo.'
+        : getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
     } finally {
       setPaymentProcessing(false)
       options.setBusy(false)
       paymentLockRef.current = false
     }
-  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, paymentScope, pendingPayment, realtime, refreshSales, requestPendingPaymentConfirmation, settlePayment, invoiceOrderId])
+  }, [cleanupVirtualRoomTable, draft, invoiceCustomer, options, paymentScope, pendingPayment, realtime, refreshSales, requestPendingPaymentConfirmation, invoiceOrderId])
 
   const requestCloseCash = useCallback(async () => {
     if (!options.context || !options.cashSession) return false

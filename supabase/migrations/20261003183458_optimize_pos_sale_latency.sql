@@ -31,11 +31,11 @@ where event_kind = 'sale_created'
   and (sale_ticket_id is distinct from payload -> 'ticket' ->> 'id'
     or sale_cash_session_id is distinct from payload -> 'ticket' ->> 'cashSessionId');
 
-create index concurrently if not exists offline_event_log_sale_session_ticket_idx
+create index if not exists offline_event_log_sale_session_ticket_idx
 on public.offline_event_log (tenant_id, sale_cash_session_id, sale_ticket_id, id)
 where event_kind = 'sale_created';
 
-create index concurrently if not exists offline_event_log_sale_id_idx
+create index if not exists offline_event_log_sale_id_idx
 on public.offline_event_log (tenant_id, ((payload -> 'sale') ->> 'id'), created_at desc)
 where event_kind = 'sale_created';
 

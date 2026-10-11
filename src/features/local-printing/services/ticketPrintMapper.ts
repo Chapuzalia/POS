@@ -47,7 +47,11 @@ type MapperOptions = {
 }
 
 export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
-  const { sale } = options
+  // Local snapshots retain their installation number but never print a tax QR,
+  // including payloads saved before local-only rendering was separated.
+  const sale = options.sale.localFiscal?.verifactuLegend === false && options.sale.fiscal?.provider === 'verifactu'
+    ? { ...options.sale, fiscal: { ...options.sale.fiscal, verificationUrl: '', qrBase64: null } }
+    : options.sale
   const isReprint = options.isReprint === true
   const isPreTicket = options.isPreTicket === true
   const printQr = options.printQr !== false

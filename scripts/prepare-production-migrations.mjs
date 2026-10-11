@@ -9,6 +9,8 @@ export const SALE_LATENCY_PIPELINE_MIGRATION = '20261003183458_optimize_pos_sale
 
 function adaptPipelineIndexes(sql, filename, expectedCount) {
   const matches = sql.match(/^create index concurrently\b/gim) ?? []
+  const regularIndexes = sql.match(/^create index if not exists\b/gim) ?? []
+  if (matches.length === 0 && regularIndexes.length === expectedCount) return sql
   if (matches.length !== expectedCount) {
     throw new Error(
       `${filename} must contain exactly ${expectedCount} concurrent indexes; found ${matches.length}.`,

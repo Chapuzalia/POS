@@ -155,7 +155,23 @@
     const legacyRefund = await buildLocalRectificative({ ...refundInput, original: { ...issued, invoice: { ...issued.invoice, transmissionMode: 'local-only' } } })
     assert(legacyRefund.invoice.transmissionMode === 'local-only', 'refund enrolled legacy installation')
     window.refundEvidence = { record: refund.record, invoice: refund.invoice }
+    const revocationDb = await openLedger()
+    const revoking = revocationDb.transaction('bindings', 'readwrite')
+    revoking.objectStore('bindings').put({ scope: `pwa-revoked:${productionInstallationId}`,
+      installationId: productionInstallationId, revokedAt: new Date().toISOString(), reason: 'Prueba de revocación' })
+    await transactionDone(revoking)
+    revocationDb.close()
+    const beforeRevokedEmission = (await readLocalFiscalHead(issued.scope)).chain.position
+    await mustReject(issueLocalInvoice({ ...base, ...productionScope, environment: 'production',
+      deviceId: productionDeviceId, system: refundInput.system, invoiceId: crypto.randomUUID(),
+      ticketId: nextTicketId, saleId: nextSaleId, salePayload: { ...productionPayload,
+        ticket: { ...productionPayload.ticket, id: nextTicketId }, sale: { ...productionPayload.sale, id: nextSaleId } },
+      transmissionMode: 'bridge', lease: refundInput.lease }), 'revoked installation emitted another sale')
+    await mustReject(buildLocalRectificative(refundInput), 'revoked installation prepared a refund')
+    assert((await readLocalFiscalHead(issued.scope)).chain.position === beforeRevokedEmission, 'revocation consumed a position')
+    assert((await listLocalFiscalEntries(productionScope)).length === 3, 'revocation removed historical records')
+    await assertFiscalLedgerHeadValid(issued.scope, productionDeviceId, false, productionInstallationId)
     document.body.dataset.state = 'passed'
-    document.body.textContent = 'PASS IndexedDB chain, production sale, pending bridge, reprint, recovery and partial refund serialization'
+    document.body.textContent = 'PASS IndexedDB chain, production sale, pending bridge, reprint, recovery, partial refund serialization and revocation blocking'
   } catch (error) { document.body.dataset.state = 'failed'; document.body.textContent = `FAIL ${error.message}` }
 </script></body></html>

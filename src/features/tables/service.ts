@@ -441,6 +441,18 @@ export async function closeRestaurantOrder(orderId: string, paymentMethod: Payme
   return data as CloseRestaurantOrderResult
 }
 
+export async function payRestaurantIdempotent(context: TenantContext, operationId: string, action: 'close' | 'equal_part' | 'selected_items', params: Record<string, unknown>) {
+  const { data, error } = await requireSupabase().rpc('pay_restaurant_idempotent', {
+    p_operation_id: operationId, p_tenant_id: context.tenantId, p_venue_id: context.venueId,
+    p_device_id: context.deviceId, p_action: action, p_params: params,
+  })
+  if (error) throw error
+  const result = data as Record<string, unknown>
+  return action === 'equal_part' && result.split
+    ? { ...result, split: mapEqualSplit(result.split) }
+    : result
+}
+
 export async function cancelEmptyRestaurantOrder(orderId: string, expectedRevision: number) {
   const { data, error } = await requireSupabase().rpc('cancel_empty_restaurant_order', {
     p_order_id: orderId,

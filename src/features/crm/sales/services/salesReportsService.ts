@@ -298,7 +298,7 @@ function mapFiscalRecord(ticket: SalesReportTicketRow): CrmSalesReportTicket['fi
     const series = typeof localInvoice.series === 'string' ? localInvoice.series : null
     const number = typeof localInvoice.number === 'number' ? String(localInvoice.number) : null
     const issuedAt = typeof localInvoice.issuedAt === 'string' ? localInvoice.issuedAt : null
-    const verificationUrl = typeof localInvoice.qrUrl === 'string' ? localInvoice.qrUrl : null
+    const verificationUrl = localInvoice.transmissionMode !== 'local-only' && typeof localInvoice.qrUrl === 'string' ? localInvoice.qrUrl : null
     const transmissionMode = localInvoice.transmissionMode
     if (series && number && issuedAt) {
       return {
@@ -327,7 +327,7 @@ function mapRefundDocuments(ticket: SalesReportTicketRow): CrmSalesReportTicket[
       series: request.fiscal_series ?? (typeof invoice.series === 'string' ? invoice.series : null),
       number,
       issuedAt,
-      verificationUrl: typeof invoice.qrUrl === 'string' ? invoice.qrUrl : null,
+      verificationUrl: invoice.transmissionMode !== 'local-only' && typeof invoice.qrUrl === 'string' ? invoice.qrUrl : null,
       status: request.fiscal_status,
       method: request.refund_method,
       totalCents: -Math.abs(request.total_cents),

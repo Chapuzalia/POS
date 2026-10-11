@@ -9,7 +9,7 @@ const context = mode => ({ tenantId: 'tenant', venueId: 'venue', deviceId: 'devi
 const cashSession = { id: 'cash', cashRegisterId: 'register' }
 class MissingIdentity extends Error {}
 
-function gate(mode, failure) {
+function gate(mode, failure, revocation = { active: false }) {
   const calls = []
   const busy = []
   const window = new EventTarget()
@@ -28,8 +28,11 @@ function gate(mode, failure) {
       latestFiscalInstallation: async () => { calls.push('preview'); return null },
       activateFiscalInstallation: async () => { calls.push('activate') },
       FiscalActivationConfirmationError: class extends Error {},
+      fiscalIdentityKey: () => 'identity-key',
     },
-    './mode.ts': { localFiscalMode: () => { calls.push('mode'); return 'production' } },
+    './installationRevocation.ts': { FISCAL_INSTALLATION_REVOKED: 'installation-revoked', checkFiscalInstallationRevocation: async () => { if (revocation.active) throw Object.assign(new MissingIdentity(), { installationRevoked: true }) } },
+    './tenantMode.ts': { resolveLocalFiscalMode: () => { calls.push('mode'); return Promise.resolve('production') } },
+    './integration.ts': { loadVerifactuIntegration: async () => { calls.push('settings'); return { aeat_environment: 'production' } } },
     './settings.ts': {
       FISCAL_SETTINGS_CHANGED: 'fiscal-settings-changed',
       loadFiscalPosSettings: async () => { calls.push('settings'); return { aeat_environment: 'production' } },
@@ -64,7 +67,7 @@ for (const mode of ['checkout', 'hybrid', undefined]) {
     assert.equal(runner.render(props).type, 'modal')
     await settle()
     assert.equal(runner.render(props), 'POS')
-    assert.deepEqual(calls, ['mode', 'load'])
+    assert.deepEqual(calls, ['mode', 'load', 'timer'])
     runner.unmount()
   })
 
@@ -103,7 +106,23 @@ test('a mode change cancels an in-flight checkout check before a satellite rende
   assert.equal(runner.render(satellite), 'POS')
   await settle()
   assert.equal(runner.render(satellite), 'POS')
-  assert.deepEqual(calls, ['mode', 'load'])
+  assert.deepEqual(calls, ['mode'])
+  runner.unmount()
+})
+
+test('a running checkout detects revocation without reloading and permits only a new installation', async () => {
+  const revoked = { active: false }
+  const { runner, props, window } = gate('checkout', undefined, revoked)
+  runner.render(props); await settle()
+  assert.equal(runner.render(props), 'POS')
+  revoked.active = true
+  window.dispatchEvent(new Event('online'))
+  await settle()
+  const tree = runner.render(props)
+  assert.equal(tree.type, 'modal')
+  assert.ok(nodes(tree).some(node => typeof node.props?.children === 'string' && node.props.children.includes('revocada desde el bridge')))
+  assert.ok(nodes(tree).some(node => node.props?.children === 'Crear nueva instalación' && !node.props.disabled))
+  assert.ok(!nodes(tree).some(node => String(node.props?.children).includes('Recuperar última')))
   runner.unmount()
 })
 

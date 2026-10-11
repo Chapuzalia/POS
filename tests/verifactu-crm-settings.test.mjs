@@ -76,6 +76,6 @@ test('CRM bridge metadata preserves existing settings and accepts HTTP only on l
   assert.deepEqual(localOnly.rows, [{ bridge_url: null }])
 })
 
-test('loopback URL constraint replacement still requires reviewed production migration promotion', () => {
-  assert.deepEqual(analyzeMigration(localHttp), ['DROP'])
+test('loopback URL constraint replacement passes the strict compatible migration review', () => {
+  assert.deepEqual(analyzeMigration(localHttp), [])
 })

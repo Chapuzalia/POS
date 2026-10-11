@@ -31,6 +31,5 @@ export function isClosedCashSaleRejection(
     .filter((value): value is string => typeof value === 'string')
     .map((value) => value.toLocaleLowerCase('es'))
 
-  return String(databaseError.code) === '55000'
-    || messages.some((message) => closedCashMessages.some((fragment) => message.includes(fragment)))
+  return messages.some((message) => closedCashMessages.some((fragment) => message.includes(fragment)))
 }

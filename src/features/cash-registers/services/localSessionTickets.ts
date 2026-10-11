@@ -1,5 +1,6 @@
 import { getSessionTickets } from '../../../lib/offlineStore'
-import type { CashSession, SessionTicketRecord, TenantContext } from '../../../types'
+import { loadDurableSessionTickets } from '../../../lib/durableSales.ts'
+import type { CashSession, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
 import { listLocalFiscalEconomicSales, listLocalFiscalEntries, listLocalFiscalScopes } from '../../fiscal/local/localLedger.ts'
 import { printPayloadWithLocalFiscal } from '../../fiscal/local/posInvoice.ts'
 
@@ -7,7 +8,7 @@ import { printPayloadWithLocalFiscal } from '../../fiscal/local/posInvoice.ts'
 export async function loadLocalSessionTickets(context: TenantContext, session: CashSession, loadedTickets: SessionTicketRecord[]): Promise<SessionTicketRecord[]> {
   const inSession = (ticket: SessionTicketRecord) => ticket.cashSessionId === session.id
     && ticket.payload.ticket.tenantId === context.tenantId && ticket.payload.ticket.venueId === context.venueId
-  const cached = [...loadedTickets, ...getSessionTickets(context, session.id)].filter(inSession)
+  const cached = [...await loadDurableSessionTickets(context, session.id), ...loadedTickets, ...getSessionTickets(context, session.id)].filter(inSession)
   const tickets = new Map(cached.map(ticket => [ticket.payload.ticket.id, ticket]))
   const scopes = await listLocalFiscalScopes(context, session.cashRegisterId)
   for (const scope of scopes) {
@@ -35,4 +36,10 @@ export async function loadLocalSessionTickets(context: TenantContext, session: C
     }
   }
   return [...tickets.values()]
+}
+
+export async function loadLocalSessionSales(context: TenantContext, session: CashSession): Promise<SaleRecord[]> {
+  const tickets = await loadLocalSessionTickets(context, session, [])
+  return tickets.filter(ticket => ticket.status !== 'voided').map(ticket => ({ id: ticket.id,
+    cashSessionId: session.id, paymentMethod: ticket.paymentMethod, totalCents: ticket.totalCents, createdAt: ticket.createdAt }))
 }

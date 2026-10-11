@@ -234,7 +234,7 @@ export function buildSaleTicketLines(
   if (sale.fiscal && options.label !== 'PRE-TICKET') {
     lines.push('', ...section('Fiscal', printerLayout))
     if (sale.fiscal.externalCode && !localFiscal) lines.push(...wrapReceiptText(`Código: ${sale.fiscal.externalCode}`, printerLayout.columns, printerLayout.characterSet))
-    if (localFiscal) lines.push(...centeredWrapped('QR tributario:', printerLayout))
+    if (localFiscal && sale.fiscal.verificationUrl) lines.push(...centeredWrapped('QR tributario:', printerLayout))
     if (sale.fiscal.verificationUrl) lines.push(...wrapReceiptText(sale.fiscal.verificationUrl, printerLayout.columns, printerLayout.characterSet))
     if (localFiscal?.verifactuLegend) lines.push(...centeredWrapped('VERI*FACTU', printerLayout))
     const fiscalError = summarizeFiscalError(sale.fiscal.errorMessage ?? sale.fiscal.errorCode)
