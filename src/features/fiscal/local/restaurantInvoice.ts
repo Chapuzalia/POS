@@ -3,10 +3,21 @@ import { payRestaurantLocalFiscal } from '../../tables/service.ts'
 import { issuePosInvoice, printPayloadWithLocalFiscal, preparedFiscalInstallation, preflightFiscalInstallation } from './posInvoice.ts'
 import type { PreparedFiscalInstallation } from './posInvoice.ts'
 import { openLedger, request, transactionDone, reconcileLocalFiscalCopies, type LocalFiscalEntry } from './localLedger.ts'
+import { fiscalBridgeAccessToken, fiscalBridgeBaseUrl } from './installation.ts'
+import { synchronizeLocalFiscalQueue } from './sync.ts'
 
 type Action = 'close' | 'equal_part' | 'selected_items'
 
 type PreparedRestaurantPayment = { key: string; entry: LocalFiscalEntry; draft: SaleCreatedPayload; action: Action; params: Record<string, unknown> }
+function queueRestaurantFiscalDelivery(entry: LocalFiscalEntry): void {
+  const baseUrl = fiscalBridgeBaseUrl(entry.record.tenantId)
+  if (entry.invoice.transmissionMode !== 'bridge' || !baseUrl) return
+  // The restaurant RPC has already confirmed the economic transaction. Delivery
+  // must start now without delaying printing or Cashlogy acknowledgement.
+  void synchronizeLocalFiscalQueue({ tenantId: entry.record.tenantId, fiscalSubjectId: entry.record.fiscalSubjectId,
+    installationId: entry.record.installationId, mode: 'production', baseUrl,
+    getAccessToken: fiscalBridgeAccessToken }).catch(() => { /* Retained for background retry. */ })
+}
 async function pendingRestaurantPayment(key: string): Promise<PreparedRestaurantPayment | undefined> {
   const db = await openLedger()
   try {
@@ -74,6 +85,7 @@ export async function issueRestaurantInvoice(
     const entry: LocalFiscalEntry = { ...pending.entry, invoice: { ...pending.entry.invoice,
       ticketId: payload.ticket.id, saleId: payload.sale.id, paymentId: payload.payment?.id ?? null } }
     await reconcileLocalFiscalCopies(entry.record, context.deviceId, [{ entry, economicPayload: payload, eventId: entry.id }])
+    queueRestaurantFiscalDelivery(entry)
     return { result, entry, payload: printPayloadWithLocalFiscal(payload, entry) }
   }
   let result: Record<string, unknown> | null = null
@@ -95,5 +107,6 @@ export async function issueRestaurantInvoice(
     throw error
   }
   if (!result || !finalPayload) throw new Error('El cobro fiscal no quedó confirmado.')
+  queueRestaurantFiscalDelivery(entry)
   return { result, entry, payload: printPayloadWithLocalFiscal(finalPayload, entry) }
 }

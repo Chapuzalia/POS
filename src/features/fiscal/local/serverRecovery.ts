@@ -48,7 +48,9 @@ function toCopy(row: Row, installation: FiscalInstallation): RestorableFiscalCop
     ...row.invoice_snapshot,
     ticketId: row.ticket_id ?? row.invoice_snapshot.ticketId,
     saleId: row.sale_id ?? row.invoice_snapshot.saleId,
-    paymentId: typeof paymentId === 'string' ? paymentId : row.invoice_snapshot.paymentId,
+    paymentId: typeof paymentId === 'string' ? paymentId
+      : row.rpc_result && row.invoice_snapshot.paymentId !== null ? row.sale_id ?? row.invoice_snapshot.saleId
+        : row.invoice_snapshot.paymentId,
   }
   const annulment = row.record_kind === 'anulacion'
     ? { issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, series: invoice.series, number: invoice.number,

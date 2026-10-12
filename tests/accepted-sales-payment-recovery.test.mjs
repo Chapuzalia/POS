@@ -29,13 +29,17 @@ for (const failure of ['lost_reply', 'local_quota']) test(`restaurant recovery p
   let preparations = 0, economicSales = 0, requests = 0
   const receipts = new Map()
   const envelopes = []
+  const deliveries = []
   const remote = { ticketId: 'remote-ticket', saleId: 'remote-sale', paymentId: 'remote-payment', totalCents: 600 }
   const service = compileComponent(source('features/fiscal/local/restaurantInvoice.ts'), {
     './localLedger.ts': ledger,
+    './installation.ts': { fiscalBridgeBaseUrl: () => 'https://bridge.example', fiscalBridgeAccessToken: async () => 'token' },
+    './sync.ts': { synchronizeLocalFiscalQueue: async config => { deliveries.push(config) } },
     './posInvoice.ts': {
       issuePosInvoice: async (_context, _session, _draft, _synced, resolve) => {
         preparations++
         const entry = preparedEntry()
+        entry.invoice.transmissionMode = 'bridge'
         await resolve(entry)
         throw new Error('Storage full after server commit')
       },
@@ -51,12 +55,14 @@ for (const failure of ['lost_reply', 'local_quota']) test(`restaurant recovery p
   })
   const params = { orderId: 'order', allowPending: true }
   await assert.rejects(service.issueRestaurantInvoice(context, session, draft(), 'close', params), /lost|Storage full/)
+  assert.equal(deliveries.length, 0, 'an unconfirmed/unpersisted restaurant invoice must not be delivered')
   const recovered = await service.issueRestaurantInvoice(context, session, draft(), 'close', params)
   assert.equal(preparations, 1)
   assert.equal(economicSales, 1)
   assert.equal(requests, 2)
   assert.deepEqual(envelopes[0], envelopes[1])
   assert.equal(recovered.payload.sale.id, 'remote-sale')
+  assert.equal(deliveries.length, 1, 'recovered restaurant records must be delivered immediately')
   const saved = await ledger.findLocalFiscalEntryByTicket(preparedEntry().record, 'remote-ticket')
   assert.equal(saved.id, 'record')
   assert.equal((await ledger.listLocalFiscalEconomicSales(preparedEntry().record))[0].payload.sale.id, 'remote-sale')
