@@ -27,6 +27,7 @@ export type RestorableFiscalCopy = { entry: LocalFiscalEntry; economicPayload: S
 const dbName = 'tickit-verifactu-local-v1'
 const dbVersion = 5
 export const FISCAL_DELIVERY_CHANGED = 'tickit:fiscal-delivery-changed'
+export const FISCAL_ECONOMIC_SYNCED = 'tickit:fiscal-economic-synced'
 
 function deliveryChanged() {
   if (typeof window !== 'undefined') window.dispatchEvent(new Event(FISCAL_DELIVERY_CHANGED))

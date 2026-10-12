@@ -347,7 +347,7 @@ export function CatalogPanel({
           <div className="flex min-h-12 items-center gap-2 rounded-[var(--radius)] border border-[var(--field-border)] bg-[var(--field)] px-3">
             <Search className="h-5 w-5 shrink-0 text-[var(--muted)]" />
             <UiInput
-              className="h-full min-h-full min-w-0 flex-1 border-none bg-transparent text-[var(--field-foreground)] outline-none"
+              className="h-full min-h-full min-w-0 flex-1 border-none !bg-transparent text-[var(--field-foreground)] outline-none"
               onChange={(event) => {
                 setSearch(event.target.value);
                 setSelectedCategoryId(null);
@@ -361,8 +361,9 @@ export function CatalogPanel({
                 size="sm"
                 type="button"
                 variant="tertiary"
+                className="!h-10 !w-24 justify-end flex"
               >
-                <X className="h-4 w-4" />
+                <X className="h-4 w-4 justify-end" />
               </Button>
             ) : null}
           </div>

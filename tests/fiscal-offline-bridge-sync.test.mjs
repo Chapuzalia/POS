@@ -24,11 +24,14 @@ function scenario(count = 4) {
   }
   const window = new EventTarget(), document = new EventTarget()
   document.visibilityState = 'visible'
-  let interval, requestMode = 'ok', signal, reply = { state: 'VPS_STORED' }
+  const economicSynced = 'tickit:fiscal-economic-synced'
+  const acknowledgements = []
+  window.addEventListener(economicSynced, event => acknowledgements.push(event.detail))
+  let interval, requestMode = 'ok', signal, statusGate, bridgePasses = 0, reply = { state: 'VPS_STORED' }
   window.setInterval = action => { interval = action; return 1 }
   window.clearInterval = () => { interval = undefined }
   const globals = {
-    navigator, window, document, AbortController,
+    navigator, window, document, AbortController, CustomEvent,
     setTimeout(action, ms) { const id = Symbol(); timers.set(id, { action, ms }); return id },
     clearTimeout(id) { timers.delete(id) },
   }
@@ -43,6 +46,7 @@ function scenario(count = 4) {
   }
   for (let n = 0; n < count; n++) addSale()
   const ledger = {
+    FISCAL_ECONOMIC_SYNCED: economicSynced,
     listLocalFiscalEntries: async () => entries.map(entry => ({ ...entry, delivery: { ...entry.delivery } })),
     listPendingFiscalEconomicSales: async () => sales.filter(sale => !sale.synced),
     markFiscalEconomicSaleSynced: async id => { sales.find(sale => sale.id === id).synced = true },
@@ -78,8 +82,13 @@ function scenario(count = 4) {
     './deliveryIncidence.ts': { isFiscalTransportFailure },
     './bridgeClient.ts': { BridgeHttpError, createBridgeClient: config => {
       assert.equal(config.mode, 'production')
+      bridgePasses++
       return {
-        async status(id) { if (!bridgeStored.has(id)) throw new BridgeHttpError(404); return bridgeStored.get(id) },
+        async status(id) {
+          if (statusGate) await statusGate
+          if (!bridgeStored.has(id)) throw new BridgeHttpError(404)
+          return bridgeStored.get(id)
+        },
         async deliver(records) {
           const record = clone(records[0])
           deliveries.push(record)
@@ -94,13 +103,87 @@ function scenario(count = 4) {
       }
     } },
   }, globals)
+  const bridgeConfig = { ...scope, mode: 'production', baseUrl: 'http://localhost:3000/', getAccessToken: async () => 'session' }
   return { entries, sales, rpcCalls, deliveries, economicStored, bridgeStored, locks, timers, navigator, addSale,
-    economic, synchronizeBridge: () => bridge.synchronizeLocalFiscalQueue({ ...scope, mode: 'production', baseUrl: 'http://localhost:3000/', getAccessToken: async () => 'session' }),
+    economic, acknowledgements, synchronizeBridge: () => bridge.synchronizeLocalFiscalQueue(bridgeConfig),
+    startBridge: () => bridge.startFiscalSyncWhileOpen(bridgeConfig),
+    bridgePasses: () => bridgePasses,
+    acknowledge: detail => window.dispatchEvent(new CustomEvent(economicSynced, { detail })),
+    holdStatus: () => { let release; statusGate = new Promise(resolve => { release = resolve }); return release },
     setRequestMode: value => { requestMode = value }, setReply: value => { reply = value },
     timeout: () => { for (const timer of [...timers.values()]) { assert.equal(timer.ms, 20_000); timer.action() } },
     interval: () => interval?.(), signal: () => signal,
   }
 }
+
+test('economic acknowledgement wakes the bridge immediately without waiting for its interval', async () => {
+  const s = scenario(1)
+  const stop = s.startBridge()
+  try {
+    await settle()
+    assert.equal(s.deliveries.length, 0)
+    await s.economic.synchronizeFiscalEconomicSales(scope)
+    await settle()
+    assert.deepEqual(s.acknowledgements, ['tenant:subject:installation'])
+    assert.equal(s.sales[0].synced, true)
+    assert.equal(s.deliveries.length, 1)
+    assert.equal(s.entries[0].delivery.state, 'VPS_STORED')
+    const passes = s.bridgePasses()
+    for (const otherScope of ['other:subject:installation', 'tenant:other:installation', 'tenant:subject:other']) {
+      s.acknowledge(otherScope)
+    }
+    await settle()
+    assert.equal(s.bridgePasses(), passes, 'other fiscal scopes must not wake this worker')
+    s.bridgeStored.set('record-1', { ...s.bridgeStored.get('record-1'), state: 'AEAT_ACCEPTED', aeatRespondedAt: '2026-10-11T00:00:01Z' })
+    s.entries[0].delivery.nextAttemptAt = null
+    s.interval()
+    await settle()
+    assert.equal(s.entries[0].delivery.state, 'AEAT_ACCEPTED', 'AEAT polling continues after durable bridge storage')
+    assert.equal(s.deliveries.length, 1, 'polling must not resend the stored sale')
+    const finalPasses = s.bridgePasses()
+    stop()
+    s.acknowledge('tenant:subject:installation')
+    await settle()
+    assert.equal(s.bridgePasses(), finalPasses, 'stopped workers must remove their listener')
+  } finally { stop() }
+})
+
+test('an acknowledgement during a running bridge pass schedules another pass without losing the new sale', async () => {
+  const s = scenario(1)
+  await s.economic.synchronizeFiscalEconomicSales(scope)
+  const releaseStatus = s.holdStatus()
+  const stop = s.startBridge()
+  try {
+    await settle()
+    s.addSale()
+    await s.economic.synchronizeFiscalEconomicSales(scope)
+    assert.equal(s.deliveries.length, 0)
+    releaseStatus()
+    await settle()
+    assert.deepEqual(s.deliveries.map(record => record.chainPosition), [1, 2])
+    assert.ok(s.entries.every(entry => entry.delivery.state === 'VPS_STORED'))
+  } finally { releaseStatus(); stop() }
+})
+
+test('a lost economic acknowledgement does not wake bridge delivery until an idempotent retry succeeds', async () => {
+  const s = scenario(1)
+  const stop = s.startBridge()
+  try {
+    await settle()
+    s.setRequestMode('lost-response')
+    const pending = s.economic.synchronizeFiscalEconomicSales(scope)
+    await settle()
+    s.timeout()
+    await assert.rejects(pending, /tiempo de espera/)
+    assert.equal(s.acknowledgements.length, 0)
+    assert.equal(s.deliveries.length, 0)
+    s.setRequestMode('ok')
+    await s.economic.synchronizeFiscalEconomicSales(scope)
+    await settle()
+    assert.equal(s.deliveries.length, 1)
+    assert.deepEqual(s.rpcCalls[0], s.rpcCalls[1])
+  } finally { stop() }
+})
 
 test('four disconnected sales and the subsequent online sale wait for economic acknowledgement and deliver in order', async () => {
   const s = scenario()

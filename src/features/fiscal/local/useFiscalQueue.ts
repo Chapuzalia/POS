@@ -29,8 +29,9 @@ export function useFiscalQueue({ context, cashSession }: { context: TenantContex
         if (!active) return
         const entries = (await Promise.all(scopes.map(scope => listLocalFiscalEntries(scope)))).flat()
         if (!active) return
+        // Durable bridge storage completes POS delivery; AEAT polling continues in the worker.
         const unsent = entries.filter(entry => entry.invoice.transmissionMode === 'bridge'
-          && ['LOCAL_PENDING', 'VPS_STORED', 'REQUIRES_ACTION'].includes(entry.delivery.state))
+          && ['LOCAL_PENDING', 'REQUIRES_ACTION'].includes(entry.delivery.state))
         const originals = new Map(entries.map(entry => [`${entry.invoice.issuerNif}:${entry.invoice.series}/${entry.invoice.number}`, entry.invoice.ticketId]))
         const ticketIds = [...new Set(unsent.map(entry => {
           const alta = entry.record.canonicalRecord.RegistroAlta as { FacturasRectificadas?: { IDFacturaRectificada: Array<{ IDEmisorFactura: string; NumSerieFactura: string }> } } | undefined

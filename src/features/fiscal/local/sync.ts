@@ -1,6 +1,6 @@
 import { BridgeHttpError, type BridgeSubmission, type BridgeResult } from './bridgeClient.ts'
 import { createBridgeClient } from './bridgeClient.ts'
-import { listLocalFiscalEntries, listPendingFiscalEconomicSales, markLocalFiscalIncidence, updateLocalFiscalDelivery, type LocalFiscalEntry } from './localLedger.ts'
+import { FISCAL_ECONOMIC_SYNCED, listLocalFiscalEntries, listPendingFiscalEconomicSales, markLocalFiscalIncidence, updateLocalFiscalDelivery, type LocalFiscalEntry } from './localLedger.ts'
 import { isFiscalTransportFailure } from './deliveryIncidence.ts'
 
 export type FiscalScope = { tenantId: string; fiscalSubjectId: string; installationId: string }
@@ -110,14 +110,29 @@ export async function synchronizeLocalFiscalQueue(config: FiscalSyncConfig): Pro
 export function startFiscalSyncWhileOpen(config: FiscalSyncConfig): () => void {
   let stopped = false
   let running = false
+  let requested = false
+  const scope = `${config.tenantId}:${config.fiscalSubjectId}:${config.installationId}`
   const run = () => {
-    if (stopped || running || document.visibilityState === 'hidden') return
+    if (stopped || document.visibilityState === 'hidden') return
+    if (running) { requested = true; return }
     running = true
-    void synchronizeLocalFiscalQueue(config).catch(() => { /* pending records retain their state for the next attempt */ }).finally(() => { running = false })
+    void synchronizeLocalFiscalQueue(config).catch(() => { /* pending records retain their state for the next attempt */ }).finally(() => {
+      running = false
+      if (requested) { requested = false; run() }
+    })
+  }
+  const economicSynced = (event: Event) => {
+    if (event instanceof CustomEvent && event.detail === scope) run()
   }
   const timer = window.setInterval(run, 30000)
   window.addEventListener('online', run)
+  window.addEventListener(FISCAL_ECONOMIC_SYNCED, economicSynced)
   document.addEventListener('visibilitychange', run)
   run()
-  return () => { stopped = true; window.clearInterval(timer); window.removeEventListener('online', run); document.removeEventListener('visibilitychange', run) }
+  return () => {
+    stopped = true; window.clearInterval(timer)
+    window.removeEventListener('online', run)
+    window.removeEventListener(FISCAL_ECONOMIC_SYNCED, economicSynced)
+    document.removeEventListener('visibilitychange', run)
+  }
 }

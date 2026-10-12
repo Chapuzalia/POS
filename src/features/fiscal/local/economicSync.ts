@@ -1,5 +1,5 @@
 import { supabase } from '../../../lib/supabase.ts'
-import { listLocalFiscalEntries, listPendingFiscalEconomicSales, markFiscalEconomicSaleSynced, markLocalFiscalIncidence } from './localLedger.ts'
+import { FISCAL_ECONOMIC_SYNCED, listLocalFiscalEntries, listPendingFiscalEconomicSales, markFiscalEconomicSaleSynced, markLocalFiscalIncidence } from './localLedger.ts'
 import { isFiscalTransportFailure } from './deliveryIncidence.ts'
 import type { FiscalScope } from './sync.ts'
 
@@ -39,6 +39,7 @@ export async function synchronizeFiscalEconomicSales(scope: FiscalScope): Promis
         ])
         if (error) throw error
         await markFiscalEconomicSaleSynced(sale.id)
+        window.dispatchEvent(new CustomEvent(FISCAL_ECONOMIC_SYNCED, { detail: key }))
       } catch (error) {
         if (isFiscalTransportFailure(error)) await markLocalFiscalIncidence(scope)
         throw error

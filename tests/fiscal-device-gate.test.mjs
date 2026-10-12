@@ -152,12 +152,13 @@ for (const linked of [true, false]) test(`satellites preserve economic sync and 
   assert.deepEqual(calls.slice(linked ? 2 : 1), [['stop-economic'], ...(linked ? [['stop-bridge']] : [])])
 })
 
-test('fiscal pending tickets stay visible after economic sync and clear only after final delivery', async () => {
+test('fiscal pending tickets clear on durable bridge storage while unsent records and action remain visible', async () => {
   const entries = [
     { invoice: { ticketId: 'offline-sale', transmissionMode: 'bridge' }, delivery: { state: 'LOCAL_PENDING', incidence: true } },
     { invoice: { ticketId: 'stored-sale', transmissionMode: 'bridge' }, delivery: { state: 'VPS_STORED' } },
     { invoice: { ticketId: 'local-sale', transmissionMode: 'local-only' }, delivery: { state: 'LOCAL_PENDING', incidence: true } },
     { invoice: { ticketId: 'accepted-sale', transmissionMode: 'bridge' }, delivery: { state: 'AEAT_ACCEPTED', incidence: true } },
+    { invoice: { ticketId: 'action-sale', transmissionMode: 'bridge' }, delivery: { state: 'REQUIRES_ACTION' } },
   ]
   entries.forEach((entry, index) => {
     Object.assign(entry.invoice, { issuerNif: '89890001K', series: 'S', number: index + 1 })
@@ -180,12 +181,13 @@ test('fiscal pending tickets stay visible after economic sync and clear only aft
   }, { window, document: new EventTarget() })
   const props = { context: context('checkout'), cashSession }
   runner.render(props); await settle()
-  assert.deepEqual(Array.from(runner.render(props)), ['accepted-sale', 'offline-sale', 'stored-sale'], 'a pending refund marks its original ticket')
+  assert.deepEqual(Array.from(runner.render(props)), ['accepted-sale', 'action-sale', 'offline-sale'], 'a pending refund marks its original ticket')
   // Switching tenants never shows the previous scope while the new read is pending.
   assert.deepEqual(Array.from(runner.render({ ...props, context: { ...props.context, tenantId: 'other' } })), [])
   runner.render(props); await settle()
-  entries[0].delivery.state = 'AEAT_ACCEPTED'; entries[1].delivery.state = 'AEAT_ACCEPTED'
+  entries[0].delivery.state = 'VPS_STORED'
   entries[4].delivery.state = 'AEAT_ACCEPTED'
+  entries[5].delivery.state = 'VPS_STORED'
   window.dispatchEvent(new Event('fiscal-delivery-changed')); await settle()
   assert.deepEqual(Array.from(runner.render(props)), [])
   runner.unmount()
