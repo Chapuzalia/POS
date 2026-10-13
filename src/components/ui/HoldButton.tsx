@@ -157,7 +157,7 @@ export function HoldButton({ children, disabled = false, onHold }: HoldButtonPro
       <span aria-hidden="true" className={`pointer-events-none absolute inset-0 origin-left bg-white/25 ${phase === 'holding' ? '' : 'transition-transform duration-150'}`} style={{ transform: 'scaleX(var(--hold-progress, 0))' }} />
       <span className="pointer-events-none relative grid justify-items-center gap-0.5">
         <span className="inline-flex items-center gap-2">{children}</span>
-        <span className="text-[10px] font-medium leading-none opacity-85">{phase === 'pending' ? 'Anulando…' : 'Mantén 1,5 s'}</span>
+        <span className="text-[10px] font-medium leading-none opacity-85">{phase === 'pending' ? 'Anulando…' : null}</span>
       </span>
     </Button>
   )
