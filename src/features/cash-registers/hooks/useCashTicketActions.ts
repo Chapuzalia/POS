@@ -40,6 +40,7 @@ type Options = {
 export function useCashTicketActions(options: Options) {
   const paymentChangeLockRef = useRef(false)
   const refundLockRef = useRef(false)
+  const voidLockRef = useRef(false)
   const historySyncRef = useRef<Promise<void> | null>(null)
   const [historyRefreshVersion, setHistoryRefreshVersion] = useState(0)
   const historyContext = options.context
@@ -270,7 +271,7 @@ export function useCashTicketActions(options: Options) {
 
   const voidTicket = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
-    if (!context || !options.cashSession || ticket.status !== 'active') return
+    if (!context || !options.cashSession || ticket.status !== 'active' || voidLockRef.current) return
     const pendingSale = getOfflineQueue().find((event) =>
       event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
     if (pendingSale) {
@@ -278,9 +279,8 @@ export function useCashTicketActions(options: Options) {
       return
     }
 
-    const reason = window.prompt('Motivo fiscal de la anulación:')?.trim()
-    if (!reason || !window.confirm('¿Anular esta venta? Se conservará el registro fiscal original y se añadirá una anulación encadenada.')) return
-
+    const reason = 'Anulación solicitada desde el histórico de tickets'
+    voidLockRef.current = true
     options.setBusy(true)
     options.setError(null)
     try {
@@ -301,6 +301,7 @@ export function useCashTicketActions(options: Options) {
       options.setError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' }))
     } finally {
       options.setBusy(false)
+      voidLockRef.current = false
     }
   }, [options])
 

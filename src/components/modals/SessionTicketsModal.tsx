@@ -4,6 +4,7 @@ import { formatMoney, formatTicketNumber } from '../../lib/format'
 import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from '../../types'
 import { AppModal, Button, Input } from '../ui'
 import { NumericKeypadModal } from '../ui/NumericKeypadModal'
+import { HoldButton } from '../ui/HoldButton'
 import { usePrintAgent } from '../../features/local-printing'
 import {
   getVisibleTicketPages,
@@ -248,15 +249,13 @@ export function SessionTicketsModal({
                           <CreditCard className="h-4 w-4" /> Modificar
                         </Button>
                       )}
-                      <Button
-disabled={isBusy || ticket.status !== 'active' || Boolean(ticket.linkedDocumentRole)}
-                         onClick={() => void voidTicket(ticket)}
-                        type="button"
-                        variant="danger"
+                      <HoldButton
+                        disabled={isBusy || ticket.status !== 'active' || Boolean(ticket.linkedDocumentRole)}
+                        onHold={() => voidTicket(ticket)}
                       >
                         <Trash2 className="h-4 w-4" />
-                        Eliminar
-                      </Button>
+                        Anular
+                      </HoldButton>
                     </div>
                   </div>
 

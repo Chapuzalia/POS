@@ -14,6 +14,7 @@ function harness() {
     '../../lib/format': { formatMoney: value => String(value), formatTicketNumber: value => String(value) },
     '../ui': { AppModal: 'modal', Button: 'button', Input: 'input' },
     '../ui/NumericKeypadModal': { NumericKeypadModal: 'keypad' },
+    '../ui/HoldButton': { HoldButton: 'hold-button' },
     '../../features/local-printing': { usePrintAgent: () => ({ isPrintingTicket: false }) },
     '../../features/cash-registers/services/sessionTicketHistoryModel.ts': { getVisibleTicketPages: () => [1], SESSION_TICKETS_PAGE_SIZE: 20 },
   })

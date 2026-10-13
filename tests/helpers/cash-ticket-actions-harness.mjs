@@ -16,7 +16,7 @@ export function createCashTicketActionsHarness({
   loadSessionTicketPageFromSupabase = async () => ({ currentPage: 1, tickets: [], totalResults: 0 }),
 } = {}) {
   let cachedTickets = []
-  const calls = { busy: [], enqueued: [], errors: [], finished: [], forgotten: [], historyOpen: [], ledgers: [], stats: 0, sync: 0, tickets: [], remoteHistory: 0, savedHistory: [] }
+  const calls = { busy: [], dialogs: [], enqueued: [], errors: [], finished: [], forgotten: [], historyOpen: [], ledgers: [], stats: 0, sync: 0, tickets: [], remoteHistory: 0, savedHistory: [] }
   const ticket = {
     cashSessionId: 'cash', createdAt: '2026-09-12T00:00:00Z', id: 'sale-1', paymentMethod: 'card', printAttempts: 0,
     printStatus: 'not_requested', status: 'active', totalCents: 600,
@@ -56,7 +56,7 @@ export function createCashTicketActionsHarness({
       getCashlogyPaymentAmounts: (transaction, totalCents) => ({ changeCents: transaction?.changeCents ?? 0, receivedCents: transaction?.receivedCents ?? totalCents }),
       settleCashlogyPaymentIfConfigured,
     },
-  }, { window: { confirm: () => true, prompt: () => 'Anulación solicitada' } })
+  }, { window: { confirm: () => { calls.dialogs.push('confirm'); return true }, prompt: () => { calls.dialogs.push('prompt'); return 'Anulación solicitada' } } })
   const options = {
     cashSession: { id: 'cash', cashRegisterId: 'register' },
     context: { role: 'owner', tenantId: 'tenant', venueId: 'venue', deviceId: 'device' },
