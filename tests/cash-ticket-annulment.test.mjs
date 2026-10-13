@@ -1,6 +1,54 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { createCashTicketActionsHarness } from './helpers/cash-ticket-actions-harness.mjs'
+import { IDBFactory } from 'fake-indexeddb'
+import { openLedger, persistLocalFiscalAnnulment, request, transactionDone } from '../src/features/fiscal/local/localLedger.ts'
+import { createLocalFallbackLease } from '../src/features/fiscal/local/clock.ts'
+import { UserFacingError } from '../src/utils/UserFacingError.ts'
+import { getReadableError } from '../src/utils/errors.ts'
+
+test('an older fiscal ticket exposes the reason for rejection without changing the chain', async (t) => {
+  const oldIndexedDB = globalThis.indexedDB
+  const oldLocks = Object.getOwnPropertyDescriptor(navigator, 'locks')
+  globalThis.indexedDB = new IDBFactory()
+  Object.defineProperty(navigator, 'locks', { configurable: true, value: { request: async (_, __, action) => action() } })
+  t.after(() => {
+    globalThis.indexedDB = oldIndexedDB
+    if (oldLocks) Object.defineProperty(navigator, 'locks', oldLocks)
+    else delete navigator.locks
+  })
+  const installation = { tenantId: 'tenant', fiscalSubjectId: 'subject', installationId: 'installation', deviceId: 'device' }
+  const scope = 'tenant:subject:installation'
+  const chain = { scope, position: 2, previous: { hash: 'latest-hash' } }
+  const db = await openLedger()
+  t.after(() => db.close())
+  const seed = db.transaction('cursors', 'readwrite')
+  const seeded = transactionDone(seed)
+  seed.objectStore('cursors').put(chain)
+  await seeded
+
+  await assert.rejects(persistLocalFiscalAnnulment({
+    installation,
+    lease: createLocalFallbackLease(installation.installationId, installation.deviceId),
+    original: { scope, record: { ...installation, hash: 'older-hash' } },
+    reason: 'Anulación solicitada desde el histórico de tickets',
+  }), error => {
+    assert.ok(error instanceof UserFacingError)
+    assert.equal(getReadableError(error), 'Solo se puede anular el último ticket emitido.')
+    return true
+  })
+  const tx = db.transaction(['cursors', 'entries', 'delivery'], 'readonly')
+  const checked = transactionDone(tx)
+  const [storedChain, entries, deliveries] = await Promise.all([
+    request(tx.objectStore('cursors').get(scope)),
+    request(tx.objectStore('entries').count()),
+    request(tx.objectStore('delivery').count()),
+  ])
+  await checked
+  assert.deepEqual(storedChain, chain)
+  assert.equal(entries, 0)
+  assert.equal(deliveries, 0)
+})
 
 test('confirmed hold annuls with an automatic fiscal reason and no further dialogs', async () => {
   const fiscalCalls = []

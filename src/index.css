@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "@heroui/styles";
 
+/* Operational notices must remain visible above POS and CRM dialogs. */
+[data-sileo-viewport] {
+  z-index: 110 !important;
+}
+
 /*
  * Visual architecture boundary:
  * - this file owns design tokens, theme scopes, and document-level defaults;

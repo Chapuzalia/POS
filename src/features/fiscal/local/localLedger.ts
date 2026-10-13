@@ -5,6 +5,7 @@ import { fiscalSeries } from './fiscalPolicy.ts'
 import { assertFiscalClock, type FiscalClockSample } from './clock.ts'
 import { assertFiscalLease, type FiscalLease } from './clock.ts'
 import type { SaleCreatedPayload } from '../../../types/index.ts'
+import { UserFacingError } from '../../../utils/UserFacingError.ts'
 
 export type LocalFiscalState = BridgeResult['state']
 export type LocalFiscalEntry = {
@@ -517,7 +518,7 @@ export async function persistLocalFiscalAnnulment(input: {
       await assertFiscalEmissionAllowed(tx.objectStore('bindings'), installation.installationId)
       if (!chain?.previous || chain.previous.hash !== original.record.hash) {
         tx.abort()
-        throw new Error('Solo puede anularse la última factura de la cadena fiscal en esta V1.')
+        throw new UserFacingError('Solo se puede anular el último ticket emitido.')
       }
       const id = crypto.randomUUID()
       const entry: LocalFiscalEntry = {
