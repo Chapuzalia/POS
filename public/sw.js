@@ -6,6 +6,7 @@ const STATIC_CACHE = `${CACHE_PREFIX}-static-${CACHE_VERSION}`
 const APP_SHELL = [
   '/',
   '/index.html',
+  '/crm/index.html',
   '/manifest.webmanifest',
   '/crm.webmanifest',
   '/favicon.svg',
@@ -46,15 +47,24 @@ self.addEventListener('activate', (event) => {
 })
 
 async function networkFirstNavigation(request) {
+  const url = new URL(request.url)
+  // Canonicalize even when a controlled PWA is offline and cannot reach Vercel.
+  if (url.pathname === '/crm') {
+    return Response.redirect(`${url.origin}/crm/${url.search}`, 308)
+  }
   const cache = await caches.open(STATIC_CACHE)
+  const shellKey = url.pathname.startsWith('/crm/')
+    ? '/crm/index.html'
+    : '/index.html'
 
   try {
     const response = await fetch(request)
     if (!response.ok) throw new Error('App shell unavailable')
-    await cache.put('/index.html', response.clone())
+    await cache.put(shellKey, response.clone())
     return response
   } catch {
-    return (await cache.match('/index.html')) || (await cache.match('/')) || Response.error()
+    // Never fall back to the other app's HTML: its manifest defines another PWA.
+    return (await cache.match(shellKey)) || Response.error()
   }
 }
 
