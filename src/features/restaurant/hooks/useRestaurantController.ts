@@ -618,15 +618,22 @@ export function useRestaurantController(options: Options) {
       const singleTicket = equalSplit.singleTicket === true
       const finalPart = singleTicket && equalSplit.remainingParts === 1
       const totalCents = finalPart ? (equalSplit.tenders ?? []).reduce((sum, tender) => sum + tender.amountCents, 0) + amountCents : amountCents
-      const subtotalCents = finalPart ? equalSplit.totalCents : getRestaurantPrintSubtotal(paymentLines)
+      const subtotalCents = singleTicket
+        ? finalPart ? equalSplit.totalCents : equalSplit.nextPartCents
+        : getRestaurantPrintSubtotal(paymentLines)
       const totalDiscountCents = subtotalCents - totalCents
       const documentDiscount: AppliedDiscount | null = finalPart
         ? totalDiscountCents > 0 ? { discountId: null, name: 'Descuentos por comensal', type: 'manual', calculationType: 'fixed',
           value: totalDiscountCents, fixedApplication: 'ticket', roundingIncrementCents: null, color: null } : null
         : effectiveDiscount
+      // Intermediate shares reserve money only. Recalculating discounts against
+      // fractional product quantities can reject the second share; the final bill
+      // snapshots the original lines and the accumulated discount once.
+      const documentLines = singleTicket ? finalPart ? current.lines : [] : paymentLines
       const paymentDraft = buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
-        discount: documentDiscount, lines: finalPart ? current.lines : paymentLines, paymentId: createId(), paymentMethod: method,
+        discount: singleTicket && !finalPart ? null : documentDiscount, lines: documentLines, paymentId: createId(), paymentMethod: method,
         receivedCents, changeCents: null, saleId: createId(), subtotalCents, ticketId: createId(), totalCents })
+      if (singleTicket && !finalPart) paymentDraft.ticket.discount = documentDiscount
       // The final document covers the full order; hardware collects only this person's share.
       if (singleTicket && paymentDraft.payment) paymentDraft.payment = { ...paymentDraft.payment, amountCents,
         changeCents: method === 'cash' ? Math.max(0, (receivedCents ?? amountCents) - amountCents) : 0 }

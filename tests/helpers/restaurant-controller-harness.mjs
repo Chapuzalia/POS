@@ -3,6 +3,8 @@ import { readFile } from 'node:fs/promises'
 import { compileComponent, createCompiledHookRunner } from './component-harness.mjs'
 import { getOrderPendingUnits } from '../../src/features/tables/service-status.ts'
 import { withConfirmedRestaurantPayments } from '../../src/features/restaurant/services/paymentPayload.ts'
+import * as restaurantPrintPayload from '../../src/features/restaurant/services/restaurantPrintPayload.ts'
+import { calculateDiscountForLines } from '../../src/lib/discounts.ts'
 
 const source = await readFile(new URL('../../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const paymentSource = await readFile(new URL('../../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
@@ -24,6 +26,7 @@ export function createRestaurantControllerHarness({
   fiscalMode = 'disabled',
   fiscalIssue = null,
   pendingUnits = 0,
+  realPayloads = false,
   tableService: tableServiceOverrides = {},
 } = {}) {
   const mapRefresh = deferred()
@@ -90,7 +93,7 @@ export function createRestaurantControllerHarness({
     ...tableServiceOverrides,
   }
   const modules = {
-    '../../../lib/discounts': { calculateDiscountForLines: () => ({ totalCents: 600 }) },
+    '../../../lib/discounts': { calculateDiscountForLines: realPayloads ? calculateDiscountForLines : () => ({ totalCents: 600 }) },
     '../../../lib/format': { createId: () => 'id', getLineSignature: () => 'signature', isValidQuantity: (value) => Number.isFinite(value) && value > 0, roundQuantity: (value) => value },
     '../../../lib/observability.ts': { reportOperationError() {} },
     '../../../utils/UserFacingError.ts': { UserFacingError: Error },
@@ -115,7 +118,7 @@ export function createRestaurantControllerHarness({
     '../../tables/service': tableService,
     '../../tables/service-status': { canDecreaseLineQuantity: () => true, getOrderPendingUnits },
     '../draft-policy': { isRestaurantRevisionConflict: () => false, requiresConfirmedRestaurantLineRemoval: () => false, shouldSaveBeforeLeavingOrder: () => false },
-    '../services/restaurantPrintPayload': {
+    '../services/restaurantPrintPayload': realPayloads ? restaurantPrintPayload : {
       buildRestaurantPrintPayload: (input) => ({ ...input,
         ticket: { id: input.ticketId, totalCents: input.totalCents, invoice: input.invoice },
         sale: { id: input.saleId, totalCents: input.totalCents, paymentMethod: input.paymentMethod },

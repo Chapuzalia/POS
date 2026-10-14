@@ -8,6 +8,7 @@ import { withConfirmedRestaurantPayments } from '../src/features/restaurant/serv
 import { summarizeSales } from '../src/features/cash-registers/services/cashSummary.ts'
 import * as durable from '../src/lib/durableSales.ts'
 import { compileComponent } from './helpers/component-harness.mjs'
+import { createRestaurantControllerHarness } from './helpers/restaurant-controller-harness.mjs'
 
 const migration = readFileSync(new URL('../supabase/migrations/20261014115222_equal_split_single_ticket.sql', import.meta.url), 'utf8')
 const base = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
@@ -69,6 +70,41 @@ async function fixture() {
 test('migration is additive and preserves the legacy split APIs', () => {
   assert.deepEqual(analyzeMigration(migration), [])
   assert.doesNotMatch(migration, /create or replace function public\.(?:pay_restaurant_order_equal_part|pay_restaurant_local_fiscal|pay_restaurant_idempotent)\(/i)
+})
+
+test('the controller pays three consecutive shares with an inherited per-unit discount without fractional product quantities', async () => {
+  const discount = { discountId: null, name: 'Descuento por unidad', type: 'fixed', calculationType: 'fixed', value: 30, fixedApplication: 'unit', roundingIncrementCents: null, color: null }
+  let split = { id: 'split', orderId: 'order', orderGroupId: 'group', singleTicket: true, totalCents: 1200, partCount: 3, paidParts: 0, paidCents: 0, remainingParts: 3,
+    remainingCents: 1200, nextPartCents: 400, nextDefaultDiscount: discount, nextDefaultDiscountAmountCents: 30, nextDefaultTotalCents: 370, tenders: [], status: 'open', revision: 1 }
+  const line = (id, price) => ({ id, tenantId: 'tenant', productId: id, variantId: id, productName: id, variantName: '', quantity: 1, servedQuantity: 1, unitPriceCents: price,
+    modifiers: [], components: [], catalogSnapshot: {}, mixer: null, note: null, createdAt: id })
+  const harness = createRestaurantControllerHarness({ realPayloads: true,
+    currentOrder: { order: { id: 'order', revision: 1, status: 'open' }, lines: [line('a',400),line('b',800)], tables: [{ areaId: 'area', id: 'table', isVirtual: false }] },
+    tableService: {
+      configureRestaurantEqualSplit: async () => split,
+      payRestaurantEqualPart: async () => {
+        const part = split.paidParts + 1
+        split = { ...split, paidParts: part, remainingParts: 3-part, paidCents: part*400, remainingCents: (3-part)*400,
+          tenders: [...split.tenders,{ id: `payment-${part}`, method: 'card', amountCents: 370, partNumber: part, discountAmountCents: 30 }] }
+        return { requiresConfirmation: false, split, completed: part === 3, singleTicket: true, paidAmountCents: 370,
+          ticketId: part === 3 ? 'ticket' : null, saleId: part === 3 ? 'sale' : null, paymentId: `payment-${part}`, nextOrderId: null,
+          payments: part === 3 ? split.tenders.map(tender => ({ ...tender, tenantId: 'tenant', saleId: 'sale', receivedCents: null, changeCents: 0 })) : [] }
+      },
+    } })
+  harness.mapRefresh.resolve({ areas: [{ id: 'area' }], tables: [] })
+  await harness.render().configureEqualSplit(3)
+  await harness.render().payEqualSplitPart('card',null,false,null,true)
+  assert.equal(split.paidParts, 1)
+  await harness.render().payEqualSplitPart('card',null,false,null,true)
+  assert.equal(split.paidParts, 2)
+  assert.equal(harness.calls.prints, 0)
+  await harness.render().payEqualSplitPart('card',null,false,null,true)
+  assert.equal(split.paidParts, 3)
+  assert.equal(harness.calls.prints, 1)
+  assert.equal(harness.calls.printed[0].sale.totalCents, 1110)
+  assert.equal(harness.calls.printed[0].ticket.discountAmountCents, 90)
+  assert.deepEqual(harness.calls.printed[0].lines.map(line => [line.quantity,line.unitPriceCents]), [[1,400],[1,800]])
+  assert.deepEqual(harness.calls.printed[0].payments.map(payment => payment.amountCents), [370,370,370])
 })
 
 test('three equal tenders create one full ticket only at completion, with exact cents and replay', async t => {
@@ -229,6 +265,65 @@ test('intermediate tender commits its journal without adding a durable sale or o
   assert.equal((await durable.loadPaymentOperation(operation.key)).state, 'committed')
   assert.equal((await durable.loadDurableSessionTickets(context, session)).length, 0)
   assert.equal((await durable.loadDurableEvents()).length, 0)
+})
+
+test('three payments traverse real IndexedDB, RPC mapping and PostgreSQL, including a lost second response', async t => {
+  delete globalThis.window
+  const { db, configured } = await fixture()
+  t.after(() => db.close())
+  globalThis.indexedDB = new IDBFactory()
+  globalThis.window = { location: { pathname: '/pos' } }
+  Object.defineProperty(globalThis,'navigator',{ configurable: true, value: { locks: { request: (_key,_options,work) => work() } } })
+  const context = { tenantId: tenant, venueId: venue, deviceId: device, userId: user }
+  const source = readFileSync(new URL('../src/features/tables/service.ts',import.meta.url),'utf8')
+  const selected = ['function requireSupabase','function mapEqualSplit','export async function payRestaurantIdempotent']
+    .map(name => source.slice(source.indexOf(name)).split('\n}')[0]+'\n}').join('\n')
+  let loseSecondReply = true
+  const rpcIds = []
+  const tables = compileComponent(selected,{}, { supabase: { rpc: async (name,params) => {
+    assert.equal(name,'pay_restaurant_equal_split_single_idempotent')
+    rpcIds.push(params.p_operation_id)
+    const answer = await db.query('select public.pay_restaurant_equal_split_single_idempotent($1,$2,$3,$4,$5,$6) as result',
+      [params.p_operation_id,params.p_tenant_id,params.p_venue_id,params.p_device_id,params.p_action,params.p_params])
+    if (params.p_params.expectedPaidParts === 1 && loseSecondReply) { loseSecondReply = false; throw new Error('Response lost after second payment') }
+    return { data: answer.rows[0].result, error: null }
+  } } })
+  const charges = []
+  const service = compileComponent(readFileSync(new URL('../src/features/restaurant/services/payment.ts',import.meta.url),'utf8'),{
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
+    '../../../lib/durableSales.ts': durable,
+    '../../fiscal/local/tenantMode.ts': { resolveLocalFiscalMode: async () => 'disabled' },
+    '../../fiscal/local/posInvoice.ts': {}, '../../fiscal/local/restaurantInvoice.ts': {},
+    '../../local-printing/cashlogy/useCashlogyStore.ts': {
+      isCashlogyPaymentConfigured: () => true,
+      settleCashlogyPaymentIfConfigured: async (amount,saleId,requestId) => { charges.push(amount); return { requestedAmountCents: amount,saleId,requestId,id:`physical-${charges.length}`,receivedCents:400,changeCents:400-amount } },
+      getCashlogyPaymentAmounts: transaction => transaction,
+    },
+    '../../tables/service.ts': tables,
+  },{ JSON })
+  const input = part => ({ context,session:{ id:session },target:configured.id,action:'equal_part',sequence:part,
+    draft:{ ticket:{ id:uuid(400+part),totalCents:part === 2 ? 1002 : 334 },sale:{ id:uuid(410+part),tenantId:tenant,totalCents:part === 2 ? 1002 : 334,paymentMethod:part === 1 ? 'card' : 'cash' },
+      payment:{ id:uuid(420+part),amountCents:334,receivedCents:part === 1 ? null : 400,changeCents:part === 1 ? 0 : 66 },
+      lines:part === 2 ? [{ id:'line',quantity:2,unitPriceCents:501,lineTotalCents:1002 }] : [] },
+    params:{ splitId:configured.id,singleTicket:true,finalPart:part === 2,amountCents:334,expectedPaidParts:part,method:part === 1 ? 'card' : 'cash',receivedCents:part === 1 ? null : 400,allowPending:false,discount:null,useDefaultDiscount:true } })
+  const first = await service.payRestaurantSale(input(0))
+  assert.equal(first.result.split.paidParts,1)
+  assert.equal(first.payload,null)
+  await assert.rejects(service.payRestaurantSale(input(1)),/Response lost/)
+  assert.equal((await db.query('select paid_parts from public.restaurant_order_equal_splits')).rows[0].paid_parts,2)
+  const second = await service.payRestaurantSale(input(1))
+  assert.equal(second.result.split.paidParts,2)
+  assert.equal(second.payload,null)
+  assert.equal((await durable.loadDurableSessionTickets(context,session)).length,0)
+  const last = await service.payRestaurantSale(input(2))
+  assert.equal(last.result.completed,true)
+  assert.equal(last.payload.sale.totalCents,1002)
+  assert.deepEqual(last.payload.payments.map(payment => payment.method),['cash','card','cash'])
+  assert.deepEqual(charges,[334,334])
+  assert.equal(new Set(rpcIds).size,3)
+  assert.equal(rpcIds[1],rpcIds[2])
+  assert.equal((await durable.loadDurableSessionTickets(context,session)).length,1)
+  assert.equal((await db.query('select count(*)::int as n from public.sales')).rows[0].n,1)
 })
 
 test('production issues one invoice for the full total while Cashlogy charges only the final share', async () => {
