@@ -506,9 +506,12 @@ export async function loadSalesLedgerFromSupabase(context: TenantContext, cashSe
 
   const { data, error } = await supabase
     .from('sales')
-    .select('id, cash_session_id, payment_method, total_cents, created_at, sale_payments(method, amount_cents)')
+    // Fiscal annulments retain sales/payments as immutable historical snapshots.
+    .select('id, cash_session_id, payment_method, total_cents, created_at, sale_payments(method, amount_cents), tickets!inner(status, venue_id)')
     .eq('tenant_id', context.tenantId)
     .eq('cash_session_id', cashSessionId)
+    .eq('tickets.status', 'paid')
+    .eq('tickets.venue_id', context.venueId)
     .order('created_at', { ascending: true })
 
   if (error) {
