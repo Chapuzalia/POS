@@ -16,8 +16,8 @@ export type MetadataEvidence = {
 export type DocumentMetadata = Record<MetadataField, MetadataEvidence>
 type Candidate = { value: string; evidence: string; labelCandidate: string }
 const fields: MetadataField[] = ['date', 'number']
-const datePattern = /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-]\d{4})\b/g
-const excludedLabel = /\b(vencimiento|entrega|pedido|pago|caducidad|cliente|cif|nif|vat|telefono|iban|total|importe|referencia|resum|resumen)\b/i
+const datePattern = /\b(?:\d{4}-\d{1,2}-\d{1,2}|\d{1,2}[/.-]\d{1,2}[/.-](?:\d{4}|\d{2}))\b/g
+const excludedLabel = /\b(vencimiento|venciment|vent|entrega|pedido|pago|caducidad|cliente|cif|nif|vat|telefono|iban|total|importe|import|referencia|tracabilitat|trazabilidad|resum|resumen)\b/i
 
 export function normalizeMetadataLabel(value: string) {
   return value.normalize('NFD').replace(/[\u0300-\u036f]/g, '').toUpperCase()
@@ -27,9 +27,12 @@ export function normalizeMetadataLabel(value: string) {
 export function normalizeMetadataValue(field: MetadataField, value: unknown): string | null {
   if (typeof value !== 'string' || !value.trim()) return null
   if (field === 'number') return value.trim().length <= 80 ? value.trim().replace(/\s*([/_.-])\s*/g, '$1') : null
-  const match = value.trim().match(/^(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}))$/)
+  const match = value.trim().match(/^(?:(\d{4})-(\d{1,2})-(\d{1,2})|(\d{1,2})[/.-](\d{1,2})[/.-](\d{4}|\d{2}))$/)
   if (!match) return null
-  const year = Number(match[1] ?? match[6]), month = Number(match[2] ?? match[5]), day = Number(match[3] ?? match[4])
+  // Supplier receiving uses contemporary documents; a printed YY denotes 20YY.
+  const rawYear = match[1] ?? match[6]
+  const year = Number(rawYear) + (rawYear.length === 2 ? 2000 : 0)
+  const month = Number(match[2] ?? match[5]), day = Number(match[3] ?? match[4])
   const date = new Date(Date.UTC(year, month - 1, day))
   return year >= 1900 && date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day
     ? `${year}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}` : null
@@ -84,8 +87,8 @@ function candidatesFor(ocr: OcrDocument, field: MetadataField, label?: string | 
           if (!candidateLabel) continue
           if (label) {
             if (normalizeMetadataLabel(candidateLabel) !== normalizeMetadataLabel(label)) continue
-          } else if (field === 'number' && !/\b(factura|albaran|documento|numero|num)\b|n[º°o.]\s/i.test(normalizeMetadataLabel(candidateLabel))
-            && !/n[º°.]|\bnro\b/i.test(candidateLabel)) continue
+          } else if (field === 'number' && !/\b(factura|albaran|documento|numero|num)\b/i.test(normalizeMetadataLabel(candidateLabel))
+            && !/^(?:n[º°.]|nro\b)/i.test(candidateLabel)) continue
           const evidence = line.trim()
           candidates.push({ value: match[0], evidence, labelCandidate: candidateLabel })
         }

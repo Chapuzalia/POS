@@ -362,6 +362,12 @@ function mapEqualSplit(value: unknown): RestaurantEqualSplit {
   return {
     id: String(row.id), orderId: String(read('orderId', 'order_id')), orderGroupId: String(read('orderGroupId', 'order_group_id')),
     totalCents, partCount, paidParts, paidCents,
+    singleTicket: Boolean(read('singleTicket', 'single_ticket')),
+    tenders: ((row.tenders ?? []) as Array<Record<string, unknown>>).map((tender) => ({
+      id: String(tender.id), partNumber: Number(tender.part_number), method: tender.method as PaymentMethod | null,
+      amountCents: Number(tender.amount_cents), discountAmountCents: Number(tender.discount_amount_cents),
+      receivedCents: tender.received_cents === null ? null : Number(tender.received_cents), changeCents: Number(tender.change_cents),
+    })),
     remainingParts: Number(read('remainingParts', 'remaining_parts') ?? partCount - paidParts),
     remainingCents: Number(read('remainingCents', 'remaining_cents') ?? totalCents - paidCents),
     nextPartCents: Number(read('nextPartCents', 'next_part_cents') ?? nextPartCents),
@@ -441,6 +447,18 @@ export async function closeRestaurantOrder(orderId: string, paymentMethod: Payme
   return data as CloseRestaurantOrderResult
 }
 
+export async function payRestaurantIdempotent(context: TenantContext, operationId: string, action: 'close' | 'equal_part' | 'selected_items', params: Record<string, unknown>) {
+  const { data, error } = await requireSupabase().rpc(params.singleTicket ? 'pay_restaurant_equal_split_single_idempotent' : 'pay_restaurant_idempotent', {
+    p_operation_id: operationId, p_tenant_id: context.tenantId, p_venue_id: context.venueId,
+    p_device_id: context.deviceId, p_action: action, p_params: params,
+  })
+  if (error) throw error
+  const result = data as Record<string, unknown>
+  return action === 'equal_part' && result.split
+    ? { ...result, split: mapEqualSplit(result.split) }
+    : result
+}
+
 export async function cancelEmptyRestaurantOrder(orderId: string, expectedRevision: number) {
   const { data, error } = await requireSupabase().rpc('cancel_empty_restaurant_order', {
     p_order_id: orderId,
@@ -467,14 +485,14 @@ export async function cleanupVirtualRoomRestaurantTable(input: {
 }
 
 export async function loadRestaurantEqualSplit(context: TenantContext, orderId: string): Promise<RestaurantEqualSplit | null> {
-  const { data, error } = await requireSupabase().from('restaurant_order_equal_splits').select('*')
+  const { data, error } = await requireSupabase().from('restaurant_order_equal_splits').select('*, tenders:restaurant_equal_split_tenders(*)')
     .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('order_id', orderId).eq('status', 'open').maybeSingle()
   if (error) throw error
   return data ? mapEqualSplit(data) : null
 }
 
 export async function configureRestaurantEqualSplit(orderId: string, partCount: number, expectedRevision: number, defaultDiscount: AppliedDiscount | null) {
-  const { data, error } = await requireSupabase().rpc('configure_restaurant_order_equal_split', { p_order_id: orderId, p_part_count: partCount, p_expected_order_revision: expectedRevision, p_default_discount: defaultDiscount })
+  const { data, error } = await requireSupabase().rpc('configure_restaurant_equal_split_single', { p_order_id: orderId, p_part_count: partCount, p_expected_order_revision: expectedRevision, p_default_discount: defaultDiscount })
   if (error) throw error
   return mapEqualSplit(data)
 }
@@ -527,7 +545,7 @@ export async function payRestaurantLocalFiscal(
   action: 'close' | 'equal_part' | 'selected_items',
   params: Record<string, unknown>, record: Record<string, unknown>, invoice: Record<string, unknown>,
 ): Promise<Record<string, unknown>> {
-  const { data, error } = await requireSupabase().rpc('pay_restaurant_local_fiscal', {
+  const { data, error } = await requireSupabase().rpc(params.singleTicket ? 'pay_restaurant_equal_split_single_fiscal' : 'pay_restaurant_local_fiscal', {
     p_action: action, p_params: params, p_record: record, p_invoice: invoice,
   })
   if (error) throw error

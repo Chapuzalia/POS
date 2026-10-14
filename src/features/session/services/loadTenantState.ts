@@ -1,4 +1,5 @@
 import { getSaleLedger } from '../../../lib/offlineStore'
+import { loadLocalSessionSales } from '../../cash-registers/services/localSessionTickets.ts'
 import {
   loadOpenCashSession,
   loadPosCatalogFromSupabase,
@@ -40,7 +41,7 @@ export async function loadTenantState(context: TenantContext) {
     loadOpenCashSession(context),
     loadProductSalesStatsFromSupabase(context),
   ])
-  const localLedger = cashSession ? getSaleLedger(context) : []
+  const localLedger = cashSession ? mergeLedgers(getSaleLedger(context), await loadLocalSessionSales(context, cashSession)) : []
   const remoteLedger = cashSession ? await loadSalesLedgerFromSupabase(context, cashSession.id) : []
   return {
     catalog: posCatalog.catalog,

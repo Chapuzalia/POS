@@ -14,10 +14,13 @@ export function summarizeSales(
 ): CashSummary {
   const summary = records.reduce(
     (totals, record) => {
-      if (record.paymentMethod === 'cash') totals.cashCents += record.totalCents
-      else if (record.paymentMethod === 'card') totals.cardCents += record.totalCents
-      else if (record.paymentMethod === 'invitation') totals.invitationCents += record.totalCents
-      else totals.otherCents += record.totalCents
+      const payments = record.payments?.length ? record.payments : [{ method: record.paymentMethod, amountCents: record.totalCents }]
+      for (const payment of payments) {
+        if (payment.method === 'cash') totals.cashCents += payment.amountCents
+        else if (payment.method === 'card') totals.cardCents += payment.amountCents
+        else if (payment.method === 'invitation') totals.invitationCents += payment.amountCents
+        else totals.otherCents += payment.amountCents
+      }
       totals.totalSalesCents += record.totalCents
       return totals
     },

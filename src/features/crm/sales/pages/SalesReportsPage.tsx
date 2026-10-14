@@ -459,7 +459,7 @@ function getReportDiscountLabel(ticket: Pick<CrmSalesReportTicketListItem, 'disc
 
 function getReportPaymentLabel(ticket: Pick<CrmSalesReportTicketListItem, 'totalCents' | 'paymentMethod'>) {
   if (ticket.totalCents === 0 && !ticket.paymentMethod) return 'No requerido'
-  return ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Sin cobro'
+  return ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : ticket.totalCents > 0 ? 'Varios métodos' : 'Sin cobro'
 }
 
 function getDisplayedTicketNumber(ticket: Pick<CrmSalesReportTicketListItem, 'fiscal' | 'ticketNumber'>) {
@@ -619,6 +619,15 @@ export function SalesReportTicketModal({
           <TicketDetailSummary label="Método de pago">
             <strong>{getReportPaymentLabel(ticket)}</strong>
           </TicketDetailSummary>
+          {ticket.payments?.length ? <div className="!col-span-full !rounded-[10px] !border !border-[var(--crm-border)] !p-3.5">
+            <h3 className="!mb-3 !text-sm !font-semibold">Pagos de la orden</h3>
+            <ol className="!space-y-2">
+              {ticket.payments.map((payment, index) => <li className="!flex !justify-between !gap-3 !text-sm" key={payment.id}>
+                <span>{(ticket.payments?.length ?? 0) > 1 || payment.partNumber ? `Parte ${payment.partNumber ?? index + 1} · ` : ''}{paymentLabels[payment.method]}</span>
+                <strong className="!font-mono">{formatMoney(payment.amountCents)}</strong>
+              </li>)}
+            </ol>
+          </div> : null}
           <TicketDetailSummary label="Productos">
             <strong>{ticket.lineCount} líneas · {ticket.quantity} uds.</strong>
           </TicketDetailSummary>

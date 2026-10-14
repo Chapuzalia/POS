@@ -123,7 +123,7 @@ const ticketSelect = `
     )
   ),
     sales (
-      payment_method
+      payment_method, sale_payments(id, method, amount_cents, received_cents, change_cents, created_at, equal_split_part_number)
     )
 `
 
@@ -173,7 +173,7 @@ export type SalesReportTicketRow = {
   tenant_id: string
   venue_id: string
   local_created_at: string
-  sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
+  sales: Array<{ payment_method: HistoricalPaymentMethod | null; sale_payments?: Array<{ id: string; method: HistoricalPaymentMethod; amount_cents: number; received_cents: number | null; change_cents: number; created_at: string; equal_split_part_number?: number | null }> }> | null
    status: 'paid' | 'void'
      refund_requests: Array<{
        id: string
@@ -298,7 +298,7 @@ function mapFiscalRecord(ticket: SalesReportTicketRow): CrmSalesReportTicket['fi
     const series = typeof localInvoice.series === 'string' ? localInvoice.series : null
     const number = typeof localInvoice.number === 'number' ? String(localInvoice.number) : null
     const issuedAt = typeof localInvoice.issuedAt === 'string' ? localInvoice.issuedAt : null
-    const verificationUrl = typeof localInvoice.qrUrl === 'string' ? localInvoice.qrUrl : null
+    const verificationUrl = localInvoice.transmissionMode !== 'local-only' && typeof localInvoice.qrUrl === 'string' ? localInvoice.qrUrl : null
     const transmissionMode = localInvoice.transmissionMode
     if (series && number && issuedAt) {
       return {
@@ -327,7 +327,7 @@ function mapRefundDocuments(ticket: SalesReportTicketRow): CrmSalesReportTicket[
       series: request.fiscal_series ?? (typeof invoice.series === 'string' ? invoice.series : null),
       number,
       issuedAt,
-      verificationUrl: typeof invoice.qrUrl === 'string' ? invoice.qrUrl : null,
+      verificationUrl: invoice.transmissionMode !== 'local-only' && typeof invoice.qrUrl === 'string' ? invoice.qrUrl : null,
       status: request.fiscal_status,
       method: request.refund_method,
       totalCents: -Math.abs(request.total_cents),
@@ -412,6 +412,10 @@ function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicke
     discountValueType: ticket.discount_value_type,
     discountRoundingIncrementCents: ticket.discount_rounding_increment_cents,
     paymentMethod: ticket.sales?.[0]?.payment_method ?? null,
+    payments: [...(ticket.sales?.[0]?.sale_payments ?? [])].sort((left, right) => left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id)).map(payment => ({
+      id: payment.id, method: payment.method, amountCents: payment.amount_cents, receivedCents: payment.received_cents, changeCents: payment.change_cents,
+      partNumber: payment.equal_split_part_number ?? undefined,
+    })),
     quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + Number(line.allocated_quantity ?? line.quantity), 0),
     status: ticket.status,
     subtotalCents: ticket.subtotal_cents,

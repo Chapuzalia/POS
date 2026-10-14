@@ -1,4 +1,5 @@
 import { z } from 'zod'
+import { isFiscalBridgeOrigin } from './bridgeUrl.ts'
 
 export const bridgeStates = [
   'LOCAL_PENDING', 'VPS_STORED', 'AEAT_ACCEPTED',
@@ -79,7 +80,8 @@ export type BridgeAnnulmentSnapshot = {
   reason: string
 }
 
-export type BridgeSubmission = BridgeRecord & ({ invoice: BridgeInvoiceSnapshot } | { annulment: BridgeAnnulmentSnapshot })
+// Delivery metadata is separate from the immutable fiscal envelope and invoice.
+export type BridgeSubmission = BridgeRecord & { deliveryIncidence?: boolean } & ({ invoice: BridgeInvoiceSnapshot } | { annulment: BridgeAnnulmentSnapshot })
 
 export type BridgeClientConfig = {
   mode: 'disabled' | 'test' | 'production'
@@ -90,10 +92,10 @@ export type BridgeClientConfig = {
 /** Transport only. A bridge response cannot replace canonicalRecord or hash. */
 export function createBridgeClient(config: BridgeClientConfig) {
   if (config.mode === 'disabled') throw new Error('El componente fiscal local está desactivado.')
-  const base = new URL(config.baseUrl)
-  if (base.protocol !== 'https:' || base.username || base.password || base.search || base.hash || base.pathname !== '/') {
-    throw new Error('El puente fiscal requiere una URL HTTPS sin credenciales ni parámetros.')
+  if (!isFiscalBridgeOrigin(config.baseUrl)) {
+    throw new Error('El puente fiscal requiere HTTPS, o HTTP en localhost, 127.0.0.1 o [::1], sin rutas, credenciales ni parámetros.')
   }
+  const base = new URL(config.baseUrl)
 
   async function request(path: string, init?: RequestInit): Promise<unknown> {
     const token = await config.getAccessToken()

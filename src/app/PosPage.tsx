@@ -6,6 +6,8 @@ import { AppModal } from '../components/ui/AppModal'
 import type { RefObject, ReactNode } from 'react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
+import { getOfflineQueue } from '../lib/offlineStore'
+import { pendingSync } from '../features/offline/services/pendingSync'
 import { isAssistEnabled } from '../features/assist/engine'
 import { AssistBoundary } from '../features/assist/AssistBoundary'
 import {
@@ -101,6 +103,7 @@ type Props = {
   error: string | null
   errorId: number
   floatingTicketButtonRef: RefObject<HTMLButtonElement | null>
+  fiscalPendingTicketIds: string[]
   isBusy: boolean
   isLoading: boolean
   isOnline: boolean
@@ -128,6 +131,7 @@ type Props = {
 }
 
 export function PosPage(props: Props) {
+  const pending = pendingSync(getOfflineQueue(), props.fiscalPendingTicketIds)
   const displayedError = props.error
   const displayedErrorId = props.errorId
   const clearDisplayedError = props.onSetError
@@ -502,7 +506,7 @@ export function PosPage(props: Props) {
         onOpenTicketHistory={() => void cash.ticketActions.openHistory()}
         onRefreshCatalog={() => void props.onRefreshCatalog()}
         onLogout={() => void props.onLogout()}
-        pendingCount={props.offline.pendingCount}
+        pendingCount={pending.pendingCount}
         preTicketAction={restaurant.posView.type !== 'table_map' && cash.session ? <PreTicketButton
           cashSession={cash.session}
           context={props.context}
@@ -812,6 +816,8 @@ export function PosPage(props: Props) {
       {cash.historyOpen ? <SessionTicketsModal
         canReprint={Boolean(props.context.canManageCash || props.context.canCloseCashSession || ['manager', 'owner'].includes(props.context.role))}
         initialPage={initialTicketHistoryPage}
+        pendingTicketIds={pending.pendingTicketIds}
+        pendingSaleIds={pending.pendingSaleIds}
         isBusy={props.isBusy}
         loadPage={cash.ticketActions.loadHistoryPage}
         onChangePayment={cash.ticketActions.changePayment}
@@ -844,7 +850,7 @@ export function PosPage(props: Props) {
         onCatalogStartTabChange={props.onUpdateCatalogStartTab}
         onRetrySync={() => void props.offline.retry()}
         onThemeChange={props.setThemeId}
-        pendingCount={props.offline.pendingCount}
+        pendingCount={pending.pendingCount}
         themeId={props.selectedThemeId}
         themes={props.themes}
       /> : null}

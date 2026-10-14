@@ -4,7 +4,7 @@
 
 Cada release debe mantener compatibilidad N-1: durante el despliegue pueden seguir activos clientes de la versión anterior. Las migraciones ya desplegadas son inmutables; cualquier corrección requiere una migración nueva.
 
-El checker compara `baseSha` (último baseline desplegado correctamente) con `headSha`. Solo acepta migraciones añadidas, rechaza versiones/timestamps duplicados y no permite modificar, renombrar ni eliminar migraciones existentes.
+El checker compara `baseSha` (último baseline desplegado correctamente) con `headSha`. Solo acepta migraciones añadidas, rechaza versiones/timestamps duplicados y no permite modificar, renombrar ni eliminar migraciones existentes, salvo la retirada exacta de `CONCURRENTLY` de los cinco índices históricos identificados en la sección de compatibilidad del pipeline.
 
 ## Expand
 
@@ -19,12 +19,24 @@ set statement_timeout = '5min';
 Expand añade estructura compatible sin retirar ni cambiar el contrato anterior. Ejemplos habituales:
 
 - tablas o columnas nullable nuevas;
-- índices con `CREATE INDEX CONCURRENTLY`;
+- índices con `CREATE INDEX`, compatible con la ejecución transaccional de la CLI;
 - FK y `CHECK` iniciales con `NOT VALID`;
 - `UNIQUE`/`PRIMARY KEY` sobre tablas existentes mediante índice único concurrente y `USING INDEX`;
 - RPC nuevas manteniendo las anteriores.
 
 Una sustitución compatible de función/procedimiento puede declarar `migration-safety-reviewed: CREATE OR REPLACE ROUTINE` con una razón específica. Debe conservar firma, resultado, permisos y comportamiento N-1. El waiver `REVOKE` solo permite retirar acceso de función a `PUBLIC`/`anon` cuando se concede `EXECUTE` a `authenticated`. Ningún waiver permite operaciones contract.
+
+`migration-safety-reviewed: COMPATIBLE CHECK REPLACEMENT` reconoce únicamente los
+dos reemplazos revisados de `fiscal_pos_bridge_settings_bridge_url_check` y
+`refund_requests_fiscal_series_check`. El checker compara todos los tokens de la
+migración, incluidos los literales: exige los timeouts y un único `ALTER TABLE`
+que sustituye atómicamente el mismo CHECK por su predicado aprobado con `NOT VALID`.
+Cada predicado conserva íntegra la condición desplegada como rama de un `OR` y
+amplía solo HTTP loopback o series R con secuencia de instalación positiva. Otros
+DROP, predicados, tablas, constraints, instrucciones o cambios de configuración
+siguen bloqueados. No es un waiver genérico ni requiere omitir el checker.
+Las dos migraciones se corrigen antes de su primer despliegue en main; Staging
+debe volver a su baseline antes de reaplicarlas. El historial de main es inmutable.
 
 ## Pending contract
 
@@ -95,7 +107,7 @@ No se fuerzan siempre tres releases. El contract puede ir en el segundo release 
 
 - No mezclar operaciones expand y contract.
 - No eliminar datos en expand.
-- Usar `CREATE INDEX CONCURRENTLY` sobre tablas existentes.
+- Usar `CREATE INDEX` en las migraciones ejecutadas por la CLI; planificar su creación sobre tablas existentes con los timeouts de bloqueo y ejecución.
 - Añadir FK/`CHECK` como `NOT VALID` y validar posteriormente.
 - Preparar restricciones `UNIQUE`/`PRIMARY KEY` con índice concurrente y `USING INDEX`.
 - Mantener `lock_timeout = '5s'` y `statement_timeout = '5min'` en expand y contract.
@@ -105,7 +117,7 @@ El pipeline calcula el rango desde el último deploy completo correcto. Si un de
 
 Las migraciones nuevas deben guardarse en UTF-8 sin BOM. `scripts/prepare-production-migrations.mjs` elimina el BOM inicial únicamente de la copia SQL que se empaqueta para producción, conservando las fuentes históricas y el resto de bytes. PostgreSQL rechaza ese marcador con `SQLSTATE 42601` antes de ejecutar la primera sentencia; una migración posterior no puede corregir ese fallo de lectura.
 
-La CLI de producción ejecuta migraciones en pipeline, donde PostgreSQL rechaza `CREATE INDEX CONCURRENTLY` con `SQLSTATE 25001`. La preparación adapta únicamente los tres índices de `20260912222539_paginate_pos_session_tickets.sql` y los dos de `20261003183458_optimize_pos_sale_latency.sql` a índices normales en la copia de despliegue. Comprueba el número esperado de índices y conserva los timeouts y las fuentes. Esta excepción de compatibilidad puede bloquear escrituras mientras se crean los índices; `lock_timeout = '5s'` limita la espera para adquirir el bloqueo y `statement_timeout = '5min'` limita la ejecución.
+La CLI de producción ejecuta migraciones en pipeline, donde PostgreSQL rechaza `CREATE INDEX CONCURRENTLY` con `SQLSTATE 25001`. Por autorización explícita, se retira únicamente esa palabra de los tres índices de `20260912222539_paginate_pos_session_tickets.sql` y los dos de `20261003183458_optimize_pos_sale_latency.sql`. El checker compara el texto completo con el baseline y permite exclusivamente esas cinco retiradas en esos dos archivos; cualquier otra modificación histórica sigue bloqueada. La preparación acepta las fuentes corregidas y conserva la adaptación de copias antiguas, comprobando el número esperado de índices. Los índices normales pueden bloquear escrituras mientras se crean; `lock_timeout = '5s'` limita la espera para adquirir el bloqueo y `statement_timeout = '5min'` limita la ejecución.
 
 ## Excepción revisada para una única promoción
 

@@ -4,6 +4,7 @@ import { formatMoney, formatTicketNumber } from '../../lib/format'
 import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from '../../types'
 import { AppModal, Button, Input } from '../ui'
 import { NumericKeypadModal } from '../ui/NumericKeypadModal'
+import { HoldButton } from '../ui/HoldButton'
 import { usePrintAgent } from '../../features/local-printing'
 import {
   getVisibleTicketPages,
@@ -24,6 +25,8 @@ type SessionTicketsModalProps = {
   canReprint: boolean
   initialPage: SessionTicketHistoryPage | null
   isBusy: boolean
+  pendingTicketIds?: ReadonlySet<string>
+  pendingSaleIds?: ReadonlySet<string>
   loadPage: (page: number, query: string) => Promise<SessionTicketHistoryPage>
   onChangePayment: (ticket: SessionTicketRecord, paymentMethod: PaymentMethod) => void | Promise<void>
   onRefund?: (ticket: SessionTicketRecord, lines: Array<{ lineId: string; quantity: number }>, paymentMethod: PaymentMethod) => void | Promise<void>
@@ -61,9 +64,15 @@ function TicketModificationModal({ children, dismissDisabled = false, maxWidth =
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 [-webkit-overflow-scrolling:touch]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4">
-            <span className="text-sm font-semibold text-[var(--muted)]">{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Pago no requerido'}</span>
+            <span className="text-sm font-semibold text-[var(--muted)]">{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : ticket.payload.payments?.length ? 'Varios métodos' : 'Pago no requerido'}</span>
             <span className="font-mono text-2xl font-black tabular-nums">{formatMoney(ticket.totalCents)}</span>
           </div>
+          {ticket.payload.payments?.length ? <ol className="mb-4 space-y-2 text-sm">
+            {ticket.payload.payments.map((payment, index) => <li className="flex justify-between gap-3" key={payment.id}>
+              <span>Parte {payment.partNumber ?? index + 1} · {paymentLabels[payment.method]}</span>
+              <strong>{formatMoney(payment.amountCents)}</strong>
+            </li>)}
+          </ol> : null}
           {children}
         </div>
       </section>
@@ -75,6 +84,8 @@ export function SessionTicketsModal({
   canReprint,
   initialPage,
   isBusy,
+  pendingTicketIds,
+  pendingSaleIds,
   loadPage,
   onChangePayment,
   onRefund,
@@ -163,6 +174,7 @@ export function SessionTicketsModal({
             <p className="text-sm text-[var(--muted)]">
               {isLoading && !pageData ? 'Cargando…' : `${totalResults} ${requestedQuery ? 'coincidencias' : 'tickets'}`}
             </p>
+            {pageData?.source === 'local' ? <p className="text-xs text-[var(--muted)]">Tickets guardados en este TPV</p> : null}
           </div>
           <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" disabled={isBusy} onClick={onClose} size="sm" type="button" variant="tertiary">
             <X className="h-4 w-4" />
@@ -220,6 +232,9 @@ export function SessionTicketsModal({
                       <p className="mt-1 text-xs font-bold text-[var(--muted)]">
                         Impresión: {ticket.printStatus || 'no solicitada'}{ticket.printErrorCode ? ` · ${ticket.printErrorCode}` : ''}
                       </p>
+                      {pendingTicketIds?.has(ticket.payload.ticket.id) || pendingSaleIds?.has(ticket.payload.sale.id) ? (
+                        <p className="mt-1 text-xs font-semibold text-[var(--warning)]">Pendiente de sincronizar</p>
+                      ) : null}
                     </div>
 
                     <div className="flex flex-wrap items-center justify-end gap-2">
@@ -240,15 +255,13 @@ export function SessionTicketsModal({
                           <CreditCard className="h-4 w-4" /> Modificar
                         </Button>
                       )}
-                      <Button
-disabled={isBusy || ticket.status !== 'active' || Boolean(ticket.linkedDocumentRole)}
-                         onClick={() => void voidTicket(ticket)}
-                        type="button"
-                        variant="danger"
+                      <HoldButton
+                        disabled={isBusy || ticket.status !== 'active' || Boolean(ticket.linkedDocumentRole)}
+                        onHold={() => voidTicket(ticket)}
                       >
                         <Trash2 className="h-4 w-4" />
-                        Eliminar
-                      </Button>
+                        Anular
+                      </HoldButton>
                     </div>
                   </div>
 
@@ -328,9 +341,10 @@ disabled={isBusy || ticket.status !== 'active' || Boolean(ticket.linkedDocumentR
         <TicketModificationModal title="Modificar ticket" ticket={actionTicket} onClose={() => setActionTicket(null)}>
           <div className="grid gap-3">
             <p className="text-sm text-[var(--muted)]">Elige una acción para este ticket.</p>
-            <Button fullWidth className="min-h-16 justify-start !whitespace-normal rounded-[var(--radius)] border border-[var(--separator)] !bg-[var(--background)] px-4 text-left font-bold !text-[var(--foreground)]" onClick={() => { setPaymentChoiceTicket(actionTicket); setActionTicket(null) }} type="button" variant="secondary">
+            <Button disabled={Boolean(actionTicket.payload.payments?.length)} fullWidth className="min-h-16 justify-start !whitespace-normal rounded-[var(--radius)] border border-[var(--separator)] !bg-[var(--background)] px-4 text-left font-bold !text-[var(--foreground)]" onClick={() => { setPaymentChoiceTicket(actionTicket); setActionTicket(null) }} type="button" variant="secondary">
               <CreditCard className="h-6 w-6 shrink-0 text-[var(--accent)]" /> Cambiar forma de pago
             </Button>
+            {actionTicket.payload.payments?.length ? <p className="text-sm text-[var(--muted)]">Esta venta conserva varios pagos separados; no admite cambiar un método único para toda la cuenta.</p> : null}
             <Button fullWidth className="min-h-16 justify-start !whitespace-normal rounded-[var(--radius)] border border-[var(--separator)] !bg-[var(--background)] px-4 text-left font-bold !text-[var(--foreground)]" onClick={() => { setRefundQuantities(Object.fromEntries(actionTicket.payload.lines.map((line) => [line.id, line.quantity]))); setRefundPaymentMethod('cash'); setPaymentChoiceTicket(null); setActionTicket(null); setRefundTicket(actionTicket) }} type="button" variant="secondary">
               <RotateCcw className="h-6 w-6 shrink-0 text-[var(--accent)]" /> Devolución
             </Button>

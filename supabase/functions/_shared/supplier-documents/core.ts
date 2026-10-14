@@ -977,7 +977,7 @@ export function inspectProfileHeader(rawHeaders: string[], rules: SupplierProfil
     const index = Number.isFinite(best) && !ambiguous ? scores.indexOf(best) : null
     return { field: column.field, required: column.required, aliases: column.headerAliases,
       index, header: index === null ? null : rawHeaders[index], ambiguous, positional: false,
-      distance: Number.isFinite(best) ? best : null }
+      distance: Number.isFinite(best) ? best : null, relocatedFrom: null as number | null }
   })
   const matchesTableStart = Boolean(rules.tableStartText && headers.join(' ').includes(normalizeDocumentText(rules.tableStartText)))
   const relevant = columns.some((column) => column.index !== null) || matchesTableStart
@@ -1035,6 +1035,38 @@ export function inspectParserTables(ocr: OcrDocument, rules: SupplierProfileRule
   return trace
 }
 
+// OCR can shift all grouped amounts into an adjacent column. Reuse the same
+// profile only with an empty mapped column and independent product-price evidence.
+function alignGroupedAmountColumn(header: ReturnType<typeof inspectProfileHeader>, rows: string[][], rules: SupplierProfileRules) {
+  const amountColumn = header.columns.find((column) => column.field === 'lineTotal')
+  const descriptionIndex = header.columns.find((column) => column.field === 'description')?.index
+  const quantityIndex = header.columns.find((column) => column.field === 'quantity')?.index
+  const priceIndex = header.columns.find((column) => column.field === 'unitPrice')?.index
+  if (!rules.lineGroup || amountColumn?.index == null || descriptionIndex == null || quantityIndex == null || priceIndex == null) return
+  const amountIndex = amountColumn.index
+  const relevantRows = rows.filter((row) => row[descriptionIndex]?.trim())
+  if (!relevantRows.length || relevantRows.some((row) => row[amountIndex]?.trim())) return
+  const products = relevantRows.filter((row) => !auxiliaryLineKind(row[descriptionIndex])
+    && (parseProfileNumber(row[quantityIndex], rules) ?? 0) > 0)
+  const discounts = relevantRows.filter((row) => rules.lineGroup?.discountAliases.some((alias) => labelMatchDistance(row[descriptionIndex], alias) === 0))
+  if (!products.length || !discounts.length) return
+  const matches = [amountIndex - 1, amountIndex + 1].filter((index) => {
+    if (index < 0 || index >= header.headers.length || header.columns.some((column) => column.index === index)) return false
+    // A tax indicator or package count is not evidence of a shifted money column.
+    if (!products.concat(discounts).every((row) => /\d[.,]\d{2}(?:\s*-)?\s*$/.test(row[index]?.trim() ?? ''))) return false
+    return products.every((row) => {
+      const quantity = parseProfileNumber(row[quantityIndex], rules)
+      const price = parseProfileNumber(row[priceIndex], rules)
+      const amount = parseProfileNumber(row[index], rules)
+      return quantity !== null && price !== null && amount !== null && Math.abs(quantity * price - amount) <= 0.02
+    })
+  })
+  if (matches.length !== 1) return
+  amountColumn.relocatedFrom = amountColumn.index
+  amountColumn.index = matches[0]
+  amountColumn.header = header.headers[matches[0]]
+}
+
 export function runDeterministicLineParser(
   inputRules: SupplierProfileRules | unknown,
   ocrInput: OcrDocument | unknown,
@@ -1057,12 +1089,14 @@ export function runDeterministicLineParser(
       for (let headerRowIndex = 0; headerRowIndex < matrix.length; headerRowIndex += 1) {
         const header = inspectProfileHeader(matrix[headerRowIndex] ?? [], rules)
         if (!header.usable) continue
-        const indexes = new Map(header.columns.flatMap((column) => column.index === null ? [] : [[column.field, column.index] as const]))
         const attempt = trace?.headers.find((entry) => entry.pageNumber === page.pageNumber && entry.tableIndex === tableIndex && entry.headerRowIndex === headerRowIndex)
         matchedHeaders = true
         let dataRows = matrix.slice(headerRowIndex + 1)
         let usedFollowingTable = false
         while (true) {
+          alignGroupedAmountColumn(header, dataRows, rules)
+          const indexes = new Map(header.columns.flatMap((column) => column.index === null ? [] : [[column.field, column.index] as const]))
+          if (attempt) attempt.columns = header.columns
           const lines: ExtractedLine[] = []
           const rejectRow = (rowIndex: number, reason: string) => {
             if (!attempt) return
@@ -1128,6 +1162,11 @@ export function runDeterministicLineParser(
                 const kind = Number.isFinite(best) && scores.filter((score) => score === best).length === 1
                   ? kinds[scores.indexOf(best)] : null
                 const hasIdentity = Boolean(get(continuationRow, 'supplierReference') || get(continuationRow, 'barcode'))
+                if (!hasIdentity && continuationQuantity === null && kind === 'discount' && amount === null) {
+                  rejectRow(continuationIndex, 'PROFILE_DISCOUNT_UNREADABLE')
+                  if (trace) trace.partialLines = [...selectedTables.values()].flatMap((table) => table.lines).concat(lines)
+                  throw new Error('PROFILE_DISCOUNT_UNREADABLE')
+                }
                 const structuralMatch = !hasIdentity && amount !== null
                   && (kind === 'end' || continuationQuantity === null)
                 const matchedKind = structuralMatch ? kind : null
@@ -1261,6 +1300,27 @@ export type MathValidation = {
   invalidLineIndexes: number[]
 }
 
+// Inventory cost is the purchased product after its discount. Printed net
+// amounts can include transport, taxes or deposits and never supply this cost.
+export function productNetCost(line: Pick<ExtractedLine, 'quantity' | 'unitPrice' | 'discountAmount'>): number | null {
+  if (line.unitPrice === null || !Number.isFinite(line.quantity * line.unitPrice - line.discountAmount)) return null
+  const cost = roundMoney(line.quantity * line.unitPrice - line.discountAmount)
+  return cost < 0 ? null : cost
+}
+
+export function validateProductExtraction(extractionInput: SupplierDocumentExtraction | unknown): MathValidation & { scope: 'products' } {
+  const extraction = supplierDocumentExtractionSchema.parse(extractionInput)
+  const invalidLineIndexes = extraction.lines.flatMap((line, index) => {
+    const cost = productNetCost(line)
+    const gross = line.unitPrice === null ? null : line.quantity * line.unitPrice
+    // Check the product's independent gross amount when available. Additional
+    // costs and document totals cannot invalidate quantity, price and discount.
+    return cost === null || (gross !== null && line.grossCost !== null
+      && Math.abs(gross - line.grossCost) > Math.max(0.02, Math.abs(gross) * 0.03)) ? [index] : []
+  })
+  return { coherent: extraction.lines.length > 0 && !invalidLineIndexes.length, documentDifference: null, invalidLineIndexes, scope: 'products' }
+}
+
 export function validateExtractionMath(extractionInput: SupplierDocumentExtraction | unknown, tolerance = 0.03): MathValidation {
   const extraction = supplierDocumentExtractionSchema.parse(extractionInput)
   const invalidLineIndexes: number[] = []
@@ -1295,7 +1355,7 @@ export function validateExtractionMath(extractionInput: SupplierDocumentExtracti
   }
 }
 
-export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierDocumentExtraction) {
+export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierDocumentExtraction, options: { existingProfile?: boolean } = {}) {
   if (!interpreted.proposedProfile) return { candidate: false, reason: 'PROFILE_NOT_PROPOSED' as const, parsed: null }
   try {
     interpreted = enrichDocumentFinancials(interpreted, ocr)
@@ -1310,7 +1370,9 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
     if (!profileRequiredTextsMeetConfidence(rules, ocr)) {
       return { candidate: false, reason: 'PROFILE_FINGERPRINT_WORD_CONFIDENCE_TOO_LOW' as const, parsed: null }
     }
-    if (rules.lineGroup) {
+    // New rules need literal evidence. A stored profile may describe optional
+    // auxiliary rows absent from this delivery; product comparison still applies.
+    if (rules.lineGroup && !options.existingProfile) {
       const ocrText = normalizeDocumentText([
         ocr.text,
         ...ocr.pages.flatMap((page) => page.tables.flatMap((table) => table.cells.map((cell) => cell.text))),
@@ -1329,8 +1391,8 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
       supplierName: interpreted.supplier.name,
       supplierTaxId: interpreted.supplier.taxId,
     })
-    const parserMath = validateExtractionMath(parsed)
-    const interpretationMath = validateExtractionMath(interpreted)
+    const parserMath = validateProductExtraction(parsed)
+    const interpretationMath = validateProductExtraction(interpreted)
     const sameLineCount = parsed.lines.length === interpreted.lines.length
     const comparable = sameLineCount && parsed.lines.every((line, index) => {
       const expected = interpreted.lines[index]
@@ -1340,13 +1402,9 @@ export function validateProposedProfile(ocr: OcrDocument, interpreted: SupplierD
       return normalizeDocumentText(line.description) === normalizeDocumentText(expected.description)
         && Math.abs(line.quantity - expected.quantity) <= 0.000001
         && Math.abs(line.discountAmount - expected.discountAmount) <= 0.02
-        && Math.abs(line.chargesAmount - expected.chargesAmount) <= 0.02
         && sameMoney(line.unitPrice, expected.unitPrice)
         && normalizeDocumentText(line.purchaseUnit ?? '') === normalizeDocumentText(expected.purchaseUnit ?? '')
-        && sameMoney(line.grossCost, expected.grossCost)
-        && sameMoney(line.netCost, expected.netCost)
-        && sameMoney(line.lineTotal, expected.lineTotal)
-        && (!parsed.document.financialSummary?.taxes.length || line.taxRate === expected.taxRate)
+        && sameMoney(productNetCost(line), productNetCost(expected))
     })
     return {
       candidate: parserMath.coherent && interpretationMath.coherent && comparable,

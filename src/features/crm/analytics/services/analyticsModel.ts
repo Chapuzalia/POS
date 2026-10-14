@@ -16,6 +16,7 @@ export function buildDayActivityStats(
     ticketId: string
     paymentMethod: HistoricalPaymentMethod | null
     totalCents: number
+    payments?: Array<{ method: HistoricalPaymentMethod; amountCents: number }>
   }>,
   config: OperationalDayConfig,
   now = new Date(),
@@ -34,8 +35,11 @@ export function buildDayActivityStats(
   let cardCents = 0
   sales.forEach((sale) => {
     if (!dayTicketIds.has(sale.ticketId)) return
-    if (sale.paymentMethod === 'cash') cashCents += sale.totalCents
-    if (sale.paymentMethod === 'card') cardCents += sale.totalCents
+    const payments = sale.payments?.length ? sale.payments : [{ method: sale.paymentMethod, amountCents: sale.totalCents }]
+    for (const payment of payments) {
+      if (payment.method === 'cash') cashCents += payment.amountCents
+      if (payment.method === 'card') cardCents += payment.amountCents
+    }
   })
 
   return {

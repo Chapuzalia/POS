@@ -1065,14 +1065,14 @@ test('un requiredText no puede usar palabras OCR con confidence inferior al 90%'
   assert.equal(validateProposedProfile(ocr, fixture.extraction).candidate, true)
 })
 
-test('valida perfiles multipfila por aliases OCR, descuentos, cargos, netos y matemáticas', () => {
+test('valida perfiles multipfila por aliases OCR y datos de producto sin exigir cargos', () => {
   const fixture = getSupplierDocumentMockFixture('multi-row-product')
   assert.ok(fixture)
   assert.equal(validateProposedProfile(fixture.ocr, fixture.extraction).candidate, true)
 
   const wrongCharges = structuredClone(fixture.extraction)
   wrongCharges.lines[0].chargesAmount = 0
-  assert.equal(validateProposedProfile(fixture.ocr, wrongCharges).candidate, false)
+  assert.equal(validateProposedProfile(fixture.ocr, wrongCharges).candidate, true)
 
   const inventedAlias = structuredClone(fixture.extraction)
   inventedAlias.proposedProfile.lineGroup.chargeAliases.push('CARGO QUE NO EXISTE')

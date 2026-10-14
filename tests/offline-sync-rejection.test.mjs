@@ -23,6 +23,9 @@ test('solo los errores reales de caja cerrada activan la recuperacion de caja', 
 })
 
 test('los errores de inventario no eliminan la caja activa', () => {
+  for (const message of ['INVENTORY_DISABLED', 'LOCAL_FISCAL_RECORD_REQUIRED', 'LOCAL_FISCAL_LEGACY_PROVIDER_ENABLED']) {
+    assert.equal(isClosedCashSaleRejection(saleEvent, { code: '55000', message }), false)
+  }
   assert.equal(isClosedCashSaleRejection(saleEvent, {
     code: '22023',
     message: 'INVENTORY_CONSUMPTION_UNIT_MISMATCH',

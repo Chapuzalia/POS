@@ -1,15 +1,13 @@
 import { useCallback, useRef, useState } from 'react'
 import { createId } from '../../../lib/format'
-import { enqueueOfflineEvent, forgetOfflineEvent, getOfflineQueue } from '../../../lib/offlineStore'
+import { enqueueOfflineEvent, getOfflineQueue, getSessionTickets, saveSessionTickets } from '../../../lib/offlineStore'
+import { isTransportError } from '../../../lib/observability.ts'
 import { loadSessionTicketPageFromSupabase } from '../../../services/posService'
-import { supabase } from '../../../lib/supabase.ts'
 import type { CashSession, PaymentMethod, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
 import { prepareLocalFiscalAnnulment } from '../../fiscal/local/annulment.ts'
-import { loadFiscalInstallation, getFiscalInstallationLease } from '../../fiscal/local/installation.ts'
-import { findLocalFiscalEntryByTicket, buildLocalRectificative, persistLocalRectificative } from '../../fiscal/local/localLedger.ts'
-import { assertFiscalLease } from '../../fiscal/local/clock.ts'
+import { issuePosRefund } from '../../fiscal/local/refund.ts'
 import { nextPrintCopyNumber, usePrintAgentStore } from '../../local-printing'
 import {
   finishCashlogyPayment,
@@ -18,6 +16,8 @@ import {
 } from '../../local-printing/cashlogy/useCashlogyStore'
 import type { CashlogyTransaction } from '../../local-printing/types'
 import type { SessionTicketHistoryPage } from '../services/sessionTicketHistoryModel.ts'
+import { createLocalSessionTicketHistoryPage } from '../services/sessionTicketHistoryModel.ts'
+import { loadLocalSessionTickets } from '../services/localSessionTickets.ts'
 
 type Options = {
   context: TenantContext | null
@@ -39,6 +39,8 @@ type Options = {
 
 export function useCashTicketActions(options: Options) {
   const paymentChangeLockRef = useRef(false)
+  const refundLockRef = useRef(false)
+  const voidLockRef = useRef(false)
   const historySyncRef = useRef<Promise<void> | null>(null)
   const [historyRefreshVersion, setHistoryRefreshVersion] = useState(0)
   const historyContext = options.context
@@ -51,9 +53,9 @@ export function useCashTicketActions(options: Options) {
   const syncHistoryPendingEvents = options.syncPendingEvents
   const openHistory = useCallback(() => {
     if (!historyContext || !historyCashSession) return
-    if (!historyIsOnline) { setHistoryError('El histórico de tickets requiere conexión para consultar los datos de Supabase.'); return }
     setHistoryError(null)
     setHistoryOpen(true)
+    if (!historyIsOnline) return
 
     const hasPendingEvents = getOfflineQueue().some((event) => event.tenantId === historyContext.tenantId)
     if (!hasPendingEvents || historySyncRef.current) return
@@ -73,10 +75,34 @@ export function useCashTicketActions(options: Options) {
     // Changing this version intentionally invalidates the callback so an open
     // history refreshes after its background offline sync has settled.
     void historyRefreshVersion
-    if (!historyContext || !historyCashSession || !historyIsOnline) {
-      throw new Error('El histórico de tickets requiere conexión para consultar los datos de Supabase.')
+    if (!historyContext || !historyCashSession) {
+      throw new Error('No hay una sesión de caja seleccionada.')
     }
-    const result = await loadSessionTicketPageFromSupabase(historyContext, historyCashSession.id, page, query)
+    const localPage = async () => createLocalSessionTicketHistoryPage(
+      mergeHistoryPrintStates(await loadLocalSessionTickets(historyContext, historyCashSession, historyTickets)), page, query,
+    )
+    if (!historyIsOnline) return localPage()
+    let result: SessionTicketHistoryPage
+    try {
+      result = await loadSessionTicketPageFromSupabase(historyContext, historyCashSession.id, page, query)
+    } catch (error) {
+      if (isTransportError(error)) return localPage()
+      throw error
+    }
+    // Persist every consulted server page so it remains available after disconnecting.
+    const stored = new Map(getSessionTickets(historyContext, historyCashSession.id).map(ticket => [ticket.payload.ticket.id, ticket]))
+    const pendingEvents = getOfflineQueue().filter(event => event.tenantId === historyContext.tenantId)
+    for (const { ticket } of result.tickets) {
+      const cached = historyTickets.find(item => item.payload.ticket.id === ticket.payload.ticket.id) ?? stored.get(ticket.payload.ticket.id)
+      const hasLocalChange = pendingEvents.some(event => (event.kind === 'sale_created' && event.payload.ticket.id === ticket.payload.ticket.id)
+        || (event.kind === 'sale_voided' && event.payload.ticketId === ticket.payload.ticket.id)
+        || (event.kind === 'sale_payment_changed' && event.payload.saleId === ticket.payload.sale.id))
+      if (cached && hasLocalChange) { stored.set(ticket.payload.ticket.id, cached); continue }
+      stored.set(ticket.payload.ticket.id, { ...ticket, payload: { ...ticket.payload,
+        localFiscal: cached?.payload.localFiscal ?? ticket.payload.localFiscal,
+        fiscal: cached?.payload.fiscal ?? ticket.payload.fiscal } })
+    }
+    saveSessionTickets(historyContext, historyCashSession.id, mergeHistoryPrintStates([...stored.values()]))
     if (query.trim()) {
       const mergedTickets = mergeHistoryPrintStates(result.tickets.map(({ ticket }) => ticket))
       const mergedById = new Map(mergedTickets.map((ticket) => [ticket.id, ticket]))
@@ -91,7 +117,7 @@ export function useCashTicketActions(options: Options) {
     const remoteByTicketId = new Map(result.tickets.map((item) => [item.ticket.payload.ticket.id, item]))
     const cachedTickets = historyTickets.filter((ticket) => ticket.cashSessionId === historyCashSession.id)
     const merged = new Map<string, SessionTicketHistoryPage['tickets'][number]>()
-    for (const cached of cachedTickets) {
+    for (const cached of cachedTickets.filter(ticket => result.currentPage === 1 || remoteByTicketId.has(ticket.payload.ticket.id))) {
       const remote = remoteByTicketId.get(cached.payload.ticket.id)
       merged.set(cached.payload.ticket.id, {
         number: remote?.number ?? cached.ticketNumber ?? 0,
@@ -187,15 +213,9 @@ export function useCashTicketActions(options: Options) {
         cashlogyTransactionId: cashlogyTransaction?.id ?? currentPayment.cashlogyTransactionId ?? null,
       } } } : item)
       options.persistTickets(nextTickets)
-      options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod } : sale))
-      const pendingSale = getOfflineQueue().find((event) =>
-        event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
-      if (pendingSale) {
-        forgetOfflineEvent(pendingSale.id)
-        options.refreshPendingCount()
-        finishCashlogyPayment(cashlogyTransaction)
-        return
-      }
+      options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod,
+        payments: sale.payments?.map(payment => ({ ...payment, method: paymentMethod })) } : sale))
+      // Keep the accepted sale. Replay its creation before changing the payment.
       enqueueOfflineEvent({ id: createId(), kind: 'sale_payment_changed', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: {
         saleId: ticket.payload.sale.id,
         paymentId: currentPayment.id,
@@ -228,71 +248,31 @@ export function useCashTicketActions(options: Options) {
 
   const refund = useCallback(async (ticket: SessionTicketRecord, lines: Array<{ lineId: string; quantity: number }>, paymentMethod: PaymentMethod) => {
     const { context, cashSession } = options
-    if (!context || !cashSession || ticket.status !== 'active') return
+    if (!context || !cashSession || ticket.status !== 'active' || refundLockRef.current) return
     if (!options.isOnline) { options.setError('La devolución requiere conexión para guardar conjuntamente el documento económico y fiscal.'); return }
     if (ticket.cashSessionId !== cashSession.id) { options.setError('La devolución solo puede hacerse mientras siga abierta la caja original.'); return }
     if (!ticket.payload.localFiscal) {
       options.setError('La devolución requiere una factura fiscal local original.')
       return
     }
-    const reason = 'Devolución de bienes o servicios'
+    refundLockRef.current = true
     options.setBusy(true)
     options.setError(null)
     try {
-      if (!supabase) throw new Error('Supabase no está disponible para confirmar la devolución.')
-      const installation = await loadFiscalInstallation(context, cashSession)
-      const lease = await getFiscalInstallationLease(installation)
-      assertFiscalLease(lease, installation.installationId, installation.deviceId, Date.now(), performance.now())
-      const original = await findLocalFiscalEntryByTicket(installation, ticket.payload.ticket.id)
-      if (!original) throw new Error('No se encontró la factura fiscal local original del ticket.')
-      const refundRequestId = crypto.randomUUID()
-       const selectedLines = lines.map((line) => {
-         const lineIndex = ticket.payload.lines.findIndex((item) => item.id === line.lineId)
-         if (lineIndex < 0) throw new Error('La línea seleccionada no pertenece al ticket original.')
-         return { lineId: String(lineIndex), quantity: line.quantity, originalQuantity: ticket.payload.lines[lineIndex].quantity }
-       })
-      const originalAlta = original.record.canonicalRecord.RegistroAlta
-      if (!originalAlta || typeof originalAlta !== 'object' || !('TipoFactura' in originalAlta)) throw new Error('La factura fiscal original no contiene un alta válida.')
-      const entry = await buildLocalRectificative({
-        installation,
-        lease,
-        original,
-        type: originalAlta.TipoFactura === 'F1' ? 'R1' : 'R5',
-        reason,
-        system: installation.system,
-        timezone: installation.timezone,
-        environment: 'production',
-        qrEnvironment: installation.aeatEnvironment,
-        selectedLines,
-        refundRequestId,
-      })
-      const rpcLines = lines.map((line) => ({ originalTicketLineId: line.lineId, quantity: line.quantity }))
-      const { error } = await supabase.rpc('create_ticket_refund', {
-        p_tenant_id: context.tenantId,
-        p_original_ticket_id: ticket.payload.ticket.id,
-        p_original_sale_id: ticket.payload.sale.id,
-        p_refund_request_id: refundRequestId,
-        p_refund_cash_session_id: cashSession.id,
-        p_refund_method: paymentMethod,
-        p_lines: rpcLines,
-        p_idempotency_key: entry.record.idempotencyKey,
-        p_record: entry.record,
-        p_invoice: entry.invoice,
-      })
-      if (error) throw error
-      await persistLocalRectificative(entry)
+      await issuePosRefund(context, cashSession, ticket, lines, paymentMethod)
       options.refreshPendingCount()
       setHistoryRefreshVersion((version) => version + 1)
     } catch (error) {
       options.setError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' }))
     } finally {
       options.setBusy(false)
+      refundLockRef.current = false
     }
   }, [options])
 
   const voidTicket = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
-    if (!context || !options.cashSession || ticket.status !== 'active') return
+    if (!context || !options.cashSession || ticket.status !== 'active' || voidLockRef.current) return
     const pendingSale = getOfflineQueue().find((event) =>
       event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)
     if (pendingSale) {
@@ -300,9 +280,8 @@ export function useCashTicketActions(options: Options) {
       return
     }
 
-    const reason = window.prompt('Motivo fiscal de la anulación:')?.trim()
-    if (!reason || !window.confirm('¿Anular esta venta? Se conservará el registro fiscal original y se añadirá una anulación encadenada.')) return
-
+    const reason = 'Anulación solicitada desde el histórico de tickets'
+    voidLockRef.current = true
     options.setBusy(true)
     options.setError(null)
     try {
@@ -323,6 +302,7 @@ export function useCashTicketActions(options: Options) {
       options.setError(getReadableError(error, { operation: 'features.cash-registers.hooks.useCashTicketActions' }))
     } finally {
       options.setBusy(false)
+      voidLockRef.current = false
     }
   }, [options])
 

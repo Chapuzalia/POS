@@ -47,6 +47,25 @@ const sale = {
   payment: { id: 'payment', tenantId: 'tenant', saleId: 'sale_123', method: 'cash', amountCents: 1600, receivedCents: 2000, changeCents: 400 },
 }
 
+test('a completed equal split prints all original lines and each tender in one original receipt', () => {
+  const payload = { ...sale, payment: null, sale: { ...sale.sale, paymentMethod: null },
+    payments: [534,533,533].map((amountCents,index) => ({ id: `part-${index}`, tenantId: 'tenant', saleId: sale.sale.id,
+      method: index === 0 ? 'cash' : 'card', amountCents, receivedCents: index === 0 ? 600 : null, changeCents: index === 0 ? 66 : 0 })) }
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true })
+  assert.equal(request.requestId, 'print:sale_123:original')
+  assert.equal(request.options.copies, 1)
+  assert.equal(request.options.openCashDrawer, true)
+  const text = request.lines.join('\n')
+  assert.match(text, /2 x Brugal/)
+  assert.match(text, /Parte 1.*Efectivo.*5,34/)
+  assert.match(text, /Parte 2.*Tarjeta.*5,33/)
+  assert.match(text, /Parte 3.*Tarjeta.*5,33/)
+  assert.match(text, /TOTAL.*16,00/)
+  const reprint = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint: true, autoOpenCashDrawer: true })
+  assert.equal(reprint.options.openCashDrawer, false)
+  assert.match(reprint.lines.join('\n'), /Parte 3.*Tarjeta/)
+})
+
 const verifactuUrl = 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345678&numserie=F-2026-000123&fecha=21-08-2026&importe=16.00'
 
 function completeInvoiceSale() {
@@ -100,12 +119,13 @@ function buildQuickSalePayload(...args) {
   }
 }
 
-function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssue = null, fiscalPreflight = null }) {
+function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssue = null, fiscalPreflight = null, printSale = null, onError = assert.fail }) {
   const sync = deferred()
   const calls = []
   const printed = []
   const earlyDrawerCalls = []
   const dispatchedRequestIds = new Set()
+  const paymentInFlightChanges = []
   const earlyCashDrawerMock = {
     requestEarlyCashDrawer: ({ requestId, payments }) => {
       if (dispatchedRequestIds.has(requestId)) return false
@@ -121,19 +141,21 @@ function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssu
     '../../../lib/observability.ts': { operationBreadcrumb() {}, reportOperationError() {} },
     '../../../utils/errors.ts': { getReadableError: (error) => error?.message ?? String(error) },
     '../../../lib/format': { createId: () => 'event-1' },
-    '../../../lib/offlineStore': { enqueueOfflineEvent: () => calls.push('persist') },
+    '../../../lib/durableSales.ts': createDurableSalesHarness(enqueue => calls.push(enqueue ? 'persist' : 'persistFiscal')),
     '../services/salePayload': { buildSalePayload: (...args) => buildQuickSalePayload(...args) },
     '../../fiscal/service': { loadFiscalReceiptData: async () => { calls.push('fiscal'); return { status: 'accepted', verificationUrl: 'https://verify.local' } } },
     '../../customers/service': { loadTicketInvoice: async () => null },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../local-printing/cashlogy/useCashlogyStore': {
+      isCashlogyPaymentConfigured: () => false,
       finishCashlogyPayment() {},
       getCashlogyPaymentAmounts: () => ({ changeCents: null, receivedCents: null }),
       getCashlogyPaymentSaleId: () => null,
       settleCashlogyPaymentIfConfigured: async () => null,
     },
     '../../local-printing/services/earlyCashDrawer': earlyCashDrawerMock,
-    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {}, localFiscalMode: () => fiscalMode },
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {} },
+    '../../fiscal/local/tenantMode.ts': { assertRealSaleAllowed() {}, resolveLocalFiscalMode: async () => fiscalMode },
     '../../fiscal/local/posInvoice.ts': { issuePosInvoice: async (...args) => {
       calls.push('issueFiscal')
       if (!fiscalIssue) throw new Error('Unexpected production fiscal issue')
@@ -157,17 +179,18 @@ function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssu
     ledger: [],
     lines: [quickSaleLine('line', 600, 21)],
     mergeProductStats() {},
-    onError: assert.fail,
+    onError,
+    onPaymentInFlightChange: value => paymentInFlightChanges.push(value),
     persistLedger() {},
     persistLines() {},
     persistTickets() {},
-    printSale: async (payload, options) => { calls.push('print'); printed.push({ ...payload, printOptions: options }) },
+    printSale: async (payload, options) => { calls.push('print'); printed.push({ ...payload, printOptions: options }); await printSale?.(payload, options) },
     refreshPendingCount() {},
     resetUi() { calls.push('reset') },
     syncPendingEvents: async () => { calls.push('sync'); await sync.promise },
     tickets: [],
   }
-  return { calls, pay: runner.render(options), printed, sync, earlyDrawerCalls }
+  return { calls, pay: runner.render(options), printed, sync, earlyDrawerCalls, paymentInFlightChanges, options, render: () => runner.render(options) }
 }
 
 test('normaliza hostnames, IPv4 e IPv6 y aplica HTTPS con el puerto 8443', () => {
@@ -476,11 +499,95 @@ test('la venta rápida libera la interfaz y espera la fiscalización antes de im
 
   online.sync.resolve()
   await payment
+  await flush()
   assert.deepEqual(online.calls, ['persist', 'reset', 'sync', 'print'])
 
   const offline = quickSalePaymentHarness({ isOnline: false })
   await offline.pay('card', null)
   assert.deepEqual(offline.calls, ['persist', 'reset', 'print'])
+})
+
+test('la venta guardada libera el cobro aunque la sincronización no responda', async () => {
+  const harness = quickSalePaymentHarness({ isOnline: true })
+  await harness.pay('card', null)
+  assert.deepEqual(harness.paymentInFlightChanges, [true, false])
+  assert.deepEqual(harness.calls, ['persist', 'reset', 'sync'])
+  assert.equal(harness.printed.length, 0)
+  harness.sync.resolve()
+  await flush()
+  assert.equal(harness.printed.length, 1)
+})
+
+test('la venta offline guardada libera el cobro aunque la impresora no responda', async () => {
+  const print = deferred()
+  const harness = quickSalePaymentHarness({ isOnline: false, printSale: () => print.promise })
+  await harness.pay('cash', null)
+  assert.deepEqual(harness.paymentInFlightChanges, [true, false])
+  assert.deepEqual(harness.calls, ['persist', 'earlyDrawer', 'reset', 'print'])
+  print.resolve()
+  await flush()
+})
+
+test('un fallo de impresión posterior avisa sin volver a cobrar ni encolar la venta', async () => {
+  const errors = []
+  const harness = quickSalePaymentHarness({ isOnline: false,
+    printSale: async () => { throw new Error('Printer unavailable') }, onError: message => errors.push(message) })
+  await harness.pay('card', null)
+  await flush()
+  assert.deepEqual(harness.paymentInFlightChanges, [true, false])
+  assert.equal(harness.calls.filter(call => call === 'persist').length, 1)
+  assert.equal(errors.length, 1)
+  assert.match(errors[0], /venta está guardada/)
+})
+
+test('una sincronización tardía conserva los nuevos tickets y el estado de impresión actual', async () => {
+  const harness = quickSalePaymentHarness({ isOnline: true })
+  const saved = []
+  harness.options.persistTickets = tickets => { saved.push(tickets) }
+  harness.options.loadPersistedTicket = async () => ({ payload: { ticket: {}, fiscal: { status: 'accepted' } } })
+  await harness.render()('card', null)
+  const original = saved[0][0]
+  const next = { id: 'next-sale', payload: {}, printStatus: 'printed' }
+  harness.options.tickets = [next, { ...original, printStatus: 'printed', printAttempts: 1 }]
+  harness.render()
+  harness.sync.resolve()
+  await flush()
+  assert.equal(saved.length, 2)
+  assert.equal(saved[1][0], next)
+  assert.equal(saved[1][1].printStatus, 'printed')
+  assert.equal(saved[1][1].printAttempts, 1)
+  assert.equal(saved[1][1].payload.fiscal.status, 'accepted')
+  assert.equal(saved[1][1].payload.sale, original.payload.sale)
+  assert.equal(saved[1][1].payload.payment, original.payload.payment)
+})
+
+test('una sincronización tardía no guarda tickets en otra caja o tenant', async () => {
+  const harness = quickSalePaymentHarness({ isOnline: true })
+  const saved = []
+  harness.options.persistTickets = tickets => saved.push(tickets)
+  harness.options.loadPersistedTicket = async () => ({ payload: { ticket: {}, fiscal: { status: 'accepted' } } })
+  await harness.render()('card', null)
+  harness.options.context = { ...quickSaleContext, tenantId: 'other-tenant' }
+  harness.options.cashSession = { ...quickSaleCashSession, id: 'other-cash' }
+  harness.render()
+  harness.sync.resolve()
+  await flush()
+  assert.equal(saved.length, 1)
+})
+
+test('la respuesta inmediata del servidor conserva el ticket guardado antes del siguiente render', async () => {
+  const harness = quickSalePaymentHarness({ isOnline: true })
+  const saved = []
+  harness.options.persistTickets = tickets => saved.push(tickets)
+  harness.options.loadPersistedTicket = async () => ({ ticketNumber: 15, payload: { ticket: {}, fiscal: { status: 'accepted' } } })
+  await harness.render()('card', null)
+  harness.sync.resolve()
+  await flush()
+  assert.equal(saved.length, 2)
+  assert.equal(saved[1].length, 1)
+  assert.equal(saved[1][0].id, saved[0][0].id)
+  assert.equal(saved[1][0].ticketNumber, 15)
+  assert.equal(saved[1][0].payload.sale, saved[0][0].payload.sale)
 })
 
 test('construye el ticket de mesa localmente en cuanto la RPC devuelve sus IDs', () => {
@@ -558,6 +665,7 @@ test('la venta rapida online persiste, solicita cajon temprano, sincroniza y mar
   assert.deepEqual(harness.calls.slice(0, 3), ['persist', 'earlyDrawer', 'reset'])
   harness.sync.resolve()
   await payment
+  await flush()
   assert.deepEqual(harness.calls, ['persist', 'earlyDrawer', 'reset', 'sync', 'print'])
   assert.equal(harness.earlyDrawerCalls.length, 1)
   assert.match(harness.earlyDrawerCalls[0], /^drawer:[^:]+:payment$/u)
@@ -572,11 +680,12 @@ test('la venta rapida online con tarjeta no solicita cajon temprano', async () =
   assert.deepEqual(harness.earlyDrawerCalls, [])
   harness.sync.resolve()
   await payment
+  await flush()
   assert.deepEqual(harness.calls, ['persist', 'reset', 'sync', 'print'])
   assert.notEqual(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
 })
 
-test('la factura fiscal reimprime la base y cuota históricas sin recalcular el desglose', () => {
+test('el ticket local conserva numeración y desglose históricos sin imprimir QR ni leyenda Verifactu', () => {
   const issued = structuredClone(sale)
   issued.localFiscal = { recordId: 'record-1', series: 'L1-C1-I1-2026-S', number: 3,
     issuedAt: '2026-07-18T16:30:00+02:00', documentKind: 'simplified',
@@ -590,9 +699,32 @@ test('la factura fiscal reimprime la base y cuota históricas sin recalcular el 
   const text = payload.lines.join('\n')
   assert.match(text, /Base imponible[ ]+13,23 €/)
   assert.match(text, /IVA 21 %[ ]+2,77 €/)
-  assert.ok(payload.elements.some((element) => element.type === 'qr' && element.data === verifactuUrl))
-  assert.equal(payload.elements.find((element) => element.type === 'qr' || element.value.trim()).type, 'qr')
+  assert.ok(!payload.elements.some((element) => element.type === 'qr'))
+  assert.doesNotMatch(text, /www\.aeat|QR tributario/)
+  assert.equal(issued.fiscal.verificationUrl, verifactuUrl, 'printing must not mutate the saved snapshot')
   assert.doesNotMatch(text, /VERI\*FACTU/)
+})
+
+test('la copia de un ticket local usa su snapshot aunque la instalación haya sido retirada', async () => {
+  const hookSource = readFileSync(new URL('../src/features/cash-registers/hooks/useCashSession.ts', import.meta.url), 'utf8')
+  const callback = hookSource.match(/const printSale = useCallback\(async [\s\S]*?\}, \[options\.context, persistTickets, session, updateTicketPrintState\]\)/)?.[0]
+  assert.ok(callback)
+  const original = structuredClone(sale)
+  original.localFiscal = { recordId: 'old-record', series: 'DIS-C1-1-2026-S', number: 2, verifactuLegend: false }
+  let printed, reads = 0
+  const { printSale } = compileComponent(`export ${callback}`, {}, {
+    useCallback: action => action,
+    options: { context: { tenantId: 'tenant' } },
+    usePrintAgentStore: { getState: () => ({ token: 'paired', selectedPrinterId: 'main' }) },
+    loadFiscalInstallation: async () => { reads++; throw new Error('La instalación está retirada') },
+    printTicket: async value => { printed = value }, session: { id: 'cash' },
+    ticketsRef: { current: [] }, updateTicketPrintState() {}, persistTickets: () => assert.fail('Copies must not persist a new sale'),
+  })
+  await printSale(original, { isReprint: true, copyNumber: 2 })
+  assert.equal(reads, 0)
+  assert.equal(printed.payload, original)
+  assert.equal(printed.payload.localFiscal.series, 'DIS-C1-1-2026-S')
+  assert.equal(printed.options.copyNumber, 2)
 })
 
 test('la rectificativa fuerza en la impresión la referencia a la factura original aunque la plantilla personalizada la omita', () => {
@@ -804,3 +936,4 @@ test('el mapper suprime openCashDrawer cuando el cajon ya fue solicitado y conse
   assert.equal(mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true, cashDrawerAlreadyRequested: true }).options.openCashDrawer, false)
   assert.equal(mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true }).options.openCashDrawer, true)
 })
+import { createDurableSalesHarness } from './helpers/durable-sales-harness.mjs'

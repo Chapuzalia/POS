@@ -5,6 +5,10 @@ import { pathToFileURL } from 'node:url'
 
 const MIGRATIONS_PATHSPEC = ':(glob)supabase/migrations/*.sql'
 const CONTRACTS_PATH = 'supabase/contracts-pending.yml'
+const HISTORICAL_PIPELINE_INDEX_FIXES = new Map([
+  ['supabase/migrations/20260912222539_paginate_pos_session_tickets.sql', 3],
+  ['supabase/migrations/20261003183458_optimize_pos_sale_latency.sql', 2],
+])
 const CONTRACT_OPERATIONS = new Set([
   'DROP',
   'RENAME',
@@ -61,6 +65,19 @@ function fileExists(sha, file, cwd) {
   } catch {
     return false
   }
+}
+
+// Explicitly authorized compatibility repair of the two historical files.
+// Compare complete source text: only removal of CONCURRENTLY at their five
+// CREATE INDEX statements is allowed, without changing any other SQL or comment.
+function isHistoricalPipelineIndexFix(baseSha, headSha, file, cwd) {
+  const expectedCount = HISTORICAL_PIPELINE_INDEX_FIXES.get(file)
+  if (!expectedCount || !fileExists(baseSha, file, cwd) || !fileExists(headSha, file, cwd)) return false
+  const source = sha => execFileSync('git', ['show', `${sha}:${file}`], { cwd, encoding: 'utf8' }).replaceAll('\r\n', '\n')
+  const before = source(baseSha)
+  const matches = before.match(/^create index concurrently\b/gim) ?? []
+  return matches.length === expectedCount
+    && source(headSha) === before.replace(/^create index concurrently\b/gim, 'create index')
 }
 
 export function parsePendingContracts(yaml) {
@@ -438,7 +455,45 @@ const blockedRules = [
 const reviewableRules = new Set([
   'CREATE OR REPLACE ROUTINE',
   'REVOKE',
+  'COMPATIBLE CHECK REPLACEMENT',
 ])
+
+// Compare executable tokens without erasing literal values. The general scanner
+// deliberately blanks literals; that is not sufficient to prove a CHECK safe.
+function canonicalCheckMigration(sql) {
+  const tokens = sql.match(/--[^\r\n]*|\/\*[\s\S]*?\*\/|'(?:''|[^'])*'|"(?:""|[^"])*"|[a-z_][a-z0-9_$]*|\s+|./gi) ?? []
+  return tokens.filter(token => !/^\s+$/.test(token) && !token.startsWith('--') && !token.startsWith('/*'))
+    .map(token => token.startsWith("'") || token.startsWith('"') ? token : token.toLowerCase()).join(' ')
+}
+
+// These two statements retain the deployed predicate verbatim as an OR branch.
+// Allow only the complete three-statement migration: fixed timeouts and a single
+// atomic replacement of the same named CHECK, NOT VALID. No general DROP waiver.
+const compatibleCheckMigrations = new Set([
+  String.raw`set lock_timeout = '5s';
+set statement_timeout = '5min';
+alter table public.fiscal_pos_bridge_settings
+  drop constraint fiscal_pos_bridge_settings_bridge_url_check,
+  add constraint fiscal_pos_bridge_settings_bridge_url_check check (
+    (bridge_url ~ '^https://[^/?#@]+/?$' and length(bridge_url) <= 255)
+    or (
+      length(bridge_url) <= 255
+      and case when bridge_url ~ '^http://(localhost|127\.0\.0\.1|\[::1\])(:[0-9]{1,5})?/?$'
+        then coalesce(substring(bridge_url from ':([0-9]{1,5})/?$')::integer, 80) <= 65535
+        else false
+      end
+    )
+  ) not valid;`,
+  String.raw`set lock_timeout = '5s';
+set statement_timeout = '5min';
+alter table public.refund_requests
+  drop constraint refund_requests_fiscal_series_check,
+  add constraint refund_requests_fiscal_series_check
+    check (
+      fiscal_series ~ '^[A-Z0-9]{1,8}-[A-Z0-9]{1,8}-[0-9]{4}-R$'
+      or fiscal_series ~ '^[A-Z0-9]{1,8}-[A-Z0-9]{1,8}-[1-9][0-9]*-[0-9]{4}-R$'
+    ) not valid;`,
+].map(canonicalCheckMigration))
 
 export function analyzeMigration(
   sql,
@@ -477,6 +532,10 @@ export function analyzeMigration(
     sql.match(
       /^\s*--\s*migration-safety-reason:\s*(.+)$/im,
     )?.[1]?.trim()
+
+  const compatibleCheckReplacement = safety === 'expand'
+    && reviewedRules.has('COMPATIBLE CHECK REPLACEMENT') && Boolean(reviewReason)
+    && compatibleCheckMigrations.has(canonicalCheckMigration(sql))
 
   const allowedContractOperations =
     new Set(contract?.allowed_operations ?? [])
@@ -533,6 +592,8 @@ export function analyzeMigration(
     if (!pattern.test(normalized)) {
       continue
     }
+
+    if (name === 'DROP' && compatibleCheckReplacement) continue
 
     if (
       name === 'ANONYMOUS DO BLOCK'
@@ -595,6 +656,10 @@ export function analyzeMigration(
     findings.push(
       'MISSING REVIEW REASON',
     )
+  }
+
+  if (reviewedRules.has('COMPATIBLE CHECK REPLACEMENT') && !compatibleCheckReplacement) {
+    findings.push('REVIEWED CHECK REPLACEMENT MUST MATCH AN APPROVED COMPATIBLE MIGRATION')
   }
 
   if (reviewedRules.has('REVOKE')) {
@@ -815,6 +880,7 @@ export function checkMigrationRange(
       MIGRATIONS_PATHSPEC,
       cwd,
     )
+      .filter(file => !isHistoricalPipelineIndexFix(baseSha, headSha, file, cwd))
 
   if (historicalChanges.length) {
     throw new Error(

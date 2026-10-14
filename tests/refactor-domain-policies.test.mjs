@@ -18,7 +18,7 @@ test('changing tenant or user resets tenant-scoped state', () => {
   assert.equal(shouldResetTenantState(current, { tenantId: 'tenant-b', userId: 'user-a' }), true)
 })
 
-test('rejected offline sale restores its ticket and discount without overwriting another ticket', () => {
+test('rejected accepted sale never restores a payable ticket or discount', () => {
   const event = {
     kind: 'sale_created',
     payload: {
@@ -42,8 +42,8 @@ test('rejected offline sale restores its ticket and discount without overwriting
   const recovery = getRejectedSaleRecovery(event, false)
   assert.equal(recovery.closedSessionId, 'closed-session')
   assert.equal(recovery.rejectedSaleId, 'sale-1')
-  assert.equal(recovery.linesToRestore[0].quantity, 2)
-  assert.equal(recovery.discount.amountCents, 100)
+  assert.equal(recovery.linesToRestore, null)
+  assert.equal(recovery.discount, null)
   const recoveryWithCurrentTicket = getRejectedSaleRecovery(event, true)
   assert.equal(recoveryWithCurrentTicket.linesToRestore, null)
   assert.equal(recoveryWithCurrentTicket.discount, null)

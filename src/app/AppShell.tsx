@@ -62,7 +62,7 @@ import { AppRouter } from './AppRouter'
 import { isBackofficeUser, isCrmUser, isSuperadmin } from './app-permissions'
 import { useDomainErrors } from './useDomainErrors'
 import { FiscalInstallationGate } from '../features/fiscal/local/FiscalInstallationGate'
-import { FiscalQueueNotice } from '../features/fiscal/local/FiscalQueueNotice'
+import { useFiscalQueue } from '../features/fiscal/local/useFiscalQueue'
 
 const CrmPage = lazy(() => import('../components/crm/CrmPage').then((module) => ({ default: module.CrmPage })))
 const SuperAdminPage = lazy(() => import('../components/superadmin/SuperAdminPage').then((module) => ({ default: module.SuperAdminPage })))
@@ -208,6 +208,10 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     syncPendingEvents: offline.syncPendingEvents,
   })
   const promotionsEnabled = Boolean(context && hasTenantCapability(context, 'promotions'))
+  const fiscalPendingTicketIds = useFiscalQueue({
+    context: context && !isBackofficeUser(context) && context.deviceMode !== 'kds' ? context : null,
+    cashSession: cash.session,
+  })
   const quickSale = useQuickSale({
     catalog,
     cashSession: cash.session,
@@ -540,7 +544,8 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
       printingClosingId={cash.printingClosingId}
       sessions={cash.options.sessions}
     /></PosStartupReveal>
-    return <PosStartupReveal><FiscalQueueNotice context={context} cashSession={cash.session} /><FiscalInstallationGate key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${cash.session?.cashRegisterId}`} context={context} cashSession={cash.session} onLogout={session.logout} onBusyChange={setAuxiliaryOperationBusy}><PosPage
+    return <PosStartupReveal><FiscalInstallationGate key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${context.deviceMode}:${cash.session?.cashRegisterId}`} context={context} cashSession={cash.session} onLogout={session.logout} onBusyChange={setAuxiliaryOperationBusy}><PosPage
+      fiscalPendingTicketIds={fiscalPendingTicketIds}
       addFeedback={addFeedback}
       catalog={catalog}
       discounts={discounts}

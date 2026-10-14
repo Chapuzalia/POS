@@ -1,6 +1,7 @@
 import { BridgeHttpError, type BridgeSubmission, type BridgeResult } from './bridgeClient.ts'
 import { createBridgeClient } from './bridgeClient.ts'
-import { listLocalFiscalEntries, updateLocalFiscalDelivery, type LocalFiscalEntry } from './localLedger.ts'
+import { FISCAL_ECONOMIC_SYNCED, listLocalFiscalEntries, listPendingFiscalEconomicSales, markLocalFiscalIncidence, updateLocalFiscalDelivery, type LocalFiscalEntry } from './localLedger.ts'
+import { isFiscalTransportFailure } from './deliveryIncidence.ts'
 
 export type FiscalScope = { tenantId: string; fiscalSubjectId: string; installationId: string }
 export type FiscalSyncConfig = FiscalScope & { mode: 'test' | 'production'; baseUrl: string; getAccessToken: () => Promise<string> }
@@ -31,7 +32,8 @@ export function summarizeLocalFiscalQueue(entries: readonly LocalFiscalEntry[], 
 export function deliveryFromResult(entry: LocalFiscalEntry, result: BridgeResult): LocalFiscalEntry['delivery'] {
   if (result.idempotencyKey !== entry.id) throw new Error('El puente respondió sobre otro registro fiscal.')
   if (result.state === 'LOCAL_PENDING') throw new Error('El puente no puede confirmar un estado exclusivamente local.')
-  if (!result.vpsStoredAt) throw new Error('Falta el acuse durable del VPS.')
+  if (!result.vpsStoredAt) throw new Error(result.state === 'REQUIRES_ACTION' && result.description
+    ? result.description : 'Falta el acuse durable del VPS.')
   if (result.state.startsWith('AEAT_') && !result.aeatRespondedAt) throw new Error('Falta la fecha de respuesta AEAT.')
   if ((result.state === 'AEAT_ACCEPTED_WITH_ERRORS' || result.state === 'AEAT_REJECTED') && (!result.code || !result.description)) {
     throw new Error('Falta el código o la descripción del resultado AEAT.')
@@ -40,6 +42,7 @@ export function deliveryFromResult(entry: LocalFiscalEntry, result: BridgeResult
     throw new Error('El puente intentó retroceder un estado fiscal final.')
   }
   return {
+    ...(entry.delivery.incidence ? { incidence: true } : {}),
     state: result.state,
     attempts: entry.delivery.attempts + 1,
     lastError: result.state === 'AEAT_REJECTED' || result.state === 'REQUIRES_ACTION' ? result.description : null,
@@ -54,7 +57,11 @@ export async function resolvePendingBridgeRecord(
   record: BridgeSubmission,
 ): Promise<BridgeResult> {
   try {
-    return await client.status(record.idempotencyKey)
+    const result = await client.status(record.idempotencyKey)
+    // A lost POST acknowledgement may have created the bridge record before the
+    // POS noticed the outage. Report delivery metadata through the same idempotent
+    // ingestion contract; it never resubmits an already accepted record to AEAT.
+    return record.deliveryIncidence ? (await client.deliver([record]))[0] : result
   } catch (error) {
     if (!(error instanceof BridgeHttpError) || error.status !== 404) throw error
     return (await client.deliver([record]))[0]
@@ -63,23 +70,33 @@ export async function resolvePendingBridgeRecord(
 
 /** Runs only while the PWA is open. The bridge must retry its own durably stored records. */
 export async function synchronizeLocalFiscalQueue(config: FiscalSyncConfig): Promise<void> {
+  if (navigator.onLine === false) { await markLocalFiscalIncidence(config); return }
   const scope = `${config.tenantId}:${config.fiscalSubjectId}:${config.installationId}`
   if (!navigator.locks?.request) throw new Error('Web Locks no está disponible para sincronizar la cola fiscal.')
   await navigator.locks.request(`tickit-fiscal-sync:${scope}`, { mode: 'exclusive' }, async () => {
     const entries = await listLocalFiscalEntries(config)
+    const economicPending = new Set((await listPendingFiscalEconomicSales(config)).map(sale => sale.id))
     const client = createBridgeClient({ mode: config.mode, baseUrl: config.baseUrl, getAccessToken: config.getAccessToken })
     for (const entry of entries) {
       if (terminal.has(entry.delivery.state)) continue
-      if (entry.delivery.nextAttemptAt && Date.parse(entry.delivery.nextAttemptAt) > Date.now()) continue
+      // Supabase must acknowledge the economic sale before the bridge can reconcile it.
+      // Never let a later record overtake this unconfirmed chain position.
+      if (entry.delivery.state === 'LOCAL_PENDING' && economicPending.has(entry.id)) break
+      if (entry.delivery.nextAttemptAt && Date.parse(entry.delivery.nextAttemptAt) > Date.now()) {
+        if (entry.delivery.state === 'LOCAL_PENDING') break
+        continue
+      }
       try {
         const submission: BridgeSubmission = entry.annulment
           ? { ...entry.record, annulment: entry.annulment }
           : { ...entry.record, invoice: entry.invoice }
+        if (entry.delivery.incidence) submission.deliveryIncidence = true
         const result = entry.delivery.state === 'LOCAL_PENDING'
           ? await resolvePendingBridgeRecord(client, submission)
           : await client.status(entry.id)
         await updateLocalFiscalDelivery(entry.id, deliveryFromResult(entry, result))
       } catch (error) {
+        if (isFiscalTransportFailure(error)) await markLocalFiscalIncidence(config)
         const attempts = entry.delivery.attempts + 1
         const lastError = error instanceof Error ? error.message.slice(0, 300) : 'Error de sincronización fiscal'
         await updateLocalFiscalDelivery(entry.id, { ...entry.delivery, attempts, lastError, nextAttemptAt: nextRetry(attempts) })
@@ -93,14 +110,29 @@ export async function synchronizeLocalFiscalQueue(config: FiscalSyncConfig): Pro
 export function startFiscalSyncWhileOpen(config: FiscalSyncConfig): () => void {
   let stopped = false
   let running = false
+  let requested = false
+  const scope = `${config.tenantId}:${config.fiscalSubjectId}:${config.installationId}`
   const run = () => {
-    if (stopped || running || document.visibilityState === 'hidden') return
+    if (stopped || document.visibilityState === 'hidden') return
+    if (running) { requested = true; return }
     running = true
-    void synchronizeLocalFiscalQueue(config).catch(() => { /* pending records retain their state for the next attempt */ }).finally(() => { running = false })
+    void synchronizeLocalFiscalQueue(config).catch(() => { /* pending records retain their state for the next attempt */ }).finally(() => {
+      running = false
+      if (requested) { requested = false; run() }
+    })
+  }
+  const economicSynced = (event: Event) => {
+    if (event instanceof CustomEvent && event.detail === scope) run()
   }
   const timer = window.setInterval(run, 30000)
   window.addEventListener('online', run)
+  window.addEventListener(FISCAL_ECONOMIC_SYNCED, economicSynced)
   document.addEventListener('visibilitychange', run)
   run()
-  return () => { stopped = true; window.clearInterval(timer); window.removeEventListener('online', run); document.removeEventListener('visibilitychange', run) }
+  return () => {
+    stopped = true; window.clearInterval(timer)
+    window.removeEventListener('online', run)
+    window.removeEventListener(FISCAL_ECONOMIC_SYNCED, economicSynced)
+    document.removeEventListener('visibilitychange', run)
+  }
 }

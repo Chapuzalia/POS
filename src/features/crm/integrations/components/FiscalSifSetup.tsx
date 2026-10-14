@@ -53,13 +53,13 @@ export function FiscalSifSetup({ tenantContext, disabled, runAction }: Props) {
     })
   }
 
-  return <section className="!grid !gap-4 !rounded-2xl !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-card)]">
-    <div><h2 className="!m-0 !text-base !font-bold">Titular y cajas fiscales</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">El CRM prepara la caja lógica. Cada PWA confirma su propia instalación y conserva su identidad local.</p></div>
+  return <section className="!grid !gap-4 !rounded-[16px] !bg-[var(--crm-surface)] !p-5 !text-[var(--crm-text)] !shadow-[var(--crm-shadow-card)]">
+    <div><h2 className="!m-0 !text-base !font-bold">Titular y numeración de cajas</h2><p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">Cada PWA conserva su instalación y numeración propia, también sin Verifactu.</p></div>
     <div className="!grid !gap-3 sm:!grid-cols-2">
       <Field label="Razón social del titular"><UiInput className={inputClass} disabled={disabled || !canEdit} value={legalName} onChange={event => setLegalName(event.target.value)} maxLength={120} /></Field>
       <Field label="NIF del titular"><UiInput className={inputClass} disabled={disabled || !canEdit} value={nif} onChange={event => setNif(event.target.value.toUpperCase())} maxLength={9} /></Field>
     </div>
-    {venues.map(venue => <div className="!grid !gap-3 !rounded-xl !bg-[var(--crm-surface-soft)] !p-4" key={venue.id}>
+    {venues.map(venue => <div className="!grid !gap-3 !rounded-[12px] !bg-[var(--crm-surface-soft)] !p-4" key={venue.id}>
       <div className="!font-semibold">{venue.name}</div>
       <Field label="Código local"><UiInput className={inputClass} disabled={disabled || !canEdit || Boolean(venue.fiscal_code)} value={venueCodes[venue.id] ?? ''} onChange={event => setVenueCodes(current => ({ ...current, [venue.id]: event.target.value.toUpperCase() }))} maxLength={8} /></Field>
       {registers.filter(register => register.venue_id === venue.id).map(register => {

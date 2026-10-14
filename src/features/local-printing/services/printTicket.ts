@@ -22,7 +22,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
   const printState = usePrintAgentStore.getState()
   const requestId = options.isReprint ? `print:${payload.sale.id}:copy:${options.copyNumber || 1}` : `print:${payload.sale.id}:original`
   operationBreadcrumb({ operation: 'sale.print', saleId: payload.sale.id, ticketId: payload.ticket.id, operationId: requestId, step: 'requested' })
-  const payments = payload.payment ? [{ method: payload.payment.method, amountCents: payload.payment.amountCents }] : []
+  const payments = payload.payments ?? (payload.payment ? [payload.payment] : [])
   const hardwareAction = getAutomaticSaleHardwareAction({
     payments,
     isReprint: options.isReprint,

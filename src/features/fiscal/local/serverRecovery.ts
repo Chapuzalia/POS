@@ -2,6 +2,7 @@ import { z } from 'zod'
 import { supabase } from '../../../lib/supabase.ts'
 import type { BridgeRecord } from './bridgeClient.ts'
 import type { FiscalInstallation } from './installation.ts'
+import { readFiscalBackend } from './backendRead.ts'
 import { readLocalFiscalHead, readLocalFiscalRecord, reconcileLocalFiscalCopies, type LocalFiscalEntry,
   type RestorableFiscalCopy } from './localLedger.ts'
 
@@ -47,7 +48,9 @@ function toCopy(row: Row, installation: FiscalInstallation): RestorableFiscalCop
     ...row.invoice_snapshot,
     ticketId: row.ticket_id ?? row.invoice_snapshot.ticketId,
     saleId: row.sale_id ?? row.invoice_snapshot.saleId,
-    paymentId: typeof paymentId === 'string' ? paymentId : row.invoice_snapshot.paymentId,
+    paymentId: typeof paymentId === 'string' ? paymentId
+      : row.rpc_result && row.invoice_snapshot.paymentId !== null ? row.sale_id ?? row.invoice_snapshot.saleId
+        : row.invoice_snapshot.paymentId,
   }
   const annulment = row.record_kind === 'anulacion'
     ? { issuerName: invoice.issuerName, issuerNif: invoice.issuerNif, series: invoice.series, number: invoice.number,
@@ -74,7 +77,7 @@ async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstall
   ).eq('tenant_id', installation.tenantId).eq('fiscal_subject_id', installation.fiscalSubjectId)
     .eq('installation_id', installation.installationId)
   const latest = preparedHead ? { data: preparedHead.record, error: null }
-    : await scopeQuery().order('chain_position', { ascending: false }).limit(1).maybeSingle()
+    : await readFiscalBackend(signal => scopeQuery().order('chain_position', { ascending: false }).limit(1).abortSignal(signal).maybeSingle())
   if (latest.error) throw latest.error
   if (!latest.data) return 0
   const lastServer = rowSchema.parse(latest.data)
@@ -89,8 +92,8 @@ async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstall
   const copies: RestorableFiscalCopy[] = []
   let offset = 0
   for (;;) {
-    const page = await scopeQuery().gte('chain_position', lastLocal?.record.chainPosition ?? 1)
-      .order('chain_position', { ascending: true }).range(offset, offset + 499)
+    const page = await readFiscalBackend(signal => scopeQuery().gte('chain_position', lastLocal?.record.chainPosition ?? 1)
+      .order('chain_position', { ascending: true }).range(offset, offset + 499).abortSignal(signal))
     if (page.error) throw page.error
     const rows = (page.data ?? []).map(row => toCopy(rowSchema.parse(row), installation))
     copies.push(...rows)

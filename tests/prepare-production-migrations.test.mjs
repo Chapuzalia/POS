@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict'
-import { mkdtemp, mkdir, readFile, rm, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -15,6 +15,31 @@ const legacySql = `create index concurrently first_idx on public.example (id);
 create index concurrently second_idx on public.example (name);
 create index concurrently third_idx on public.example (created_at);
 `
+
+test('el paquete completo no contiene índices concurrentes y conserva las fuentes históricas', async () => {
+  const directory = await mkdtemp(join(tmpdir(), 'production-complete-migrations-'))
+  const source = new URL('../supabase/migrations/', import.meta.url)
+  const filenames = (await readdir(source)).filter(filename => filename.endsWith('.sql'))
+  const originals = new Map(await Promise.all(filenames.map(async filename => [
+    filename, await readFile(new URL(filename, source)),
+  ])))
+  try {
+    const output = join(directory, 'output')
+    await prepareProductionMigrations(source, output)
+    const concurrentSources = []
+    for (const [filename, original] of originals) {
+      assert.deepEqual(await readFile(new URL(filename, source)), original, filename)
+      const prepared = await readFile(join(output, filename), 'utf8')
+      assert.doesNotMatch(prepared, /\bcreate\s+(?:unique\s+)?index\s+concurrently\b/i, filename)
+      if (/\bcreate\s+(?:unique\s+)?index\s+concurrently\b/i.test(original.toString('utf8'))) {
+        concurrentSources.push(filename)
+      }
+    }
+    assert.deepEqual(concurrentSources, [])
+  } finally {
+    await rm(directory, { recursive: true, force: true })
+  }
+})
 
 test('prepara SQL con BOM ejecutable en PostgreSQL sin modificar las fuentes ni literales', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'production-migrations-'))
@@ -53,7 +78,9 @@ test('prepara SQL con BOM ejecutable en PostgreSQL sin modificar las fuentes ni 
   }
 })
 
-test('conserva el guard que exige los tres índices de la migración legacy', () => {
+test('acepta los tres índices legacy sin CONCURRENTLY y conserva el guard de cantidad', () => {
+  const corrected = legacySql.replaceAll('create index concurrently', 'create index if not exists')
+  assert.equal(adaptLegacyPipelineMigration(corrected), corrected)
   assert.throws(
     () => adaptLegacyPipelineMigration('create index concurrently only_idx on public.example (id);'),
     /must contain exactly 3 concurrent indexes; found 1/,
@@ -87,7 +114,7 @@ test('los índices de latencia empaquetados se ejecutan en una transacción y co
     ])
     for (const row of result.rows) assert.match(row.indexdef, /WHERE \(event_kind = 'sale_created'::text\)/)
 
-    await writeFile(join(source, SALE_LATENCY_PIPELINE_MIGRATION), original.replace(/create index concurrently/, 'create index'))
+    await writeFile(join(source, SALE_LATENCY_PIPELINE_MIGRATION), original.replace(/create index if not exists/, 'create index concurrently if not exists'))
     await assert.rejects(prepareProductionMigrations(source, join(directory, 'invalid-output')), /must contain exactly 2 concurrent indexes; found 1/)
   } finally {
     await db.close()

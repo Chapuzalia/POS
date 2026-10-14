@@ -354,6 +354,7 @@ export type SaleRecord = {
   paymentMethod: HistoricalPaymentMethod | null
   totalCents: number
   createdAt: string
+  payments?: Array<{ method: HistoricalPaymentMethod; amountCents: number }>
 }
 
 export type RefundDocument = {
@@ -467,7 +468,10 @@ export type SaleCreatedPayload = {
     changeCents: number
     cashlogyRequestId?: string | null
     cashlogyTransactionId?: string | null
+    partNumber?: number
   } | null
+  /** All tenders for a single sale; payment remains the legacy single-tender field. */
+  payments?: Array<NonNullable<SaleCreatedPayload['payment']>>
   localFiscal?: {
     recordId: string
     series: string
@@ -791,6 +795,7 @@ export type CrmSalesReportTicket = {
   discountRoundingIncrementCents: DiscountRoundingIncrementCents | null
   paymentMethod: HistoricalPaymentMethod | null
   quantity: number
+  payments?: Array<{ id: string; method: HistoricalPaymentMethod; amountCents: number; receivedCents: number | null; changeCents: number; partNumber?: number }>
   status: 'paid' | 'void'
   subtotalCents: number
   totalCents: number

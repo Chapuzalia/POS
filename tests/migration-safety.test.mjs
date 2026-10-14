@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { execFileSync } from 'node:child_process'
-import { mkdtemp, writeFile, mkdir, rm } from 'node:fs/promises'
+import { mkdtemp, readFile, writeFile, mkdir, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import test from 'node:test'
@@ -89,6 +89,92 @@ revoke all on function public.pay() from public, anon;
 grant execute on function public.pay() to authenticated;`)
   assert.deepEqual(findings, [])
   assert.ok(analyzeMigration(`${safeHeader}-- migration-safety-reviewed: DROP\ndrop table public.sales;`).includes('RULE CANNOT BE REVIEW-WAIVED: DROP'))
+})
+
+test('permite únicamente las dos ampliaciones CHECK revisadas, sin permitir otros DROP ni alterar predicados', async () => {
+  const loopback = await readFile(new URL('../supabase/migrations/20261010232706_allow_http_loopback_bridge.sql', import.meta.url), 'utf8')
+  const refund = await readFile(new URL('../supabase/migrations/20261011010552_allow_refund_installation_series.sql', import.meta.url), 'utf8')
+  for (const sql of [loopback, refund]) {
+    assert.deepEqual(analyzeMigration(sql), [])
+    assert.deepEqual(analyzeMigration(sql.replaceAll('alter table', 'ALTER /* reviewed syntax */ TABLE').replaceAll('\n', '\r\n')), [])
+    assert.deepEqual(analyzeMigration(sql.replace('add constraint', 'add /* ; */ constraint')), [])
+    const variants = [
+      sql.replace(/-- migration-safety-reviewed:[^\n]*\n/, ''),
+      sql.replace(/-- migration-safety-reason:[^\n]*\n/, ''),
+      sql.replace('drop constraint', 'drop constraint if exists'),
+      sql.replace('not valid;', ';'),
+      sql.replace('drop constraint', 'drop column'),
+      sql + '\ndrop table public.sales;',
+      sql + '\nalter table public.sales drop constraint total_check;',
+      sql + '\nalter table public.sales disable row level security;',
+      sql.replace('COMPATIBLE CHECK REPLACEMENT', 'DROP'),
+      sql.replace('COMPATIBLE CHECK REPLACEMENT', 'COMPATIBLE CHECK REPLACEMENT, DROP'),
+      sql.replace('set lock_timeout', 'set standard_conforming_strings = off;\nset lock_timeout'),
+    ]
+    for (const unsafe of variants) assert.ok(analyzeMigration(unsafe).length, unsafe)
+  }
+  // Literal values matter: the normal scanner blanks strings, but this rule
+  // must reject a changed regex, fiscal suffix, size/port bound or table target.
+  for (const unsafe of [
+    loopback.replace('65535', '99999'),
+    loopback.replaceAll('255', '500'),
+    loopback.replace('localhost|127', 'example.com|127'),
+    loopback.replace('^https://[^/?#@]+/?$', '^https?://.*$'),
+    loopback.replaceAll('public.fiscal_pos_bridge_settings', 'public.other_settings'),
+    refund.replaceAll('-R$', '-S$'),
+    refund.replace('[1-9][0-9]*', '[0-9]*'),
+    refund.replaceAll('refund_requests_fiscal_series_check', 'refund_requests_total_cents_check'),
+    refund.replaceAll('public.refund_requests', 'public.sales'),
+  ]) assert.ok(analyzeMigration(unsafe).includes('DROP'), unsafe)
+})
+
+test('el rango permite los CHECK compatibles añadidos y mantiene la inmutabilidad de migraciones desplegadas', async () => {
+  const refund = await readFile(new URL('../supabase/migrations/20261011010552_allow_refund_installation_series.sql', import.meta.url), 'utf8')
+  await withRepository(async cwd => {
+    const old = 'supabase/migrations/20260901000000_refunds.sql'
+    const added = 'supabase/migrations/20261011010552_allow_refund_installation_series.sql'
+    await put(cwd, old, `${safeHeader}create table public.refund_requests (fiscal_series text);`)
+    const baseSha = commit(cwd, 'baseline')
+    await put(cwd, added, refund)
+    const headSha = commit(cwd, 'compatible CHECK widening')
+    assert.deepEqual(checkMigrationRange(baseSha, headSha, { cwd }), [added])
+    await put(cwd, old, refund)
+    const rewritten = commit(cwd, 'invalid rewrite of historical migration')
+    assert.throws(() => checkMigrationRange(baseSha, rewritten, { cwd }), /Existing migration files are immutable/)
+  })
+})
+
+test('el historial permite solo retirar los cinco CONCURRENTLY autorizados, sin cambiar otro SQL', async () => {
+  const files = [
+    'supabase/migrations/20260912222539_paginate_pos_session_tickets.sql',
+    'supabase/migrations/20261003183458_optimize_pos_sale_latency.sql',
+  ]
+  const corrected = await Promise.all(files.map(file => readFile(new URL(`../${file}`, import.meta.url), 'utf8')))
+  await withRepository(async cwd => {
+    for (const [index, file] of files.entries()) {
+      await put(cwd, file, corrected[index].replace(/^create index if not exists\b/gim, 'create index concurrently if not exists'))
+    }
+    const unrelated = 'supabase/migrations/20260901000000_other.sql'
+    await put(cwd, unrelated, `${safeHeader}create index concurrently if not exists other_idx on public.sales (id);`)
+    const base = commit(cwd, 'historical concurrent indexes')
+    for (const [index, file] of files.entries()) await put(cwd, file, corrected[index])
+    assert.deepEqual(checkMigrationRange(base, commit(cwd, 'remove only CONCURRENTLY'), { cwd }), [])
+
+    for (const [index, file] of files.entries()) {
+      for (const changed of [
+        corrected[index] + '\ndrop table public.sales;',
+        corrected[index] + '\n-- unrelated edit',
+        corrected[index].replace('create index if not exists', 'create index concurrently if not exists'),
+        corrected[index].replace('where event_kind', 'where upper(event_kind)'),
+      ]) {
+        await put(cwd, file, changed)
+        assert.throws(() => checkMigrationRange(base, commit(cwd, 'reject additional historical edit'), { cwd }), /Existing migration files are immutable/)
+      }
+      await put(cwd, file, corrected[index])
+    }
+    await put(cwd, unrelated, `${safeHeader}create index if not exists other_idx on public.sales (id);`)
+    assert.throws(() => checkMigrationRange(base, commit(cwd, 'reject an unapproved historical file'), { cwd }), /Existing migration files are immutable/)
+  })
 })
 
 test('exige cabecera exacta y timeouts explícitos', () => {

@@ -28,7 +28,7 @@ import type {
   TenantContext,
 } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
-import { localFiscalMode } from '../../fiscal/local/mode.ts'
+import { resolveLocalFiscalMode } from '../../fiscal/local/tenantMode.ts'
 import { loadFiscalInstallation } from '../../fiscal/local/installation.ts'
 import { findLocalFiscalEntryByTicket } from '../../fiscal/local/localLedger.ts'
 import { printPayloadWithLocalFiscal } from '../../fiscal/local/posInvoice.ts'
@@ -52,6 +52,7 @@ import { useActiveCashSession } from './useActiveCashSession'
 import { useCashRegisterOptions } from './useCashRegisterOptions'
 import { useCashTicketActions } from './useCashTicketActions'
 import { getClosedCashState } from '../services/cashState'
+import { loadLocalSessionSales } from '../services/localSessionTickets.ts'
 import {
   createCashMovement as createCashMovementRequest,
   loadCashClosing,
@@ -102,6 +103,20 @@ export function useCashSession(options: Options) {
   const syncPendingEvents = options.syncPendingEvents
   usePrintAgentScope(cashContext)
   useCashlogyScope(cashContext, session?.id ?? null)
+
+  useEffect(() => {
+    if (!cashContext || !session || isOnline) return
+    let active = true
+    void loadLocalSessionSales(cashContext, session).then(sales => {
+      if (!active || saleRefreshScopeRef.current !== saleRefreshScope) return
+      setLedger(current => [...new Map([...sales, ...current].map(sale => [sale.id, sale])).values()])
+    }).catch(error => {
+      if (!active) return
+      reportOperationError(error, { operation: 'cash.session', step: 'restore_local_sales', recoverable: true })
+      reportError('No se han podido recuperar todas las ventas locales. Revisa el almacenamiento antes de cerrar la caja.')
+    })
+    return () => { active = false }
+  }, [cashContext, isOnline, reportError, saleRefreshScope, session])
 
   useEffect(() => {
     if (!cashContext || !session) {
@@ -169,11 +184,13 @@ export function useCashSession(options: Options) {
 
   const printSale = useCallback(async (
     payload: SessionTicketRecord['payload'],
-    printOptions: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean } = {},
+    printOptions: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean; fiscalMode?: 'legacy' | 'verifactu' } = {},
   ) => {
     if (!options.context) return
     const printState = usePrintAgentStore.getState()
-    if (localFiscalMode() === 'production' && printState.token && printState.selectedPrinterId) {
+    // Copies use the original persisted snapshot, including retired installations.
+    if (!printOptions.isReprint && printState.token && printState.selectedPrinterId && (payload.localFiscal
+      || (printOptions.fiscalMode !== 'legacy' && await resolveLocalFiscalMode(options.context.tenantId) === 'production'))) {
       const installation = await loadFiscalInstallation(options.context, { cashRegisterId: payload.ticket.cashRegisterId })
       const entry = await findLocalFiscalEntryByTicket(installation, payload.ticket.id)
       if (!entry) {

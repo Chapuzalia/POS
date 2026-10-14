@@ -3,13 +3,17 @@ import { readFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
 import { runInNewContext } from 'node:vm'
 import test from 'node:test'
+import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
+import * as durable from '../src/lib/durableSales.ts'
+import { compileComponent } from './helpers/component-harness.mjs'
+import { withConfirmedRestaurantPayments } from '../src/features/restaurant/services/paymentPayload.ts'
 
 // Execute the real store actions with isolated storage/network dependencies.
 async function loadStore(kind, request, options = {}) {
   const name = kind === 'payment' ? 'useCashlogyStore' : 'useCashlogyManagementStore'
   const source = await readFile(new URL(`../src/features/local-printing/cashlogy/${name}.ts`, import.meta.url), 'utf8')
   const code = stripTypeScriptTypes(source).replace(/^import\s[\s\S]*?from\s+['"][^'"]+['"]\s*;?/gm, '').replace(/^export\s+/gm, '')
-  const intent = { requestId: 'request-1', transactionId: null, chargeRequestedAt: '2026-09-10', amountCents: 600 }
+  const intent = options.intent ?? { requestId: 'request-1', transactionId: null, chargeRequestedAt: '2026-09-10', amountCents: 600 }
 const dependencies = {
     CashlogyError: class CashlogyError extends Error {
       constructor(options = {}) { super(options.message ?? options.code); Object.assign(this, options) }
@@ -27,7 +31,7 @@ const dependencies = {
       getCashlogyHealth: options.getCashlogyHealth ?? (async () => ({ activeCashManagementOperation: null })),
       ...options.client,
     }),
-    usePrintAgentStore: { getState: () => ({ baseUrl: 'https://agent.local', token: 'token', cashlogyConfigured: true,
+    usePrintAgentStore: { getState: () => ({ baseUrl: 'https://agent.local', token: 'token', cashlogyConfigured: options.configured ?? true,
       checkCashlogyHealth: options.getCashlogyHealth ?? (async () => ({ enabled: true, ok: true, sessionState: 'ready', activeTransaction: null })) }) },
     loadCashlogyIntent: () => intent,
     loadCashlogyManagementIntent: () => kind === 'management' ? intent : null,
@@ -45,12 +49,36 @@ const dependencies = {
     reportOperationError: () => {},
     operationBreadcrumb: () => {},
     createCashlogyRequestId: () => 'request-new',
+    updateCashlogyPaymentAttempt: options.updateCashlogyPaymentAttempt ?? (async () => {}),
     toCashlogyError: (error) => error,
     AbortController,
     AbortSignal,
   }
-  return runInNewContext(`${code}\n${name}`, dependencies)
+  return runInNewContext(`${code}\n${kind === 'payment' ? 'useCashlogyStore.settle = settleCashlogyPaymentIfConfigured;' : ''}\n${name}`, dependencies)
 }
+
+test('payment: durable recovery queries the original request even after configuration changes and never creates another charge', async () => {
+  let queries = 0, charges = 0
+  const store = await loadStore('payment', async requestId => {
+    queries++; assert.equal(requestId, 'request-1')
+    return { transaction: { id: 'transaction', requestId, requestedAmountCents: 600, saleId: null, status: 'completed' } }
+  }, { configured: false, client: { createCashlogyTransaction: async () => { charges++; throw new Error('Second charge') } } })
+  store.getState().configureScope({ tenantId: 't', establishmentId: 'v', terminalId: 'd' })
+  const confirmed = await store.settle(600, 'original-sale', 'request-1', true)
+  assert.equal(confirmed.saleId, 'original-sale')
+  assert.equal(queries, 1)
+  assert.equal(charges, 0)
+})
+
+test('payment: a lost original request response cannot fall back to creating a charge', async () => {
+  let charges = 0
+  const store = await loadStore('payment', async () => { throw new Error('Request unavailable') }, {
+    client: { createCashlogyTransaction: async () => { charges++; throw new Error('Second charge') } },
+  })
+  store.getState().configureScope({ tenantId: 't', establishmentId: 'v', terminalId: 'd' })
+  await assert.rejects(store.settle(600, 'sale', 'request-1', true), /unavailable/)
+  assert.equal(charges, 0)
+})
 
 test('management: a missing saved operation stops automatic recovery and can be discarded after a fresh health check', async () => {
   const saves = []
@@ -358,4 +386,180 @@ test('payment: late-phase cancellation waits for the physical result after expli
   assert.equal(polls, 1)
   assert.equal(store.getState().intent, null)
   assert.equal(store.getState().modalOpen, false)
+})
+
+async function journalFixture() {
+  globalThis.indexedDB = new IDBFactory()
+  globalThis.window = { location: { pathname: '/pos' } }
+  Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: (_key, _options, work) => work() } } })
+  const context = { tenantId: 't', venueId: 'v', deviceId: 'd', userId: 'u' }
+  const session = { id: 'session' }
+  const key = `${durable.paymentScope(context, session.id)}|restaurant:close:order`
+  const payload = { sale: { id: 'original-sale', tenantId: 't', totalCents: 600, paymentMethod: 'cash' },
+    ticket: { id: 'ticket' }, payment: { id: 'payment', receivedCents: 600 }, lines: [] }
+  const operation = await durable.preparePaymentOperation(key, 'original-order', payload, { orderId: 'order', method: 'cash' })
+  const intent = { requestId: 'request-1', saleId: payload.sale.id, amountCents: 600,
+    paymentOperationKey: key, transactionId: null, chargeRequestedAt: '2026-10-11' }
+  await durable.updateCashlogyPaymentAttempt(intent, paymentScope, { type: 'start' })
+  return { context, session, key, payload, operation, intent }
+}
+
+async function restaurantRecovery(store) {
+  const source = await readFile(new URL('../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
+  return compileComponent(source, {
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
+    '../../../lib/durableSales.ts': durable,
+    '../../local-printing/cashlogy/useCashlogyStore.ts': {
+      isCashlogyPaymentConfigured: () => true, settleCashlogyPaymentIfConfigured: store.settle,
+      getCashlogyPaymentAmounts: () => ({ receivedCents: 600, changeCents: 0 }),
+    },
+    '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {} },
+    '../../fiscal/local/tenantMode.ts': { resolveLocalFiscalMode: async () => 'disabled' },
+    '../../fiscal/local/posInvoice.ts': {}, '../../fiscal/local/restaurantInvoice.ts': {},
+    '../../tables/service.ts': { payRestaurantIdempotent: async () => ({ saleId: 'remote-sale', ticketId: 'remote-ticket', paymentId: 'remote-payment' }) },
+  }, { JSON })
+}
+
+for (const mode of ['before_request', 'missing', 'cancelled']) test(`payment journal: cancel ${mode} unlocks a new sale instead of leaving charging forever`, async () => {
+  const fixture = await journalFixture()
+  const store = await loadStore('payment', async () => { throw absentPayment() }, {
+    intent: { ...fixture.intent, chargeRequestedAt: mode === 'before_request' ? null : fixture.intent.chargeRequestedAt },
+    updateCashlogyPaymentAttempt: durable.updateCashlogyPaymentAttempt,
+  })
+  store.getState().configureScope(paymentScope)
+  if (mode === 'cancelled') store.setState({ transaction: { id: 'tx', requestId: 'request-1', status: 'cancelled' } })
+  await store.getState().cancel()
+  assert.equal(store.getState().intent, null)
+  assert.equal(await durable.loadPaymentOperation(fixture.key), undefined)
+  const next = await durable.preparePaymentOperation(fixture.key, 'changed-order', { ...fixture.payload, sale: { ...fixture.payload.sale, id: 'new-sale' } })
+  assert.equal(next.state, 'prepared')
+  assert.equal(next.payload.sale.id, 'new-sale')
+})
+
+test('payment journal: restart saves the new request before POST and recovery after response loss queries that request without charging again', async () => {
+  const fixture = await journalFixture()
+  let charges = 0
+  const store = await loadStore('payment', async () => { throw absentPayment() }, {
+    intent: fixture.intent, updateCashlogyPaymentAttempt: durable.updateCashlogyPaymentAttempt,
+    client: { getCashlogyLevels: async () => ({ levels: [] }), createCashlogyCharge: async payload => {
+      charges++
+      assert.equal(payload.requestId, 'request-new')
+      assert.equal(payload.saleId, 'original-sale')
+      assert.equal((await durable.loadPaymentOperation(fixture.key)).cashlogyRequestId, payload.requestId)
+      throw new Error('Network response lost')
+    } },
+  })
+  store.getState().configureScope(paymentScope)
+  await assert.rejects(store.getState().retryPayment(true), /response lost/)
+  const pending = await durable.loadPaymentOperation(fixture.key)
+  assert.equal(pending.cashlogyRequestId, 'request-new')
+  assert.equal(pending.eventId, fixture.operation.eventId)
+  // Simulate reload with the original draft/order no longer open.
+  const restored = await loadStore('payment', async requestId => {
+    assert.equal(requestId, 'request-new')
+    return { transaction: { ...completedPayment, saleId: 'original-sale' } }
+  }, { intent: store.getState().intent, updateCashlogyPaymentAttempt: durable.updateCashlogyPaymentAttempt,
+    client: { createCashlogyCharge: async () => assert.fail('Recovery must not POST') } })
+  restored.getState().configureScope(paymentScope)
+  const service = await restaurantRecovery(restored)
+  const [recovered] = await service.recoverRestaurantPayments(fixture.context, fixture.session)
+  assert.equal(recovered.transaction.requestId, 'request-new')
+  assert.equal(recovered.payload.payment.cashlogyRequestId, 'request-new')
+  assert.equal((await durable.loadPaymentOperation(fixture.key)).state, 'committed')
+  assert.equal(charges, 1)
+})
+
+test('payment journal: a missing local Cashlogy intent is reconstructed for cancel/restart controls without posting a charge', async () => {
+  const fixture = await journalFixture()
+  const store = await loadStore('payment', async () => { throw absentPayment() }, {
+    intent: fixture.intent, updateCashlogyPaymentAttempt: durable.updateCashlogyPaymentAttempt,
+    client: { createCashlogyCharge: async () => assert.fail('Missing is not permission to charge') },
+  })
+  store.getState().configureScope(paymentScope)
+  store.setState({ intent: null })
+  await assert.rejects(store.settle(600, 'original-sale', 'request-1', true, fixture.key))
+  assert.equal(store.getState().modalOpen, true)
+  assert.equal(store.getState().missingTransaction, true)
+  assert.equal(store.getState().intent.paymentOperationKey, fixture.key)
+  await store.getState().cancel(true)
+  assert.equal(await durable.loadPaymentOperation(fixture.key), undefined)
+})
+
+test('payment journal: cancel on a confirmed charge retains the accepted money even after the agent record is closed', async () => {
+  const fixture = await journalFixture()
+  const store = await loadStore('payment', async () => assert.fail('The agent record is already closed'), {
+    intent: fixture.intent, updateCashlogyPaymentAttempt: durable.updateCashlogyPaymentAttempt,
+  })
+  store.getState().configureScope(paymentScope)
+  store.setState({ transaction: { ...completedPayment, requestId: 'request-1', saleId: 'original-sale', automaticAcceptedCents: 700, returnedCents: 100 } })
+  await store.getState().cancel(true)
+  assert.equal(store.getState().intent, null)
+  const accepted = await durable.loadPaymentOperation(fixture.key)
+  assert.equal(accepted.state, 'accepted')
+  assert.equal(accepted.payload.payment.receivedCents, 700)
+  assert.equal(accepted.payload.payment.changeCents, 100)
+  await assert.rejects(durable.preparePaymentOperation(fixture.key.replace('restaurant:close:order', 'quick-sale'), 'new', fixture.payload), /otro cobro pendiente/)
+  const service = await restaurantRecovery(store)
+  const [recovered] = await service.recoverRestaurantPayments(fixture.context, fixture.session)
+  assert.equal(recovered.payload.payment.receivedCents, 700)
+  assert.equal(recovered.payload.payment.changeCents, 100)
+  assert.equal((await durable.loadPaymentOperation(fixture.key)).state, 'committed')
+})
+
+test('payment journal: a timeout preserves the attempt; failure to persist a restart sends no charge and still permits cancelling before POST', async () => {
+  const fixture = await journalFixture()
+  const store = await loadStore('payment', async () => { throw new Error('Timeout') }, {
+    intent: fixture.intent, updateCashlogyPaymentAttempt: durable.updateCashlogyPaymentAttempt,
+    client: { getCashlogyLevels: async () => ({ levels: [] }), createCashlogyCharge: async () => assert.fail('Cannot charge without durable identity') },
+  })
+  store.getState().configureScope(paymentScope)
+  await assert.rejects(store.getState().cancel(), /Timeout/)
+  assert.equal((await durable.loadPaymentOperation(fixture.key)).state, 'charging')
+  const put = IDBObjectStore.prototype.put
+  IDBObjectStore.prototype.put = function (...args) {
+    if (this.name === 'paymentOperations') { this.transaction.abort(); throw new DOMException('Storage full', 'QuotaExceededError') }
+    return put.apply(this, args)
+  }
+  try {
+    store.setState({ intent: null })
+    await assert.rejects(store.getState().startPayment(600, 'original-sale', undefined, 'request-new', fixture.key), /Storage full/)
+  } finally { IDBObjectStore.prototype.put = put }
+  assert.equal(store.getState().intent.chargeRequestedAt, null)
+  await store.getState().cancel()
+  assert.equal(await durable.loadPaymentOperation(fixture.key), undefined)
+})
+
+test('payment journal: a late durable recovery reply cannot revive an explicitly cancelled missing attempt', async () => {
+  const fixture = await journalFixture()
+  let respond
+  let queries = 0
+  const store = await loadStore('payment', async () => {
+    if (++queries === 1) return new Promise(resolve => { respond = resolve })
+    throw absentPayment()
+  }, { intent: fixture.intent, updateCashlogyPaymentAttempt: durable.updateCashlogyPaymentAttempt })
+  store.getState().configureScope(paymentScope)
+  const recovery = store.settle(600, 'original-sale', 'request-1', true, fixture.key)
+  const rejection = assert.rejects(recovery, error => error.code === 'CASHLOGY_OPERATION_CANCELLED')
+  await store.getState().cancel(true)
+  respond({ transaction: { ...completedPayment, requestId: 'request-1', saleId: 'original-sale' } })
+  await rejection
+  assert.equal(store.getState().intent, null)
+  assert.equal(store.getState().transaction, null)
+  assert.equal(await durable.loadPaymentOperation(fixture.key), undefined)
+})
+
+test('payment journal: cancellation is scoped and cannot erase an accepted or committed sale', async () => {
+  const fixture = await journalFixture()
+  const closing = { type: 'close', transaction: null, receivedCents: null, changeCents: null }
+  await assert.rejects(durable.updateCashlogyPaymentAttempt(fixture.intent, { ...paymentScope, tenantId: 'other' }, closing), /identificar/)
+  assert.equal((await durable.loadPaymentOperation(fixture.key)).state, 'charging')
+  const accepted = await durable.acceptPaymentOperation(await durable.loadPaymentOperation(fixture.key), fixture.payload,
+    { ...completedPayment, requestId: 'request-1', saleId: 'original-sale' })
+  await durable.updateCashlogyPaymentAttempt(fixture.intent, paymentScope, closing)
+  assert.equal((await durable.loadPaymentOperation(fixture.key)).state, 'accepted')
+  await assert.rejects(durable.updateCashlogyPaymentAttempt({ ...fixture.intent, requestId: 'request-new' }, paymentScope, { type: 'start' }), /ya está aceptado/)
+  // Restaurant RPCs may replace the draft sale ID with the server's sale ID.
+  await durable.commitPaymentOperation(accepted, { ...fixture.payload, sale: { ...fixture.payload.sale, id: 'remote-sale' } }, false)
+  await durable.updateCashlogyPaymentAttempt(fixture.intent, paymentScope, closing)
+  assert.equal((await durable.loadPaymentOperation(fixture.key)).state, 'committed')
 })

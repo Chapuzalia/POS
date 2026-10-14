@@ -126,7 +126,7 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSched
           <div className="rounded-[var(--radius)] border border-[var(--separator)] p-4"><span className="text-sm text-[var(--muted)]">{defaultDiscount ? 'Total con descuento' : 'Total comanda'}</span><strong className="mt-1 block text-xl font-black">{formatMoney(setupTotal)}</strong>{defaultDiscount ? <small className="text-[var(--muted)] line-through">{formatMoney(totalCents)}</small> : null}</div>
           <div className="rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] p-4"><span className="text-sm text-[var(--muted)]">Por comensal</span><strong className="mt-1 block text-xl font-black text-[var(--accent)]">{formatMoney(setupPartTotal)}</strong>{defaultDiscount ? <small className="text-[var(--muted)]">Descuento heredado</small> : null}</div>
         </div>
-        <p className="text-center text-xs text-[var(--muted)]">Si no divide exacto, los céntimos se ajustan automáticamente entre los cobros.</p>
+        <p className="text-center text-xs text-[var(--muted)]">Se emitirá un único tiquet al completar todos los pagos, con el importe y la forma de pago de cada parte. Los céntimos se ajustan automáticamente entre los cobros.</p>
         {localError ? <p className="rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-bold text-[var(--danger)]">{localError}</p> : null}
         <UiButton className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45 w-full" disabled={isBusy || paying} onClick={() => void startSplit()} type="button"><Check size={18} /> Empezar a cobrar</UiButton>
       </div> : <div className="!mt-6 !block space-y-5">
@@ -137,6 +137,12 @@ export function EqualSplitOrderModal({ defaultDiscount, discounts, discountSched
           </div>
           <ProgressBar aria-label={`${split.paidParts} de ${split.partCount} pagados`} className="mt-4" maxValue={split.partCount} value={split.paidParts}><ProgressBar.Track className="h-2.5 bg-[var(--separator)]"><ProgressBar.Fill className="bg-[var(--accent)]" /></ProgressBar.Track></ProgressBar>
           <p className="mt-3 text-sm font-semibold text-[var(--muted)]">{split.remainingParts === 1 ? 'Último cobro' : `Quedan ${split.remainingParts} personas`}</p>
+          {split.singleTicket && split.tenders?.length ? <ol className="mt-3 space-y-2 text-sm">
+            {split.tenders.map(tender => <li className="flex justify-between gap-3" key={tender.id}>
+              <span>Parte {tender.partNumber} · {tender.method === 'cash' ? 'Efectivo' : tender.method === 'card' ? 'Tarjeta' : 'Sin pago'}</span>
+              <strong>{formatMoney(tender.amountCents)}</strong>
+            </li>)}
+          </ol> : null}
         </div>
         {useDefaultDiscount && currentDiscount ? <p className="rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] px-3 py-2 text-sm font-semibold text-[var(--foreground)]">Este pago hereda el descuento de la comanda. Puedes cambiarlo o quitarlo solo para esta parte.</p> : null}
         <PaymentPanel discount={currentDiscount} disabled={isBusy || paying} feedback={feedback} heading="Cobrar siguiente parte" onOpenDiscount={() => setDiscountOpen(true)} onPayment={(method) => { if (method === 'cash' && cashlogyConfigured) void completePart('cash', null); else if (method === 'cash') setCashOpen(true); else void completePart(method, null) }} onRemoveDiscount={() => { setCurrentDiscount(null); setUseDefaultDiscount(false) }} subtotalCents={split.nextPartCents} totalCents={nextPayment.totalCents} />

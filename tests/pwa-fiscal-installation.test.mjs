@@ -7,6 +7,7 @@ import { compileComponent } from './helpers/component-harness.mjs'
 import { canonicalRecordSchema, createAltaRecord } from '../src/features/fiscal/local/canonical.ts'
 import { aeatHash } from '../src/features/fiscal/local/verifactu.ts'
 import { UserFacingError } from '../src/utils/UserFacingError.ts'
+import { analyzeMigration } from '../scripts/check-migrations.mjs'
 
 const migration = readFileSync(new URL('../supabase/migrations/20261002191101_pwa_fiscal_installation_identity.sql', import.meta.url), 'utf8')
 const schema = readFileSync(new URL('../supabase/migrations/20260928120000_prepare_local_verifactu_scope.sql', import.meta.url), 'utf8')
@@ -25,7 +26,7 @@ async function database(t, withLegacy = false) {
   const db = new PGlite()
   t.after(() => db.close())
   await db.exec(`
-    create role anon; create role authenticated; create schema auth;
+    create role anon; create role authenticated; create role service_role bypassrls; create schema auth;
     create function auth.uid() returns uuid language sql as $$ select '${device}'::uuid $$;
     create table tenants(id uuid primary key);
     create table venues(id uuid primary key,tenant_id uuid,timezone text);
@@ -93,6 +94,15 @@ test('legacy adaptation preserves identity and reserves its sequence even after 
   assert.equal((await db.query('select fiscal_installation_series_prefix(i) as prefix from fiscal_sif_installations i where id=$1',[legacy])).rows[0].prefix,'BCN-C1')
 })
 
+test('devices without payment permission cannot activate or recover a fiscal installation', async t => {
+  const db = await database(t, true)
+  await db.query('update devices set can_take_payments=false where id=$1', [device])
+  await assert.rejects(activate(db, { expected: legacy }), /FISCAL_ACTIVATION_FORBIDDEN/)
+  await assert.rejects(activate(db, { expected: legacy, recover: true }), /FISCAL_ACTIVATION_FORBIDDEN/)
+  assert.equal((await db.query('select count(*)::integer as n from fiscal_sif_installations')).rows[0].n, 1)
+  assert.equal((await db.query('select retired_at from fiscal_sif_installations where id=$1', [legacy])).rows[0].retired_at, null)
+})
+
 test('test recovery never retires or creates an installation and is rejected for production or other tenants', async t => {
   const db = await database(t,true)
   assert.equal(await activate(db,{expected:legacy,recover:true}),legacy)
@@ -140,8 +150,11 @@ function identityHarness({ readError = false } = {}) {
 test('IndexedDB read failures never mean missing identity, and pending retries preserve their original confirmation', async()=>{
   const normal = identityHarness()
   assert.equal(await normal.service.readFiscalIdentity('box'),null)
+  assert.equal(await normal.service.readPendingFiscalActivation('box'),null)
   await assert.rejects(identityHarness({readError:true}).service.readFiscalIdentity('box'),/read failed/)
+  await assert.rejects(identityHarness({readError:true}).service.readPendingFiscalActivation('box'),/read failed/)
   const first = await normal.service.fiscalActivationRequest('box','old',false)
+  assert.equal((await normal.service.readPendingFiscalActivation('box')).requestId,first.requestId)
   const retry = await normal.service.fiscalActivationRequest('box','other',false)
   assert.equal(first.requestId,retry.requestId)
   assert.equal(retry.expectedInstallationId,'old')
@@ -232,4 +245,44 @@ test('ledger validation checks AEAT hashes and exact cursor identity, not only p
   cursor.previous.seriesAndNumber='BCN-C1-1-2026-S/1'
   entry.record.canonicalRecord.RegistroAlta.FechaHoraHusoGenRegistro='2026-10-02T10:01:00+02:00'
   await assert.rejects(harness.service.assertFiscalLedgerValid(scope,device,false,'BCN-C1-1'),/incompleto/)
+})
+
+
+test('bridge migration only enqueues new identities, preserves history and scopes service/user RPCs', async t => {
+  const db = await database(t,true)
+  await db.exec("alter table fiscal_pos_bridge_settings add column bridge_url text; update fiscal_pos_bridge_settings set bridge_url='https://bridge.example/'")
+  await db.exec(readFileSync(new URL('../supabase/migrations/20261010184559_bridge_installation_provisioning.sql', import.meta.url),'utf8'))
+  assert.deepEqual(analyzeMigration(readFileSync(new URL('../supabase/migrations/20261010184559_bridge_installation_provisioning.sql', import.meta.url),'utf8')),[])
+  assert.equal((await db.query('select bridge_requested from fiscal_sif_installations where id=$1',[legacy])).rows[0].bridge_requested,false)
+  assert.equal((await db.query('select count(*)::int as n from fiscal_bridge_requests')).rows[0].n,0)
+  assert.equal(await activate(db,{expected:legacy,recover:true,request:crypto.randomUUID()}),legacy)
+  assert.equal((await db.query('select count(*)::int as n from fiscal_bridge_requests')).rows[0].n,0,'test recovery never enrolls history')
+  const first = await activate(db,{expected:legacy})
+  assert.equal(await activate(db,{expected:legacy}),first)
+  assert.equal((await db.query('select count(*)::int as n from fiscal_bridge_requests')).rows[0].n,1)
+  await assert.rejects(db.query('update fiscal_sif_installations set bridge_requested=true where id=$1',[legacy]),/IMMUTABLE/)
+  const authorized = async id => (await db.query("select fiscal_bridge_authorize($1,'https://bridge.example') as value",[id])).rows[0].value
+  assert.equal(await authorized(legacy),null)
+  assert.equal((await authorized(first)).installation.id,first)
+  assert.equal((await db.query("select fiscal_bridge_authorize($1,'https://other.example') as value",[first])).rows[0].value,null)
+  await db.query('update devices set can_take_payments=false where id=$1',[device])
+  assert.equal(await authorized(first),null)
+  await db.query('update devices set can_take_payments=true where id=$1',[device])
+  await db.exec('set role authenticated')
+  await assert.rejects(db.query("select fiscal_bridge_pending('https://bridge.example')"),/permission denied/)
+  await assert.rejects(db.query('select * from fiscal_bridge_requests'),/permission denied/)
+  await db.exec('reset role; set role service_role')
+  const pending = (await db.query("select fiscal_bridge_pending('https://bridge.example') as value")).rows[0].value
+  assert.equal(pending.length,1); assert.equal(pending[0].installation.id,first)
+  assert.equal((await db.query("select fiscal_bridge_pending('https://other.example') as value")).rows[0].value.length,0)
+  await db.query("select fiscal_bridge_ack($1,'https://other.example')",[first])
+  assert.equal((await db.query("select fiscal_bridge_pending('https://bridge.example') as value")).rows[0].value.length,1)
+  await db.query("select fiscal_bridge_ack($1,'https://bridge.example')",[first])
+  await db.query("select fiscal_bridge_ack($1,'https://bridge.example')",[first])
+  assert.equal((await db.query("select fiscal_bridge_pending('https://bridge.example') as value")).rows[0].value.length,0)
+  await db.exec('reset role')
+  const replacement = await activate(db,{expected:first,request:crypto.randomUUID()})
+  assert.equal((await authorized(first)).installation.id,first,'retired installation can reconcile its own pending records')
+  assert.equal((await authorized(replacement)).installation.id,replacement)
+  assert.equal((await db.query('select installation_number from fiscal_sif_installations where id=$1',[legacy])).rows[0].installation_number,'OLD-NUMBER')
 })

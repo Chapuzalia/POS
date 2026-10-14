@@ -12,6 +12,7 @@ export type SaleStatsRow = {
   ticket_id: string
   payment_method: HistoricalPaymentMethod | null
   total_cents: number
+  sale_payments?: Array<{ method: HistoricalPaymentMethod; amount_cents: number }>
 }
 
 export type TicketLineStatsRow = {
@@ -57,6 +58,7 @@ export type OpenCashSessionSaleRow = {
   cash_session_id: string
   payment_method: HistoricalPaymentMethod | null
   total_cents: number
+  sale_payments?: SaleStatsRow['sale_payments']
 }
 
 export type OperatingDaySessionRow = {
@@ -120,7 +122,7 @@ export async function loadCrmDayActivity(
   ] = await Promise.all([
     client
       .from('sales')
-      .select('id, ticket_id, payment_method, total_cents')
+      .select('id, ticket_id, payment_method, total_cents, sale_payments(method, amount_cents)')
       .eq('tenant_id', context.tenantId)
       .eq('venue_id', venue.id)
       .gte('local_created_at', dayRange.startIso)
@@ -147,6 +149,7 @@ export async function loadCrmDayActivity(
     ((saleRows ?? []) as SaleStatsRow[]).map((sale) => ({
       ticketId: sale.ticket_id,
       paymentMethod: sale.payment_method,
+      payments: sale.sale_payments?.map(payment => ({ method: payment.method, amountCents: payment.amount_cents })),
       totalCents: sale.total_cents,
     })),
     operationalDayConfig,
@@ -175,7 +178,7 @@ async function loadCrmStatsLegacy(
   const salesRowsPromise = loadStatsRows<SaleStatsRow>(async (from, to) => {
     const { data, error } = await client
       .from('sales')
-      .select('id, ticket_id, payment_method, total_cents')
+      .select('id, ticket_id, payment_method, total_cents, sale_payments(method, amount_cents)')
       .eq('tenant_id', context.tenantId)
       .eq('venue_id', venue.id)
       .gte('local_created_at', periodRange.startIso)
@@ -298,6 +301,7 @@ async function loadCrmStatsLegacy(
     sales.map((sale) => ({
       ticketId: sale.ticket_id,
       paymentMethod: sale.payment_method,
+      payments: sale.sale_payments?.map(payment => ({ method: payment.method, amountCents: payment.amount_cents })),
       totalCents: sale.total_cents,
     })),
     operationalDayConfig,
@@ -324,17 +328,14 @@ async function loadCrmStatsLegacy(
   const openCashSessionById = new Map(openCashSessions.map((session) => [session.id, session]))
 
   sales.forEach((sale) => {
-    if (sale.payment_method !== 'cash' && sale.payment_method !== 'card') return
-    const current = byPaymentMap.get(sale.payment_method) ?? {
-      method: sale.payment_method,
-      totalCents: 0,
-      count: 0,
+    const payments = sale.sale_payments?.length ? sale.sale_payments : [{ method: sale.payment_method, amount_cents: sale.total_cents }]
+    const countedMethods = new Set<PaymentMethod>()
+    for (const payment of payments) {
+      if (payment.method !== 'cash' && payment.method !== 'card') continue
+      const current = byPaymentMap.get(payment.method) ?? { method: payment.method, totalCents: 0, count: 0 }
+      byPaymentMap.set(payment.method, { ...current, count: current.count + (countedMethods.has(payment.method) ? 0 : 1), totalCents: current.totalCents + payment.amount_cents })
+      countedMethods.add(payment.method)
     }
-    byPaymentMap.set(sale.payment_method, {
-      ...current,
-      count: current.count + 1,
-      totalCents: current.totalCents + sale.total_cents,
-    })
   })
 
 
@@ -370,7 +371,7 @@ async function loadCrmStatsLegacy(
   if (openSessions.length) {
     const { data: openSessionSaleRows, error: openSessionSalesError } = await client
       .from('sales')
-      .select('cash_session_id, payment_method, total_cents')
+      .select('cash_session_id, payment_method, total_cents, sale_payments(method, amount_cents)')
       .eq('tenant_id', context.tenantId)
       .in(
         'cash_session_id',
@@ -393,14 +394,12 @@ async function loadCrmStatsLegacy(
       session.salesCents += sale.total_cents
       session.ticketCount += 1
 
-      if (sale.payment_method === 'cash') {
-        session.cashCents += sale.total_cents
-      } else if (sale.payment_method === 'card') {
-        session.cardCents += sale.total_cents
-      } else if (sale.payment_method === 'invitation') {
-        session.invitationCents += sale.total_cents
-      } else {
-        session.otherCents += sale.total_cents
+      const payments = sale.sale_payments?.length ? sale.sale_payments : [{ method: sale.payment_method, amount_cents: sale.total_cents }]
+      for (const payment of payments) {
+        if (payment.method === 'cash') session.cashCents += payment.amount_cents
+        else if (payment.method === 'card') session.cardCents += payment.amount_cents
+        else if (payment.method === 'invitation') session.invitationCents += payment.amount_cents
+        else session.otherCents += payment.amount_cents
       }
     })
   }

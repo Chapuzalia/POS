@@ -17,6 +17,11 @@ export class FiscalIdentityMissingError extends Error {
   constructor() { super('Esta PWA no tiene una identidad fiscal local. Activa una instalación antes de emitir.') }
 }
 
+export class FiscalInstallationRevokedError extends FiscalIdentityMissingError {
+  readonly installationRevoked = true
+  constructor() { super(); this.message = 'Esta instalación ha sido revocada desde el bridge. Crea una instalación nueva para seguir utilizando esta caja. El historial se conservará.' }
+}
+
 export async function readFiscalIdentity(key: string): Promise<unknown | null> {
   const db = await openLedger()
   try {
@@ -25,6 +30,17 @@ export async function readFiscalIdentity(key: string): Promise<unknown | null> {
     const row = await request(tx.objectStore('bindings').get(identityScope(key))) as { snapshot: unknown } | undefined
     await done
     return row ? row.snapshot : null
+  } finally { db.close() }
+}
+
+export async function readPendingFiscalActivation(key: string): Promise<{ requestId: string; expectedInstallationId: string | null; recoverForTesting: boolean } | null> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction('bindings', 'readonly')
+    const done = transactionDone(tx)
+    const row = await request(tx.objectStore('bindings').get(activationScope(key))) as { requestId: string; expectedInstallationId: string | null; recoverForTesting: boolean } | undefined
+    await done
+    return row ?? null
   } finally { db.close() }
 }
 
