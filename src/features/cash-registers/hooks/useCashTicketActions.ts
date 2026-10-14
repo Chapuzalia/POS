@@ -213,7 +213,8 @@ export function useCashTicketActions(options: Options) {
         cashlogyTransactionId: cashlogyTransaction?.id ?? currentPayment.cashlogyTransactionId ?? null,
       } } } : item)
       options.persistTickets(nextTickets)
-      options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod } : sale))
+      options.persistLedger(options.ledger.map((sale) => sale.id === ticket.id ? { ...sale, paymentMethod,
+        payments: sale.payments?.map(payment => ({ ...payment, method: paymentMethod })) } : sale))
       // Keep the accepted sale. Replay its creation before changing the payment.
       enqueueOfflineEvent({ id: createId(), kind: 'sale_payment_changed', tenantId: context.tenantId, createdAt: nowIso(), attempts: 0, payload: {
         saleId: ticket.payload.sale.id,

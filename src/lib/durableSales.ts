@@ -175,13 +175,15 @@ export async function discardPreparedPaymentOperation(key: string): Promise<void
 /** Sale, payment, stable identity and pending event commit together. Fiscal sales
  * already commit the economic snapshot and immutable invoice in the SIF ledger. */
 export async function commitPaymentOperation(operation: PaymentOperation, payload: SaleCreatedPayload, enqueue: boolean, result?: Record<string, unknown>): Promise<void> {
+  const intermediateSplit = result?.singleTicket === true && result.completed === false
+  if (enqueue && intermediateSplit) throw new Error('Un subpago pendiente no puede encolar una venta.')
   const route = operation.scope.split(':')[0]
   if (route !== 'pos' && route !== 'crm' && route !== 'superadmin') throw new Error('Falta el ámbito de aplicación del cobro original.')
   const db = await openLedger()
   try {
     const tx = db.transaction(['paymentOperations', 'durableSales', 'durableEvents'], 'readwrite')
     const done = transactionDone(tx)
-    tx.objectStore('durableSales').put({ id: payload.sale.id, scope: operation.key.split('|')[0], payload: structuredClone(payload) } satisfies DurableSale)
+    if (!intermediateSplit) tx.objectStore('durableSales').put({ id: payload.sale.id, scope: operation.key.split('|')[0], payload: structuredClone(payload) } satisfies DurableSale)
     tx.objectStore('paymentOperations').put({ ...operation, payload, result, state: 'committed' } satisfies PaymentOperation)
     if (enqueue) tx.objectStore('durableEvents').put({ id: operation.eventId, kind: 'sale_created', tenantId: payload.sale.tenantId,
       route, createdAt: payload.sale.createdAt, schemaVersion: 1, attempts: 0, payload: structuredClone(payload) } satisfies DurableEvent)

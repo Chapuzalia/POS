@@ -5,6 +5,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import * as ledger from '../src/features/fiscal/local/localLedger.ts'
 import * as durable from '../src/lib/durableSales.ts'
 import { compileComponent, createCompiledHookRunner } from './helpers/component-harness.mjs'
+import { withConfirmedRestaurantPayments } from '../src/features/restaurant/services/paymentPayload.ts'
 
 const source = path => readFileSync(new URL(`../src/${path}`, import.meta.url), 'utf8')
 const context = { tenantId: 'tenant', venueId: 'venue', deviceId: 'device', userId: 'cashier' }
@@ -32,6 +33,7 @@ for (const failure of ['lost_reply', 'local_quota']) test(`restaurant recovery p
   const deliveries = []
   const remote = { ticketId: 'remote-ticket', saleId: 'remote-sale', paymentId: 'remote-payment', totalCents: 600 }
   const service = compileComponent(source('features/fiscal/local/restaurantInvoice.ts'), {
+    '../../restaurant/services/paymentPayload.ts': { withConfirmedRestaurantPayments },
     './localLedger.ts': ledger,
     './installation.ts': { fiscalBridgeBaseUrl: () => 'https://bridge.example', fiscalBridgeAccessToken: async () => 'token' },
     './sync.ts': { synchronizeLocalFiscalQueue: async config => { deliveries.push(config) } },
@@ -87,6 +89,7 @@ test('restaurant retry after activation and a lost RPC reply preserves its legac
   const results = new Map()
   let mode = 'disabled'
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': {
       isCashlogyPaymentConfigured: () => true,
@@ -122,6 +125,7 @@ test('invalid VAT/identity fails before Cashlogy; a corrected preflight can safe
   setup()
   let charges = 0, preflights = 0
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': { settleCashlogyPaymentIfConfigured: async () => { charges++; throw new Error('Reached hardware') } },
     '../../fiscal/local/mode.ts': { assertRealSaleAllowed() {} },
@@ -144,6 +148,7 @@ test('activation before the first restaurant DB commit fiscalizes the accepted p
   await durable.acceptPaymentOperation(operation,original,{id:'confirmed',requestId:'request',requestedAmountCents:600})
   let legacyAttempts=0,fiscalAttempts=0
   const service=compileComponent(source('features/restaurant/services/payment.ts'),{
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts':durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts':{getCashlogyPaymentAmounts:()=>({receivedCents:600,changeCents:0}),settleCashlogyPaymentIfConfigured:assert.fail},
     '../../fiscal/local/tenantMode.ts':{resolveLocalFiscalMode:async()=> 'production'},

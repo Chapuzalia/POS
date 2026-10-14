@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises'
 
 import { compileComponent, createCompiledHookRunner } from './component-harness.mjs'
 import { getOrderPendingUnits } from '../../src/features/tables/service-status.ts'
+import { withConfirmedRestaurantPayments } from '../../src/features/restaurant/services/paymentPayload.ts'
 
 const source = await readFile(new URL('../../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const paymentSource = await readFile(new URL('../../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
@@ -138,6 +139,7 @@ export function createRestaurantControllerHarness({
   }
   const operations = new Map()
   const paymentService = compileComponent(paymentSource, {
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': {
       paymentScope: () => 'scope', withPaymentLock: (_key, work) => work(),
       loadPaymentOperation: async key => operations.get(key),

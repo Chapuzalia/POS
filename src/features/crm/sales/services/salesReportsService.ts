@@ -123,7 +123,7 @@ const ticketSelect = `
     )
   ),
     sales (
-      payment_method
+      payment_method, sale_payments(id, method, amount_cents, received_cents, change_cents, created_at, equal_split_part_number)
     )
 `
 
@@ -173,7 +173,7 @@ export type SalesReportTicketRow = {
   tenant_id: string
   venue_id: string
   local_created_at: string
-  sales: Array<{ payment_method: HistoricalPaymentMethod | null }> | null
+  sales: Array<{ payment_method: HistoricalPaymentMethod | null; sale_payments?: Array<{ id: string; method: HistoricalPaymentMethod; amount_cents: number; received_cents: number | null; change_cents: number; created_at: string; equal_split_part_number?: number | null }> }> | null
    status: 'paid' | 'void'
      refund_requests: Array<{
        id: string
@@ -412,6 +412,10 @@ function mapSalesReportTicket(ticket: SalesReportTicketRow): CrmSalesReportTicke
     discountValueType: ticket.discount_value_type,
     discountRoundingIncrementCents: ticket.discount_rounding_increment_cents,
     paymentMethod: ticket.sales?.[0]?.payment_method ?? null,
+    payments: [...(ticket.sales?.[0]?.sale_payments ?? [])].sort((left, right) => left.created_at.localeCompare(right.created_at) || left.id.localeCompare(right.id)).map(payment => ({
+      id: payment.id, method: payment.method, amountCents: payment.amount_cents, receivedCents: payment.received_cents, changeCents: payment.change_cents,
+      partNumber: payment.equal_split_part_number ?? undefined,
+    })),
     quantity: (ticket.ticket_lines ?? []).reduce((total, line) => total + Number(line.allocated_quantity ?? line.quantity), 0),
     status: ticket.status,
     subtotalCents: ticket.subtotal_cents,

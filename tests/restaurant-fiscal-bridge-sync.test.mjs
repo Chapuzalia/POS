@@ -6,6 +6,7 @@ import { IDBFactory } from 'fake-indexeddb'
 import * as ledger from '../src/features/fiscal/local/localLedger.ts'
 import { compileComponent } from './helpers/component-harness.mjs'
 import { analyzeMigration } from '../scripts/check-migrations.mjs'
+import { withConfirmedRestaurantPayments } from '../src/features/restaurant/services/paymentPayload.ts'
 
 const read = path => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 const fix = read('supabase/migrations/20261012213813_confirm_restaurant_bridge_snapshot.sql')
@@ -113,6 +114,7 @@ for (const action of ['close', 'equal_part', 'selected_items']) test(`restaurant
   const result = { ticketId: 'ticket', saleId: 'sale', paymentId: 'payment', totalCents: 600 }
   const entry = { id: 'record', record: { tenantId: 'tenant', fiscalSubjectId: 'subject', installationId: 'installation', invoiceId: 'invoice' }, invoice: { transmissionMode: 'bridge' } }
   const service = compileComponent(read('src/features/fiscal/local/restaurantInvoice.ts'), {
+    '../../restaurant/services/paymentPayload.ts': { withConfirmedRestaurantPayments },
     './localLedger.ts': ledger,
     './installation.ts': { fiscalBridgeBaseUrl: () => 'https://bridge.example', fiscalBridgeAccessToken: async () => 'token' },
     './sync.ts': { synchronizeLocalFiscalQueue: config => { calls.push(['bridge', config]); return new Promise(() => {}) } },

@@ -506,7 +506,7 @@ export async function loadSalesLedgerFromSupabase(context: TenantContext, cashSe
 
   const { data, error } = await supabase
     .from('sales')
-    .select('id, cash_session_id, payment_method, total_cents, created_at')
+    .select('id, cash_session_id, payment_method, total_cents, created_at, sale_payments(method, amount_cents)')
     .eq('tenant_id', context.tenantId)
     .eq('cash_session_id', cashSessionId)
     .order('created_at', { ascending: true })
@@ -515,12 +515,13 @@ export async function loadSalesLedgerFromSupabase(context: TenantContext, cashSe
     throw error
   }
 
-  return ((data ?? []) as SaleRow[]).map((sale) => ({
+  return ((data ?? []) as Array<SaleRow & { sale_payments?: Array<{ method: HistoricalPaymentMethod; amount_cents: number }> }>).map((sale) => ({
     id: sale.id,
     cashSessionId: sale.cash_session_id,
     paymentMethod: sale.payment_method,
     totalCents: sale.total_cents,
     createdAt: sale.created_at,
+    payments: sale.sale_payments?.map(payment => ({ method: payment.method, amountCents: payment.amount_cents })),
   }))
 }
 
@@ -653,6 +654,8 @@ type SessionTicketQueryRow = {
       change_cents: number
       cashlogy_request_id: string | null
       cashlogy_transaction_id: string | null
+      created_at?: string
+      equal_split_part_number?: number | null
     }> | null
   }> | null
 }
@@ -782,7 +785,9 @@ async function loadSessionTicketRecordsFromSupabase(
             received_cents,
             change_cents,
             cashlogy_request_id,
-            cashlogy_transaction_id
+            cashlogy_transaction_id,
+            created_at,
+            equal_split_part_number
           )
         )
     `)
@@ -809,7 +814,8 @@ async function loadSessionTicketRecordsFromSupabase(
   return ((ticketData ?? []) as SessionTicketQueryRow[]).map((ticket) => {
     const loggedPayload = loggedPayloads.get(ticket.id)
     const sale = ticket.sales?.[0]
-    const payment = sale?.sale_payments?.[0]
+    const paymentRows = [...(sale?.sale_payments ?? [])].sort((left, right) => (left.created_at ?? '').localeCompare(right.created_at ?? '') || left.id.localeCompare(right.id))
+    const payment = paymentRows.length === 1 ? paymentRows[0] : undefined
     const saleId = sale?.id ?? loggedPayload?.sale.id ?? ticket.id
     const paymentMethod = sale?.payment_method ?? loggedPayload?.sale.paymentMethod ?? null
     const createdAt = sale?.local_created_at ?? loggedPayload?.sale.createdAt ?? ticket.local_created_at
@@ -920,7 +926,14 @@ async function loadSessionTicketRecordsFromSupabase(
         changeCents: payment.change_cents,
         cashlogyRequestId: payment.cashlogy_request_id,
         cashlogyTransactionId: payment.cashlogy_transaction_id,
+        partNumber: payment.equal_split_part_number ?? undefined,
       } : null,
+      payments: paymentRows.length > 1 ? paymentRows.flatMap((payment) => payment.method === 'cash' || payment.method === 'card' ? [{
+        id: payment.id, tenantId: ticket.tenant_id, saleId, method: payment.method, amountCents: payment.amount_cents,
+        receivedCents: payment.received_cents, changeCents: payment.change_cents,
+        cashlogyRequestId: payment.cashlogy_request_id, cashlogyTransactionId: payment.cashlogy_transaction_id,
+        partNumber: payment.equal_split_part_number ?? undefined,
+      }] : []) : undefined,
       ...(localFiscalRecord && localFiscalInvoice ? {
         localFiscal: {
           recordId: localFiscalRecord.id,

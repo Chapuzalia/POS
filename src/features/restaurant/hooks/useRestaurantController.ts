@@ -615,13 +615,26 @@ export function useRestaurantController(options: Options) {
         : calculateDiscountForLines(paymentLines.map((line) => ({
             productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
           })), effectiveDiscount).totalCents
+      const singleTicket = equalSplit.singleTicket === true
+      const finalPart = singleTicket && equalSplit.remainingParts === 1
+      const totalCents = finalPart ? (equalSplit.tenders ?? []).reduce((sum, tender) => sum + tender.amountCents, 0) + amountCents : amountCents
+      const subtotalCents = finalPart ? equalSplit.totalCents : getRestaurantPrintSubtotal(paymentLines)
+      const totalDiscountCents = subtotalCents - totalCents
+      const documentDiscount: AppliedDiscount | null = finalPart
+        ? totalDiscountCents > 0 ? { discountId: null, name: 'Descuentos por comensal', type: 'manual', calculationType: 'fixed',
+          value: totalDiscountCents, fixedApplication: 'ticket', roundingIncrementCents: null, color: null } : null
+        : effectiveDiscount
+      const paymentDraft = buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
+        discount: documentDiscount, lines: finalPart ? current.lines : paymentLines, paymentId: createId(), paymentMethod: method,
+        receivedCents, changeCents: null, saleId: createId(), subtotalCents, ticketId: createId(), totalCents })
+      // The final document covers the full order; hardware collects only this person's share.
+      if (singleTicket && paymentDraft.payment) paymentDraft.payment = { ...paymentDraft.payment, amountCents,
+        changeCents: method === 'cash' ? Math.max(0, (receivedCents ?? amountCents) - amountCents) : 0 }
       const payment = await payRestaurantSale<PayRestaurantEqualPartResult>({
         context: options.context, session: options.cashSession, action: 'equal_part', target: equalSplit.id, sequence: equalSplit.paidParts,
-        draft: buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
-          discount: effectiveDiscount, lines: paymentLines, paymentId: createId(), paymentMethod: method,
-          receivedCents, changeCents: null, saleId: createId(), subtotalCents: getRestaurantPrintSubtotal(paymentLines),
-          ticketId: createId(), totalCents: amountCents }),
+        draft: paymentDraft,
         params: { splitId: equalSplit.id, method, receivedCents, allowPending,
+          ...(singleTicket ? { singleTicket, finalPart, amountCents, expectedPaidParts: equalSplit.paidParts } : {}),
           discount: withCalculationLines(discount, paymentLines), useDefaultDiscount },
       })
       const result = payment.result
@@ -629,9 +642,15 @@ export function useRestaurantController(options: Options) {
       const cashlogy = payment
       const prepared = { payload: payment.payload }
       const production = Boolean(payment.payload?.localFiscal)
-      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + result.saleId + ':payment', payments: [{ method, amountCents }] })
+      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + (result.saleId ?? `${equalSplit.id}:${equalSplit.paidParts}`) + ':payment', payments: [{ method, amountCents }] })
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
+        if (singleTicket && !result.completed) {
+          finishCashlogyPayment(cashlogy.transaction)
+          realtime.setMap(await realtime.loadCurrentMap(options.context, options.cashSession.id))
+          return result
+        }
+        if (!result.ticketId || !result.saleId) throw new Error('Falta la identidad de la venta completada.')
         if (production && !prepared?.payload) throw new Error('Falta la factura fiscal del cobro confirmado.')
         finishCashlogyPayment(cashlogy.transaction)
         const cleanedAreaId = result.completed
@@ -658,7 +677,7 @@ export function useRestaurantController(options: Options) {
           ticketNumber,
           totalCents: result.paidAmountCents,
           fiscal,
-        }), { cashDrawerAlreadyRequested, fiscalMode: production ? 'verifactu' : 'legacy' }).catch((error) => options.onError('El cobro está guardado. ' + getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentPrint' })))
+        }), { cashDrawerAlreadyRequested: cashDrawerAlreadyRequested || (singleTicket && method !== 'cash'), fiscalMode: production ? 'verifactu' : 'legacy' }).catch((error) => options.onError('El cobro está guardado. ' + getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentPrint' })))
         void refreshSales(result.ticketId, 'Pago completado sin imprimir', false).catch((error) => options.onError('El cobro está guardado. ' + getReadableError(error, { operation: 'restaurant.action', step: 'postPaymentRefresh' })))
         const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
         realtime.setMap(nextMap)

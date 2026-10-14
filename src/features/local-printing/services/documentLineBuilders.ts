@@ -222,12 +222,16 @@ export function buildSaleTicketLines(
   }
   lines.push(...row('TOTAL', money(sale.sale.totalCents), printerLayout))
 
-  if (sale.payment && options.label !== 'PRE-TICKET') {
+  const salePayments = sale.payments ?? (sale.payment ? [sale.payment] : [])
+  if (salePayments.length && options.label !== 'PRE-TICKET') {
     lines.push('', ...section('Pago', printerLayout))
-    lines.push(...row(paymentLabels[sale.payment.method] ?? sale.payment.method, money(sale.payment.amountCents), printerLayout))
-    if (sale.payment.receivedCents !== null) {
-      lines.push(...row('Entregado', money(sale.payment.receivedCents), printerLayout))
-      lines.push(...row('Cambio', money(sale.payment.changeCents), printerLayout))
+    for (const [index, payment] of salePayments.entries()) {
+      const prefix = salePayments.length > 1 || payment.partNumber ? `Parte ${payment.partNumber ?? index + 1} · ` : ''
+      lines.push(...row(prefix + (paymentLabels[payment.method] ?? payment.method), money(payment.amountCents), printerLayout))
+      if (payment.receivedCents !== null) {
+        lines.push(...row('Entregado', money(payment.receivedCents), printerLayout))
+        lines.push(...row('Cambio', money(payment.changeCents), printerLayout))
+      }
     }
   }
 
@@ -408,11 +412,15 @@ export function buildSalePrintTemplateContext(
   totalRows.push({ label: 'TOTAL (IVA incluido)', value: money(sale.sale.totalCents) })
 
   const paymentRows: Array<{ label: string; value: string }> = []
-  if (sale.payment && options.label !== 'PRE-TICKET') {
-    paymentRows.push({ label: paymentLabels[sale.payment.method] ?? sale.payment.method, value: money(sale.payment.amountCents) })
-    if (sale.payment.receivedCents !== null) {
-      paymentRows.push({ label: 'Entregado', value: money(sale.payment.receivedCents) })
-      paymentRows.push({ label: 'Cambio', value: money(sale.payment.changeCents) })
+  const salePayments = sale.payments ?? (sale.payment ? [sale.payment] : [])
+  if (options.label !== 'PRE-TICKET') {
+    for (const [index, payment] of salePayments.entries()) {
+      const prefix = salePayments.length > 1 || payment.partNumber ? `Parte ${payment.partNumber ?? index + 1} · ` : ''
+      paymentRows.push({ label: prefix + (paymentLabels[payment.method] ?? payment.method), value: money(payment.amountCents) })
+      if (payment.receivedCents !== null) {
+        paymentRows.push({ label: 'Entregado', value: money(payment.receivedCents) })
+        paymentRows.push({ label: 'Cambio', value: money(payment.changeCents) })
+      }
     }
   }
   const fiscalError = summarizeFiscalError(sale.fiscal?.errorMessage ?? sale.fiscal?.errorCode)
@@ -463,7 +471,7 @@ export function buildSalePrintTemplateContext(
       total: money(sale.sale.totalCents),
       rows: totalRows,
     },
-    payment: { method: sale.payment ? paymentLabels[sale.payment.method] ?? sale.payment.method : '', rows: paymentRows },
+    payment: { method: [...new Set(salePayments.map(payment => paymentLabels[payment.method] ?? payment.method))].join(' + '), rows: paymentRows },
     fiscal: sale.fiscal && options.label !== 'PRE-TICKET' ? {
       title: localFiscal ? '' : 'Fiscal',
       external_code: sale.fiscal.externalCode ?? '',

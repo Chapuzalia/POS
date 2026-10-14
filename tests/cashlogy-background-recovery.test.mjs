@@ -6,6 +6,7 @@ import test from 'node:test'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import * as durable from '../src/lib/durableSales.ts'
 import { compileComponent } from './helpers/component-harness.mjs'
+import { withConfirmedRestaurantPayments } from '../src/features/restaurant/services/paymentPayload.ts'
 
 // Execute the real store actions with isolated storage/network dependencies.
 async function loadStore(kind, request, options = {}) {
@@ -406,6 +407,7 @@ async function journalFixture() {
 async function restaurantRecovery(store) {
   const source = await readFile(new URL('../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
   return compileComponent(source, {
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': {
       isCashlogyPaymentConfigured: () => true, settleCashlogyPaymentIfConfigured: store.settle,

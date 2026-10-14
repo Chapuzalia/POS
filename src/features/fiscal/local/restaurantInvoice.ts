@@ -5,6 +5,7 @@ import type { PreparedFiscalInstallation } from './posInvoice.ts'
 import { openLedger, request, transactionDone, reconcileLocalFiscalCopies, type LocalFiscalEntry } from './localLedger.ts'
 import { fiscalBridgeAccessToken, fiscalBridgeBaseUrl } from './installation.ts'
 import { synchronizeLocalFiscalQueue } from './sync.ts'
+import { withConfirmedRestaurantPayments } from '../../restaurant/services/paymentPayload.ts'
 
 type Action = 'close' | 'equal_part' | 'selected_items'
 
@@ -45,10 +46,10 @@ function confirmedRestaurantPayload(draft: SaleCreatedPayload, result: Record<st
     || (paymentId !== null && paymentId !== undefined && typeof paymentId !== 'string') || Number(total) !== draft.ticket.totalCents) {
     throw new Error('El resultado económico no coincide con el registro fiscal preparado.')
   }
-  return { ...draft, ticket: { ...draft.ticket, id: ticketId },
+  return withConfirmedRestaurantPayments({ ...draft, ticket: { ...draft.ticket, id: ticketId },
     lines: draft.lines.map(line => ({ ...line, id: `${ticketId}:${line.id}`, ticketId })),
     sale: { ...draft.sale, id: saleId, ticketId },
-    payment: draft.payment ? { ...draft.payment, id: paymentId || saleId, saleId } : null }
+    payment: draft.payment ? { ...draft.payment, id: paymentId || saleId, saleId } : null }, result)
 }
 
 export async function preflightRestaurantInvoice(context: TenantContext, session: CashSession, saleId: string): Promise<PreparedFiscalInstallation> {

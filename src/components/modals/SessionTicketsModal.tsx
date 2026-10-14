@@ -64,9 +64,15 @@ function TicketModificationModal({ children, dismissDisabled = false, maxWidth =
         </header>
         <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain p-5 [-webkit-overflow-scrolling:touch]">
           <div className="mb-4 flex flex-wrap items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4">
-            <span className="text-sm font-semibold text-[var(--muted)]">{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : 'Pago no requerido'}</span>
+            <span className="text-sm font-semibold text-[var(--muted)]">{ticket.paymentMethod ? paymentLabels[ticket.paymentMethod] : ticket.payload.payments?.length ? 'Varios métodos' : 'Pago no requerido'}</span>
             <span className="font-mono text-2xl font-black tabular-nums">{formatMoney(ticket.totalCents)}</span>
           </div>
+          {ticket.payload.payments?.length ? <ol className="mb-4 space-y-2 text-sm">
+            {ticket.payload.payments.map((payment, index) => <li className="flex justify-between gap-3" key={payment.id}>
+              <span>Parte {payment.partNumber ?? index + 1} · {paymentLabels[payment.method]}</span>
+              <strong>{formatMoney(payment.amountCents)}</strong>
+            </li>)}
+          </ol> : null}
           {children}
         </div>
       </section>
@@ -335,9 +341,10 @@ export function SessionTicketsModal({
         <TicketModificationModal title="Modificar ticket" ticket={actionTicket} onClose={() => setActionTicket(null)}>
           <div className="grid gap-3">
             <p className="text-sm text-[var(--muted)]">Elige una acción para este ticket.</p>
-            <Button fullWidth className="min-h-16 justify-start !whitespace-normal rounded-[var(--radius)] border border-[var(--separator)] !bg-[var(--background)] px-4 text-left font-bold !text-[var(--foreground)]" onClick={() => { setPaymentChoiceTicket(actionTicket); setActionTicket(null) }} type="button" variant="secondary">
+            <Button disabled={Boolean(actionTicket.payload.payments?.length)} fullWidth className="min-h-16 justify-start !whitespace-normal rounded-[var(--radius)] border border-[var(--separator)] !bg-[var(--background)] px-4 text-left font-bold !text-[var(--foreground)]" onClick={() => { setPaymentChoiceTicket(actionTicket); setActionTicket(null) }} type="button" variant="secondary">
               <CreditCard className="h-6 w-6 shrink-0 text-[var(--accent)]" /> Cambiar forma de pago
             </Button>
+            {actionTicket.payload.payments?.length ? <p className="text-sm text-[var(--muted)]">Esta venta conserva varios pagos separados; no admite cambiar un método único para toda la cuenta.</p> : null}
             <Button fullWidth className="min-h-16 justify-start !whitespace-normal rounded-[var(--radius)] border border-[var(--separator)] !bg-[var(--background)] px-4 text-left font-bold !text-[var(--foreground)]" onClick={() => { setRefundQuantities(Object.fromEntries(actionTicket.payload.lines.map((line) => [line.id, line.quantity]))); setRefundPaymentMethod('cash'); setPaymentChoiceTicket(null); setActionTicket(null); setRefundTicket(actionTicket) }} type="button" variant="secondary">
               <RotateCcw className="h-6 w-6 shrink-0 text-[var(--accent)]" /> Devolución
             </Button>

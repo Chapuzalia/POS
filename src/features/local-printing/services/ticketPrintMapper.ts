@@ -56,9 +56,7 @@ export function mapSaleToPrintRequest(options: MapperOptions): PrintRequest {
   const isPreTicket = options.isPreTicket === true
   const printQr = options.printQr !== false
   const copyNumber = Math.max(1, Math.trunc(options.copyNumber || 1))
-  const payments = sale.payment && !isPreTicket
-    ? [{ method: sale.payment.method, amountCents: sale.payment.amountCents }]
-    : []
+  const payments = isPreTicket ? [] : sale.payments ?? (sale.payment ? [sale.payment] : [])
   const label = isPreTicket ? 'PRE-TICKET' : isReprint ? 'COPIA' : undefined
   const templateType = sale.ticket.invoice ? 'invoice' : 'simplified_invoice'
   const safeTemplate = getSafeDefaultPrintTemplate(templateType)

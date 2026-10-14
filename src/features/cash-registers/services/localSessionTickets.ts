@@ -41,5 +41,6 @@ export async function loadLocalSessionTickets(context: TenantContext, session: C
 export async function loadLocalSessionSales(context: TenantContext, session: CashSession): Promise<SaleRecord[]> {
   const tickets = await loadLocalSessionTickets(context, session, [])
   return tickets.filter(ticket => ticket.status !== 'voided').map(ticket => ({ id: ticket.id,
-    cashSessionId: session.id, paymentMethod: ticket.paymentMethod, totalCents: ticket.totalCents, createdAt: ticket.createdAt }))
+    cashSessionId: session.id, paymentMethod: ticket.paymentMethod, totalCents: ticket.totalCents, createdAt: ticket.createdAt,
+    payments: ticket.payload.payments ?? (ticket.payload.payment ? [ticket.payload.payment] : undefined) }))
 }

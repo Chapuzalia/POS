@@ -47,6 +47,25 @@ const sale = {
   payment: { id: 'payment', tenantId: 'tenant', saleId: 'sale_123', method: 'cash', amountCents: 1600, receivedCents: 2000, changeCents: 400 },
 }
 
+test('a completed equal split prints all original lines and each tender in one original receipt', () => {
+  const payload = { ...sale, payment: null, sale: { ...sale.sale, paymentMethod: null },
+    payments: [534,533,533].map((amountCents,index) => ({ id: `part-${index}`, tenantId: 'tenant', saleId: sale.sale.id,
+      method: index === 0 ? 'cash' : 'card', amountCents, receivedCents: index === 0 ? 600 : null, changeCents: index === 0 ? 66 : 0 })) }
+  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true })
+  assert.equal(request.requestId, 'print:sale_123:original')
+  assert.equal(request.options.copies, 1)
+  assert.equal(request.options.openCashDrawer, true)
+  const text = request.lines.join('\n')
+  assert.match(text, /2 x Brugal/)
+  assert.match(text, /Parte 1.*Efectivo.*5,34/)
+  assert.match(text, /Parte 2.*Tarjeta.*5,33/)
+  assert.match(text, /Parte 3.*Tarjeta.*5,33/)
+  assert.match(text, /TOTAL.*16,00/)
+  const reprint = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint: true, autoOpenCashDrawer: true })
+  assert.equal(reprint.options.openCashDrawer, false)
+  assert.match(reprint.lines.join('\n'), /Parte 3.*Tarjeta/)
+})
+
 const verifactuUrl = 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345678&numserie=F-2026-000123&fecha=21-08-2026&importe=16.00'
 
 function completeInvoiceSale() {

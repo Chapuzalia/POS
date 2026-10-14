@@ -6,6 +6,7 @@ import { resolveLocalFiscalMode } from '../../fiscal/local/tenantMode.ts'
 import { preflightPosInvoice } from '../../fiscal/local/posInvoice.ts'
 import { issueRestaurantInvoice } from '../../fiscal/local/restaurantInvoice.ts'
 import { payRestaurantIdempotent } from '../../tables/service.ts'
+import { withConfirmedRestaurantPayments } from './paymentPayload.ts'
 
 type Input = {
   context: TenantContext
@@ -54,12 +55,15 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
           lines: input.draft.lines.map(({ id: _id, ticketId: _ticketId, ...line }) => line), totalCents: input.draft.sale.totalCents,
           fiscalMode: production ? 'verifactu' : 'legacy' }), input.draft, { ...input.params, fiscalMode: production ? 'verifactu' : 'legacy' })
     let payload = operation.payload
+    const singleTicket = operation.params?.singleTicket === true
+    const intermediatePart = singleTicket && operation.params?.finalPart !== true
+    const settlementCents = singleTicket ? Number(operation.params?.amountCents) : payload.sale.totalCents
     if (operation.state === 'committed' && operation.result) return {
       result: operation.result as T, payload, transaction: operation.cashlogy,
       receivedCents: payload.payment?.receivedCents ?? null, changeCents: payload.payment?.changeCents ?? null,
     }
     let installation = null
-    if (production && operation.state === 'prepared') {
+    if (production && !intermediatePart && operation.state === 'prepared') {
       try { installation = await preflightPosInvoice(context, session, payload, 300000) }
       catch (error) { await discardPreparedPaymentOperation(key); throw error }
     }
@@ -68,12 +72,12 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
       if (payload.sale.paymentMethod === 'cash') {
         const recovery = operation.state === 'charging'
         if (!recovery && isCashlogyPaymentConfigured()) operation = await markPaymentCharging(operation)
-        transaction = input.confirmedCashlogy ?? await settleCashlogyPaymentIfConfigured(payload.sale.totalCents,
+        transaction = input.confirmedCashlogy ?? await settleCashlogyPaymentIfConfigured(settlementCents,
           payload.sale.id, operation.cashlogyRequestId ?? `cashlogy:sale:${payload.sale.id}`, recovery, operation.key)
-        if (transaction && (transaction.requestedAmountCents !== payload.sale.totalCents || (transaction.saleId && transaction.saleId !== payload.sale.id))) {
+        if (transaction && (transaction.requestedAmountCents !== settlementCents || (transaction.saleId && transaction.saleId !== payload.sale.id))) {
           throw new Error('El cobro Cashlogy no coincide con la operación original.')
         }
-        const amounts = getCashlogyPaymentAmounts(transaction, payload.sale.totalCents)
+        const amounts = getCashlogyPaymentAmounts(transaction, settlementCents)
         if (transaction && payload.payment) payload = { ...payload, payment: { ...payload.payment,
           receivedCents: amounts.receivedCents, changeCents: amounts.changeCents ?? 0,
           cashlogyRequestId: transaction.requestId, cashlogyTransactionId: transaction.id } }
@@ -83,7 +87,7 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
     const params = { ...(operation.params ?? input.params), allowPending: input.params.allowPending, receivedCents: payload.payment?.receivedCents ?? null,
       cashlogyRequestId: transaction?.requestId ?? null, cashlogyTransactionId: transaction?.id ?? null }
     let legacyResult: Record<string, unknown> | null = null
-    if (!production) {
+    if (!production || intermediatePart) {
       try { legacyResult = await payRestaurantIdempotent(context, operation.eventId, action, params) }
       catch (error) {
         // A confirmed legacy receipt replays unchanged. If activation happened
@@ -95,12 +99,18 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
         production = true
       }
     }
-    const fiscal = production ? await issueRestaurantInvoice(context, session, payload, action, params, installation, key) : null
+    const fiscal = production && !intermediatePart ? await issueRestaurantInvoice(context, session, payload, action, params, installation, key) : null
     const result = fiscal?.result ?? legacyResult
     if (!result) throw new Error('No se pudo confirmar la identidad del cobro.')
     if (result.requiresConfirmation === true) return { result: result as T, payload: null, transaction,
       receivedCents: payload.payment?.receivedCents ?? null, changeCents: payload.payment?.changeCents ?? null }
-    if (production && !fiscal?.payload) throw new Error('El cobro conserva su identidad fiscal pendiente de recuperar.')
+    if (production && !intermediatePart && !fiscal?.payload) throw new Error('El cobro conserva su identidad fiscal pendiente de recuperar.')
+    if (intermediatePart) {
+      if (result.completed !== false || result.ticketId !== null || result.saleId !== null) throw new Error('El subpago no coincide con el reparto pendiente.')
+      await commitPaymentOperation(operation, payload, false, result)
+      return { result: result as T, payload: null, transaction,
+        receivedCents: payload.payment?.receivedCents ?? null, changeCents: payload.payment?.changeCents ?? null }
+    }
     if (!fiscal) {
       if (typeof result.ticketId !== 'string' || typeof result.saleId !== 'string') throw new Error('Falta la identidad del cobro confirmado.')
       const ticketId = result.ticketId
@@ -108,7 +118,7 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
         lines: payload.lines.map(line => ({ ...line, ticketId })), sale: { ...payload.sale, id: result.saleId, ticketId },
         payment: payload.payment ? { ...payload.payment, id: typeof result.paymentId === 'string' ? result.paymentId : payload.payment.id, saleId: result.saleId } : null }
     }
-    const confirmedPayload = fiscal?.payload ?? payload
+    const confirmedPayload = withConfirmedRestaurantPayments(fiscal?.payload ?? payload, result)
     await commitPaymentOperation(operation, confirmedPayload, false, result)
     return { result: result as T, payload: confirmedPayload, transaction,
       receivedCents: payload.payment?.receivedCents ?? null, changeCents: payload.payment?.changeCents ?? null }
