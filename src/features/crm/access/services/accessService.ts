@@ -16,7 +16,6 @@ import {
 } from "../../../../types";
 
 export type CrmAccessData = {
-  venues: CrmVenue[];
   devices: CrmDevice[];
   users: CrmAccessUser[];
 };
@@ -30,41 +29,34 @@ type CrmDeviceAccountRow = CrmDeviceAccount & {
 
 export async function loadCrmAccessData(
   context: TenantContext,
+  venueId: string,
 ): Promise<CrmAccessData> {
+  if (!venueId) return { devices: [], users: [] };
   const client = requireSupabase();
   const [
-    { data: venueRows, error: venuesError },
     { data: deviceRows, error: devicesError },
-    { data: addonActivationRows, error: addonActivationsError },
     accessResult,
   ] = await Promise.all([
-    client
-      .from("venues")
-      .select(
-        "id, name, address, day_change_time, legal_name, tax_id, sort_order, is_active, inventory_enabled, tables_enabled, production_enabled, default_tax_rate, timezone, catalog_profile, tickit_assist_enabled, tickit_assist_sensitivity",
-      )
-      .eq("tenant_id", context.tenantId)
-      .order("sort_order").order("created_at").order("id"),
     client
       .from("devices")
       .select(
         "id, venue_id, name, is_active, device_mode, default_cash_register_id",
       )
       .eq("tenant_id", context.tenantId)
+      .eq("venue_id", venueId)
       .neq("device_mode", "kds")
       .order("name"),
-    client.rpc("list_current_tenant_venue_addons", { p_tenant_id: context.tenantId }),
     client.functions.invoke<{
       allowedVenueIds: string[] | null;
       deviceAccounts: CrmDeviceAccountRow[];
       users: CrmAccessUser[];
     }>("manage-pos-users", {
-      body: { action: "list", tenantId: context.tenantId },
+      body: { action: "list", tenantId: context.tenantId, venueId },
     }),
   ]);
 
-  if (venuesError || devicesError || addonActivationsError || accessResult.error) {
-    throw venuesError ?? devicesError ?? addonActivationsError ?? accessResult.error;
+  if (devicesError || accessResult.error) {
+    throw devicesError ?? accessResult.error;
   }
 
   const functionError = (accessResult.data as { error?: string } | null)?.error;
@@ -89,36 +81,9 @@ export async function loadCrmAccessData(
   const allowedVenueIds = accessResult.data?.allowedVenueIds;
   const canAccessVenue = (venueId: string) => context.role === "owner"
     || (Array.isArray(allowedVenueIds) && allowedVenueIds.includes(venueId));
-  const activationsByVenue = new Map<string, Record<string, boolean>>();
-  for (const row of addonActivationRows ?? []) {
-    const venueActivations = activationsByVenue.get(row.venue_id as string) ?? {};
-    venueActivations[row.addon_key as string] = row.is_enabled as boolean;
-    activationsByVenue.set(row.venue_id as string, venueActivations);
-  }
 
   return {
-    venues: (venueRows ?? []).filter((venue) => canAccessVenue(venue.id as string)).map((venue) => ({
-      id: venue.id as string,
-      name: venue.name as string,
-      catalogProfile: venue.catalog_profile as CatalogProfile,
-      address: (venue.address as string | null) ?? "",
-      dayChangeTime: normalizeDayChangeTime(
-        venue.day_change_time as string | null,
-      ),
-      legalName: (venue.legal_name as string | null) ?? "",
-      taxId: (venue.tax_id as string | null) ?? "",
-      sortOrder: venue.sort_order as number,
-      isActive: venue.is_active as boolean,
-      inventoryEnabled: venue.inventory_enabled as boolean,
-      tablesEnabled: venue.tables_enabled as boolean,
-      productionEnabled: venue.production_enabled as boolean,
-      assistEnabled: venue.tickit_assist_enabled === true,
-      assistSensitivity: venue.tickit_assist_sensitivity as CrmVenue["assistSensitivity"],
-      addonActivations: activationsByVenue.get(venue.id as string) ?? {},
-      defaultTaxRate: Number(venue.default_tax_rate),
-      timeZone: venue.timezone as string,
-    })),
-    devices: (deviceRows ?? []).filter((device) => canAccessVenue(device.venue_id as string)).map((device) => ({
+    devices: (deviceRows ?? []).filter((device) => device.venue_id === venueId && canAccessVenue(device.venue_id as string)).map((device) => ({
       id: device.id as string,
       venueId: device.venue_id as string,
       name: device.name as string,
@@ -127,7 +92,7 @@ export async function loadCrmAccessData(
       defaultCashRegisterId: device.default_cash_register_id as string | null,
       account: accountByDeviceId.get(device.id as string) ?? null,
     })),
-    users: accessResult.data?.users ?? [],
+    users: (accessResult.data?.users ?? []).filter((user) => user.role === "owner" || user.venueIds.includes(venueId)),
   };
 }
 
