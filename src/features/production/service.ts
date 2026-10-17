@@ -1,5 +1,5 @@
 import { reportOperationError } from '../../lib/observability.ts'
-import { supabase } from '../../lib/supabase'
+import { recoverSupabaseRealtimeConnection, supabase } from '../../lib/supabase'
 import type { TenantContext } from '../../types'
 import type {
   KdsQueue,
@@ -32,7 +32,9 @@ function mapOrderState(value: unknown, orderId: string): OrderProductionState {
         parentProductName: typeof item.parentProductName === 'string' ? item.parentProductName : null,
         quantity: readNumber(item.quantity),
         sentQuantity: readNumber(item.sentQuantity),
+        skippedQuantity: readNumber(item.skippedQuantity),
         readyQuantity: readNumber(item.readyQuantity),
+        preparingQuantity: readNumber(item.preparingQuantity),
         unsentQuantity: readNumber(item.unsentQuantity),
         passId: String(item.passId ?? ''),
         passName: String(item.passName ?? 'Directo'),
@@ -47,6 +49,7 @@ function mapOrderState(value: unknown, orderId: string): OrderProductionState {
         lineId: String(line.lineId ?? ''),
         sentQuantity: readNumber(line.sentQuantity),
         readyQuantity: readNumber(line.readyQuantity),
+        preparingQuantity: readNumber(line.preparingQuantity),
         unsentQuantity: readNumber(line.unsentQuantity),
       }
     }) : [],
@@ -90,9 +93,19 @@ export async function sendProductionBatch(input: {
 }
 
 export async function loadKdsQueue(deviceId: string) {
-  const { data, error } = await client().rpc('get_kds_queue', { p_device_id: deviceId })
+  const { data, error } = await client().rpc('get_kds_workflow_queue', { p_device_id: deviceId })
   if (error) throw error
   return data as KdsQueue
+}
+
+export async function acknowledgeKdsEvent(deviceId: string, eventId: string) {
+  const { error } = await client().rpc('acknowledge_kds_event', { p_device_id: deviceId, p_event_id: eventId })
+  if (error) throw error
+}
+
+export async function acceptKdsBatch(deviceId: string, batchId: string) {
+  const { error } = await client().rpc('accept_production_batch', { p_device_id: deviceId, p_batch_id: batchId })
+  if (error) throw error
 }
 
 export async function setOrderLineProductionPass(input: { lineId: string; componentId?: string | null; passId: string }) {
@@ -125,24 +138,84 @@ export async function markKdsItemQuantityReady(deviceId: string, itemId: string,
 export function subscribeToOrderProduction(context: TenantContext, orderId: string, onChange: () => void) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`production-order:${context.venueId}:${orderId}`)
-  const schedule = () => onChange()
+  let active = true
+  let refreshTimer: number | undefined
+  const schedule = () => {
+    if (!active || refreshTimer !== undefined) return
+    refreshTimer = window.setTimeout(() => {
+      refreshTimer = undefined
+      if (active) onChange()
+    }, 100)
+  }
+  const safetyTimer = window.setInterval(schedule, 15_000)
+  window.addEventListener('focus', schedule)
   channel
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_lines', filter: `order_id=eq.${orderId}` }, schedule)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `id=eq.${orderId}` }, schedule)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_batches', filter: `order_id=eq.${orderId}` }, schedule)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_items', filter: `venue_id=eq.${context.venueId}` }, schedule)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_line_allocations', filter: `venue_id=eq.${context.venueId}` }, schedule)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_component_allocations', filter: `venue_id=eq.${context.venueId}` }, schedule)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_printer_dispatches', filter: `venue_id=eq.${context.venueId}` }, schedule)
-    .subscribe()
-  return () => { void supabase?.removeChannel(channel) }
+    .subscribe((status) => { if (status === 'SUBSCRIBED') schedule() })
+  return () => {
+    active = false
+    window.clearTimeout(refreshTimer)
+    window.clearInterval(safetyTimer)
+    window.removeEventListener('focus', schedule)
+    void supabase?.removeChannel(channel)
+  }
 }
 
-export function subscribeToKds(context: TenantContext, destinationId: string, onChange: () => void) {
+export function subscribeToKds(context: Pick<TenantContext, 'tenantId' | 'venueId'>, destinationId: string, onChange: () => void) {
   if (!supabase) return () => undefined
   const channel = supabase.channel(`production-kds:${context.venueId}:${destinationId}`)
-  const schedule = () => onChange()
+  let active = true
+  let refreshTimer: number | undefined
+  let fallbackTimer: number | undefined
+  const schedule = () => {
+    if (!active || refreshTimer !== undefined) return
+    refreshTimer = window.setTimeout(() => {
+      refreshTimer = undefined
+      if (active) onChange()
+    }, 100)
+  }
+  const recover = () => {
+    void recoverSupabaseRealtimeConnection().catch(() => undefined)
+    schedule()
+  }
+  const onVisible = () => { if (document.visibilityState === 'visible') recover() }
+  const safetyTimer = window.setInterval(schedule, 15_000)
+  window.addEventListener('focus', recover)
+  window.addEventListener('online', recover)
+  document.addEventListener('visibilitychange', onVisible)
   channel
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_items', filter: `destination_id=eq.${destinationId}` }, schedule)
     .on('postgres_changes', { event: '*', schema: 'public', table: 'production_events', filter: `destination_id=eq.${destinationId}` }, schedule)
-    .subscribe()
-  return () => { void supabase?.removeChannel(channel) }
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'order_lines', filter: `venue_id=eq.${context.venueId}` }, schedule)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'orders', filter: `venue_id=eq.${context.venueId}` }, schedule)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_line_allocations', filter: `venue_id=eq.${context.venueId}` }, schedule)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'production_component_allocations', filter: `venue_id=eq.${context.venueId}` }, schedule)
+    .subscribe((status) => {
+      if (!active) return
+      if (status === 'SUBSCRIBED') {
+        if (fallbackTimer !== undefined) window.clearInterval(fallbackTimer)
+        fallbackTimer = undefined
+        schedule()
+      } else if (status === 'CHANNEL_ERROR' || status === 'TIMED_OUT' || status === 'CLOSED') {
+        if (fallbackTimer === undefined) fallbackTimer = window.setInterval(schedule, 3000)
+        schedule()
+      }
+    })
+  return () => {
+    active = false
+    window.clearTimeout(refreshTimer)
+    window.clearInterval(fallbackTimer)
+    window.clearInterval(safetyTimer)
+    window.removeEventListener('focus', recover)
+    window.removeEventListener('online', recover)
+    document.removeEventListener('visibilitychange', onVisible)
+    void supabase?.removeChannel(channel)
+  }
 }
 

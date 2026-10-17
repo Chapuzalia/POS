@@ -31,7 +31,7 @@ test('production state exposes only lines with a resolved KDS or printer destina
   assert.match(routingMigration, /'hasProductionDestination'/)
   assert.match(routingMigration, /public\.production_resolve_destination/)
   assert.match(routingMigration, /jsonb_array_elements\(line\.components\)/)
-  assert.match(controls, /productionLine\?\.hasProductionDestination && productionLine\.unsentQuantity > 0/)
+  assert.match(controls, /productionLine\?\.hasProductionDestination && entry\.hasProductionDestination/)
 })
 
 test('production snapshots, readiness, split lineage and durable dispatches are separate domains', () => {
@@ -69,6 +69,7 @@ test('KDS is a real online-only non-cash device and Realtime consumer', () => {
   assert.match(migration, /not can_take_orders[\s\S]*active_cash_session_id is null/)
   assert.match(shell, /context\.deviceMode === 'kds'/)
   assert.match(shell, /getCachedContext\(\)\?\.deviceMode !== 'kds'/)
-  assert.match(kds, /subscribeToKds/)
+  assert.match(kds, /useKdsQueue/)
+  assert.match(read('../src/features/production/useKdsQueue.ts'), /subscribeToKds/)
 })
 

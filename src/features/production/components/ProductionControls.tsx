@@ -4,6 +4,7 @@ import { AppModal, Button } from '../../../components/ui'
 import { formatQuantity } from '../../../lib/format'
 import type { RestaurantOrderDetail } from '../../tables/types'
 import type { OrderProductionState, ProductionSelection } from '../types'
+import { getProductionUnsentQuantity } from '../routing'
 
 type Props = {
   disabled: boolean
@@ -16,11 +17,8 @@ export function ProductionControls({ disabled, onSend, order, state }: Props) {
   const available = useMemo(() => state.entries.map((entry) => {
     const line = order.lines.find((candidate) => candidate.id === entry.lineId)
     const productionLine = state.lines.find((candidate) => candidate.lineId === entry.lineId)
-    return { ...entry, unsentQuantity: Math.max(0, entry.unsentQuantity - (line?.servedQuantity ?? 0)), hasProductionDestination: Boolean(productionLine?.hasProductionDestination && entry.hasProductionDestination) }
-  }).filter((entry) => {
-    const productionLine = state.lines.find((candidate) => candidate.lineId === entry.lineId)
-    return productionLine?.hasProductionDestination && productionLine.unsentQuantity > 0 && entry.hasProductionDestination && entry.unsentQuantity > 0
-  }), [order.lines, state.entries, state.lines])
+    return { ...entry, unsentQuantity: getProductionUnsentQuantity(entry, line), hasProductionDestination: Boolean(productionLine?.hasProductionDestination && entry.hasProductionDestination) }
+  }).filter((entry) => entry.hasProductionDestination && entry.unsentQuantity > 0), [order.lines, state.entries, state.lines])
   const [selected, setSelected] = useState<Record<string, number>>({})
   const [open, setOpen] = useState(false)
   const keyFor = (lineId: string, componentId: string | null) => `${lineId}:${componentId ?? ''}`

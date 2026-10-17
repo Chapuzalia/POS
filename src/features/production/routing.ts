@@ -2,6 +2,11 @@ import type { CatalogData } from '../catalog/domain/types'
 import type { RestaurantOrderLine } from '../tables/types'
 import type { ProductionEntry, ProductionRouting } from './types'
 
+export function getProductionUnsentQuantity(entry: Pick<ProductionEntry, 'sentQuantity' | 'skippedQuantity' | 'unsentQuantity'>, line?: Pick<RestaurantOrderLine, 'quantity' | 'servedQuantity'>) {
+  if (!line) return entry.unsentQuantity
+  return Math.max(0, Math.round((line.quantity - Math.max(entry.sentQuantity + (entry.skippedQuantity ?? 0), line.servedQuantity)) * 1000) / 1000)
+}
+
 function firstCategoryId(catalog: CatalogData, productId: string) {
   return catalog.placements
     .filter((placement) => placement.productId === productId && placement.active && placement.categoryId)

@@ -21,7 +21,9 @@ export type ProductionEntry = {
   parentProductName?: string | null
   quantity: number
   sentQuantity: number
+  skippedQuantity?: number
   readyQuantity: number
+  preparingQuantity?: number
   unsentQuantity: number
   passId: string
   passName: string
@@ -35,6 +37,7 @@ export type ProductionLineState = {
   lineId: string
   sentQuantity: number
   readyQuantity: number
+  preparingQuantity?: number
   unsentQuantity: number
 }
 
@@ -77,6 +80,8 @@ export type KdsItem = {
   quantity: number
   readyQuantity: number
   cancelledQuantity: number
+  servedQuantity?: number
+  acceptedAt?: string | null
   passName?: string | null
   snapshot: {
     productName?: string

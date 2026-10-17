@@ -31,8 +31,10 @@ import { MenuComponentDetails } from "../../../components/pos/MenuComponentDetai
 import { InvoiceTicketNotice } from "../../../components/pos/InvoiceTicketNotice";
 import { NumericKeypadModal } from "../../../components/ui/NumericKeypadModal";
 import { ProductionControls } from "../../production/components/ProductionControls";
+import { getOrderLineProductionProgress } from "../../production/order-progress";
 import {
   buildOptimisticProductionEntries,
+  getProductionUnsentQuantity,
   mergeProductionEntries,
 } from "../../production/routing";
 import type {
@@ -83,6 +85,7 @@ type OrderValueEditor = {
   kind: "quantity" | "unitPrice";
   lineId: string;
   productName: string;
+  quantityOffset?: number;
 };
 
 function OrderLineRow({
@@ -132,6 +135,9 @@ function OrderLineRow({
   const production = productionState?.lines.find(
     (state) => state.lineId === line.id,
   );
+  const productionEntries = (productionState?.entries ?? []).filter((entry) => entry.lineId === line.id);
+  const productionProgress = getOrderLineProductionProgress(line, productionEntries, production);
+  const productionEnabled = productionState?.effective && productionEntries.some((entry) => entry.hasProductionDestination);
   const additionNames = getLineAdditionNames(line.modifiers, line.mixer);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(
     null,
@@ -249,11 +255,13 @@ function OrderLineRow({
                 {formatQuantity(displayLine.quantity)}x - {line.productName}
               </p>
               <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${pending === 0 ? "bg-[var(--success)]/15 text-[var(--success)]" : "bg-[var(--warning)]/15 text-[var(--warning)]"}`}
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${pending === 0 || (productionEnabled && productionProgress.ready > 0) ? "bg-[var(--success)]/15 text-[var(--success)]" : productionEnabled && (productionProgress.preparing > 0 || productionProgress.sent > 0) ? "bg-[var(--accent)]/15 text-[var(--accent)]" : "bg-[var(--warning)]/15 text-[var(--warning)]"}`}
               >
                 {pending === 0
                   ? "Servido"
-                  : pending === displayLine.quantity
+                  : productionEnabled
+                    ? productionProgress.label
+                    : pending === displayLine.quantity
                     ? "Pendiente"
                     : "Parcial"}
               </span>
@@ -272,11 +280,14 @@ function OrderLineRow({
                 {formatQuantity(pending)} pendientes
               </p>
             ) : null}
-            {productionState?.effective ? (
+            {productionEnabled && !readOnly ? (
               <p className="mt-1  text-xs font-semibold text-[var(--muted)]">
-                {formatQuantity(production?.unsentQuantity ?? line.quantity)}{" "}
-                sin enviar · {formatQuantity(production?.readyQuantity ?? 0)}{" "}
-                listas
+                {[
+                  productionProgress.unsent > 0 ? `${formatQuantity(productionProgress.unsent)} sin enviar` : null,
+                  productionProgress.sent > 0 ? `${formatQuantity(productionProgress.sent)} ${productionProgress.sent === 1 ? "enviado" : "enviados"}` : null,
+                  productionProgress.preparing > 0 ? `${formatQuantity(productionProgress.preparing)} en preparación` : null,
+                  productionProgress.ready > 0 ? `${formatQuantity(productionProgress.ready)} ${productionProgress.ready === 1 ? "listo" : "listos"} para servir` : null,
+                ].filter(Boolean).join(" · ")}
               </p>
             ) : null}
           </div>
@@ -320,7 +331,7 @@ function OrderLineRow({
                   onClick={onOpenQuantityEditor}
                   type="button"
                 >
-                  {formatQuantity(line.quantity)}
+                  {formatQuantity(displayLine.quantity)}
                 </button>
               </span>
               <Button
@@ -523,7 +534,10 @@ export function RestaurantOrderPanel(props: Props) {
         catalog ?? null,
         productionRouting,
       ),
-    );
+    ).map((entry) => ({
+      ...entry,
+      unsentQuantity: getProductionUnsentQuantity(entry, order.lines.find((line) => line.id === entry.lineId)),
+    }));
   }, [
     catalog,
     order.lines,
@@ -576,6 +590,7 @@ export function RestaurantOrderPanel(props: Props) {
     if (!valueEditor) return;
     if (valueEditor.kind === "quantity") {
       const quantity = parseQuantity(value);
+      const totalQuantity = Math.round((quantity + (valueEditor.quantityOffset ?? 0)) * 1000) / 1000;
       const line = order.lines.find(
         (candidate) => candidate.id === valueEditor.lineId,
       );
@@ -585,26 +600,27 @@ export function RestaurantOrderPanel(props: Props) {
         );
         return;
       }
-      if (line && quantity < line.servedQuantity) {
+      if (line && totalQuantity < line.servedQuantity) {
         setValueEditorError(
           `La cantidad no puede ser inferior a las ${line.servedQuantity} unidades servidas.`,
         );
         return;
       }
-      onSetQuantity(valueEditor.lineId, quantity);
+      onSetQuantity(valueEditor.lineId, totalQuantity);
     } else {
       onSetUnitPrice(valueEditor.lineId, parseMoneyToCents(value));
     }
     closeValueEditor();
   }
 
-  const openQuantityEditor = (line: RestaurantOrderLine) => {
+  const openQuantityEditor = (line: RestaurantOrderLine, displayQuantity = line.quantity) => {
     setValueEditorError(null);
     setValueEditor({
-      initialValue: formatQuantity(line.quantity),
+      initialValue: formatQuantity(displayQuantity),
       kind: "quantity",
       lineId: line.id,
       productName: line.productName,
+      quantityOffset: line.quantity - displayQuantity,
     });
   };
 
@@ -633,10 +649,10 @@ export function RestaurantOrderPanel(props: Props) {
       key={`${line.id}:${displayQuantity ?? "full"}`}
       line={line}
       onChangeProductionPass={onChangeProductionPass}
-      onOpenQuantityEditor={() => openQuantityEditor(line)}
+      onOpenQuantityEditor={() => openQuantityEditor(line, displayQuantity)}
       onOpenUnitPriceEditor={() => openUnitPriceEditor(line)}
       productionRouting={productionRouting}
-      productionState={productionState}
+      productionState={productionState ? { ...productionState, entries: productionEntries } : productionState}
       readOnly={readOnly}
     />
   );
@@ -675,20 +691,7 @@ export function RestaurantOrderPanel(props: Props) {
           ) : null}
           {productionState?.effective
             ? productionPasses.map((pass) => {
-                const unsentEntries = pass.entries
-                  .map((entry) => {
-                    const line = order.lines.find(
-                      (candidate) => candidate.id === entry.lineId,
-                    );
-                    return {
-                      ...entry,
-                      unsentQuantity: Math.max(
-                        0,
-                        entry.unsentQuantity - (line?.servedQuantity ?? 0),
-                      ),
-                    };
-                  })
-                  .filter((entry) => entry.unsentQuantity > 0);
+                const unsentEntries = pass.entries.filter((entry) => entry.unsentQuantity > 0);
                 const unsent = unsentEntries.reduce(
                   (sum, entry) => sum + entry.unsentQuantity,
                   0,
@@ -759,7 +762,7 @@ export function RestaurantOrderPanel(props: Props) {
                       line,
                       line.servedQuantity,
                       line.servedQuantity,
-                      line.servedQuantity < line.quantity,
+                      true,
                     ),
                   )}
               </div>
