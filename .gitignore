@@ -34,3 +34,4 @@ backups/
 # Superdesign generated component templates
 .superdesign/tmp/
 .env*
+!apps/api/.env.example

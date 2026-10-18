@@ -5,7 +5,7 @@ import type { TenantContext } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
 import { acceptKdsBatch, acknowledgeKdsEvent, markKdsItemQuantityReady, markKdsItemReady } from '../service'
 import type { KdsQueue } from '../types'
-import { getKdsRemainingQuantity, getKdsUnservedQuantity, groupKdsItems, kdsColumns } from '../kds-queue'
+import { getKdsRemainingQuantity, getKdsUnservedQuantity, groupKdsItems, groupKdsItemsByPass, kdsColumns } from '../kds-queue'
 import { useKdsQueue } from '../useKdsQueue'
 import { InventoryPreparationsPanel } from '../../inventory'
 import { hasTenantCapability } from '../../platform/tenantFeatureAccess'
@@ -79,14 +79,16 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
     </div>
     <p className="mt-1 text-xs font-bold text-[var(--muted)]">{kdsColumns.find((column) => column.id === batch.column)?.status}</p>
     <div className="my-3 space-y-2">
-      {batch.items.map((item) => {
+      {groupKdsItemsByPass(batch.items).map((pass) => <section aria-label={`Pase ${pass.name}`} className="overflow-hidden rounded-lg border border-[var(--separator)]" key={pass.name}>
+        <h4 className="border-b border-[var(--separator)] bg-[var(--surface-secondary)] px-3 py-2 text-xs font-black uppercase tracking-wide text-[var(--muted)]">{pass.name}</h4>
+        <div className="divide-y divide-[var(--separator)]">
+        {pass.items.map((item) => {
         const remaining = getKdsRemainingQuantity(item)
         const unserved = getKdsUnservedQuantity(item)
         const ready = remaining <= 0 || unserved <= 0
         const details = itemDetails(item)
-        return <section className={`rounded-lg border p-3 ${ready ? 'border-[var(--separator)] bg-[var(--surface-secondary)] text-[var(--muted)]' : 'border-[var(--separator)]'}`} key={item.id}>
-          <p className="text-xs font-black uppercase tracking-wide text-[var(--muted)]">{item.snapshot.passName ?? item.passName ?? 'Directo'}</p>
-          <h4 className="mt-1 text-lg font-black">{formatQuantity(unserved > 0 ? unserved : item.quantity - item.cancelledQuantity)}x {item.snapshot.productName ?? 'Producto'}</h4>
+        return <section aria-label={item.snapshot.productName ?? 'Producto'} className={`p-3 ${ready ? 'bg-[var(--surface-secondary)] text-[var(--muted)]' : ''}`} key={item.id}>
+          <h5 className="text-lg font-black">{formatQuantity(unserved > 0 ? unserved : item.quantity - item.cancelledQuantity)}x {item.snapshot.productName ?? 'Producto'}</h5>
           {ready ? <p className="mt-1 flex items-center gap-1 text-sm font-bold"><CheckCheck className="h-4 w-4" /> {unserved <= 0 ? 'Servido' : 'Listo para servir'}</p> : item.readyQuantity > 0 ? <p className="mt-1 text-sm font-bold">{formatQuantity(Math.min(unserved, Math.max(0, item.readyQuantity - (item.servedQuantity ?? 0))))} listo(s) · {formatQuantity(remaining)} pendiente(s)</p> : null}
           {item.snapshot.parentProductName ? <p className="mt-2 text-sm font-semibold">Menú: {item.snapshot.parentProductName}</p> : null}
           {details ? <p className="mt-1 text-sm font-semibold">{details}</p> : null}
@@ -96,7 +98,9 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
             <Button aria-label={`Marcar todo ${item.snapshot.productName ?? 'Producto'} listo`} disabled={busyId !== null || !isOnline} onClick={() => void markReady(item.id, remaining, true)} size="lg" type="button" variant="secondary"><CheckCheck className="h-4 w-4" /> Todo listo</Button>
           </div> : null}
         </section>
-      })}
+        })}
+        </div>
+      </section>)}
     </div>
     {batch.column === 'new' ? <Button disabled={busyId !== null || !isOnline} fullWidth onClick={() => void runAction(batch.id, () => acceptKdsBatch(context.deviceId, batch.items[0].batchId))} size="lg" type="button" variant="primary">Aceptar pedido</Button> : batch.column === 'preparing' ? <Button disabled={busyId !== null || !isOnline} fullWidth onClick={() => void markBatchReady(batch)} size="lg" type="button" variant="primary"><CheckCheck className="h-5 w-5" /> Envío listo</Button> : null}
   </article>

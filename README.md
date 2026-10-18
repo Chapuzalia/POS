@@ -30,3 +30,7 @@ If you are developing a production application, we recommend enabling type-aware
 ```
 
 See the [Oxlint rules documentation](https://oxc.rs/docs/guide/usage/linter/rules) for the full list of rules and categories.
+
+## Tickit API y Carta
+
+El workspace incluye la API Express `@tickit/api` en `apps/api`. Se inicia desde esta raíz con `pnpm dev:api` o `pnpm start:api`; `pnpm build` verifica también sus tipos. El POS conserva su aplicación y despliegue actuales. Consulta la [guía de conexión, configuración y contrato HTTP de Tickit Carta](apps/api/README.md).

@@ -15,6 +15,17 @@ export function getKdsUnservedQuantity(item: KdsItem) {
   return Math.max(0, Math.round((item.quantity - item.cancelledQuantity - (item.servedQuantity ?? 0)) * 1000) / 1000)
 }
 
+export function groupKdsItemsByPass(items: KdsItem[]) {
+  const passes = new Map<string, KdsItem[]>()
+  for (const item of items) {
+    const name = item.snapshot.passName ?? item.passName ?? 'Directo'
+    const entries = passes.get(name)
+    if (entries) entries.push(item)
+    else passes.set(name, [item])
+  }
+  return [...passes].map(([name, entries]) => ({ name, items: entries }))
+}
+
 export function groupKdsItems(items: KdsItem[]) {
   const groups = new Map<string, { id: string; orderId: string; tableName: string; sequence: number; sentAt: string; items: KdsItem[] }>()
   for (const item of items) {

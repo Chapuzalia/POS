@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { groupKdsItemsByPass } from '../src/features/production/kds-queue.ts'
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const migration = read('../supabase/migrations/20260921120100_add_production_passes.sql')
@@ -65,5 +66,14 @@ test('POS pass editing is wired and restricted to unsent entries', () => {
 })
 
 test('KDS displays the persisted pass snapshot', () => {
-  assert.match(kds, /item\.snapshot\.passName/)
+  assert.match(kds, /groupKdsItemsByPass/)
+  const items = [
+    { id: 'one', snapshot: { passName: 'Entrantes' }, passName: 'Actual' },
+    { id: 'two', snapshot: { passName: 'Directo' } },
+    { id: 'three', snapshot: { passName: 'Entrantes' } },
+    { id: 'four', snapshot: {}, passName: 'Postres' },
+  ]
+  const groups = groupKdsItemsByPass(items)
+  assert.deepEqual(groups.map(group => group.name), ['Entrantes', 'Directo', 'Postres'])
+  assert.deepEqual(groups[0].items.map(item => item.id), ['one', 'three'])
 })
