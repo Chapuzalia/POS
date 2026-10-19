@@ -1,0 +1,186 @@
+name: Check and deploy staging
+
+on:
+  push:
+    branches:
+      - Staging
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Check only, or apply migrations and deploy the frontend
+        required: true
+        default: check
+        type: choice
+        options:
+          - check
+          - deploy
+
+permissions:
+  actions: read
+  contents: read
+  id-token: write
+
+concurrency:
+  group: pos-staging
+  queue: max
+  cancel-in-progress: false
+
+env:
+  DEPLOY_BRANCH: Staging
+  COOLIFY_SUPABASE_PROJECT: irsdd2liytrh7dttjr5rzj3j
+  COOLIFY_APPLICATION_UUID: ${{ vars.STAGING_COOLIFY_APPLICATION_UUID }}
+  COOLIFY_URL: ${{ vars.COOLIFY_URL }}
+
+jobs:
+  verify:
+    name: Verify staging without deploying
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      base_sha: ${{ steps.release.outputs.base_sha }}
+      previous_app_version: ${{ steps.release.outputs.previous_app_version }}
+    steps:
+      - name: Checkout repository history
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Configure Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+
+      - name: Validate staging target and activation
+        env:
+          REQUESTED_MODE: ${{ inputs.mode }}
+          DEPLOY_ENABLED: ${{ vars.STAGING_DEPLOY_ENABLED }}
+        run: |
+          node --input-type=module <<'NODE'
+          if (process.env.GITHUB_REF !== 'refs/heads/Staging') throw new Error('Run this workflow only from Staging.')
+          for (const key of ['COOLIFY_SUPABASE_PROJECT', 'COOLIFY_APPLICATION_UUID']) {
+            if (!/^[a-z0-9_-]+$/.test(process.env[key] ?? '')) throw new Error(`Configure and verify ${key} for staging.`)
+          }
+          if (process.env.COOLIFY_SUPABASE_PROJECT === 'dbdtluvsdqycxl5tecuwljie' || process.env.COOLIFY_APPLICATION_UUID === 'ezpjwb28qiq7uueykidpitdl') {
+            throw new Error('Staging must use its own Supabase and frontend resources.')
+          }
+          if (process.env.REQUESTED_MODE === 'deploy' && process.env.DEPLOY_ENABLED !== 'true') {
+            throw new Error('Complete the staging checks, then set STAGING_DEPLOY_ENABLED=true before deploying.')
+          }
+          NODE
+
+      - name: Resolve last fully deployed staging baseline
+        id: release
+        uses: actions/github-script@v7
+        env:
+          CONFIGURED_BASELINE_SHA: ${{ vars.STAGING_BASE_SHA }}
+          CONFIGURED_PREVIOUS_APP_VERSION: ${{ vars.STAGING_PREVIOUS_APP_VERSION }}
+        with:
+          script: |
+            const { resolveStagingBaseline } = await import(`${process.env.GITHUB_WORKSPACE}/scripts/resolve-staging-baseline.mjs`)
+            const { baseline, previousAppVersion, bootstrap } = await resolveStagingBaseline({
+              github, owner: context.repo.owner, repo: context.repo.repo, sha: context.sha,
+              configuredBaseline: process.env.CONFIGURED_BASELINE_SHA,
+              configuredPreviousAppVersion: process.env.CONFIGURED_PREVIOUS_APP_VERSION,
+            })
+            core.setOutput('base_sha', baseline)
+            core.setOutput('previous_app_version', previousAppVersion)
+            core.info(`Staging baseline: ${baseline}${bootstrap ? ' (configured bootstrap)' : ''}`)
+
+      - name: Connect to the private Coolify network
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4
+        with:
+          oauth-client-id: ${{ secrets.STAGING_TS_CLIENT_ID }}
+          audience: ${{ secrets.STAGING_TS_AUDIENCE }}
+          tags: tag:github-actions-staging
+          ping: tickit-vps.tail723c3c.ts.net
+
+      - name: Verify Coolify staging frontend configuration
+        env:
+          COOLIFY_API_TOKEN: ${{ secrets.STAGING_COOLIFY_API_TOKEN }}
+          APP_VERSION: ${{ github.sha }}
+          PREVIOUS_APP_VERSION: ${{ steps.release.outputs.previous_app_version }}
+        run: node scripts/deploy-coolify.mjs --check
+
+      - name: Check staging migrations for destructive operations
+        env:
+          BASE_SHA: ${{ steps.release.outputs.base_sha }}
+          HEAD_SHA: ${{ github.sha }}
+        run: |
+          git merge-base --is-ancestor "$BASE_SHA" "$HEAD_SHA"
+          bash scripts/check-pr-migrations.sh "$BASE_SHA" "$HEAD_SHA"
+
+      - name: Enable pinned pnpm
+        run: |
+          npm install --global corepack@0.36.0
+          corepack enable
+          corepack prepare pnpm@10.15.1 --activate
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Verify application and deployment tooling
+        run: |
+          python3 -B -m unittest discover -s tests -p 'test_deploy_pos.py'
+          pnpm lint
+          pnpm test
+          pnpm build
+
+      - name: Check SSH receiver, database history and CLI without applying SQL
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+          SSH_PORT: ${{ vars.STAGING_SSH_PORT || '22' }}
+          APP_VERSION: ${{ github.sha }}
+          DEPLOY_OPERATION: check
+        run: bash scripts/send-pos-migrations.sh
+
+  deploy:
+    # Baseline resolution explicitly requires this job to have succeeded.
+    name: Deploy staging release
+    needs: verify
+    if: vars.STAGING_DEPLOY_ENABLED == 'true' && (github.event_name == 'push' || inputs.mode == 'deploy')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout verified release
+        uses: actions/checkout@v4
+
+      - name: Configure Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.19.0
+
+      - name: Connect to the private Coolify network
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4
+        with:
+          oauth-client-id: ${{ secrets.STAGING_TS_CLIENT_ID }}
+          audience: ${{ secrets.STAGING_TS_AUDIENCE }}
+          tags: tag:github-actions-staging
+          ping: tickit-vps.tail723c3c.ts.net
+
+      - name: Recheck frontend before database changes
+        env:
+          COOLIFY_API_TOKEN: ${{ secrets.STAGING_COOLIFY_API_TOKEN }}
+          APP_VERSION: ${{ github.sha }}
+          PREVIOUS_APP_VERSION: ${{ needs.verify.outputs.previous_app_version }}
+        run: node scripts/deploy-coolify.mjs --check
+
+      - name: Back up staging and apply migrations
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.STAGING_SSH_HOST }}
+          SSH_USER: ${{ secrets.STAGING_SSH_USER }}
+          SSH_PORT: ${{ vars.STAGING_SSH_PORT || '22' }}
+          APP_VERSION: ${{ github.sha }}
+          DEPLOY_OPERATION: apply
+        run: bash scripts/send-pos-migrations.sh
+
+      - name: Deploy staging frontend and verify the exact SHA
+        env:
+          COOLIFY_API_TOKEN: ${{ secrets.STAGING_COOLIFY_API_TOKEN }}
+          APP_VERSION: ${{ github.sha }}
+          PREVIOUS_APP_VERSION: ${{ needs.verify.outputs.previous_app_version }}
+        run: node scripts/deploy-coolify.mjs

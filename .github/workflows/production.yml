@@ -8,6 +8,7 @@ on:
 permissions:
   actions: read
   contents: read
+  id-token: write
 
 concurrency:
   group: pos-production
@@ -18,7 +19,11 @@ jobs:
   migrate-and-deploy:
     name: Migrate database and deploy
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 60
+    env:
+      COOLIFY_SUPABASE_PROJECT: dbdtluvsdqycxl5tecuwljie
+      COOLIFY_APPLICATION_UUID: ezpjwb28qiq7uueykidpitdl
+      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
 
     steps:
       - name: Checkout repository
@@ -52,13 +57,27 @@ jobs:
               return
             }
             core.setOutput('base_sha', baselineSha)
-            core.setOutput('supported_versions', context.sha)
             core.info(`Production baseline: ${baselineSha}${previous ? '' : ' (configured bootstrap)'}`)
 
       - name: Configure Node
         uses: actions/setup-node@v4
         with:
           node-version: 22.19.0
+
+      - name: Connect to the private Coolify network
+        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4
+        with:
+          oauth-client-id: ${{ secrets.PROD_TS_CLIENT_ID }}
+          audience: ${{ secrets.PROD_TS_AUDIENCE }}
+          tags: tag:github-actions-production
+          ping: tickit-vps.tail723c3c.ts.net
+
+      - name: Verify Coolify frontend configuration before database changes
+        env:
+          COOLIFY_API_TOKEN: ${{ secrets.PROD_COOLIFY_API_TOKEN }}
+          APP_VERSION: ${{ github.sha }}
+          PREVIOUS_APP_VERSION: ${{ steps.release.outputs.base_sha }}
+        run: node scripts/deploy-coolify.mjs --check
 
       - name: Validate migrations directory
         shell: bash
@@ -114,32 +133,10 @@ jobs:
 
       - name: Verify application before database changes
         run: |
+          python3 -m unittest discover -s tests -p 'test_deploy_pos.py'
           pnpm run lint
           pnpm test
           pnpm run build
-
-      - name: Install pinned Vercel CLI
-        run: npm install --global vercel@59.16.0
-
-      - name: Build staged production deployment in Vercel
-        id: staged
-        env:
-          APP_VERSION: ${{ github.sha }}
-          SUPPORTED_APP_VERSIONS: ${{ steps.release.outputs.supported_versions }}
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-        run: |
-          set -Eeuo pipefail
-          vercel deploy --yes --prod --skip-domain \
-            --build-env APP_VERSION="$APP_VERSION" \
-            --build-env SUPPORTED_APP_VERSIONS="$SUPPORTED_APP_VERSIONS" \
-            --token=${{ secrets.VERCEL_TOKEN }} > staged-deployment-url.txt
-          deployment_url="$(tail -n 1 staged-deployment-url.txt)"
-          if [[ ! "$deployment_url" =~ ^https://[a-zA-Z0-9.-]+\.vercel\.app$ ]]; then
-            echo "Vercel did not return a valid staged deployment URL."
-            exit 1
-          fi
-          echo "url=$deployment_url" >> "$GITHUB_OUTPUT"
 
       - name: Configure SSH
         shell: bash
@@ -160,32 +157,52 @@ jobs:
           chmod 600 "$HOME/.ssh/pos-production"
           chmod 600 "$HOME/.ssh/known_hosts"
 
-      - name: Backup and apply production migrations
+      - name: Backup and apply migrations to the pinned Coolify Supabase
         shell: bash
         env:
           SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
           SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          APP_VERSION: ${{ github.sha }}
         run: |
           set -Eeuo pipefail
 
           package_root="$(mktemp -d)"
+          trap 'rm -rf "$package_root"' EXIT
           node scripts/prepare-production-migrations.mjs \
             supabase/migrations \
             "$package_root/migrations"
 
-          tar -czf - -C "$package_root" migrations \
+          PACKAGE_ROOT="$package_root" node --input-type=module <<'NODE'
+          import { writeFileSync } from 'node:fs'
+          import { join } from 'node:path'
+          writeFileSync(join(process.env.PACKAGE_ROOT, 'deployment.json'), JSON.stringify({
+            protocol: 2,
+            coolify_project: process.env.COOLIFY_SUPABASE_PROJECT,
+            commit: process.env.APP_VERSION,
+          }))
+          NODE
+
+          # The legacy receiver rejects deployment.json before connecting to any database.
+          tar -czf - -C "$package_root" deployment.json migrations \
             | ssh \
                 -T \
                 -o BatchMode=yes \
                 -o IdentitiesOnly=yes \
                 -o StrictHostKeyChecking=yes \
                 -o ConnectTimeout=15 \
+                -o ServerAliveInterval=15 \
+                -o ServerAliveCountMax=3 \
                 -i "$HOME/.ssh/pos-production" \
                 "${SSH_USER}@${SSH_HOST}"
 
-      - name: Promote verified production deployment
+      - name: Deploy the verified Git SHA in Coolify and wait for completion
         env:
-          VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
-          VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
-          DEPLOYMENT_URL: ${{ steps.staged.outputs.url }}
-        run: vercel promote "$DEPLOYMENT_URL" --yes --token=${{ secrets.VERCEL_TOKEN }}
+          COOLIFY_API_TOKEN: ${{ secrets.PROD_COOLIFY_API_TOKEN }}
+          APP_VERSION: ${{ github.sha }}
+          PREVIOUS_APP_VERSION: ${{ steps.release.outputs.base_sha }}
+        run: node scripts/deploy-coolify.mjs
+
+      - name: Remove runner SSH credentials
+        if: always()
+        shell: bash
+        run: rm -f "$HOME/.ssh/pos-production" "$HOME/.ssh/known_hosts"
