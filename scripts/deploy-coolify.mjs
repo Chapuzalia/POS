@@ -5,6 +5,7 @@ import { pathToFileURL } from 'node:url'
 const shaPattern = /^[0-9a-f]{40}$/
 const uuidPattern = /^[a-zA-Z0-9_-]+$/
 const activeStatuses = new Set(['queued', 'in_progress'])
+const knownStatuses = new Set([...activeStatuses, 'finished', 'failed', 'cancelled-by-user'])
 
 export function deploymentSettings(env) {
   let origin
@@ -54,11 +55,24 @@ export async function checkApplication(api, settings) {
   if (autoDeploy !== false && autoDeploy !== 0) {
     throw new Error('Disable frontend auto-deploy in Coolify before using this workflow, then wait for existing deployments to finish.')
   }
-  if (app.id === undefined || app.id === null) throw new Error('Coolify did not return the application identity.')
-  const deployments = await api('/deployments')
-  if (!Array.isArray(deployments)) throw new Error('Coolify returned an invalid deployments list.')
-  if (deployments.some(item => String(item.application_id) === String(app.id) && activeStatuses.has(item.status))) {
-    throw new Error('The frontend already has a queued or running deployment. Wait before retrying.')
+  // Coolify 4.4.6 omits the internal application ID from its public response.
+  // This UUID-scoped endpoint returns { count, deployments }; inspect every page.
+  let count
+  for (let skip = 0; skip < 10_000;) {
+    const page = await api(`/deployments/applications/${settings.uuid}?skip=${skip}&take=100`)
+    if (!Number.isSafeInteger(page?.count) || page.count < 0 || page.count > 10_000 ||
+        !Array.isArray(page.deployments) || page.deployments.length > 100 || skip + page.deployments.length > page.count ||
+        page.deployments.some(item => !knownStatuses.has(item?.status))) {
+      throw new Error('Coolify returned an invalid or oversized application deployment history.')
+    }
+    if (count !== undefined && count !== page.count) throw new Error('Frontend deployment history changed during preflight. Wait before retrying.')
+    count = page.count
+    if (page.deployments.some(item => activeStatuses.has(item.status))) {
+      throw new Error('The frontend already has a queued or running deployment. Wait before retrying.')
+    }
+    skip += page.deployments.length
+    if (skip === count) return
+    if (page.deployments.length === 0) throw new Error('Coolify returned an incomplete application deployment history.')
   }
 }
 

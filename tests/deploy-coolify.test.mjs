@@ -7,7 +7,7 @@ const env = {
   COOLIFY_APPLICATION_UUID: 'frontend-main', APP_VERSION: 'a'.repeat(40), PREVIOUS_APP_VERSION: 'b'.repeat(40),
 }
 const settings = deploymentSettings(env)
-const app = { id: 17, uuid: settings.uuid, git_branch: 'main', git_repository: 'Chapuzalia/POS', build_pack: 'railpack', settings: { is_auto_deploy_enabled: false } }
+const app = { uuid: settings.uuid, git_branch: 'main', git_repository: 'Chapuzalia/POS', build_pack: 'railpack', settings: { is_auto_deploy_enabled: false } }
 
 function fakeApi({ application = app, running = [], statuses = ['queued', 'in_progress', 'finished'], commit = settings.sha } = {}) {
   const calls = []
@@ -15,7 +15,7 @@ function fakeApi({ application = app, running = [], statuses = ['queued', 'in_pr
     calls.push({ path, method, body })
     if (method === 'PATCH') return {}
     if (path === `/applications/${settings.uuid}`) return application
-    if (path === '/deployments') return running
+    if (path === `/deployments/applications/${settings.uuid}?skip=0&take=100`) return { count: running.length, deployments: running }
     if (path === '/deploy') return { deployments: [{ resource_uuid: settings.uuid, deployment_uuid: 'deploy-main' }] }
     if (path === '/deployments/deploy-main') return { deployment_uuid: 'deploy-main', status: statuses.shift() ?? 'queued', commit }
     throw new Error(`Unexpected call ${path}`)
@@ -45,7 +45,9 @@ test('Staging checks accept only its own application branch and preserve the mai
   const calls = []
   const api = async (path, method = 'GET') => {
     calls.push({ path, method })
-    return path === '/deployments' ? [] : { ...app, uuid: staging.uuid, git_branch: 'Staging' }
+    return path === `/deployments/applications/${staging.uuid}?skip=0&take=100`
+      ? { count: 0, deployments: [] }
+      : { ...app, uuid: staging.uuid, git_branch: 'Staging' }
   }
   await checkApplication(api, staging)
   assert.ok(calls.every(call => call.method === 'GET'))
@@ -63,8 +65,43 @@ test('preflight refuses auto-deploy, wrong branch/repository and a concurrent de
     await assert.rejects(checkApplication(api, settings))
     assert.ok(calls.every(call => call.method === 'GET'))
   }
-  const { api } = fakeApi({ running: [{ application_id: 17, status: 'queued' }] })
+  const { api } = fakeApi({ running: [{ status: 'queued' }] })
   await assert.rejects(checkApplication(api, settings), /queued or running/)
+})
+
+test('UUID-scoped preflight detects active deployments beyond the first page without an internal app ID', async () => {
+  for (const lastStatus of ['finished', 'queued', 'in_progress']) {
+    const calls = []
+    const api = async (path, method = 'GET') => {
+      calls.push({ path, method })
+      if (path === `/applications/${settings.uuid}`) return app
+      if (path === `/deployments/applications/${settings.uuid}?skip=0&take=100`) {
+        return { count: 101, deployments: Array.from({ length: 100 }, () => ({ status: 'finished' })) }
+      }
+      assert.equal(path, `/deployments/applications/${settings.uuid}?skip=100&take=100`)
+      return { count: 101, deployments: [{ status: lastStatus }] }
+    }
+    if (lastStatus === 'finished') await checkApplication(api, settings)
+    else await assert.rejects(checkApplication(api, settings), /queued or running/)
+    assert.equal(calls.length, 3)
+    assert.ok(calls.every(call => call.method === 'GET'))
+  }
+})
+
+test('preflight refuses malformed, incomplete or changing history instead of skipping the concurrency guard', async () => {
+  for (const history of [
+    [], { count: -1, deployments: [] }, { count: 10_001, deployments: [] },
+    { count: 0, deployments: [{ status: 'finished' }] }, { count: 1, deployments: [] },
+    { count: 1, deployments: [{ status: 'unknown' }] },
+  ]) {
+    const api = async path => path === `/applications/${settings.uuid}` ? app : history
+    await assert.rejects(checkApplication(api, settings), /history/)
+  }
+  let page = 0
+  const api = async path => path === `/applications/${settings.uuid}` ? app : {
+    count: ++page === 1 ? 2 : 3, deployments: [{ status: 'finished' }],
+  }
+  await assert.rejects(checkApplication(api, settings), /history changed/)
 })
 
 test('pins the exact SHA and build variables before queueing, then waits for finished', async () => {

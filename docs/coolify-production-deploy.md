@@ -15,6 +15,14 @@ el frontend pertenece a `Chapuzalia/POS`, rama `main`, usa Railpack, tiene
 auto-deploy desactivado y no tiene otro despliegue activo. Ejecuta pruebas, lint
 y build antes de enviar las migraciones por SSH.
 
+La cola se comprueba mediante el historial paginado de la aplicación:
+`GET /deployments/applications/<UUID>?skip=0&take=100`, cuya respuesta en
+Coolify 4.4.6 contiene `count` y `deployments`. Se inspecciona todo el historial
+hasta un máximo de 10.000 registros, sin depender del ID interno que la API
+omite. Se rechazan estados desconocidos, páginas incompletas y cambios de
+recuento durante la comprobación. Contrato verificado en el
+[controlador de v4.4.6](https://github.com/coollabsio/coolify/blob/v4.4.6/app/Http/Controllers/Api/DeployController.php#L686).
+
 El receptor del VPS selecciona exactamente un PostgreSQL activo por etiquetas
 Compose de **ese recurso** y servicio `supabase-db`. Selecciona la IP dinámica de
 la red configurada, obtiene su contraseña actual y comprueba el historial.
