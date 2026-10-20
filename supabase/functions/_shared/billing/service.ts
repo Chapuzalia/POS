@@ -1,7 +1,7 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { buildContract, changeTiming, commercialState, matchesContract, mayProject, recurringMetrics, stripeItems } from './domain.ts'
 import type { CommercialException, Contract, Product, Selection, Version } from './domain.ts'
-import { StripeGateway } from './stripe.ts'
+import { StripeGateway, StripeRequestError } from './stripe.ts'
 import type { StripeInvoice, StripeSubscription } from './stripe.ts'
 
 export type Account = {
@@ -207,6 +207,14 @@ export class BillingService {
     if (!sub || sub.schedule || sub.pending_update) throw new Error('BILLING_PENDING_CHANGE')
     return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: immediate ? 'cancel_now' : 'cancel', contract: null, restoreContract: null, timing: immediate ? 'immediate' : 'period_end', stripeParams: { subscriptionId: sub.id }, preview: { amountDueCents: 0, recurringCents: 0, currency: 'eur', effectiveAt: immediate ? new Date().toISOString() : account.period_end, details: 'No se reembolsan periodos pagados. Se conserva la información y la continuidad operativa.' }, reason, prorationDate: Math.floor(Date.now() / 1000) })
   }
+  async applyStripeMutation<T>(op: Operation, work: () => Promise<T>, releaseOnRejection: boolean) {
+    try { return await work() }
+    catch (error) {
+      const diagnostic = error instanceof StripeRequestError ? error.diagnostic : { outcome: 'uncertain', code: 'STRIPE_TRANSPORT_OR_RESPONSE_ERROR' }
+      await this.transition('apply_error', { tenantId: op.tenant_id, operationId: op.id, error: diagnostic, release: releaseOnRejection && diagnostic.outcome === 'rejected' })
+      throw error
+    }
+  }
   async confirm(tenantId: string, actorId: string, operationId: string, retry = false) {
     const before = await this.db.from('billing_operations').select('*').eq('id', operationId).eq('tenant_id', tenantId).single<Operation>()
     if (before.error) throw new Error('BILLING_OPERATION_NOT_FOUND')
@@ -231,51 +239,53 @@ export class BillingService {
       const expected = immediate ? before.data.preview.amountDueCents : before.data.preview.renewalCents
       if (preview.currency !== 'eur' || preview.amount_due !== expected) throw new Error('BILLING_STALE_STRIPE_QUOTE')
     }
+    if (before.data.contract) await this.validateSelection(tenantId, before.data.contract)
     // Cross-terminal serialization is enforced in the DB, including duplicate button presses.
     const op = retry ? before.data : await this.transition<Operation>('apply_claim', { tenantId, actorId, operationId })
     if (op.status !== 'applying') return { operation: op, url: op.result?.url }
     const account = await this.account(tenantId)
-    if (op.contract) await this.validateSelection(tenantId, op.contract)
     const idempotencyKey = `tickit:${op.id}`
     let result: Operation['result'] = {}
     let status = 'payment_pending'
-    // Errors deliberately leave an uncertain operation 'applying'. Never create another charge.
+    // A retry may follow earlier effects: only a first, definitively rejected mutation can release.
     if (op.kind === 'cancel_now' || op.kind === 'cancel') {
       if (!op.stripe_params.subscriptionId) throw new Error('BILLING_SUBSCRIPTION_REQUIRED')
-      await this.stripe.request(op.kind === 'cancel_now' ? 'DELETE' : 'POST', `/subscriptions/${op.stripe_params.subscriptionId}`, op.kind === 'cancel_now' ? { prorate: false, invoice_now: false } : { cancel_at_period_end: true }, idempotencyKey)
+      await this.applyStripeMutation(op, () => this.stripe.request(op.kind === 'cancel_now' ? 'DELETE' : 'POST', `/subscriptions/${op.stripe_params.subscriptionId}`, op.kind === 'cancel_now' ? { prorate: false, invoice_now: false } : { cancel_at_period_end: true }, idempotencyKey), !retry)
       status = 'completed'
     } else if (!op.stripe_params.subscriptionId) {
       if (!op.contract) throw new Error('BILLING_CONTRACT_REQUIRED')
+      const contract = op.contract
       let customerId = account.stripe_customer_id
       if (!customerId) {
-        const customer = await this.stripe.request<{ id: string }>('POST', '/customers', { name: account.legal_name ?? undefined, email: account.email ?? undefined, metadata: { tickit_tenant_id: tenantId } }, `${idempotencyKey}:customer`)
+        const customer = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string }>('POST', '/customers', { name: account.legal_name ?? undefined, email: account.email ?? undefined, metadata: { tickit_tenant_id: tenantId } }, `${idempotencyKey}:customer`), !retry)
         customerId = customer.id
         await this.transition('link_customer', { tenantId, customerId })
       }
       const existing = await this.stripe.list<StripeSubscription>('/subscriptions', { customer: customerId, status: 'all' })
       if (existing.some(sub => !['canceled','incomplete_expired'].includes(sub.status))) throw new Error('BILLING_EXISTING_SUBSCRIPTION')
-      const checkout = await this.stripe.request<{ id: string; url: string }>('POST', '/checkout/sessions', {
-        customer: customerId, mode: 'subscription', payment_method_types: ['card'],
+      const checkout = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string; url: string }>('POST', '/checkout/sessions', {
+        customer: customerId, mode: 'subscription',
         billing_address_collection: 'required', tax_id_collection: { enabled: true }, customer_update: { address: 'auto', name: 'auto' },
         client_reference_id: tenantId, metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId },
         subscription_data: { metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId } },
-        line_items: op.contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })),
+        line_items: contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })),
         discounts: op.stripe_params.discounts || undefined,
         success_url: `${this.appUrl}/crm?billing=success`, cancel_url: `${this.appUrl}/crm?billing=cancelled`,
-      }, idempotencyKey)
+      }, idempotencyKey), !retry)
       result = { checkoutId: checkout.id, url: checkout.url }
     } else if (op.timing === 'period_end') {
       if (!op.contract) throw new Error('BILLING_CONTRACT_REQUIRED')
       const sub = await this.subscription(account)
       if (!sub || sub.pending_update || (sub.schedule && !retry)) throw new Error('BILLING_PENDING_CHANGE')
-      const schedule = await this.stripe.request<{ id: string; current_phase: { start_date: number; end_date: number } }>('POST', '/subscription_schedules', { from_subscription: sub.id }, `${idempotencyKey}:schedule`)
+      const schedule = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string; current_phase: { start_date: number; end_date: number } }>('POST', '/subscription_schedules', { from_subscription: sub.id }, `${idempotencyKey}:schedule`), !retry)
       const basePhase = { start_date: schedule.current_phase.start_date, end_date: schedule.current_phase.end_date, items: sub.items.data.map(item => ({ price: item.price.id, quantity: item.quantity })), proration_behavior: 'none', discounts: account.contract?.exception?.discountBasisPoints ? [{ coupon: `tickit_discount_${account.contract.exception.discountBasisPoints}` }] : '' }
       const nextPhase = { items: op.contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })), discounts: op.stripe_params.discounts, proration_behavior: 'none', metadata: { tickit_operation_id: op.id, tickit_exception_restored: '' }, duration: { interval: op.contract.interval, interval_count: op.contract.exception?.cycles ?? 1 } }
       const phases = [basePhase, nextPhase, ...(op.restore_contract ? [{ items: op.restore_contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })), discounts: '', proration_behavior: 'none', duration: { interval: op.restore_contract.interval, interval_count: 1 }, metadata: { tickit_operation_id: op.id, tickit_exception_restored: 'true' } }] : [])]
-      await this.stripe.request('POST', `/subscription_schedules/${schedule.id}`, { end_behavior: 'release', proration_behavior: 'none', phases }, `${idempotencyKey}:phases`)
+      // A schedule already exists. Even a definitive phase rejection must retain the lock.
+      await this.applyStripeMutation(op, () => this.stripe.request('POST', `/subscription_schedules/${schedule.id}`, { end_behavior: 'release', proration_behavior: 'none', phases }, `${idempotencyKey}:phases`), false)
       result = { scheduleId: schedule.id }; status = 'scheduled'
     } else {
-      const updated = await this.stripe.request<StripeSubscription>('POST', `/subscriptions/${op.stripe_params.subscriptionId}`, { items: op.stripe_params.items, discounts: op.stripe_params.discounts, payment_behavior: 'pending_if_incomplete', proration_behavior: 'always_invoice', proration_date: op.proration_date }, idempotencyKey)
+      const updated = await this.applyStripeMutation(op, () => this.stripe.request<StripeSubscription>('POST', `/subscriptions/${op.stripe_params.subscriptionId}`, { items: op.stripe_params.items, discounts: op.stripe_params.discounts, payment_behavior: 'pending_if_incomplete', proration_behavior: 'always_invoice', proration_date: op.proration_date }, idempotencyKey), !retry)
       result = { pendingInvoiceId: typeof updated.latest_invoice === 'object' ? updated.latest_invoice?.id : updated.latest_invoice }
     }
     const operation = await this.transition<Operation>('apply_result', { tenantId, operationId, status, result, effectiveAt: op.timing === 'period_end' ? account.period_end : null })

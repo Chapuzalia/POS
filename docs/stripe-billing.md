@@ -1,6 +1,39 @@
 # Stripe Billing de Tickit: implementación y puesta en marcha sandbox
 
-## Estado de entrega
+## Corrección de Checkout y recuperación en Staging (20-10-2026)
+
+Cambios preparados en la rama `Staging`, sin desplegar esta corrección ni aplicar su migración remota. No se ha modificado producción.
+
+- Checkout omite `payment_method_types` y utiliza los métodos dinámicos del Dashboard. Conserva suscripción, precios/cantidades, descuentos, metadatos de sesión/suscripción, recogida fiscal, actualización del cliente y redirecciones.
+- El gateway distingue rechazos de validación/autenticación/permisos de resultados inciertos. Conflictos de idempotencia, HTTP 409/429/5xx, `Stripe-Should-Retry`, respuestas ilegibles y fallos de transporte conservan el bloqueo. Solo guarda estado HTTP, tipo/código/parámetro e ID de petición sanitizados; nunca mensajes ni cuerpos de Stripe.
+- `apply_error` registra el diagnóstico y la auditoría bajo los bloqueos de cuenta y operación. Un primer rechazo definitivo sin recurso económico registrado pasa a `failed`. Un reintento tras incertidumbre o un rechazo de fases después de crear el calendario conserva `applying`. Las claves de idempotencia y la ventana de 23 horas se mantienen.
+- La mora se conserva exclusivamente para una suscripción `past_due`/`unpaid`. `manual`, sin suscripción, deja `delinquent_since=null` en la siguiente conciliación. `revision` aumenta únicamente si cambia el estado comercial persistido; los timestamps y errores técnicos de conciliación no invalidan presupuestos.
+
+Migración compatible nueva: `20261020213005_stripe_billing_failure_reconciliation.sql`. Sustituye `billing_transition(text,jsonb)` conservando firma, permisos invoker, comprobaciones de rol, acciones N-1, bloqueo por empresa y token de conciliación. No consume los contracts pendientes de tickets, contabilidad o fiscalidad, ajenos a Billing.
+
+Se revisaron las llamadas de productos/precios/cupones, previews, suscripciones/cancelaciones, calendarios y Portal frente a la API fijada. No se identificaron otras incompatibilidades en esos parámetros: ya se utilizan `phases.duration`, `discounts.source.coupon`, periodos de los items y `invoices/create_preview`; no se envían los campos de billing cycle anchor modificados por Endive. La validación real de esta corrección cubre preview y Checkout; no constituye aceptación completa de todos los flujos de calendario y Portal.
+
+Recuperación efectuada exclusivamente en el proyecto Staging `irsdd2liytrh7dttjr5rzj3j`:
+
+1. Se comprobó la operación `6ac21565-25a9-40cb-8e30-73b1c5b1bc4b`: `applying`, sin resultado ni suscripción enlazada, cuenta `manual`, `revision=5`, falsa fecha de mora. La escritura de esa fecha y el incremento rutinario proceden del `sync_commit` anterior.
+2. En el Sandbox `acct_1USgwlLmYqvOek4i`, se verificó el cliente y su metadata de empresa. Las consultas completas de sesiones Checkout y suscripciones (todos los estados, también por cliente) devolvieron cero recursos y `has_more=false`. Se repitió la comprobación usando la clave test del runtime de Staging y API `2026-09-30.endive` antes de recuperar.
+3. Se comprobó que el registro no hubiera cambiado durante la verificación y se invocó la transición existente `billing_transition/apply_result` para pasar a `failed`. El resultado conserva el rechazo HTTP 400 comunicado y la evidencia de ausencia de recursos. No se borraron registros ni se ejecutaron UPDATE SQL manuales. La cuenta continúa manual; la limpieza de la mora espera a desplegar la migración y conciliar.
+4. Una prueba independiente con cliente sintético, la versión exacta `2026-09-30.endive` y parámetros equivalentes confirmó preview y creación de Checkout. Stripe devolvió métodos dinámicos `card`, `klarna`, `link`, `amazon_pay` y `satispay`. La sesión se expiró inmediatamente, sin suscripción ni cargo. Los recursos de prueba se conservan en Sandbox, etiquetados `tickit_billing_smoke`.
+
+Despliegue preparado para Staging:
+
+1. Revisar/commit de la corrección en `Staging`. Ejecutar el workflow `Check and deploy staging` con el destino aislado y su baseline verificados. El despliegue normal hace backup y aplica primero las migraciones; no ejecutar estas instrucciones contra main/producción.
+2. Aplicar la migración nueva y después publicar las tres Edge Functions `billing`, `billing-webhook` y `billing-reconcile`, que comparten el servicio. Conservar los secretos test y el origen de Staging.
+3. Conciliar la empresa afectada desde la aplicación: comprobar `manual`, sin suscripción y `delinquent_since=null`. Repetir la conciliación y verificar que `revision` no cambia. Crear un presupuesto nuevo; el anterior queda como historial de fallo y no se reutiliza.
+4. Confirmar el Checkout nuevo en Sandbox, probar rechazo/timeout y supervisar operaciones y auditoría. Un timeout conserva su ID y clave; nunca se libera una operación incierta por ausencia momentánea de recursos.
+
+Regresión: `tests/stripe-billing-recovery.test.mjs` cubre rechazo definitivo, privacidad del diagnóstico, respuesta perdida tras crear sesión, recuperación con la misma clave, bloqueo de operaciones solapadas, rechazo durante reintento, caducidad, fases parcialmente creadas, aislamiento por empresa, recursos ya registrados, mora y revisión estable. Usa el servicio real con PostgreSQL embebido y un doble de Stripe.
+
+Validación local de la corrección: 1007 pruebas pasan con `rtk pnpm dlx pnpm@10.15.1 test`; lint y build pasan con la misma versión fijada. Lint conserva las cuatro advertencias anteriores de CRM/restaurante; build avisa de la ausencia del token de publicación de Sentry. Las tres funciones pasan `deno check` y el diff pasa `git diff --check`. El test de la migración comprueba el expand con el analizador del proyecto y ejecuta su rutina sobre PostgreSQL embebido.
+
+Referencias: [métodos dinámicos](https://docs.stripe.com/payments/payment-methods/dynamic-payment-methods), [errores e idempotencia](https://docs.stripe.com/error-low-level), [cambios de API](https://docs.stripe.com/changelog).
+
+## Estado de entrega inicial (referencia)
 
 Implementación local, sin migraciones remotas ni despliegues. Se ha consultado el MCP oficial con `livemode=false` en **Entorno de prueba de Alteil Solutions SL**. En la comprobación del 20 de octubre de 2026 no había configuraciones de Customer Portal ni endpoints webhook en ese sandbox.
 

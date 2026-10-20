@@ -21,6 +21,21 @@ export type StripeInvoice = {
 export type StripeList<T> = { data: T[]; has_more: boolean }
 type FormValue = string | number | boolean | null | undefined | FormValue[] | { [key: string]: FormValue }
 
+// Never retain Stripe messages, bodies or headers containing customer data/secrets.
+const diagnosticToken = (value: unknown) => typeof value === 'string' && /^[a-zA-Z0-9_.[\]-]{1,150}$/.test(value) ? value : null
+export class StripeRequestError extends Error {
+  readonly diagnostic: { status: number; type: string | null; code: string | null; param: string | null; requestId: string | null; outcome: 'rejected' | 'uncertain' }
+  constructor(status: number, error: { type?: unknown; code?: unknown; param?: unknown }, requestId: string | null, shouldRetry = false) {
+    super(`STRIPE_HTTP_${status}`)
+    const type = diagnosticToken(error.type)
+    // Conflicts, rate limits, idempotency errors and server failures can hide prior effects.
+    const rejected = !shouldRetry && !String(error.code ?? '').includes('idempotency') && ((status === 400 || status === 404) && type === 'invalid_request_error'
+      || status === 401 && type === 'authentication_error'
+      || status === 403 && type === 'permission_error')
+    this.diagnostic = { status, type, code: diagnosticToken(error.code), param: diagnosticToken(error.param), requestId: diagnosticToken(requestId), outcome: rejected ? 'rejected' : 'uncertain' }
+  }
+}
+
 export function encodeStripeForm(params: Record<string, FormValue>) {
   const form = new URLSearchParams()
   function append(key: string, value: FormValue) {
@@ -51,7 +66,14 @@ export class StripeGateway {
       body: method === 'GET' ? undefined : form,
       signal: AbortSignal.timeout(15_000),
     })
-    if (!result.ok) throw new Error(`STRIPE_HTTP_${result.status}`)
+    if (!result.ok) {
+      let details: { type?: unknown; code?: unknown; param?: unknown } = {}
+      try {
+        const body = await result.json()
+        if (body?.error && typeof body.error === 'object') details = body.error
+      } catch { /* An unreadable error response has an uncertain outcome. */ }
+      throw new StripeRequestError(result.status, details, result.headers.get('request-id'), result.headers.get('stripe-should-retry') === 'true')
+    }
     const body: unknown = await result.json()
     if (!body || typeof body !== 'object') throw new Error('STRIPE_INVALID_RESPONSE')
     if ('livemode' in body && body.livemode !== false) throw new Error('BILLING_LIVE_MODE_FORBIDDEN')
