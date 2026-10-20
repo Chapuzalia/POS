@@ -14,6 +14,13 @@ export const exceptionSchema = z.object({
   customAmounts: z.record(key, z.number().int().min(0).max(100_000_000)),
   cycles: z.number().int().min(1).max(36).nullable(),
   reason: z.string().trim().min(1).max(500),
+  promotions: z.array(z.object({
+    id: z.uuid(), key, freeUnits: quantity.min(1), start: z.enum(['immediate','period_end']),
+    durationUnit: z.enum(['months','cycles']), duration: quantity.min(1).max(36),
+    consent: z.string().trim().min(1).max(500),
+    startsAt: z.number().int().positive().optional(), endsAt: z.number().int().positive().optional(),
+    consentRecordedAt: z.string().optional(),
+  }).strict()).max(8).optional(),
 }).strict()
 export const productSchema = z.object({
   key, kind: z.enum(['plan','addon']), name: z.string().trim().min(1).max(120), description: z.string().max(2000),

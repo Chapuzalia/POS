@@ -3,6 +3,8 @@ import { buildContract, changeTiming, commercialState, matchesContract, mayProje
 import type { CommercialException, Contract, Product, Selection, Version } from './domain.ts'
 import { StripeGateway, StripeRequestError } from './stripe.ts'
 import type { StripeInvoice, StripeSubscription } from './stripe.ts'
+import { promotionPhases, renewalOnOrAfter, resolvePromotions } from './promotions.ts'
+import type { PromotionPhase, PromotionPreview } from './promotions.ts'
 
 export type Account = {
   tenant_id: string; stripe_customer_id: string | null; stripe_subscription_id: string | null
@@ -10,19 +12,22 @@ export type Account = {
   contract: Contract | null; billed_contract: Contract | null; revision: number; period_end: string | null; cancel_at_period_end: boolean
   delinquent_since: string | null; grace_days: number; last_payment_status: string | null
   last_reconciled_at: string | null; sync_error: string | null; created_at: string
+  schedule_operation_id: string | null
 }
 export type Operation = {
-  id: string; tenant_id: string; actor_id: string; kind: 'change' | 'cancel' | 'cancel_now'
+  id: string; tenant_id: string; actor_id: string; kind: 'change' | 'cancel' | 'cancel_now'; reason: string
   status: string; contract: Contract | null; restore_contract: Contract | null
-  timing: 'immediate' | 'period_end'; preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string }
-  stripe_params: { subscriptionId: string | null; items?: ReturnType<typeof stripeItems>; discounts?: Array<{ coupon: string }> | ''; scheduleId?: string; baseline?: string }
+  timing: 'immediate' | 'period_end'; preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string; promotions?: PromotionPreview[]; afterPromotionCents?: number }
+  stripe_params: { subscriptionId: string | null; items?: ReturnType<typeof stripeItems>; discounts?: Array<{ coupon: string }> | ''; scheduleId?: string; baseline?: string; scheduleBaseline?: string; phases?: PromotionPhase[]; cancelSchedule?: boolean }
   result: { url?: string; checkoutId?: string; scheduleId?: string; pendingInvoiceId?: string | null } | null; created_at: string; proration_date: number; effective_at: string | null
 }
 type VersionRow = { id: string; product_key: string; interval: 'month' | 'year'; amount_cents: number; features: string[]; limits: Version['limits']; included: Record<string, number>; maximum: number | null; requires: string[]; stripe_price_id: string | null; published: boolean }
 type ProductRow = { key: string; kind: Product['kind']; name: string; description: string; scope: Product['scope']; feature_key: string | null; resource: Product['resource']; active: boolean; sort_order: number }
 type StripePrice = { id: string; unit_amount: number; currency: string; recurring: { interval: string }; active: boolean; metadata: Record<string, string> }
 const iso = (seconds: number | undefined | null) => seconds ? new Date(seconds * 1000).toISOString() : null
-const subscriptionBaseline = (sub: StripeSubscription) => JSON.stringify({ status: sub.status, items: sub.items.data.map(item => [item.id,item.price.id,item.quantity,item.current_period_start,item.current_period_end]), pending: sub.pending_update, schedule: sub.schedule, cancellation: sub.cancel_at_period_end, discounts: sub.discounts, invoice: typeof sub.latest_invoice === 'object' ? sub.latest_invoice?.id : sub.latest_invoice })
+const subscriptionBaseline = (sub: StripeSubscription) => JSON.stringify({ status: sub.status, anchor: sub.billing_cycle_anchor, items: sub.items.data.map(item => [item.id,item.price.id,item.quantity,item.current_period_start,item.current_period_end]), pending: sub.pending_update, schedule: sub.schedule, cancellation: sub.cancel_at_period_end, discounts: sub.discounts, invoice: typeof sub.latest_invoice === 'object' ? sub.latest_invoice?.id : sub.latest_invoice })
+type Schedule = { id: string; subscription: string; status: string; current_phase: { start_date: number; end_date: number }; phases: unknown[]; metadata: Record<string, string> }
+const scheduleBaseline = (schedule: Schedule) => JSON.stringify({ phases: schedule.phases, status: schedule.status, current: schedule.current_phase })
 
 export class BillingService {
   readonly db: SupabaseClient
@@ -83,16 +88,22 @@ export class BillingService {
   }
   async detail(tenantId: string, admin: boolean) {
     const account = await this.account(tenantId)
+    const scheduled = await this.scheduleOperation(account)
     const [tenant, venues, devices, invoices, operations, audit] = await Promise.all([
       this.db.from('tenants').select('id,name,max_venues,max_devices').eq('id', tenantId).single(),
       this.db.from('venues').select('id,name,is_active').eq('tenant_id', tenantId),
       this.db.from('devices').select('id,name,venue_id,is_active').eq('tenant_id', tenantId).eq('is_active', true),
       this.db.from('billing_invoices').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100),
-      this.db.from('billing_operations').select('id,kind,status,timing,preview,result,reason,created_at,effective_at').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
+      this.db.from('billing_operations').select('id,kind,status,timing,preview,result,reason,created_at,effective_at,contract').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
       admin ? this.db.from('billing_audit').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
     ])
     if ([tenant, venues, devices, invoices, operations, audit].some(result => result.error)) throw new Error('BILLING_DB_DETAIL')
-    return { account, tenant: tenant.data, venues: venues.data, devices: devices.data, invoices: invoices.data, operations: operations.data, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
+    const history = operations.data ?? []
+    if (scheduled && !history.some(row => row.id === scheduled.id)) {
+      const { id, kind, status, timing, preview, result, reason, created_at, effective_at, contract } = scheduled
+      history.push({ id, kind, status, timing, preview, result, reason, created_at, effective_at, contract })
+    }
+    return { account, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, invoices: invoices.data, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
   }
   async overview() {
     // Paginate; PostgREST's default 1000-row cap must not silently undercount revenue.
@@ -120,6 +131,20 @@ export class BillingService {
     const sub = await this.stripe.request<StripeSubscription>('GET', `/subscriptions/${account.stripe_subscription_id}`, { expand: ['latest_invoice','discounts'] })
     if (sub.customer !== account.stripe_customer_id || sub.livemode !== false || sub.items.has_more) throw new Error('BILLING_SUBSCRIPTION_MISMATCH')
     return sub
+  }
+  async ownedSchedule(account: Account, sub: StripeSubscription) {
+    if (!sub.schedule || !account.schedule_operation_id) return null
+    const stored = await this.db.from('billing_operations').select('*').eq('tenant_id', account.tenant_id).eq('id', account.schedule_operation_id).single<Operation>()
+    if (stored.error || stored.data.result?.scheduleId !== sub.schedule || !stored.data.stripe_params.phases) return null
+    const schedule = await this.stripe.request<Schedule>('GET', `/subscription_schedules/${sub.schedule}`)
+    if (schedule.subscription !== sub.id || schedule.status !== 'active' || schedule.metadata.tickit_operation_id !== stored.data.id) throw new Error('BILLING_PENDING_CHANGE')
+    return schedule
+  }
+  async scheduleOperation(account: Account) {
+    if (!account.schedule_operation_id) return null
+    const stored = await this.db.from('billing_operations').select('*').eq('tenant_id', account.tenant_id).eq('id', account.schedule_operation_id).single<Operation>()
+    if (stored.error || !stored.data.stripe_params.phases) throw new Error('BILLING_DB_OPERATION')
+    return stored.data
   }
   async validateSelection(tenantId: string, contract: Contract) {
     const [venues, devices] = await Promise.all([
@@ -164,10 +189,12 @@ export class BillingService {
     if (commercialState(account.status, account.delinquent_since, account.grace_days) === 'restricted' && !['canceled','incomplete_expired'].includes(account.status)) throw new Error('BILLING_PAYMENT_REQUIRED')
     const { products, versions } = await this.catalog()
     const existingContract = account.billed_contract ?? account.contract
+    const scheduled = await this.scheduleOperation(account)
+    const agreement = scheduled?.contract ?? existingContract
     if (!isSuperadmin) {
       if (exception) throw new Error('BILLING_FORBIDDEN')
-      exception = existingContract?.exception ?? null
-      const existing = account.billed_contract ?? account.contract
+      exception = agreement?.exception ?? null
+      const existing = agreement
       const retained = new Set([existing?.selection.planVersionId, ...(existing?.selection.addons.map(addon => addon.versionId) ?? [])])
       const current = new Map<string, string>()
       for (const version of versions) if (version.published && !current.has(`${version.productKey}:${version.interval}`)) current.set(`${version.productKey}:${version.interval}`,version.id)
@@ -175,6 +202,11 @@ export class BillingService {
         const version = versions.find(row => row.id === id)
         if (!version || (!retained.has(id) && current.get(`${version.productKey}:${version.interval}`) !== id)) throw new Error('BILLING_INVALID_HISTORICAL_TARIFF')
       }
+    }
+    // N-1 admin clients do not send the promotions field. Omission cannot revoke
+    // a signed grant; the new editor sends an explicit [] to withdraw promotions.
+    if (isSuperadmin && exception?.promotions === undefined && agreement?.exception?.promotions?.length) {
+      exception = { ...(exception ?? { freeUnits: {}, limits: {}, discountBasisPoints: 0, customAmounts: {}, cycles: null, reason }), promotions: agreement.exception.promotions }
     }
     const effectiveProducts = products.map(product => {
       if (product.active) return product
@@ -184,11 +216,28 @@ export class BillingService {
       const requested = selection.addons.find(addon => addon.key === product.key)
       return previous && requested && previous.versionId === requested.versionId && requested.quantity <= previous.quantity ? { ...product, active: true } : product
     })
-    const next = buildContract(effectiveProducts, versions, selection, exception)
-    await this.validateSelection(tenantId, next)
+    // Reject foreign assignments and invalid quantities before any Stripe request.
+    await this.validateSelection(tenantId, buildContract(effectiveProducts, versions, selection, exception))
     const linkedSubscription = await this.subscription(account)
     const subscription = linkedSubscription && !['canceled','incomplete_expired'].includes(linkedSubscription.status) ? linkedSubscription : null
-    if (subscription?.pending_update || subscription?.schedule || subscription?.cancel_at_period_end || (subscription && !['active','trialing'].includes(subscription.status))) throw new Error('BILLING_PENDING_CHANGE')
+    const owned = subscription ? await this.ownedSchedule(account, subscription) : null
+    if (scheduled && subscription?.schedule !== scheduled.result?.scheduleId) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+    if (subscription?.pending_update || (subscription?.schedule && !owned) || subscription?.cancel_at_period_end || (subscription && !['active','trialing'].includes(subscription.status))) throw new Error('BILLING_PENDING_CHANGE')
+    const now = Math.floor(Date.now() / 1000)
+    if (exception?.promotions?.length || owned) {
+      exception ??= { freeUnits: {}, limits: {}, discountBasisPoints: 0, customAmounts: {}, cycles: null, reason }
+      if (!subscription || !existingContract || exception.cycles || existingContract.exception?.cycles) throw new Error('BILLING_INVALID_PROMOTION_CONTRACT')
+      // A promotion may be removed by Superadmin, but a self-service change retains it.
+      if (subscription.status !== 'active') throw new Error('BILLING_PENDING_CHANGE')
+      if (!Number.isSafeInteger(subscription.billing_cycle_anchor) || subscription.items.data.some(item => item.current_period_start !== subscription.items.data[0].current_period_start || item.current_period_end !== subscription.items.data[0].current_period_end)) throw new Error('BILLING_INVALID_PROMOTION_DATE')
+      const interval = versions.find(v => v.id === selection.planVersionId)?.interval ?? existingContract.interval
+      const renewal = subscription.items.data[0].current_period_end
+      const promotions = resolvePromotions(exception.promotions ?? [], agreement?.exception?.promotions ?? [], selection, now, renewal, interval, interval === existingContract.interval ? subscription.billing_cycle_anchor : renewal)
+      exception = { ...exception, promotions }
+      return this.quotePromotions(account, actorId, selection, exception, reason, effectiveProducts, versions, subscription, owned, now, agreement)
+    }
+    const next = buildContract(effectiveProducts, versions, selection, exception)
+    await this.validateSelection(tenantId, next)
     // Fixed-term concessions use schedule phases; only at renewal, never an ad-hoc expiry cron.
     const timing = exception?.cycles ? 'period_end' : subscription && account.contract ? changeTiming(account.contract, next) : 'immediate'
     if (exception?.cycles && !subscription) throw new Error('BILLING_TEMPORARY_REQUIRES_SUBSCRIPTION')
@@ -201,11 +250,68 @@ export class BillingService {
     if (preview && preview.currency !== 'eur') throw new Error('BILLING_CURRENCY_MISMATCH')
     return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing, stripeParams: { subscriptionId: subscription?.id ?? null, items, discounts, baseline: subscription ? subscriptionBaseline(subscription) : undefined }, preview: { amountDueCents: timing === 'immediate' ? preview.amount_due : 0, renewalCents: timing === 'period_end' ? preview.amount_due : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? account.period_end : null, details: timing === 'period_end' ? 'Cambio al vencimiento; sin cargo inmediato. Vista previa de renovación calculada por Stripe.' : 'Vista previa de Stripe; incluye los ajustes e impuestos configurados.' }, reason, prorationDate })
   }
+  async promotionInvoice(account: Account, sub: StripeSubscription, contract: Contract, discounts: PromotionPhase['discounts']) {
+    const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', {
+      customer: account.stripe_customer_id ?? undefined, subscription: sub.id, preview_mode: 'recurring',
+      subscription_details: { items: stripeItems(sub.items.data, contract.lines), proration_behavior: 'none' }, discounts,
+    })
+    if (preview.currency !== 'eur') throw new Error('BILLING_CURRENCY_MISMATCH')
+    return preview.amount_due
+  }
+  async quotePromotions(account: Account, actorId: string, selection: Selection, exception: CommercialException, reason: string, products: Product[], versions: Version[], sub: StripeSubscription, owned: Schedule | null, now: number, agreement: Contract | null) {
+    const current = account.billed_contract ?? account.contract
+    if (!current) throw new Error('BILLING_CONTRACT_REQUIRED')
+    const renewal = sub.items.data[0].current_period_end
+    const requested = buildContract(products, versions, selection, exception, now)
+    await this.materialize(requested, account.tenant_id)
+    const fresh = (exception.promotions ?? []).filter(p => !(agreement?.exception?.promotions ?? []).some(old => old.id === p.id))
+    const immediate = fresh.some(p => p.start === 'immediate')
+    // Only the newly granted units may change the bill immediately; existing paid
+    // periods are not refunded. Other prices, discounts and reductions use renewal.
+    const grantedKeys = new Set(fresh.filter(p => p.start === 'immediate').map(p => p.key))
+    const grantOnly = current.lines.every(line => {
+      const target = requested.lines.find(row => row.key === line.key)
+      return grantedKeys.has(line.key) ? !target || target.stripePriceId === line.stripePriceId && target.quantity <= line.quantity : target?.stripePriceId === line.stripePriceId && target.quantity === line.quantity
+    }) && requested.lines.every(line => current.lines.some(row => row.key === line.key))
+    if (immediate && (!grantOnly || changeTiming(current, { ...requested, recurringCents: current.recurringCents }) !== 'immediate' || requested.recurringCents > current.recurringCents || requested.exception?.discountBasisPoints !== (current.exception?.discountBasisPoints ?? 0) || !matchesContract(sub.items.data, current))) throw new Error('BILLING_INVALID_PROMOTION_IMMEDIATE_CHANGE')
+    const effective = immediate ? now : renewal
+    if (fresh.some(p => (p.startsAt ?? 0) < effective)) throw new Error('BILLING_INVALID_PROMOTION_DATE')
+    const phases = promotionPhases(products, versions, selection, exception, current, effective, owned?.current_phase.start_date ?? sub.items.data[0].current_period_start, now, renewal)
+    // Preserve existing grants until a deferred change, including expirations before renewal.
+    for (const phase of phases) {
+      if (phase.start < effective && !immediate) {
+        const retainedKeys = new Set([versions.find(v => v.id === current.selection.planVersionId)?.productKey, ...current.selection.addons.map(addon => addon.key)])
+        phase.contract = buildContract(products.map(product => retainedKeys.has(product.key) ? { ...product, active: true } : product), versions, current.selection, current.exception, Math.max(now, phase.start))
+      }
+      await this.validateSelection(account.tenant_id, phase.contract)
+      // Stripe resets anchors on zero-to-paid classic subscriptions. Require a paid
+      // base so an expiry cannot unexpectedly invoice in the middle of a period.
+      if (!phase.contract.lines.some(line => line.amountCents > 0)) throw new Error('BILLING_INVALID_PROMOTION_ZERO_BASE')
+      phase.discounts = await this.materialize(phase.contract, account.tenant_id)
+    }
+    const next = phases.find(p => p.start <= effective && effective < p.end)?.contract
+    if (!next) throw new Error('BILLING_INVALID_PROMOTION_DATE')
+    const previews: PromotionPreview[] = []
+    for (const promotion of exception.promotions ?? []) {
+      const firstCharge = renewalOnOrAfter(promotion.endsAt ?? now, renewal, next.interval, next.interval === current.interval ? sub.billing_cycle_anchor : renewal)
+      const after = buildContract(products, versions, selection, exception, firstCharge)
+      const discounts = await this.materialize(after, account.tenant_id)
+      const line = after.lines.find(l => l.key === promotion.key)
+      const version = versions.find(v => v.id === selection.addons.find(a => a.key === promotion.key)?.versionId)
+      previews.push({ id: promotion.id, key: promotion.key, freeUnits: promotion.freeUnits, activationAt: iso(promotion.startsAt) ?? '', endsAt: iso(promotion.endsAt) ?? '', firstChargeAt: line && line.amountCents > 0 && exception.discountBasisPoints < 10_000 ? iso(firstCharge) : null, regularUnitCents: exception.customAmounts[promotion.key] ?? version?.amountCents ?? 0, firstAddonChargeCents: line ? Number((BigInt(line.amountCents) * BigInt(line.quantity) * BigInt(10_000 - exception.discountBasisPoints) + 5_000n) / 10_000n) : 0, firstInvoiceCents: await this.promotionInvoice(account, sub, after, discounts), prorated: false })
+    }
+    const renewalPhase = phases.find(p => p.start <= renewal && renewal < p.end) ?? phases.at(-1)
+    const renewalCents = renewalPhase ? await this.promotionInvoice(account, sub, renewalPhase.contract, renewalPhase.discounts) : 0
+    return this.transition<Operation>('quote', { tenantId: account.tenant_id, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: null, timing: immediate ? 'immediate' : 'period_end',
+      stripeParams: { subscriptionId: sub.id, scheduleId: owned?.id, baseline: subscriptionBaseline(sub), scheduleBaseline: owned ? scheduleBaseline(owned) : undefined, phases },
+      preview: { amountDueCents: 0, recurringCents: next.recurringCents, afterPromotionCents: phases.at(-1)?.contract.recurringCents, renewalCents, currency: 'eur', effectiveAt: iso(effective), promotions: previews, details: 'Sin cargos ni prorrateos ahora o al cambiar de fase. Si la promoción termina entre renovaciones, el tramo restante es gratuito y el precio habitual se cobra en la siguiente renovación. Cambios de plan, cantidades o retirada de promociones: próxima renovación. Importes recurrentes sin impuestos; primera factura estimada por Stripe con la configuración actual, sujeta a cambios fiscales, de saldo y de contrato.' }, reason, prorationDate: now })
+  }
   async quoteCancel(tenantId: string, actorId: string, immediate: boolean, reason: string) {
     const account = await this.account(tenantId)
     const sub = await this.subscription(account)
-    if (!sub || sub.schedule || sub.pending_update) throw new Error('BILLING_PENDING_CHANGE')
-    return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: immediate ? 'cancel_now' : 'cancel', contract: null, restoreContract: null, timing: immediate ? 'immediate' : 'period_end', stripeParams: { subscriptionId: sub.id }, preview: { amountDueCents: 0, recurringCents: 0, currency: 'eur', effectiveAt: immediate ? new Date().toISOString() : account.period_end, details: 'No se reembolsan periodos pagados. Se conserva la información y la continuidad operativa.' }, reason, prorationDate: Math.floor(Date.now() / 1000) })
+    const owned = sub ? await this.ownedSchedule(account, sub) : null
+    if (!sub || (sub.schedule && !owned) || sub.pending_update) throw new Error('BILLING_PENDING_CHANGE')
+    return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: immediate ? 'cancel_now' : 'cancel', contract: null, restoreContract: null, timing: immediate ? 'immediate' : 'period_end', stripeParams: { subscriptionId: sub.id, baseline: subscriptionBaseline(sub), scheduleId: owned?.id, scheduleBaseline: owned ? scheduleBaseline(owned) : undefined, cancelSchedule: Boolean(owned) }, preview: { amountDueCents: 0, recurringCents: 0, currency: 'eur', effectiveAt: immediate ? new Date().toISOString() : account.period_end, details: 'No se reembolsan periodos pagados. Se retira el calendario promocional y se cancela la suscripción; no se cobrarán recuperaciones de precio posteriores. Se conserva la información y la continuidad operativa.' }, reason, prorationDate: Math.floor(Date.now() / 1000) })
   }
   async applyStripeMutation<T>(op: Operation, work: () => Promise<T>, releaseOnRejection: boolean) {
     try { return await work() }
@@ -224,8 +330,25 @@ export class BillingService {
       const account = await this.account(tenantId)
       const sub = await this.subscription(account)
       if (!sub || subscriptionBaseline(sub) !== before.data.stripe_params.baseline) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+      if (before.data.stripe_params.scheduleId && before.data.stripe_params.scheduleBaseline) {
+        const schedule = await this.ownedSchedule(account, sub)
+        if (!schedule || scheduleBaseline(schedule) !== before.data.stripe_params.scheduleBaseline) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+      }
     }
-    if (!retry && before.data.kind === 'change') {
+    if (!retry && before.data.stripe_params.phases) {
+      const account = await this.account(tenantId), sub = await this.subscription(account)
+      const phases = before.data.stripe_params.phases
+      if (!sub || phases[0].end <= Math.floor(Date.now() / 1000)) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+      const renewal = sub.items.data[0].current_period_end
+      const phase = phases.find(p => p.start <= renewal && renewal < p.end) ?? phases.at(-1)
+      if (!phase || await this.promotionInvoice(account, sub, phase.contract, phase.discounts) !== before.data.preview.renewalCents) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+      for (const promotion of before.data.preview.promotions ?? []) {
+        if (!promotion.firstChargeAt) continue
+        const at = Date.parse(promotion.firstChargeAt) / 1000
+        const after = phases.find(p => p.start <= at && at < p.end) ?? phases.at(-1)
+        if (!after || await this.promotionInvoice(account, sub, after.contract, after.discounts) !== promotion.firstInvoiceCents) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+      }
+    } else if (!retry && before.data.kind === 'change') {
       const account = await this.account(tenantId)
       const immediate = before.data.timing === 'immediate'
       const subId = before.data.stripe_params.subscriptionId
@@ -250,7 +373,10 @@ export class BillingService {
     // A retry may follow earlier effects: only a first, definitively rejected mutation can release.
     if (op.kind === 'cancel_now' || op.kind === 'cancel') {
       if (!op.stripe_params.subscriptionId) throw new Error('BILLING_SUBSCRIPTION_REQUIRED')
-      await this.applyStripeMutation(op, () => this.stripe.request(op.kind === 'cancel_now' ? 'DELETE' : 'POST', `/subscriptions/${op.stripe_params.subscriptionId}`, op.kind === 'cancel_now' ? { prorate: false, invoice_now: false } : { cancel_at_period_end: true }, idempotencyKey), !retry)
+      if (op.stripe_params.cancelSchedule && op.stripe_params.scheduleId) {
+        await this.applyStripeMutation(op, () => this.stripe.request('POST', `/subscription_schedules/${op.stripe_params.scheduleId}/release`, { preserve_cancel_date: false }, `${idempotencyKey}:release`), !retry)
+      }
+      await this.applyStripeMutation(op, () => this.stripe.request(op.kind === 'cancel_now' ? 'DELETE' : 'POST', `/subscriptions/${op.stripe_params.subscriptionId}`, op.kind === 'cancel_now' ? { prorate: false, invoice_now: false } : { cancel_at_period_end: true }, idempotencyKey), !retry && !op.stripe_params.cancelSchedule)
       status = 'completed'
     } else if (!op.stripe_params.subscriptionId) {
       if (!op.contract) throw new Error('BILLING_CONTRACT_REQUIRED')
@@ -273,6 +399,11 @@ export class BillingService {
         success_url: `${this.appUrl}/crm?billing=success`, cancel_url: `${this.appUrl}/crm?billing=cancelled`,
       }, idempotencyKey), !retry)
       result = { checkoutId: checkout.id, url: checkout.url }
+    } else if (op.stripe_params.phases) {
+      const schedule = op.stripe_params.scheduleId ? { id: op.stripe_params.scheduleId } : await this.applyStripeMutation(op, () => this.stripe.request<{ id: string }>('POST', '/subscription_schedules', { from_subscription: op.stripe_params.subscriptionId }, `${idempotencyKey}:schedule`), !retry)
+      const phases = op.stripe_params.phases.map((phase,index) => ({ start_date: phase.start, end_date: phase.end, items: phase.contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })), discounts: phase.discounts, proration_behavior: 'none', metadata: { tickit_operation_id: op.id, tickit_phase: String(index), tickit_exception_restored: '' } }))
+      await this.applyStripeMutation(op, () => this.stripe.request('POST', `/subscription_schedules/${schedule.id}`, { end_behavior: 'release', proration_behavior: 'none', metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId }, phases }, `${idempotencyKey}:phases`), false)
+      result = { scheduleId: schedule.id }; status = 'scheduled'
     } else if (op.timing === 'period_end') {
       if (!op.contract) throw new Error('BILLING_CONTRACT_REQUIRED')
       const sub = await this.subscription(account)
@@ -327,6 +458,14 @@ export class BillingService {
       }
       const pending = await this.db.from('billing_operations').select('*').eq('tenant_id', tenantId).in('status', ['applying','scheduled','payment_pending']).order('created_at', { ascending: false }).returns<Operation[]>()
       if (pending.error) throw new Error('BILLING_DB_OPERATION')
+      // Applied calendars are no longer in-flight economic operations, but their phase
+      // snapshots remain the authority until superseded. Never reconstruct them from catalog.
+      let timeline: Operation | null = null
+      if (account.schedule_operation_id) {
+        const stored = await this.db.from('billing_operations').select('*').eq('tenant_id', tenantId).eq('id', account.schedule_operation_id).single<Operation>()
+        if (stored.error) throw new Error('BILLING_DB_OPERATION')
+        timeline = stored.data
+      }
       for (const operation of pending.data) {
         if ((!sub || ['canceled','incomplete_expired'].includes(sub.status)) && operation.result?.checkoutId) {
           const session = await this.stripe.request<{ status: string }>('GET', `/checkout/sessions/${operation.result.checkoutId}`)
@@ -343,7 +482,7 @@ export class BillingService {
           }
         }
       }
-      const candidates = pending.data.flatMap(op => [{ operation: op, contract: op.contract, restored: false }, ...(op.restore_contract ? [{ operation: op, contract: op.restore_contract, restored: true }] : [])])
+      const candidates = pending.data.filter(op => !op.stripe_params.phases).flatMap(op => [{ operation: op, contract: op.contract, restored: false }, ...(op.restore_contract ? [{ operation: op, contract: op.restore_contract, restored: true }] : [])])
       const matches = (contract: Contract) => {
         if (!sub || !matchesContract(sub.items.data, contract)) return false
         const expected = contract.exception?.discountBasisPoints ? `tickit_discount_${contract.exception.discountBasisPoints}` : null
@@ -355,12 +494,17 @@ export class BillingService {
       const match = sub && candidates.find(candidate => candidate.contract && matches(candidate.contract)
         && (!candidate.operation.restore_contract || candidate.restored === (sub.metadata.tickit_exception_restored === 'true'))
         && (candidate.operation.timing !== 'period_end' || (candidate.operation.effective_at !== null && sub.items.data[0].current_period_start * 1000 >= Date.parse(candidate.operation.effective_at))))
+      const phaseIndex = Number(sub?.metadata.tickit_phase)
+      const phase = timeline?.id === sub?.metadata.tickit_operation_id && Number.isInteger(phaseIndex) ? timeline?.stripe_params.phases?.[phaseIndex] : null
+      const phaseMatch = phase && matches(phase.contract) ? phase.contract : null
       const latest = sub?.latest_invoice && typeof sub.latest_invoice === 'object' ? sub.latest_invoice : null
       let contract: Contract | null = null
       let completedOperationId: string | null = null
       let discrepancy: string | null = null
       if (sub && mayProject(sub.status, Boolean(sub.pending_update), latest?.status === 'paid')) {
-        if (match?.contract) {
+        if (phaseMatch && timeline) {
+          contract = phaseMatch; completedOperationId = timeline.id
+        } else if (match?.contract) {
           contract = match.contract
           // Keep temporary concessions pending until the standard phase has returned.
           if (!match.operation.restore_contract || match.restored) completedOperationId = match.operation.id
@@ -368,7 +512,7 @@ export class BillingService {
           contract = account.contract
         } else discrepancy = 'UNRECOGNIZED_STRIPE_ITEMS'
       }
-      await this.transition('sync_commit', { tenantId, token, customerId: account.stripe_customer_id, subscriptionId: sub?.id ?? null, status: sub?.status ?? account.status, contract, paymentStatus: latest?.status ?? null, periodEnd: iso(sub?.items.data[0]?.current_period_end), cancelAtPeriodEnd: sub?.cancel_at_period_end ?? false, completedOperationId, discrepancy })
+      await this.transition('sync_commit', { tenantId, token, customerId: account.stripe_customer_id, subscriptionId: sub?.id ?? null, status: sub?.status ?? account.status, contract, clearSchedule: !sub?.schedule, financialContract: sub && !sub.pending_update && ['active','past_due','unpaid'].includes(sub.status) ? phaseMatch : null, paymentStatus: latest?.status ?? null, periodEnd: iso(sub?.items.data[0]?.current_period_end), cancelAtPeriodEnd: sub?.cancel_at_period_end ?? false, completedOperationId, discrepancy })
       return { reconciled: true, discrepancy }
     } catch (error) {
       await this.transition('sync_fail', { tenantId, token })

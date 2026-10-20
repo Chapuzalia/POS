@@ -26,6 +26,19 @@ export type Version = {
 }
 export type AddonSelection = { key: string; versionId: string; quantity: number; venueIds: string[]; deviceIds: string[] }
 export type Selection = { planVersionId: string; addons: AddonSelection[] }
+export type AddonPromotion = {
+  id: string
+  key: string
+  freeUnits: number
+  start: 'immediate' | 'period_end'
+  durationUnit: 'months' | 'cycles'
+  duration: number
+  consent: string
+  // Assigned by the server. Existing grants retain their original dates on changes.
+  startsAt?: number
+  endsAt?: number
+  consentRecordedAt?: string
+}
 export type CommercialException = {
   freeUnits: Record<string, number>
   limits: Partial<{ venues: number; devices: number }>
@@ -34,6 +47,7 @@ export type CommercialException = {
   // A temporary exception ends at an exact subscription boundary via a Stripe schedule.
   cycles: number | null
   reason: string
+  promotions?: AddonPromotion[]
 }
 export type Line = { key: string; versionId: string; stripePriceId: string | null; quantity: number; amountCents: number }
 export type Contract = {
@@ -53,7 +67,7 @@ function integer(value: number, label: string, max = 100_000) {
   return value
 }
 
-export function buildContract(products: Product[], versions: Version[], selection: Selection, exception: CommercialException | null = null): Contract {
+export function buildContract(products: Product[], versions: Version[], selection: Selection, exception: CommercialException | null = null, at = Math.floor(Date.now() / 1000)): Contract {
   const byKey = new Map(products.map(product => [product.key, product]))
   const byId = new Map(versions.map(version => [version.id, version]))
   const plan = byId.get(selection.planVersionId)
@@ -78,7 +92,8 @@ export function buildContract(products: Product[], versions: Version[], selectio
     if (product.scope === 'venue' && (addon.venueIds.length > quantity || addon.deviceIds.length)) throw new Error('BILLING_VENUE_QUANTITY')
     if (product.scope === 'device' && (addon.deviceIds.length > quantity || addon.venueIds.length)) throw new Error('BILLING_DEVICE_QUANTITY')
     if (product.scope === 'tenant' && (addon.venueIds.length || addon.deviceIds.length)) throw new Error('BILLING_TENANT_ASSIGNMENT')
-    const included = (product.featureKey && plan.features.includes(product.featureKey) ? quantity : integer(plan.included[addon.key] ?? 0, 'INCLUDED')) + integer(exception?.freeUnits[addon.key] ?? 0, 'FREE_UNITS')
+    const promotionalUnits = (exception?.promotions ?? []).filter(promotion => promotion.key === addon.key && promotion.startsAt !== undefined && promotion.endsAt !== undefined && promotion.startsAt <= at && at < promotion.endsAt).reduce((sum, promotion) => sum + integer(promotion.freeUnits, 'FREE_UNITS'), 0)
+    const included = (product.featureKey && plan.features.includes(product.featureKey) ? quantity : integer(plan.included[addon.key] ?? 0, 'INCLUDED')) + integer(exception?.freeUnits[addon.key] ?? 0, 'FREE_UNITS') + promotionalUnits
     const billable = Math.max(0, quantity - included)
     if (quantity > 0 && product.featureKey) features.add(product.featureKey)
     if (product.resource) limits[product.resource] += quantity

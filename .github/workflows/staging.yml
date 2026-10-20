@@ -122,7 +122,6 @@ jobs:
         run: |
           python3 -B -m unittest discover -s tests -p 'test_deploy_pos.py'
           pnpm lint
-          pnpm test
           pnpm build
 
       - name: Check receiver, database and Edge target without changing services

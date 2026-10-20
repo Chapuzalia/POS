@@ -21,6 +21,7 @@ export type BillingAccount = {
   sync_error: string | null
   stripe_customer_id: string | null
   stripe_subscription_id: string | null
+  schedule_operation_id: string | null
   grace_days: number
   created_at: string
 }
@@ -31,12 +32,14 @@ export type BillingInvoice = {
 }
 export type BillingOperation = {
   id: string; kind: string; status: string; timing: 'immediate' | 'period_end'; reason: string
-  preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string }
+  preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string; afterPromotionCents?: number; promotions?: import('../../../supabase/functions/_shared/billing/promotions').PromotionPreview[] }
+  contract?: Contract | null
   result?: { url?: string } | null
   created_at: string; effective_at?: string | null
 }
 export type BillingDetail = {
   account: BillingAccount
+  scheduledContract: Contract | null
   tenant: { id: string; name: string; max_venues: number; max_devices: number }
   venues: Array<{ id: string; name: string; is_active: boolean }>
   devices: Array<{ id: string; name: string; venue_id: string; is_active: boolean }>

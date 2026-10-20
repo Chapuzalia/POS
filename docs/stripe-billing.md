@@ -1,5 +1,7 @@
 # Stripe Billing de Tickit: implementación y puesta en marcha sandbox
 
+La ampliación preparada en `Staging` añade [promociones gratuitas por addon con inicio inmediato](stripe-billing-promotions.md), conservando las excepciones y contratos anteriores. Esa guía detalla la política sin prorrateo, los calendarios modificables y el despliegue Self-Hosted en Coolify.
+
 ## Corrección de Checkout y recuperación en Staging (20-10-2026)
 
 Cambios preparados en la rama `Staging`, sin desplegar esta corrección ni aplicar su migración remota. No se ha modificado producción.

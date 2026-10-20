@@ -5,6 +5,7 @@ export type StripeSubscription = {
   pending_update: unknown; cancel_at_period_end: boolean
   latest_invoice: string | StripeInvoice | null
   schedule: string | null
+  billing_cycle_anchor?: number
   discounts: Array<string | { source: { coupon: string | { id: string } } }>
   metadata: Record<string, string>
 }

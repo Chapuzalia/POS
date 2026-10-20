@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 export const billingIds = { tenant: '10000000-0000-4000-8000-000000000001', other: '10000000-0000-4000-8000-000000000002', owner: '20000000-0000-4000-8000-000000000001', stranger: '20000000-0000-4000-8000-000000000002', venue: '30000000-0000-4000-8000-000000000001', venueB: '30000000-0000-4000-8000-000000000002' }
 export const billingMigration = await readFile(new URL('../../supabase/migrations/20261020174341_stripe_billing_foundation.sql', import.meta.url), 'utf8')
 export const billingRepairMigration = await readFile(new URL('../../supabase/migrations/20261020213005_stripe_billing_failure_reconciliation.sql', import.meta.url), 'utf8')
+export const billingPromotionsMigration = await readFile(new URL('../../supabase/migrations/20261020221050_billing_immediate_promotions.sql', import.meta.url), 'utf8')
 export async function createBillingDb(t) {
   const db = new PGlite()
   t.after(() => db.close())
@@ -36,6 +37,7 @@ export async function createBillingDb(t) {
   `)
   await db.exec(billingMigration)
   await db.exec(billingRepairMigration)
+  await db.exec(billingPromotionsMigration)
   const transition = async (action, data) => (await db.query('select public.billing_transition($1,$2::jsonb) result', [action, JSON.stringify(data)])).rows[0].result
   return { db, transition }
 }
