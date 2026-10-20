@@ -131,10 +131,12 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   const addFeedback = useAddProductFeedback(floatingTicketButtonRef)
   const tenantIdForFeatureSync = context && !isSuperadmin(context) ? context.tenantId : null
   const userIdForFeatureSync = context?.userId ?? null
+  const venueIdForFeatureSync = context?.venueId || undefined
   const featuresInitiallyLoaded = context?.features !== undefined
   const featureRefreshRef = useRef<{
     tenantId: string
     userId: string
+    venueId?: string
     controller: ReturnType<typeof createTenantFeatureRefresh>
   } | null>(null)
 
@@ -145,11 +147,13 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     }
     if (!isOnline) return undefined
     if (featureRefreshRef.current?.tenantId !== tenantIdForFeatureSync
-      || featureRefreshRef.current.userId !== userIdForFeatureSync) {
+      || featureRefreshRef.current.userId !== userIdForFeatureSync
+      || featureRefreshRef.current.venueId !== venueIdForFeatureSync) {
       featureRefreshRef.current = {
         tenantId: tenantIdForFeatureSync,
         userId: userIdForFeatureSync,
-        controller: createTenantFeatureRefresh(() => loadTenantFeatures(tenantIdForFeatureSync), featuresInitiallyLoaded),
+        venueId: venueIdForFeatureSync,
+        controller: createTenantFeatureRefresh(() => loadTenantFeatures(tenantIdForFeatureSync, venueIdForFeatureSync), featuresInitiallyLoaded),
       }
     }
     const controller = featureRefreshRef.current.controller
@@ -159,7 +163,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
         const features = await controller.refreshIfStale()
         if (!active || features === undefined) return
         setContext((current) => {
-          if (!current || current.tenantId !== tenantIdForFeatureSync || current.userId !== userIdForFeatureSync) return current
+          if (!current || current.tenantId !== tenantIdForFeatureSync || current.userId !== userIdForFeatureSync || (current.venueId || undefined) !== venueIdForFeatureSync) return current
           const unchanged = current.features?.length === features.length
             && current.features.every((feature, index) => feature === features[index])
           if (unchanged) return current
@@ -176,7 +180,7 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
       active = false
       unsubscribe()
     }
-  }, [featuresInitiallyLoaded, isOnline, tenantIdForFeatureSync, userIdForFeatureSync])
+  }, [featuresInitiallyLoaded, isOnline, tenantIdForFeatureSync, userIdForFeatureSync, venueIdForFeatureSync])
 
   const persistProductSalesStats = useCallback((stats: ProductSalesStat[]) => {
     productStatsRevisionRef.current++

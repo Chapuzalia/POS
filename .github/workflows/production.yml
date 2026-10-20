@@ -138,62 +138,27 @@ jobs:
           pnpm test
           pnpm run build
 
-      - name: Configure SSH
-        shell: bash
+      - name: Check database and Edge target before production changes
         env:
           SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
-        run: |
-          set -Eeuo pipefail
-
-          install -d -m 700 "$HOME/.ssh"
-
-          printf '%s\n' "$SSH_PRIVATE_KEY" \
-            > "$HOME/.ssh/pos-production"
-
-          printf '%s\n' "$SSH_KNOWN_HOSTS" \
-            > "$HOME/.ssh/known_hosts"
-
-          chmod 600 "$HOME/.ssh/pos-production"
-          chmod 600 "$HOME/.ssh/known_hosts"
-
-      - name: Backup and apply migrations to the pinned Coolify Supabase
-        shell: bash
-        env:
           SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
           SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PORT: ${{ vars.PROD_SSH_PORT || '22' }}
           APP_VERSION: ${{ github.sha }}
-        run: |
-          set -Eeuo pipefail
+          DEPLOY_OPERATION: check
+        run: bash scripts/send-pos-migrations.sh
 
-          package_root="$(mktemp -d)"
-          trap 'rm -rf "$package_root"' EXIT
-          node scripts/prepare-production-migrations.mjs \
-            supabase/migrations \
-            "$package_root/migrations"
-
-          PACKAGE_ROOT="$package_root" node --input-type=module <<'NODE'
-          import { writeFileSync } from 'node:fs'
-          import { join } from 'node:path'
-          writeFileSync(join(process.env.PACKAGE_ROOT, 'deployment.json'), JSON.stringify({
-            protocol: 2,
-            coolify_project: process.env.COOLIFY_SUPABASE_PROJECT,
-            commit: process.env.APP_VERSION,
-          }))
-          NODE
-
-          # The legacy receiver rejects deployment.json before connecting to any database.
-          tar -czf - -C "$package_root" deployment.json migrations \
-            | ssh \
-                -T \
-                -o BatchMode=yes \
-                -o IdentitiesOnly=yes \
-                -o StrictHostKeyChecking=yes \
-                -o ConnectTimeout=15 \
-                -o ServerAliveInterval=15 \
-                -o ServerAliveCountMax=3 \
-                -i "$HOME/.ssh/pos-production" \
-                "${SSH_USER}@${SSH_HOST}"
+      - name: Back up production, apply migrations and deploy verified Edge Functions
+        env:
+          SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
+          SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
+          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
+          SSH_USER: ${{ secrets.PROD_SSH_USER }}
+          SSH_PORT: ${{ vars.PROD_SSH_PORT || '22' }}
+          APP_VERSION: ${{ github.sha }}
+          DEPLOY_OPERATION: apply
+        run: bash scripts/send-pos-migrations.sh
 
       - name: Deploy the verified Git SHA in Coolify and wait for completion
         env:
@@ -201,8 +166,3 @@ jobs:
           APP_VERSION: ${{ github.sha }}
           PREVIOUS_APP_VERSION: ${{ steps.release.outputs.base_sha }}
         run: node scripts/deploy-coolify.mjs
-
-      - name: Remove runner SSH credentials
-        if: always()
-        shell: bash
-        run: rm -f "$HOME/.ssh/pos-production" "$HOME/.ssh/known_hosts"

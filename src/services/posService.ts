@@ -62,12 +62,14 @@ function mapFiscalSnapshot(row: {
   }
 }
 
-export async function loadTenantFeatures(tenantId: string) {
+export async function loadTenantFeatures(tenantId: string, venueId?: string): Promise<ReturnType<typeof normalizeTenantFeatures> | undefined> {
   if (!supabase) return undefined
-  const { data, error } = await supabase.rpc('get_current_tenant_features', { p_tenant_id: tenantId })
+  const { data, error } = venueId
+    ? await supabase.rpc('get_current_billing_venue_features', { p_tenant_id: tenantId, p_venue_id: venueId })
+    : await supabase.rpc('get_current_tenant_features', { p_tenant_id: tenantId })
   if (error) {
     // Keep deployments compatible while the feature migration and PostgREST schema cache propagate.
-    if (['42883', 'PGRST202'].includes(error.code ?? '')) return undefined
+    if (['42883', 'PGRST202'].includes(error.code ?? '')) return venueId ? loadTenantFeatures(tenantId) : undefined
     throw error
   }
   return normalizeTenantFeatures(data)
@@ -150,7 +152,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw tenantError
   }
 
-  const features = await loadTenantFeatures(tenant.id)
+  const features = membership.role === 'owner' || membership.role === 'manager' ? await loadTenantFeatures(tenant.id) : undefined
 
   if (membership.role === 'owner' || membership.role === 'manager') {
     return requireExclusiveLogin({
@@ -242,7 +244,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
-    features,
+    features: await loadTenantFeatures(tenant.id, venue.id),
   })
 }
 
@@ -341,7 +343,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new TenantSessionError('El usuario ya no tiene acceso activo a este negocio.')
   }
 
-  const features = await loadTenantFeatures(tenant.id)
+  const features = membership.role === 'owner' || membership.role === 'manager' ? await loadTenantFeatures(tenant.id) : undefined
 
   if (membership.role === 'owner' || membership.role === 'manager') {
     return requireExclusiveLogin({
@@ -425,7 +427,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     userId: user.id,
     userName: user.user_metadata.full_name ?? user.email ?? 'Usuario',
     role: membership.role,
-    features,
+    features: await loadTenantFeatures(tenant.id, venue.id),
   })
 }
 

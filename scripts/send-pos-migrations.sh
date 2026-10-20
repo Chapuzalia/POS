@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Shared transport only. The root-owned VPS receiver owns backup and migration execution.
+# Shared transport only. The installed receiver owns database and Edge deployment.
 set -Eeuo pipefail
 umask 077
 
@@ -30,6 +30,8 @@ printf '%s\n' "$SSH_KNOWN_HOSTS" > "$package_root/known_hosts"
 chmod 600 "$package_root/key" "$package_root/known_hosts"
 
 node scripts/prepare-production-migrations.mjs supabase/migrations "$package_root/migrations"
+node scripts/prepare-edge-functions.mjs supabase/functions "$package_root/functions"
+cp supabase/config.toml "$package_root/config.toml"
 PACKAGE_ROOT="$package_root" DEPLOY_OPERATION="$operation" node --input-type=module <<'NODE'
 import { writeFileSync } from 'node:fs'
 import { join } from 'node:path'
@@ -37,7 +39,7 @@ if (!/^[a-z0-9_-]+$/.test(process.env.COOLIFY_SUPABASE_PROJECT ?? '') || !/^[0-9
   throw new Error('Invalid Coolify project or release SHA.')
 }
 writeFileSync(join(process.env.PACKAGE_ROOT, 'deployment.json'), JSON.stringify({
-  protocol: 3,
+  protocol: 4,
   coolify_project: process.env.COOLIFY_SUPABASE_PROJECT,
   commit: process.env.APP_VERSION,
   operation: process.env.DEPLOY_OPERATION,
@@ -45,7 +47,7 @@ writeFileSync(join(process.env.PACKAGE_ROOT, 'deployment.json'), JSON.stringify(
 NODE
 
 # A legacy receiver rejects the manifest or protocol before connecting to any database.
-tar -czf - -C "$package_root" deployment.json migrations \
+tar -czf - -C "$package_root" deployment.json migrations functions config.toml \
   | ssh -T \
       -o BatchMode=yes -o IdentitiesOnly=yes -o StrictHostKeyChecking=yes \
       -o UserKnownHostsFile="$package_root/known_hosts" \

@@ -5,6 +5,7 @@ import { type CrmPlan, loadCrmPlan } from '../services/planService'
 import { type RunAction } from '../../shared/types'
 import { type TenantContext } from '../../../../types'
 import { useCallback, useEffect, useState } from 'react'
+import { TenantBillingPanel } from '../../../billing/TenantBillingPanel'
 
 export type PlanCrmProps = {
   disabled: boolean
@@ -52,7 +53,7 @@ export function PlanCrm({ disabled, runAction, tenantContext }: PlanCrmProps) {
           </div>
         ) : <div className="!grid !min-h-[180px] !place-items-center !px-5 !pb-5 !text-sm !font-medium !text-[var(--crm-text-muted)]">Cargando información del plan...</div>}
       </section>
-      <p className="!m-0 !px-1 !text-xs !font-medium !text-[var(--crm-text-muted)]">Si necesitas ampliar alguno de estos límites, contacta con el administrador de la plataforma.</p>
+      <TenantBillingPanel key={tenantContext.tenantId} tenantId={tenantContext.tenantId} disabled={disabled} />
     </div>
   )
 }

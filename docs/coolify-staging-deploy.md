@@ -1,5 +1,10 @@
 # Prueba de despliegue de Staging en Coolify
 
+Actualización de Edge Functions: `staging.yml` usa protocolo 4 y publica
+migraciones, funciones y frontend. **Actualizar primero el receptor instalado**
+siguiendo [esta guía](coolify-edge-functions-deploy.md). El modo `check` también
+valida el destino Edge sin cambiar código ni reiniciar servicios.
+
 ## Estado de la inspección
 
 El informe del agente y la consulta administrativa del 2026-10-19 confirman

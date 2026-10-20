@@ -2,6 +2,11 @@
 
 ## Recursos y orden
 
+Actualización de Edge Functions: los workflows usan ahora protocolo 4 y
+despliegan las funciones entre SQL y frontend. **Antes de publicar el workflow**,
+actualizar el receptor instalado siguiendo [esta guía](coolify-edge-functions-deploy.md),
+que detalla comprobaciones, autenticación, interrupción y recuperación del código.
+
 La inspección del VPS del 2026-10-19 identificó estos recursos de `Tickit TPV / production`:
 
 | Recurso | UUID / proyecto Compose |
@@ -71,7 +76,7 @@ desde Actions: debe instalarlo un administrador desde una copia revisada.
    del primer push: desactivarlo durante la action no evita un deploy que ya
    haya empezado. A partir de entonces, la publicación de main la controla Actions.
    Evitar deploys manuales y cambios de configuración mientras se ejecuta.
-2. Comprobar en el VPS que están disponibles Python 3.10+, Docker y
+2. Comprobar en el VPS que están disponibles Python 3.11+, Docker y
    `/usr/bin/supabase --version`, que debe devolver `2.121.0`, la versión actual
    comunicada por el usuario tras el informe inicial. Confirmar la ruta exacta
    del binario y las ayudas antes de activar el receptor. No actualizar
@@ -175,9 +180,10 @@ timeout no cancela un deployment que sigue en el servidor. El preflight del
 reintento rechaza otro deployment aún activo.
 
 La action mantiene lint/tests/build y el checker del repositorio. La prueba
-completa contra el VPS queda pendiente hasta instalar el receptor, configurar
-los secrets y desactivar auto-deploy. Esta primera adaptación cubre `main`;
-staging necesita su propio VPS, UUID, configuración, credenciales y baseline.
+completa de Edge Functions contra el VPS queda pendiente hasta actualizar el
+receptor según la [guía de funciones](coolify-edge-functions-deploy.md).
+Staging utiliza el mismo transporte con su propio VPS, UUID, configuración,
+credenciales y baseline, documentados en [su guía](coolify-staging-deploy.md).
 
 Referencias: [API de actualización](https://coolify.io/docs/api/endpoints/applications/update-application-by-uuid),
 [API de deploy](https://coolify.io/docs/api/endpoints/deployments/deploy-by-tag-or-uuid),

@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       mode:
-        description: Check only, or apply migrations and deploy the frontend
+        description: Check only, or deploy migrations, Edge Functions and frontend
         required: true
         default: check
         type: choice
@@ -125,7 +125,7 @@ jobs:
           pnpm test
           pnpm build
 
-      - name: Check SSH receiver, database history and CLI without applying SQL
+      - name: Check receiver, database and Edge target without changing services
         env:
           SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
@@ -167,7 +167,7 @@ jobs:
           PREVIOUS_APP_VERSION: ${{ needs.verify.outputs.previous_app_version }}
         run: node scripts/deploy-coolify.mjs --check
 
-      - name: Back up staging and apply migrations
+      - name: Back up staging, apply migrations and deploy verified Edge Functions
         env:
           SSH_PRIVATE_KEY: ${{ secrets.STAGING_SSH_PRIVATE_KEY }}
           SSH_KNOWN_HOSTS: ${{ secrets.STAGING_SSH_KNOWN_HOSTS }}
