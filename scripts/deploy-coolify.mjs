@@ -82,7 +82,9 @@ export async function deployApplication(api, settings, {
 } = {}) {
   // Recheck after migrations: a manual deploy must not race release configuration.
   await checkApplication(api, settings)
-  await api(`/applications/${settings.uuid}`, 'PATCH', { git_commit_sha: settings.sha, is_auto_deploy_enabled: false })
+  // Superadmin is a client route without a physical HTML entry in dist.
+  // Coolify's static nginx image must fall back to index.html for direct visits.
+  await api(`/applications/${settings.uuid}`, 'PATCH', { git_commit_sha: settings.sha, is_auto_deploy_enabled: false, is_spa: true })
   await api(`/applications/${settings.uuid}/envs/bulk`, 'PATCH', {
     data: [
       { key: 'APP_VERSION', value: settings.sha },

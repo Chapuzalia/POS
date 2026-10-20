@@ -44,7 +44,10 @@ contiene contraseña. Se pasa `--skip-vault` para limitar el despliegue a las
 migraciones, sin sincronizar secretos de Vault desde configuración.
 Las salidas de herramientas permanecen en el log privado del VPS.
 
-Después fija el SHA en Coolify, configura `APP_VERSION` y
+Después fija el SHA y activa `is_spa` en Coolify para que nginx sirva
+`index.html` al acceder directamente a `/superadmin`, que es una ruta cliente
+sin archivo HTML propio. Los archivos existentes, incluida la entrada de CRM,
+se siguen sirviendo desde su ubicación. Configura `APP_VERSION` y
 `SUPPORTED_APP_VERSIONS` como variables **de build**, solicita el despliegue y
 espera hasta 20 minutos. Exige estado `finished` y el mismo SHA para que el
 workflow se considere correcto. La lista de versiones incluye el baseline y

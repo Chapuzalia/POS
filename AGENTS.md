@@ -4,6 +4,13 @@
 
 This is a production-oriented, multi-tenant POS/CRM/KDS. Favor correctness of sales, cash, fiscal, offline, printing, auth and tenant isolation over cosmetic refactors or architectural novelty.
 
+## Explicit permission before production changes
+
+- Always ask the user for explicit permission before applying any change directly to production. A request to investigate or fix an issue does not authorize production changes.
+- This includes deployments, hotfixes, configuration changes in Coolify/nginx, container or service reloads/restarts, migrations and production data writes, even when reversible or low risk.
+- First prepare and verify the concrete change, explain its production impact, and wait for approval before executing it. Existing explicit approval covers only its authorized scope.
+- Read-only production diagnosis and local preparation may proceed without this additional approval. This rule remains in force until the user explicitly changes it.
+
 ## Stack and commands
 
 - React 19 + TypeScript + Vite 8; Tailwind CSS 4 + HeroUI; Zustand where already used.

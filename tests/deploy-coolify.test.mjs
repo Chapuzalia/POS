@@ -110,7 +110,7 @@ test('pins the exact SHA and build variables before queueing, then waits for fin
   await deployApplication(api, settings, { sleep: async () => {}, log: value => log.push(value) })
   const writes = calls.filter(call => call.method !== 'GET')
   assert.deepEqual(writes.map(call => call.method), ['PATCH', 'PATCH', 'POST'])
-  assert.deepEqual(writes[0].body, { git_commit_sha: settings.sha, is_auto_deploy_enabled: false })
+  assert.deepEqual(writes[0].body, { git_commit_sha: settings.sha, is_auto_deploy_enabled: false, is_spa: true })
   assert.equal(writes[1].body.data[0].key, 'APP_VERSION')
   assert.equal(writes[1].body.data[0].value, settings.sha)
   assert.equal(writes[1].body.data[1].value, settings.supportedVersions)
