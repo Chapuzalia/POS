@@ -27,6 +27,7 @@ dist-ssr
 *.prod
 
 backups/
+/output/pdf/staging-demo-credentials.pdf
 
 # Sentry Config File
 .env.sentry-build-plugin

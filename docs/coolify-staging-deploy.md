@@ -47,6 +47,24 @@ parte del esquema coincide con el resultado esperado de las migraciones.
 No se han creado policies ni cambiado permisos para corregirla durante esta
 adaptación.
 
+Actualización del 2026-10-23: se ha aplicado **solo en staging** la migración
+`20261023160909_restore_supplier_document_storage_policies.sql`. Añade las
+policies `supplier_document_originals_read`, `_insert` y `_delete`, con el mismo
+predicado de acceso actual de documentos, conservando RLS y el bucket privado.
+Los nombres nuevos permiten aplicarla también donde las policies históricas
+siguen presentes, sin sustituirlas. La ausencia histórica indicada arriba ya
+no describe el estado actual de staging; esta corrección no se ha aplicado a main.
+
+La CLI realizó un dry-run con esa única migración pendiente y la registró en
+el historial de staging. Se validó el backup completo
+`/opt/pos-deploy/backups/staging-before-storage-policies-20261023T161428Z.dump`
+con `pg_restore --list` y su lectura completa con `pg_restore --file=/dev/null`.
+Las lecturas por la API pública con tokens temporales de rol `authenticated`
+de un manager autorizado devolvieron HTTP 206 para los tres originales del
+2026-10-08 de Loft; otro tenant y el rol anónimo siguieron recibiendo
+`NoSuchKey`. Las pruebas locales cubren además local no asignado, addon
+desactivado, documento eliminado, membresía inactiva y originales sin UPDATE.
+
 La recuperación guiada del historial terminó correctamente en una transacción,
 sin ejecutar las migraciones ni restaurar datos de la aplicación. La consulta
 posterior en staging devuelve **161 registros**, última versión
