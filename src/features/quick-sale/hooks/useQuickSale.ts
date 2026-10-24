@@ -41,6 +41,7 @@ export type ProductDialogState = {
   allowVariantSelection: boolean
   initialSelection?: ProductLineSelection
   initialVariantId?: string
+  initialUnitPriceCents?: number
   lineId?: string
   item: ResolvedCatalogItem
 }

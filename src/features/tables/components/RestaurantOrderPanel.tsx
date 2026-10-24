@@ -28,6 +28,8 @@ import {
 import type { CatalogData } from "../../catalog/domain/types";
 import type { RestaurantOrderDetail, RestaurantOrderLine } from "../types";
 import { MenuComponentDetails } from "../../../components/pos/MenuComponentDetails";
+import { MenuCourseRow } from "./MenuCourseRow";
+import { resolveSellableProduct } from "../../catalog/domain/resolver";
 import { InvoiceTicketNotice } from "../../../components/pos/InvoiceTicketNotice";
 import { NumericKeypadModal } from "../../../components/ui/NumericKeypadModal";
 import { ProductionControls } from "../../production/components/ProductionControls";
@@ -67,6 +69,7 @@ type Props = {
   onServeAll: (lineId: string) => void;
   onServeAllOrder: () => void;
   onServeOne: (lineId: string) => void;
+  onServeComponent?: (lineId: string, componentId: string, quantity: number) => void;
   onSetQuantity: (lineId: string, quantity: number) => void;
   onSetUnitPrice: (lineId: string, unitPriceCents: number) => void;
   productionState?: OrderProductionState | null;
@@ -132,6 +135,7 @@ function OrderLineRow({
           servedQuantity: displayServedQuantity ?? 0,
         };
   const pending = getPendingQuantity(displayLine);
+  const isMenu = line.catalogSnapshot.productType === 'menu' || line.components.some((component) => component.type === 'menu_component');
   const production = productionState?.lines.find(
     (state) => state.lineId === line.id,
   );
@@ -234,12 +238,12 @@ function OrderLineRow({
   }
 
   return (
-    <div className="touch-pan-y relative rounded-[var(--radius)] bg-[var(--background)]">
-      <div className="absolute inset-y-px right-px flex w-24 items-center justify-center rounded-r-[calc(var(--radius)-1px)] bg-[var(--danger)] text-white">
+    <div className={`touch-pan-y relative ${isMenu ? "rounded-[16px]" : "rounded-[var(--radius)]"} bg-[var(--background)]`}>
+      <div className={`absolute inset-y-px right-px flex w-24 items-center justify-center ${isMenu ? "rounded-r-[15px]" : "rounded-r-[calc(var(--radius)-1px)]"} bg-[var(--danger)] text-white`}>
         <Trash2 aria-hidden="true" className="h-5 w-5" />
       </div>
       <article
-        className={`relative z-[1] overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-2.5 ${isDragging ? "transition-none" : "transition-transform duration-150 ease-out"}`}
+        className={`relative z-[1] overflow-hidden ${isMenu ? "rounded-[16px]" : "rounded-[var(--radius)]"} border border-[var(--separator)] bg-[var(--background)] p-2.5 ${isDragging ? "transition-none" : "transition-transform duration-150 ease-out"}`}
         onContextMenu={handleContextMenu}
         onPointerCancel={endSwipe}
         onPointerDown={handlePointerDown}
@@ -248,7 +252,7 @@ function OrderLineRow({
         ref={articleRef}
         style={{ transform: `translateX(${offsetX}px)` }}
       >
-        <div className="flex items-start justify-between gap-2">
+        <div className={isMenu ? "flex flex-col gap-2" : "flex items-start justify-between gap-2"}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="truncate font-bold">
@@ -297,9 +301,7 @@ function OrderLineRow({
           >
             <div className="flex items-center gap-1">
               {!readOnly &&
-              line.components.some(
-                (component) => component.type === "menu_component",
-              ) ? (
+              isMenu ? (
                 <Button
                   aria-label="Editar selección del menú"
                   disabled={isBusy}
@@ -383,7 +385,7 @@ function OrderLineRow({
             </strong>
           )}
         </div>
-        {!readOnly && pending > 0 ? (
+        {!readOnly && pending > 0 && !(isMenu && productionState?.effective) ? (
           <div
             className="mt-2 flex items-center justify-end gap-2 border-t border-[var(--separator)] pt-2"
             data-order-line-action="true"
@@ -507,6 +509,7 @@ export function RestaurantOrderPanel(props: Props) {
     onChangeProductionPass,
     onSetQuantity,
     onSetUnitPrice,
+    onServeComponent,
     productionState,
     productionRouting,
     catalog,
@@ -521,16 +524,14 @@ export function RestaurantOrderPanel(props: Props) {
     (line) => getPendingQuantity(line) === 0,
   );
   const productionEntries = useMemo(() => {
-    const persistedLineIds = new Set(
-      productionState?.lines.map((line) => line.lineId) ?? [],
-    );
-    const localLines = order.lines.filter(
-      (line) => !persistedLineIds.has(line.id),
-    );
+    const currentLines = new Map(order.lines.map((line) => [line.id, line]));
     return mergeProductionEntries(
-      productionState?.entries ?? [],
+      (productionState?.entries ?? []).filter((entry) => {
+        const line = currentLines.get(entry.lineId);
+        return line && (entry.componentId ? line.components.some((component) => component.id === entry.componentId) : line.components.length === 0 && line.catalogSnapshot.productType !== 'menu');
+      }),
       buildOptimisticProductionEntries(
-        localLines,
+        order.lines,
         catalog ?? null,
         productionRouting,
       ),
@@ -543,7 +544,6 @@ export function RestaurantOrderPanel(props: Props) {
     order.lines,
     productionRouting,
     productionState?.entries,
-    productionState?.lines,
   ]);
   const productionPasses = useMemo(() => {
     const grouped = new Map<
@@ -580,6 +580,20 @@ export function RestaurantOrderPanel(props: Props) {
     return grouped;
   }, [productionEntries]);
   const pendingUnits = getOrderPendingUnits(order.lines);
+  const menuLines = order.lines.filter((line) => line.catalogSnapshot.productType === 'menu' || line.components.some((component) => component.type === 'menu_component'));
+  const menuIds = new Set(menuLines.map((line) => line.id));
+  const ungroupedPendingLines = productionState?.effective
+    ? pendingLines.filter((line) => !menuIds.has(line.id) && !(productionEntriesByLine.get(line.id) ?? []).some((entry) => entry.hasProductionDestination))
+    : pendingLines;
+  const unroutedMenuEntries = productionEntries.filter((entry) => entry.componentId && menuIds.has(entry.lineId) && !entry.hasProductionDestination);
+  const pendingChoices = (line: RestaurantOrderLine) => {
+    if (!catalog || !line.productId || !line.variantId) return [];
+    try {
+      return resolveSellableProduct(catalog, line.productId, line.variantId).selectionGroups.filter((group) => group.group.type === 'menu_component'
+        && line.components.filter((component) => component.selectionGroupId === group.group.id).reduce((sum, component) => sum + component.quantity, 0) < group.assignment.minSelection)
+        .map((group) => group.assignment.displayName ?? group.group.name);
+    } catch { return []; }
+  };
 
   function closeValueEditor() {
     setValueEditor(null);
@@ -676,19 +690,33 @@ export function RestaurantOrderPanel(props: Props) {
               Pulsa un producto para añadirlo a la comanda.
             </div>
           ) : null}
-          {(!productionState?.effective || productionPasses.length === 0) &&
-          pendingLines.length ? (
+          {productionState?.effective && menuLines.length ? <section>
+            <h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--muted)]">Menús · elecciones</h2>
+            <div className="space-y-2">{menuLines.map((line) => <div key={line.id}>
+              {renderLine(line)}
+              {pendingChoices(line).length ? <Button disabled={isBusy} fullWidth onClick={() => lineProps.onEdit(line)} size="sm" type="button" variant="secondary">Elegir más tarde: {pendingChoices(line).join(', ')}</Button> : null}
+            </div>)}</div>
+          </section> : null}
+          {ungroupedPendingLines.length ? (
             <section>
               <h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--warning)]">
-                Pendientes · {formatQuantity(pendingUnits)}
+                Pendientes · {formatQuantity(getOrderPendingUnits(ungroupedPendingLines))}
               </h2>
               <div className="space-y-1.5">
-                {pendingLines.map((line) =>
+                {ungroupedPendingLines.map((line) =>
                   renderLine(line, getPendingQuantity(line)),
                 )}
               </div>
             </section>
           ) : null}
+          {productionState?.effective && unroutedMenuEntries.length ? <section>
+            <h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--muted)]">Sin envío a cocina</h2>
+            <div className="space-y-1.5">{unroutedMenuEntries.map((entry) => {
+              const line = order.lines.find((candidate) => candidate.id === entry.lineId);
+              return line ? <MenuCourseRow key={`${entry.lineId}:${entry.componentId}`} entry={entry} line={line} disabled={isBusy}
+                onEdit={lineProps.onEdit} onServe={onServeComponent} /> : null;
+            })}</div>
+          </section> : null}
           {productionState?.effective
             ? productionPasses.map((pass) => {
                 const unsentEntries = pass.entries.filter((entry) => entry.unsentQuantity > 0);
@@ -703,12 +731,13 @@ export function RestaurantOrderPanel(props: Props) {
                   passId: pass.id,
                   passName: pass.name,
                 }));
-                const lines = pendingLines.filter((line) =>
+                const lines = pendingLines.filter((line) => !menuIds.has(line.id) &&
                   (productionEntriesByLine.get(line.id) ?? []).some(
                     (entry) => entry.passId === pass.id,
                   ),
                 );
-                if (lines.length === 0) return null;
+                const courses = pass.entries.filter((entry) => entry.componentId && menuIds.has(entry.lineId));
+                if (lines.length === 0 && courses.length === 0) return null;
                 return (
                   <section key={pass.id}>
                     <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -731,6 +760,12 @@ export function RestaurantOrderPanel(props: Props) {
                       ) : null}
                     </div>
                     <div className="space-y-1.5">
+                      {courses.map((entry) => {
+                        const line = order.lines.find((candidate) => candidate.id === entry.lineId);
+                        return line ? <MenuCourseRow key={`${entry.lineId}:${entry.componentId}`} entry={entry} line={line} disabled={isBusy}
+                          routing={productionRouting} onEdit={lineProps.onEdit} onSend={onSendToProduction} onServe={onServeComponent}
+                          onChangePass={onChangeProductionPass} /> : null;
+                      })}
                       {lines.map((line) =>
                         renderLine(line, getPendingQuantity(line)),
                       )}

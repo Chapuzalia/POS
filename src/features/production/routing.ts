@@ -2,9 +2,9 @@ import type { CatalogData } from '../catalog/domain/types'
 import type { RestaurantOrderLine } from '../tables/types'
 import type { ProductionEntry, ProductionRouting } from './types'
 
-export function getProductionUnsentQuantity(entry: Pick<ProductionEntry, 'sentQuantity' | 'skippedQuantity' | 'unsentQuantity'>, line?: Pick<RestaurantOrderLine, 'quantity' | 'servedQuantity'>) {
+export function getProductionUnsentQuantity(entry: Pick<ProductionEntry, 'sentQuantity' | 'skippedQuantity' | 'unsentQuantity' | 'servedQuantity'>, line?: Pick<RestaurantOrderLine, 'quantity' | 'servedQuantity'>) {
   if (!line) return entry.unsentQuantity
-  return Math.max(0, Math.round((line.quantity - Math.max(entry.sentQuantity + (entry.skippedQuantity ?? 0), line.servedQuantity)) * 1000) / 1000)
+  return Math.max(0, Math.round((line.quantity - Math.max(entry.sentQuantity + (entry.skippedQuantity ?? 0), entry.servedQuantity ?? line.servedQuantity)) * 1000) / 1000)
 }
 
 function firstCategoryId(catalog: CatalogData, productId: string) {
@@ -53,6 +53,7 @@ export function buildOptimisticProductionEntries(lines: RestaurantOrderLine[], c
   if (!catalog || !routing) return []
   return lines.flatMap((line) => {
     if (line.components.length === 0) {
+      if (line.catalogSnapshot.productType === 'menu') return []
       const categoryId = line.catalogSnapshot.categoryId ?? firstCategoryId(catalog, line.productId ?? '')
       const entry = makeEntry(line, null, line.productId, line.productName, line.quantity, categoryId, routing)
       return entry ? [entry] : []

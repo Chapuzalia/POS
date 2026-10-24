@@ -16,9 +16,8 @@ type Props = {
 export function ProductionControls({ disabled, onSend, order, state }: Props) {
   const available = useMemo(() => state.entries.map((entry) => {
     const line = order.lines.find((candidate) => candidate.id === entry.lineId)
-    const productionLine = state.lines.find((candidate) => candidate.lineId === entry.lineId)
-    return { ...entry, unsentQuantity: getProductionUnsentQuantity(entry, line), hasProductionDestination: Boolean(productionLine?.hasProductionDestination && entry.hasProductionDestination) }
-  }).filter((entry) => entry.hasProductionDestination && entry.unsentQuantity > 0), [order.lines, state.entries, state.lines])
+    return { ...entry, unsentQuantity: getProductionUnsentQuantity(entry, line), hasProductionDestination: Boolean(line && entry.hasProductionDestination) }
+  }).filter((entry) => entry.hasProductionDestination && entry.unsentQuantity > 0), [order.lines, state.entries])
   const [selected, setSelected] = useState<Record<string, number>>({})
   const [open, setOpen] = useState(false)
   const keyFor = (lineId: string, componentId: string | null) => `${lineId}:${componentId ?? ''}`

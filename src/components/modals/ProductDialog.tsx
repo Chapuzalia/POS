@@ -16,12 +16,15 @@ import type { ProductLineSelection, TicketLineModifier } from "../../types";
 import { cx } from "../../utils/cx";
 import { AppModal, Button } from "../ui";
 import { PosMixerCard } from "../pos/PosMixerCard";
+import { reconcileMenuEdit } from "../../features/restaurant/services/menuCourses";
 
 type ProductDialogProps = {
+  allowDeferredMenu?: boolean;
   allowVariantSelection: boolean;
   catalog: CatalogData;
   initialSelection?: ProductLineSelection;
   initialVariantId?: string;
+  initialUnitPriceCents?: number;
   isBusy: boolean;
   item: ResolvedCatalogItem;
   onAdd: AddCatalogLine;
@@ -218,10 +221,12 @@ function buildSelection(
 }
 
 export function ProductDialog({
+  allowDeferredMenu = false,
   allowVariantSelection,
   catalog,
   initialSelection,
   initialVariantId,
+  initialUnitPriceCents,
   isBusy,
   item,
   onAdd,
@@ -326,12 +331,15 @@ export function ProductDialog({
   );
   const isSelectionValid = useMemo(() => {
     try {
-      canonicalizeProductLineSelection(catalog, selectedSellable, selection);
+      canonicalizeProductLineSelection(catalog, selectedSellable, selection, allowDeferredMenu);
+      if (allowDeferredMenu && selectedSellable.product.type === 'menu' && initialSelection && initialUnitPriceCents !== undefined) {
+        reconcileMenuEdit({ ...initialSelection, unitPriceCents: initialUnitPriceCents, servedQuantity: 0 }, selection.components, [], selection.modifiers);
+      }
       return true;
     } catch {
       return false;
     }
-  }, [catalog, selectedSellable, selection]);
+  }, [allowDeferredMenu, catalog, initialSelection, initialUnitPriceCents, selectedSellable, selection]);
   const groupProgress = useMemo(() => menuAssignments.map((group) => {
     const selected = Object.values(selectedQuantities[group.group.id] ?? {}).reduce((total, quantity) => total + quantity, 0);
     return {
@@ -343,10 +351,18 @@ export function ProductDialog({
       maximum: group.assignment.maxSelection,
     };
   }), [menuAssignments, selectedQuantities]);
-  const selectionTotals = useMemo(
-    () => calculateSaleLineTotals(selectedSellable.variant, selection.components, selection.modifiers),
-    [selectedSellable.variant, selection.components, selection.modifiers],
-  );
+  const selectionTotals = useMemo(() => {
+    if (allowDeferredMenu && selectedSellable.product.type === 'menu' && initialSelection && initialUnitPriceCents !== undefined) {
+      const previousSupplements = calculateSaleLineTotals({ priceCents: 0 }, initialSelection.components, initialSelection.modifiers);
+      try {
+        const edited = reconcileMenuEdit({ ...initialSelection, unitPriceCents: initialUnitPriceCents, servedQuantity: 0 }, selection.components, [], selection.modifiers);
+        return calculateSaleLineTotals({ priceCents: initialUnitPriceCents - previousSupplements.grossBeforeDiscountCents }, edited.components, selection.modifiers);
+      } catch {
+        return { basePriceCents: initialUnitPriceCents, componentDeltaCents: 0, modifierDeltaCents: 0, grossBeforeDiscountCents: initialUnitPriceCents };
+      }
+    }
+    return calculateSaleLineTotals(selectedSellable.variant, selection.components, selection.modifiers);
+  }, [allowDeferredMenu, initialSelection, initialUnitPriceCents, selectedSellable.product.type, selectedSellable.variant, selection.components, selection.modifiers]);
   const missingSelections = groupProgress.filter((group) => !group.complete);
 
   function completeAdd(
@@ -866,7 +882,7 @@ export function ProductDialog({
                 <strong className="mt-1 block font-mono text-2xl tabular-nums">{formatMoney(selectionTotals.grossBeforeDiscountCents)}</strong>
                 {selectionTotals.componentDeltaCents + selectionTotals.modifierDeltaCents !== 0 ? <span className="text-xs text-[var(--muted)]">Base {formatMoney(selectionTotals.basePriceCents)} · suplementos {formatMoney(selectionTotals.componentDeltaCents + selectionTotals.modifierDeltaCents)}</span> : null}
               </div>
-              {missingSelections.length ? <p className="mt-4 rounded-[var(--radius)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">Completa {missingSelections.map((group) => group.label).join(', ')} para continuar.</p> : null}
+              {missingSelections.length ? <p className="mt-4 rounded-[var(--radius)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">{allowDeferredMenu ? `Puedes elegir más tarde: ${missingSelections.map((group) => group.label).join(', ')}. Los platos incluidos no añaden precio al menú.` : `Completa ${missingSelections.map((group) => group.label).join(', ')} para continuar.`}</p> : null}
             </aside>
           </div>
         ) : null}

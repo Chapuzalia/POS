@@ -31,7 +31,7 @@ test('production state exposes only lines with a resolved KDS or printer destina
   assert.match(routingMigration, /'hasProductionDestination'/)
   assert.match(routingMigration, /public\.production_resolve_destination/)
   assert.match(routingMigration, /jsonb_array_elements\(line\.components\)/)
-  assert.match(controls, /productionLine\?\.hasProductionDestination && entry\.hasProductionDestination/)
+  assert.match(controls, /line && entry\.hasProductionDestination/)
 })
 
 test('production snapshots, readiness, split lineage and durable dispatches are separate domains', () => {

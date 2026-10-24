@@ -101,6 +101,7 @@ export function createRestaurantControllerHarness({
     '../../../utils/errors': { getReadableError: (error) => error?.message ?? String(error) },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../catalog/services/saleLineBuilder': { buildSaleLine() {} },
+    '../services/menuCourses': { reconcileMenuEdit() {} },
     '../../customers/service': { loadTicketInvoice: async () => null },
     '../../customers/customerValidation.ts': { customerFiscalSnapshot: (customer) => customer },
     '../../fiscal/service': { autoIssueFiscalTicket: async () => ({ fiscal: null }), loadFiscalReceiptData: async () => null },

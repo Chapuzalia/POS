@@ -21,6 +21,7 @@ export type ProductionEntry = {
   parentProductName?: string | null
   quantity: number
   sentQuantity: number
+  servedQuantity?: number
   skippedQuantity?: number
   readyQuantity: number
   preparingQuantity?: number

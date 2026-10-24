@@ -52,6 +52,7 @@ function canonicalComponents(
   catalog: CatalogData,
   sellable: ResolvedSellableProduct,
   submitted: readonly TicketLineComponent[],
+  allowDeferredMenu = false,
 ): TicketLineComponent[] {
   const allowedGroups = new Map(sellable.selectionGroups.flatMap((resolvedGroup) => resolvedGroup.options
     .map((option) => [option.id, resolvedGroup.group.id] as const)))
@@ -65,7 +66,7 @@ function canonicalComponents(
     if (selectedIds.size !== selected.length) throw new Error(`${resolvedGroup.group.name}: una opción está repetida.`)
     const count = selected.reduce((total, component) => total + component.quantity, 0)
     const { minSelection, maxSelection } = resolvedGroup.assignment
-    if (count < minSelection || count > maxSelection) {
+    if ((count < minSelection && !(allowDeferredMenu && sellable.product.type === 'menu' && resolvedGroup.group.type === 'menu_component')) || count > maxSelection) {
       throw new Error(`${resolvedGroup.assignment.displayName ?? resolvedGroup.group.name}: selecciona entre ${minSelection} y ${maxSelection}.`)
     }
     for (const component of selected) {
@@ -101,8 +102,9 @@ export function canonicalizeProductLineSelection(
   catalog: CatalogData,
   sellable: ResolvedSellableProduct,
   selection: ProductLineSelection,
+  allowDeferredMenu = false,
 ): ProductLineSelection {
-  const components = canonicalComponents(catalog, sellable, selection.components)
+  const components = canonicalComponents(catalog, sellable, selection.components, allowDeferredMenu)
   const modifiers = canonicalModifiers(sellable.modifierGroups, selection.modifiers)
   const mixer = components.find((component) => component.type === 'mixer') ?? null
   return {
@@ -225,8 +227,9 @@ export function buildSaleLine(
   sellable: ResolvedSellableProduct,
   selection: ProductLineSelection,
   item: ResolvedCatalogItem | null = null,
+  allowDeferredMenu = false,
 ): TicketLine {
-  const canonical = canonicalizeProductLineSelection(catalog, sellable, selection)
+  const canonical = canonicalizeProductLineSelection(catalog, sellable, selection, allowDeferredMenu)
   const totals = calculateSaleLineTotals(sellable.variant, canonical.components, canonical.modifiers)
   return {
     id,

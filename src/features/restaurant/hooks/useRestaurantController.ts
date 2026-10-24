@@ -79,9 +79,11 @@ import {
   loadOrderProductionState,
   sendProductionBatch,
   setOrderLineProductionPass,
+  serveMenuComponent,
   subscribeToOrderProduction,
 } from '../../production/service'
 import type { OrderProductionState, ProductionSelection } from '../../production/types'
+import { reconcileMenuEdit } from '../services/menuCourses'
 
 async function loadTicketNumberForPrint(context: TenantContext, cashSession: CashSession, ticketId: string) {
   const printState = usePrintAgentStore.getState()
@@ -495,12 +497,14 @@ export function useRestaurantController(options: Options) {
       setPendingLineRemoval(null)
       return
     }
-    if (requiresConfirmedRestaurantLineRemoval(currentLine.servedQuantity) && !confirmed) {
+    const authoritativeProduction = productionAvailable ? await loadOrderProductionState(saved.order.id) : productionState
+    const servedQuantity = Math.max(currentLine.servedQuantity, ...(authoritativeProduction?.entries.filter((entry) => entry.lineId === lineId).map((entry) => entry.servedQuantity ?? 0) ?? []))
+    if (requiresConfirmedRestaurantLineRemoval(servedQuantity) && !confirmed) {
       setPendingLineRemoval(currentLine)
       return
     }
     try {
-      if (requiresConfirmedRestaurantLineRemoval(currentLine.servedQuantity)) {
+      if (confirmed || requiresConfirmedRestaurantLineRemoval(servedQuantity)) {
         await removeRestaurantOrderLineConfirmed(currentLine.id, saved.order.revision)
       } else {
         await saveRestaurantOrderLines({
@@ -529,17 +533,18 @@ export function useRestaurantController(options: Options) {
       setPendingLineRemoval(null)
       options.onError('La comanda cambió en otro dispositivo. Se ha recargado la versión más reciente.')
     }
-  }), [cleanupVirtualRoomTable, draft, options, realtime, runBusy])
+  }), [cleanupVirtualRoomTable, draft, options, productionAvailable, productionState, realtime, runBusy])
 
   const requestLineRemoval = useCallback((lineId: string) => {
     const line = draft.getCurrentOrder()?.lines.find((candidate) => candidate.id === lineId)
     if (!line || !options.isOnline) return
-    if (requiresConfirmedRestaurantLineRemoval(line.servedQuantity)) {
+    const servedQuantity = Math.max(line.servedQuantity, ...(productionState?.entries.filter((entry) => entry.lineId === lineId).map((entry) => entry.servedQuantity ?? 0) ?? []))
+    if (requiresConfirmedRestaurantLineRemoval(servedQuantity)) {
       setPendingLineRemoval(line)
       return
     }
     void removeLine(line.id, false)
-  }, [draft, options.isOnline, removeLine])
+  }, [draft, options.isOnline, productionState, removeLine])
 
   const confirmLineRemoval = useCallback(() => {
     if (!pendingLineRemoval) return
@@ -1068,9 +1073,19 @@ export function useRestaurantController(options: Options) {
     }
     const current = draft.getCurrentOrder()
     if (!current || !options.context || !options.catalog) return false
-    const candidate = buildSaleLine(createId(), options.catalog, sellable, selection, item)
+    const candidate = buildSaleLine(createId(), options.catalog, sellable, selection, item, true)
     if (lineId) {
-      if ((productionState?.lines.find((line) => line.lineId === lineId)?.sentQuantity ?? 0) > 0
+      const previous = current.lines.find((line) => line.id === lineId)
+      if (!previous) return false
+      const isMenu = sellable.product.type === 'menu'
+      let menuEdit: ReturnType<typeof reconcileMenuEdit> | null = null
+      try {
+        if (isMenu) menuEdit = reconcileMenuEdit(previous, candidate.components, productionState?.entries.filter((entry) => entry.lineId === lineId) ?? [], candidate.modifiers)
+      } catch (error) {
+        options.onError(getReadableError(error, { operation: 'restaurant.menu.edit' }))
+        return false
+      }
+      if ((menuEdit ? menuEdit.changesSentDish : (productionState?.lines.find((line) => line.lineId === lineId)?.sentQuantity ?? 0) > 0)
         && !window.confirm('Este producto ya se envió a producción. Se notificará la modificación a cocina/barra. ¿Continuar?')) return false
       const timestamp = nowIso()
       draft.updateDraft((detail) => ({
@@ -1081,10 +1096,10 @@ export function useRestaurantController(options: Options) {
           variantId: candidate.variantId,
           productName: candidate.productName,
           variantName: candidate.variantName,
-          unitPriceCents: candidate.unitPriceCents,
+          unitPriceCents: menuEdit?.unitPriceCents ?? candidate.unitPriceCents,
           modifiers: candidate.modifiers,
-          components: candidate.components,
-          catalogSnapshot: candidate.catalogSnapshot,
+          components: menuEdit?.components ?? candidate.components,
+          catalogSnapshot: isMenu ? line.catalogSnapshot : candidate.catalogSnapshot,
           mixerProductId: candidate.mixerProductId ?? null,
           mixer: candidate.mixer ?? null,
           updatedAt: timestamp,
@@ -1094,7 +1109,7 @@ export function useRestaurantController(options: Options) {
       return true
     }
     const signature = getLineSignature(candidate)
-    const existing = current.lines.find((line) => line.productId !== null
+    const existing = sellable.product.type === 'menu' ? undefined : current.lines.find((line) => line.productId !== null
       && line.note === null
       && getLineSignature({
         productId: line.productId,
@@ -1139,6 +1154,18 @@ export function useRestaurantController(options: Options) {
     if (!options.isOnline) return
     const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
     if (!line) return
+    if (direction === 1 && (line.catalogSnapshot.productType === 'menu' || line.components.some((component) => component.type === 'menu_component'))) {
+      const timestamp = nowIso()
+      draft.updateDraft((detail) => ({ ...detail, lines: [...detail.lines, { ...line, id: createId(), quantity: 1, servedQuantity: 0,
+        fullyServedAt: null, createdAt: timestamp, updatedAt: timestamp }] }))
+      return
+    }
+    const servedQuantity = Math.max(line.servedQuantity, ...(productionState?.entries.filter((entry) => entry.lineId === lineId).map((entry) => entry.servedQuantity ?? 0) ?? []))
+    if (direction === -1 && line.quantity - 1 < servedQuantity) {
+      if (line.quantity === 1) setPendingLineRemoval(line)
+      else options.onError('No puedes reducir la cantidad por debajo de los platos servidos.')
+      return
+    }
     if (direction === -1
       && (productionState?.lines.find((state) => state.lineId === lineId)?.sentQuantity ?? 0) > line.quantity - 1
       && !window.confirm('Esta unidad ya se envió a producción. Se generará una anulación para cocina/barra. ¿Continuar?')) return
@@ -1204,6 +1231,19 @@ export function useRestaurantController(options: Options) {
     await setOrderLineProductionPass(input)
     setProductionState(await loadOrderProductionState(saved.order.id))
   }), [draft, options.context, options.isOnline, productionAvailable, runBusy])
+
+  const serveComponent = useCallback((lineId: string, componentId: string, quantity: number) => runBusy(async () => {
+    if (!options.context || !options.isOnline) return
+    const saved = await draft.flush()
+    if (!saved) return
+    try {
+      await serveMenuComponent({ orderId: saved.order.id, lineId, componentId, quantity,
+        expectedRevision: saved.order.revision, deviceId: options.context.deviceId })
+    } finally {
+      draft.replaceOrder(await loadRestaurantOrder(options.context, saved.order.id))
+      await refreshProduction(saved.order.id)
+    }
+  }), [draft, options.context, options.isOnline, refreshProduction, runBusy])
 
   const sendToProduction = useCallback((selection?: ProductionSelection[]) => runBusy(async () => {
     if (!options.context || !options.isOnline || !productionAvailable) return
@@ -1316,6 +1356,7 @@ export function useRestaurantController(options: Options) {
     productionState,
     sendToProduction,
     serveLineFully: (lineId: string) => void runServiceAction(() => markRestaurantOrderLineFullyServed(lineId)),
+    serveComponent,
     serveLineUnit: (lineId: string) => void runServiceAction(() => markRestaurantOrderLineUnitsServed(lineId, 1)),
     serveOrderFully: () => void runServiceAction((order) => markRestaurantOrderFullyServed(order.order.id)),
     setEqualSplit,

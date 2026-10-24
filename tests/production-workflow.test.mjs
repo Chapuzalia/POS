@@ -42,6 +42,8 @@ test('POS shows 1 on both sides of the pending row, 4 in completed, sends only 1
     '../../production/components/ProductionControls': { ProductionControls: empty },
     '../../production/routing': routing,
     '../../production/order-progress': orderProgress,
+    './MenuCourseRow': { MenuCourseRow: empty },
+    '../../catalog/domain/resolver': { resolveSellableProduct: () => ({ selectionGroups: [] }) },
   }
   const { RestaurantOrderPanel } = compileComponent(source('tables/components/RestaurantOrderPanel.tsx'), modules)
   const props = { order: { lines: [line] }, isBusy: false, lineDiscounts: {}, productionState: state,

@@ -32,6 +32,7 @@ function mapOrderState(value: unknown, orderId: string): OrderProductionState {
         parentProductName: typeof item.parentProductName === 'string' ? item.parentProductName : null,
         quantity: readNumber(item.quantity),
         sentQuantity: readNumber(item.sentQuantity),
+        servedQuantity: item.servedQuantity == null ? undefined : readNumber(item.servedQuantity),
         skippedQuantity: readNumber(item.skippedQuantity),
         readyQuantity: readNumber(item.readyQuantity),
         preparingQuantity: readNumber(item.preparingQuantity),
@@ -113,6 +114,18 @@ export async function setOrderLineProductionPass(input: { lineId: string; compon
     p_order_line_id: input.lineId,
     p_component_id: input.componentId ?? '',
     p_pass_id: input.passId,
+  })
+  if (error) throw error
+}
+
+export async function serveMenuComponent(input: { orderId: string; lineId: string; componentId: string; quantity: number; expectedRevision: number; deviceId: string }) {
+  const { error } = await client().rpc('serve_restaurant_menu_component', {
+    p_order_id: input.orderId,
+    p_line_id: input.lineId,
+    p_component_id: input.componentId,
+    p_quantity: input.quantity,
+    p_expected_revision: input.expectedRevision,
+    p_device_id: input.deviceId,
   })
   if (error) throw error
 }

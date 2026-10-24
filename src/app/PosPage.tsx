@@ -319,6 +319,7 @@ export function PosPage(props: Props) {
               mixer: line.mixer,
             },
             initialVariantId: line.variantId ?? undefined,
+            initialUnitPriceCents: line.unitPriceCents,
             lineId: line.id,
             item,
           })
@@ -328,6 +329,7 @@ export function PosPage(props: Props) {
         onServeAll={restaurant.serveLineFully}
         onServeAllOrder={restaurant.serveOrderFully}
         onServeOne={restaurant.serveLineUnit}
+        onServeComponent={restaurant.serveComponent}
         onSetQuantity={restaurant.setLineQuantity}
         onSetUnitPrice={restaurant.setLineUnitPrice}
          catalog={props.catalog}
@@ -755,10 +757,12 @@ export function PosPage(props: Props) {
         onSave={saveQuickSaleAsVirtual}
       /> : null}
       {quickSale.productDialog && props.catalog ? <ProductDialog
+        allowDeferredMenu={restaurant.posView.type === 'table_order'}
         allowVariantSelection={quickSale.productDialog.allowVariantSelection}
         catalog={props.catalog}
         initialSelection={quickSale.productDialog.initialSelection}
         initialVariantId={quickSale.productDialog.initialVariantId}
+        initialUnitPriceCents={quickSale.productDialog.initialUnitPriceCents}
         isBusy={props.isBusy}
         item={quickSale.productDialog.item}
         key={`${quickSale.productDialog.item.placement.id}-${quickSale.productDialog.initialVariantId ?? quickSale.productDialog.item.variant.id}-${quickSale.productDialog.lineId ?? 'new'}`}
