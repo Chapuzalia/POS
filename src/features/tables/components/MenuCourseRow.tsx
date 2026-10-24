@@ -1,53 +1,41 @@
-import { Check, Pencil, Send } from 'lucide-react'
+import { Check } from 'lucide-react'
 import { Button } from '../../../components/ui'
-import { NativeSelect } from '../../../components/ui/NativeSelect'
-import { formatQuantity } from '../../../lib/format'
-import type { ProductionEntry, ProductionRouting, ProductionSelection } from '../../production/types'
+import { formatMoney, formatQuantity, quantityAmountCents } from '../../../lib/format'
+import type { TicketLineComponent } from '../../../types'
+import type { ProductionEntry, ProductionSelection } from '../../production/types'
+import { getMenuCourseService } from '../menu-service-model'
 import type { RestaurantOrderLine } from '../types'
 
 type Props = {
-  entry: ProductionEntry
+  component: TicketLineComponent
+  entry?: ProductionEntry
   line: RestaurantOrderLine
   disabled: boolean
-  routing?: ProductionRouting
+  productionEnabled: boolean
   onEdit: (line: RestaurantOrderLine) => void
   onSend?: (selection: ProductionSelection[]) => void
   onServe?: (lineId: string, componentId: string, quantity: number) => void
-  onChangePass?: (input: { lineId: string; componentId: string; passId: string }) => void
 }
 
-export function MenuCourseRow({ entry, line, disabled, routing, onEdit, onSend, onServe, onChangePass }: Props) {
-  const componentId = entry.componentId
-  const component = line.components.find((candidate) => candidate.id === componentId)
-  if (!component || !componentId) return null
-  const served = entry.servedQuantity ?? line.servedQuantity
-  const pending = Math.max(0, line.quantity - served)
-  const sent = Math.max(0, pending - entry.unsentQuantity - entry.readyQuantity - (entry.preparingQuantity ?? 0))
-  const status = pending === 0 ? 'Servido' : [
-    entry.unsentQuantity > 0 ? `${formatQuantity(entry.unsentQuantity * component.quantity)} sin enviar` : '',
-    sent > 0 ? `${formatQuantity(sent * component.quantity)} enviado` : '',
-    (entry.preparingQuantity ?? 0) > 0 ? `${formatQuantity((entry.preparingQuantity ?? 0) * component.quantity)} en preparación` : '',
-    entry.readyQuantity > 0 ? `${formatQuantity(entry.readyQuantity * component.quantity)} listo para servir` : '',
-  ].filter(Boolean).join(' · ')
-  return <article className="space-y-2 rounded-[16px] border border-[var(--separator)] bg-[var(--background)] p-3">
-    <div className="flex items-start justify-between gap-2">
-      <div className="min-w-0">
-        <p className="font-bold">{formatQuantity(line.quantity * component.quantity)}× {component.productName}</p>
-        <p className="text-xs font-semibold text-[var(--muted)]">{line.productName} · {component.selectionGroupName} · {component.priceDeltaCents === 0 ? 'Incluido' : 'Con suplemento'}</p>
-        {(component.modifiers ?? []).length ? <p className="text-sm text-[var(--muted)]">{component.modifiers?.map((modifier) => modifier.name).join(', ')}</p> : null}
-        <p className={`text-xs font-bold ${pending === 0 ? 'text-[var(--success)]' : 'text-[var(--muted)]'}`}>{status}</p>
-      </div>
-      <Button aria-label={`Cambiar ${component.productName} del menú`} disabled={disabled} onClick={() => onEdit(line)} size="sm" type="button" variant="tertiary"><Pencil className="h-4 w-4" /></Button>
-    </div>
-    {entry.sentQuantity === 0 && pending > 0 && routing && onChangePass ? <NativeSelect aria-label={`Pase de ${component.productName}`} disabled={disabled} value={entry.passId}
-      onChange={(event) => onChangePass({ lineId: line.id, componentId, passId: event.target.value })} triggerClassName="min-h-10">
-      {routing.passes.map((pass) => <option key={pass.id} value={pass.id}>{pass.name}</option>)}
-    </NativeSelect> : null}
-    <div className="flex flex-wrap gap-2">
-      {entry.unsentQuantity > 0 && entry.hasProductionDestination && onSend ? <Button disabled={disabled} size="sm" type="button" variant="secondary"
-        onClick={() => onSend([{ lineId: line.id, componentId, quantity: entry.unsentQuantity, passId: entry.passId, passName: entry.passName }])}><Send className="h-4 w-4" /> Enviar plato</Button> : null}
-      {pending > 0 && onServe ? <Button disabled={disabled} size="sm" type="button" variant="secondary"
-        onClick={() => onServe(line.id, componentId, served + Math.min(1, pending))}><Check className="h-4 w-4" /> Servir {formatQuantity(Math.min(1, pending) * component.quantity)}</Button> : null}
-    </div>
-  </article>
+export function MenuCourseRow({ component, entry, line, disabled, productionEnabled, onEdit, onSend, onServe }: Props) {
+  const service = getMenuCourseService(line, entry, productionEnabled)
+  const quantity = line.quantity * component.quantity
+  const supplement = quantityAmountCents(component.priceDeltaCents + (component.modifiers ?? []).reduce((sum, modifier) => sum + modifier.priceCents, 0), quantity)
+  return <div className="flex items-center gap-3 py-3" data-menu-course={component.id}>
+    <button aria-label={`Editar ${component.selectionGroupName}: ${component.productName}`} className="min-h-11 min-w-0 flex-1 cursor-pointer text-left disabled:cursor-default"
+      disabled={disabled} onClick={() => onEdit(line)} type="button">
+      <span className="block text-xs font-medium text-[var(--muted)]">{component.selectionGroupName}</span>
+      <span className="block text-sm font-bold leading-5 text-[var(--foreground)]">{quantity !== 1 ? `${formatQuantity(quantity)}× ` : ''}{component.productName}
+        {supplement !== 0 ? <span className="ml-2 whitespace-nowrap text-xs font-medium text-[var(--muted)]">{supplement > 0 ? '+' : ''}{formatMoney(supplement)}</span> : null}
+      </span>
+      {(component.modifiers ?? []).length ? <span className="block text-xs font-semibold text-[var(--foreground)]">{component.modifiers?.map((modifier) => modifier.name).join(' · ')}</span> : null}
+      {service.status && service.pending > 0 ? <span className={`block text-xs ${service.ready > 0 ? 'font-bold text-[var(--success)]' : 'text-[var(--muted)]'}`}>{service.status}</span> : null}
+      {line.quantity > 1 && service.served > 0 && service.pending > 0 ? <span className="block text-xs text-[var(--muted)]">{formatQuantity(service.served * component.quantity)} servido · {formatQuantity(service.pending * component.quantity)} pendiente</span> : null}
+    </button>
+    {service.pending === 0 ? <span aria-label="Servido" className="flex min-h-11 min-w-11 items-center justify-center text-[var(--success)]"><Check aria-hidden="true" className="h-5 w-5" /></span>
+      : service.action === 'send' && entry && onSend ? <Button aria-label={`Enviar ${component.productName}`} className="!min-h-11 shrink-0 !rounded-[10px] !px-3 text-sm font-bold" disabled={disabled}
+        onClick={() => onSend([{ lineId: line.id, componentId: component.id, quantity: service.unsent, passId: entry.passId, passName: entry.passName }])} size="sm" type="button" variant="primary">Enviar</Button>
+      : onServe ? <Button aria-label={`Servir ${component.productName}`} className="!min-h-11 shrink-0 !rounded-[10px] !px-3 text-sm font-bold" disabled={disabled}
+        onClick={() => onServe(line.id, component.id, service.served + service.serveQuantity)} size="sm" type="button" variant="secondary">Servir{quantity > 1 ? ` ${formatQuantity(service.serveQuantity * component.quantity)}` : ''}</Button> : null}
+  </div>
 }

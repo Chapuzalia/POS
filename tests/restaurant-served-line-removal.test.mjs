@@ -5,6 +5,7 @@ import * as format from '../src/lib/format.ts'
 import * as routing from '../src/features/production/routing.ts'
 import * as orderProgress from '../src/features/production/order-progress.ts'
 import * as serviceStatus from '../src/features/tables/service-status.ts'
+import * as menuServiceModel from '../src/features/tables/menu-service-model.ts'
 import { createCompiledHookRunner, jsxRuntime, nodes } from './helpers/component-harness.mjs'
 import { createRestaurantControllerHarness, flush } from './helpers/restaurant-controller-harness.mjs'
 
@@ -26,8 +27,8 @@ const modules = {
   '../../production/components/ProductionControls': { ProductionControls: empty },
   '../../production/routing': routing,
   '../../production/order-progress': orderProgress,
-  './MenuCourseRow': { MenuCourseRow: empty },
-  '../../catalog/domain/resolver': { resolveSellableProduct: () => ({ selectionGroups: [] }) },
+  './MenuOrderCard': { MenuOrderCard: empty },
+  '../menu-service-model': menuServiceModel,
 }
 const line = { id: 'served-line', productName: 'Cafe', quantity: 2, servedQuantity: 2, unitPriceCents: 150, modifiers: [], components: [], catalogSnapshot: {} }
 const order = { order: { id: 'order', revision: 7, status: 'open' }, lines: [line], tables: [] }
@@ -57,7 +58,7 @@ for (const scenario of [
     const runner = createCompiledHookRunner(source, 'RestaurantOrderPanel', modules)
     const tree = runner.render({ order: { ...order, lines: [{ ...line, servedQuantity: scenario.servedQuantity }] },
       isBusy: scenario.isBusy, lineDiscounts: {}, onRemove: id => requests.push(id) })
-    const completed = nodes(tree).find(node => node.type === 'section' && text(node).startsWith('Completados'))
+    const completed = nodes(tree).find(node => node.type === 'details' && text(node).startsWith('Completados'))
     const row = nodes(completed).find(node => node.props.line?.id === line.id)
     assert.ok(row, 'served line is visible in Completados')
     swipeRow(row.props, scenario.distance)

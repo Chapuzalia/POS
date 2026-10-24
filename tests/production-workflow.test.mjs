@@ -6,12 +6,17 @@ import * as routing from '../src/features/production/routing.ts'
 import * as kdsQueue from '../src/features/production/kds-queue.ts'
 import * as orderProgress from '../src/features/production/order-progress.ts'
 import * as serviceStatus from '../src/features/tables/service-status.ts'
+import * as menuServiceModel from '../src/features/tables/menu-service-model.ts'
 import { compileComponent, createCompiledHookRunner, createHookHarness, expandedNodes, jsxRuntime, nodes } from './helpers/component-harness.mjs'
 
 const source = path => readFileSync(new URL(`../src/features/${path}`, import.meta.url), 'utf8')
 const icon = () => null
 const icons = Object.fromEntries(['Beaker', 'Check', 'CheckCheck', 'ListChecks', 'LogOut', 'RefreshCw', 'TriangleAlert', 'WifiOff', 'X', 'Minus', 'Pencil', 'Plus', 'Trash2', 'Send'].map(name => [name, icon]))
-const Button = props => jsxRuntime.jsx('button', props)
+const Button = props => {
+  const buttonProps = { ...props }
+  delete buttonProps.key
+  return jsxRuntime.jsx('button', buttonProps)
+}
 const empty = () => null
 const entry = { lineId: 'line', componentId: null, productName: 'Absolut', quantity: 5, sentQuantity: 4, readyQuantity: 0, unsentQuantity: 1, passId: 'pass', passName: 'Directo', passSortOrder: 0, hasProductionDestination: true }
 const line = { id: 'line', productName: 'Absolut', quantity: 5, servedQuantity: 4, unitPriceCents: 600, modifiers: [], components: [], catalogSnapshot: {} }
@@ -42,8 +47,8 @@ test('POS shows 1 on both sides of the pending row, 4 in completed, sends only 1
     '../../production/components/ProductionControls': { ProductionControls: empty },
     '../../production/routing': routing,
     '../../production/order-progress': orderProgress,
-    './MenuCourseRow': { MenuCourseRow: empty },
-    '../../catalog/domain/resolver': { resolveSellableProduct: () => ({ selectionGroups: [] }) },
+    './MenuOrderCard': { MenuOrderCard: empty },
+    '../menu-service-model': menuServiceModel,
   }
   const { RestaurantOrderPanel } = compileComponent(source('tables/components/RestaurantOrderPanel.tsx'), modules)
   const props = { order: { lines: [line] }, isBusy: false, lineDiscounts: {}, productionState: state,
@@ -54,7 +59,7 @@ test('POS shows 1 on both sides of the pending row, 4 in completed, sends only 1
   assert.deepEqual(quantityButtons.map(node => text(node)), ['1', '4'])
   assert.equal(quantityButtons[1].props.disabled, true)
   assert.match(text(tree), /Directo · 1 nuevos/)
-  const send = nodes(tree).find(node => text(node) === 'Enviar Directo · 1')
+  const send = nodes(tree).find(node => typeof node.props.onClick === 'function' && text(node) === 'Enviar Directo · 1')
   send.props.onClick()
   assert.equal(sent[0][0].quantity, 1)
   quantityButtons[0].props.onClick()

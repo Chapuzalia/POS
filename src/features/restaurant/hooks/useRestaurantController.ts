@@ -84,6 +84,7 @@ import {
 } from '../../production/service'
 import type { OrderProductionState, ProductionSelection } from '../../production/types'
 import { reconcileMenuEdit } from '../services/menuCourses'
+import { isMenuOrderLine } from '../../tables/menu-service-model'
 
 async function loadTicketNumberForPrint(context: TenantContext, cashSession: CashSession, ticketId: string) {
   const printState = usePrintAgentStore.getState()
@@ -205,16 +206,17 @@ export function useRestaurantController(options: Options) {
     && options.context.deviceMode !== 'kds'
     && hasTenantCapability(options.context, 'production'),
   )
+  const orderServiceAvailable = productionAvailable || Boolean(draft.order?.lines.some(isMenuOrderLine))
   const refreshProduction = useCallback(async (orderId = invoiceOrderId) => {
-    if (!productionAvailable || !options.isOnline || !orderId) {
+    if (!orderServiceAvailable || !isOnline || !orderId) {
       setProductionState(null)
       return
     }
     setProductionState(await loadOrderProductionState(orderId))
-  }, [invoiceOrderId, isOnline, productionAvailable])
+  }, [invoiceOrderId, isOnline, orderServiceAvailable])
 
   useEffect(() => {
-    if (!context || !isOnline || !invoiceOrderId || !productionAvailable) {
+    if (!context || !isOnline || !invoiceOrderId || !orderServiceAvailable) {
       setProductionState(null)
       return undefined
     }
@@ -222,7 +224,7 @@ export function useRestaurantController(options: Options) {
     return subscribeToOrderProduction(context, invoiceOrderId, () => {
       void refreshProduction(invoiceOrderId).catch((error) => reportOperationError(error, { operation: 'restaurant.refresh', recoverable: true }))
     })
-  }, [cashSessionId, context, invoiceOrderId, isOnline, onError, productionAvailable, refreshProduction])
+  }, [cashSessionId, context, invoiceOrderId, isOnline, onError, orderServiceAvailable, refreshProduction])
 
   const replaceDraftOrder = draft.replaceOrder
   useEffect(() => {
