@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises'
 import { compileComponent, createCompiledHookRunner } from './component-harness.mjs'
 import { getOrderPendingUnits } from '../../src/features/tables/service-status.ts'
 import { withConfirmedRestaurantPayments } from '../../src/features/restaurant/services/paymentPayload.ts'
+import { requiresConfirmedRestaurantLineRemoval } from '../../src/features/restaurant/draft-policy.ts'
 import * as restaurantPrintPayload from '../../src/features/restaurant/services/restaurantPrintPayload.ts'
 import { calculateDiscountForLines } from '../../src/lib/discounts.ts'
 
@@ -118,7 +119,7 @@ export function createRestaurantControllerHarness({
     '../../tables/layout-service': { applySessionLayout() {}, saveSessionTableLayout() {} },
     '../../tables/service': tableService,
     '../../tables/service-status': { canDecreaseLineQuantity: () => true, getOrderPendingUnits },
-    '../draft-policy': { isRestaurantRevisionConflict: () => false, requiresConfirmedRestaurantLineRemoval: () => false, shouldSaveBeforeLeavingOrder: () => false },
+    '../draft-policy': { isRestaurantRevisionConflict: () => false, requiresConfirmedRestaurantLineRemoval, shouldSaveBeforeLeavingOrder: () => false },
     '../services/restaurantPrintPayload': realPayloads ? restaurantPrintPayload : {
       buildRestaurantPrintPayload: (input) => ({ ...input,
         ticket: { id: input.ticketId, totalCents: input.totalCents, invoice: input.invoice },

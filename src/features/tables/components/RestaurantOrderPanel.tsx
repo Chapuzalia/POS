@@ -797,7 +797,7 @@ export function RestaurantOrderPanel(props: Props) {
                       line,
                       line.servedQuantity,
                       line.servedQuantity,
-                      true,
+                      line.servedQuantity < line.quantity,
                     ),
                   )}
               </div>
