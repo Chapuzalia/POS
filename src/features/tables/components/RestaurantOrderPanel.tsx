@@ -1,12 +1,9 @@
 import { Check, CheckCheck, Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   useMemo,
-  useRef,
   useState,
-  type MouseEvent,
   type PointerEvent,
 } from "react";
-import { createPortal } from "react-dom";
 import {
   centsToInput,
   formatMoney,
@@ -19,7 +16,6 @@ import {
 import { getLineAdditionNames } from "../../../lib/mixers";
 import type { LineDiscountAllocation } from "../../../lib/discounts";
 import { Button } from "../../../components/ui";
-import { NativeSelect } from "../../../components/ui/NativeSelect";
 import {
   canDecreaseLineQuantity,
   getOrderPendingUnits,
@@ -29,6 +25,8 @@ import type { CatalogData } from "../../catalog/domain/types";
 import type { RestaurantOrderDetail, RestaurantOrderLine } from "../types";
 import { MenuComponentDetails } from "../../../components/pos/MenuComponentDetails";
 import { MenuOrderCard } from "./MenuOrderCard";
+import { OrderLineActionsModal } from "./OrderLineActionsModal";
+import { isOrderLineActionTarget, useOrderLineLongPress } from "../hooks/useOrderLineLongPress";
 import { isMenuOrderLine } from "../menu-service-model";
 import { InvoiceTicketNotice } from "../../../components/pos/InvoiceTicketNotice";
 import { NumericKeypadModal } from "../../../components/ui/NumericKeypadModal";
@@ -49,13 +47,6 @@ import type {
 const swipeDeleteThreshold = 72;
 const swipeMaxOffset = 96;
 
-function isOrderLineActionTarget(target: EventTarget | null) {
-  return (
-    target instanceof Element &&
-    Boolean(target.closest('[data-order-line-action="true"]'))
-  );
-}
-
 type Props = {
   isBusy: boolean;
   lineDiscounts: Record<string, LineDiscountAllocation>;
@@ -71,6 +62,7 @@ type Props = {
   onServeAllOrder: () => void;
   onServeOne: (lineId: string) => void;
   onServeComponent?: (lineId: string, componentId: string, quantity: number) => void;
+  onSetNote?: (lineId: string, note: string) => Promise<boolean>;
   onSetQuantity: (lineId: string, quantity: number) => void;
   onSetUnitPrice: (lineId: string, unitPriceCents: number) => void;
   productionState?: OrderProductionState | null;
@@ -98,7 +90,7 @@ function OrderLineRow({
   displayServedQuantity,
   isBusy,
   line,
-  onChangeProductionPass,
+  onOpenActions,
   onDecrement,
   onEdit,
   onIncrement,
@@ -107,7 +99,6 @@ function OrderLineRow({
   onRemove,
   onServeAll,
   onServeOne,
-  productionRouting,
   productionState,
   readOnly = false,
 }: Omit<
@@ -123,6 +114,7 @@ function OrderLineRow({
   displayQuantity?: number;
   displayServedQuantity?: number;
   line: RestaurantOrderLine;
+  onOpenActions?: () => void;
   onOpenQuantityEditor: () => void;
   onOpenUnitPriceEditor: () => void;
   readOnly?: boolean;
@@ -148,91 +140,41 @@ function OrderLineRow({
     null,
   );
   const [offsetX, setOffsetX] = useState(0);
-  const longPressTimer = useRef<number | null>(null);
-  const articleRef = useRef<HTMLElement | null>(null);
-  const [passMenuOpen, setPassMenuOpen] = useState(false);
-  const [passMenuPosition, setPassMenuPosition] = useState({
-    left: 0,
-    top: 0,
-    width: 0,
-  });
   const isDragging = dragStart !== null;
-  const canChangeProductionPass =
-    !readOnly &&
-    Boolean(
-      onChangeProductionPass &&
-      productionRouting &&
-      productionRouting.passes.length > 1 &&
-      productionState?.entries.some(
-        (entry) =>
-          entry.lineId === line.id &&
-          entry.unsentQuantity > 0 &&
-          entry.sentQuantity === 0,
-      ),
-    );
-
-  function openProductionPassEditor() {
-    if (!canChangeProductionPass) return;
-    const bounds = articleRef.current?.getBoundingClientRect();
-    if (bounds)
-      setPassMenuPosition({
-        left: Math.max(
-          8,
-          Math.min(
-            bounds.left + 8,
-            window.innerWidth - Math.min(bounds.width - 16, 520) - 8,
-          ),
-        ),
-        top: Math.min(bounds.top + 48, window.innerHeight - 80),
-        width: Math.min(bounds.width - 16, 520),
-      });
-    setPassMenuOpen((current) => !current);
-  }
-
-  function clearLongPress() {
-    if (longPressTimer.current !== null)
-      window.clearTimeout(longPressTimer.current);
-    longPressTimer.current = null;
-  }
-
-  function handleContextMenu(event: MouseEvent<HTMLElement>) {
-    if (!canChangeProductionPass) return;
-    event.preventDefault();
-    openProductionPassEditor();
-  }
+  const longPress = useOrderLineLongPress(readOnly || isBusy || !onOpenActions, () => onOpenActions?.());
 
   function handlePointerDown(event: PointerEvent<HTMLElement>) {
     if (
       readOnly ||
       isBusy ||
+      event.isPrimary === false ||
       event.button !== 0 ||
       isOrderLineActionTarget(event.target)
     )
       return;
-    clearLongPress();
-    longPressTimer.current = window.setTimeout(openProductionPassEditor, 600);
+    longPress.onPointerDown(event);
     event.currentTarget.setPointerCapture(event.pointerId);
     setDragStart({ x: event.clientX, y: event.clientY });
   }
 
   function handlePointerMove(event: PointerEvent<HTMLElement>) {
+    longPress.onPointerMove(event);
     if (!dragStart) return;
     const deltaX = event.clientX - dragStart.x;
     const deltaY = event.clientY - dragStart.y;
-    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) clearLongPress();
     if (Math.abs(deltaY) > 16 && Math.abs(deltaY) > Math.abs(deltaX)) return;
     setOffsetX(Math.min(0, Math.max(deltaX, -swipeMaxOffset)));
   }
 
   function endSwipe(event: PointerEvent<HTMLElement>) {
+    const wasHeld = longPress.onPointerUp();
     if (!dragStart) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       try {
         event.currentTarget.releasePointerCapture(event.pointerId);
       } catch {}
     }
-    const shouldRemove = offsetX <= -swipeDeleteThreshold && !isBusy;
-    clearLongPress();
+    const shouldRemove = offsetX <= -swipeDeleteThreshold && !isBusy && !wasHeld;
     setDragStart(null);
     setOffsetX(0);
     if (shouldRemove && !readOnly) onRemove(line.id);
@@ -244,13 +186,16 @@ function OrderLineRow({
         <Trash2 aria-hidden="true" className="h-5 w-5" />
       </div>
       <article
-        className={`relative z-[1] overflow-hidden ${isMenu ? "rounded-[16px]" : "rounded-[var(--radius)]"} border border-[var(--separator)] bg-[var(--background)] p-2.5 ${isDragging ? "transition-none" : "transition-transform duration-150 ease-out"}`}
-        onContextMenu={handleContextMenu}
-        onPointerCancel={endSwipe}
+        className={`relative z-[1] select-none [-webkit-touch-callout:none] overflow-hidden ${isMenu ? "rounded-[16px]" : "rounded-[var(--radius)]"} border border-[var(--separator)] bg-[var(--background)] p-2.5 ${isDragging ? "transition-none" : "transition-transform duration-150 ease-out"}`}
+        onClickCapture={longPress.onClickCapture}
+        onContextMenu={longPress.onContextMenu}
+        onKeyDown={longPress.onKeyDown}
+        tabIndex={!readOnly && !isBusy && onOpenActions ? 0 : undefined}
+        onPointerCancel={() => { longPress.onPointerCancel(); setDragStart(null); setOffsetX(0); }}
         onPointerDown={handlePointerDown}
+        onPointerDownCapture={longPress.onPointerDownCapture}
         onPointerMove={handlePointerMove}
         onPointerUp={endSwipe}
-        ref={articleRef}
         style={{ transform: `translateX(${offsetX}px)` }}
       >
         <div className={isMenu ? "flex flex-col gap-2" : "flex items-start justify-between gap-2"}>
@@ -277,6 +222,7 @@ function OrderLineRow({
               </p>
             ) : null}
             <MenuComponentDetails compact components={line.components} />
+            {line.note ? <p className="mt-2 whitespace-pre-wrap break-words text-sm font-semibold text-[var(--foreground)]">{line.note}</p> : null}
             {displayQuantity === undefined &&
             pending > 0 &&
             pending < line.quantity ? (
@@ -417,82 +363,6 @@ function OrderLineRow({
           </div>
         ) : null}
       </article>
-      {passMenuOpen && productionRouting
-        ? createPortal(
-            <>
-              <button
-                aria-label="Cerrar selector de pase"
-                className="fixed inset-0 z-40 cursor-default"
-                onClick={() => setPassMenuOpen(false)}
-                type="button"
-              />
-              <div
-                className="fixed z-50 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 shadow-[var(--shadow)]"
-                data-order-line-action="true"
-                style={{
-                  left: passMenuPosition.left,
-                  top: passMenuPosition.top,
-                  width: passMenuPosition.width,
-                }}
-              >
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <strong className="text-sm">Cambiar pase</strong>
-                  <button
-                    aria-label="Cerrar selector de pase"
-                    className="text-xs font-bold text-[var(--muted)]"
-                    onClick={() => setPassMenuOpen(false)}
-                    type="button"
-                  >
-                    Cerrar
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {productionState?.entries
-                    .filter(
-                      (entry) =>
-                        entry.lineId === line.id &&
-                        entry.unsentQuantity > 0 &&
-                        entry.sentQuantity === 0,
-                    )
-                    .map((entry) => (
-                      <label
-                        className="block space-y-1"
-                        key={`${entry.lineId}:${entry.componentId ?? ""}`}
-                      >
-                        <span className="block truncate text-xs font-bold text-[var(--muted)]">
-                          {entry.productName}
-                          {entry.parentProductName
-                            ? ` · ${entry.parentProductName}`
-                            : ""}
-                        </span>
-                        <NativeSelect
-                          aria-label={`Pase de ${entry.productName}`}
-                          disabled={isBusy}
-                          onChange={(event) => {
-                            if (event.target.value !== entry.passId)
-                              onChangeProductionPass?.({
-                                lineId: entry.lineId,
-                                componentId: entry.componentId,
-                                passId: event.target.value,
-                              });
-                          }}
-                          triggerClassName="min-h-10"
-                          value={entry.passId}
-                        >
-                          {productionRouting.passes.map((pass) => (
-                            <option key={pass.id} value={pass.id}>
-                              {pass.name}
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </label>
-                    ))}
-                </div>
-              </div>
-            </>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }
@@ -510,12 +380,15 @@ export function RestaurantOrderPanel(props: Props) {
     onChangeProductionPass,
     onSetQuantity,
     onSetUnitPrice,
+    onSetNote,
     onServeComponent,
     productionState,
     productionRouting,
     catalog,
     ...lineProps
   } = props;
+  const [lineActions, setLineActions] = useState<{ lineId: string; mode: 'actions' | 'note' } | null>(null);
+  const actionLine = order.lines.find((line) => line.id === lineActions?.lineId);
   const [valueEditor, setValueEditor] = useState<OrderValueEditor | null>(null);
   const [valueEditorError, setValueEditorError] = useState<string | null>(null);
   const pendingLines = order.lines.filter(
@@ -664,7 +537,7 @@ export function RestaurantOrderPanel(props: Props) {
       isBusy={isBusy}
       key={`${line.id}:${displayQuantity ?? "full"}`}
       line={line}
-      onChangeProductionPass={onChangeProductionPass}
+      onOpenActions={onSetNote || onChangeProductionPass ? () => setLineActions({ lineId: line.id, mode: 'actions' }) : undefined}
       onOpenQuantityEditor={() => openQuantityEditor(line, displayQuantity)}
       onOpenUnitPriceEditor={() => openUnitPriceEditor(line)}
       productionRouting={productionRouting}
@@ -674,6 +547,8 @@ export function RestaurantOrderPanel(props: Props) {
   );
   const renderMenu = (line: RestaurantOrderLine, index: number) => <MenuOrderCard key={line.id} line={line} number={index + 1} entries={productionEntriesByLine.get(line.id) ?? []}
     catalog={catalog} routing={productionRouting} productionEnabled={Boolean(productionState?.effective)} disabled={isBusy} discount={lineDiscounts[line.id]}
+    onOpenActions={onSetNote || onChangeProductionPass ? () => setLineActions({ lineId: line.id, mode: 'actions' }) : undefined}
+    onComment={onSetNote ? () => setLineActions({ lineId: line.id, mode: 'note' }) : undefined}
     onEdit={lineProps.onEdit} onIncrement={lineProps.onIncrement} onDecrement={lineProps.onDecrement} onRemove={lineProps.onRemove}
     onOpenQuantity={() => openQuantityEditor(line)} onOpenPrice={() => openUnitPriceEditor(line)}
     onSend={onSendToProduction} onServe={onServeComponent} onChangePass={onChangeProductionPass} />;
@@ -788,6 +663,10 @@ export function RestaurantOrderPanel(props: Props) {
           ) : null}
         </div>
       </section>
+      {actionLine && lineActions ? <OrderLineActionsModal key={`${actionLine.id}:${lineActions.mode}`} line={actionLine}
+        label={isMenuOrderLine(actionLine) ? `${actionLine.productName} · ${menuLines.findIndex((line) => line.id === actionLine.id) + 1}` : actionLine.productName}
+        entries={productionEntriesByLine.get(actionLine.id) ?? []} routing={productionRouting} disabled={isBusy}
+        initialMode={lineActions.mode} onClose={() => setLineActions(null)} onSetNote={onSetNote} onChangePass={onChangeProductionPass} /> : null}
       {valueEditor ? (
         <NumericKeypadModal
           allowDecimal

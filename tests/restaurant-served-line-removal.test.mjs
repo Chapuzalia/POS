@@ -28,6 +28,8 @@ const modules = {
   '../../production/routing': routing,
   '../../production/order-progress': orderProgress,
   './MenuOrderCard': { MenuOrderCard: empty },
+    './OrderLineActionsModal': { OrderLineActionsModal: empty },
+    '../hooks/useOrderLineLongPress': { isOrderLineActionTarget: () => false, useOrderLineLongPress: () => ({ onPointerDown() {}, onPointerMove() {}, onPointerUp: () => false, onPointerCancel() {} }) },
   '../menu-service-model': menuServiceModel,
 }
 const line = { id: 'served-line', productName: 'Cafe', quantity: 2, servedQuantity: 2, unitPriceCents: 150, modifiers: [], components: [], catalogSnapshot: {} }

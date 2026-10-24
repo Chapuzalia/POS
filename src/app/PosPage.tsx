@@ -332,6 +332,7 @@ export function PosPage(props: Props) {
         onServeComponent={restaurant.serveComponent}
         onSetQuantity={restaurant.setLineQuantity}
         onSetUnitPrice={restaurant.setLineUnitPrice}
+        onSetNote={restaurant.setLineNote}
          catalog={props.catalog}
          productionRouting={props.catalog?.productionRouting}
           productionState={restaurant.productionState}

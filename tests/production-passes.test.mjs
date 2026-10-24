@@ -62,7 +62,9 @@ test('POS groups by pass and retains manual partial selection', () => {
 test('POS pass editing is wired and restricted to unsent entries', () => {
   assert.match(productionService, /setOrderLineProductionPass/)
   assert.match(restaurantController, /changeProductionPass/)
-  assert.match(panel, /entry\.sentQuantity === 0/)
+  const actions = readFileSync(new URL('../src/features/tables/components/OrderLineActionsModal.tsx', import.meta.url), 'utf8')
+  assert.match(panel, /onChangePass=\{onChangeProductionPass\}/)
+  assert.match(actions, /entry\.sentQuantity === 0/)
 })
 
 test('KDS displays the persisted pass snapshot', () => {

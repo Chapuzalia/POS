@@ -48,6 +48,8 @@ test('POS shows 1 on both sides of the pending row, 4 in completed, sends only 1
     '../../production/routing': routing,
     '../../production/order-progress': orderProgress,
     './MenuOrderCard': { MenuOrderCard: empty },
+    './OrderLineActionsModal': { OrderLineActionsModal: empty },
+    '../hooks/useOrderLineLongPress': { isOrderLineActionTarget: () => false, useOrderLineLongPress: () => ({ onPointerDown() {}, onPointerMove() {}, onPointerUp: () => false, onPointerCancel() {} }) },
     '../menu-service-model': menuServiceModel,
   }
   const { RestaurantOrderPanel } = compileComponent(source('tables/components/RestaurantOrderPanel.tsx'), modules)
@@ -116,6 +118,15 @@ test('KDS accepts new sends, keeps ready dishes grey, moves to completed and ret
   })
   const props = { context: { deviceId: 'device' }, isOnline: true }
   let tree = runner.render(props)
+  const originalEvents = queue.events
+  for (const note of ['Sin sal\nSalsa aparte <texto>', null]) {
+    queue = { ...queue, events: [{ ...originalEvents[0], event_type: 'modified', payload: { productName: 'Bull', note } }] }
+    const notice = nodes(runner.render(props)).find(node => node.type === 'article')
+    assert.ok(text(notice).includes(`Comentario: ${note ?? 'sin comentario'}`))
+    assert.equal(nodes(notice).some(node => node.props.dangerouslySetInnerHTML), false)
+  }
+  queue = { ...queue, events: originalEvents }
+  tree = runner.render(props)
   assert.deepEqual(nodes(tree).filter(node => node.type === 'h2').map(text), ['Nuevos pedidos', 'En preparación', 'Completados'])
   assert.equal(nodes(tree).filter(node => node.type === 'h3').length, 1)
   const passGroup = nodes(tree).filter(node => node.type === 'section' && node.props['aria-label'] === 'Pase Directo')

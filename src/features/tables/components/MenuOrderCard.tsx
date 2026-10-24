@@ -9,6 +9,7 @@ import { getMenuCourseGroups, isMenuServiceComplete } from '../menu-service-mode
 import type { RestaurantOrderLine } from '../types'
 import { MenuCourseRow } from './MenuCourseRow'
 import { MenuDetailsModal } from './MenuDetailsModal'
+import { useOrderLineLongPress } from '../hooks/useOrderLineLongPress'
 
 type Props = {
   line: RestaurantOrderLine
@@ -28,10 +29,12 @@ type Props = {
   onRemove: (lineId: string) => void
   onOpenQuantity: () => void
   onOpenPrice: () => void
+  onOpenActions?: () => void
+  onComment?: () => void
 }
 
 export function MenuOrderCard({ line, number, entries, catalog, routing, productionEnabled, disabled, discount,
-  onEdit, onSend, onServe, onChangePass, onIncrement, onDecrement, onRemove, onOpenQuantity, onOpenPrice }: Props) {
+  onEdit, onSend, onServe, onChangePass, onIncrement, onDecrement, onRemove, onOpenQuantity, onOpenPrice, onOpenActions, onComment }: Props) {
   const [detailsOpen, setDetailsOpen] = useState(false)
   const [expanded, setExpanded] = useState(false)
   const groups = getMenuCourseGroups(line, catalog)
@@ -39,8 +42,9 @@ export function MenuOrderCard({ line, number, entries, catalog, routing, product
   const completed = isMenuServiceComplete(line, entries, missingChoices.length)
   const label = `${line.productName} · ${number}`
   const total = discount?.netCents ?? quantityAmountCents(line.unitPriceCents, line.quantity)
+  const longPress = useOrderLineLongPress(disabled || !onOpenActions, () => onOpenActions?.())
 
-  return <article aria-label={label} className="rounded-[14px] border border-[var(--separator)] bg-[var(--surface)] px-3.5" data-menu-id={line.id}>
+  return <article {...longPress} tabIndex={!disabled && onOpenActions ? 0 : undefined} aria-label={label} className="touch-pan-y select-none rounded-[14px] border border-[var(--separator)] bg-[var(--surface)] px-3.5 [-webkit-touch-callout:none]" data-menu-id={line.id}>
     <div className="flex min-h-16 items-center gap-2 py-2">
       {completed ? <Check aria-label="Menú completado" className="h-4 w-4 shrink-0 text-[var(--success)]" /> : null}
       <div className="min-w-0 flex-1">
@@ -61,10 +65,10 @@ export function MenuOrderCard({ line, number, entries, catalog, routing, product
         <Button aria-label={`Elegir ${group.name} de ${label}`} className="!min-h-11 !rounded-[10px] !px-3 text-sm font-bold" disabled={disabled} onClick={() => onEdit(line)} size="sm" type="button" variant="secondary">Elegir</Button>
       </div> : null])}
       {!line.components.length && !missingChoices.length ? <Button className="my-2 !min-h-11" disabled={disabled} onClick={() => onEdit(line)} type="button" variant="secondary">Elegir platos</Button> : null}
-      {line.note || line.modifiers.length ? <p className="py-3 text-xs font-semibold text-[var(--foreground)]">{[...line.modifiers.map((modifier) => modifier.name), line.note].filter(Boolean).join(' · ')}</p> : null}
+      {line.note || line.modifiers.length ? <p className="whitespace-pre-wrap break-words py-3 text-xs font-semibold text-[var(--foreground)]">{[...line.modifiers.map((modifier) => modifier.name), line.note].filter(Boolean).join(' · ')}</p> : null}
     </div> : null}
     {detailsOpen ? <MenuDetailsModal label={label} line={line} entries={entries} routing={routing} productionEnabled={productionEnabled} disabled={disabled} discount={discount}
       onClose={() => setDetailsOpen(false)} onEdit={onEdit} onIncrement={onIncrement} onDecrement={onDecrement} onRemove={onRemove}
-      onOpenQuantity={onOpenQuantity} onOpenPrice={onOpenPrice} onServe={onServe} onChangePass={onChangePass} /> : null}
+      onOpenQuantity={onOpenQuantity} onOpenPrice={onOpenPrice} onServe={onServe} onChangePass={onChangePass} onComment={onComment} /> : null}
   </article>
 }

@@ -31,7 +31,7 @@ function fixture() {
   return { catalog, line, entries }
 }
 
-const rowModules = { 'react/jsx-runtime': jsxRuntime, 'lucide-react': icons, '../../../components/ui': { Button }, '../../../lib/format': format, '../menu-service-model': menuModel }
+const rowModules = { 'react/jsx-runtime': jsxRuntime, 'lucide-react': icons, '../../../components/ui': { Button }, '../../../lib/format': format, '../menu-service-model': menuModel, '../hooks/useOrderLineLongPress': { useOrderLineLongPress: () => ({}) }, './OrderLineActionsModal': { OrderLineActionsModal: () => null } }
 const { MenuCourseRow } = compileComponent(source('components/MenuCourseRow.tsx'), rowModules)
 const { MenuDetailsModal } = compileComponent(source('components/MenuDetailsModal.tsx'), {
   ...rowModules, '../../../components/ui': { Button, AppModal: props => props.children },

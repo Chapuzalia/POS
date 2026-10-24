@@ -22,7 +22,7 @@ export function MenuCourseRow({ component, entry, line, disabled, productionEnab
   const quantity = line.quantity * component.quantity
   const supplement = quantityAmountCents(component.priceDeltaCents + (component.modifiers ?? []).reduce((sum, modifier) => sum + modifier.priceCents, 0), quantity)
   return <div className="flex items-center gap-3 py-3" data-menu-course={component.id}>
-    <button aria-label={`Editar ${component.selectionGroupName}: ${component.productName}`} className="min-h-11 min-w-0 flex-1 cursor-pointer text-left disabled:cursor-default"
+    <button data-order-line-hold="true" aria-label={`Editar ${component.selectionGroupName}: ${component.productName}`} className="min-h-11 min-w-0 flex-1 cursor-pointer text-left disabled:cursor-default"
       disabled={disabled} onClick={() => onEdit(line)} type="button">
       <span className="block text-xs font-medium text-[var(--muted)]">{component.selectionGroupName}</span>
       <span className="block text-sm font-bold leading-5 text-[var(--foreground)]">{quantity !== 1 ? `${formatQuantity(quantity)}× ` : ''}{component.productName}

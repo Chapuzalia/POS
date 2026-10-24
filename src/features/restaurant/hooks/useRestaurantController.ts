@@ -1215,6 +1215,22 @@ export function useRestaurantController(options: Options) {
     }))
   }, [draft, options])
 
+  const setLineNote = useCallback(async (lineId: string, value: string) => {
+    if (!options.context?.canTakeOrders || !options.isOnline || options.isBusy) return false
+    const current = draft.getCurrentOrder()
+    const line = current?.lines.find((item) => item.id === lineId)
+    if (!current || current.order.status !== 'open' || !line) return false
+    const note = Array.from(value.replace(/\r\n?/g, '\n'))
+      .filter((character) => character === '\n' || character === '\t' || (character.charCodeAt(0) >= 32 && character.charCodeAt(0) !== 127))
+      .join('').trim() || null
+    if (line.note !== note) draft.updateDraft((detail) => ({
+      ...detail,
+      lines: detail.lines.map((item) => item.id === lineId ? { ...item, note, updatedAt: nowIso() } : item),
+    }))
+    const saved = await draft.flush()
+    return saved?.order.id === current.order.id && saved.lines.some((item) => item.id === lineId && item.note === note)
+  }, [draft, options])
+
   const runServiceAction = useCallback((action: (order: RestaurantOrderDetail) => Promise<void>) => runBusy(async () => {
     if (!options.context || !options.isOnline) return
     const saved = await draft.flush()
@@ -1365,6 +1381,7 @@ export function useRestaurantController(options: Options) {
     setEqualSplitOpen,
     setInvoiceCustomer,
     setLineQuantity,
+    setLineNote,
     setLineUnitPrice,
     setMap: realtime.setMap,
     setMoveOrderId,

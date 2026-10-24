@@ -204,8 +204,10 @@ test('identical menus stay separate, direct service is never resent, quantity re
 
 test('kitchen notes affect only outstanding sent dishes and repeat saves leave no extra notices', async t => {
   const { db, save, send, serve } = await setup(t)
-  await save([component(0), component(1)], 1)
+  await db.exec(readProductionSql('20261024203609_kitchen_order_comments'))
+  await save([component(0), component(1)], 1, { note: 'Salsa aparte' })
   await send('both', 2)
+  assert.ok((await db.query('select snapshot from production_items')).rows.every(row => row.snapshot.note === 'Salsa aparte'))
   await serve(optionIds[0], 1, 2)
   await save([component(0), component(1)], 3, { note: 'Segundo sin sal' })
   const events = (await db.query('select event_type,payload from production_events')).rows
@@ -213,8 +215,13 @@ test('kitchen notes affect only outstanding sent dishes and repeat saves leave n
   assert.equal(events[0].event_type, 'modified')
   assert.equal(events[0].payload.productName, 'Menú diario')
   assert.equal(events[0].payload.note, 'Segundo sin sal')
+  assert.ok((await db.query('select production_render_event_lines(id) lines from production_events')).rows[0].lines.includes('NOTA: Segundo sin sal'))
+  assert.ok((await db.query('select snapshot from production_items')).rows.every(row => row.snapshot.note === 'Salsa aparte'), 'already sent snapshots remain immutable')
   await save([component(0), component(1)], 4, { note: 'Segundo sin sal' })
   assert.equal((await db.query('select count(*)::int n from production_events')).rows[0].n, 1)
+  await save([component(0), component(1)], 5, { note: null })
+  assert.equal((await db.query('select count(*)::int n from production_events')).rows[0].n, 2)
+  assert.ok((await db.query("select production_render_event_lines(id) lines from production_events where payload->>'note' is null")).rows[0].lines.includes('NOTA: SIN COMENTARIO'))
 })
 
 test('an optional course chosen after all previous dishes were served reopens just that course', async t => {

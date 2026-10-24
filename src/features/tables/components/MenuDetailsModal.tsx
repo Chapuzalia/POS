@@ -24,10 +24,11 @@ type Props = {
   onOpenPrice: () => void
   onServe?: (lineId: string, componentId: string, quantity: number) => void
   onChangePass?: (input: { lineId: string; componentId?: string | null; passId: string }) => void
+  onComment?: () => void
 }
 
 export function MenuDetailsModal({ label, line, entries, routing, productionEnabled, disabled, discount,
-  onClose, onEdit, onIncrement, onDecrement, onRemove, onOpenQuantity, onOpenPrice, onServe, onChangePass }: Props) {
+  onClose, onEdit, onIncrement, onDecrement, onRemove, onOpenQuantity, onOpenPrice, onServe, onChangePass, onComment }: Props) {
   const maxServed = Math.max(line.servedQuantity, ...entries.map((entry) => entry.servedQuantity ?? 0))
   const closeAndRun = (action: () => void) => { onClose(); action() }
   const kitchenActions = productionEnabled ? line.components.flatMap((component) => {
@@ -54,6 +55,8 @@ export function MenuDetailsModal({ label, line, entries, routing, productionEnab
           <span className="flex items-center gap-3"><Pencil aria-hidden="true" className="h-4 w-4 shrink-0" />Cambiar elecciones</span>
           <ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0" />
         </Button>
+
+        {onComment ? <Button className="!min-h-12 border border-[var(--separator)] !px-4 !text-[var(--foreground)]" disabled={disabled} fullWidth onClick={() => closeAndRun(onComment)} type="button" variant="tertiary">{line.note ? 'Editar comentario' : 'Añadir comentario'}</Button> : null}
 
         <div className="space-y-3">
           <div className="flex min-h-20 items-center justify-between gap-3 rounded-[12px] border border-[var(--separator)] bg-[var(--background)] p-3">
