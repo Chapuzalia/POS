@@ -2,7 +2,7 @@ import type { CashSession, SaleCreatedPayload, TenantContext } from '../../../ty
 import { payRestaurantLocalFiscal } from '../../tables/service.ts'
 import { issuePosInvoice, printPayloadWithLocalFiscal, preparedFiscalInstallation, preflightFiscalInstallation } from './posInvoice.ts'
 import type { PreparedFiscalInstallation } from './posInvoice.ts'
-import { openLedger, request, transactionDone, reconcileLocalFiscalCopies, type LocalFiscalEntry } from './localLedger.ts'
+import { openLedger, request, transactionDone, readLocalFiscalRecord, reconcileLocalFiscalCopies, type LocalFiscalEntry } from './localLedger.ts'
 import { fiscalBridgeAccessToken, fiscalBridgeBaseUrl } from './installation.ts'
 import { synchronizeLocalFiscalQueue } from './sync.ts'
 import { withConfirmedRestaurantPayments } from '../../restaurant/services/paymentPayload.ts'
@@ -71,7 +71,15 @@ export async function issueRestaurantInvoice(
   operationKey?: string,
 ): Promise<{ result: Record<string, unknown>; entry: LocalFiscalEntry | null; payload: SaleCreatedPayload | null }> {
   const key = operationKey ?? `${context.tenantId}:${context.venueId}:${context.deviceId}:${cashSession.id}:${draft.sale.id}`
-  const pending = await pendingRestaurantPayment(key)
+  let pending = await pendingRestaurantPayment(key)
+  if (pending && pending.draft.sale.id !== draft.sale.id && pending.action === action
+    && pending.entry.record.tenantId === context.tenantId && pending.entry.record.deviceId === context.deviceId) {
+    // Partial payments reuse the order/split key. Only a locally committed
+    // record releases the previous envelope; unresolved RPCs keep their identity.
+    const confirmed = await readLocalFiscalRecord(pending.entry.scope, pending.entry.id)
+    if (confirmed && confirmed.record.hash === pending.entry.record.hash
+      && confirmed.record.invoiceId === pending.entry.record.invoiceId) pending = undefined
+  }
   if (pending) {
     if (pending.draft.sale.id !== draft.sale.id || pending.action !== action
       || pending.entry.record.tenantId !== context.tenantId || pending.entry.record.deviceId !== context.deviceId) {

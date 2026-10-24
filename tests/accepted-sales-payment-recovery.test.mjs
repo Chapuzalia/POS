@@ -81,6 +81,112 @@ test('an unresolved fiscal payment blocks a new fiscal issue until the original 
   await assert.rejects(ledger.assertRestaurantPaymentsReconciled(preparedEntry().record), /pendiente de conciliar/)
 })
 
+for (const action of ['equal_part', 'selected_items']) for (const state of ['fresh', 'accepted']) test(`a ${state} ${action} payment recovers past a confirmed fiscal envelope from the previous payment`, async () => {
+  setup()
+  let preparations = 0, charges = 0, requests = 0
+  let loseReply = true
+  const envelopes = []
+  const fiscal = compileComponent(source('features/fiscal/local/restaurantInvoice.ts'), {
+    '../../restaurant/services/paymentPayload.ts': { withConfirmedRestaurantPayments },
+    './localLedger.ts': ledger,
+    './installation.ts': { fiscalBridgeBaseUrl: () => null },
+    './sync.ts': {},
+    './posInvoice.ts': {
+      issuePosInvoice: async (_context, _session, payload, _synced, resolve) => {
+        const position = ++preparations
+        const entry = preparedEntry()
+        entry.id = `record-${position}`
+        Object.assign(entry.record, { idempotencyKey: entry.id, chainPosition: position,
+          previous: position > 1 ? { hash: String(position - 1).repeat(64) } : null,
+          hash: String(position).repeat(64) })
+        Object.assign(entry.invoice, { number: position, ticketId: payload.ticket.id, saleId: payload.sale.id })
+        const confirmed = await resolve(entry)
+        Object.assign(entry.invoice, { ticketId: confirmed.ticket.id, saleId: confirmed.sale.id })
+        await ledger.reconcileLocalFiscalCopies(entry.record, context.deviceId, [{ entry, economicPayload: confirmed, eventId: entry.id }])
+        return entry
+      },
+      printPayloadWithLocalFiscal: payload => payload,
+    },
+    '../../tables/service.ts': { payRestaurantLocalFiscal: async (_action, _params, record) => {
+      requests++
+      envelopes.push(record.idempotencyKey)
+      if (record.chainPosition === 2 && loseReply) { loseReply = false; throw new Error('Response lost') }
+      return { ticketId: `ticket-${record.chainPosition}`, saleId: `sale-${record.chainPosition}`, paymentId: 'payment', totalCents: 600 }
+    } },
+  })
+  const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
+    '../../../lib/durableSales.ts': durable,
+    '../../local-printing/cashlogy/useCashlogyStore.ts': {
+      isCashlogyPaymentConfigured: () => true,
+      settleCashlogyPaymentIfConfigured: async (amount, saleId, requestId) => {
+        charges++
+        return { id: `cashlogy-${charges}`, saleId, requestId, requestedAmountCents: amount }
+      },
+      getCashlogyPaymentAmounts: () => ({ receivedCents: 600, changeCents: 0 }),
+    },
+    '../../fiscal/local/tenantMode.ts': { resolveLocalFiscalMode: async () => 'verifactu' },
+    '../../fiscal/local/posInvoice.ts': { preflightPosInvoice: async () => ({}) },
+    '../../fiscal/local/restaurantInvoice.ts': fiscal,
+    '../../tables/service.ts': {},
+  }, { JSON })
+  const params = { orderId: 'order', splitId: 'split', method: 'cash', allowPending: true }
+  const input = { context, session, target: action === 'equal_part' ? 'split' : 'order', action, draft: draft(), params, sequence: 0 }
+  await service.payRestaurantSale(input)
+  // Old clients can leave a new accepted charge beside the previous fiscal journal.
+  const key = `${durable.paymentScope(context, session.id)}|restaurant:${action}:${input.target}`
+  const nextDraft = { ...draft(), sale: { ...draft().sale, id: 'next-sale' } }
+  if (state === 'accepted') {
+    const next = await durable.preparePaymentOperation(key, 'next-part', nextDraft, { ...params, fiscalMode: 'verifactu' })
+    await durable.acceptPaymentOperation(next, nextDraft, { id: 'already-charged', requestId: 'next-request', requestedAmountCents: 600 })
+    await assert.rejects(service.recoverRestaurantPayments(context, session), /Response lost/)
+  } else await assert.rejects(service.payRestaurantSale({ ...input, draft: nextDraft, sequence: 1 }), /Response lost/)
+  const [recovered] = await service.recoverRestaurantPayments(context, session)
+  assert.equal(recovered.result.saleId, 'sale-2')
+  assert.equal(charges, state === 'accepted' ? 1 : 2, 'recovery must not charge the accepted second payment again')
+  assert.equal(preparations, 2)
+  assert.equal(requests, 3)
+  assert.deepEqual(envelopes, ['record-1', 'record-2', 'record-2'])
+  assert.equal((await durable.loadPaymentOperation(key)).state, 'committed')
+  assert.equal((await durable.loadPendingPaymentOperations(context, session.id)).length, 0)
+  assert.equal((await durable.loadDurableSessionTickets(context, session.id)).length, 2)
+  await ledger.assertRestaurantPaymentsReconciled(preparedEntry().record)
+})
+
+for (const invalid of ['unconfirmed', 'hash', 'invoice', 'tenant', 'device', 'action']) test(`a mismatched ${invalid} fiscal envelope cannot be replaced by a new payment`, async () => {
+  setup()
+  const entry = preparedEntry()
+  const pending = { key: 'original-operation', entry, draft: draft(), action: 'selected_items', params: { orderId: 'order' } }
+  if (invalid !== 'unconfirmed') {
+    const confirmed = structuredClone(entry)
+    if (invalid === 'hash') confirmed.record.hash = 'B'.repeat(64)
+    if (invalid === 'invoice') confirmed.record.invoiceId = 'another-invoice'
+    await ledger.reconcileLocalFiscalCopies(entry.record, context.deviceId, [{ entry: confirmed, economicPayload: draft(), eventId: entry.id }])
+  }
+  if (invalid === 'tenant') pending.entry.record.tenantId = 'other-tenant'
+  if (invalid === 'device') pending.entry.record.deviceId = 'other-device'
+  if (invalid === 'action') pending.action = 'close'
+  const db = await ledger.openLedger()
+  const tx = db.transaction('restaurantPayments', 'readwrite')
+  const done = ledger.transactionDone(tx)
+  tx.objectStore('restaurantPayments').put(pending)
+  await done; db.close()
+  const service = compileComponent(source('features/fiscal/local/restaurantInvoice.ts'), {
+    '../../restaurant/services/paymentPayload.ts': { withConfirmedRestaurantPayments },
+    './localLedger.ts': ledger,
+    './installation.ts': {}, './sync.ts': {},
+    './posInvoice.ts': { issuePosInvoice: assert.fail },
+    '../../tables/service.ts': { payRestaurantLocalFiscal: assert.fail },
+  })
+  await assert.rejects(service.issueRestaurantInvoice(context, session,
+    { ...draft(), sale: { ...draft().sale, id: 'another-sale' } }, 'selected_items', { orderId: 'order' }, null, pending.key), /no pertenece a este cobro/)
+  const savedDb = await ledger.openLedger()
+  const savedTx = savedDb.transaction('restaurantPayments', 'readonly')
+  const savedDone = ledger.transactionDone(savedTx)
+  assert.deepEqual(await ledger.request(savedTx.objectStore('restaurantPayments').get(pending.key)), pending)
+  await savedDone; savedDb.close()
+})
+
 test('restaurant retry after activation and a lost RPC reply preserves its legacy receipt and Cashlogy confirmation', async () => {
   setup()
   let charges = 0, attempts = 0, economicSales = 0
