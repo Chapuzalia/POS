@@ -21,7 +21,7 @@ export type SaleLineTotals = {
   grossBeforeDiscountCents: number
 }
 
-function canonicalModifiers(
+export function canonicalizeProductModifiers(
   groups: readonly ResolvedCatalogModifierGroup[],
   submitted: readonly TicketLineModifier[],
 ): TicketLineModifier[] {
@@ -91,7 +91,7 @@ function canonicalComponents(
         quantity: component.quantity,
         priceDeltaCents: option.supplementCents,
         sortOrder: option.sortOrder,
-        modifiers: canonicalModifiers(componentSellable.modifierGroups, component.modifiers ?? []),
+        modifiers: canonicalizeProductModifiers(componentSellable.modifierGroups, component.modifiers ?? []),
       })
     }
   }
@@ -105,7 +105,7 @@ export function canonicalizeProductLineSelection(
   allowDeferredMenu = false,
 ): ProductLineSelection {
   const components = canonicalComponents(catalog, sellable, selection.components, allowDeferredMenu)
-  const modifiers = canonicalModifiers(sellable.modifierGroups, selection.modifiers)
+  const modifiers = canonicalizeProductModifiers(sellable.modifierGroups, selection.modifiers)
   const mixer = components.find((component) => component.type === 'mixer') ?? null
   return {
     modifiers,

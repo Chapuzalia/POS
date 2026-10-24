@@ -17,6 +17,9 @@ import { cx } from "../../utils/cx";
 import { AppModal, Button } from "../ui";
 import { PosMixerCard } from "../pos/PosMixerCard";
 import { reconcileMenuEdit } from "../../features/restaurant/services/menuCourses";
+import { createMenuBatchDraft, type MenuBatchDraft } from "../../features/restaurant/services/menuBatch";
+import { MenuEntryMode } from "../pos/MenuEntryMode";
+import { MenuBatchDialog } from "./MenuBatchDialog";
 
 type ProductDialogProps = {
   allowDeferredMenu?: boolean;
@@ -28,6 +31,8 @@ type ProductDialogProps = {
   isBusy: boolean;
   item: ResolvedCatalogItem;
   onAdd: AddCatalogLine;
+  onAddMenus?: (sellable: ResolvedSellableProduct, selections: ProductLineSelection[], item: ResolvedCatalogItem, sourceElement?: HTMLElement | null) => boolean;
+  suggestedMenuCount?: number;
   onCancel: () => void;
 };
 
@@ -230,6 +235,8 @@ export function ProductDialog({
   isBusy,
   item,
   onAdd,
+  onAddMenus,
+  suggestedMenuCount = 2,
   onCancel,
 }: ProductDialogProps) {
   const variants = useMemo(
@@ -279,6 +286,8 @@ export function ProductDialog({
     !startsWithVariantSelection,
   );
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [menuEntryMode, setMenuEntryMode] = useState<'individual' | 'courses'>('individual');
+  const [menuBatch, setMenuBatch] = useState<MenuBatchDraft | null>(null);
   const submittedRef = useRef(false);
   const dialogRef = useRef<HTMLElement>(null);
   const isChoosingVariant = startsWithVariantSelection && !hasChosenVariant;
@@ -592,6 +601,27 @@ export function ProductDialog({
     }
   }
 
+  const canOrderByCourses = Boolean(onAddMenus && allowDeferredMenu && !initialSelection && !isChoosingVariant && menuAssignments.length && selectedSellable.product.type === 'menu');
+
+  function enterBatchMode() {
+    setMenuBatch((current) => current ? { ...current, selections: [selection, ...current.selections.slice(1)] }
+      : createMenuBatchDraft(selection, suggestedMenuCount > 1 ? suggestedMenuCount : 2));
+    setMenuEntryMode('courses');
+  }
+
+  if (canOrderByCourses && menuEntryMode === 'courses' && menuBatch && onAddMenus) return <MenuBatchDialog catalog={catalog} item={item} sellable={selectedSellable}
+    draft={menuBatch} disabled={isBusy || hasSubmitted} onChange={setMenuBatch} onCancel={onCancel}
+    onIndividual={() => {
+      const first = menuBatch.selections[0];
+      setSelectedQuantities(initialQuantities(selectedSellable, first));
+      setSelectedModifiers(initialModifiers(selectedSellable.modifierGroups, first.modifiers));
+      setSelectedComponentModifiers(initialComponentModifiers(catalog, selectedSellable, initialQuantities(selectedSellable, first), first));
+      setMenuEntryMode('individual');
+    }}
+    onAdd={(selections, sourceElement) => onAddMenus(selectedSellable, selections, item, sourceElement)}
+    renderEditor={(menuSelection, onSave, onClose) => <ProductDialog allowDeferredMenu allowVariantSelection={false} catalog={catalog} item={item}
+      initialVariantId={selectedVariantId} initialSelection={menuSelection} isBusy={isBusy} onAdd={(_sellable, edited) => { onSave(edited); return true }} onCancel={onClose} />} />;
+
   return (
     <AppModal
       containerClassName={isChoosingMixer ? "!w-[calc(100vw-32px)] !p-0" : "!p-4"}
@@ -624,6 +654,8 @@ export function ProductDialog({
             <X className="h-4 w-4" />
           </Button>
         </div>
+
+        {canOrderByCourses ? <div className="mt-4 max-w-sm"><MenuEntryMode mode="individual" disabled={isBusy || hasSubmitted} onChange={(mode) => { if (mode === 'courses') enterBatchMode() }} /></div> : null}
 
         {isChoosingVariant ? (
           <div className="mt-5 grid gap-2">

@@ -766,6 +766,8 @@ export function PosPage(props: Props) {
         initialUnitPriceCents={quickSale.productDialog.initialUnitPriceCents}
         isBusy={props.isBusy}
         item={quickSale.productDialog.item}
+        suggestedMenuCount={restaurant.order?.order.guestCount}
+        onAddMenus={restaurant.posView.type === 'table_order' && !quickSale.productDialog.lineId ? restaurant.addMenuBatch : undefined}
         key={`${quickSale.productDialog.item.placement.id}-${quickSale.productDialog.initialVariantId ?? quickSale.productDialog.item.variant.id}-${quickSale.productDialog.lineId ?? 'new'}`}
         onAdd={(sellable, selection, item, sourceElement) => restaurant.posView.type === 'table_order'
           ? restaurant.addLine(sellable, selection, item, quickSale.productDialog?.lineId, sourceElement)

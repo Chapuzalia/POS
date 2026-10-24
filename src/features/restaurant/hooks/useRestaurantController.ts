@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { createId, getLineSignature, isValidQuantity, roundQuantity } from '../../../lib/format'
 import { calculateDiscountForLines } from '../../../lib/discounts'
 import { buildSaleLine } from '../../catalog/services/saleLineBuilder'
+import { buildRestaurantMenuBatchLines } from '../services/menuBatch'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../catalog/domain/types'
 import type {
   AppliedDiscount,
@@ -1152,6 +1153,22 @@ export function useRestaurantController(options: Options) {
     return true
   }, [draft, options, productionState])
 
+  const addMenuBatch = useCallback((sellable: ResolvedSellableProduct, selections: ProductLineSelection[], item: ResolvedCatalogItem, sourceElement?: HTMLElement | null) => {
+    const { context, catalog } = options
+    const current = draft.getCurrentOrder()
+    if (!options.isOnline || options.isBusy || !context?.canTakeOrders || !catalog || !current || current.order.status !== 'open') return false
+    if (catalog.tenantId !== context.tenantId || catalog.venueId !== context.venueId) return false
+    try {
+      const lines = buildRestaurantMenuBatchLines({ catalog, sellable, selections, item, context, orderId: current.order.id, createLineId: createId, timestamp: nowIso() })
+      draft.updateDraft((detail) => ({ ...detail, lines: [...detail.lines, ...lines] }))
+      options.onAddFeedback({ feedbackType: 'added', productName: `${lines.length} × ${sellable.product.name}`, sourceElement })
+      return true
+    } catch (error) {
+      options.onError(getReadableError(error, { operation: 'restaurant.menu.batch' }))
+      return false
+    }
+  }, [draft, options])
+
   const changeLineQuantity = useCallback((lineId: string, direction: 1 | -1) => {
     if (!options.isOnline) return
     const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
@@ -1334,6 +1351,7 @@ export function useRestaurantController(options: Options) {
 
   return {
     addLine,
+    addMenuBatch,
     cancelEmptyOrder,
     changeLineQuantity,
     changeProductionPass,

@@ -7,6 +7,7 @@ import { requiresConfirmedRestaurantLineRemoval } from '../../src/features/resta
 import * as restaurantPrintPayload from '../../src/features/restaurant/services/restaurantPrintPayload.ts'
 import { calculateDiscountForLines } from '../../src/lib/discounts.ts'
 import { isMenuOrderLine } from '../../src/features/tables/menu-service-model.ts'
+import { buildRestaurantMenuBatchLines } from '../../src/features/restaurant/services/menuBatch.ts'
 
 const source = await readFile(new URL('../../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const paymentSource = await readFile(new URL('../../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
@@ -31,6 +32,7 @@ export function createRestaurantControllerHarness({
   realPayloads = false,
   tableService: tableServiceOverrides = {},
   productionService: productionServiceOverrides = {},
+  idFactory = () => 'id',
 } = {}) {
   const mapRefresh = deferred()
   const queueSync = deferred()
@@ -97,7 +99,7 @@ export function createRestaurantControllerHarness({
   }
   const modules = {
     '../../../lib/discounts': { calculateDiscountForLines: realPayloads ? calculateDiscountForLines : () => ({ totalCents: 600 }) },
-    '../../../lib/format': { createId: () => 'id', getLineSignature: () => 'signature', isValidQuantity: (value) => Number.isFinite(value) && value > 0, roundQuantity: (value) => value },
+    '../../../lib/format': { createId: idFactory, getLineSignature: () => 'signature', isValidQuantity: (value) => Number.isFinite(value) && value > 0, roundQuantity: (value) => value },
     '../../../lib/observability.ts': { reportOperationError() {} },
     '../../../utils/UserFacingError.ts': { UserFacingError: Error },
     '../../../utils/dates': { nowIso: () => '2026-09-12T00:00:00Z' },
@@ -105,6 +107,7 @@ export function createRestaurantControllerHarness({
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../catalog/services/saleLineBuilder': { buildSaleLine() {} },
     '../services/menuCourses': { reconcileMenuEdit() {} },
+    '../services/menuBatch': { buildRestaurantMenuBatchLines },
     '../../customers/service': { loadTicketInvoice: async () => null },
     '../../customers/customerValidation.ts': { customerFiscalSnapshot: (customer) => customer },
     '../../fiscal/service': { autoIssueFiscalTicket: async () => ({ fiscal: null }), loadFiscalReceiptData: async () => null },
