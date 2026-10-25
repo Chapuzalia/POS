@@ -407,6 +407,7 @@ async function journalFixture() {
 async function restaurantRecovery(store) {
   const source = await readFile(new URL('../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
   return compileComponent(source, {
+    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': {

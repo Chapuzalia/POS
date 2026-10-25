@@ -25,7 +25,7 @@ import {
   getMovedRestaurantPrintLines,
   getRestaurantPrintSubtotal,
 } from '../services/restaurantPrintPayload'
-import { applySessionLayout, saveSessionTableLayout } from '../../tables/layout-service'
+import { applyVenueLayout, saveVenueTableLayout } from '../../tables/layout-service'
 import { getOrderPendingUnits } from '../../tables/service-status'
 import {
   cancelEmptyRestaurantOrder,
@@ -323,7 +323,7 @@ export function useRestaurantController(options: Options) {
       await realtime.refreshMap()
       setPosView({
         type: 'table_map',
-        areaId: input.areaId ?? `virtual:${options.cashSession.id}`,
+        areaId: input.areaId ?? `virtual:${options.context.venueId}`,
       })
       return true
     } catch (error) {
@@ -358,7 +358,7 @@ export function useRestaurantController(options: Options) {
 
     options.setAppliedDiscount(null)
     draft.clearOrder()
-    setPosView({ type: 'table_map', areaId: input.areaId ?? `virtual:${options.cashSession.id}` })
+    setPosView({ type: 'table_map', areaId: input.areaId ?? `virtual:${options.context.venueId}` })
     try {
       const nextMap = await realtime.loadCurrentMap(options.context, options.cashSession.id)
       realtime.setMap(nextMap)
@@ -648,8 +648,8 @@ export function useRestaurantController(options: Options) {
       const payment = await payRestaurantSale<PayRestaurantEqualPartResult>({
         context: options.context, session: options.cashSession, action: 'equal_part', target: equalSplit.id, sequence: equalSplit.paidParts,
         draft: paymentDraft,
-        params: { splitId: equalSplit.id, method, receivedCents, allowPending,
-          ...(singleTicket ? { singleTicket, finalPart, amountCents, expectedPaidParts: equalSplit.paidParts } : {}),
+        params: { splitId: equalSplit.id, expectedPaidParts: equalSplit.paidParts, method, receivedCents, allowPending,
+          ...(singleTicket ? { singleTicket, finalPart, amountCents } : {}),
           discount: withCalculationLines(discount, paymentLines), useDefaultDiscount },
       })
       const result = payment.result
@@ -944,7 +944,7 @@ export function useRestaurantController(options: Options) {
           ticketId: createId(), totalCents: amountCents,
           invoice: invoiceCustomer ? { customerId: invoiceCustomer.id, customer: customerFiscalSnapshot(invoiceCustomer),
             series: null, number: null, issuedAt: null } : null }),
-        params: { orderId: saved.order.id, method, receivedCents, allowPending: forceWithPending,
+        params: { orderId: saved.order.id, expectedRevision: saved.order.revision, method, receivedCents, allowPending: forceWithPending,
           discount: withCalculationLines(options.appliedDiscount, saved.lines), customerId: invoiceCustomer?.id ?? null,
           customerSnapshot: invoiceCustomer ? customerFiscalSnapshot(invoiceCustomer) : null },
       })
@@ -1322,15 +1322,15 @@ export function useRestaurantController(options: Options) {
     setProductionState(await loadOrderProductionState(saved.order.id))
   }), [draft, options.context, options.isOnline, productionAvailable, refreshProduction, runBusy])
 
-  const updateSessionLayout = useCallback(async (
-    cashSessionId: string,
+  const updateVenueLayout = useCallback(async (
     expectedRevision: number,
-    tables: Parameters<typeof saveSessionTableLayout>[2],
+    tables: Parameters<typeof saveVenueTableLayout>[2],
   ) => {
+    if (!options.context) throw new UserFacingError('No hay un local seleccionado.')
     options.setBusy(true)
     try {
-      const saved = await saveSessionTableLayout(cashSessionId, expectedRevision, tables)
-      realtime.setMap((current) => applySessionLayout(current, saved))
+      const saved = await saveVenueTableLayout(options.context, expectedRevision, tables)
+      realtime.setMap((current) => applyVenueLayout(current, saved))
       return saved
     } finally {
       options.setBusy(false)
@@ -1412,7 +1412,7 @@ export function useRestaurantController(options: Options) {
     tablesConfigLoaded: realtime.configLoaded,
     tablesEnabled: realtime.tablesEnabled,
     updateDraft: draft.updateDraft,
-    updateSessionLayout,
+    updateVenueLayout,
     reloadMap: realtime.refreshMap,
   }
 }

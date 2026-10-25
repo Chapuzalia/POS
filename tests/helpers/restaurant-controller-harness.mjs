@@ -121,7 +121,7 @@ export function createRestaurantControllerHarness({
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
     '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false, hasTenantCapability: () => false },
     '../../production/service': { loadOrderProductionState: async () => null, sendProductionBatch() {}, subscribeToOrderProduction() {}, ...productionServiceOverrides },
-    '../../tables/layout-service': { applySessionLayout() {}, saveSessionTableLayout() {} },
+    '../../tables/layout-service': { applyVenueLayout() {}, saveVenueTableLayout() {} },
     '../../tables/service': tableService,
     '../../tables/menu-service-model': { isMenuOrderLine },
     '../../tables/service-status': { canDecreaseLineQuantity: () => true, getOrderPendingUnits },
@@ -150,6 +150,7 @@ export function createRestaurantControllerHarness({
   }
   const operations = new Map()
   const paymentService = compileComponent(paymentSource, {
+    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': {
       paymentScope: () => 'scope', withPaymentLock: (_key, work) => work(),
@@ -166,6 +167,7 @@ export function createRestaurantControllerHarness({
         const next = { ...operation, payload, cashlogy, state: 'accepted' }; operations.set(next.key, next); return next
       },
       markPaymentCharging: async operation => ({ ...operation, state: 'charging' }),
+      markRestaurantCheckoutReserved: async operation => ({ ...operation, checkoutReserved: true }),
       discardPreparedPaymentOperation: async key => operations.delete(key),
       commitPaymentOperation: async (operation, payload, _enqueue, result) => operations.set(operation.key, { ...operation, payload, result, state: 'committed' }),
     },

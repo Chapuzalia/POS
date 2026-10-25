@@ -550,7 +550,7 @@ export function useCashSession(options: Options) {
         throw new UserFacingError('Quedan operaciones sin sincronizar en este dispositivo. Sincronízalas antes de cerrar.')
       }
       const [openOrders, nextLedger, cashlogyBalance, stackerCollectionsCents] = await Promise.all([
-        loadOpenRestaurantOrders(cashContext, session.id),
+        loadOpenRestaurantOrders(cashContext),
         loadSalesLedgerFromSupabase(cashContext, session.id),
         loadActiveCashlogyCashBalance(),
         loadCashlogyStackerCollectionsTotal(cashContext, session.id),

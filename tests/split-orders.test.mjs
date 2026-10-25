@@ -49,7 +49,7 @@ test('mapa, detalle y realtime trabajan por grupo de ocupacion', () => {
   assert.match(service, /orderByGroup/)
   assert.match(service, /tableIdsByGroup/)
   assert.match(service, /loadRestaurantOrderGroup/)
-  assert.match(service, /\['order_groups', 'orders', 'order_tables', 'order_lines'/)
+  assert.match(service, /\['dining_areas', 'order_groups', 'orders', 'order_tables', 'order_lines'/)
   assert.match(migration, /'order_groups'/)
   assert.match(migration, /alter publication supabase_realtime add table public\.%I/i)
 })

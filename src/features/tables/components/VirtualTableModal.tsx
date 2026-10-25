@@ -75,7 +75,7 @@ export function VirtualTableModal({
     >
       <div>
         <h1 className="text-lg font-bold">Crear mesa virtual</h1>
-        <p>Solo estará disponible durante la sesión de caja actual.</p>
+        <p>Estará disponible en todas las cajas del local, también después del cierre.</p>
       </div>
       <label>
         <h2 className="text-base font-semibold">Nombre</h2>

@@ -96,6 +96,7 @@ async function realtimeHarness(overrides = {}) {
     ...overrides,
   }
   const runner = hookRunner('useRestaurantRealtime', {
+    '../../tables/layout-service': { subscribeToVenueTableLayout: () => () => {} },
     '../../tables/service': {
       loadVenueTablesEnabled: async () => true,
       loadRestaurantMap: async () => { calls.maps++; return databaseMap },

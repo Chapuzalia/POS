@@ -1,12 +1,13 @@
 import type { CashSession, SaleCreatedPayload, TenantContext } from '../../../types/index.ts'
 import type { CashlogyTransaction } from '../../local-printing/types.ts'
-import { acceptPaymentOperation, commitPaymentOperation, discardPreparedPaymentOperation, loadPaymentOperation, loadPendingPaymentOperations, markPaymentCharging, paymentScope, preparePaymentOperation, withPaymentLock } from '../../../lib/durableSales.ts'
+import { acceptPaymentOperation, commitPaymentOperation, discardPreparedPaymentOperation, loadPaymentOperation, loadPendingPaymentOperations, markPaymentCharging, markRestaurantCheckoutReserved, paymentScope, preparePaymentOperation, withPaymentLock } from '../../../lib/durableSales.ts'
 import { getCashlogyPaymentAmounts, isCashlogyPaymentConfigured, settleCashlogyPaymentIfConfigured } from '../../local-printing/cashlogy/useCashlogyStore.ts'
 import { resolveLocalFiscalMode } from '../../fiscal/local/tenantMode.ts'
 import { preflightPosInvoice } from '../../fiscal/local/posInvoice.ts'
 import { issueRestaurantInvoice } from '../../fiscal/local/restaurantInvoice.ts'
 import { payRestaurantIdempotent } from '../../tables/service.ts'
 import { withConfirmedRestaurantPayments } from './paymentPayload.ts'
+import { prepareRestaurantCheckout, releaseRestaurantCheckout, startRestaurantCheckout } from './checkout.ts'
 
 type Input = {
   context: TenantContext
@@ -46,14 +47,15 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
   const scope = paymentScope(context, session.id)
   return withPaymentLock(scope, async () => {
     const key = `${scope}|restaurant:${action}:${input.target}`
-    const { allowPending: _allowPending, receivedCents: _received, ...economicParams } = input.params
+    const checkoutParams: Record<string, unknown> = { ...input.params, cashSessionId: session.id }
+    const { allowPending: _allowPending, receivedCents: _received, ...economicParams } = checkoutParams
     const pending = await loadPaymentOperation(key)
     const savedMode = pending && ['accepted', 'charging', 'committed'].includes(pending.state) ? pending.params?.fiscalMode : undefined
     let production = savedMode === 'verifactu' || (savedMode !== 'legacy' && await resolveLocalFiscalMode(context.tenantId) !== 'disabled')
-    let operation = pending && (pending.state === 'accepted' || pending.state === 'charging') ? pending
+    let operation = pending && (pending.state === 'accepted' || pending.state === 'charging' || (pending.state === 'prepared' && pending.checkoutReserved)) ? pending
       : await preparePaymentOperation(key, JSON.stringify({ params: economicParams, sequence: input.sequence,
           lines: input.draft.lines.map(({ id: _id, ticketId: _ticketId, ...line }) => line), totalCents: input.draft.sale.totalCents,
-          fiscalMode: production ? 'verifactu' : 'legacy' }), input.draft, { ...input.params, fiscalMode: production ? 'verifactu' : 'legacy' })
+          fiscalMode: production ? 'verifactu' : 'legacy' }), input.draft, { ...checkoutParams, fiscalMode: production ? 'verifactu' : 'legacy' })
     let payload = operation.payload
     const singleTicket = operation.params?.singleTicket === true
     const intermediatePart = singleTicket && operation.params?.finalPart !== true
@@ -62,12 +64,31 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
       result: operation.result as T, payload, transaction: operation.cashlogy,
       receivedCents: payload.payment?.receivedCents ?? null, changeCents: payload.payment?.changeCents ?? null,
     }
+    const originalParams = { ...(operation.params ?? checkoutParams), cashSessionId: session.id, paymentOperationId: operation.eventId,
+      allowPending: input.params.allowPending }
+    // Persist a group-wide reservation before touching hardware. Another checkout
+    // cannot collect the same bill while this operation is pending or recovering.
+    if (operation.state === 'prepared' && !operation.checkoutReserved) operation = await markRestaurantCheckoutReserved(operation)
+    try { await prepareRestaurantCheckout(context, operation.eventId, action, originalParams) }
+    catch (error) {
+      // A PostgreSQL rejection confirms the transaction did not reserve/charge.
+      // A network failure is ambiguous and retains the exact durable operation.
+      if (operation.state === 'prepared' && typeof error === 'object' && error !== null && 'code' in error
+        && typeof error.code === 'string' && /^[0-9A-Z]{5}$/.test(error.code)) {
+        if (await releaseRestaurantCheckout(context, operation.eventId)) await discardPreparedPaymentOperation(key)
+      }
+      throw error
+    }
     let installation = null
     if (production && !intermediatePart && operation.state === 'prepared') {
       try { installation = await preflightPosInvoice(context, session, payload, 300000) }
-      catch (error) { await discardPreparedPaymentOperation(key); throw error }
+      catch (error) {
+        if (await releaseRestaurantCheckout(context, operation.eventId)) await discardPreparedPaymentOperation(key)
+        throw error
+      }
     }
     let transaction = operation.cashlogy
+    await startRestaurantCheckout(context, operation.eventId)
     if (operation.state !== 'accepted') {
       if (payload.sale.paymentMethod === 'cash') {
         const recovery = operation.state === 'charging'
@@ -84,7 +105,7 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
       }
       operation = await acceptPaymentOperation(operation, payload, transaction)
     }
-    const params = { ...(operation.params ?? input.params), allowPending: input.params.allowPending, receivedCents: payload.payment?.receivedCents ?? null,
+    const params = { ...originalParams, receivedCents: payload.payment?.receivedCents ?? null,
       cashlogyRequestId: transaction?.requestId ?? null, cashlogyTransactionId: transaction?.id ?? null }
     let legacyResult: Record<string, unknown> | null = null
     if (!production || intermediatePart) {

@@ -11,6 +11,7 @@ export type PaymentOperation = {
   state: 'prepared' | 'charging' | 'accepted' | 'committed'
   cashlogy: CashlogyTransaction | null
   cashlogyRequestId?: string
+  checkoutReserved?: boolean
   eventId: string
   params?: Record<string, unknown>
   result?: Record<string, unknown>
@@ -47,7 +48,8 @@ export async function loadPendingPaymentOperations(context: TenantContext, cashS
     const done = transactionDone(tx)
     const stored = await request(tx.objectStore('paymentOperations').index('scope').getAll(paymentScope(context, cashSessionId))) as PaymentOperation[]
     await done
-    return stored.filter(operation => operation.state === 'accepted' || operation.state === 'charging')
+    return stored.filter(operation => operation.state === 'accepted' || operation.state === 'charging'
+      || (operation.state === 'prepared' && operation.checkoutReserved))
   } finally { db.close() }
 }
 
@@ -60,7 +62,7 @@ export async function preparePaymentOperation(key: string, fingerprint: string, 
     const scope = key.split('|')[0]
     const operations = await request(store.index('scope').getAll(scope)) as PaymentOperation[]
     if (operations.some(operation => operation.key !== key
-      && (operation.state === 'charging' || operation.state === 'accepted'))) {
+      && (operation.state === 'charging' || operation.state === 'accepted' || (operation.state === 'prepared' && operation.checkoutReserved)))) {
       tx.abort()
       throw new Error('Hay otro cobro pendiente de recuperar en esta caja. Finaliza la operación original antes de iniciar otro cobro.')
     }
@@ -105,11 +107,39 @@ export async function markPaymentCharging(operation: PaymentOperation): Promise<
   } finally { db.close() }
 }
 
+/** Additive metadata: a prepared restaurant payment may own a server reservation
+ * even if the response was lost, before any hardware collection was started. */
+export async function markRestaurantCheckoutReserved(operation: PaymentOperation): Promise<PaymentOperation> {
+  const reserved = { ...operation, checkoutReserved: true }
+  const db = await openLedger()
+  try {
+    const tx = db.transaction('paymentOperations', 'readwrite')
+    const done = transactionDone(tx)
+    tx.objectStore('paymentOperations').put(reserved)
+    await done
+    return reserved
+  } finally { db.close() }
+}
+
 /** The hardware buttons own explicit cancellation/restart of an attempt. Keep
  * their request identity in the same journal used by economic recovery. */
 export async function updateCashlogyPaymentAttempt(intent: CashlogyIntent, scope: PrintAgentScope | null,
   action: { type: 'start' } | { type: 'close'; transaction: CashlogyTransaction | null; receivedCents: number | null; changeCents: number | null }): Promise<void> {
   if (!intent.paymentOperationKey) return // Older clients and payment-method changes have no sale journal.
+  if (action.type === 'close' && action.transaction?.status !== 'completed') {
+    const pending = await loadPaymentOperation(intent.paymentOperationKey)
+    if (pending?.checkoutReserved && pending.state !== 'accepted' && pending.state !== 'committed') {
+      const prefix = scope ? `${getAppRoute()}:${scope.tenantId}:${scope.establishmentId}:${scope.terminalId}:` : null
+      if (!scope || !prefix || !pending.scope.startsWith(prefix)
+        || (pending.cashlogyRequestId ?? `cashlogy:sale:${pending.payload.sale.id}`) !== intent.requestId) {
+        throw new Error('El intento cancelado no coincide con el cobro pendiente.')
+      }
+      // Do network work before opening an IndexedDB transaction. If cancellation
+      // cannot be confirmed remotely, retain the journal and hardware identity.
+      const { cancelRestaurantCheckout } = await import('../features/restaurant/services/checkout.ts')
+      await cancelRestaurantCheckout(pending.eventId, scope.terminalId)
+    }
+  }
   const db = await openLedger()
   try {
     const tx = db.transaction('paymentOperations', 'readwrite')

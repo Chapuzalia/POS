@@ -22,11 +22,9 @@ test('una mesa virtual no puede utilizarse desde otra sesión de caja', () => {
   assert.match(migration, /La mesa virtual pertenece a otra sesión de caja/i)
 })
 
-test('la distribución solo incluye mesas permanentes y virtuales de la sesión activa', () => {
-  const scopedLayoutFilters = migration.match(/rt\.cash_session_id is null or rt\.cash_session_id = session_row\.id/g) ?? []
-  assert.ok(scopedLayoutFilters.length >= 3)
-  assert.match(service, /cash_session_id\.is\.null,cash_session_id\.eq\.\$\{cashSessionId\}/)
-  assert.match(service, /id: `virtual:\$\{cashSessionId\}`[\s\S]*name: 'Virtual'/)
+test('la distribución incluye mesas permanentes y virtuales de todo el local', () => {
+  assert.doesNotMatch(service, /cash_session_id\.is\.null,cash_session_id\.eq/)
+  assert.match(service, /id: `virtual:\$\{context\.venueId\}`[\s\S]*name: 'Virtual'/)
 })
 
 test('el editor permite eliminar mesas temporales del turno y cancela solo comandas sin cobros', () => {

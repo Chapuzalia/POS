@@ -25,6 +25,42 @@ function setup() {
   Object.defineProperty(globalThis, 'navigator', { configurable: true, value: { locks: { request: (_key, _options, work) => work() } } })
 }
 
+test('a lost checkout-reservation response recovers the original prepared operation before collecting money', async () => {
+  setup()
+  const operations = [],phases = []
+  const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
+    './checkout.ts': {
+      prepareRestaurantCheckout: async (_context,id,_action,params) => {
+        operations.push(id)
+        assert.equal(params.cashSessionId,session.id)
+        if (operations.length === 1) throw new Error('Reservation response lost')
+        phases.push('reserved')
+      },
+      startRestaurantCheckout: async () => phases.push('started'),releaseRestaurantCheckout: assert.fail,
+    },
+    '../../../lib/durableSales.ts': durable,
+    '../../local-printing/cashlogy/useCashlogyStore.ts': {
+      isCashlogyPaymentConfigured: () => true,
+      settleCashlogyPaymentIfConfigured: async () => { phases.push('hardware'); return null },
+      getCashlogyPaymentAmounts: () => ({ receivedCents:600,changeCents:0 }),
+    },
+    '../../fiscal/local/tenantMode.ts': { resolveLocalFiscalMode: async () => 'disabled' },
+    '../../fiscal/local/posInvoice.ts': {},'../../fiscal/local/restaurantInvoice.ts': {},
+    '../../tables/service.ts': { payRestaurantIdempotent: async () => ({ ticketId:'ticket',saleId:'sale',paymentId:'payment',totalCents:600 }) },
+  }, { JSON })
+  await assert.rejects(service.payRestaurantSale({ context,session,target:'order',action:'close',draft:draft(),params:{ orderId:'order',method:'cash' } }),/Reservation response lost/)
+  assert.deepEqual(phases,[])
+  const pending = await durable.loadPendingPaymentOperations(context,session.id)
+  assert.equal(pending.length,1)
+  assert.equal(pending[0].state,'prepared')
+  const [recovered] = await service.recoverRestaurantPayments(context,session)
+  assert.equal(recovered.result.saleId,'sale')
+  assert.equal(operations[0],operations[1])
+  assert.deepEqual(phases,['reserved','started','hardware'])
+  assert.equal((await durable.loadPendingPaymentOperations(context,session.id)).length,0)
+})
+
 for (const failure of ['lost_reply', 'local_quota']) test(`restaurant recovery preserves the exact fiscal envelope after ${failure}`, async () => {
   setup()
   let preparations = 0, economicSales = 0, requests = 0
@@ -115,6 +151,7 @@ for (const action of ['equal_part', 'selected_items']) for (const state of ['fre
     } },
   })
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': {
@@ -195,6 +232,7 @@ test('restaurant retry after activation and a lost RPC reply preserves its legac
   const results = new Map()
   let mode = 'disabled'
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': {
@@ -231,6 +269,7 @@ test('invalid VAT/identity fails before Cashlogy; a corrected preflight can safe
   setup()
   let charges = 0, preflights = 0
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': { settleCashlogyPaymentIfConfigured: async () => { charges++; throw new Error('Reached hardware') } },
@@ -254,6 +293,7 @@ test('activation before the first restaurant DB commit fiscalizes the accepted p
   await durable.acceptPaymentOperation(operation,original,{id:'confirmed',requestId:'request',requestedAmountCents:600})
   let legacyAttempts=0,fiscalAttempts=0
   const service=compileComponent(source('features/restaurant/services/payment.ts'),{
+    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts':durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts':{getCashlogyPaymentAmounts:()=>({receivedCents:600,changeCents:0}),settleCashlogyPaymentIfConfigured:assert.fail},

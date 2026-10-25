@@ -52,7 +52,7 @@ import type {
   RestaurantMap,
   RestaurantTableMapItem,
   RestaurantTableShape,
-  SessionTableLayout,
+  VenueTableLayout,
   TableLayoutEntry,
 } from "../types";
 import {
@@ -74,7 +74,6 @@ import { ReservationTableBadge } from "../../reservations/components/Reservation
 type Props = {
   canOpen: boolean;
   canQuickSale: boolean;
-  cashSessionId: string;
   isBusy: boolean;
   isOnline: boolean;
   map: RestaurantMap;
@@ -83,7 +82,7 @@ type Props = {
   onLayoutChange: (
     tables: Record<string, TableLayoutEntry>,
     expectedRevision: number,
-  ) => Promise<SessionTableLayout>;
+  ) => Promise<VenueTableLayout>;
   onError: (message: string) => void;
   onMove: (tableId: string) => Promise<void>;
   onSaveQuickSale: (tableId: string) => Promise<void>;
@@ -1172,8 +1171,8 @@ export function TableMapView(props: Props) {
             <h2>Eliminar {selectedTable.name}</h2>
             <p>
               {selectedTable.status === "occupied"
-                ? "La comanda sin cobrar se cancelará y la mesa temporal desaparecerá del turno."
-                : "La mesa temporal desaparecerá del turno."}
+                ? "La comanda sin cobrar se cancelará y la mesa temporal desaparecerá del local."
+                : "La mesa temporal desaparecerá del local."}
             </p>
             <div>
               <UiButton
