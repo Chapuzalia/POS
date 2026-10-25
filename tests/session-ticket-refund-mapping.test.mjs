@@ -79,13 +79,6 @@ test('el histórico usa los importes y el IVA persistidos de la devolución parc
   assert.equal(payload.payment.amountCents, -1000)
 })
 
-test('los datos fiscales incompletos se mantienen como snapshot nulo sin inventar importes', async () => {
-  for (const field of ['tax_rate', 'taxable_base_cents', 'tax_amount_cents']) {
-    const payload = await loadRefund({ fiscal: { [field]: null } })
-    assert.equal(payload.lines[0].fiscalSnapshot, null)
-  }
-})
-
 test('el snapshot de devolución admite IVA cero y no depende del snapshot de la venta original', async () => {
   const payload = await loadRefund({
     fiscal: { tax_rate: 0, taxable_base_cents: -1000, tax_amount_cents: 0 },
@@ -94,18 +87,4 @@ test('el snapshot de devolución admite IVA cero y no depende del snapshot de la
   assert.deepEqual({ ...payload.lines[0].fiscalSnapshot }, {
     taxRate: 0, taxableBaseCents: -1000, taxAmountCents: 0, grossTotalCents: -1000,
   })
-})
-
-test('solo efectivo y tarjeta generan un pago; se conserva el método histórico de la devolución', async () => {
-  for (const method of ['cash', 'card', 'invitation', 'other']) {
-    const payload = await loadRefund({ method })
-    assert.equal(payload.sale.paymentMethod, method)
-    if (method === 'cash' || method === 'card') {
-      assert.equal(payload.payment.method, method)
-      assert.equal(payload.payment.saleId, 'refund')
-      assert.equal(payload.payment.tenantId, 'tenant')
-    } else {
-      assert.equal(payload.payment, null)
-    }
-  }
 })

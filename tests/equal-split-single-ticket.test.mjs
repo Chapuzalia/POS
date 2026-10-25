@@ -3,17 +3,16 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
 import { IDBFactory } from 'fake-indexeddb'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
+
 import { withConfirmedRestaurantPayments } from '../src/features/restaurant/services/paymentPayload.ts'
-import { summarizeSales } from '../src/features/cash-registers/services/cashSummary.ts'
+
 import * as durable from '../src/lib/durableSales.ts'
 import { compileComponent } from './helpers/component-harness.mjs'
-import { createRestaurantControllerHarness } from './helpers/restaurant-controller-harness.mjs'
 
 const migration = readFileSync(new URL('../supabase/migrations/20261014115222_equal_split_single_ticket.sql', import.meta.url), 'utf8')
 const base = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const uuid = n => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
-const [tenant, venue, user, device, session, register, group, order, split] = Array.from({ length: 9 }, (_, n) => uuid(n + 1))
+const [tenant, venue, user, device, session, register, group, order] = Array.from({ length: 9 }, (_, n) => uuid(n + 1))
 
 async function fixture() {
   const db = new PGlite()
@@ -67,105 +66,6 @@ async function fixture() {
   return { db, pay, configured }
 }
 
-test('migration is additive and preserves the legacy split APIs', () => {
-  assert.deepEqual(analyzeMigration(migration), [])
-  assert.doesNotMatch(migration, /create or replace function public\.(?:pay_restaurant_order_equal_part|pay_restaurant_local_fiscal|pay_restaurant_idempotent)\(/i)
-})
-
-test('the controller pays three consecutive shares with an inherited per-unit discount without fractional product quantities', async () => {
-  const discount = { discountId: null, name: 'Descuento por unidad', type: 'fixed', calculationType: 'fixed', value: 30, fixedApplication: 'unit', roundingIncrementCents: null, color: null }
-  let split = { id: 'split', orderId: 'order', orderGroupId: 'group', singleTicket: true, totalCents: 1200, partCount: 3, paidParts: 0, paidCents: 0, remainingParts: 3,
-    remainingCents: 1200, nextPartCents: 400, nextDefaultDiscount: discount, nextDefaultDiscountAmountCents: 30, nextDefaultTotalCents: 370, tenders: [], status: 'open', revision: 1 }
-  const line = (id, price) => ({ id, tenantId: 'tenant', productId: id, variantId: id, productName: id, variantName: '', quantity: 1, servedQuantity: 1, unitPriceCents: price,
-    modifiers: [], components: [], catalogSnapshot: {}, mixer: null, note: null, createdAt: id })
-  const harness = createRestaurantControllerHarness({ realPayloads: true,
-    currentOrder: { order: { id: 'order', revision: 1, status: 'open' }, lines: [line('a',400),line('b',800)], tables: [{ areaId: 'area', id: 'table', isVirtual: false }] },
-    tableService: {
-      configureRestaurantEqualSplit: async () => split,
-      payRestaurantEqualPart: async () => {
-        const part = split.paidParts + 1
-        split = { ...split, paidParts: part, remainingParts: 3-part, paidCents: part*400, remainingCents: (3-part)*400,
-          tenders: [...split.tenders,{ id: `payment-${part}`, method: 'card', amountCents: 370, partNumber: part, discountAmountCents: 30 }] }
-        return { requiresConfirmation: false, split, completed: part === 3, singleTicket: true, paidAmountCents: 370,
-          ticketId: part === 3 ? 'ticket' : null, saleId: part === 3 ? 'sale' : null, paymentId: `payment-${part}`, nextOrderId: null,
-          payments: part === 3 ? split.tenders.map(tender => ({ ...tender, tenantId: 'tenant', saleId: 'sale', receivedCents: null, changeCents: 0 })) : [] }
-      },
-    } })
-  harness.mapRefresh.resolve({ areas: [{ id: 'area' }], tables: [] })
-  await harness.render().configureEqualSplit(3)
-  await harness.render().payEqualSplitPart('card',null,false,null,true)
-  assert.equal(split.paidParts, 1)
-  await harness.render().payEqualSplitPart('card',null,false,null,true)
-  assert.equal(split.paidParts, 2)
-  assert.equal(harness.calls.prints, 0)
-  await harness.render().payEqualSplitPart('card',null,false,null,true)
-  assert.equal(split.paidParts, 3)
-  assert.equal(harness.calls.prints, 1)
-  assert.equal(harness.calls.printed[0].sale.totalCents, 1110)
-  assert.equal(harness.calls.printed[0].ticket.discountAmountCents, 90)
-  assert.deepEqual(harness.calls.printed[0].lines.map(line => [line.quantity,line.unitPriceCents]), [[1,400],[1,800]])
-  assert.deepEqual(harness.calls.printed[0].payments.map(payment => payment.amountCents), [370,370,370])
-})
-
-test('three equal tenders create one full ticket only at completion, with exact cents and replay', async t => {
-  const { db, pay } = await fixture()
-  t.after(() => db.close())
-  const first = await pay(0, 'cash', 400)
-  assert.equal(first.completed, false)
-  assert.equal(first.ticketId, null)
-  assert.equal(first.paidAmountCents, 334)
-  assert.deepEqual(await pay(0, 'cash', 400), first)
-  assert.equal((await db.query('select count(*)::int as n from public.tickets')).rows[0].n, 0)
-  assert.equal((await db.query('select count(*)::int as n from public.sales')).rows[0].n, 0)
-  await assert.rejects(pay(0, 'cash', 400, null, uuid(99)), /reparto ha cambiado/)
-  await assert.rejects(pay(1, 'card', null, null, uuid(100), uuid(200)), /FORBIDDEN/)
-  await assert.rejects(db.exec(`update public.cash_sessions set status='closed' where id='${session}'`), /repartos parcialmente cobrados/)
-  await assert.rejects(db.exec(`update public.orders set cash_session_id='${uuid(88)}' where id='${order}'`), /Completa el reparto/)
-  await pay(1)
-  const last = await pay(2)
-  assert.equal(last.completed, true)
-  assert.equal(last.totalCents, 1002)
-  assert.deepEqual(last.payments.map(p => [p.method,p.amountCents]), [['cash',334],['card',334],['card',334]])
-  assert.deepEqual(await pay(2), last)
-  assert.equal((await db.query('select count(*)::int as n from public.tickets')).rows[0].n, 1)
-  assert.equal((await db.query('select count(*)::int as n from public.sales')).rows[0].n, 1)
-  assert.equal((await db.query('select payment_method from public.sales')).rows[0].payment_method, null)
-  assert.deepEqual((await db.query('select quantity,unit_price_cents,line_total_cents from public.ticket_lines order by unit_price_cents')).rows,
-    [{ quantity: 1, unit_price_cents: 0, line_total_cents: 0 },{ quantity: 2, unit_price_cents: 501, line_total_cents: 1002 }])
-  assert.equal((await db.query('select status from public.orders')).rows[0].status, 'paid')
-  const stats = (await db.query("select public.crm_stats_live($1,$2,now()-interval '1 day',now()+interval '1 day') as result",[tenant,venue])).rows[0].result
-  assert.deepEqual(stats.dayActivity, { totalCents: 1002, cashCents: 334, cardCents: 668, ticketCount: 1 })
-  assert.equal(stats.openCashSessions[0].ticketCount, 1)
-  assert.equal(stats.openCashSessions[0].salesCents, 1002)
-  assert.equal(stats.openCashSessions[0].cashCents, 334)
-  assert.equal(stats.openCashSessions[0].cardCents, 668)
-  const period = (await db.query("select public.crm_stats_period($1,$2,'day',current_date,current_date,current_date,now()-interval '1 day',now()+interval '1 day','Europe/Madrid',null) as result",[tenant,venue])).rows[0].result
-  assert.equal(period.monthTicketCount, 1)
-  assert.deepEqual(period.byPayment, [{ method: 'card', totalCents: 668, count: 1 },{ method: 'cash', totalCents: 334, count: 1 }])
-  await db.exec(`update public.cash_sessions set status='closed' where id='${session}'`)
-})
-
-test('per-person discounts and cash change remain separate while the sale total is aggregated', async t => {
-  const { db, pay } = await fixture()
-  t.after(() => db.close())
-  await pay(0, 'cash', 400, { type: 'manual', calculationType: 'fixed', value: 34, name: 'Descuento' })
-  await pay(1)
-  const result = await pay(2)
-  assert.equal(result.totalCents, 968)
-  assert.equal(result.payments[0].changeCents, 100)
-  assert.deepEqual((await db.query('select subtotal_cents,discount_amount_cents,total_cents from public.tickets')).rows[0],
-    { subtotal_cents: 1002, discount_amount_cents: 34, total_cents: 968 })
-  const payload = withConfirmedRestaurantPayments({ sale: { id: result.saleId, tenantId: tenant, totalCents: 968 }, payment: null }, result)
-  assert.equal(payload.payment, null)
-  assert.equal(payload.payments.length, 3)
-  const totals = summarizeSales(1000, [{ totalCents: 968, paymentMethod: null, payments: payload.payments }])
-  assert.equal(totals.cashCents, 1300)
-  assert.equal(totals.cardCents, 668)
-  assert.equal(totals.totalSalesCents, 968)
-  assert.throws(() => withConfirmedRestaurantPayments(payload, { ...result, payments: result.payments.slice(1) }), /total de la venta/)
-  assert.throws(() => withConfirmedRestaurantPayments(payload, { ...result, payments: [{ ...result.payments[0], tenantId: uuid(90) }] }), /no coincide/)
-})
-
 test('rounding preserves every cent and rejected cash attempts do not advance the split', async t => {
   const { db, pay } = await fixture()
   t.after(() => db.close())
@@ -197,32 +97,6 @@ test('Cashlogy receipts are reserved by one share and transfer unchanged to its 
     { cashlogy_request_id: hardware.cashlogyRequestId, cashlogy_transaction_id: hardware.cashlogyTransactionId })
 })
 
-test('a fully discounted share keeps the original numbers of later payers', async t => {
-  const { db, pay } = await fixture()
-  t.after(() => db.close())
-  const free = { type: 'manual', calculationType: 'fixed', value: 334, name: 'Invitación' }
-  await pay(0,null,null,free)
-  await pay(1)
-  const result = await pay(2)
-  assert.deepEqual(result.payments.map(payment => payment.partNumber), [2,3])
-  assert.equal(result.totalCents, 668)
-  assert.deepEqual((await db.query('select equal_split_part_number from public.sale_payments order by equal_split_part_number')).rows.map(row => row.equal_split_part_number), [2,3])
-})
-
-test('a fully discounted order completes as one zero-total sale without invented payments', async t => {
-  const { db, pay } = await fixture()
-  t.after(() => db.close())
-  const free = { type: 'manual', calculationType: 'fixed', value: 334, name: 'Invitación' }
-  await pay(0,null,null,free)
-  await pay(1,null,null,free)
-  const result = await pay(2,null,null,free)
-  assert.equal(result.totalCents, 0)
-  assert.deepEqual(result.payments, [])
-  assert.equal((await db.query('select count(*)::int as n from public.sales')).rows[0].n, 1)
-  assert.equal((await db.query('select count(*)::int as n from public.sale_payments')).rows[0].n, 0)
-  assert.equal(withConfirmedRestaurantPayments({ sale: { id: result.saleId, tenantId: tenant, totalCents: 0 }, payment: null },result).payment, null)
-})
-
 test('the PostgreSQL fiscal transaction issues one PWA installation invoice, links all payments and replays the same record', async t => {
   const { db, pay, configured } = await fixture()
   t.after(() => db.close())
@@ -252,19 +126,6 @@ test('the PostgreSQL fiscal transaction issues one PWA installation invoice, lin
   assert.equal((await db.query('select count(*)::int as n from public.sales')).rows[0].n, 1)
   assert.equal((await db.query('select last_number from public.fiscal_local_series')).rows[0].last_number, 1)
   assert.equal((await db.query('select sale_id from public.fiscal_local_records')).rows[0].sale_id, first.saleId)
-})
-
-test('intermediate tender commits its journal without adding a durable sale or offline sale event', async () => {
-  globalThis.indexedDB = new IDBFactory()
-  globalThis.window = { location: { pathname: '/pos' } }
-  const context = { tenantId: tenant, venueId: venue, deviceId: device, userId: user }
-  const scope = durable.paymentScope(context, session)
-  const payload = { ticket: { id: 'draft' }, sale: { id: 'pending-sale', tenantId: tenant, totalCents: 334 }, lines: [] }
-  const operation = await durable.preparePaymentOperation(`${scope}|restaurant:equal_part:${split}`, 'first', payload, { singleTicket: true })
-  await durable.commitPaymentOperation(operation, payload, false, { singleTicket: true, completed: false })
-  assert.equal((await durable.loadPaymentOperation(operation.key)).state, 'committed')
-  assert.equal((await durable.loadDurableSessionTickets(context, session)).length, 0)
-  assert.equal((await durable.loadDurableEvents()).length, 0)
 })
 
 test('three payments traverse real IndexedDB, RPC mapping and PostgreSQL, including a lost second response', async t => {

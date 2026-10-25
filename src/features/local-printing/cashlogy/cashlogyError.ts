@@ -70,7 +70,8 @@ export function toCashlogyError(error: unknown, fallback: CashlogyErrorCode = 'C
 export function isUncertainCashlogyError(error: unknown): boolean {
   if (error instanceof CashlogyError) return ['CASHLOGY_NETWORK_ERROR', 'CASHLOGY_CONNECTION_LOST', 'CASHLOGY_STATUS_UNKNOWN'].includes(error.code) || isUncertainCashlogyError(error.cause)
   return error instanceof PrintAgentError
-    && (['NETWORK_ERROR', 'TIMEOUT', 'ABORTED'].includes(error.code) || error.status === 502)
+    && (['NETWORK_ERROR', 'TIMEOUT', 'ABORTED', 'INVALID_RESPONSE'].includes(error.code)
+      || (error.status !== undefined && error.status >= 500 && error.status <= 599))
 }
 
 export function isMissingCashlogyTransaction(error: unknown): boolean {

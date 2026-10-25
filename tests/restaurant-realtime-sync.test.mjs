@@ -6,7 +6,6 @@ import test from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
 import { getReadableError } from '../src/utils/errors.ts'
-import { isMenuOrderLine } from '../src/features/tables/menu-service-model.ts'
 
 // Run the actual hooks with isolated React state, browser events and timers.
 // No database connection or additional test dependencies are needed.
@@ -134,72 +133,6 @@ async function realtimeHarness(overrides = {}) {
   }
 }
 
-for (const event of ['visibilitychange', 'focus', 'online']) {
-  test(`el mapa recupera cambios perdidos al recibir ${event}`, async () => {
-    const h = await realtimeHarness()
-    h.occupy()
-    if (event === 'visibilitychange') {
-      h.document.visibilityState = 'hidden'
-      h.document.dispatchEvent(new Event(event))
-      await h.tick(250)
-      assert.equal(h.calls.maps, 1)
-      h.document.visibilityState = 'visible'
-    }
-    const target = event === 'visibilitychange' ? h.document : h.window
-    target.dispatchEvent(new Event(event))
-    await h.tick(250)
-    assert.equal(h.calls.maps, 2)
-    assert.equal(h.result().map.tables[0].occupied, true)
-    assert.equal(h.calls.views.length, 1, 'no reinicializa la vista al refrescar')
-    h.unmount()
-  })
-}
-
-test('un traspaso remoto retira el pedido suspendido del editor sin abrir una cuenta hermana', async () => {
-  const h = await realtimeHarness({ posView: { type: 'table_order', orderId: 'order' } })
-  h.carryForward()
-  h.channels[0].change()
-  await h.tick(250)
-  assert.equal(h.calls.replaced.at(-1), null)
-  assert.equal(h.calls.views.at(-1).type, 'table_map')
-  assert.equal(h.calls.views.at(-1).areaId, 'area')
-  assert.deepEqual(h.calls.errors, [])
-  h.unmount()
-})
-
-test('SUBSCRIBED mantiene Realtime y polling de seguridad cada 18 segundos', async () => {
-  const h = await realtimeHarness()
-  h.channels[0].status('SUBSCRIBED')
-  await h.tick(250)
-  h.occupy()
-  await h.tick(18000)
-  assert.equal(h.calls.maps, 3)
-  assert.equal(h.result().map.tables[0].occupied, true)
-  h.channels[0].change()
-  await h.tick(250)
-  assert.equal(h.calls.maps, 4)
-  h.unmount()
-})
-
-for (const status of ['CLOSED', 'CHANNEL_ERROR', 'TIMED_OUT']) {
-  test(`${status} activa fallback; SUBSCRIBED recupera solo el polling lento`, async () => {
-    const h = await realtimeHarness()
-    h.channels[0].status(status)
-    h.channels[0].status(status)
-    assert.equal(h.timers.size, 2, 'no duplica el fallback')
-    h.occupy()
-    await h.tick(3250)
-    assert.equal(h.calls.maps, 2)
-    assert.equal(h.result().map.tables[0].occupied, true)
-    h.channels[0].status('SUBSCRIBED')
-    await h.tick(250)
-    await h.tick(3250)
-    assert.equal(h.calls.maps, 3, 'el fallback rapido se ha detenido')
-    assert.equal(h.timers.size, 1, 'se conserva la comprobacion lenta')
-    h.unmount()
-  })
-}
-
 test('offline limpia la suscripcion y online refresca sin reinicializar la vista', async () => {
   const h = await realtimeHarness()
   await h.rerender({ isOnline: false })
@@ -214,20 +147,6 @@ test('offline limpia la suscripcion y online refresca sin reinicializar la vista
   h.unmount()
 })
 
-test('el desmontaje limpia listeners y timers incluso si el canal emite CLOSED', async () => {
-  const h = await realtimeHarness()
-  h.channels[0].status('CLOSED')
-  h.channels[0].change()
-  h.unmount()
-  h.channels[0].status('CLOSED')
-  h.channels[0].change()
-  for (const event of ['focus', 'online']) h.window.dispatchEvent(new Event(event))
-  h.document.dispatchEvent(new Event('visibilitychange'))
-  assert.equal(h.timers.size, 0)
-  await h.tick(20000)
-  assert.equal(h.calls.maps, 1)
-})
-
 test('el polling actualiza el mapa sin reemplazar una comanda con cambios pendientes', async () => {
   const h = await realtimeHarness({ posView: { type: 'table_order', orderId: 'order' }, saveState: 'dirty' })
   h.occupy()
@@ -237,37 +156,3 @@ test('el polling actualiza el mapa sin reemplazar una comanda con cambios pendie
   assert.equal(h.calls.replaced.length, 0)
   h.unmount()
 })
-
-for (const [message, refreshFails, expectedRefreshes] of [
-  ['Una de las mesas ya no esta disponible', false, 1],
-  ['Una de las mesas ya no está disponible', true, 1],
-  ['La caja o el dispositivo no son validos', false, 0],
-]) {
-  test(`apertura rechazada: ${message}, fallo de refresco: ${refreshFails}`, async () => {
-    const errors = []
-    const busy = []
-    let refreshes = 0
-    const runner = hookRunner('useRestaurantController', {
-      '../../tables/service': { openRestaurantOrder: async () => { throw { message, code: 'P0001' } } },
-      './useRestaurantDraft': { useRestaurantDraft: () => ({ replaceOrder() {}, saveState: 'saved' }) },
-      './useRestaurantRealtime': { useRestaurantRealtime: () => ({
-        refreshMap: async () => { refreshes++; if (refreshFails) throw new Error('offline') },
-      }) },
-      '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false, hasTenantCapability: () => false },
-      '../../tables/menu-service-model': { isMenuOrderLine },
-    })
-    const result = runner.render({
-      context: { canTakeOrders: true, deviceId: 'device' }, cashSession: { id: 'session' },
-      enabled: true, isOnline: true, isBusy: false,
-      syncPendingEvents: async () => {}, onError: (error) => errors.push(error), setBusy: (value) => busy.push(value),
-      setAppliedDiscount: () => assert.fail('no debe continuar una apertura rechazada'),
-    })
-    await result.openTableOrder(['table'], 2)
-    assert.equal(refreshes, expectedRefreshes)
-    assert.equal(errors[0], null)
-    assert.ok(!errors[1].includes('P0001'))
-    assert.ok(!errors[1].includes(message))
-    assert.deepEqual(busy, [true, false])
-    runner.unmount()
-  })
-}

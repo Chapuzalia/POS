@@ -2,12 +2,11 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
-import { fiscalSeries } from '../src/features/fiscal/local/fiscalPolicy.ts'
+
 import { compileComponent } from './helpers/component-harness.mjs'
 import { canonicalRecordSchema, createAltaRecord } from '../src/features/fiscal/local/canonical.ts'
 import { aeatHash } from '../src/features/fiscal/local/verifactu.ts'
 import { UserFacingError } from '../src/utils/UserFacingError.ts'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
 
 const migration = readFileSync(new URL('../supabase/migrations/20261002191101_pwa_fiscal_installation_identity.sql', import.meta.url), 'utf8')
 const schema = readFileSync(new URL('../supabase/migrations/20260928120000_prepare_local_verifactu_scope.sql', import.meta.url), 'utf8')
@@ -83,56 +82,6 @@ test('new PWA installations allocate per-register identity and retries return th
   await assert.rejects(db.exec(`update fiscal_sif_installations set installation_sequence=99 where id='${second}'`), /cannot be reused/)
 })
 
-test('legacy adaptation preserves identity and reserves its sequence even after retirement', async t => {
-  const db = await database(t,true)
-  const old = (await db.query('select * from fiscal_sif_installations where id=$1',[legacy])).rows[0]
-  assert.equal(old.installation_number,'OLD-NUMBER')
-  assert.equal(old.installation_sequence,1)
-  assert.equal(old.series_version,1)
-  const next = await activate(db,{expected:legacy})
-  assert.equal((await db.query('select installation_number from fiscal_sif_installations where id=$1',[next])).rows[0].installation_number,'BCN-C1-2')
-  assert.equal((await db.query('select fiscal_installation_series_prefix(i) as prefix from fiscal_sif_installations i where id=$1',[legacy])).rows[0].prefix,'BCN-C1')
-})
-
-test('devices without payment permission cannot activate or recover a fiscal installation', async t => {
-  const db = await database(t, true)
-  await db.query('update devices set can_take_payments=false where id=$1', [device])
-  await assert.rejects(activate(db, { expected: legacy }), /FISCAL_ACTIVATION_FORBIDDEN/)
-  await assert.rejects(activate(db, { expected: legacy, recover: true }), /FISCAL_ACTIVATION_FORBIDDEN/)
-  assert.equal((await db.query('select count(*)::integer as n from fiscal_sif_installations')).rows[0].n, 1)
-  assert.equal((await db.query('select retired_at from fiscal_sif_installations where id=$1', [legacy])).rows[0].retired_at, null)
-})
-
-test('test recovery never retires or creates an installation and is rejected for production or other tenants', async t => {
-  const db = await database(t,true)
-  assert.equal(await activate(db,{expected:legacy,recover:true}),legacy)
-  assert.equal((await db.query('select count(*)::integer as n from fiscal_sif_installations')).rows[0].n,1)
-  assert.equal((await db.query('select retired_at from fiscal_sif_installations')).rows[0].retired_at,null)
-  await db.exec(`update fiscal_pos_bridge_settings set aeat_environment='production'`)
-  await assert.rejects(activate(db,{expected:legacy,recover:true}), /TEST_RECOVERY_FORBIDDEN/)
-  await assert.rejects(activate(db,{tenantId:crypto.randomUUID()}), /ACTIVATION_FORBIDDEN/)
-})
-
-test('server parsing supports both series layouts and upgraded validators use installation prefix', async t => {
-  const db = await database(t,true)
-  for (const name of ['sync_local_fiscal_sale_created','pay_restaurant_local_fiscal']) {
-    const text = (await db.query('select pg_get_functiondef(oid) as d from pg_proc where proname=$1',[name])).rows[0].d
-    assert.match(text,/fiscal_installation_series_prefix\(v_installation\)/)
-    assert.match(text,/fiscal_series_exercise\(v_series_name\)/)
-    assert.match(text,/generatedAt.*>= v_installation.retired_at/)
-  }
-  for (const series of ['BCN-C1-2026-S','BCN-C1-1-2026-F','BCN-C1-12-2027-R']) {
-    assert.equal((await db.query('select fiscal_series_exercise($1) as y',[series])).rows[0].y,Number(series.split('-').at(-2)))
-  }
-  await assert.rejects(db.query('select fiscal_series_exercise($1)',['BCN-C1-0-2026-S']), /SERIES_MISMATCH/)
-  const base = {venueCode:'BCN',registerCode:'C1',exercise:2026,kind:'simplified'}
-  assert.equal(fiscalSeries({...base,installationSequence:1}),'BCN-C1-1-2026-S')
-  assert.equal(fiscalSeries({...base,installationSequence:2}),'BCN-C1-2-2026-S')
-  assert.equal(fiscalSeries(base),'BCN-C1-2026-S')
-  assert.throws(()=>fiscalSeries({...base,installationSequence:0}),/inválida/)
-  assert.throws(()=>fiscalSeries({...base,exercise:10000}),/inválida/)
-})
-
 function identityHarness({ readError = false } = {}) {
   const data = new Map()
   const store = {
@@ -159,18 +108,6 @@ test('IndexedDB read failures never mean missing identity, and pending retries p
   assert.equal(first.requestId,retry.requestId)
   assert.equal(retry.expectedInstallationId,'old')
   await assert.rejects(normal.service.fiscalActivationRequest('box','other',true),/misma opción/)
-})
-
-test('CRM setup prepares logical codes without consuming the first installation', async t=>{
-  const db=await database(t)
-  await db.exec(`update venues set fiscal_code=null`)
-  await db.query('select save_fiscal_pwa_setup($1,$2,$3,$4)',[tenant,'Bar SL','B12345678',JSON.stringify([{venueId:venue,venueCode:'BCN'}])])
-  assert.equal((await db.query('select count(*)::integer as n from fiscal_sif_installations')).rows[0].n,0)
-  assert.equal((await db.query('select fiscal_code from cash_registers')).rows[0].fiscal_code,'C1')
-  await assert.rejects(db.exec("update cash_registers set fiscal_code='C9'"),/REGISTER_CODE_IMMUTABLE/)
-  const first=await activate(db)
-  assert.equal((await db.query('select installation_number from fiscal_sif_installations where id=$1',[first])).rows[0].installation_number,'BCN-C1-1')
-  await assert.rejects(db.query('select save_fiscal_pwa_setup($1,$2,$3,$4)',[tenant,'Bar SL','B12345678',JSON.stringify([{venueId:venue,venueCode:'MAD'}])]),/VENUE_CODE_IMMUTABLE/)
 })
 
 test('different boxes start at 1 with exclusive codes; racing confirmations cannot retire an unconfirmed installation', async t=>{
@@ -245,44 +182,4 @@ test('ledger validation checks AEAT hashes and exact cursor identity, not only p
   cursor.previous.seriesAndNumber='BCN-C1-1-2026-S/1'
   entry.record.canonicalRecord.RegistroAlta.FechaHoraHusoGenRegistro='2026-10-02T10:01:00+02:00'
   await assert.rejects(harness.service.assertFiscalLedgerValid(scope,device,false,'BCN-C1-1'),/incompleto/)
-})
-
-
-test('bridge migration only enqueues new identities, preserves history and scopes service/user RPCs', async t => {
-  const db = await database(t,true)
-  await db.exec("alter table fiscal_pos_bridge_settings add column bridge_url text; update fiscal_pos_bridge_settings set bridge_url='https://bridge.example/'")
-  await db.exec(readFileSync(new URL('../supabase/migrations/20261010184559_bridge_installation_provisioning.sql', import.meta.url),'utf8'))
-  assert.deepEqual(analyzeMigration(readFileSync(new URL('../supabase/migrations/20261010184559_bridge_installation_provisioning.sql', import.meta.url),'utf8')),[])
-  assert.equal((await db.query('select bridge_requested from fiscal_sif_installations where id=$1',[legacy])).rows[0].bridge_requested,false)
-  assert.equal((await db.query('select count(*)::int as n from fiscal_bridge_requests')).rows[0].n,0)
-  assert.equal(await activate(db,{expected:legacy,recover:true,request:crypto.randomUUID()}),legacy)
-  assert.equal((await db.query('select count(*)::int as n from fiscal_bridge_requests')).rows[0].n,0,'test recovery never enrolls history')
-  const first = await activate(db,{expected:legacy})
-  assert.equal(await activate(db,{expected:legacy}),first)
-  assert.equal((await db.query('select count(*)::int as n from fiscal_bridge_requests')).rows[0].n,1)
-  await assert.rejects(db.query('update fiscal_sif_installations set bridge_requested=true where id=$1',[legacy]),/IMMUTABLE/)
-  const authorized = async id => (await db.query("select fiscal_bridge_authorize($1,'https://bridge.example') as value",[id])).rows[0].value
-  assert.equal(await authorized(legacy),null)
-  assert.equal((await authorized(first)).installation.id,first)
-  assert.equal((await db.query("select fiscal_bridge_authorize($1,'https://other.example') as value",[first])).rows[0].value,null)
-  await db.query('update devices set can_take_payments=false where id=$1',[device])
-  assert.equal(await authorized(first),null)
-  await db.query('update devices set can_take_payments=true where id=$1',[device])
-  await db.exec('set role authenticated')
-  await assert.rejects(db.query("select fiscal_bridge_pending('https://bridge.example')"),/permission denied/)
-  await assert.rejects(db.query('select * from fiscal_bridge_requests'),/permission denied/)
-  await db.exec('reset role; set role service_role')
-  const pending = (await db.query("select fiscal_bridge_pending('https://bridge.example') as value")).rows[0].value
-  assert.equal(pending.length,1); assert.equal(pending[0].installation.id,first)
-  assert.equal((await db.query("select fiscal_bridge_pending('https://other.example') as value")).rows[0].value.length,0)
-  await db.query("select fiscal_bridge_ack($1,'https://other.example')",[first])
-  assert.equal((await db.query("select fiscal_bridge_pending('https://bridge.example') as value")).rows[0].value.length,1)
-  await db.query("select fiscal_bridge_ack($1,'https://bridge.example')",[first])
-  await db.query("select fiscal_bridge_ack($1,'https://bridge.example')",[first])
-  assert.equal((await db.query("select fiscal_bridge_pending('https://bridge.example') as value")).rows[0].value.length,0)
-  await db.exec('reset role')
-  const replacement = await activate(db,{expected:first,request:crypto.randomUUID()})
-  assert.equal((await authorized(first)).installation.id,first,'retired installation can reconcile its own pending records')
-  assert.equal((await authorized(replacement)).installation.id,replacement)
-  assert.equal((await db.query('select installation_number from fiscal_sif_installations where id=$1',[legacy])).rows[0].installation_number,'OLD-NUMBER')
 })

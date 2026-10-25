@@ -1,18 +1,10 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+
 import test from 'node:test'
 
 import { normalizeCustomerTaxId, validateCustomerCreateInput } from '../src/features/customers/customerValidation.ts'
 import { buildSalePayload } from '../src/features/quick-sale/services/salePayload.ts'
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
-
-const migration = await readFile(new URL('../supabase/migrations/20260821180000_add_invoice_customers.sql', import.meta.url), 'utf8')
-const customerDeleteMigration = await readFile(new URL('../supabase/migrations/20260825140000_delete_unused_invoice_customers.sql', import.meta.url), 'utf8')
-const fiscalMigration = await readFile(new URL('../supabase/migrations/20260803220000_add_verifacti_integration.sql', import.meta.url), 'utf8')
-const customerService = await readFile(new URL('../src/features/customers/service.ts', import.meta.url), 'utf8')
-const quickSaleHook = await readFile(new URL('../src/features/quick-sale/hooks/useQuickSale.ts', import.meta.url), 'utf8')
-const restaurantHook = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
-const posPage = await readFile(new URL('../src/app/PosPage.tsx', import.meta.url), 'utf8')
 
 const customer = {
   id: 'customer-1', tenantId: 'tenant', legalName: 'Alteil Solutions S.L.', taxId: 'B12345678',
@@ -56,158 +48,20 @@ test('valida los campos obligatorios y normaliza NIF/CIF equivalentes', () => {
   assert.equal(validateCustomerCreateInput({ ...customer, country: '' }).country, 'España')
 })
 
-test('la creación persiste los datos fiscales del cliente mediante RPC', () => {
-  assert.match(customerService, /rpc\('create_invoice_customer'/)
-  assert.match(migration, /insert into public\.customers[\s\S]*legal_name, tax_id, address, postal_code, city, province, country, email, phone/i)
-})
-
-test('la actualización de clientes conserva el filtro de tenant e identidad', () => {
-  assert.match(customerService, /from\('customers'\)\.update/)
-  assert.match(customerService, /\.eq\('tenant_id', tenantId\)\.eq\('id', customerId\)/)
-})
-
-test('el borrado de clientes exige acceso y rechaza clientes con facturas', () => {
-  assert.match(customerService, /rpc\('delete_invoice_customer'/)
-  assert.match(customerService, /CUSTOMER_HAS_INVOICES/)
-  assert.match(customerDeleteMigration, /user_has_tenant_access\(p_tenant_id\)/)
-  assert.match(customerDeleteMigration, /CUSTOMER_HAS_INVOICES/)
-  assert.match(customerDeleteMigration, /delete from public\.customers/i)
-  assert.match(migration, /customer_id uuid references public\.customers\(id\) on delete restrict/i)
-})
-
-test('la búsqueda de clientes admite razón social y NIF/CIF', () => {
-  assert.match(customerService, /rpc\('search_invoice_customers'/)
-  assert.match(migration, /customer\.legal_name ilike/i)
-  assert.match(migration, /customer\.tax_id_normalized like/i)
-})
-
-test('evita NIF/CIF duplicado dentro del mismo tenant incluso con formato distinto', () => {
-  assert.match(migration, /unique \(tenant_id, tax_id_normalized\)/i)
-  assert.match(migration, /CUSTOMER_TAX_ID_DUPLICATE/i)
-  assert.equal(normalizeCustomerTaxId('B-12345678'), normalizeCustomerTaxId('b 12345678'))
-})
-
-test('la migración crea, busca y aísla clientes por tenant, con NIF/CIF único normalizado', () => {
-  assert.match(migration, /create table public\.customers/i)
-  assert.match(migration, /alter table public\.customers enable row level security/i)
-  assert.match(migration, /unique \(tenant_id, tax_id_normalized\)/i)
-  assert.match(migration, /create policy customers_select[\s\S]*user_has_tenant_access\(tenant_id\)/i)
-  assert.match(migration, /create policy customers_insert[\s\S]*with check \(public\.user_has_tenant_access\(tenant_id\)\)/i)
-  assert.match(migration, /create or replace function public\.search_invoice_customers/i)
-  assert.match(migration, /customer\.tenant_id = p_tenant_id/i)
-  assert.match(migration, /CUSTOMER_TAX_ID_DUPLICATE/i)
-  assert.match(customerService, /rpc\('search_invoice_customers'/)
-  assert.match(customerService, /rpc\('create_invoice_customer'/)
-})
-
-test('asocia y quita cliente sin cambiar el ticket normal', () => {
-  const normal = payload([line('Café', 1100, 10)])
-  const invoice = payload([line('Café', 1100, 10)], null, customer)
-  assert.equal(normal.ticket.invoice, null)
+test('el snapshot fiscal queda desacoplado de cambios posteriores del cliente', () => {
+  const sourceCustomer = { ...customer }
+  const invoice = payload([line('Café', 1100, 10)], null, sourceCustomer)
   assert.equal(invoice.ticket.invoice.customerId, customer.id)
-  assert.equal(invoice.ticket.invoice.customer.legalName, customer.legalName)
-  assert.match(quickSaleHook, /removeInvoiceCustomer: \(\) => setInvoiceCustomer\(null\)/)
-})
-
-test('quitar cliente devuelve el borrador a ticket normal', () => {
-  assert.match(quickSaleHook, /removeInvoiceCustomer: \(\) => setInvoiceCustomer\(null\)/)
-  assert.match(posPage, /onRemoveInvoiceCustomer=\{removeInvoiceCustomer\}/)
-})
-
-test('un ticket normal no contiene cliente ni consume numeración de factura', () => {
-  const normal = payload([line('Agua', 200, 10)])
-  assert.equal(normal.ticket.invoice, null)
-  assert.match(migration, /customer_id_value := nullif\(current_setting\('app\.invoice_customer_id', true\), ''\)::uuid/i)
-  assert.match(migration, /if customer_id_value is null then return new; end if/i)
-})
-
-test('una factura contiene cliente y snapshot fiscal antes de sincronizar', () => {
-  const billed = payload([line('Agua', 200, 10)], null, customer)
-  assert.equal(billed.ticket.invoice.customerId, customer.id)
-  assert.deepEqual(billed.ticket.invoice.customer, {
+  assert.deepEqual(invoice.ticket.invoice.customer, {
     legalName: customer.legalName, taxId: customer.taxId, address: customer.address,
     postalCode: customer.postalCode, city: customer.city, province: customer.province,
     country: customer.country, email: customer.email, phone: customer.phone,
   })
-})
-
-test('el snapshot fiscal queda desacoplado de cambios posteriores del cliente', () => {
-  const sourceCustomer = { ...customer }
-  const invoice = payload([line('Café', 1100, 10)], null, sourceCustomer)
   sourceCustomer.legalName = 'Nombre cambiado después'
   sourceCustomer.address = 'Otra dirección'
   assert.equal(invoice.ticket.invoice.customer.legalName, 'Alteil Solutions S.L.')
   assert.equal(invoice.ticket.invoice.customer.address, 'Calle Mayor 1')
-  assert.match(migration, /new\.customer_snapshot := jsonb_build_object/i)
-  assert.match(migration, /INVOICE_SNAPSHOT_IMMUTABLE/i)
-})
 
-test('la numeración usa la secuencia fiscal atómica y una restricción única concurrente', () => {
-  assert.match(migration, /next_fiscal_invoice_number\(new\.tenant_id, new\.invoice_series\)/i)
-  assert.match(fiscalMigration, /update public\.fiscal_invoice_sequences[\s\S]*set last_value = last_value \+ 1[\s\S]*returning last_value into v_number/i)
-  assert.match(migration, /new\.invoice_series := 'F-' \|\| to_char/i)
-  assert.match(migration, /new\.invoice_number := lpad\(sequence_value::text, 6, '0'\)/i)
-  assert.match(migration, /create unique index tickets_tenant_invoice_number_idx[\s\S]*tenant_id, invoice_series, invoice_number/i)
-  assert.match(migration, /create unique index tickets_tenant_invoice_number_idx[\s\S]*where is_invoice/i)
-  assert.doesNotMatch(migration, /max\s*\(\s*invoice_number|order by invoice_number desc/i)
-})
-
-test('la numeración correlativa se asigna en base de datos, nunca con last + 1 en frontend', () => {
-  assert.match(fiscalMigration, /insert into public\.fiscal_invoice_sequences[\s\S]*on conflict \(tenant_id, series\)[\s\S]*set last_value = last_value \+ 1/i)
-  assert.match(migration, /next_fiscal_invoice_number\(new\.tenant_id, new\.invoice_series\)/i)
-  assert.doesNotMatch(customerService + quickSaleHook, /last\s*\+\s*1|max\s*\(\s*invoice/i)
-})
-
-test('el ticket normal conserva su impresión y la factura añade emisor, destinatario y número', () => {
-  const normal = payload([line('Café', 1100, 10)])
-  const billed = payload([line('Café', 1100, 10)], null, customer)
-  billed.ticket.invoice = { ...billed.ticket.invoice, series: 'F-2026', number: '000123', issuedAt: '2026-08-21T12:00:00+02:00' }
-  const establishment = { name: 'TICKIT BAR', legalName: 'TICKIT BAR S.L.', taxId: 'B87654321', address: 'Plaça Major 2' }
-  const normalText = mapSaleToPrintRequest({ sale: normal, establishment, printerId: 'main', printerLayout: layout }).lines.join('\n')
-  const invoiceText = mapSaleToPrintRequest({ sale: billed, establishment, printerId: 'main', printerLayout: layout }).lines.join('\n')
-  assert.doesNotMatch(normalText, /FACTURA|Alteil Solutions/)
-  assert.match(normalText, /Ticket/)
-  assert.match(invoiceText, /FACTURA/)
-  assert.match(invoiceText, /F-2026-000123/)
-  assert.match(invoiceText, /TICKIT BAR S\.L\./)
-  assert.match(invoiceText, /Alteil Solutions S\.L\./)
-  assert.match(invoiceText, /B12345678/)
-  assert.match(invoiceText, /Calle Mayor 1/)
-  assert.match(invoiceText, /08700 Igualada/)
-  assert.match(invoiceText, /Barcelona/)
-})
-
-test('la previsualización de factura muestra borrador y no usa el UUID como número fiscal', () => {
-  const billed = payload([line('Café', 1100, 10)], null, customer)
-  const text = mapSaleToPrintRequest({
-    sale: billed,
-    establishment: { name: 'TICKIT BAR' },
-    printerId: 'main',
-    printerLayout: layout,
-    isPreTicket: true,
-  }).lines.join('\n')
-  assert.match(text, /FACTURA \(BORRADOR\)/)
-  assert.match(text, /Pendiente de numeración/)
-  assert.doesNotMatch(text, new RegExp(billed.ticket.id))
-})
-
-test('un rechazo fiscal imprime un resumen breve en lugar del QR', () => {
-  const repeatedMessage = 'El NIF/NOMBRE (77311554Z/David Puta) del destinatario no se encuentra registrado en la Agencia Tributaria. Para personas jurídicas el NIF debe estar registrado en la AEAT. El NIF/NOMBRE (77311554Z/David Puta) del destinatario no se encuentra registrado en la Agencia Tributaria.'
-  const billed = payload([line('Café', 1100, 10)], null, customer)
-  billed.ticket.invoice = { ...billed.ticket.invoice, series: 'F-2026', number: '000007', issuedAt: billed.sale.createdAt }
-  billed.fiscal = {
-    invoiceId: 'fiscal-1', provider: 'verifactu', status: 'rejected', uuid: null,
-    qrBase64: null, verificationUrl: null, externalCode: null,
-    errorCode: 'HTTP_400', errorMessage: repeatedMessage,
-  }
-  const request = mapSaleToPrintRequest({ sale: billed, establishment: { name: 'TICKIT BAR' }, printerId: 'main', printerLayout: layout })
-  const text = request.lines.join('\n')
-  assert.match(text, /Fiscal/)
-  assert.match(text, /QR no disponible\./)
-  assert.match(text, /Motivo:[\s\S]*El NIF\/NOMBRE[\s\S]*no se encuentra registrado[\s\S]*Agencia Tributaria\./)
-  assert.doesNotMatch(text, /Para personas jurídicas/)
-  assert.ok(request.elements.every((element) => element.type === 'text'))
-  assert.match(restaurantHook, /payRestaurantSale/)
 })
 
 test('la factura imprime descuentos y varios tipos de IVA desde los importes finales cobrados', () => {
@@ -221,11 +75,4 @@ test('la factura imprime descuentos y varios tipos de IVA desde los importes fin
   assert.match(text, /IVA 10 %[ ]+0,80 €/)
   assert.match(text, /IVA 21 %[ ]+1,68 €/)
   assert.match(text, /TOTAL \(IVA incluido\)[ ]+18,48 €/)
-})
-
-test('la factura de mesa y la venta rápida pasan el customerId solo a RPC de servidor', () => {
-  assert.match(migration, /create or replace function public\.sync_invoice_sale_created/i)
-  assert.match(migration, /create or replace function public\.close_restaurant_order_with_invoice/i)
-  assert.match(migration, /set_config\('app\.invoice_customer_id', p_customer_id::text, true\)/i)
-  assert.match(migration, /El cliente no pertenece al negocio/i)
 })

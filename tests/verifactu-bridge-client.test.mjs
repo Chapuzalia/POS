@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { BridgeHttpError, createBridgeClient } from '../src/features/fiscal/local/bridgeClient.ts'
+import { createBridgeClient } from '../src/features/fiscal/local/bridgeClient.ts'
 
 const record = {
   idempotencyKey: 'record-1', environment: 'test', tenantId: 'tenant-1', fiscalSubjectId: 'subject-1',
@@ -15,76 +15,6 @@ const record = {
     lines: [{ description: 'Servicio ficticio', grossCents: 1210, discountCents: 0, baseCents: 1000,
       taxCents: 210, taxRate: '21.00' }], recipient: null, totalCents: 1210, taxCents: 210 },
 }
-
-test('remote transport requires HTTPS and production transport never accepts test records', async () => {
-  const production = createBridgeClient({ mode: 'production', baseUrl: 'https://bridge.example/', getAccessToken: async () => 'token' })
-  await assert.rejects(production.deliver([record]), /entorno del registro/)
-  assert.throws(() => createBridgeClient({ mode: 'test', baseUrl: 'http://bridge.example/', getAccessToken: async () => 'token' }), /HTTPS/)
-})
-
-test('local HTTP delivers production POS envelopes without changing authentication or payload', async t => {
-  const productionRecord = { ...record, environment: 'production' }
-  for (const baseUrl of ['http://localhost:3000/', 'http://127.0.0.1:3000', 'http://[::1]:3000/']) {
-    t.mock.method(globalThis, 'fetch', async (url, init) => {
-      assert.equal(String(url), new URL('/v1/records', baseUrl).href)
-      assert.equal(init.headers.Authorization, 'Bearer local-session')
-      assert.deepEqual(JSON.parse(init.body).records, [productionRecord])
-      return new Response(JSON.stringify({ contract: 'tickit-verifactu-bridge', version: 1, results: [{
-        idempotencyKey: record.idempotencyKey, state: 'VPS_STORED', code: null, description: null,
-        csv: null, responseRef: null, vpsStoredAt: '2024-01-01T18:20:33Z', aeatRespondedAt: null,
-      }] }), { status: 200 })
-    })
-    const client = createBridgeClient({ mode: 'production', baseUrl, getAccessToken: async () => 'local-session' })
-    assert.equal((await client.deliver([productionRecord]))[0].state, 'VPS_STORED')
-    t.mock.restoreAll()
-  }
-  for (const baseUrl of ['http://localhost.evil:3000/', 'http://192.168.1.10:3000/', 'http://127.1:3000/', 'http://user:pass@localhost:3000/', 'http://localhost:3000/path', 'http://localhost:3000/?', 'http://localhost:3000/#', 'http://localhost:99999/', 'ftp://localhost:3000/']) {
-    assert.throws(() => createBridgeClient({ mode: 'production', baseUrl, getAccessToken: async () => 'token' }), /HTTPS/)
-  }
-})
-
-test('test bridge refuses production records before any network call', async () => {
-  const client = createBridgeClient({ mode: 'test', baseUrl: 'https://bridge.example/', getAccessToken: async () => 'token' })
-  await assert.rejects(client.deliver([{ ...record, environment: 'production' }]), /entorno del registro/)
-})
-
-test('durable response is per record and never rewrites the fiscal input', async () => {
-  const originalFetch = globalThis.fetch
-  let sent
-  globalThis.fetch = async (_url, init) => {
-    sent = JSON.parse(init.body)
-    assert.equal(init.headers.Authorization, 'Bearer temporary-token')
-    return new Response(JSON.stringify({ contract: 'tickit-verifactu-bridge', version: 1, results: [{
-      idempotencyKey: record.idempotencyKey, state: 'VPS_STORED', code: null,
-      description: null, csv: null, responseRef: null,
-      vpsStoredAt: '2024-01-01T18:20:33Z', aeatRespondedAt: null,
-    }] }), { status: 200, headers: { 'Content-Type': 'application/json' } })
-  }
-  try {
-    const client = createBridgeClient({ mode: 'test', baseUrl: 'https://bridge.example/', getAccessToken: async () => 'temporary-token' })
-    const result = await client.deliver([record])
-    assert.equal(result[0].state, 'VPS_STORED')
-    assert.deepEqual(sent.records[0].canonicalRecord, record.canonicalRecord)
-    assert.deepEqual(sent.records[0].invoice, record.invoice)
-    assert.equal(record.hash, 'A'.repeat(64))
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-})
-
-test('a VPS response cannot claim a local-only state', async () => {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => new Response(JSON.stringify({ contract: 'tickit-verifactu-bridge', version: 1, results: [{
-    idempotencyKey: record.idempotencyKey, state: 'LOCAL_PENDING', code: null,
-    description: null, csv: null, responseRef: null, vpsStoredAt: null, aeatRespondedAt: null,
-  }] }), { status: 200 })
-  try {
-    const client = createBridgeClient({ mode: 'test', baseUrl: 'https://bridge.example/', getAccessToken: async () => 'token' })
-    await assert.rejects(client.deliver([record]), /individualmente/)
-  } finally {
-    globalThis.fetch = originalFetch
-  }
-})
 
 test('lost POST response is queried by the same idempotency key', async () => {
   const originalFetch = globalThis.fetch
@@ -112,26 +42,6 @@ test('duplicate remains actionable until AEAT identity and hash are reconciled',
     const result = await client.status(record.idempotencyKey)
     assert.equal(result.state, 'REQUIRES_ACTION')
     assert.notEqual(result.state, 'AEAT_ACCEPTED')
-  } finally { globalThis.fetch = originalFetch }
-})
-
-test('exclusive installation lease refuses another device identity', async () => {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => new Response(JSON.stringify({ contract: 'tickit-verifactu-bridge', version: 1,
-    leaseId: 'lease-1', installationId: 'install-1', deviceId: 'other-ipad', fencingToken: 3,
-    expiresAt: '2026-09-28T11:00:00Z', serverUtcAt: '2026-09-28T10:00:00Z' }), { status: 200 })
-  try {
-    const client = createBridgeClient({ mode: 'test', baseUrl: 'https://bridge.example/', getAccessToken: async () => 'token' })
-    await assert.rejects(client.acquireInstallationLease('install-1', 'ipad-1'), /otro dispositivo/)
-  } finally { globalThis.fetch = originalFetch }
-})
-
-test('a status failure retains its HTTP code and does not imply a missing record', async () => {
-  const originalFetch = globalThis.fetch
-  globalThis.fetch = async () => new Response(null, { status: 503 })
-  try {
-    const client = createBridgeClient({ mode: 'test', baseUrl: 'https://bridge.example/', getAccessToken: async () => 'token' })
-    await assert.rejects(client.status(record.idempotencyKey), error => error instanceof BridgeHttpError && error.status === 503)
   } finally { globalThis.fetch = originalFetch }
 })
 

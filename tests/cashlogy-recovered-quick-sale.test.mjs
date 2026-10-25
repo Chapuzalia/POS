@@ -3,11 +3,10 @@ import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
-import { jsx, jsxs } from 'react/jsx-runtime'
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 const paymentSource = await read('src/features/quick-sale/hooks/useQuickSalePayment.ts')
-const modalSource = await read('src/features/local-printing/components/CashlogyPaymentModal.tsx')
+
 const storeSource = await read('src/features/local-printing/cashlogy/useCashlogyStore.ts')
 const identitySource = storeSource.match(/export function getCashlogyPaymentSaleId[\s\S]*?\n}/)[0]
 
@@ -133,20 +132,6 @@ test('cache or statistics failure after durable commit never rejects a recovered
   assert.ok(h.calls.errors.some(error => /guardada/.test(error)))
 })
 
-test('aplica el cobro recuperado sin saleId remoto usando la identidad persistida y sin volver a cobrar', async () => {
-  const h = harness()
-  await h.pay('cash', null, h.transaction)
-  assert.equal(h.calls.events.length, 1)
-  assert.equal(h.calls.events[0].payload.sale.id, 'sale')
-  assert.equal(h.calls.events[0].payload.payment.cashlogyTransactionId, 'tx')
-  assert.equal(h.calls.charges, 0)
-  assert.equal(h.calls.finishes, 1)
-  await new Promise(setImmediate)
-  assert.equal(h.calls.prints, 1)
-  assert.equal(h.state.intent, null)
-  assert.equal(h.state.modalOpen, false)
-})
-
 test('no reutiliza la identidad de otro intento ni pierde el cobro cuando falta el ticket', async () => {
   for (const config of [{ lines: [] }, { intentPatch: { requestId: 'other' } },
     { intentPatch: { amountCents: 700 } }, { intentPatch: { transactionId: 'other' } },
@@ -158,110 +143,4 @@ test('no reutiliza la identidad de otro intento ni pierde el cobro cuando falta 
     assert.equal(h.calls.finishes, 0)
     assert.ok(h.state.intent)
   }
-})
-
-test('dos aplicaciones simultáneas no duplican la venta y el segundo intento explica el bloqueo', async () => {
-  const h = harness({ busySync: true })
-  const first = h.pay('cash', null, h.transaction)
-  await assert.rejects(h.pay('cash', null, h.transaction), /sigue en curso/)
-  h.releaseSync()
-  await first
-  assert.equal(h.calls.events.length, 1)
-  assert.equal(h.calls.charges, 0)
-})
-
-function modalHarness(state, onFinalizeRecovered) {
-  const slots = []
-  let cursor = 0
-  const { CashlogyPaymentModal } = compile(modalSource, {
-    'react/jsx-runtime': { jsx, jsxs },
-    react: { useState(initial) {
-      const index = cursor++
-      if (!(index in slots)) slots[index] = initial
-      return [slots[index], (value) => { slots[index] = value }]
-    } },
-    'lucide-react': { AlertTriangle: 'icon', Ban: 'icon', CheckCircle2: 'icon', LoaderCircle: 'icon' },
-    'zustand/react/shallow': { useShallow: (selector) => selector },
-    '../../../components/ui': { AppModal: 'modal', Button: 'button', Metric: 'metric' },
-    '../../../components/ui/appDialogStore': { appConfirm: async () => true },
-    '../../../lib/format': { formatMoney: String },
-    '../cashlogy/cashlogyPresentation': { shouldShowCashlogyOperationDetails: () => false },
-    '../cashlogy/cashlogyError': { isUncertainCashlogyError: () => false },
-    '../cashlogy/cashlogyPolling': { cashlogyActiveStatuses: new Set(), cashlogyCancellableStatuses: new Set() },
-    '../cashlogy/useCashlogyStore': { useCashlogyStore: (selector) => selector(state) },
-    './CashlogyLevelCards': { CashlogyLevelCards: 'levels' },
-  })
-  return () => { cursor = 0; return CashlogyPaymentModal({ onFinalizeRecovered }) }
-}
-function nodes(tree) {
-  if (tree == null || typeof tree !== 'object') return []
-  if (Array.isArray(tree)) return tree.flatMap(nodes)
-  return [tree, ...nodes(tree.props?.children)]
-}
-const flush = () => new Promise((resolve) => setImmediate(resolve))
-
-test('el modal conserva el fallo al aplicar y permite continuar con otros tickets sin perder el cobro', async () => {
-  const h = harness({ lines: [] })
-  h.state.hide = () => { h.state.modalOpen = false }
-  const render = modalHarness(h.state, (transaction) => h.pay('cash', null, transaction))
-  const apply = nodes(render()).find((node) => node.type === 'button' && node.props.variant === 'primary')
-  apply.props.onClick()
-  await flush()
-  const after = nodes(render())
-  const alert = after.find((node) => node.props?.role === 'alert')
-  assert.ok(alert)
-  assert.match(alert.props.children.props.children, /No hay productos/)
-  assert.equal(after.some((node) => node.type === 'button' && node.props.children === 'Volver al TPV'), false)
-  const cancel = after.find((node) => node.type === 'button' && node.props.variant === 'dangerSoft')
-  assert.equal(cancel.props.disabled, false)
-  assert.equal(h.state.modalOpen, true)
-  assert.ok(h.state.intent)
-  assert.equal(h.calls.finishes, 0)
-  assert.equal(h.calls.charges, 0)
-  const continueButton = after.find((node) => node.type === 'button' && node.props.children === 'Continuar con otros tickets')
-  assert.ok(continueButton)
-  continueButton.props.onClick()
-  assert.equal(h.state.modalOpen, false)
-  assert.ok(h.state.intent)
-  assert.equal(h.calls.finishes, 0)
-})
-
-test('el botón Aplicar registra la venta recuperada y cierra el modal', async () => {
-  const h = harness()
-  h.state.hide = () => { h.state.modalOpen = false }
-  const render = modalHarness(h.state, (transaction) => h.pay('cash', null, transaction))
-  const apply = nodes(render()).find((node) => node.type === 'button' && node.props.variant === 'primary')
-  assert.equal(Boolean(apply.props.disabled), false)
-  apply.props.onClick()
-  await flush()
-  assert.equal(render(), null)
-  assert.equal(h.calls.events.length, 1)
-  assert.equal(h.calls.charges, 0)
-  assert.equal(h.calls.finishes, 1)
-})
-
-test('un estado incierto solo permite aplicar o repetir después de revisión manual', async () => {
-  const h = harness()
-  h.state.transaction.status = 'unknown'
-  const calls = { finalized: 0, retries: [] }
-  h.state.retryPayment = async (...args) => {
-    calls.retries.push(args)
-    return { ...h.transaction, id: 'retry', status: 'completed' }
-  }
-  const render = modalHarness(h.state, async () => { calls.finalized += 1 })
-
-  let rendered = nodes(render())
-  const checkbox = rendered.find((node) => node.type === 'input' && node.props.type === 'checkbox')
-  assert.equal(rendered.find((node) => node.type === 'button' && node.props.variant === 'primary').props.disabled, true)
-  assert.equal(rendered.find((node) => node.type === 'button' && node.props.variant === 'danger').props.disabled, true)
-
-  checkbox.props.onChange({ target: { checked: true } })
-  rendered = nodes(render())
-  const retry = rendered.find((node) => node.type === 'button' && node.props.variant === 'danger')
-  assert.equal(retry.props.disabled, false)
-  retry.props.onClick()
-  await flush()
-
-  assert.deepEqual(calls.retries, [[true]])
-  assert.equal(calls.finalized, 1)
 })

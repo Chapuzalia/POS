@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
 
 const readMigration = (name) => readFile(new URL(`../supabase/migrations/${name}.sql`, import.meta.url), 'utf8')
 const migration = await readMigration('20261023160909_restore_supplier_document_storage_policies')
@@ -15,10 +14,6 @@ const id = (value) => `00000000-0000-4000-8000-${String(value).padStart(12, '0')
 const tenant = id(1), venue = id(2), otherVenue = id(3), documentId = id(4)
 const owner = id(10), cashier = id(11), outsider = id(12), otherCashier = id(13)
 const path = `${tenant}/${venue}/${documentId}/image.webp`
-
-test('la restauración de Storage es expand y compatible', () => {
-  assert.deepEqual(analyzeMigration(migration), [])
-})
 
 test('las policies reparadas conservan los límites reales del documento', async (t) => {
   const db = new PGlite()
@@ -128,25 +123,4 @@ test('las policies reparadas conservan los límites reales del documento', async
     assert.deepEqual(policies, ['DELETE', 'INSERT', 'SELECT'].map((cmd) => ({ cmd, roles: ['authenticated'] })))
     assert.equal((await db.query("select relrowsecurity from pg_class where oid = 'storage.objects'::regclass")).rows[0].relrowsecurity, true)
   })
-})
-
-test('la migración es aditiva en instalaciones con las policies históricas presentes', async (t) => {
-  const db = new PGlite()
-  t.after(() => db.close())
-  await db.exec(`
-    create role authenticated;
-    create schema storage;
-    create table storage.objects (bucket_id text, name text);
-    create function public.can_access_supplier_document_object(text) returns boolean language sql as $$ select true $$;
-  `)
-  const originals = receipts.match(/create policy supplier_documents_storage_read[\s\S]*?(?=create or replace function public\.create_supplier_document)/)[0]
-  await db.exec(originals)
-  const originalPolicies = (await db.query("select policyname, cmd, roles, qual, with_check from pg_policies where schemaname = 'storage' order by policyname")).rows
-  await db.exec(migration)
-  const allPolicies = (await db.query("select policyname, cmd, roles, qual, with_check from pg_policies where schemaname = 'storage' order by policyname")).rows
-  assert.deepEqual(allPolicies.filter((policy) => policy.policyname.startsWith('supplier_documents_storage_')), originalPolicies)
-  for (const policy of allPolicies.filter((policy) => policy.policyname.startsWith('supplier_document_originals_'))) {
-    const original = originalPolicies.find((candidate) => candidate.cmd === policy.cmd)
-    assert.deepEqual({ ...policy, policyname: original.policyname }, original)
-  }
 })

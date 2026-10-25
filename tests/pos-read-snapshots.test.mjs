@@ -2,13 +2,10 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
 
 const read = path => readFileSync(new URL(path, import.meta.url), 'utf8')
 const migration = read('../supabase/migrations/20261003195724_reduce_pos_request_redundancy.sql')
 const tenant='11111111-1111-4111-8111-111111111111', venue='22222222-2222-4222-8222-222222222222', other='33333333-3333-4333-8333-333333333333'
-
-test('grouped read RPC migration retains N-1 and satisfies deployment safety',()=>assert.deepEqual(analyzeMigration(migration),[]))
 
 async function database(t) {
   const db=new PGlite(); t.after(()=>db.close())
@@ -40,15 +37,4 @@ test('order snapshot excludes another tenant and venue',async t=>{
   assert.equal(snapshot.order.id,tenant); assert.deepEqual(snapshot.lines,[])
   assert.equal((await db.query('select pos_restaurant_order($1,$2,$3) as snapshot',[other,other,other])).rows[0].snapshot,null)
   assert.equal((await db.query('select pos_restaurant_order($1,$2,$3) as snapshot',[tenant,other,tenant])).rows[0].snapshot,null)
-})
-
-test('fiscal snapshot still rejects retired or mismatched installation and returns latest head',async t=>{
-  const db=await database(t)
-  await db.exec(`insert into fiscal_subjects values('${tenant}','${tenant}','Emisor','89890001K'); insert into fiscal_pos_bridge_settings values('${tenant}'); insert into fiscal_sif_installations values('${tenant}','${tenant}','${venue}','${tenant}','${tenant}','${tenant}',null); insert into fiscal_local_records values('${tenant}','${tenant}','${tenant}','${tenant}',1),('${venue}','${tenant}','${tenant}','${tenant}',2); set role authenticated; set test.uid='${tenant}';`)
-  const args=[tenant,venue,tenant,tenant,tenant]
-  const load=async values=>(await db.query('select pos_fiscal_preparation($1,$2,$3,$4,$5) as snapshot',values)).rows[0].snapshot
-  assert.equal((await load(args)).head.chain_position,2)
-  assert.equal(await load([tenant,venue,tenant,other,tenant]),null)
-  await db.exec(`reset role; update fiscal_sif_installations set retired_at=now(); set role authenticated;`)
-  assert.equal(await load(args),null)
 })

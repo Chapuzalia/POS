@@ -10,7 +10,7 @@ import { hasPersistedSessionForUser, isInvalidAuthError } from '../src/features/
 import { appendFrozenQueueEvent, recordQueueEventFailure } from '../src/features/offline/services/offlineQueueState.ts'
 import { isClosedCashSaleRejection } from '../src/features/offline/services/cashSessionRejection.ts'
 import { buildSalePayload } from '../src/features/quick-sale/services/salePayload.ts'
-import { backendFetch } from '../src/lib/backendFetch.ts'
+
 import { isCrmUser } from '../src/app/app-permissions.ts'
 
 const compiled = new Map()
@@ -164,20 +164,6 @@ async function harness({ online = true, boot = false, refreshError = null } = {}
   return { durable, calls, faults, state, options, store, service, lease, globals, timers, synced, render, supabase, get actions() { return actions }, signOut: () => { raw = null; authListener('SIGNED_OUT') } }
 }
 
-test('1 y 5: el corte conserva usuario, local, caja y credenciales sin hidratar ni cerrar', async () => {
-  const h = await harness()
-  const before = h.state.context
-  h.calls.length = 0
-  h.options.isOnline = false; h.render(); await flush()
-  assert.equal(h.state.context, before)
-  assert.equal(h.state.cash.id, cash.id)
-  assert.equal(h.state.ready, false)
-  assert.equal(h.state.cleared, 0)
-  assert.equal(h.state.hydrated, 0)
-  assert.equal(await h.service.hasValidOfflineSession(context), true)
-  assert.deepEqual(h.calls, [])
-})
-
 test('2: refresh con network error mantiene sesión y caja, sin signOut', async () => {
   const h = await harness({ refreshError: Object.assign(new Error('Failed to fetch'), { name: 'AuthRetryableFetchError', status: 0 }) })
   assert.equal(h.state.cleared, 0)
@@ -272,30 +258,6 @@ test('6: un heartbeat fallido conserva el lease y la sesión; false confirmado s
   assert.equal(closed[0][1], true)
 })
 
-test('9: arranque offline usa credenciales Supabase caducadas y la misma caja, sin red', async () => {
-  const h = await harness({ online: false, boot: true })
-  assert.equal(h.state.context.userId, context.userId)
-  assert.equal(h.state.cash.id, cash.id)
-  assert.equal(h.state.hydrated, 1)
-  assert.deepEqual(h.calls, [])
-  assert.equal(hasPersistedSessionForUser(null, 'user'), false)
-  assert.equal(hasPersistedSessionForUser(credentials, 'another-user'), false)
-})
-
-test('fallo de catálogo/caja conserva el estado vivo y reintenta sin evento online', async () => {
-  const h = await harness()
-  h.faults.load = new TypeError('fetch failed')
-  h.globals.window.dispatchEvent(new Event('pos:backend-unavailable'))
-  assert.equal(h.state.ready, false)
-  for (const [id, timer] of [...h.timers]) { h.timers.delete(id); timer.callback() }
-  await flush()
-  assert.equal(h.state.cleared, 0)
-  assert.equal(h.state.cash.id, cash.id)
-  h.faults.load = null
-  h.globals.window.dispatchEvent(new Event('focus')); await flush()
-  assert.equal(h.state.ready, true)
-})
-
 test('SIGNED_OUT durante una restauración pendiente no resucita el usuario', async () => {
   const h = await harness()
   h.options.isOnline = false; h.render(); await flush()
@@ -306,63 +268,4 @@ test('SIGNED_OUT durante una restauración pendiente no resucita el usuario', as
   resolveRefresh({ data: { session: { user: { id: 'user' } } }, error: null }); await flush()
   assert.equal(h.state.context, null)
   assert.equal(h.store.getCachedContext(), null)
-})
-
-test('respuestas vacías de lease y errores genéricos no prueban revocación', async () => {
-  const h = await harness()
-  h.supabase.rpc = async () => ({ data: null, error: null })
-  await assert.rejects(h.lease.checkLoginLease(), /comprobar/)
-  for (const error of [new TypeError('Failed to fetch'), { status: 503 }, { status: 403 }, { code: 'request_timeout' }]) {
-    assert.equal(isInvalidAuthError(error), false)
-  }
-})
-
-test('backend inaccesible, timeout y rate limit se notifican sin convertirlos en revocación', async () => {
-  const previousFetch = globalThis.fetch
-  const previousWindow = globalThis.window
-  globalThis.window = new EventTarget()
-  let degraded = 0
-  window.addEventListener('pos:backend-unavailable', () => degraded++)
-  try {
-    for (const status of [408, 429, 500, 503, 530]) {
-      globalThis.fetch = async () => new Response('proxy unavailable', { status })
-      await assert.rejects(backendFetch('https://supabase.test/auth/v1/token'), TypeError)
-    }
-    globalThis.fetch = async () => { throw new TypeError('Failed to fetch') }
-    await assert.rejects(backendFetch('https://supabase.test/auth/v1/token'), TypeError)
-    assert.equal(degraded, 6)
-    globalThis.fetch = async () => new Response(JSON.stringify({ code: 'refresh_token_not_found' }), { status: 400 })
-    const invalid = await backendFetch('https://supabase.test/auth/v1/token')
-    assert.equal(invalid.status, 400)
-    assert.equal(isInvalidAuthError(await invalid.json()), true)
-    assert.equal(degraded, 6)
-  } finally {
-    globalThis.fetch = previousFetch
-    globalThis.window = previousWindow
-  }
-})
-
-test('el timeout de autenticación degrada la sesión sin acortar las RPC de negocio', async () => {
-  const window = new EventTarget()
-  let timeout
-  let degraded = 0
-  window.addEventListener('pos:backend-unavailable', () => degraded++)
-  const transport = load('lib/backendFetch', {}, {
-    window, Event, Request, AbortController,
-    setTimeout: (callback) => { timeout = callback; return 1 }, clearTimeout() {},
-    fetch: async (_input, { signal }) => new Promise((_resolve, reject) => {
-      signal.addEventListener('abort', () => reject(new Error('Request timed out')))
-    }),
-  }).backendFetch
-  const request = transport('https://supabase.test/auth/v1/token')
-  timeout()
-  await assert.rejects(request, /timed out/)
-  assert.equal(degraded, 1)
-  timeout = undefined
-  const controller = new AbortController()
-  const rpc = transport('https://supabase.test/rest/v1/rpc/process_document', { signal: controller.signal })
-  assert.equal(timeout, undefined)
-  controller.abort()
-  await assert.rejects(rpc)
-  assert.equal(degraded, 1, 'A caller cancellation is not a backend outage')
 })

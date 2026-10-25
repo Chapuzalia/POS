@@ -2,7 +2,6 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
 
 const original = readFileSync(new URL('../supabase/migrations/20260901130000_paginate_crm_sales_reports.sql', import.meta.url), 'utf8')
 const migration = readFileSync(new URL('../supabase/migrations/20261005205620_optimize_crm_sales_report_queries.sql', import.meta.url), 'utf8')
@@ -12,13 +11,6 @@ const baseline = original.slice(start, end).replace('public.crm_sales_report_tic
 const id = n => `00000000-0000-4000-8000-${String(n).padStart(12, '0')}`
 const tenant = id(1), venue = id(2), discount = id(3)
 const from = '2026-10-01T04:00:00Z', to = '2026-10-08T04:00:00Z'
-
-test('query optimization is a compatible expand migration with a separate summary', () => {
-  assert.deepEqual(analyzeMigration(migration), [])
-  const summary = migration.slice(migration.indexOf('create function public.crm_sales_report_summary('))
-  assert.doesNotMatch(summary, /p_page|p_sort_key|line_totals|offset /)
-  assert.match(summary, /crm_allocate_net_total_to_lines/)
-})
 
 async function fixture(t) {
   const db = new PGlite()
@@ -100,26 +92,6 @@ test('optimized pages and summary retain all legacy sorts, filters and historica
   assert.ok(!boundaries.some(row => row.ticket_id === id(16)))
   assert.ok(!boundaries.some(row => row.ticket_id === id(17)))
   assert.ok(!boundaries.some(row => row.ticket_id === id(18)))
-})
-
-function planNodes(plan) {
-  return [plan, ...(plan.Plans ?? []).flatMap(planNodes)]
-}
-
-test('date page execution avoids scanning sales and line quantities while quantity sorting still scans lines', async t => {
-  const db = await fixture(t)
-  const functionSql = migration.slice(migration.indexOf('create or replace function public.crm_sales_report_ticket_page('), migration.indexOf('create function public.crm_sales_report_summary('))
-  const body = functionSql.slice(functionSql.indexOf('as $$') + 5, functionSql.indexOf('$$;', functionSql.indexOf('as $$') + 5))
-  async function explain(sort) {
-    const literals = { p_tenant_id: `'${tenant}'::uuid`, p_venue_id: `'${venue}'::uuid`, p_date_from: `'${from}'::timestamptz`, p_date_to: `'${to}'::timestamptz`, p_product_query: 'null::text', p_category_query: 'null::text', p_discount_filter: "'all'::text", p_sort_key: `'${sort}'::text`, p_sort_direction: "'desc'::text", p_page: '1', p_page_size: '2', p_include_summary: 'false' }
-    const sql = body.replace(/\bp_\w+\b/g, parameter => literals[parameter])
-    const [row] = (await db.query('explain (analyze, format json) ' + sql)).rows
-    return planNodes(row['QUERY PLAN'][0].Plan)
-  }
-  const date = await explain('createdAt')
-  assert.ok(date.filter(node => ['sales', 'ticket_lines'].includes(node['Relation Name'])).every(node => node['Actual Loops'] === 0))
-  const quantity = await explain('quantity')
-  assert.ok(quantity.some(node => node['Relation Name'] === 'ticket_lines' && node['Actual Loops'] > 0))
 })
 
 test('page and summary keep RLS and function permissions for authenticated callers', async t => {

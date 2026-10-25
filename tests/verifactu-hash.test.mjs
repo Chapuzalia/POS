@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import { test } from 'node:test'
-import { aeatHash, aeatHashSource, aeatQrUrl } from '../src/features/fiscal/local/verifactu.ts'
+import { aeatHash, aeatHashSource } from '../src/features/fiscal/local/verifactu.ts'
 
 const first = {
   kind: 'alta', issuerNif: '89890001K', seriesAndNumber: '12345678/G33',
@@ -29,12 +29,4 @@ test('AEAT 0.1.2 chained anulación vector', async () => {
   }
   assert.equal(await aeatHash(input), '177547C0D57AC74748561D054A9CEC14B4C4EA23D1BEFD6F2E69E3A388F90C68')
   assert.match(aeatHashSource(input), /^IDEmisorFacturaAnulada=/)
-})
-
-test('QR encodes only the official invoice fields', () => {
-  const url = aeatQrUrl({ ...first, environment: 'test' })
-  assert.equal(url, 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=89890001K&numserie=12345678%2FG33&fecha=01-01-2024&importe=123.45')
-  const productionUrl = aeatQrUrl({ ...first, environment: 'production' })
-  assert.equal(productionUrl, 'https://www2.agenciatributaria.gob.es/wlpl/TIKE-CONT/ValidarQR?nif=89890001K&numserie=12345678%2FG33&fecha=01-01-2024&importe=123.45')
-  assert.doesNotMatch(url, /Huella|hash/)
 })

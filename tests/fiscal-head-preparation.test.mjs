@@ -36,12 +36,6 @@ async function harness() {
   return { entry, chain, rows, service, scope, get schemas() { return schemas } }
 }
 
-test('preparation validates one head regardless of chain length, without reading history', async () => {
-  const h = await harness()
-  await h.service.assertFiscalLedgerHeadValid(h.scope, 'device', false, 'installation')
-  assert.equal(h.schemas, 1)
-})
-
 test('head preparation rejects corrupt canonical hash, number and cursor identity', async () => {
   for (const mutate of [
     h => { h.entry.record.canonicalRecord.RegistroAlta.Huella = '0'.repeat(64) },

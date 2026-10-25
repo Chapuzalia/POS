@@ -1,6 +1,7 @@
 import { DEFAULT_PRINT_AGENT_TIMEOUT_MS, PRINT_AGENT_HEALTH_TIMEOUT_MS } from '../constants/config.ts'
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl.ts'
 import { PrintAgentError, type PrintAgentErrorCode } from './PrintAgentError.ts'
+import { expectedCashlogyCharge, validateCashlogyTransactionResponse, type ExpectedTransaction } from '../cashlogy/cashlogyTransactionValidation.ts'
 import type {
   CashlogyAccounting, CashlogyCancelResponse, CashlogyCapabilities, CashlogyCashManagementOperation, CashlogyChargeRequest,
   CashlogyConnector, CashlogyDenominations, CashlogyDevice, CashlogyDeviceError, CashlogyDiagnosticLog,
@@ -64,9 +65,17 @@ function responseMessage(body: unknown) {
 }
 
 function delay(ms: number, signal?: AbortSignal) {
+  if (signal?.aborted) return Promise.reject(new PrintAgentError({ code: 'ABORTED' }))
   return new Promise<void>((resolve, reject) => {
-    const timer = globalThis.setTimeout(resolve, ms)
-    signal?.addEventListener('abort', () => { globalThis.clearTimeout(timer); reject(signal.reason) }, { once: true })
+    const timer = globalThis.setTimeout(() => {
+      signal?.removeEventListener('abort', abort)
+      resolve()
+    }, ms)
+    const abort = () => {
+      globalThis.clearTimeout(timer)
+      reject(new PrintAgentError({ code: 'ABORTED' }))
+    }
+    signal?.addEventListener('abort', abort, { once: true })
   })
 }
 
@@ -85,6 +94,7 @@ export function createPrintAgentClient(options: ClientOptions) {
     const attempts = Math.max(1, (requestOptions.retries || 0) + 1)
 
     for (let attempt = 0; attempt < attempts; attempt += 1) {
+      if (requestOptions.signal?.aborted) throw new PrintAgentError({ code: 'ABORTED' })
       const controller = new AbortController()
       const timeoutMs = requestOptions.timeoutMs || defaultTimeoutMs
       let timedOut = false
@@ -203,13 +213,25 @@ export function createPrintAgentClient(options: ClientOptions) {
     getCashlogyDenominations: (signal?: AbortSignal) => request<CashlogyDenominations>('/api/v1/cashlogy/accounting/denominations', { retries: 1, signal }),
     getCashlogyLevels: (signal?: AbortSignal) => request<CashlogyLevels>('/api/v1/cashlogy/accounting/levels', { retries: 1, signal }),
     getCashlogyCapabilities: (signal?: AbortSignal) => request<CashlogyCapabilities>('/api/v1/cashlogy/accounting/capabilities', { retries: 1, signal }),
-    createCashlogyCharge: (payload: CashlogyChargeRequest, signal?: AbortSignal) => request<{ ok: true; duplicate: boolean; transaction: CashlogyTransaction }>('/api/v1/cashlogy/transactions/charge', { body: payload, method: 'POST', signal }),
+    createCashlogyCharge: async (payload: CashlogyChargeRequest, signal?: AbortSignal) => {
+      const response = await request<{ ok: true; duplicate: boolean; transaction: CashlogyTransaction }>('/api/v1/cashlogy/transactions/charge', { body: payload, method: 'POST', signal })
+      return { ...response, transaction: validateCashlogyTransactionResponse(response, expectedCashlogyCharge(payload)) }
+    },
     getCashlogyTransactions: (limit = 100, signal?: AbortSignal) => request<{ transactions: CashlogyTransaction[] }>(`/api/v1/cashlogy/transactions?limit=${encodeURIComponent(String(limit))}`, { retries: 1, signal }),
-    getCashlogyTransaction: (transactionId: string, signal?: AbortSignal) => request<{ transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}`, { retries: 1, signal }),
-    getCashlogyTransactionByRequestId: (requestId: string, signal?: AbortSignal) => request<{ transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/by-request/${encodeURIComponent(requestId)}`, { retries: 1, signal }),
-    recoverCashlogyTransaction: (transactionId: string, signal?: AbortSignal) => request<{ transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}/recover`, { body: {}, method: 'POST', signal }),
+    getCashlogyTransaction: async (transactionId: string, signal?: AbortSignal, expected: ExpectedTransaction = {}) => ({
+      transaction: validateCashlogyTransactionResponse(await request<unknown>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}`, { retries: 1, signal }), { ...expected, id: transactionId }),
+    }),
+    getCashlogyTransactionByRequestId: async (requestId: string, signal?: AbortSignal, expected: ExpectedTransaction = {}) => ({
+      transaction: validateCashlogyTransactionResponse(await request<unknown>(`/api/v1/cashlogy/transactions/by-request/${encodeURIComponent(requestId)}`, { retries: 1, signal }), { ...expected, requestId }),
+    }),
+    recoverCashlogyTransaction: async (transactionId: string, signal?: AbortSignal, expected: ExpectedTransaction = {}) => ({
+      transaction: validateCashlogyTransactionResponse(await request<unknown>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}/recover`, { body: {}, method: 'POST', signal }), { ...expected, id: transactionId }),
+    }),
     acknowledgeCashlogyTransaction: (transactionId: string, reviewed = false, signal?: AbortSignal) => request<{ ok: true }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}/acknowledge`, { body: { reviewed }, method: 'POST', signal }),
-    cancelCashlogyTransaction: (transactionId: string, signal?: AbortSignal) => request<{ ok: true; duplicate: boolean; transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}/cancel`, { body: {}, method: 'POST', signal }),
+    cancelCashlogyTransaction: async (transactionId: string, signal?: AbortSignal, expected: ExpectedTransaction = {}) => {
+      const response = await request<{ ok: true; duplicate: boolean; transaction: CashlogyTransaction }>(`/api/v1/cashlogy/transactions/${encodeURIComponent(transactionId)}/cancel`, { body: {}, method: 'POST', signal })
+      return { ...response, transaction: validateCashlogyTransactionResponse(response, { ...expected, id: transactionId }) }
+    },
     cancelActiveCashlogyOperation: (signal?: AbortSignal) => request<CashlogyCancelResponse>('/api/v1/cashlogy/cancel', { body: {}, method: 'POST', signal }),
     startCashlogyRefill: (requestId: string, signal?: AbortSignal) => request<CashlogyOperationResponse>('/api/v1/cashlogy/cash-management/refill/start', { body: { requestId }, method: 'POST', signal }),
     getCashlogyRefill: (operationId: string, signal?: AbortSignal) => request<{ operation: CashlogyCashManagementOperation }>(`/api/v1/cashlogy/cash-management/refill/${encodeURIComponent(operationId)}`, { retries: 1, signal }),

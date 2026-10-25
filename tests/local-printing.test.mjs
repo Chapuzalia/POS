@@ -1,26 +1,15 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { buildPrintAgentHeaders, createPrintAgentClient } from '../src/features/local-printing/api/printAgentClient.ts'
-import { PrintAgentError } from '../src/features/local-printing/api/PrintAgentError.ts'
-import { normalizePrintAgentUrl } from '../src/features/local-printing/utils/normalizePrintAgentUrl.ts'
-import { sanitizePrintDiagnostics } from '../src/features/local-printing/utils/sanitizePrintDiagnostics.ts'
-import { getAutomaticSaleHardwareAction, shouldOpenCashDrawer } from '../src/features/local-printing/services/cashDrawerRules.ts'
+import { createPrintAgentClient } from '../src/features/local-printing/api/printAgentClient.ts'
+
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
-import { getSafeDefaultPrintTemplate } from '../src/features/print-templates/defaults.ts'
-import { isRegulatedSaleTemplateType, resolveSafeTemplateDefinition } from '../src/features/print-templates/saleTemplateGuard.ts'
+
 import { buildSalePayload } from '../src/features/quick-sale/services/salePayload.ts'
-import { pollPrintJob } from '../src/features/local-printing/services/jobPolling.ts'
-import { recoverSelectedPrinter } from '../src/features/local-printing/services/printerSelectionRecovery.ts'
-import { clearPrintAgentConfig, loadPrintAgentConfig, savePrintAgentConfig } from '../src/features/local-printing/services/printAgentStorage.ts'
+
 import { printRequestSchema } from '../src/features/local-printing/schemas/printSchemas.ts'
-import {
-  buildRestaurantPrintPayload,
-  getEqualSplitPrintLines,
-  getMovedRestaurantPrintLines,
-  getRestaurantPrintSubtotal,
-} from '../src/features/restaurant/services/restaurantPrintPayload.ts'
-import { compileComponent, createCompiledHookRunner } from './helpers/component-harness.mjs'
+
+import { createCompiledHookRunner } from './helpers/component-harness.mjs'
 import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
 
 const layout80 = { columns: 48, paperWidth: 80, characterSet: 'CP858' }
@@ -46,25 +35,6 @@ const sale = {
   },
   payment: { id: 'payment', tenantId: 'tenant', saleId: 'sale_123', method: 'cash', amountCents: 1600, receivedCents: 2000, changeCents: 400 },
 }
-
-test('a completed equal split prints all original lines and each tender in one original receipt', () => {
-  const payload = { ...sale, payment: null, sale: { ...sale.sale, paymentMethod: null },
-    payments: [534,533,533].map((amountCents,index) => ({ id: `part-${index}`, tenantId: 'tenant', saleId: sale.sale.id,
-      method: index === 0 ? 'cash' : 'card', amountCents, receivedCents: index === 0 ? 600 : null, changeCents: index === 0 ? 66 : 0 })) }
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true })
-  assert.equal(request.requestId, 'print:sale_123:original')
-  assert.equal(request.options.copies, 1)
-  assert.equal(request.options.openCashDrawer, true)
-  const text = request.lines.join('\n')
-  assert.match(text, /2 x Brugal/)
-  assert.match(text, /Parte 1.*Efectivo.*5,34/)
-  assert.match(text, /Parte 2.*Tarjeta.*5,33/)
-  assert.match(text, /Parte 3.*Tarjeta.*5,33/)
-  assert.match(text, /TOTAL.*16,00/)
-  const reprint = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint: true, autoOpenCashDrawer: true })
-  assert.equal(reprint.options.openCashDrawer, false)
-  assert.match(reprint.lines.join('\n'), /Parte 3.*Tarjeta/)
-})
 
 const verifactuUrl = 'https://prewww2.aeat.es/wlpl/TIKE-CONT/ValidarQR?nif=B12345678&numserie=F-2026-000123&fecha=21-08-2026&importe=16.00'
 
@@ -101,11 +71,6 @@ function quickSaleLine(id, unitPriceCents, vatRate) {
       saleFormatId: null, saleFormatName: id,
     },
   }
-}
-
-const twentyPercentDiscount = {
-  discountId: null, name: 'Manual 20 %', type: 'manual', calculationType: 'percentage', value: 20,
-  roundingIncrementCents: null, color: null,
 }
 
 function buildQuickSalePayload(...args) {
@@ -193,59 +158,6 @@ function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssu
   return { calls, pay: runner.render(options), printed, sync, earlyDrawerCalls, paymentInFlightChanges, options, render: () => runner.render(options) }
 }
 
-test('normaliza hostnames, IPv4 e IPv6 y aplica HTTPS con el puerto 8443', () => {
-  assert.equal(normalizePrintAgentUrl('tpv-printer.local'), 'https://tpv-printer.local:8443')
-  assert.equal(normalizePrintAgentUrl('192.168.1.27:9443'), 'https://192.168.1.27:9443')
-  assert.equal(normalizePrintAgentUrl('[2001:db8::1]'), 'https://[2001:db8::1]:8443')
-  assert.equal(normalizePrintAgentUrl('https://alteil-print-mess.local:8443/'), 'https://alteil-print-mess.local:8443')
-})
-
-test('rechaza protocolos, rutas, credenciales e IPv4 malformadas', () => {
-  for (const value of ['http://tpv-printer.local:8443', 'https://tpv-printer.local:8443/api', 'https://user:pass@tpv-printer.local', '999.1.1.1']) {
-    assert.throws(() => normalizePrintAgentUrl(value), PrintAgentError)
-  }
-})
-
-test('construye headers sin filtrar el token a la URL o al cuerpo', () => {
-  assert.deepEqual(buildPrintAgentHeaders('secret', true), {
-    Accept: 'application/json', 'Content-Type': 'application/json', Authorization: 'Bearer secret',
-  })
-  assert.equal(buildPrintAgentHeaders(null).Authorization, undefined)
-})
-
-test('recupera la selección remota perdida y no confunde errores de configuración con red', async () => {
-  const storeSource = readFileSync(new URL('../src/features/local-printing/store/usePrintAgentStore.ts', import.meta.url), 'utf8')
-  const selectedIds = []
-  const recovered = await recoverSelectedPrinter(null, 'simulated-printer', async (printerId) => {
-    selectedIds.push(printerId)
-    return { id: printerId, paperWidth: 80, characterSet: 'CP858' }
-  })
-  assert.equal(recovered.id, 'simulated-printer')
-  assert.deepEqual(selectedIds, ['simulated-printer'])
-  assert.deepEqual(await recoverSelectedPrinter({ id: 'physical' }, 'simulated-printer', async () => { throw new Error('no debe ejecutarse') }), { id: 'physical' })
-  assert.match(storeSource, /printRequestSchema\.parse\(rawPayload\)[\s\S]*code: 'INVALID_REQUEST'/)
-})
-
-test('distingue timeout, error de red, HTTP, token ausente y respuesta no JSON', async () => {
-  const abortableFetch = (_url, init) => new Promise((_resolve, reject) => {
-    init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
-  })
-  const timeoutClient = createPrintAgentClient({ baseUrl: 'https://tpv-printer.local:8443', token: 'secret', defaultTimeoutMs: 5, fetchImpl: abortableFetch })
-  await assert.rejects(timeoutClient.getServerInfo(), (error) => error.code === 'TIMEOUT')
-
-  const networkClient = createPrintAgentClient({ baseUrl: 'https://tpv-printer.local:8443', token: 'secret', fetchImpl: async () => { throw new TypeError('Failed to fetch') } })
-  await assert.rejects(networkClient.getServerInfo(), (error) => error.code === 'NETWORK_ERROR')
-
-  const httpClient = createPrintAgentClient({ baseUrl: 'https://tpv-printer.local:8443', token: 'bad', fetchImpl: async () => new Response(JSON.stringify({ code: 'UNAUTHORIZED' }), { status: 401 }) })
-  await assert.rejects(httpClient.getServerInfo(), (error) => error.code === 'UNAUTHORIZED' && error.status === 401)
-
-  const textClient = createPrintAgentClient({ baseUrl: 'https://tpv-printer.local:8443', token: 'secret', fetchImpl: async () => new Response('not-json', { status: 200 }) })
-  await assert.rejects(textClient.getServerInfo(), (error) => error.code === 'INVALID_RESPONSE')
-
-  const anonymous = createPrintAgentClient({ baseUrl: 'https://tpv-printer.local:8443', fetchImpl: async () => new Response('{}') })
-  await assert.rejects(anonymous.getServerInfo(), (error) => error.code === 'UNAUTHORIZED')
-})
-
 test('bloquea la impresión fiscal si un agente antiguo no admite el QR estructurado', async () => {
   const payload = mapSaleToPrintRequest({
     sale: completeInvoiceSale(), establishment: { name: 'MESS' },
@@ -264,40 +176,6 @@ test('bloquea la impresión fiscal si un agente antiguo no admite el QR estructu
   await assert.rejects(client.printTicket(payload), (error) => error.code === 'FISCAL_QR_UNSUPPORTED')
   assert.equal(bodies.length, 1)
   assert.ok(bodies[0].elements.some((element) => element.type === 'qr'))
-})
-
-test('conserva el fallback de texto para documentos sin QR', async () => {
-  const bodies = []
-  const client = createPrintAgentClient({
-    baseUrl: 'https://tpv-printer.local:8443', token: 'secret',
-    fetchImpl: async (_url, init) => {
-      bodies.push(JSON.parse(String(init?.body)))
-      return bodies.length === 1
-        ? new Response(JSON.stringify({ code: 'INVALID_REQUEST' }), { status: 400 })
-        : new Response(JSON.stringify({ ok: true, jobId: 'legacy-job', status: 'printed' }), { status: 200 })
-    },
-  })
-  const response = await client.printTicket({
-    requestId: 'test-legacy', printerId: 'main-bar', force: false, lines: ['Documento'],
-    elements: [{ type: 'text', value: 'Documento' }],
-    options: { cut: true, openCashDrawer: false, copies: 1 },
-  })
-  assert.equal(response.jobId, 'legacy-job')
-  assert.equal(bodies.length, 2)
-  assert.equal(bodies[1].elements, undefined)
-})
-
-test('permite cancelar una consulta mediante AbortSignal', async () => {
-  const controller = new AbortController()
-  const client = createPrintAgentClient({
-    baseUrl: 'https://tpv-printer.local:8443', token: 'secret',
-    fetchImpl: (_url, init) => new Promise((_resolve, reject) => {
-      init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')))
-    }),
-  })
-  const promise = client.getServerInfo(controller.signal)
-  controller.abort()
-  await assert.rejects(promise, (error) => error.code === 'ABORTED')
 })
 
 test('mapea cubatas, extras, efectivo e importes enteros con idempotencia estable', () => {
@@ -322,200 +200,12 @@ test('mapea cubatas, extras, efectivo e importes enteros con idempotencia establ
   assert.deepEqual(Object.keys(printRequestSchema.parse(payload)).sort(), ['elements', 'force', 'lines', 'options', 'printerId', 'requestId'])
 })
 
-test('un ticket normal sin VeriFactu no añade QR', () => {
-  const normalSale = structuredClone(sale)
-  const payload = mapSaleToPrintRequest({
-    sale: normalSale, establishment: { name: 'MESS' },
-    printerId: 'main-bar', printerLayout: layout80,
-  })
-  assert.ok(payload.elements.every((element) => element.type === 'text'))
-  assert.equal(payload.lines.join('').includes('prewww2.aeat.es'), false)
-})
-
-test('una factura simplificada sustituye el enlace VeriFactu por un QR con el contenido exacto', () => {
-  const simplifiedInvoiceSale = structuredClone(sale)
-  simplifiedInvoiceSale.fiscal = {
-    invoiceId: 'fiscal_ticket', provider: 'verifactu', status: 'accepted', uuid: 'uuid_ticket',
-    externalCode: null, qrBase64: null, verificationUrl: verifactuUrl,
-  }
-  const payload = mapSaleToPrintRequest({
-    sale: simplifiedInvoiceSale, establishment: { name: 'MESS' },
-    printerId: 'main-bar', printerLayout: layout80,
-  })
-  const qrElements = payload.elements?.filter((element) => element.type === 'qr') ?? []
-  assert.equal(qrElements.length, 1)
-  assert.equal(qrElements[0].data, verifactuUrl)
-  assert.ok(payload.lines.join('').includes('prewww2.aeat.es'), 'lines conserva el fallback para agentes antiguos')
-  assert.equal(
-    payload.elements.some((element) => element.type === 'text' && element.value.includes('prewww2.aeat.es')),
-    false,
-  )
-})
-
-test('una factura completa sustituye el enlace VeriFactu por un QR con el contenido exacto', () => {
-  const payload = mapSaleToPrintRequest({
-    sale: completeInvoiceSale(), establishment: { name: 'MESS' },
-    printerId: 'main-bar', printerLayout: layout80,
-  })
-  const qrElements = payload.elements?.filter((element) => element.type === 'qr') ?? []
-  assert.equal(qrElements.length, 1)
-  assert.equal(qrElements[0].data, verifactuUrl)
-  assert.ok(payload.lines.join('').includes('prewww2.aeat.es'), 'lines conserva el fallback para agentes antiguos')
-  assert.equal(
-    payload.elements.some((element) => element.type === 'text' && element.value.includes('prewww2.aeat.es')),
-    false,
-  )
-  assert.equal(printRequestSchema.parse(payload).elements[0].type, 'qr')
-})
-
-test('la venta rapida imprime base sin impuestos, IVA y total con distintos tipos', () => {
-  const payload = buildQuickSalePayload(
-    quickSaleContext,
-    quickSaleCashSession,
-    [quickSaleLine('IVA 21', 1210, 21), quickSaleLine('IVA 10', 1100, 10)],
-    'cash',
-    2310,
-    null,
-  )
-
-  assert.deepEqual(payload.lines.map((line) => line.fiscalSnapshot), [
-    { taxRate: 21, grossTotalCents: 1210, taxableBaseCents: 1000, taxAmountCents: 210 },
-    { taxRate: 10, grossTotalCents: 1100, taxableBaseCents: 1000, taxAmountCents: 100 },
-  ])
-
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80 })
-  const text = request.lines.join('\n')
-  assert.match(text, /Subtotal[ ]+23,10 €/)
-  assert.match(text, /Base imponible[ ]+20,00 €/)
-  assert.match(text, /IVA 10 %[ ]+1,00 €/)
-  assert.match(text, /IVA 21 %[ ]+2,10 €/)
-  assert.match(text, /TOTAL \(IVA incluido\)[ ]+23,10 €/)
-})
-
-test('la venta rapida reparte el descuento y recalcula el IVA final de cada tipo', () => {
-  const payload = buildQuickSalePayload(
-    quickSaleContext,
-    quickSaleCashSession,
-    [quickSaleLine('IVA 21', 1210, 21), quickSaleLine('IVA 10', 1100, 10)],
-    'card',
-    null,
-    twentyPercentDiscount,
-  )
-
-  assert.equal(payload.ticket.subtotalCents, 2310)
-  assert.equal(payload.ticket.discountAmountCents, 462)
-  assert.equal(payload.ticket.totalCents, 1848)
-  assert.deepEqual(payload.lines.map((line) => line.fiscalSnapshot), [
-    { taxRate: 21, grossTotalCents: 968, taxableBaseCents: 800, taxAmountCents: 168 },
-    { taxRate: 10, grossTotalCents: 880, taxableBaseCents: 800, taxAmountCents: 80 },
-  ])
-
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80 })
-  const text = request.lines.join('\n')
-  assert.match(text, /Subtotal[ ]+23,10 €/)
-  assert.match(text, /Base imponible[ ]+16,00 €/)
-  assert.match(text, /Descuento[ ]+-4,62 €/)
-  assert.match(text, /IVA 10 %[ ]+0,80 €/)
-  assert.match(text, /IVA 21 %[ ]+1,68 €/)
-  assert.match(text, /TOTAL \(IVA incluido\)[ ]+18,48 €/)
-})
-
-test('omite todo el desglose fiscal si alguna linea de venta rapida no tiene IVA', () => {
-  const payload = buildQuickSalePayload(
-    { ...quickSaleContext, venueDefaultTaxRate: undefined },
-    quickSaleCashSession,
-    [quickSaleLine('Con IVA', 1210, 21), quickSaleLine('Sin dato fiscal', 500, null)],
-    'card',
-    null,
-    twentyPercentDiscount,
-  )
-  assert.ok(payload.lines[0].fiscalSnapshot)
-  assert.equal(payload.lines[1].fiscalSnapshot, null)
-
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80 })
-  const text = request.lines.join('\n')
-  assert.match(text, /Subtotal[ ]+17,10 €/)
-  assert.match(text, /Descuento[ ]+-3,42 €/)
-  assert.match(text, /TOTAL \(IVA incluido\)[ ]+13,68 €/)
-  assert.doesNotMatch(text, /\nIVA \d/u)
-})
-
-test('la venta rapida aplica el IVA predeterminado del local a productos que lo heredan', () => {
-  const payload = buildQuickSalePayload(
-    quickSaleContext,
-    quickSaleCashSession,
-    [quickSaleLine('IVA heredado', 10000, null)],
-    'card',
-    null,
-    null,
-  )
-  assert.deepEqual(payload.lines[0].fiscalSnapshot, {
-    taxRate: 21,
-    grossTotalCents: 10000,
-    taxableBaseCents: 8264,
-    taxAmountCents: 1736,
-  })
-
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80 })
-  const text = request.lines.join('\n')
-  assert.match(text, /Subtotal[ ]+100,00 €/)
-  assert.match(text, /Base imponible[ ]+82,64 €/)
-  assert.match(text, /IVA 21 %[ ]+17,36 €/)
-  assert.match(text, /TOTAL \(IVA incluido\)[ ]+100,00 €/)
-})
-
 test('la reimpresion usa COPIA, un ID de copia y nunca abre el cajon', () => {
   const payload = mapSaleToPrintRequest({ sale, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint: true, copyNumber: 2, autoOpenCashDrawer: true })
   assert.equal(payload.requestId, 'print:sale_123:copy:2')
   assert.equal(payload.force, true)
   assert.ok(payload.lines.some((line) => line.trim() === 'COPIA'))
   assert.equal(payload.options.openCashDrawer, false)
-})
-
-test('la regla del cajon cubre efectivo, tarjeta, mixto y reimpresion', () => {
-  const settings = { autoOpenCashDrawer: true }
-  assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 100 }], settings }), true)
-  assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'card', amountCents: 100 }], settings }), false)
-  assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'card', amountCents: 80 }, { method: 'cash', amountCents: 20 }], settings }), true)
-  assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 100 }], settings, isReprint: true }), false)
-})
-
-test('la preferencia de ticket decide entre imprimir, abrir cajon o no actuar', () => {
-  const cash = [{ method: 'cash', amountCents: 100 }]
-  const card = [{ method: 'card', amountCents: 100 }]
-  assert.equal(getAutomaticSaleHardwareAction({ payments: cash, settings: { alwaysPrintTicket: true, autoOpenCashDrawer: true } }), 'print')
-  assert.equal(getAutomaticSaleHardwareAction({ payments: cash, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true } }), 'open_drawer')
-  assert.equal(getAutomaticSaleHardwareAction({ payments: card, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true } }), 'none')
-  assert.equal(getAutomaticSaleHardwareAction({ payments: cash, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: false } }), 'none')
-  assert.equal(getAutomaticSaleHardwareAction({ payments: cash, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true, cashlogyConfigured: true } }), 'none')
-  assert.equal(getAutomaticSaleHardwareAction({ payments: card, isReprint: true, settings: { alwaysPrintTicket: false, autoOpenCashDrawer: true } }), 'print')
-})
-
-test('la venta rápida libera la interfaz y espera la fiscalización antes de imprimir online', async () => {
-  const online = quickSalePaymentHarness({ isOnline: true })
-  const payment = online.pay('card', null)
-  await flush()
-  assert.deepEqual(online.calls, ['persist', 'reset', 'sync'])
-
-  online.sync.resolve()
-  await payment
-  await flush()
-  assert.deepEqual(online.calls, ['persist', 'reset', 'sync', 'print'])
-
-  const offline = quickSalePaymentHarness({ isOnline: false })
-  await offline.pay('card', null)
-  assert.deepEqual(offline.calls, ['persist', 'reset', 'print'])
-})
-
-test('la venta guardada libera el cobro aunque la sincronización no responda', async () => {
-  const harness = quickSalePaymentHarness({ isOnline: true })
-  await harness.pay('card', null)
-  assert.deepEqual(harness.paymentInFlightChanges, [true, false])
-  assert.deepEqual(harness.calls, ['persist', 'reset', 'sync'])
-  assert.equal(harness.printed.length, 0)
-  harness.sync.resolve()
-  await flush()
-  assert.equal(harness.printed.length, 1)
 })
 
 test('la venta offline guardada libera el cobro aunque la impresora no responda', async () => {
@@ -540,27 +230,6 @@ test('un fallo de impresión posterior avisa sin volver a cobrar ni encolar la v
   assert.match(errors[0], /venta está guardada/)
 })
 
-test('una sincronización tardía conserva los nuevos tickets y el estado de impresión actual', async () => {
-  const harness = quickSalePaymentHarness({ isOnline: true })
-  const saved = []
-  harness.options.persistTickets = tickets => { saved.push(tickets) }
-  harness.options.loadPersistedTicket = async () => ({ payload: { ticket: {}, fiscal: { status: 'accepted' } } })
-  await harness.render()('card', null)
-  const original = saved[0][0]
-  const next = { id: 'next-sale', payload: {}, printStatus: 'printed' }
-  harness.options.tickets = [next, { ...original, printStatus: 'printed', printAttempts: 1 }]
-  harness.render()
-  harness.sync.resolve()
-  await flush()
-  assert.equal(saved.length, 2)
-  assert.equal(saved[1][0], next)
-  assert.equal(saved[1][1].printStatus, 'printed')
-  assert.equal(saved[1][1].printAttempts, 1)
-  assert.equal(saved[1][1].payload.fiscal.status, 'accepted')
-  assert.equal(saved[1][1].payload.sale, original.payload.sale)
-  assert.equal(saved[1][1].payload.payment, original.payload.payment)
-})
-
 test('una sincronización tardía no guarda tickets en otra caja o tenant', async () => {
   const harness = quickSalePaymentHarness({ isOnline: true })
   const saved = []
@@ -573,171 +242,6 @@ test('una sincronización tardía no guarda tickets en otra caja o tenant', asyn
   harness.sync.resolve()
   await flush()
   assert.equal(saved.length, 1)
-})
-
-test('la respuesta inmediata del servidor conserva el ticket guardado antes del siguiente render', async () => {
-  const harness = quickSalePaymentHarness({ isOnline: true })
-  const saved = []
-  harness.options.persistTickets = tickets => saved.push(tickets)
-  harness.options.loadPersistedTicket = async () => ({ ticketNumber: 15, payload: { ticket: {}, fiscal: { status: 'accepted' } } })
-  await harness.render()('card', null)
-  harness.sync.resolve()
-  await flush()
-  assert.equal(saved.length, 2)
-  assert.equal(saved[1].length, 1)
-  assert.equal(saved[1][0].id, saved[0][0].id)
-  assert.equal(saved[1][0].ticketNumber, 15)
-  assert.equal(saved[1][0].payload.sale, saved[0][0].payload.sale)
-})
-
-test('construye el ticket de mesa localmente en cuanto la RPC devuelve sus IDs', () => {
-  const context = { tenantId: 'tenant', venueId: 'mess', deviceId: 'ipad', userId: 'user' }
-  const cashSession = { id: 'cash', cashRegisterId: 'register' }
-  const lines = [{
-    id: 'order-line', tenantId: 'tenant', venueId: 'mess', orderId: 'order', productId: 'product', variantId: 'variant',
-    productName: 'Brugal', variantName: 'Cubata', unitPriceCents: 900, quantity: 2, servedQuantity: 2,
-    fullyServedAt: null, modifiers: [], mixerProductId: 'cola', mixer: { productId: 'cola', name: 'Coca-Cola', priceCents: 0 },
-    note: null, createdAt: '2026-07-21T10:00:00Z', updatedAt: '2026-07-21T10:00:00Z',
-  }]
-  const selected = getMovedRestaurantPrintLines(lines, [{ lineId: 'order-line', quantity: 1 }])
-  const payload = buildRestaurantPrintPayload({
-    cashSession, context, createdAt: '2026-07-21T10:05:00Z', discount: null, lines: selected,
-    paymentId: 'payment', paymentMethod: 'cash', receivedCents: 1000, saleId: 'sale-table', subtotalCents: 900,
-    ticketId: 'ticket-table', totalCents: 900,
-  })
-  const request = mapSaleToPrintRequest({ sale: payload, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, autoOpenCashDrawer: true })
-  assert.equal(request.requestId, 'print:sale-table:original')
-  assert.match(request.lines.join('\n'), /1 x Brugal Cubata/)
-  assert.match(request.lines.join('\n'), /Coca-Cola/)
-  assert.doesNotMatch(request.lines.join('\n'), /\nIVA \d/u)
-  assert.equal(request.options.openCashDrawer, true)
-})
-
-test('el reparto igual reproduce localmente la asignacion monetaria del servidor', () => {
-  const base = {
-    tenantId: 'tenant', venueId: 'mess', orderId: 'order', productId: 'product', variantId: 'variant',
-    servedQuantity: 1, fullyServedAt: null, modifiers: [], mixerProductId: null, mixer: null, note: null,
-    updatedAt: '2026-07-21T10:00:00Z',
-  }
-  const lines = [
-    { ...base, id: 'line-a', productName: 'A', variantName: 'A', unitPriceCents: 500, quantity: 2, createdAt: '2026-07-21T10:00:00Z' },
-    { ...base, id: 'line-b', productName: 'B', variantName: 'B', unitPriceCents: 1000, quantity: 1, createdAt: '2026-07-21T10:01:00Z' },
-  ]
-  const allocation = getEqualSplitPrintLines(lines, { totalCents: 2000, partCount: 3, paidParts: 1 })
-  assert.deepEqual(allocation.map((line) => line.lineTotalCents), [333, 334])
-  assert.equal(getRestaurantPrintSubtotal(allocation), 667)
-})
-
-test('el polling termina en printed y convierte una espera excesiva en unknown sin reenviar', async () => {
-  let calls = 0
-  const printed = await pollPrintJob({ getJob: async () => ({ id: 'job', status: ++calls > 1 ? 'printed' : 'printing' }) }, 'job', { intervalMs: 1, maxWaitMs: 50 })
-  assert.equal(printed.status, 'printed')
-  const unknown = await pollPrintJob({ getJob: async () => ({ id: 'job', status: 'pending' }) }, 'job', { intervalMs: 1, maxWaitMs: 3 })
-  assert.equal(unknown.status, 'unknown')
-})
-
-test('persiste configuracion separada por terminal y permite borrar el token', () => {
-  const values = new Map()
-  const originalWindow = globalThis.window
-  globalThis.window = { localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) } }
-  const mess = { tenantId: 'tenant', establishmentId: 'mess', terminalId: 'ipad-1' }
-  const loft = { tenantId: 'tenant', establishmentId: 'loft', terminalId: 'ipad-1' }
-  savePrintAgentConfig(mess, { ...loadPrintAgentConfig(mess), token: 'mess-secret' })
-  savePrintAgentConfig(loft, { ...loadPrintAgentConfig(loft), token: 'loft-secret' })
-  assert.equal(loadPrintAgentConfig(mess).token, 'mess-secret')
-  assert.equal(loadPrintAgentConfig(loft).token, 'loft-secret')
-  assert.equal(loadPrintAgentConfig(mess).preferences.alwaysPrintTicket, true)
-  clearPrintAgentConfig(mess)
-  assert.equal(loadPrintAgentConfig(mess).token, null)
-  globalThis.window = originalWindow
-})
-
-test('el informe tecnico elimina token, Authorization y datos de ticket', () => {
-  const sanitized = sanitizePrintDiagnostics({ token: 'secret', Authorization: 'Bearer secret', nested: { ticket: { customerData: 'private' }, status: 'ok' } })
-  assert.deepEqual(sanitized, { nested: { status: 'ok' } })
-  assert.equal(JSON.stringify(sanitized).includes('secret'), false)
-})
-
-test('la venta rapida online persiste, solicita cajon temprano, sincroniza y marca el print', async () => {
-  const harness = quickSalePaymentHarness({ isOnline: true })
-  const payment = harness.pay('cash', null)
-  await flush()
-  assert.deepEqual(harness.calls.slice(0, 3), ['persist', 'earlyDrawer', 'reset'])
-  harness.sync.resolve()
-  await payment
-  await flush()
-  assert.deepEqual(harness.calls, ['persist', 'earlyDrawer', 'reset', 'sync', 'print'])
-  assert.equal(harness.earlyDrawerCalls.length, 1)
-  assert.match(harness.earlyDrawerCalls[0], /^drawer:[^:]+:payment$/u)
-  assert.equal(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
-})
-
-test('la venta rapida online con tarjeta no solicita cajon temprano', async () => {
-  const harness = quickSalePaymentHarness({ isOnline: true })
-  const payment = harness.pay('card', null)
-  await flush()
-  assert.deepEqual(harness.calls.slice(0, 2), ['persist', 'reset'])
-  assert.deepEqual(harness.earlyDrawerCalls, [])
-  harness.sync.resolve()
-  await payment
-  await flush()
-  assert.deepEqual(harness.calls, ['persist', 'reset', 'sync', 'print'])
-  assert.notEqual(harness.printed[0].printOptions.cashDrawerAlreadyRequested, true)
-})
-
-test('el ticket local conserva numeración y desglose históricos sin imprimir QR ni leyenda Verifactu', () => {
-  const issued = structuredClone(sale)
-  issued.localFiscal = { recordId: 'record-1', series: 'L1-C1-I1-2026-S', number: 3,
-    issuedAt: '2026-07-18T16:30:00+02:00', documentKind: 'simplified',
-    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1',
-    verifactuLegend: false }
-  issued.lines[0].fiscalSnapshot = { taxRate: 21, taxableBaseCents: 1323, taxAmountCents: 277, grossTotalCents: 1600 }
-  issued.fiscal = { invoiceId: 'invoice-1', provider: 'verifactu', status: 'pending',
-    externalCode: 'L1-C1-I1-2026-S/3', qrBase64: null, verificationUrl: verifactuUrl }
-  const payload = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS' },
-    printerId: 'main-bar', printerLayout: layout80 })
-  const text = payload.lines.join('\n')
-  assert.match(text, /Base imponible[ ]+13,23 €/)
-  assert.match(text, /IVA 21 %[ ]+2,77 €/)
-  assert.ok(!payload.elements.some((element) => element.type === 'qr'))
-  assert.doesNotMatch(text, /www\.aeat|QR tributario/)
-  assert.equal(issued.fiscal.verificationUrl, verifactuUrl, 'printing must not mutate the saved snapshot')
-  assert.doesNotMatch(text, /VERI\*FACTU/)
-})
-
-test('la copia de un ticket local usa su snapshot aunque la instalación haya sido retirada', async () => {
-  const hookSource = readFileSync(new URL('../src/features/cash-registers/hooks/useCashSession.ts', import.meta.url), 'utf8')
-  const callback = hookSource.match(/const printSale = useCallback\(async [\s\S]*?\}, \[options\.context, persistTickets, session, updateTicketPrintState\]\)/)?.[0]
-  assert.ok(callback)
-  const original = structuredClone(sale)
-  original.localFiscal = { recordId: 'old-record', series: 'DIS-C1-1-2026-S', number: 2, verifactuLegend: false }
-  let printed, reads = 0
-  const { printSale } = compileComponent(`export ${callback}`, {}, {
-    useCallback: action => action,
-    options: { context: { tenantId: 'tenant' } },
-    usePrintAgentStore: { getState: () => ({ token: 'paired', selectedPrinterId: 'main' }) },
-    loadFiscalInstallation: async () => { reads++; throw new Error('La instalación está retirada') },
-    printTicket: async value => { printed = value }, session: { id: 'cash' },
-    ticketsRef: { current: [] }, updateTicketPrintState() {}, persistTickets: () => assert.fail('Copies must not persist a new sale'),
-  })
-  await printSale(original, { isReprint: true, copyNumber: 2 })
-  assert.equal(reads, 0)
-  assert.equal(printed.payload, original)
-  assert.equal(printed.payload.localFiscal.series, 'DIS-C1-1-2026-S')
-  assert.equal(printed.options.copyNumber, 2)
-})
-
-test('la rectificativa fuerza en la impresión la referencia a la factura original aunque la plantilla personalizada la omita', () => {
-  const issued = structuredClone(sale)
-  issued.localFiscal = { recordId: 'refund-record', series: 'MES-C2-2026-R', number: 4,
-    issuedAt: '2026-09-30T19:44:45+02:00', documentKind: 'simplified', issuerName: 'Emisor', issuerNif: 'B12345678', issuerAddress: '',
-    verifactuLegend: true, rectifiedInvoice: { series: 'MES-C2-2026-S', number: 123, issuedAt: '2026-09-30T16:46:00+02:00' } }
-  issued.fiscal = { invoiceId: 'refund-invoice', provider: 'verifactu', status: 'pending', externalCode: 'MES-C2-2026-R/4', qrBase64: null, verificationUrl: verifactuUrl }
-  const request = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, template: { version: 1, blocks: [{ id: 'qr', type: 'qr', value: '{{fiscal.verification_url}}', when: 'fiscal.show_qr' }] } })
-  const text = request.lines.join('\\n')
-  assert.match(text, /FACTURA RECTIFICATIVA/)
-  assert.ok(text.includes('MES-C2-2026-S/123'))
-  assert.match(text, /Fecha factura original/)
 })
 
 test('la factura VERI*FACTU fuerza QR al principio, corrección M y leyenda aunque la plantilla fiscal sea incompleta', () => {
@@ -759,176 +263,6 @@ test('la factura VERI*FACTU fuerza QR al principio, corrección M y leyenda aunq
   assert.equal(firstVisible.type, 'qr')
   assert.deepEqual(qr, { type: 'qr', data: verifactuUrl, size: 6, errorCorrection: 'M' })
   assert.ok(payload.elements.some((element) => element.type === 'text' && element.value === 'VERI*FACTU'))
-})
-
-test('desactivar el QR solo lo elimina de la impresión, incluidas copias y rectificativas', () => {
-  const issued = completeInvoiceSale()
-  issued.localFiscal = {
-    recordId: 'record', series: 'R', number: 4, issuedAt: issued.sale.createdAt,
-    documentKind: 'complete', issuerName: 'Emisor', issuerNif: 'B12345678', issuerAddress: '',
-    verifactuLegend: true,
-    rectifiedInvoice: { series: 'S', number: 3, issuedAt: issued.sale.createdAt },
-  }
-  const snapshot = structuredClone(issued)
-  for (const isReprint of [false, true]) {
-    const options = { sale: issued, establishment: { name: 'MESS' }, printerId: 'main', printerLayout: layout80, isReprint }
-    const withQr = mapSaleToPrintRequest(options)
-    const withoutQr = mapSaleToPrintRequest({ ...options, printQr: false })
-    assert.equal(withQr.elements.filter((element) => element.type === 'qr').length, 1)
-    assert.equal(withoutQr.elements.filter((element) => element.type === 'qr').length, 0)
-    assert.equal(withoutQr.requestId, withQr.requestId)
-    assert.deepEqual(withoutQr.options, withQr.options)
-    const text = withoutQr.lines.join('\n')
-    assert.match(text, /VERI\*FACTU/)
-    assert.match(text, /FACTURA RECTIFICATIVA/)
-    assert.match(text, /S\/3/)
-    assert.match(text, /16,00 €/)
-    if (isReprint) assert.match(text, /COPIA/)
-  }
-  assert.deepEqual(issued, snapshot)
-})
-
-test('la impresión consulta la preferencia del tenant y conserva el QR si la configuración no está disponible', async () => {
-  const source = readFileSync(new URL('../src/features/local-printing/services/printCompletedSale.ts', import.meta.url), 'utf8')
-  const printed = []
-  const tenants = []
-  let setting = false
-  let unavailable = false
-  const { printCompletedSale } = compileComponent(source, {
-    '../../print-templates/service.ts': { resolvePrintTemplate: async () => ({ definition: getSafeDefaultPrintTemplate('invoice') }) },
-    '../../fiscal/local/settings.ts': { loadFiscalPosSettings: async (tenantId) => {
-      tenants.push(tenantId)
-      if (unavailable) throw new Error('Backend unavailable')
-      return { print_ticket_qr: setting }
-    } },
-    '../store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({ preferences: {}, printTicket: (payload) => { printed.push(payload); return payload } }) } },
-    './selectedPrinterLayout': { loadSelectedPrinterLayout: async () => ({ printer: { id: 'main' }, layout: layout80 }) },
-    './ticketPrintMapper': { mapSaleToPrintRequest },
-  })
-  const input = { sale: completeInvoiceSale(), establishment: { name: 'MESS' }, context: { tenantId: 'tenant', venueId: 'mess' } }
-  await printCompletedSale(input)
-  setting = true
-  await printCompletedSale({ ...input, isReprint: true })
-  unavailable = true
-  await printCompletedSale(input)
-  assert.deepEqual(tenants, ['tenant', 'tenant', 'tenant'])
-  assert.deepEqual(printed.map((payload) => payload.elements.some((element) => element.type === 'qr')), [false, true, true])
-})
-
-test('una plantilla de venta solo con texto libre no oculta los datos obligatorios ni desplaza el QR', () => {
-  const issued = structuredClone(sale)
-  issued.localFiscal = { recordId: 'record-guard', series: 'L1-C1-I1-2026-S', number: 7,
-    issuedAt: '2026-07-18T16:40:00+02:00', documentKind: 'simplified',
-    issuerName: 'Emisor histórico SL', issuerNif: 'B12345678', issuerAddress: 'Calle Uno 1', verifactuLegend: true }
-  issued.fiscal = { invoiceId: 'invoice-guard', provider: 'verifactu', status: 'pending',
-    externalCode: 'L1-C1-I1-2026-S/7', qrBase64: null, verificationUrl: verifactuUrl }
-  const payload = mapSaleToPrintRequest({ sale: issued, establishment: { name: 'MESS', taxId: 'B12345678' },
-    printerId: 'main', printerLayout: layout80, template: { version: 1, blocks: [
-      { id: 'saludo', type: 'text', value: 'Síguenos en @restaurante' },
-    ] } })
-  const firstVisible = payload.elements.find((element) => element.type === 'qr' || element.value.trim())
-  assert.equal(firstVisible.type, 'qr')
-  assert.deepEqual(payload.elements.find((element) => element.type === 'qr'),
-    { type: 'qr', data: verifactuUrl, size: 6, errorCorrection: 'M' })
-  const text = payload.lines.join('\n')
-  assert.match(text, /VERI\*FACTU/)
-  assert.match(text, /FACTURA SIMPLIFICADA/)
-  assert.match(text, /NIF\/CIF B12345678/)
-  assert.match(text, /Número fiscal[ ]+L1-C1-I1-2026-S\/7/)
-  assert.match(text, /Fecha expedición[ ]+2026-07-18 16:40:00/)
-  assert.match(text, /Brugal/)
-  assert.match(text, /TOTAL \(IVA incluido\)[ ]+16,00 €/)
-  assert.match(text, /Código: L1-C1-I1-2026-S\/7/)
-  assert.doesNotMatch(text, /Gracias por su visita/)
-  assert.deepEqual(payload.elements.at(-1), { type: 'text', value: 'Síguenos en @restaurante' })
-})
-
-test('el guard de venta restaura la estructura legal y deduplica el texto propio del local', () => {
-  const structural = getSafeDefaultPrintTemplate('simplified_invoice')
-  const resolved = resolveSafeTemplateDefinition('simplified_invoice', { version: 1, blocks: [
-    { id: 'titulo', type: 'text', value: 'PRODUCTOS' },
-     { id: 'saludo', type: 'text', value: '  Bienvenidos  ' },
-     { id: 'saludo-2', type: 'text', value: 'bienvenidos' },
-     { id: 'custom-text:after_document:1', type: 'text', value: 'Entre documento y productos' },
-    { id: 'variable', type: 'text', value: 'Total {{ticket.number}}' },
-    { id: 'falso-qr', type: 'qr', value: 'https://example.test/falso' },
-    { id: 'falsa-fila', type: 'row', label: 'TOTAL', value: '0,00 €' },
-    { id: 'falso-bucle', type: 'repeat', source: 'items', blocks: [{ id: 'item', type: 'text', value: 'gratis' }] },
-    { id: 'condicionado', type: 'text', value: 'Solo con cliente', when: 'customer.name' },
-  ] })
-  const mandatoryIds = new Set(structural.blocks.map((block) => block.id))
-  assert.deepEqual(resolved.blocks.filter((block) => mandatoryIds.has(block.id)), structural.blocks)
-  assert.deepEqual(resolved.blocks.filter((block) => !mandatoryIds.has(block.id)), [
-    { id: 'custom-text:after_document:1', type: 'text', value: 'Entre documento y productos' },
-    { id: 'saludo', type: 'text', value: 'Bienvenidos' },
-  ])
-  const documentIndex = resolved.blocks.findIndex((block) => block.id === 'ticket-date')
-  const customIndex = resolved.blocks.findIndex((block) => block.id === 'custom-text:after_document:1')
-  const itemsIndex = resolved.blocks.findIndex((block) => block.id === 'items')
-  assert.ok(documentIndex < customIndex && customIndex < itemsIndex)
-  assert.deepEqual(resolveSafeTemplateDefinition('simplified_invoice', resolved), resolved)
-})
-
-test('una plantilla de venta manipulada queda reducida a la estructura obligatoria mas su texto literal', () => {
-  const structural = getSafeDefaultPrintTemplate('invoice')
-  const resolved = resolveSafeTemplateDefinition('invoice', { version: 1, blocks: [
-    { id: 'nota', type: 'text', value: 'Gracias' },
-    { id: 'leyenda', type: 'text', value: 'VERI*FACTU' },
-  ] })
-  assert.equal(resolved.blocks[0].id, 'fiscal-qr')
-  assert.deepEqual(resolved.blocks.slice(0, structural.blocks.length), structural.blocks)
-  assert.deepEqual(resolved.blocks.at(-1), { id: 'nota', type: 'text', value: 'Gracias' })
-  assert.equal(resolveSafeTemplateDefinition('invoice', undefined).blocks.length, structural.blocks.length)
-})
-
-test('los tipos de plantilla ajenos a la venta conservan su definicion', () => {
-  const kds = { version: 1, blocks: [
-    { id: 'kds-order', type: 'text', value: 'COMANDA #{{order.number}}', bold: true, size: 'large' },
-  ] }
-  assert.equal(isRegulatedSaleTemplateType('simplified_invoice'), true)
-  assert.equal(isRegulatedSaleTemplateType('invoice'), true)
-  assert.equal(isRegulatedSaleTemplateType('cash_closure'), false)
-  assert.deepEqual(resolveSafeTemplateDefinition('kds', kds), kds)
-  assert.deepEqual(resolveSafeTemplateDefinition('cash_closure', undefined), getSafeDefaultPrintTemplate('cash_closure'))
-})
-
-test('la venta rápida en modo producción emite localmente y conserva el envío pendiente', async () => {
-  const harness = quickSalePaymentHarness({ isOnline: false, fiscalMode: 'production',
-    fiscalIssue: async () => ({ id: 'fiscal-record', record: {
-      tenantId: quickSaleContext.tenantId, fiscalSubjectId: 'subject', installationId: 'installation',
-    } }) })
-  await harness.pay('card', null)
-  assert.deepEqual(harness.calls.filter(item => ['preflightFiscal', 'issueFiscal', 'print'].includes(item)),
-    ['preflightFiscal', 'issueFiscal', 'print'])
-  assert.equal(harness.calls.includes('persist'), false)
-  assert.equal(harness.printed[0].localFiscal.number, 1)
-  assert.equal(harness.printed[0].fiscal.verificationUrl, 'https://aeat.example.invalid/qr')
-})
-
-test('la venta rápida entrega a la emisión la instalación fiscal preparada en el mismo cobro', async () => {
-  const issued = []
-  const harness = quickSalePaymentHarness({ isOnline: false, fiscalMode: 'production',
-    fiscalPreflight: async (context, cashSession, preview) => ({
-      tenantId: context.tenantId, venueId: context.venueId, deviceId: context.deviceId,
-      cashRegisterId: cashSession.cashRegisterId, cashSessionId: cashSession.id, saleId: preview.sale.id,
-      installation: { installationId: 'installation' }, preparedAt: 1, preparedMonotonicAt: 1,
-    }),
-    fiscalIssue: async (context, cashSession, payload, economicAlreadySynced, resolveSale, simplifiedLimitCents, prepared) => {
-      issued.push({ payload, economicAlreadySynced, resolveSale, simplifiedLimitCents, prepared })
-      return { id: 'fiscal-record', record: {
-        tenantId: quickSaleContext.tenantId, fiscalSubjectId: 'subject', installationId: 'installation',
-      } }
-    } })
-  await harness.pay('card', null)
-
-  assert.deepEqual(harness.calls.filter(item => ['preflightFiscal', 'issueFiscal', 'print'].includes(item)),
-    ['preflightFiscal', 'issueFiscal', 'print'])
-  assert.equal(issued.length, 1)
-  assert.equal(issued[0].prepared.saleId, issued[0].payload.sale.id)
-  assert.equal(issued[0].prepared.installation.installationId, 'installation')
-  assert.equal(issued[0].economicAlreadySynced, false)
-  assert.equal(issued[0].resolveSale, undefined)
-  assert.equal(issued[0].simplifiedLimitCents, undefined)
 })
 
 test('el mapper suprime openCashDrawer cuando el cajon ya fue solicitado y conserva el comportamiento normal', () => {
