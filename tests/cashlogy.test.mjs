@@ -275,8 +275,7 @@ test('dar cambio Cashlogy empieza a 0 y exige elegir las denominaciones manualme
   assert.doesNotMatch(modal, /suggestCashlogyDenominations/)
   assert.doesNotMatch(modal, /suggestedOperationId/)
   assert.match(selector, /quantities\[option\.valueCents\] \?\? 0/)
-  assert.match(selector, /Elige manualmente la combinación/)
-  assert.match(selector, /Poner todo a 0/)
+  assert.doesNotMatch(selector, /Elige manualmente la combinación|Poner todo a 0|onClear/)
 })
 
 test('el límite de espera detiene consultas sin declarar cancelado un cobro activo', async () => {
