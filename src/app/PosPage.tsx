@@ -7,6 +7,7 @@ import type { RefObject, ReactNode } from 'react'
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react'
 import { AppHeader } from '../components/layout/AppHeader'
 import { getOfflineQueue } from '../lib/offlineStore'
+import { loadPaymentOperations } from '../lib/durableSales.ts'
 import { pendingSync } from '../features/offline/services/pendingSync'
 import { isAssistEnabled } from '../features/assist/engine'
 import { AssistBoundary } from '../features/assist/AssistBoundary'
@@ -47,7 +48,7 @@ import type { useReservationsController } from '../features/reservations/hooks/u
 import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
 import { CustomerInvoiceModal } from '../features/customers'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
-import { finishCashlogyPayment, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
+import { finishCashlogyPayment, getCashlogyPaymentSaleId, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
 import { usePrintAgentStore } from '../features/local-printing/store/usePrintAgentStore'
 import {
   isActiveCashlogyError,
@@ -163,7 +164,7 @@ export function PosPage(props: Props) {
   const cashlogyPaymentModalOpen = useCashlogyStore((state) => state.modalOpen)
   const showCashlogyPayment = useCashlogyStore((state) => state.show)
   const cashlogyPaymentLocked = Boolean(cashlogyPaymentIntent)
-  const posInteractionBlocked = props.isBusy || cashlogyPaymentLocked
+  const posInteractionBlocked = props.isBusy || (cashlogyPaymentLocked && cashlogyPaymentModalOpen)
   const cashlogyManagementOpen = useCashlogyManagementStore((state) => state.modalOpen)
   const canManageCash = Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))
   const promotionsEnabled = hasTenantCapability(props.context, 'promotions')
@@ -259,8 +260,8 @@ export function PosPage(props: Props) {
   const cashlogyPendingNotice = cashlogyPaymentIntent && !cashlogyPaymentModalOpen
     ? <section className="flex items-center justify-between gap-3 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent-soft)] p-3 text-[var(--foreground)]">
         <div className="min-w-0">
-          <p className="font-black">Cobro Cashlogy en curso</p>
-          <p className="text-sm text-[var(--muted)]">{formatMoney(cashlogyPaymentIntent.amountCents)} · El ticket está bloqueado para evitar duplicados.</p>
+          <p className="font-black">Cobro Cashlogy pendiente</p>
+          <p className="text-sm text-[var(--muted)]">{formatMoney(cashlogyPaymentIntent.amountCents)} · Puedes seguir con otros tickets y cobrar con tarjeta. Esta operación se conserva para recuperarla.</p>
         </div>
         <UiButton className="shrink-0 rounded-[var(--radius)] border border-[var(--accent)] px-3 py-2 text-sm font-black" onClick={showCashlogyPayment} type="button">Reabrir cobro</UiButton>
       </section>
@@ -384,7 +385,7 @@ export function PosPage(props: Props) {
     finally { setPaymentProgress((current) => current === progress ? null : current) }
   }
   const handlePayment = (method: PaymentMethod | null) => {
-    if (cashlogyPaymentLocked) {
+    if (cashlogyPaymentLocked && method === 'cash' && cashlogyEnabled && cashlogyConfigured) {
       showCashlogyPayment()
       return
     }
@@ -732,12 +733,30 @@ export function PosPage(props: Props) {
       <CashlogyPaymentModal
         finalizeDisabled={props.isBusy}
         onFinalizeRecovered={async (transaction) => {
-          const historicalTicket = transaction.saleId
-            ? cash.tickets.find((ticket) => ticket.payload.sale.id === transaction.saleId)
+          const saleId = getCashlogyPaymentSaleId(transaction)
+          const historicalTicket = saleId
+            ? cash.tickets.find((ticket) => ticket.payload.sale.id === saleId)
             : null
           if (historicalTicket) {
             if (historicalTicket.paymentMethod === 'card') await cash.ticketActions.changePayment(historicalTicket, 'cash', transaction)
             else finishCashlogyPayment(transaction)
+            return
+          }
+          const original = cash.session && saleId ? (await loadPaymentOperations(props.context, cash.session.id))
+            .find(operation => operation.payload.sale.id === saleId) : undefined
+          if (original?.key.includes('|quick-sale')) {
+            await quickSale.completePayment('cash', null, transaction)
+            return
+          }
+          if (original?.key.includes('|restaurant:') && cash.session) {
+            const { recoverRestaurantPayments } = await import('../features/restaurant/services/payment.ts')
+            const recovered = await recoverRestaurantPayments(props.context, cash.session, { ...transaction, saleId })
+            for (const payment of recovered) {
+              finishCashlogyPayment(payment.transaction)
+              if (payment.result.ticketId) void cash.refreshConfirmedSale(payment.result.ticketId, 'Cobro recuperado; revisa el histórico', false)
+                .catch(() => props.onSetError('El cobro está guardado. No se pudo actualizar el histórico.'))
+            }
+            void restaurant.reloadMap().catch(() => props.onSetError('El cobro está guardado. No se pudo actualizar el mapa de mesas.'))
             return
           }
           if (restaurant.posView.type === 'table_order') await restaurant.completePayment('cash', null, false, transaction)

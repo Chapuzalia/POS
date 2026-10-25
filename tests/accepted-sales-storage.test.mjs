@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { preparePaymentOperation, acceptPaymentOperation, commitPaymentOperation, loadDurableEvents, loadDurableSessionTickets,
-  paymentScope, updateDurableEvent, markPaymentCharging } from '../src/lib/durableSales.ts'
+  paymentScope, updateDurableEvent, markPaymentCharging, loadPaymentOperation, loadPaymentOperations, markRestaurantCheckoutReserved } from '../src/lib/durableSales.ts'
 import { openLedger, request, transactionDone } from '../src/features/fiscal/local/localLedger.ts'
 
 const context = { tenantId: 'tenant', venueId: 'venue', deviceId: 'device', userId: 'cashier' }
@@ -71,8 +71,50 @@ test('charging intent survives response/storage loss and cannot be replaced with
   assert.equal(retry.state, 'charging')
   assert.equal(retry.payload.sale.id, 'sale')
   await assert.rejects(preparePaymentOperation(key, 'other-cart', payload), /pendiente/)
-  await assert.rejects(preparePaymentOperation(key.replace('quick-sale', 'restaurant:close:order'), 'other-sale', payload), /otro cobro pendiente/)
+  await assert.rejects(preparePaymentOperation(key.replace('quick-sale', 'restaurant:close:order'), 'other-sale', payload), /ticket ya tiene/)
 })
+
+test('an interrupted preparation can be replaced by an edited ticket before any collection or reservation', async () => {
+  const key = await setup()
+  const original = { ...payload, payment: { id: 'payment', amountCents: 600 } }
+  const operation = await preparePaymentOperation(key, 'draft', original, { sourceLineIds: ['old-line'] })
+  const edited = { ...original, sale: { ...original.sale, id: 'edited-sale', totalCents: 900 } }
+  const next = await preparePaymentOperation(key, 'edited-draft', edited, { sourceLineIds: ['new-line'] })
+  assert.equal(next.state, 'prepared')
+  assert.equal(next.payload.sale.id, 'edited-sale')
+  assert.equal(next.payload.sale.totalCents, 900)
+  assert.notEqual(next.eventId, operation.eventId)
+  assert.deepEqual(next.params.sourceLineIds, ['new-line'])
+  assert.deepEqual(await loadPaymentOperation(key), next)
+  assert.equal((await loadDurableEvents()).length, 0)
+  assert.equal((await rows('durableSales')).length, 0)
+})
+
+for (const evidence of ['reservation', 'request', 'transaction', 'payment_request', 'payment_transaction', 'fiscal', 'result']) {
+  test(`a prepared payment with ${evidence} evidence retains its original identity after editing the ticket`, async () => {
+    const key = await setup()
+    const original = { ...payload, payment: { id: 'payment', amountCents: 600 } }
+    let operation = await preparePaymentOperation(key, 'draft', original)
+    if (evidence === 'reservation') operation = await markRestaurantCheckoutReserved(operation)
+    else {
+      if (evidence === 'request') operation.cashlogyRequestId = 'request'
+      if (evidence === 'transaction') operation.cashlogy = { id: 'transaction' }
+      if (evidence === 'payment_request') operation.payload.payment.cashlogyRequestId = 'request'
+      if (evidence === 'payment_transaction') operation.payload.payment.cashlogyTransactionId = 'transaction'
+      if (evidence === 'fiscal') operation.payload.localFiscal = { recordId: 'record' }
+      if (evidence === 'result') operation.result = { saleId: 'sale' }
+      const db = await openLedger()
+      try {
+        const tx = db.transaction('paymentOperations', 'readwrite')
+        const done = transactionDone(tx)
+        tx.objectStore('paymentOperations').put(operation)
+        await done
+      } finally { db.close() }
+    }
+    await assert.rejects(preparePaymentOperation(key, 'edited-ticket', original), /pendiente/)
+    assert.deepEqual(await loadPaymentOperation(key), operation)
+  })
+}
 test('SQL 55000 and closed cash retain the durable queue; acknowledged retry removes only that event', async () => {
   const key = await setup()
   const operation = await preparePaymentOperation(key, 'draft', payload)
@@ -95,4 +137,40 @@ test('paid draft lines cannot become a second charge after a cache failure or ch
   assert.equal(retry.eventId, operation.eventId)
   const next = await preparePaymentOperation(key, 'new-cart', payload, { sourceLineIds: ['new-line'] })
   assert.notEqual(next.eventId, operation.eventId)
+})
+
+for (const state of ['charging', 'accepted', 'reserved']) test(`a ${state} ticket does not block an unrelated quick sale or table payment`, async () => {
+  const key = await setup()
+  let original = await preparePaymentOperation(key, 'original', payload, { sourceLineIds: ['old-line'] })
+  if (state === 'charging') original = await markPaymentCharging(original)
+  if (state === 'accepted') original = await acceptPaymentOperation(original, payload, { id: 'transaction' })
+  if (state === 'reserved') original = await markRestaurantCheckoutReserved(original)
+  for (const suffix of ['quick-sale:new-sale', 'restaurant:close:other-order']) {
+    const nextPayload = { ...payload, ticket: { ...payload.ticket, id: `ticket-${suffix}` }, sale: { ...payload.sale, id: `sale-${suffix}` } }
+    const next = await preparePaymentOperation(`${key.split('|')[0]}|${suffix}`, suffix, nextPayload, { sourceLineIds: [suffix] })
+    await commitPaymentOperation(await acceptPaymentOperation(next, nextPayload, null), nextPayload, true)
+  }
+  assert.deepEqual(await loadPaymentOperation(key), original)
+  assert.equal((await loadDurableEvents()).length, 2)
+  assert.equal((await loadPaymentOperations(context, 'session')).length, 3)
+  assert.equal((await loadPaymentOperations({ ...context, venueId: 'other' }, 'session')).length, 0)
+  assert.equal((await loadPaymentOperations({ ...context, deviceId: 'other' }, 'session')).length, 0)
+  window.location.pathname = '/crm'
+  assert.equal((await loadPaymentOperations(context, 'session')).length, 0)
+})
+
+for (const state of ['charging', 'accepted', 'committed']) test(`a new quick-sale key cannot charge lines already belonging to a ${state} ticket`, async () => {
+  const key = await setup()
+  let original = await preparePaymentOperation(key, 'original', payload, { sourceLineIds: ['old-line'] })
+  if (state === 'charging') original = await markPaymentCharging(original)
+  else original = await acceptPaymentOperation(original, payload, { id: 'transaction' })
+  if (state === 'committed') {
+    await commitPaymentOperation(original, payload, true)
+    original = await loadPaymentOperation(key)
+  }
+  const retry = await preparePaymentOperation(`${key}:different-key`, 'edited-ticket',
+    { ...payload, ticket: { ...payload.ticket, id: 'new-ticket' }, sale: { ...payload.sale, id: 'new-sale' } },
+    { sourceLineIds: ['old-line', 'new-line'] })
+  assert.deepEqual(retry, original)
+  assert.equal((await loadPaymentOperations(context, 'session')).length, 1)
 })

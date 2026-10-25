@@ -1,7 +1,7 @@
 import { reportOperationError, operationBreadcrumb } from '../../../lib/observability.ts'
 import { getReadableError } from '../../../utils/errors.ts'
 import { useCallback, useEffect, useRef } from 'react'
-import { acceptPaymentOperation, commitPaymentOperation, discardPreparedPaymentOperation, loadPaymentOperation, markPaymentCharging, paymentScope, preparePaymentOperation, withPaymentLock } from '../../../lib/durableSales.ts'
+import { acceptPaymentOperation, commitPaymentOperation, discardPreparedPaymentOperation, loadPaymentOperations, markPaymentCharging, paymentScope, preparePaymentOperation, withPaymentLock } from '../../../lib/durableSales.ts'
 import { loadSessionTicketFromSupabase } from '../../../services/posService'
 import { buildSalePayload } from '../services/salePayload'
 import { loadTicketInvoice } from '../../customers/service'
@@ -53,6 +53,7 @@ export function useQuickSalePayment(options: Options) {
     paymentMethod: PaymentMethod | null,
     receivedCents: number | null,
     confirmedCashlogyTransaction: CashlogyTransaction | null = null,
+    recoveryKey?: string,
   ) => {
     const { context, cashSession, lines } = options
     const fail = (message: string) => {
@@ -82,8 +83,16 @@ export function useQuickSalePayment(options: Options) {
       fail('El cobro recuperado no pertenece a una venta rápida identificable. El cobro se conserva pendiente; no vuelvas a cobrar en la máquina.')
       return
     }
-    const operationKey = `${paymentScope(context, cashSession.id)}|quick-sale`
-    const stored = await loadPaymentOperation(operationKey)
+    const quickSaleKey = `${paymentScope(context, cashSession.id)}|quick-sale`
+    const operations = (await loadPaymentOperations(context, cashSession.id))
+      .filter(operation => operation.key === quickSaleKey || operation.key.startsWith(`${quickSaleKey}:`))
+    const stored = operations.find(operation => {
+      if (recoveryKey) return operation.key === recoveryKey
+      if (confirmedCashlogyTransaction) return operation.payload.sale.id === confirmedCashlogyTransaction.saleId
+      const sourceIds = operation.params?.sourceLineIds
+      return Array.isArray(sourceIds) && lines.some(line => sourceIds.includes(line.id))
+    })
+    if (recoveryKey && !stored) return // A cancelled attempt must never become a new collection.
     const pending = stored && (stored.state === 'accepted' || stored.state === 'charging'
       || confirmedCashlogyTransaction?.saleId === stored.payload.sale.id) ? stored : undefined
     if (pending?.params?.fiscalMode === 'legacy') localFiscalProduction = false
@@ -111,6 +120,9 @@ export function useQuickSalePayment(options: Options) {
       options.invoiceCustomer,
       confirmedCashlogyTransaction?.saleId ? { saleId: confirmedCashlogyTransaction.saleId } : undefined,
     )
+    // Additive keys retain old singleton journals and give every new ticket its
+    // own recovery identity; one unresolved payment cannot occupy the register.
+    const operationKey = stored?.key ?? `${quickSaleKey}:${candidate.sale.id}`
     let operation = pending ?? await preparePaymentOperation(operationKey, fingerprint, candidate, {
       sourceLineIds: lines.map(line => line.id), fiscalMode: localFiscalProduction ? 'verifactu' : 'legacy',
     })
@@ -138,7 +150,7 @@ export function useQuickSalePayment(options: Options) {
     if (localFiscalProduction) {
       try { preparedFiscalInstallation = await preflightPosInvoice(context, cashSession, preview) }
       catch (error) {
-        if (operation.state === 'prepared') await discardPreparedPaymentOperation(operationKey)
+        if (operation.state === 'prepared') await discardPreparedPaymentOperation(operation.key)
         fail(error instanceof Error ? error.message : 'La instalación fiscal no está preparada para emitir.')
         return
       }
@@ -201,11 +213,19 @@ export function useQuickSalePayment(options: Options) {
         options.onError('La venta está guardada. No se pudo actualizar algún dato local; puedes recuperarla desde el histórico. No vuelvas a cobrarla.')
       }
     }
-    updateSecondary('ledger_cache', () => options.persistLedger([...options.ledger.filter(sale => sale.id !== saleRecord.id), saleRecord]))
+    updateSecondary('ledger_cache', () => {
+      const current = latestOptionsRef.current
+      if (!current.context || !current.cashSession || paymentScope(current.context, current.cashSession.id) !== paymentScope(context, cashSession.id)) return
+      const savedLedger = [...current.ledger.filter(sale => sale.id !== saleRecord.id), saleRecord]
+      current.persistLedger(savedLedger)
+      latestOptionsRef.current = { ...current, ledger: savedLedger }
+    })
     updateSecondary('ticket_cache', () => {
-      const savedTickets = [ticketRecord, ...options.tickets]
-      options.persistTickets(savedTickets)
-      latestOptionsRef.current = { ...options, tickets: savedTickets }
+      const current = latestOptionsRef.current
+      if (!current.context || !current.cashSession || paymentScope(current.context, current.cashSession.id) !== paymentScope(context, cashSession.id)) return
+      const savedTickets = [ticketRecord, ...current.tickets.filter(ticket => ticket.id !== ticketRecord.id)]
+      current.persistTickets(savedTickets)
+      latestOptionsRef.current = { ...current, tickets: savedTickets }
     })
     if (sameDraft) {
       updateSecondary('product_stats', () => options.mergeProductStats(lines))
@@ -281,6 +301,7 @@ export function useQuickSalePayment(options: Options) {
     paymentMethod: PaymentMethod | null,
     receivedCents: number | null,
     confirmedCashlogyTransaction: CashlogyTransaction | null = null,
+    recoveryKey?: string,
   ) => {
     if (paymentInFlightRef.current) {
       if (confirmedCashlogyTransaction) throw new Error('El registro del cobro anterior sigue en curso. Espera a que termine antes de aplicarlo de nuevo.')
@@ -290,8 +311,8 @@ export function useQuickSalePayment(options: Options) {
     options.onPaymentInFlightChange?.(true)
     try {
       if (options.context && options.cashSession) {
-        await withPaymentLock(paymentScope(options.context, options.cashSession.id), () => completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction))
-      } else await completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction)
+        await withPaymentLock(paymentScope(options.context, options.cashSession.id), () => completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction, recoveryKey))
+      } else await completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction, recoveryKey)
     } catch (error) {
       reportOperationError(error, { operation: 'sale.payment', step: 'payment_recovery', recoverable: true })
       options.onError(getReadableError(error, { operation: 'sale.payment' }, 'No se pudo completar el registro. Revisa el cobro original antes de repetirlo.'))
@@ -309,9 +330,13 @@ export function useQuickSalePayment(options: Options) {
     const scope = paymentScope(context, cashSession.id)
     if (recoveryScopeRef.current === scope) return
     recoveryScopeRef.current = scope
-    void loadPaymentOperation(`${scope}|quick-sale`).then(operation => {
-      if (recoveryScopeRef.current !== scope || !operation || (operation.state !== 'accepted' && operation.state !== 'charging')) return
-      return pay(operation.payload.payment?.method ?? null, operation.payload.payment?.receivedCents ?? null)
+    void loadPaymentOperations(context, cashSession.id).then(async operations => {
+      for (const operation of operations) {
+        if (recoveryScopeRef.current !== scope) return
+        if ((operation.key !== `${scope}|quick-sale` && !operation.key.startsWith(`${scope}|quick-sale:`))
+          || (operation.state !== 'accepted' && operation.state !== 'charging')) continue
+        await pay(operation.payload.payment?.method ?? null, operation.payload.payment?.receivedCents ?? null, null, operation.key)
+      }
     }).catch(error => {
       reportOperationError(error, { operation: 'sale.payment', step: 'restore_payment', recoverable: true })
       options.onError('No se pudo recuperar el cobro pendiente. Conserva el almacenamiento y reintenta la recuperación antes de volver a cobrar.')

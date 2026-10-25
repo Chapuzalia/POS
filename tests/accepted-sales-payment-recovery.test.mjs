@@ -382,3 +382,42 @@ test('idempotent restaurant RPC preserves scoped parameters and maps equal split
   assert.equal(result.split.nextPartCents, 600)
   assert.equal(result.split.remainingParts, 1)
 })
+
+for (const state of ['charging', 'accepted', 'committed']) test(`applying a ${state} restaurant charge after switching tickets recovers only its original order and replays without another charge`, async () => {
+  setup()
+  const key = `${durable.paymentScope(context, session.id)}|restaurant:close:old-order`
+  const payload = draft()
+  let operation = await durable.preparePaymentOperation(key, 'old-draft', payload, { orderId: 'old-order', method: 'cash', fiscalMode: 'legacy' })
+  operation = await durable.markPaymentCharging(operation)
+  const confirmed = { id: 'confirmed', saleId: payload.sale.id, requestId: operation.cashlogyRequestId, requestedAmountCents: 600, status: 'completed' }
+  if (state !== 'charging') operation = await durable.acceptPaymentOperation(operation, payload, confirmed)
+  const result = { ticketId: payload.ticket.id, saleId: payload.sale.id, paymentId: payload.payment.id, totalCents: 600 }
+  if (state === 'committed') await durable.commitPaymentOperation(operation, payload, false, result)
+  const otherPayload = { ...draft(), sale: { ...draft().sale, id: 'other-sale' }, ticket: { id: 'other-ticket' } }
+  const other = await durable.preparePaymentOperation(`${durable.paymentScope(context, session.id)}|restaurant:close:new-order`, 'other', otherPayload, { orderId: 'new-order' })
+  let rpcCalls = 0
+  const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    './paymentPayload.ts': { withConfirmedRestaurantPayments },
+    './checkout.ts': { prepareRestaurantCheckout: async () => {}, startRestaurantCheckout: async () => {} },
+    '../../../lib/durableSales.ts': durable,
+    '../../local-printing/cashlogy/useCashlogyStore.ts': {
+      isCashlogyPaymentConfigured: () => true, settleCashlogyPaymentIfConfigured: assert.fail,
+      getCashlogyPaymentAmounts: () => ({ receivedCents: 600, changeCents: 0 }),
+    },
+    '../../fiscal/local/tenantMode.ts': { resolveLocalFiscalMode: async () => 'disabled' },
+    '../../fiscal/local/posInvoice.ts': {}, '../../fiscal/local/restaurantInvoice.ts': {},
+    '../../tables/service.ts': { payRestaurantIdempotent: async (_context, eventId, _action, params) => {
+      rpcCalls++
+      assert.equal(eventId, operation.eventId)
+      assert.equal(params.orderId, 'old-order')
+      return result
+    } },
+  }, { JSON })
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const [recovered] = await service.recoverRestaurantPayments(context, session, confirmed)
+    assert.equal(recovered.result.saleId, payload.sale.id)
+    assert.equal((await durable.loadPaymentOperation(key)).eventId, operation.eventId)
+    assert.deepEqual(await durable.loadPaymentOperation(other.key), other)
+  }
+  assert.equal(rpcCalls, state === 'committed' ? 0 : 1)
+})

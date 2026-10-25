@@ -41,16 +41,20 @@ export async function loadPaymentOperation(key: string): Promise<PaymentOperatio
   } finally { db.close() }
 }
 
-export async function loadPendingPaymentOperations(context: TenantContext, cashSessionId: string): Promise<PaymentOperation[]> {
+export async function loadPaymentOperations(context: TenantContext, cashSessionId: string): Promise<PaymentOperation[]> {
   const db = await openLedger()
   try {
     const tx = db.transaction('paymentOperations', 'readonly')
     const done = transactionDone(tx)
     const stored = await request(tx.objectStore('paymentOperations').index('scope').getAll(paymentScope(context, cashSessionId))) as PaymentOperation[]
     await done
-    return stored.filter(operation => operation.state === 'accepted' || operation.state === 'charging'
-      || (operation.state === 'prepared' && operation.checkoutReserved))
+    return stored
   } finally { db.close() }
+}
+
+export async function loadPendingPaymentOperations(context: TenantContext, cashSessionId: string): Promise<PaymentOperation[]> {
+  return (await loadPaymentOperations(context, cashSessionId)).filter(operation => operation.state === 'accepted' || operation.state === 'charging'
+    || (operation.state === 'prepared' && operation.checkoutReserved))
 }
 
 export async function preparePaymentOperation(key: string, fingerprint: string, payload: SaleCreatedPayload, params?: Record<string, unknown>): Promise<PaymentOperation> {
@@ -61,17 +65,35 @@ export async function preparePaymentOperation(key: string, fingerprint: string, 
     const store = tx.objectStore('paymentOperations')
     const scope = key.split('|')[0]
     const operations = await request(store.index('scope').getAll(scope)) as PaymentOperation[]
+    // Pending work belongs to its ticket, not to the entire register. Different
+    // tickets can proceed while their predecessors remain available for recovery.
+    // Preserve duplicate protection when another caller supplies a different key.
+    const sourceIds = params?.sourceLineIds
+    const quickSale = key.startsWith(`${scope}|quick-sale:`) || key === `${scope}|quick-sale`
+    const overlapping = quickSale && Array.isArray(sourceIds) ? operations.find(operation => {
+      const previousIds = operation.params?.sourceLineIds
+      return operation.key !== key
+        && (operation.key.startsWith(`${scope}|quick-sale:`) || operation.key === `${scope}|quick-sale`)
+        && Array.isArray(previousIds) && sourceIds.some(id => previousIds.includes(id))
+    }) : undefined
+    if (overlapping) { await done; return overlapping }
     if (operations.some(operation => operation.key !== key
-      && (operation.state === 'charging' || operation.state === 'accepted' || (operation.state === 'prepared' && operation.checkoutReserved)))) {
+      && (operation.payload.sale.id === payload.sale.id || operation.payload.ticket.id === payload.ticket.id))) {
       tx.abort()
-      throw new Error('Hay otro cobro pendiente de recuperar en esta caja. Finaliza la operación original antes de iniciar otro cobro.')
+      throw new Error('Este ticket ya tiene una operación de cobro. Recupera su resultado original para evitar cobrarlo dos veces.')
     }
     const previous = await request(store.get(key)) as PaymentOperation | undefined
-    if (previous && previous.fingerprint !== fingerprint && previous.state !== 'committed') {
+    // A reload may interrupt preparation before any external side effect. Such a
+    // draft can follow ticket edits; reservations and collection evidence must
+    // retain their original identity even if an older journal says prepared.
+    const replaceablePreparation = previous?.state === 'prepared'
+      && !previous.checkoutReserved && !previous.cashlogyRequestId && !previous.cashlogy
+      && !previous.payload.payment?.cashlogyRequestId && !previous.payload.payment?.cashlogyTransactionId
+      && !previous.payload.localFiscal && !previous.result
+    if (previous && previous.fingerprint !== fingerprint && previous.state !== 'committed' && !replaceablePreparation) {
       tx.abort()
       throw new Error('Hay un cobro pendiente de registrar. Recupera la operación original antes de cambiar el ticket o volver a cobrar.')
     }
-    const sourceIds = params?.sourceLineIds
     const previousIds = previous?.params?.sourceLineIds
     const containsPaidLines = previous?.state === 'committed' && Array.isArray(sourceIds) && Array.isArray(previousIds)
       && sourceIds.some(id => previousIds.includes(id))
