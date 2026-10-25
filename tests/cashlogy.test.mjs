@@ -275,8 +275,7 @@ test('dar cambio Cashlogy empieza a 0 y exige elegir las denominaciones manualme
   assert.doesNotMatch(modal, /suggestCashlogyDenominations/)
   assert.doesNotMatch(modal, /suggestedOperationId/)
   assert.match(selector, /quantities\[option\.valueCents\] \?\? 0/)
-  assert.match(selector, /Elige manualmente la combinación/)
-  assert.match(selector, /Poner todo a 0/)
+  assert.doesNotMatch(selector, /Elige manualmente la combinación|Poner todo a 0|onClear/)
 })
 
 test('el límite de espera detiene consultas sin declarar cancelado un cobro activo', async () => {
@@ -504,7 +503,7 @@ test('los servicios de cobro dividido entregan la identidad Cashlogy a la RPC id
     '../../lib/mixers': { splitLegacyMixerModifiers: () => ({ components: [], mixer: null, mixerProductId: null, modifiers: [] }) },
     '../catalog/services/catalogSnapshots': { normalizeCatalogSnapshot: () => null },
     './service-status': { getOrderPendingUnits: () => 0 },
-    './layout-service': { applySessionLayout: (map) => map },
+    './layout-service': { applyVenueLayout: (map) => map },
     './order-line-payload': { buildCatalogOrderLinesPayload: () => [], buildRestaurantOrderLinesPayload: () => [] },
     './map-elements': { normalizeMapElements: (value) => value },
     '../reservations/domain/reservationAvailability': { getDateRange: () => ({}), localDateKey: () => '2026-09-12' },

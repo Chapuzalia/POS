@@ -1,0 +1,12 @@
+{
+  "coolify_project": "irsdd2liytrh7dttjr5rzj3j",
+  "docker_network": "irsdd2liytrh7dttjr5rzj3j",
+  "db_user": "supabase_admin",
+  "db_name": "postgres",
+  "required_migration": "20261015120000",
+  "supabase_bin": "/usr/bin/supabase",
+  "supabase_version": "2.121.0",
+  "edge_image": "supabase/edge-runtime:v1.76.2",
+  "backup_dir": "/opt/pos-deploy/backups",
+  "log_dir": "/var/log/pos-deploy"
+}

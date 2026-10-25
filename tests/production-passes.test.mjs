@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
+import { groupKdsItemsByPass } from '../src/features/production/kds-queue.ts'
 
 const read = (path) => readFileSync(new URL(path, import.meta.url), 'utf8')
 const migration = read('../supabase/migrations/20260921120100_add_production_passes.sql')
@@ -53,7 +54,7 @@ test('production batch pass fallback aggregates UUIDs through text', () => {
 
 test('POS groups by pass and retains manual partial selection', () => {
   assert.match(panel, /productionPasses/)
-  assert.match(controls, /entry\.unsentQuantity - \(line\?\.servedQuantity \?\? 0\)/)
+  assert.match(controls, /getProductionUnsentQuantity\(entry, line\)/)
   assert.match(controls, /componentId: entry\.componentId/)
   assert.match(controls, /entry\.unsentQuantity > 0/)
 })
@@ -61,9 +62,20 @@ test('POS groups by pass and retains manual partial selection', () => {
 test('POS pass editing is wired and restricted to unsent entries', () => {
   assert.match(productionService, /setOrderLineProductionPass/)
   assert.match(restaurantController, /changeProductionPass/)
-  assert.match(panel, /entry\.sentQuantity === 0/)
+  const actions = readFileSync(new URL('../src/features/tables/components/OrderLineActionsModal.tsx', import.meta.url), 'utf8')
+  assert.match(panel, /onChangePass=\{onChangeProductionPass\}/)
+  assert.match(actions, /entry\.sentQuantity === 0/)
 })
 
 test('KDS displays the persisted pass snapshot', () => {
-  assert.match(kds, /item\.snapshot\.passName/)
+  assert.match(kds, /groupKdsItemsByPass/)
+  const items = [
+    { id: 'one', snapshot: { passName: 'Entrantes' }, passName: 'Actual' },
+    { id: 'two', snapshot: { passName: 'Directo' } },
+    { id: 'three', snapshot: { passName: 'Entrantes' } },
+    { id: 'four', snapshot: {}, passName: 'Postres' },
+  ]
+  const groups = groupKdsItemsByPass(items)
+  assert.deepEqual(groups.map(group => group.name), ['Entrantes', 'Directo', 'Postres'])
+  assert.deepEqual(groups[0].items.map(item => item.id), ['one', 'three'])
 })

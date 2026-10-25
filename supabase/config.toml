@@ -16,3 +16,15 @@ import_map = "./functions/deno.json"
 verify_jwt = false
 import_map = "./functions/deno.json"
 
+[functions.billing]
+# JWT is validated with auth.getUser() and tenant membership/role checks inside.
+verify_jwt = false
+
+[functions.billing-webhook]
+# Only raw-body Stripe HMAC verification authorizes this endpoint.
+verify_jwt = false
+
+[functions.billing-reconcile]
+# Separate scheduler secret validated inside; sandbox only.
+verify_jwt = false
+

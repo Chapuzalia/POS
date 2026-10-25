@@ -10,7 +10,7 @@ type Options = {
 export async function getRestaurantCashClosureError(options: Options) {
   if (!options.context.canCloseCashSession) return 'Este dispositivo no puede cerrar cajas.'
   if (options.tablesEnabled && !options.isOnline) {
-    return 'Con el addon de mesas activo, el cierre de caja requiere conexión para comprobar comandas abiertas.'
+    return 'Con el addon de mesas activo, el cierre de caja requiere conexión para verificar los cobros pendientes.'
   }
   // The close modal offers carryover; the database remains the final close guard.
   return null

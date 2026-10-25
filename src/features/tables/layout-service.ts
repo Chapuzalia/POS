@@ -2,25 +2,31 @@ import { supabase } from '../../lib/supabase'
 import type { TenantContext } from '../../types/domain'
 import { getReadableError } from '../../utils/errors'
 import { compactJoinedCompositions } from './joined-layout'
-import type { RestaurantMap, SessionTableLayout, TableLayoutEntry } from './types'
+import type { RestaurantMap, VenueTableLayout, TableLayoutEntry } from './types'
 
 function client() { if (!supabase) throw new Error('Supabase no está configurado.'); return supabase }
 
-export async function loadSessionTableLayout(_context: TenantContext, cashSessionId: string): Promise<SessionTableLayout> {
-  const { data, error } = await client().rpc('get_cash_session_table_layout', { p_cash_session_id: cashSessionId })
+export async function loadVenueTableLayout(context: TenantContext): Promise<VenueTableLayout> {
+  const { data, error } = await client().rpc('get_venue_table_layout', { p_venue_id: context.venueId })
   if (error) throw error
-  const value = data as SessionTableLayout
-  if (!value || value.cashSessionId !== cashSessionId) throw new Error('No se pudo cargar la distribución temporal de mesas.')
+  const value = data as VenueTableLayout
+  if (!value || value.venueId !== context.venueId) throw new Error('No se pudo cargar la distribución de mesas del local.')
   return value
 }
 
-export async function saveSessionTableLayout(cashSessionId: string, expectedRevision: number, tables: Record<string, TableLayoutEntry>): Promise<SessionTableLayout> {
-  const { data, error } = await client().rpc('save_cash_session_table_layout', { p_cash_session_id: cashSessionId, p_expected_revision: expectedRevision, p_tables: tables })
+export async function saveVenueTableLayout(context: TenantContext, expectedRevision: number, tables: Record<string, TableLayoutEntry>): Promise<VenueTableLayout> {
+  const { data, error } = await client().rpc('save_venue_table_layout', { p_venue_id: context.venueId, p_expected_revision: expectedRevision, p_tables: tables })
   if (error) throw new Error(getReadableError(error, { operation: 'features.tables.layout-service' }))
-  return data as SessionTableLayout
+  return data as VenueTableLayout
 }
 
-export function applySessionLayout(map: RestaurantMap, layout: SessionTableLayout): RestaurantMap {
+export async function restoreVenueTableLayout(context: TenantContext, expectedRevision: number): Promise<VenueTableLayout> {
+  const { data, error } = await client().rpc('restore_venue_table_layout', { p_venue_id: context.venueId, p_expected_revision: expectedRevision })
+  if (error) throw new Error(getReadableError(error, { operation: 'features.tables.layout-service.restore' }))
+  return data as VenueTableLayout
+}
+
+export function applyVenueLayout(map: RestaurantMap, layout: VenueTableLayout): RestaurantMap {
   const groupMembers = new Map<string, string[]>()
   for (const [tableId, entry] of Object.entries(layout.tables)) {
     if (entry.groupId) groupMembers.set(entry.groupId, [...(groupMembers.get(entry.groupId) ?? []), tableId])
@@ -45,10 +51,10 @@ export function layoutFromMap(map: RestaurantMap): Record<string, TableLayoutEnt
   return Object.fromEntries(map.tables.map((table) => [table.id, { positionX: table.positionX, positionY: table.positionY, groupId: table.layoutGroupId ?? null }]))
 }
 
-export function subscribeToSessionTableLayout(context: TenantContext, cashSessionId: string, onChange: (revision: number) => void) {
+export function subscribeToVenueTableLayout(context: TenantContext, onChange: (revision: number) => void) {
   if (!supabase) return () => undefined
-  const channel = supabase.channel(`cash-session-layout:${context.tenantId}:${context.venueId}:${cashSessionId}`)
-    .on('postgres_changes', { event: '*', schema: 'public', table: 'cash_session_table_layouts', filter: `cash_session_id=eq.${cashSessionId}` }, (payload) => {
+  const channel = supabase.channel(`venue-table-layout:${context.tenantId}:${context.venueId}`)
+    .on('postgres_changes', { event: '*', schema: 'public', table: 'venue_table_layouts', filter: `venue_id=eq.${context.venueId}` }, (payload) => {
       const revision = Number((payload.new as { revision?: number } | null)?.revision ?? 0)
       onChange(revision)
     })

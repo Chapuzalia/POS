@@ -202,7 +202,6 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
   const changeDenominationQuantity = useCallback((valueCents: number, quantity: number) => {
     setQuantities((current) => ({ ...current, [valueCents]: quantity }))
   }, [])
-  const clearDenominationSelection = useCallback(() => setQuantities({}), [])
 
   const title = management.intent ? 'Operación Cashlogy' : view === 'withdraw'
     ? 'Retirar efectivo'
@@ -236,7 +235,6 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
           denominationOptions={denominationOptions}
           management={management}
           onCloseResolved={closeResolvedOperation}
-          onClearQuantities={clearDenominationSelection}
           onQuantitiesChange={changeDenominationQuantity}
           quantities={quantities}
           selectedTotalCents={selectedTotalCents}
@@ -347,7 +345,6 @@ type OperationViewProps = {
     | 'isRecordingStackerCollection' | 'stackerCollectionPending' | 'missingIntent'
     | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'cancel' | 'recover' | 'discardMissingIntent'>
   onCloseResolved: () => void
-  onClearQuantities: () => void
   onQuantitiesChange: (valueCents: number, quantity: number) => void
   quantities: Record<number, number>
   selectedTotalCents: number
@@ -392,7 +389,6 @@ function OperationView(props: OperationViewProps) {
       <CashlogyDenominationSelector
         disabled={busy}
         onChange={props.onQuantitiesChange}
-        onClear={props.onClearQuantities}
         options={props.denominationOptions}
         quantities={props.quantities}
         targetCents={acceptedCents}

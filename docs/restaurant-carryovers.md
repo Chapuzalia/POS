@@ -1,5 +1,9 @@
 # Traspaso de pedidos entre turnos
 
+> Documento histórico. Desde `20261024234554_venue_restaurant_operations.sql`, las
+> comandas permanecen abiertas por local y no se traspasan al cerrar caja. El modelo
+> vigente se describe en [Mesas compartidas por local](restaurant-shared-tables.md).
+
 ## Uso
 
 El cierre consulta los pedidos abiertos y los cobros confirmados. Con pedidos abiertos,

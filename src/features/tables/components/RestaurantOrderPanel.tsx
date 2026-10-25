@@ -1,12 +1,9 @@
 import { Check, CheckCheck, Minus, Pencil, Plus, Trash2 } from "lucide-react";
 import {
   useMemo,
-  useRef,
   useState,
-  type MouseEvent,
   type PointerEvent,
 } from "react";
-import { createPortal } from "react-dom";
 import {
   centsToInput,
   formatMoney,
@@ -19,7 +16,6 @@ import {
 import { getLineAdditionNames } from "../../../lib/mixers";
 import type { LineDiscountAllocation } from "../../../lib/discounts";
 import { Button } from "../../../components/ui";
-import { NativeSelect } from "../../../components/ui/NativeSelect";
 import {
   canDecreaseLineQuantity,
   getOrderPendingUnits,
@@ -28,12 +24,19 @@ import {
 import type { CatalogData } from "../../catalog/domain/types";
 import type { RestaurantOrderDetail, RestaurantOrderLine } from "../types";
 import { MenuComponentDetails } from "../../../components/pos/MenuComponentDetails";
+import { MenuOrderCard } from "./MenuOrderCard";
+import { OrderLineActionsModal } from "./OrderLineActionsModal";
+import { isOrderLineActionTarget, useOrderLineLongPress } from "../hooks/useOrderLineLongPress";
+import { isMenuOrderLine } from "../menu-service-model";
 import { InvoiceTicketNotice } from "../../../components/pos/InvoiceTicketNotice";
 import { NumericKeypadModal } from "../../../components/ui/NumericKeypadModal";
 import { ProductionControls } from "../../production/components/ProductionControls";
+import { getOrderLineProductionProgress } from "../../production/order-progress";
 import {
   buildOptimisticProductionEntries,
+  getProductionUnsentQuantity,
   mergeProductionEntries,
+  resolveProductionPass,
 } from "../../production/routing";
 import type {
   OrderProductionState,
@@ -43,13 +46,6 @@ import type {
 
 const swipeDeleteThreshold = 72;
 const swipeMaxOffset = 96;
-
-function isOrderLineActionTarget(target: EventTarget | null) {
-  return (
-    target instanceof Element &&
-    Boolean(target.closest('[data-order-line-action="true"]'))
-  );
-}
 
 type Props = {
   isBusy: boolean;
@@ -65,6 +61,8 @@ type Props = {
   onServeAll: (lineId: string) => void;
   onServeAllOrder: () => void;
   onServeOne: (lineId: string) => void;
+  onServeComponent?: (lineId: string, componentId: string, quantity: number) => void;
+  onSetNote?: (lineId: string, note: string) => Promise<boolean>;
   onSetQuantity: (lineId: string, quantity: number) => void;
   onSetUnitPrice: (lineId: string, unitPriceCents: number) => void;
   productionState?: OrderProductionState | null;
@@ -83,6 +81,7 @@ type OrderValueEditor = {
   kind: "quantity" | "unitPrice";
   lineId: string;
   productName: string;
+  quantityOffset?: number;
 };
 
 function OrderLineRow({
@@ -91,7 +90,7 @@ function OrderLineRow({
   displayServedQuantity,
   isBusy,
   line,
-  onChangeProductionPass,
+  onOpenActions,
   onDecrement,
   onEdit,
   onIncrement,
@@ -100,7 +99,6 @@ function OrderLineRow({
   onRemove,
   onServeAll,
   onServeOne,
-  productionRouting,
   productionState,
   readOnly = false,
 }: Omit<
@@ -116,6 +114,7 @@ function OrderLineRow({
   displayQuantity?: number;
   displayServedQuantity?: number;
   line: RestaurantOrderLine;
+  onOpenActions?: () => void;
   onOpenQuantityEditor: () => void;
   onOpenUnitPriceEditor: () => void;
   readOnly?: boolean;
@@ -129,131 +128,90 @@ function OrderLineRow({
           servedQuantity: displayServedQuantity ?? 0,
         };
   const pending = getPendingQuantity(displayLine);
+  const isMenu = line.catalogSnapshot.productType === 'menu' || line.components.some((component) => component.type === 'menu_component');
   const production = productionState?.lines.find(
     (state) => state.lineId === line.id,
   );
+  const productionEntries = (productionState?.entries ?? []).filter((entry) => entry.lineId === line.id);
+  const productionProgress = getOrderLineProductionProgress(line, productionEntries, production);
+  const productionEnabled = productionState?.effective && productionEntries.some((entry) => entry.hasProductionDestination);
   const additionNames = getLineAdditionNames(line.modifiers, line.mixer);
   const [dragStart, setDragStart] = useState<{ x: number; y: number } | null>(
     null,
   );
   const [offsetX, setOffsetX] = useState(0);
-  const longPressTimer = useRef<number | null>(null);
-  const articleRef = useRef<HTMLElement | null>(null);
-  const [passMenuOpen, setPassMenuOpen] = useState(false);
-  const [passMenuPosition, setPassMenuPosition] = useState({
-    left: 0,
-    top: 0,
-    width: 0,
-  });
   const isDragging = dragStart !== null;
-  const canChangeProductionPass =
-    !readOnly &&
-    Boolean(
-      onChangeProductionPass &&
-      productionRouting &&
-      productionRouting.passes.length > 1 &&
-      productionState?.entries.some(
-        (entry) =>
-          entry.lineId === line.id &&
-          entry.unsentQuantity > 0 &&
-          entry.sentQuantity === 0,
-      ),
-    );
-
-  function openProductionPassEditor() {
-    if (!canChangeProductionPass) return;
-    const bounds = articleRef.current?.getBoundingClientRect();
-    if (bounds)
-      setPassMenuPosition({
-        left: Math.max(
-          8,
-          Math.min(
-            bounds.left + 8,
-            window.innerWidth - Math.min(bounds.width - 16, 520) - 8,
-          ),
-        ),
-        top: Math.min(bounds.top + 48, window.innerHeight - 80),
-        width: Math.min(bounds.width - 16, 520),
-      });
-    setPassMenuOpen((current) => !current);
-  }
-
-  function clearLongPress() {
-    if (longPressTimer.current !== null)
-      window.clearTimeout(longPressTimer.current);
-    longPressTimer.current = null;
-  }
-
-  function handleContextMenu(event: MouseEvent<HTMLElement>) {
-    if (!canChangeProductionPass) return;
-    event.preventDefault();
-    openProductionPassEditor();
-  }
+  const longPress = useOrderLineLongPress(readOnly || isBusy || !onOpenActions, () => onOpenActions?.());
 
   function handlePointerDown(event: PointerEvent<HTMLElement>) {
     if (
       readOnly ||
       isBusy ||
+      event.isPrimary === false ||
       event.button !== 0 ||
       isOrderLineActionTarget(event.target)
     )
       return;
-    clearLongPress();
-    longPressTimer.current = window.setTimeout(openProductionPassEditor, 600);
+    longPress.onPointerDown(event);
     event.currentTarget.setPointerCapture(event.pointerId);
     setDragStart({ x: event.clientX, y: event.clientY });
   }
 
   function handlePointerMove(event: PointerEvent<HTMLElement>) {
+    longPress.onPointerMove(event);
     if (!dragStart) return;
     const deltaX = event.clientX - dragStart.x;
     const deltaY = event.clientY - dragStart.y;
-    if (Math.abs(deltaX) > 8 || Math.abs(deltaY) > 8) clearLongPress();
     if (Math.abs(deltaY) > 16 && Math.abs(deltaY) > Math.abs(deltaX)) return;
     setOffsetX(Math.min(0, Math.max(deltaX, -swipeMaxOffset)));
   }
 
   function endSwipe(event: PointerEvent<HTMLElement>) {
+    const wasHeld = longPress.onPointerUp();
     if (!dragStart) return;
     if (event.currentTarget.hasPointerCapture(event.pointerId)) {
       try {
         event.currentTarget.releasePointerCapture(event.pointerId);
       } catch {}
     }
-    const shouldRemove = offsetX <= -swipeDeleteThreshold && !isBusy;
-    clearLongPress();
+    const shouldRemove = offsetX <= -swipeDeleteThreshold && !isBusy && !wasHeld;
     setDragStart(null);
     setOffsetX(0);
     if (shouldRemove && !readOnly) onRemove(line.id);
   }
 
   return (
-    <div className="touch-pan-y relative rounded-[var(--radius)] bg-[var(--background)]">
-      <div className="absolute inset-y-px right-px flex w-24 items-center justify-center rounded-r-[calc(var(--radius)-1px)] bg-[var(--danger)] text-white">
+    <div className={`touch-pan-y relative ${isMenu ? "rounded-[16px]" : "rounded-[var(--radius)]"} bg-[var(--background)]`}>
+      <div className={`absolute inset-y-px right-px flex w-24 items-center justify-center ${isMenu ? "rounded-r-[15px]" : "rounded-r-[calc(var(--radius)-1px)]"} bg-[var(--danger)] text-white`}>
         <Trash2 aria-hidden="true" className="h-5 w-5" />
       </div>
       <article
-        className={`relative z-[1] overflow-hidden rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-2.5 ${isDragging ? "transition-none" : "transition-transform duration-150 ease-out"}`}
-        onContextMenu={handleContextMenu}
-        onPointerCancel={endSwipe}
+        className={`relative z-[1] select-none [-webkit-touch-callout:none] overflow-hidden ${isMenu ? "rounded-[16px]" : "rounded-[var(--radius)]"} border border-[var(--separator)] bg-[var(--background)] p-2.5 ${isDragging ? "transition-none" : "transition-transform duration-150 ease-out"}`}
+        onClickCapture={longPress.onClickCapture}
+        onContextMenu={longPress.onContextMenu}
+        onKeyDown={longPress.onKeyDown}
+        tabIndex={!readOnly && !isBusy && onOpenActions ? 0 : undefined}
+        onPointerCancel={() => { longPress.onPointerCancel(); setDragStart(null); setOffsetX(0); }}
         onPointerDown={handlePointerDown}
+        onPointerDownCapture={longPress.onPointerDownCapture}
         onPointerMove={handlePointerMove}
         onPointerUp={endSwipe}
-        ref={articleRef}
         style={{ transform: `translateX(${offsetX}px)` }}
       >
-        <div className="flex items-start justify-between gap-2">
+        <div className={isMenu ? "flex flex-col gap-2" : "flex items-start justify-between gap-2"}>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="truncate font-bold">
                 {formatQuantity(displayLine.quantity)}x - {line.productName}
               </p>
               <span
-                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${pending === 0 ? "bg-[var(--success)]/15 text-[var(--success)]" : "bg-[var(--warning)]/15 text-[var(--warning)]"}`}
+                className={`shrink-0 rounded-full px-2 py-0.5 text-[10px] font-black uppercase tracking-wide ${pending === 0 || (productionEnabled && productionProgress.ready > 0) ? "bg-[var(--success)]/15 text-[var(--success)]" : productionEnabled && (productionProgress.preparing > 0 || productionProgress.sent > 0) ? "bg-[var(--accent)]/15 text-[var(--accent)]" : "bg-[var(--warning)]/15 text-[var(--warning)]"}`}
               >
                 {pending === 0
                   ? "Servido"
-                  : pending === displayLine.quantity
+                  : productionEnabled
+                    ? productionProgress.label
+                    : pending === displayLine.quantity
                     ? "Pendiente"
                     : "Parcial"}
               </span>
@@ -264,6 +222,7 @@ function OrderLineRow({
               </p>
             ) : null}
             <MenuComponentDetails compact components={line.components} />
+            {line.note ? <p className="mt-2 whitespace-pre-wrap break-words text-sm font-semibold text-[var(--foreground)]">{line.note}</p> : null}
             {displayQuantity === undefined &&
             pending > 0 &&
             pending < line.quantity ? (
@@ -272,11 +231,14 @@ function OrderLineRow({
                 {formatQuantity(pending)} pendientes
               </p>
             ) : null}
-            {productionState?.effective ? (
+            {productionEnabled && !readOnly ? (
               <p className="mt-1  text-xs font-semibold text-[var(--muted)]">
-                {formatQuantity(production?.unsentQuantity ?? line.quantity)}{" "}
-                sin enviar · {formatQuantity(production?.readyQuantity ?? 0)}{" "}
-                listas
+                {[
+                  productionProgress.unsent > 0 ? `${formatQuantity(productionProgress.unsent)} sin enviar` : null,
+                  productionProgress.sent > 0 ? `${formatQuantity(productionProgress.sent)} ${productionProgress.sent === 1 ? "enviado" : "enviados"}` : null,
+                  productionProgress.preparing > 0 ? `${formatQuantity(productionProgress.preparing)} en preparación` : null,
+                  productionProgress.ready > 0 ? `${formatQuantity(productionProgress.ready)} ${productionProgress.ready === 1 ? "listo" : "listos"} para servir` : null,
+                ].filter(Boolean).join(" · ")}
               </p>
             ) : null}
           </div>
@@ -286,9 +248,7 @@ function OrderLineRow({
           >
             <div className="flex items-center gap-1">
               {!readOnly &&
-              line.components.some(
-                (component) => component.type === "menu_component",
-              ) ? (
+              isMenu ? (
                 <Button
                   aria-label="Editar selección del menú"
                   disabled={isBusy}
@@ -320,7 +280,7 @@ function OrderLineRow({
                   onClick={onOpenQuantityEditor}
                   type="button"
                 >
-                  {formatQuantity(line.quantity)}
+                  {formatQuantity(displayLine.quantity)}
                 </button>
               </span>
               <Button
@@ -372,7 +332,7 @@ function OrderLineRow({
             </strong>
           )}
         </div>
-        {!readOnly && pending > 0 ? (
+        {!readOnly && pending > 0 && !(isMenu && productionState?.effective) ? (
           <div
             className="mt-2 flex items-center justify-end gap-2 border-t border-[var(--separator)] pt-2"
             data-order-line-action="true"
@@ -403,82 +363,6 @@ function OrderLineRow({
           </div>
         ) : null}
       </article>
-      {passMenuOpen && productionRouting
-        ? createPortal(
-            <>
-              <button
-                aria-label="Cerrar selector de pase"
-                className="fixed inset-0 z-40 cursor-default"
-                onClick={() => setPassMenuOpen(false)}
-                type="button"
-              />
-              <div
-                className="fixed z-50 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-3 shadow-[var(--shadow)]"
-                data-order-line-action="true"
-                style={{
-                  left: passMenuPosition.left,
-                  top: passMenuPosition.top,
-                  width: passMenuPosition.width,
-                }}
-              >
-                <div className="mb-2 flex items-center justify-between gap-2">
-                  <strong className="text-sm">Cambiar pase</strong>
-                  <button
-                    aria-label="Cerrar selector de pase"
-                    className="text-xs font-bold text-[var(--muted)]"
-                    onClick={() => setPassMenuOpen(false)}
-                    type="button"
-                  >
-                    Cerrar
-                  </button>
-                </div>
-                <div className="space-y-2">
-                  {productionState?.entries
-                    .filter(
-                      (entry) =>
-                        entry.lineId === line.id &&
-                        entry.unsentQuantity > 0 &&
-                        entry.sentQuantity === 0,
-                    )
-                    .map((entry) => (
-                      <label
-                        className="block space-y-1"
-                        key={`${entry.lineId}:${entry.componentId ?? ""}`}
-                      >
-                        <span className="block truncate text-xs font-bold text-[var(--muted)]">
-                          {entry.productName}
-                          {entry.parentProductName
-                            ? ` · ${entry.parentProductName}`
-                            : ""}
-                        </span>
-                        <NativeSelect
-                          aria-label={`Pase de ${entry.productName}`}
-                          disabled={isBusy}
-                          onChange={(event) => {
-                            if (event.target.value !== entry.passId)
-                              onChangeProductionPass?.({
-                                lineId: entry.lineId,
-                                componentId: entry.componentId,
-                                passId: event.target.value,
-                              });
-                          }}
-                          triggerClassName="min-h-10"
-                          value={entry.passId}
-                        >
-                          {productionRouting.passes.map((pass) => (
-                            <option key={pass.id} value={pass.id}>
-                              {pass.name}
-                            </option>
-                          ))}
-                        </NativeSelect>
-                      </label>
-                    ))}
-                </div>
-              </div>
-            </>,
-            document.body,
-          )
-        : null}
     </div>
   );
 }
@@ -496,40 +380,41 @@ export function RestaurantOrderPanel(props: Props) {
     onChangeProductionPass,
     onSetQuantity,
     onSetUnitPrice,
+    onSetNote,
+    onServeComponent,
     productionState,
     productionRouting,
     catalog,
     ...lineProps
   } = props;
+  const [lineActions, setLineActions] = useState<{ lineId: string; mode: 'actions' | 'note' } | null>(null);
+  const actionLine = order.lines.find((line) => line.id === lineActions?.lineId);
   const [valueEditor, setValueEditor] = useState<OrderValueEditor | null>(null);
   const [valueEditorError, setValueEditorError] = useState<string | null>(null);
   const pendingLines = order.lines.filter(
     (line) => getPendingQuantity(line) > 0,
   );
-  const servedLines = order.lines.filter(
-    (line) => getPendingQuantity(line) === 0,
-  );
   const productionEntries = useMemo(() => {
-    const persistedLineIds = new Set(
-      productionState?.lines.map((line) => line.lineId) ?? [],
-    );
-    const localLines = order.lines.filter(
-      (line) => !persistedLineIds.has(line.id),
-    );
+    const currentLines = new Map(order.lines.map((line) => [line.id, line]));
     return mergeProductionEntries(
-      productionState?.entries ?? [],
+      (productionState?.entries ?? []).filter((entry) => {
+        const line = currentLines.get(entry.lineId);
+        return line && (entry.componentId ? line.components.some((component) => component.id === entry.componentId) : line.components.length === 0 && line.catalogSnapshot.productType !== 'menu');
+      }),
       buildOptimisticProductionEntries(
-        localLines,
+        order.lines,
         catalog ?? null,
         productionRouting,
       ),
-    );
+    ).map((entry) => ({
+      ...entry,
+      unsentQuantity: getProductionUnsentQuantity(entry, order.lines.find((line) => line.id === entry.lineId)),
+    }));
   }, [
     catalog,
     order.lines,
     productionRouting,
     productionState?.entries,
-    productionState?.lines,
   ]);
   const productionPasses = useMemo(() => {
     const grouped = new Map<
@@ -566,6 +451,24 @@ export function RestaurantOrderPanel(props: Props) {
     return grouped;
   }, [productionEntries]);
   const pendingUnits = getOrderPendingUnits(order.lines);
+  const menuLines = order.lines.filter(isMenuOrderLine);
+  const menuIds = new Set(menuLines.map((line) => line.id));
+  const servicePasses = new Map<string, { id: string; name: string; sortOrder: number; lines: RestaurantOrderLine[] }>();
+  for (const line of pendingLines) {
+    if (menuIds.has(line.id)) continue;
+    const entries = productionEntriesByLine.get(line.id) ?? [];
+    const entry = entries.find((candidate) => candidate.componentId === null) ?? entries[0];
+    const pass = entry?.passId
+      ? { id: entry.passId, name: entry.passName, sortOrder: entry.passSortOrder }
+      : resolveProductionPass(productionRouting, line.productId, line.catalogSnapshot.categoryId)
+        ?? { id: 'direct-service', name: 'Directo', sortOrder: 0 };
+    const group = servicePasses.get(pass.id);
+    if (group) group.lines.push(line);
+    else servicePasses.set(pass.id, { ...pass, lines: [line] });
+  }
+  const orderedServicePasses = [...servicePasses.values()].sort((left, right) => left.sortOrder - right.sortOrder || left.name.localeCompare(right.name));
+  const completedStandardLines = order.lines.filter((line) => !menuIds.has(line.id) && line.servedQuantity > 0);
+  const completedStandardUnits = completedStandardLines.reduce((sum, line) => sum + line.servedQuantity, 0);
 
   function closeValueEditor() {
     setValueEditor(null);
@@ -576,6 +479,7 @@ export function RestaurantOrderPanel(props: Props) {
     if (!valueEditor) return;
     if (valueEditor.kind === "quantity") {
       const quantity = parseQuantity(value);
+      const totalQuantity = Math.round((quantity + (valueEditor.quantityOffset ?? 0)) * 1000) / 1000;
       const line = order.lines.find(
         (candidate) => candidate.id === valueEditor.lineId,
       );
@@ -585,26 +489,27 @@ export function RestaurantOrderPanel(props: Props) {
         );
         return;
       }
-      if (line && quantity < line.servedQuantity) {
+      if (line && totalQuantity < line.servedQuantity) {
         setValueEditorError(
           `La cantidad no puede ser inferior a las ${line.servedQuantity} unidades servidas.`,
         );
         return;
       }
-      onSetQuantity(valueEditor.lineId, quantity);
+      onSetQuantity(valueEditor.lineId, totalQuantity);
     } else {
       onSetUnitPrice(valueEditor.lineId, parseMoneyToCents(value));
     }
     closeValueEditor();
   }
 
-  const openQuantityEditor = (line: RestaurantOrderLine) => {
+  const openQuantityEditor = (line: RestaurantOrderLine, displayQuantity = line.quantity) => {
     setValueEditorError(null);
     setValueEditor({
-      initialValue: formatQuantity(line.quantity),
+      initialValue: formatQuantity(displayQuantity),
       kind: "quantity",
       lineId: line.id,
       productName: line.productName,
+      quantityOffset: line.quantity - displayQuantity,
     });
   };
 
@@ -632,18 +537,25 @@ export function RestaurantOrderPanel(props: Props) {
       isBusy={isBusy}
       key={`${line.id}:${displayQuantity ?? "full"}`}
       line={line}
-      onChangeProductionPass={onChangeProductionPass}
-      onOpenQuantityEditor={() => openQuantityEditor(line)}
+      onOpenActions={onSetNote || onChangeProductionPass ? () => setLineActions({ lineId: line.id, mode: 'actions' }) : undefined}
+      onOpenQuantityEditor={() => openQuantityEditor(line, displayQuantity)}
       onOpenUnitPriceEditor={() => openUnitPriceEditor(line)}
       productionRouting={productionRouting}
-      productionState={productionState}
+      productionState={productionState ? { ...productionState, entries: productionEntries } : productionState}
       readOnly={readOnly}
     />
   );
+  const renderMenu = (line: RestaurantOrderLine, index: number) => <MenuOrderCard key={line.id} line={line} number={index + 1} entries={productionEntriesByLine.get(line.id) ?? []}
+    catalog={catalog} routing={productionRouting} productionEnabled={Boolean(productionState?.effective)} disabled={isBusy} discount={lineDiscounts[line.id]}
+    onOpenActions={onSetNote || onChangeProductionPass ? () => setLineActions({ lineId: line.id, mode: 'actions' }) : undefined}
+    onComment={onSetNote ? () => setLineActions({ lineId: line.id, mode: 'note' }) : undefined}
+    onEdit={lineProps.onEdit} onIncrement={lineProps.onIncrement} onDecrement={lineProps.onDecrement} onRemove={lineProps.onRemove}
+    onOpenQuantity={() => openQuantityEditor(line)} onOpenPrice={() => openUnitPriceEditor(line)}
+    onSend={onSendToProduction} onServe={onServeComponent} onChangePass={onChangeProductionPass} />;
 
   return (
     <>
-      <section className="flex min-h-0 flex-1 flex-col rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
+      <section className="flex min-h-0 flex-1 flex-col rounded-[16px] border border-[var(--separator)] bg-[var(--surface)] shadow-[var(--shadow)]">
         {invoiceCustomerName &&
         onChangeInvoiceCustomer &&
         onRemoveInvoiceCustomer ? (
@@ -660,52 +572,20 @@ export function RestaurantOrderPanel(props: Props) {
               Pulsa un producto para añadirlo a la comanda.
             </div>
           ) : null}
-          {(!productionState?.effective || productionPasses.length === 0) &&
-          pendingLines.length ? (
-            <section>
-              <h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--warning)]">
-                Pendientes · {formatQuantity(pendingUnits)}
-              </h2>
-              <div className="space-y-1.5">
-                {pendingLines.map((line) =>
-                  renderLine(line, getPendingQuantity(line)),
-                )}
-              </div>
-            </section>
-          ) : null}
-          {productionState?.effective
-            ? productionPasses.map((pass) => {
-                const unsentEntries = pass.entries
-                  .map((entry) => {
-                    const line = order.lines.find(
-                      (candidate) => candidate.id === entry.lineId,
-                    );
-                    return {
-                      ...entry,
-                      unsentQuantity: Math.max(
-                        0,
-                        entry.unsentQuantity - (line?.servedQuantity ?? 0),
-                      ),
-                    };
-                  })
-                  .filter((entry) => entry.unsentQuantity > 0);
-                const unsent = unsentEntries.reduce(
-                  (sum, entry) => sum + entry.unsentQuantity,
-                  0,
-                );
-                const selection = unsentEntries.map((entry) => ({
-                  lineId: entry.lineId,
-                  componentId: entry.componentId,
-                  quantity: entry.unsentQuantity,
-                  passId: pass.id,
-                  passName: pass.name,
-                }));
-                const lines = pendingLines.filter((line) =>
-                  (productionEntriesByLine.get(line.id) ?? []).some(
-                    (entry) => entry.passId === pass.id,
-                  ),
-                );
-                if (lines.length === 0) return null;
+          {productionState?.effective && onSendToProduction && productionPasses.some((pass) => pass.entries.some((entry) => entry.unsentQuantity > 0)) ? <div className="flex flex-wrap gap-2">
+            {productionPasses.map((pass) => {
+              const unsentEntries = pass.entries.filter((entry) => entry.unsentQuantity > 0);
+              const unsent = unsentEntries.reduce((sum, entry) => sum + entry.unsentQuantity, 0);
+              return unsent > 0 ? <Button className="!min-h-11 !rounded-[10px] !px-3 text-sm font-bold" disabled={isBusy} key={pass.id}
+                onClick={() => onSendToProduction(unsentEntries.map((entry) => ({ lineId: entry.lineId, componentId: entry.componentId, quantity: entry.unsentQuantity, passId: pass.id, passName: pass.name })))}
+                size="sm" type="button" variant="secondary">Enviar {pass.name} · {formatQuantity(unsent)}</Button> : null;
+            })}
+          </div> : null}
+          {menuLines.map((line, index) => getPendingQuantity(line) > 0 ? renderMenu(line, index) : null)}
+          {orderedServicePasses.map((pass) => {
+                const lineIds = new Set(pass.lines.map((line) => line.id));
+                const unsent = productionState?.effective ? productionEntries.reduce((sum, entry) =>
+                  entry.passId === pass.id && entry.hasProductionDestination && lineIds.has(entry.lineId) ? sum + entry.unsentQuantity : sum, 0) : 0;
                 return (
                   <section key={pass.id}>
                     <div className="mb-1.5 flex items-center justify-between gap-2">
@@ -715,45 +595,21 @@ export function RestaurantOrderPanel(props: Props) {
                           ? ` · ${formatQuantity(unsent)} nuevos`
                           : ""}
                       </h2>
-                      {unsent > 0 && onSendToProduction ? (
-                        <Button
-                          disabled={isBusy}
-                          onClick={() => onSendToProduction(selection)}
-                          size="sm"
-                          type="button"
-                          variant="primary"
-                        >
-                          Enviar {pass.name} · {formatQuantity(unsent)}
-                        </Button>
-                      ) : null}
                     </div>
                     <div className="space-y-1.5">
-                      {lines.map((line) =>
+                      {pass.lines.map((line) =>
                         renderLine(line, getPendingQuantity(line)),
                       )}
                     </div>
                   </section>
                 );
-              })
-            : null}
-          {servedLines.length ||
-          order.lines.some(
-            (line) =>
-              line.servedQuantity > 0 && line.servedQuantity < line.quantity,
-          ) ? (
-            <section>
-              <h2 className="mb-1.5 text-xs font-black uppercase tracking-wide text-[var(--muted)]">
-                Completados ·{" "}
-                {formatQuantity(
-                  order.lines.reduce(
-                    (sum, line) => sum + line.servedQuantity,
-                    0,
-                  ),
-                )}
-              </h2>
+              })}
+          {menuLines.map((line, index) => getPendingQuantity(line) === 0 ? renderMenu(line, index) : null)}
+          {completedStandardLines.length ? (
+            <details>
+              <summary className="min-h-11 cursor-pointer py-3 text-xs font-bold text-[var(--muted)]">Completados · {formatQuantity(completedStandardUnits)}</summary>
               <div className="space-y-1.5">
-                {order.lines
-                  .filter((line) => line.servedQuantity > 0)
+                {completedStandardLines
                   .map((line) =>
                     renderLine(
                       line,
@@ -763,7 +619,7 @@ export function RestaurantOrderPanel(props: Props) {
                     ),
                   )}
               </div>
-            </section>
+            </details>
           ) : null}
         </div>
         <div className="space-y-2 border-t border-[var(--separator)] p-3">
@@ -777,7 +633,10 @@ export function RestaurantOrderPanel(props: Props) {
               {warning.message}
             </p>
           ))}
-          {productionState && onSendToProduction ? (
+          {pendingUnits > 0 ? <details>
+            <summary className="min-h-11 cursor-pointer py-3 text-center text-sm font-semibold text-[var(--muted)]">Más acciones</summary>
+            <div className="space-y-2">
+          {productionState?.effective && onSendToProduction ? (
             <ProductionControls
               disabled={isBusy}
               onSend={onSendToProduction}
@@ -785,25 +644,29 @@ export function RestaurantOrderPanel(props: Props) {
               state={productionState}
             />
           ) : null}
-          {pendingUnits > 0 ? (
             <Button
               disabled={isBusy}
               fullWidth
               onClick={onServeAllOrder}
               size="md"
               type="button"
-              variant="primary"
+              variant="secondary"
             >
               <CheckCheck className="h-4 w-4" /> Servir toda la comanda ·{" "}
               {formatQuantity(pendingUnits)}
             </Button>
-          ) : order.lines.length ? (
+            </div>
+          </details> : order.lines.length ? (
             <p className="text-center text-sm font-bold text-[var(--success)]">
               Comanda completada
             </p>
           ) : null}
         </div>
       </section>
+      {actionLine && lineActions ? <OrderLineActionsModal key={`${actionLine.id}:${lineActions.mode}`} line={actionLine}
+        label={isMenuOrderLine(actionLine) ? `${actionLine.productName} · ${menuLines.findIndex((line) => line.id === actionLine.id) + 1}` : actionLine.productName}
+        entries={productionEntriesByLine.get(actionLine.id) ?? []} routing={productionRouting} disabled={isBusy}
+        initialMode={lineActions.mode} onClose={() => setLineActions(null)} onSetNote={onSetNote} onChangePass={onChangeProductionPass} /> : null}
       {valueEditor ? (
         <NumericKeypadModal
           allowDecimal

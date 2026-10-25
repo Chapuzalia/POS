@@ -32,6 +32,10 @@ const supportedAppVersions = [...new Set([
 
 // https://vite.dev/config/
 export default defineConfig({
+  server: {
+    host: '0.0.0.0',
+    allowedHosts: ['gerard'],
+  },
   optimizeDeps: {
     exclude: ['@jsquash/webp'],
   },

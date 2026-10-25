@@ -6,6 +6,7 @@ import {
   Check,
   Pencil,
   Plus,
+  RotateCcw,
   Save,
   ShoppingBag,
   Trash2,
@@ -52,7 +53,7 @@ import type {
   RestaurantMap,
   RestaurantTableMapItem,
   RestaurantTableShape,
-  SessionTableLayout,
+  VenueTableLayout,
   TableLayoutEntry,
 } from "../types";
 import {
@@ -74,7 +75,6 @@ import { ReservationTableBadge } from "../../reservations/components/Reservation
 type Props = {
   canOpen: boolean;
   canQuickSale: boolean;
-  cashSessionId: string;
   isBusy: boolean;
   isOnline: boolean;
   map: RestaurantMap;
@@ -83,7 +83,8 @@ type Props = {
   onLayoutChange: (
     tables: Record<string, TableLayoutEntry>,
     expectedRevision: number,
-  ) => Promise<SessionTableLayout>;
+  ) => Promise<VenueTableLayout>;
+  onLayoutRestore: (expectedRevision: number) => Promise<VenueTableLayout>;
   onError: (message: string) => void;
   onMove: (tableId: string) => Promise<void>;
   onSaveQuickSale: (tableId: string) => Promise<void>;
@@ -175,6 +176,7 @@ export function TableMapView(props: Props) {
     onCreateVirtual,
     onDeleteVirtual,
     onLayoutChange,
+    onLayoutRestore,
     onMove,
     onSaveQuickSale,
     onOpen,
@@ -556,6 +558,35 @@ export function TableMapView(props: Props) {
     setDisplayTables(proposal ? moved : aligned);
   }
 
+  const hasJoinedTables = displayTables.some((table) => Boolean(table.layoutGroupId)
+    || (table.layoutGroupTableIds?.length ?? 0) > 1 || table.groupTableIds.length > 1);
+  const restoreDisabled = !isOnline || isBusy || savingLayout || tableSelectionMode || hasJoinedTables;
+  const restoreTitle = hasJoinedTables
+    ? "Separa todas las mesas juntadas para recuperar el mapa inicial"
+    : "Recuperar mapa inicial";
+
+  function applySavedLayout(saved: VenueTableLayout) {
+    latestRevisionRef.current = saved.revision;
+    setDisplayTables((current) => withGroupMembership(current.map((table) => {
+      const entry = saved.tables[table.id];
+      return entry ? { ...table, positionX: entry.positionX, positionY: entry.positionY, layoutGroupId: entry.groupId } : table;
+    })));
+  }
+
+  async function restoreInitialLayout() {
+    if (!editMode || restoreDisabled || dragRef.current) return;
+    setSavingLayout(true);
+    setSelectedTableId(null);
+    setGroupMenu(null);
+    try {
+      applySavedLayout(await onLayoutRestore(latestRevisionRef.current));
+    } catch (error) {
+      onError(getReadableError(error, { operation: 'features.tables.components.TableMapView.restore' }));
+    } finally {
+      setSavingLayout(false);
+    }
+  }
+
   async function persistTables(nextTables: RestaurantTableMapItem[]) {
     const nextMap = { ...map, tables: nextTables };
     setDisplayTables(nextTables);
@@ -565,22 +596,7 @@ export function TableMapView(props: Props) {
         layoutFromMap(nextMap),
         latestRevisionRef.current,
       );
-      latestRevisionRef.current = saved.revision;
-      setDisplayTables((current) =>
-        withGroupMembership(
-          current.map((table) => {
-            const entry = saved.tables[table.id];
-            return entry
-              ? {
-                  ...table,
-                  positionX: entry.positionX,
-                  positionY: entry.positionY,
-                  layoutGroupId: entry.groupId,
-                }
-              : table;
-          }),
-        ),
-      );
+      applySavedLayout(saved);
     } catch (error) {
       setDisplayTables(map.tables);
       onError(getReadableError(error, { operation: 'features.tables.components.TableMapView' }));
@@ -847,6 +863,15 @@ export function TableMapView(props: Props) {
             {editMode ? <Check size={18} /> : <Pencil size={18} />}
             {editMode ? "Finalizar edición" : "Editar mesas"}
           </UiButton>
+          {editMode ? <UiButton
+            className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] px-4 font-extrabold text-[var(--foreground)] disabled:opacity-45"
+            disabled={restoreDisabled}
+            onClick={() => void restoreInitialLayout()}
+            title={restoreTitle}
+            type="button"
+          >
+            <RotateCcw size={18} /> Recuperar mapa inicial
+          </UiButton> : null}
           {canQuickSale ? (
             <UiButton
               className="inline-flex min-h-11 items-center justify-center gap-2 rounded-[var(--radius)] border border-[var(--accent)] bg-[var(--accent)] px-4 font-extrabold text-[var(--accent-foreground)] disabled:opacity-45"
@@ -913,6 +938,9 @@ export function TableMapView(props: Props) {
               onAreaChange(areaId);
             }}
             onEditToggle={toggleEditMode}
+            restoreDisabled={restoreDisabled}
+            restoreTitle={restoreTitle}
+            onRestoreLayout={() => void restoreInitialLayout()}
             onCreateVirtual={openVirtualTableModal}
             onQuickSale={() => onQuickSale(activeAreaId)}
           />
@@ -1172,8 +1200,8 @@ export function TableMapView(props: Props) {
             <h2>Eliminar {selectedTable.name}</h2>
             <p>
               {selectedTable.status === "occupied"
-                ? "La comanda sin cobrar se cancelará y la mesa temporal desaparecerá del turno."
-                : "La mesa temporal desaparecerá del turno."}
+                ? "La comanda sin cobrar se cancelará y la mesa temporal desaparecerá del local."
+                : "La mesa temporal desaparecerá del local."}
             </p>
             <div>
               <UiButton

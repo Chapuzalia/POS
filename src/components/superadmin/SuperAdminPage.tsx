@@ -6,7 +6,7 @@ import { Checkbox as UiCheckbox } from '../ui/Checkbox'
 import { AppModal } from '../ui/AppModal'
 import { DataTable } from '../ui/DataTable'
 import { Building2, Check, ChevronRight, Crown, Eye, LockKeyhole, LogOut, Menu, Pencil, Plus, Power, RefreshCw, Store, Trash2, UserRound, X } from 'lucide-react'
-import { useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
   createPlatformTenant,
   deletePlatformTenant,
@@ -22,6 +22,8 @@ import { getReadableError } from '../../utils/errors'
 import { tenantAddonCatalog, updateTenantAddons } from '../../features/platform/tenantFeatureAccess'
 import { loadPlatformVerifactuIntegrations, type VerifactuIntegration } from '../../features/fiscal/local/integration'
 import { VerifactuConfiguration } from './VerifactuConfiguration'
+
+const BillingAdmin = lazy(() => import('../../features/billing/BillingAdmin'))
 
 type SuperAdminPageProps = {
   context: TenantContext
@@ -80,6 +82,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [verifactuIntegrations, setVerifactuIntegrations] = useState<VerifactuIntegration[]>([])
   const [platformFeatures, setPlatformFeatures] = useState<PlatformFeature[]>([])
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
+  const [section, setSection] = useState<'tenants' | 'billing'>('tenants')
   const [tenantModal, setTenantModal] = useState<TenantModalState>(null)
   const [isBusy, setIsBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
@@ -268,14 +271,15 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
         <nav aria-label="Navegación del Superadmin" className="!mt-[30px] !flex !flex-col !gap-[5px]">
           <p className="!mx-0 !mt-0 !mb-[7px] !ml-[3px] !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Menú principal</p>
           <UiButton
-            aria-current="page"
+            aria-current={section === 'tenants' ? 'page' : undefined}
             className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none"
-            onClick={() => setIsSidebarOpen(false)}
+            onClick={() => { setSection('tenants'); setIsSidebarOpen(false) }}
             type="button"
           >
             <Building2 className="h-4 w-4" />
             <span>Negocios</span>
           </UiButton>
+          <UiButton aria-current={section === 'billing' ? 'page' : undefined} className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none" onClick={() => { setSection('billing'); setIsSidebarOpen(false) }} type="button"><Crown className="h-4 w-4" /><span>Facturación</span></UiButton>
         </nav>
 
         <div className="!mt-auto !grid !gap-[5px] !border-0 !pt-7">
@@ -304,9 +308,9 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
               <Crown className="size-3.5" />
               <span>Plataforma</span>
               <ChevronRight className="size-3.5" />
-              <span>Negocios</span>
+              <span>{section === 'billing' ? 'Facturación' : 'Negocios'}</span>
             </div>
-            <h1 className="!mt-0 !min-h-0 !overflow-hidden !text-[17px] !leading-tight !font-bold !tracking-[-0.025em] !text-ellipsis !whitespace-nowrap !text-[var(--crm-text)] md:!mt-1 md:!text-xl">Gestión global de negocios</h1>
+            <h1 className="!mt-0 !min-h-0 !overflow-hidden !text-[17px] !leading-tight !font-bold !tracking-[-0.025em] !text-ellipsis !whitespace-nowrap !text-[var(--crm-text)] md:!mt-1 md:!text-xl">{section === 'billing' ? 'Facturación de suscripciones' : 'Gestión global de negocios'}</h1>
           </div>
 
           <div className="!flex !w-auto !min-w-0 !items-center !justify-end !gap-2.5 !overflow-visible">
@@ -326,6 +330,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
         {!isOnline ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">La administración global requiere conexión.</div> : null}
 
         <main className="!mx-auto !min-h-0 !w-full !max-w-[1720px] !flex-1 !overflow-auto !px-4 !pt-[26px] !pb-7 md:!px-7 md:!pt-[42px] md:!pb-9">
+          {section === 'billing' ? <Suspense fallback={<p>Cargando facturación…</p>}><BillingAdmin disabled={!isOnline} /></Suspense> : <>
           {pendingVerifactu.length ? <div role="status" className="!mb-4 !grid !gap-2 !rounded-[12px] !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !text-[var(--crm-yellow)]">
             <strong>{pendingVerifactu.length} solicitudes de Verifactu pendientes</strong>
             <div className="!flex !flex-wrap !gap-2">{pendingVerifactu.map(integration => {
@@ -368,6 +373,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
               </tbody>
             </DataTable> : !isBusy ? <div className="!grid !min-h-[260px] !place-items-center !content-center !gap-2 !text-[13px] !font-medium !text-[var(--crm-text-muted)]"><Store className="h-6 w-6" /><span>Todavía no hay negocios.</span></div> : null}
           </section>
+          </>}
         </main>
       </section>
 

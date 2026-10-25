@@ -102,7 +102,7 @@ export function CrmSectionContent({
     case 'modifiers':
       return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
     case 'access':
-      return <AccessManagementCrm disabled={disabled} runAction={runAction} tenantContext={context} />
+      return <AccessManagementCrm disabled={disabled} key={`${context.tenantId}:${selectedVenueId}`} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} venues={venues} />
     case 'discounts':
       return <DiscountsCrm disabled={disabled} onCatalogChanged={onCatalogChanged} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'import':

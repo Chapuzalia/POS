@@ -1,5 +1,5 @@
 import { Dropdown, Label } from '@heroui/react'
-import { Check, ChevronDown, Pencil, Plus, ShoppingBag } from 'lucide-react'
+import { Check, ChevronDown, Pencil, Plus, RotateCcw, ShoppingBag } from 'lucide-react'
 
 import { Button as UiButton } from '../../../components/ui/Button'
 import type { DiningArea } from '../types'
@@ -13,6 +13,9 @@ type Props = {
   editMode: boolean
   onAreaChange: (areaId: string) => void
   onEditToggle: () => void
+  restoreDisabled: boolean
+  restoreTitle: string
+  onRestoreLayout: () => void
   onCreateVirtual: () => void
   onQuickSale: () => void
 }
@@ -26,6 +29,9 @@ export function MobileTableMapChrome({
   editMode,
   onAreaChange,
   onEditToggle,
+  restoreDisabled,
+  restoreTitle,
+  onRestoreLayout,
   onCreateVirtual,
   onQuickSale,
 }: Props) {
@@ -95,6 +101,16 @@ export function MobileTableMapChrome({
           >
             {editMode ? <Check className="size-[18px]" /> : <Pencil className="size-[18px]" />}
           </UiButton>
+          {editMode ? <UiButton
+            aria-label="Recuperar mapa inicial"
+            className="inline-flex size-11 min-h-11 min-w-11 items-center justify-center rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] disabled:opacity-45"
+            disabled={restoreDisabled}
+            onClick={onRestoreLayout}
+            title={restoreTitle}
+            type="button"
+          >
+            <RotateCcw className="size-[18px]" />
+          </UiButton> : null}
         </div>
 
         {editMode ? (

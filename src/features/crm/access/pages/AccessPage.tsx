@@ -21,6 +21,7 @@ import {
   type SetStateAction,
   useCallback,
   useEffect,
+  useRef,
   useState,
 } from "react";
 import { sileo } from "sileo";
@@ -52,7 +53,9 @@ import {
 export type AccessManagementCrmProps = {
   disabled: boolean;
   runAction: RunAction;
+  selectedVenueId: string;
   tenantContext: TenantContext;
+  venues: CrmVenue[];
 };
 
 const modeOptions = [
@@ -74,17 +77,17 @@ const roleOptions = [
 export function AccessManagementCrm({
   disabled,
   runAction,
+  selectedVenueId,
   tenantContext,
+  venues,
 }: AccessManagementCrmProps) {
   const modalBusy = useCrmModalBusy(disabled)
 
   const [data, setData] = useState<CrmAccessData>({
     devices: [],
     users: [],
-    venues: [],
   });
   const [deviceName, setDeviceName] = useState("");
-  const [deviceVenueId, setDeviceVenueId] = useState("");
   const [deviceMode, setDeviceMode] = useState<DeviceMode>("checkout");
   const [generatedCredentials, setGeneratedCredentials] = useState<{
     email: string;
@@ -105,25 +108,25 @@ export function AccessManagementCrm({
     string[]
   >([]);
 
+  const requestId = useRef(0);
   const refresh = useCallback(async () => {
-    setData(await loadCrmAccessData(tenantContext));
-  }, [tenantContext]);
+    const currentRequest = ++requestId.current;
+    const nextData = await loadCrmAccessData(tenantContext, selectedVenueId);
+    if (currentRequest === requestId.current) setData(nextData);
+  }, [tenantContext, selectedVenueId]);
 
   useEffect(() => {
     void runAction(refresh);
+    return () => { requestId.current += 1; };
   }, [refresh, runAction]);
-
-  useEffect(() => {
-    if (!deviceVenueId && data.venues.length)
-      setDeviceVenueId(data.venues[0].id);
-  }, [data.venues, deviceVenueId]);
 
   async function submitDevice(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
+    if (!venues.some((venue) => venue.id === selectedVenueId && venue.isActive)) return;
     await runAction(async () => {
       const credentials = await createCrmDevice(
         tenantContext,
-        deviceVenueId,
+        selectedVenueId,
         deviceName,
         deviceMode,
       );
@@ -138,7 +141,7 @@ export function AccessManagementCrm({
     setUserPassword("");
     setUserRole("manager");
     setUserVenueIds(
-      data.venues.filter((venue) => venue.isActive).map((venue) => venue.id),
+      venues.filter((venue) => venue.id === selectedVenueId && venue.isActive).map((venue) => venue.id),
     );
     setIsUserModalOpen(true);
   }
@@ -180,7 +183,7 @@ export function AccessManagementCrm({
     setEditingManagerId(user.id);
     setEditingManagerVenueIds(
       user.venueIds.filter((venueId) =>
-        data.venues.some((venue) => venue.id === venueId && venue.isActive),
+        venues.some((venue) => venue.id === venueId && venue.isActive),
       ),
     );
   }
@@ -273,7 +276,9 @@ export function AccessManagementCrm({
     });
   }
 
-  const venueById = new Map(data.venues.map((venue) => [venue.id, venue]));
+  const venueById = new Map(venues.map((venue) => [venue.id, venue]));
+  const selectedVenue = venueById.get(selectedVenueId);
+  const visibleUsers = data.users.filter((user) => user.role === "owner" || user.venueIds.includes(selectedVenueId));
 
   return (
     <>
@@ -287,17 +292,9 @@ export function AccessManagementCrm({
             className="grid gap-3 p-3.5 !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]"
             onSubmit={(event) => void submitDevice(event)}
           >
-            <Field label="Local">
-              <CrmSelect
-                disabled={disabled}
-                onChange={setDeviceVenueId}
-                options={data.venues
-                  .filter((venue) => venue.isActive)
-                  .map((venue) => ({ label: venue.name, value: venue.id }))}
-                required
-                value={deviceVenueId}
-              />
-            </Field>
+            <p className="m-0 text-xs text-[var(--crm-text-muted)]">
+              Local: {selectedVenue?.name ?? "Selecciona un local en la cabecera"}
+            </p>
             <Field label="Nombre del dispositivo">
               <UiInput
                 className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
@@ -318,7 +315,7 @@ export function AccessManagementCrm({
             
             <UiButton
               className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
-              disabled={disabled || !deviceVenueId || !deviceName.trim()}
+              disabled={disabled || !selectedVenue?.isActive || !deviceName.trim()}
               type="submit"
             >
               <Plus className="h-4 w-4" /> Crear dispositivo
@@ -504,7 +501,7 @@ export function AccessManagementCrm({
               <div className="min-w-0 [&_h2]:m-0 [&_h2]:text-[17px] [&_h2]:font-bold [&_h2]:tracking-[-0.02em] [&_h2]:text-[var(--crm-text)] [&_p]:mt-1 [&_p]:mb-0 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)]">
                 <h2>Usuarios con acceso al CRM</h2>
                 <p>
-                  {data.users.length} usuarios gestores
+                  {visibleUsers.length} usuarios gestores
                 </p>
               </div>
               <UiButton
@@ -519,7 +516,7 @@ export function AccessManagementCrm({
               </UiButton>
             </div>
             <div className="!divide-y !divide-[var(--crm-border-subtle)]">
-              {data.users.map((user) => (
+              {visibleUsers.map((user) => (
                 <div
                   className="!grid !min-h-[68px] !items-center !gap-3 !px-[18px] !py-3 sm:!grid-cols-[minmax(0,1fr)_110px_minmax(160px,.8fr)_80px_auto] md:!px-[22px]"
                   key={user.id}
@@ -563,7 +560,7 @@ export function AccessManagementCrm({
                   )}
                 </div>
               ))}
-              {!data.users.length ? (
+              {!visibleUsers.length ? (
                 <EmptyList message="No hay usuarios gestores configurados." />
               ) : null}
             </div>
@@ -640,7 +637,7 @@ export function AccessManagementCrm({
                     toggleVenue(venueId, checked, setUserVenueIds)
                   }
                   selectedVenueIds={userVenueIds}
-                  venues={data.venues}
+                  venues={venues}
                 />
               ) : null}
               <p className="m-0 text-xs leading-6 text-[var(--crm-text-muted)]">
@@ -705,7 +702,7 @@ export function AccessManagementCrm({
                   toggleVenue(venueId, checked, setEditingManagerVenueIds)
                 }
                 selectedVenueIds={editingManagerVenueIds}
-                venues={data.venues}
+                venues={venues}
               />
               <div className="!flex !justify-end !gap-2">
                 <UiButton

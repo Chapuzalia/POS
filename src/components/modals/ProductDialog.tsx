@@ -16,15 +16,23 @@ import type { ProductLineSelection, TicketLineModifier } from "../../types";
 import { cx } from "../../utils/cx";
 import { AppModal, Button } from "../ui";
 import { PosMixerCard } from "../pos/PosMixerCard";
+import { reconcileMenuEdit } from "../../features/restaurant/services/menuCourses";
+import { createMenuBatchDraft, type MenuBatchDraft } from "../../features/restaurant/services/menuBatch";
+import { MenuEntryMode } from "../pos/MenuEntryMode";
+import { MenuBatchDialog } from "./MenuBatchDialog";
 
 type ProductDialogProps = {
+  allowDeferredMenu?: boolean;
   allowVariantSelection: boolean;
   catalog: CatalogData;
   initialSelection?: ProductLineSelection;
   initialVariantId?: string;
+  initialUnitPriceCents?: number;
   isBusy: boolean;
   item: ResolvedCatalogItem;
   onAdd: AddCatalogLine;
+  onAddMenus?: (sellable: ResolvedSellableProduct, selections: ProductLineSelection[], item: ResolvedCatalogItem, sourceElement?: HTMLElement | null) => boolean;
+  suggestedMenuCount?: number;
   onCancel: () => void;
 };
 
@@ -218,13 +226,17 @@ function buildSelection(
 }
 
 export function ProductDialog({
+  allowDeferredMenu = false,
   allowVariantSelection,
   catalog,
   initialSelection,
   initialVariantId,
+  initialUnitPriceCents,
   isBusy,
   item,
   onAdd,
+  onAddMenus,
+  suggestedMenuCount = 2,
   onCancel,
 }: ProductDialogProps) {
   const variants = useMemo(
@@ -274,6 +286,8 @@ export function ProductDialog({
     !startsWithVariantSelection,
   );
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [menuEntryMode, setMenuEntryMode] = useState<'individual' | 'courses'>('individual');
+  const [menuBatch, setMenuBatch] = useState<MenuBatchDraft | null>(null);
   const submittedRef = useRef(false);
   const dialogRef = useRef<HTMLElement>(null);
   const isChoosingVariant = startsWithVariantSelection && !hasChosenVariant;
@@ -326,12 +340,15 @@ export function ProductDialog({
   );
   const isSelectionValid = useMemo(() => {
     try {
-      canonicalizeProductLineSelection(catalog, selectedSellable, selection);
+      canonicalizeProductLineSelection(catalog, selectedSellable, selection, allowDeferredMenu);
+      if (allowDeferredMenu && selectedSellable.product.type === 'menu' && initialSelection && initialUnitPriceCents !== undefined) {
+        reconcileMenuEdit({ ...initialSelection, unitPriceCents: initialUnitPriceCents, servedQuantity: 0 }, selection.components, [], selection.modifiers);
+      }
       return true;
     } catch {
       return false;
     }
-  }, [catalog, selectedSellable, selection]);
+  }, [allowDeferredMenu, catalog, initialSelection, initialUnitPriceCents, selectedSellable, selection]);
   const groupProgress = useMemo(() => menuAssignments.map((group) => {
     const selected = Object.values(selectedQuantities[group.group.id] ?? {}).reduce((total, quantity) => total + quantity, 0);
     return {
@@ -343,10 +360,18 @@ export function ProductDialog({
       maximum: group.assignment.maxSelection,
     };
   }), [menuAssignments, selectedQuantities]);
-  const selectionTotals = useMemo(
-    () => calculateSaleLineTotals(selectedSellable.variant, selection.components, selection.modifiers),
-    [selectedSellable.variant, selection.components, selection.modifiers],
-  );
+  const selectionTotals = useMemo(() => {
+    if (allowDeferredMenu && selectedSellable.product.type === 'menu' && initialSelection && initialUnitPriceCents !== undefined) {
+      const previousSupplements = calculateSaleLineTotals({ priceCents: 0 }, initialSelection.components, initialSelection.modifiers);
+      try {
+        const edited = reconcileMenuEdit({ ...initialSelection, unitPriceCents: initialUnitPriceCents, servedQuantity: 0 }, selection.components, [], selection.modifiers);
+        return calculateSaleLineTotals({ priceCents: initialUnitPriceCents - previousSupplements.grossBeforeDiscountCents }, edited.components, selection.modifiers);
+      } catch {
+        return { basePriceCents: initialUnitPriceCents, componentDeltaCents: 0, modifierDeltaCents: 0, grossBeforeDiscountCents: initialUnitPriceCents };
+      }
+    }
+    return calculateSaleLineTotals(selectedSellable.variant, selection.components, selection.modifiers);
+  }, [allowDeferredMenu, initialSelection, initialUnitPriceCents, selectedSellable.product.type, selectedSellable.variant, selection.components, selection.modifiers]);
   const missingSelections = groupProgress.filter((group) => !group.complete);
 
   function completeAdd(
@@ -576,6 +601,27 @@ export function ProductDialog({
     }
   }
 
+  const canOrderByCourses = Boolean(onAddMenus && allowDeferredMenu && !initialSelection && !isChoosingVariant && menuAssignments.length && selectedSellable.product.type === 'menu');
+
+  function enterBatchMode() {
+    setMenuBatch((current) => current ? { ...current, selections: [selection, ...current.selections.slice(1)] }
+      : createMenuBatchDraft(selection, suggestedMenuCount > 1 ? suggestedMenuCount : 2));
+    setMenuEntryMode('courses');
+  }
+
+  if (canOrderByCourses && menuEntryMode === 'courses' && menuBatch && onAddMenus) return <MenuBatchDialog catalog={catalog} item={item} sellable={selectedSellable}
+    draft={menuBatch} disabled={isBusy || hasSubmitted} onChange={setMenuBatch} onCancel={onCancel}
+    onIndividual={() => {
+      const first = menuBatch.selections[0];
+      setSelectedQuantities(initialQuantities(selectedSellable, first));
+      setSelectedModifiers(initialModifiers(selectedSellable.modifierGroups, first.modifiers));
+      setSelectedComponentModifiers(initialComponentModifiers(catalog, selectedSellable, initialQuantities(selectedSellable, first), first));
+      setMenuEntryMode('individual');
+    }}
+    onAdd={(selections, sourceElement) => onAddMenus(selectedSellable, selections, item, sourceElement)}
+    renderEditor={(menuSelection, onSave, onClose) => <ProductDialog allowDeferredMenu allowVariantSelection={false} catalog={catalog} item={item}
+      initialVariantId={selectedVariantId} initialSelection={menuSelection} isBusy={isBusy} onAdd={(_sellable, edited) => { onSave(edited); return true }} onCancel={onClose} />} />;
+
   return (
     <AppModal
       containerClassName={isChoosingMixer ? "!w-[calc(100vw-32px)] !p-0" : "!p-4"}
@@ -608,6 +654,8 @@ export function ProductDialog({
             <X className="h-4 w-4" />
           </Button>
         </div>
+
+        {canOrderByCourses ? <div className="mt-4 max-w-sm"><MenuEntryMode mode="individual" disabled={isBusy || hasSubmitted} onChange={(mode) => { if (mode === 'courses') enterBatchMode() }} /></div> : null}
 
         {isChoosingVariant ? (
           <div className="mt-5 grid gap-2">
@@ -866,7 +914,7 @@ export function ProductDialog({
                 <strong className="mt-1 block font-mono text-2xl tabular-nums">{formatMoney(selectionTotals.grossBeforeDiscountCents)}</strong>
                 {selectionTotals.componentDeltaCents + selectionTotals.modifierDeltaCents !== 0 ? <span className="text-xs text-[var(--muted)]">Base {formatMoney(selectionTotals.basePriceCents)} · suplementos {formatMoney(selectionTotals.componentDeltaCents + selectionTotals.modifierDeltaCents)}</span> : null}
               </div>
-              {missingSelections.length ? <p className="mt-4 rounded-[var(--radius)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">Completa {missingSelections.map((group) => group.label).join(', ')} para continuar.</p> : null}
+              {missingSelections.length ? <p className="mt-4 rounded-[var(--radius)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">{allowDeferredMenu ? `Puedes elegir más tarde: ${missingSelections.map((group) => group.label).join(', ')}. Los platos incluidos no añaden precio al menú.` : `Completa ${missingSelections.map((group) => group.label).join(', ')} para continuar.`}</p> : null}
             </aside>
           </div>
         ) : null}

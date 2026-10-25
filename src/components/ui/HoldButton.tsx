@@ -1,8 +1,9 @@
 import { useEffect, useRef, useState } from 'react'
 import type { KeyboardEvent, PointerEvent, ReactNode } from 'react'
+import { Popover } from '@heroui/react'
 import { Button } from './Button'
 
-const HOLD_MS = 1500
+const HOLD_MS = 1000
 
 type Gesture = { kind: 'pointer'; id: number } | { kind: 'key'; key: string }
 
@@ -18,10 +19,12 @@ export function HoldButton({ children, disabled = false, onHold }: HoldButtonPro
   const frameRef = useRef(0)
   const gestureRef = useRef<Gesture | null>(null)
   const pendingRef = useRef(false)
+  const completedGestureRef = useRef(false)
   const mountedRef = useRef(false)
   const latestRef = useRef({ disabled, onHold })
   latestRef.current = { disabled, onHold }
   const [phase, setPhase] = useState<'idle' | 'holding' | 'pending'>('idle')
+  const [showHint, setShowHint] = useState(false)
 
   function cancel() {
     cancelAnimationFrame(frameRef.current)
@@ -65,6 +68,8 @@ export function HoldButton({ children, disabled = false, onHold }: HoldButtonPro
 
   function begin(gesture: Gesture) {
     if (latestRef.current.disabled || pendingRef.current || gestureRef.current) return
+    completedGestureRef.current = false
+    setShowHint(false)
     gestureRef.current = gesture
     const startedAt = performance.now()
     buttonRef.current?.style.setProperty('--hold-progress', '0')
@@ -81,6 +86,7 @@ export function HoldButton({ children, disabled = false, onHold }: HoldButtonPro
         return
       }
       frameRef.current = 0
+      completedGestureRef.current = true
       pendingRef.current = true
       setPhase('pending')
       void complete()
@@ -119,7 +125,7 @@ export function HoldButton({ children, disabled = false, onHold }: HoldButtonPro
   }
 
   function keyDown(event: KeyboardEvent<HTMLButtonElement>) {
-    if (event.key === 'Escape') { cancel(); return }
+    if (event.key === 'Escape') { cancel(); setShowHint(false); return }
     if (event.key !== ' ' && event.key !== 'Enter') return
     event.preventDefault()
     if (!event.repeat) begin({ kind: 'key', key: event.key })
@@ -128,37 +134,60 @@ export function HoldButton({ children, disabled = false, onHold }: HoldButtonPro
   function keyUp(event: KeyboardEvent<HTMLButtonElement>) {
     if (event.key !== ' ' && event.key !== 'Enter') return
     event.preventDefault()
-    if (gestureRef.current?.kind === 'key' && gestureRef.current.key === event.key) cancel()
+    if (gestureRef.current?.kind === 'key' && gestureRef.current.key === event.key) {
+      const wasShortPress = !completedGestureRef.current && !pendingRef.current
+      cancel()
+      if (wasShortPress && !latestRef.current.disabled) setShowHint(true)
+    }
   }
 
   return (
-    <Button
-      aria-busy={phase === 'pending'}
-      aria-label="Anular ticket: mantén pulsado durante 1,5 segundos"
-      className="relative isolate min-h-11 touch-none select-none overflow-hidden !gap-0 !px-4 transition-transform data-[holding=true]:scale-[0.97] motion-reduce:transform-none"
-      data-holding={phase === 'holding'}
-      disabled={disabled || phase === 'pending'}
-      onBlur={cancel}
-      onClick={(event) => event.preventDefault()}
-      onContextMenu={(event) => event.preventDefault()}
-      onKeyDown={keyDown}
-      onKeyUp={keyUp}
-      onLostPointerCapture={endPointer}
-      onPointerCancel={endPointer}
-      onPointerDown={pointerDown}
-      onPointerLeave={endPointer}
-      onPointerMove={pointerMove}
-      onPointerUp={endPointer}
-      ref={buttonRef}
-      style={{ WebkitTouchCallout: 'none' }}
-      type="button"
-      variant="danger"
-    >
-      <span aria-hidden="true" className={`pointer-events-none absolute inset-0 origin-left bg-white/25 ${phase === 'holding' ? '' : 'transition-transform duration-150'}`} style={{ transform: 'scaleX(var(--hold-progress, 0))' }} />
-      <span className="pointer-events-none relative grid justify-items-center gap-0.5">
-        <span className="inline-flex items-center gap-2">{children}</span>
-        <span className="text-[10px] font-medium leading-none opacity-85">{phase === 'pending' ? 'Anulando…' : null}</span>
-      </span>
-    </Button>
+    <>
+      <Button
+        aria-busy={phase === 'pending'}
+        aria-label="Anular ticket: mantén pulsado durante 1 segundo"
+        className="relative isolate min-h-11 touch-none select-none overflow-hidden !gap-0 !px-4 transition-transform data-[holding=true]:scale-[0.97] motion-reduce:transform-none"
+        data-holding={phase === 'holding'}
+        disabled={disabled || phase === 'pending'}
+        onBlur={cancel}
+        onClick={(event) => {
+          event.preventDefault()
+          if (!latestRef.current.disabled && !pendingRef.current && !completedGestureRef.current) setShowHint(true)
+        }}
+        onContextMenu={(event) => event.preventDefault()}
+        onKeyDown={keyDown}
+        onKeyUp={keyUp}
+        onLostPointerCapture={endPointer}
+        onPointerCancel={endPointer}
+        onPointerDown={pointerDown}
+        onPointerLeave={endPointer}
+        onPointerMove={pointerMove}
+        onPointerUp={endPointer}
+        ref={buttonRef}
+        style={{ WebkitTouchCallout: 'none' }}
+        type="button"
+        variant="danger"
+      >
+        <span aria-hidden="true" className={`pointer-events-none absolute inset-0 origin-left bg-white/25 ${phase === 'holding' ? '' : 'transition-transform duration-150'}`} style={{ transform: 'scaleX(var(--hold-progress, 0))' }} />
+        <span className="pointer-events-none relative grid justify-items-center gap-0.5">
+          <span className="inline-flex items-center gap-2">{children}</span>
+          <span className="text-[10px] font-medium leading-none opacity-85">{phase === 'pending' ? 'Anulando…' : null}</span>
+        </span>
+      </Button>
+      <Popover.Content
+        className="max-w-[min(16rem,calc(100vw-32px))] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)]"
+        isNonModal
+        isOpen={showHint && !disabled}
+        offset={8}
+        onOpenChange={setShowHint}
+        placement="left"
+        triggerRef={buttonRef}
+      >
+        <Popover.Arrow />
+        <Popover.Dialog aria-label="Cómo anular el ticket" className="p-3 text-sm font-medium">
+          Para anular el ticket, mantén pulsado durante 1 segundo.
+        </Popover.Dialog>
+      </Popover.Content>
+    </>
   )
 }

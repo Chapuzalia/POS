@@ -27,7 +27,6 @@ import { AddProductFlyAnimation } from '../components/feedback/AddProductFlyAnim
 import { EqualSplitOrderModal } from '../features/tables/components/EqualSplitOrderModal'
 import { RemoveOrderLineModal } from '../features/tables/components/RemoveOrderLineModal'
 import { RestaurantOrderPanel } from '../features/tables/components/RestaurantOrderPanel'
-import { CarryoverNotice } from '../features/restaurant/components/CarryoverNotice'
 import { SplitOrderModal } from '../features/tables/components/SplitOrderModal'
 import { TableMapView } from '../features/tables/components/TableMapView'
 import { TableOrderBar } from '../features/tables/components/TableOrderBar'
@@ -319,6 +318,7 @@ export function PosPage(props: Props) {
               mixer: line.mixer,
             },
             initialVariantId: line.variantId ?? undefined,
+            initialUnitPriceCents: line.unitPriceCents,
             lineId: line.id,
             item,
           })
@@ -328,8 +328,10 @@ export function PosPage(props: Props) {
         onServeAll={restaurant.serveLineFully}
         onServeAllOrder={restaurant.serveOrderFully}
         onServeOne={restaurant.serveLineUnit}
+        onServeComponent={restaurant.serveComponent}
         onSetQuantity={restaurant.setLineQuantity}
         onSetUnitPrice={restaurant.setLineUnitPrice}
+        onSetNote={restaurant.setLineNote}
          catalog={props.catalog}
          productionRouting={props.catalog?.productionRouting}
           productionState={restaurant.productionState}
@@ -470,11 +472,6 @@ export function PosPage(props: Props) {
     <div className="flex h-full min-h-0 flex-col overflow-hidden bg-[var(--background)] text-[var(--foreground)]">
       <div aria-atomic="true" aria-live="polite" className="sr-only">{props.addFeedback.announcement}</div>
       {confirmedPayment && !paymentProcessing ? <div role="status" className="pointer-events-none fixed bottom-[max(2rem,env(safe-area-inset-bottom))] left-1/2 z-[80] -translate-x-1/2"><div className="flex items-center gap-2 rounded-full border border-[var(--success)] bg-[var(--success-soft)] px-5 py-3 font-bold text-[var(--success)] shadow-lg motion-safe:animate-[ticket-feedback-success_320ms_ease-out]"><Check aria-hidden="true" className="size-5" strokeWidth={3} />Cobro registrado</div></div> : null}
-      {restaurantEnabled && cash.session ? <CarryoverNotice
-        key={cash.session.id}
-        context={props.context} session={cash.session} isOnline={props.isOnline}
-        disabled={posInteractionBlocked} onRecovered={restaurant.returnToMap}
-      /> : null}
       <AppHeader
         assistAction={isAssistEnabled(restaurant.map.assist?.configuration, props.context.features) && restaurant.map.assist?.contextKey === `${props.context.tenantId}:${props.context.venueId}` ? <AssistBoundary key={`${props.context.tenantId}:${props.context.venueId}:${props.context.deviceId}:${props.context.userId}`}><Suspense fallback={null}><AssistIndicator context={props.context} snapshot={restaurant.map.assist} isOnline={props.isOnline} busy={posInteractionBlocked} /></Suspense></AssistBoundary> : null}
         cashSession={cash.session}
@@ -547,7 +544,6 @@ export function PosPage(props: Props) {
 
       {restaurantEnabled && !props.reservations.isOpen && restaurant.tablesEnabled && restaurant.posView.type === 'table_map' && cash.session ? <TableMapView
         canOpen={Boolean(props.context.canTakeOrders)}
-        cashSessionId={cash.session.id}
         canQuickSale={props.context.canTakePayments === true}
         isBusy={posInteractionBlocked}
         isOnline={props.isOnline}
@@ -560,7 +556,15 @@ export function PosPage(props: Props) {
         onError={props.onSetError}
         onLayoutChange={async (tables, expectedRevision) => {
           try {
-            return await restaurant.updateSessionLayout(cash.session!.id, expectedRevision, tables)
+            return await restaurant.updateVenueLayout(expectedRevision, tables)
+          } catch (error) {
+            try { await restaurant.reloadMap() } catch { /* conserva el mapa confirmado */ }
+            throw error
+          }
+        }}
+        onLayoutRestore={async (expectedRevision) => {
+          try {
+            return await restaurant.restoreVenueLayout(expectedRevision)
           } catch (error) {
             try { await restaurant.reloadMap() } catch { /* conserva el mapa confirmado */ }
             throw error
@@ -755,12 +759,16 @@ export function PosPage(props: Props) {
         onSave={saveQuickSaleAsVirtual}
       /> : null}
       {quickSale.productDialog && props.catalog ? <ProductDialog
+        allowDeferredMenu={restaurant.posView.type === 'table_order'}
         allowVariantSelection={quickSale.productDialog.allowVariantSelection}
         catalog={props.catalog}
         initialSelection={quickSale.productDialog.initialSelection}
         initialVariantId={quickSale.productDialog.initialVariantId}
+        initialUnitPriceCents={quickSale.productDialog.initialUnitPriceCents}
         isBusy={props.isBusy}
         item={quickSale.productDialog.item}
+        suggestedMenuCount={restaurant.order?.order.guestCount}
+        onAddMenus={restaurant.posView.type === 'table_order' && !quickSale.productDialog.lineId ? restaurant.addMenuBatch : undefined}
         key={`${quickSale.productDialog.item.placement.id}-${quickSale.productDialog.initialVariantId ?? quickSale.productDialog.item.variant.id}-${quickSale.productDialog.lineId ?? 'new'}`}
         onAdd={(sellable, selection, item, sourceElement) => restaurant.posView.type === 'table_order'
           ? restaurant.addLine(sellable, selection, item, quickSale.productDialog?.lineId, sourceElement)

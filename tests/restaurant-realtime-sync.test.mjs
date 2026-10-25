@@ -6,6 +6,7 @@ import test from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
 import { getReadableError } from '../src/utils/errors.ts'
+import { isMenuOrderLine } from '../src/features/tables/menu-service-model.ts'
 
 // Run the actual hooks with isolated React state, browser events and timers.
 // No database connection or additional test dependencies are needed.
@@ -95,6 +96,7 @@ async function realtimeHarness(overrides = {}) {
     ...overrides,
   }
   const runner = hookRunner('useRestaurantRealtime', {
+    '../../tables/layout-service': { subscribeToVenueTableLayout: () => () => {} },
     '../../tables/service': {
       loadVenueTablesEnabled: async () => true,
       loadRestaurantMap: async () => { calls.maps++; return databaseMap },
@@ -252,6 +254,7 @@ for (const [message, refreshFails, expectedRefreshes] of [
         refreshMap: async () => { refreshes++; if (refreshFails) throw new Error('offline') },
       }) },
       '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false, hasTenantCapability: () => false },
+      '../../tables/menu-service-model': { isMenuOrderLine },
     })
     const result = runner.render({
       context: { canTakeOrders: true, deviceId: 'device' }, cashSession: { id: 'session' },

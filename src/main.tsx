@@ -1,3 +1,4 @@
+import './lib/browserCrypto.ts'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
 import { Toaster } from 'sileo'

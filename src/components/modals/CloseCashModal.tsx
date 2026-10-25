@@ -55,7 +55,6 @@ export function CloseCashModal({
 
   function handleConfirm() {
     onConfirm({
-      carryForwardOpenOrders: openOrderCount > 0,
       sessionId: cashSession.id,
       tenantId: cashSession.tenantId,
       closedAt: nowIso(),
@@ -194,7 +193,7 @@ export function CloseCashModal({
           </label>
 
           {openOrderCount > 0 ? <div className="mt-4 rounded-[var(--radius)] border border-[var(--separator)] p-3">
-            <p className="text-sm">Hay {openOrderCount} pedidos abiertos. Se conservarán para el siguiente turno. El importe pendiente de cobro no se incluirá en este cierre.</p>
+            <p className="text-sm">Hay {openOrderCount} pedidos abiertos en el local. Seguirán disponibles en las demás cajas y en la próxima apertura. El importe pendiente de cobro no se incluirá en este cierre.</p>
             <Button className="mt-3" disabled={isBusy} onClick={onCancel} type="button" variant="tertiary">Volver y revisar</Button>
           </div> : null}
           <Button
@@ -206,7 +205,7 @@ export function CloseCashModal({
             type="button"
             variant="danger"
           >
-            {openOrderCount > 0 ? 'Traspasar al siguiente turno y cerrar' : 'Cerrar caja'}
+            Cerrar caja
           </Button>
         </section>
       </AppModal>

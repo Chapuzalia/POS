@@ -17,6 +17,7 @@ import { tenantAddonCatalog, hasTenantAddon, hasTenantVenueAddon } from '../../.
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
 import { type CrmPlan, loadCrmPlan } from '../../plan/services/planService'
 import { CRM_PASSWORD_MIN_LENGTH, updateCurrentCrmPassword } from '../../settings/services/accountSettingsService'
+import { CartaIntegration } from '../components/CartaIntegration'
 
 export type SettingsCrmProps = {
   disabled: boolean
@@ -229,6 +230,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
                 </section>
                 <div className="!flex !items-center !justify-between !gap-3 md:!col-span-2 xl:!col-span-3"><p className="!m-0 !text-[11px] !text-[var(--crm-text-muted)]">Los cambios de addons se guardan al instante. Los datos generales se guardan con el botón.</p><UiButton className="!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} type="submit"><Save className="h-4 w-4" /> Guardar local</UiButton></div>
               </form> : null}
+              {venueExpanded && isOwner ? <CartaIntegration venueId={venue.id} disabled={disabled} /> : null}
             </article>
           })}
           {!venues.length ? <EmptyList message="No hay locales configurados." /> : null}

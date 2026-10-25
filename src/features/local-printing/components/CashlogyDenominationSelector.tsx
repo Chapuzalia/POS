@@ -5,32 +5,35 @@ import type { CashlogyDenominationOption } from '../cashlogy/cashlogyManagement'
 
 type Props = {
   disabled?: boolean
-  onClear?: () => void
   options: CashlogyDenominationOption[]
   quantities: Record<number, number>
   targetCents?: number
   onChange: (valueCents: number, quantity: number) => void
 }
 
-export function CashlogyDenominationSelector({ disabled, onChange, onClear, options, quantities, targetCents }: Props) {
+export function CashlogyDenominationSelector({ disabled, onChange, options, quantities, targetCents }: Props) {
   const selectedTotalCents = options.reduce((total, option) => (
     total + option.valueCents * (quantities[option.valueCents] ?? 0)
   ), 0)
   const remainingCents = targetCents === undefined ? null : targetCents - selectedTotalCents
 
   return <section aria-label="Selector de denominaciones" className="grid gap-3">
-    {onClear && selectedTotalCents > 0 ? <div className="flex flex-wrap items-center justify-between gap-2 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-3">
-      <p className="text-sm text-[var(--muted)]">Elige manualmente la combinación que quieres recibir.</p>
-      <Button disabled={disabled} onClick={onClear} type="button" variant="tertiary">Poner todo a 0</Button>
-    </div> : null}
     <div className="grid gap-2 sm:grid-cols-2">
       {options.map((option) => {
         const quantity = quantities[option.valueCents] ?? 0
-        return <div className="flex min-h-16 items-center gap-3 rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-2" key={option.valueCents}>
-          <div className="min-w-0 flex-1">
+        const cannotAdd = disabled || quantity >= option.availableQuantity || (targetCents !== undefined && selectedTotalCents + option.valueCents > targetCents)
+        const addUnit = () => onChange(option.valueCents, Math.min(option.availableQuantity, quantity + 1))
+        return <div className={`flex min-h-16 items-center gap-1 rounded-[var(--radius)] border ${quantity ? 'border-[var(--accent)] bg-[var(--accent-soft)]/40' : 'border-[var(--separator)] bg-[var(--background)]'} p-2`} key={option.valueCents}>
+          <button
+            aria-label={`Seleccionar una unidad de ${formatMoney(option.valueCents)}`}
+            className="min-h-14 min-w-0 flex-1 cursor-pointer rounded-[8px] px-2 py-1 text-left disabled:cursor-default"
+            disabled={cannotAdd}
+            onClick={addUnit}
+            type="button"
+          >
             <p className="font-mono text-lg font-black">{formatMoney(option.valueCents)}</p>
             <p className="text-xs text-[var(--muted)]">{option.kind === 'note' ? 'Billete' : 'Moneda'} · disponibles: {option.availableQuantity}</p>
-          </div>
+          </button>
           <Button
             aria-label={`Quitar una unidad de ${formatMoney(option.valueCents)}`}
             className="!min-h-12 !min-w-12 !px-0"
@@ -43,8 +46,8 @@ export function CashlogyDenominationSelector({ disabled, onChange, onClear, opti
           <Button
             aria-label={`Añadir una unidad de ${formatMoney(option.valueCents)}`}
             className="!min-h-12 !min-w-12 !px-0"
-            disabled={disabled || quantity >= option.availableQuantity || (targetCents !== undefined && selectedTotalCents + option.valueCents > targetCents)}
-            onClick={() => onChange(option.valueCents, Math.min(option.availableQuantity, quantity + 1))}
+            disabled={cannotAdd}
+            onClick={addUnit}
             type="button"
             variant="secondary"
           ><Plus className="h-5 w-5" /></Button>

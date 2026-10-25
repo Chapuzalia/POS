@@ -636,16 +636,22 @@ Deno.serve(async (request) => {
     }
 
     if (action === 'list') {
+      // Optional for compatibility with already installed CRM clients.
+      const venueId = String(body.venueId ?? '').trim()
+      if (venueId && !canManageVenue(venueId)) return response({ error: 'No tienes acceso a este local' }, 403)
+      let assignmentsQuery = adminClient
+        .from('device_user_assignments')
+        .select('user_id, venue_id, device_id, is_active')
+        .eq('tenant_id', tenantId)
+      if (venueId) assignmentsQuery = assignmentsQuery.eq('venue_id', venueId)
+
       const [{ data: memberships, error: membershipsError }, { data: assignments, error: assignmentsError }, { data: managerScopes, error: managerScopesError }] =
         await Promise.all([
           adminClient
             .from('tenant_memberships')
             .select('user_id, role, is_active')
             .eq('tenant_id', tenantId),
-          adminClient
-            .from('device_user_assignments')
-            .select('user_id, venue_id, device_id, is_active')
-            .eq('tenant_id', tenantId),
+          assignmentsQuery,
           adminClient
             .from('manager_venue_assignments')
             .select('manager_user_id, venue_id')
@@ -659,38 +665,40 @@ Deno.serve(async (request) => {
       const visibleAssignments = (assignments ?? []).filter((item) => canManageVenue(item.venue_id))
       const deviceUserIds = new Set(visibleAssignments.map((item) => item.user_id))
       const managementMemberships = isOwner ? (memberships ?? []).filter((item) =>
-        ['owner', 'manager'].includes(item.role)
+        item.role === 'owner' || (item.role === 'manager' && (!venueId || (managerScopes ?? []).some(
+          (scope) => scope.manager_user_id === item.user_id && scope.venue_id === venueId,
+        )))
       ) : []
       const requestedUserIds = new Set([
         ...deviceUserIds,
         ...managementMemberships.map((item) => item.user_id),
       ])
-      const { data: leases, error: leasesError } = deviceUserIds.size
-        ? await adminClient
+      const [{ data: leases, error: leasesError }, authUsers] = await Promise.all([
+        deviceUserIds.size
+        ? adminClient
           .from('user_login_leases')
           .select('user_id, heartbeat_at, expires_at')
           .in('user_id', [...deviceUserIds])
-        : { data: [], error: null }
+        : Promise.resolve({ data: [], error: null }),
+        (async () => {
+          const users = []
+          const userIds = [...requestedUserIds]
+          // Resolve only visible accounts, with bounded Auth API concurrency.
+          for (let offset = 0; offset < userIds.length; offset += 8) {
+            const results = await Promise.all(userIds.slice(offset, offset + 8).map(
+              (userId) => adminClient.auth.admin.getUserById(userId),
+            ))
+            for (const { data, error } of results) {
+              if (error) throw error
+              if (data.user) users.push(data.user)
+            }
+          }
+          return users
+        })(),
+      ])
 
       if (leasesError) {
         throw leasesError
-      }
-
-      const authUsers = []
-      let page = 1
-
-      while (true) {
-        const { data, error } = await adminClient.auth.admin.listUsers({ page, perPage: 1000 })
-
-        if (error) {
-          throw error
-        }
-
-        authUsers.push(...data.users.filter((user) => requestedUserIds.has(user.id)))
-        if (data.users.length < 1000) {
-          break
-        }
-        page += 1
       }
 
       const membershipByUser = new Map((memberships ?? []).map((item) => [item.user_id, item]))

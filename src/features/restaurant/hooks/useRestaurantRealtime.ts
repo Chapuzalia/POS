@@ -1,7 +1,7 @@
 import { operationBreadcrumb } from '../../../lib/observability.ts'
 import { getCachedAssistConfiguration } from '../../../lib/offlineStore'
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { applySessionLayout, loadSessionTableLayout, subscribeToSessionTableLayout } from '../../tables/layout-service'
+import { applyVenueLayout, loadVenueTableLayout, subscribeToVenueTableLayout } from '../../tables/layout-service'
 import {
   loadRestaurantEqualSplit,
   loadRestaurantMap,
@@ -64,8 +64,8 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
         load.rerun = false
         const permanentMap = await loadRestaurantMap(activeContext, sessionId)
         // The snapshot RPC includes layout. Older servers retain the existing fallback.
-        const currentLayout = sessionId && permanentMap.layoutRevision === undefined ? await loadSessionTableLayout(activeContext, sessionId) : null
-        nextMap = currentLayout ? applySessionLayout(permanentMap, currentLayout) : { ...permanentMap, layoutRevision: permanentMap.layoutRevision ?? 0 }
+        const currentLayout = permanentMap.layoutRevision === undefined ? await loadVenueTableLayout(activeContext) : null
+        nextMap = currentLayout ? applyVenueLayout(permanentMap, currentLayout) : { ...permanentMap, layoutRevision: permanentMap.layoutRevision ?? 0 }
       } while (load.rerun)
       return nextMap
     })()
@@ -225,9 +225,7 @@ export function useRestaurantRealtime(options: UseRestaurantRealtimeOptions) {
         fallbackTimer = window.setInterval(scheduleRefresh, 3000)
       }
     })
-    const unsubscribeLayout = options.activeCashSessionId
-      ? subscribeToSessionTableLayout(context, options.activeCashSessionId, () => void refresh())
-      : () => undefined
+    const unsubscribeLayout = subscribeToVenueTableLayout(context, () => void refresh())
 
     return () => {
       active = false

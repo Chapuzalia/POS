@@ -3,8 +3,11 @@ import { readFile } from 'node:fs/promises'
 import { compileComponent, createCompiledHookRunner } from './component-harness.mjs'
 import { getOrderPendingUnits } from '../../src/features/tables/service-status.ts'
 import { withConfirmedRestaurantPayments } from '../../src/features/restaurant/services/paymentPayload.ts'
+import { requiresConfirmedRestaurantLineRemoval } from '../../src/features/restaurant/draft-policy.ts'
 import * as restaurantPrintPayload from '../../src/features/restaurant/services/restaurantPrintPayload.ts'
 import { calculateDiscountForLines } from '../../src/lib/discounts.ts'
+import { isMenuOrderLine } from '../../src/features/tables/menu-service-model.ts'
+import { buildRestaurantMenuBatchLines } from '../../src/features/restaurant/services/menuBatch.ts'
 
 const source = await readFile(new URL('../../src/features/restaurant/hooks/useRestaurantController.ts', import.meta.url), 'utf8')
 const paymentSource = await readFile(new URL('../../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
@@ -28,6 +31,8 @@ export function createRestaurantControllerHarness({
   pendingUnits = 0,
   realPayloads = false,
   tableService: tableServiceOverrides = {},
+  productionService: productionServiceOverrides = {},
+  idFactory = () => 'id',
 } = {}) {
   const mapRefresh = deferred()
   const queueSync = deferred()
@@ -94,13 +99,15 @@ export function createRestaurantControllerHarness({
   }
   const modules = {
     '../../../lib/discounts': { calculateDiscountForLines: realPayloads ? calculateDiscountForLines : () => ({ totalCents: 600 }) },
-    '../../../lib/format': { createId: () => 'id', getLineSignature: () => 'signature', isValidQuantity: (value) => Number.isFinite(value) && value > 0, roundQuantity: (value) => value },
+    '../../../lib/format': { createId: idFactory, getLineSignature: () => 'signature', isValidQuantity: (value) => Number.isFinite(value) && value > 0, roundQuantity: (value) => value },
     '../../../lib/observability.ts': { reportOperationError() {} },
     '../../../utils/UserFacingError.ts': { UserFacingError: Error },
     '../../../utils/dates': { nowIso: () => '2026-09-12T00:00:00Z' },
     '../../../utils/errors': { getReadableError: (error) => error?.message ?? String(error) },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
     '../../catalog/services/saleLineBuilder': { buildSaleLine() {} },
+    '../services/menuCourses': { reconcileMenuEdit() {} },
+    '../services/menuBatch': { buildRestaurantMenuBatchLines },
     '../../customers/service': { loadTicketInvoice: async () => null },
     '../../customers/customerValidation.ts': { customerFiscalSnapshot: (customer) => customer },
     '../../fiscal/service': { autoIssueFiscalTicket: async () => ({ fiscal: null }), loadFiscalReceiptData: async () => null },
@@ -113,11 +120,12 @@ export function createRestaurantControllerHarness({
     '../../local-printing/store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({ cashlogyConfigured }) } },
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
     '../../platform/tenantFeatureAccess': { hasTenantFeature: () => false, hasTenantCapability: () => false },
-    '../../production/service': { loadOrderProductionState() {}, sendProductionBatch() {}, subscribeToOrderProduction() {} },
-    '../../tables/layout-service': { applySessionLayout() {}, saveSessionTableLayout() {} },
+    '../../production/service': { loadOrderProductionState: async () => null, sendProductionBatch() {}, subscribeToOrderProduction() {}, ...productionServiceOverrides },
+    '../../tables/layout-service': { applyVenueLayout() {}, saveVenueTableLayout() {} },
     '../../tables/service': tableService,
+    '../../tables/menu-service-model': { isMenuOrderLine },
     '../../tables/service-status': { canDecreaseLineQuantity: () => true, getOrderPendingUnits },
-    '../draft-policy': { isRestaurantRevisionConflict: () => false, requiresConfirmedRestaurantLineRemoval: () => false, shouldSaveBeforeLeavingOrder: () => false },
+    '../draft-policy': { isRestaurantRevisionConflict: () => false, requiresConfirmedRestaurantLineRemoval, shouldSaveBeforeLeavingOrder: () => false },
     '../services/restaurantPrintPayload': realPayloads ? restaurantPrintPayload : {
       buildRestaurantPrintPayload: (input) => ({ ...input,
         ticket: { id: input.ticketId, totalCents: input.totalCents, invoice: input.invoice },
@@ -142,6 +150,7 @@ export function createRestaurantControllerHarness({
   }
   const operations = new Map()
   const paymentService = compileComponent(paymentSource, {
+    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': {
       paymentScope: () => 'scope', withPaymentLock: (_key, work) => work(),
@@ -158,6 +167,7 @@ export function createRestaurantControllerHarness({
         const next = { ...operation, payload, cashlogy, state: 'accepted' }; operations.set(next.key, next); return next
       },
       markPaymentCharging: async operation => ({ ...operation, state: 'charging' }),
+      markRestaurantCheckoutReserved: async operation => ({ ...operation, checkoutReserved: true }),
       discardPreparedPaymentOperation: async key => operations.delete(key),
       commitPaymentOperation: async (operation, payload, _enqueue, result) => operations.set(operation.key, { ...operation, payload, result, state: 'committed' }),
     },

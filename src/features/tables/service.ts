@@ -1,9 +1,9 @@
-import { applySessionLayout } from './layout-service'
+import { applyVenueLayout } from './layout-service'
 import { buildAssistSnapshot } from '../assist/snapshot'
 import type { AssistAllocation } from '../assist/snapshot'
 import type { AssistConfiguration } from '../assist/types'
 import { saveCachedAssistConfiguration } from '../../lib/offlineStore'
-import type { SessionTableLayout } from './types'
+import type { VenueTableLayout } from './types'
 import { UserFacingError } from '../../utils/UserFacingError.ts'
 import { supabase } from '../../lib/supabase'
 import { quantityAmountCents } from '../../lib/format'
@@ -39,7 +39,7 @@ function requireSupabase() {
 }
 
 const mapArea = (row: AreaRow): DiningArea => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, name: row.name, sortOrder: row.sort_order, isActive: row.is_active, canvasWidth: row.canvas_width, canvasHeight: row.canvas_height, mapElements: normalizeMapElements(row.map_elements), createdAt: row.created_at, updatedAt: row.updated_at })
-const mapTable = (row: TableRow): RestaurantTable => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, areaId: row.area_id ?? `virtual:${row.cash_session_id}`, cashSessionId: row.cash_session_id, isVirtual: row.cash_session_id !== null, name: row.name, capacity: row.capacity, shape: row.shape, positionX: Number(row.position_x), positionY: Number(row.position_y), width: Number(row.width), height: Number(row.height), isActive: row.is_active, sortOrder: row.sort_order, reservedUntil: row.reserved_until, reservationNote: row.reservation_note, createdAt: row.created_at, updatedAt: row.updated_at })
+const mapTable = (row: TableRow): RestaurantTable => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, areaId: row.area_id ?? `virtual:${row.venue_id}`, cashSessionId: row.cash_session_id, isVirtual: row.cash_session_id !== null, name: row.name, capacity: row.capacity, shape: row.shape, positionX: Number(row.position_x), positionY: Number(row.position_y), width: Number(row.width), height: Number(row.height), isActive: row.is_active, sortOrder: row.sort_order, reservedUntil: row.reserved_until, reservationNote: row.reservation_note, createdAt: row.created_at, updatedAt: row.updated_at })
 const mapOrder = (row: OrderRow): RestaurantOrder => ({ id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, cashSessionId: row.cash_session_id, cashRegisterId: row.cash_register_id, openedByUserId: row.opened_by_user_id, openedByDeviceId: row.opened_by_device_id, guestCount: row.guest_count, status: row.status, revision: row.revision, orderGroupId: row.order_group_id, splitSequence: row.split_sequence, draftDiscount: row.draft_discount, openedAt: row.opened_at, updatedAt: row.updated_at, closedAt: row.closed_at })
 const mapLine = (row: OrderLineRow): RestaurantOrderLine => {
   const selection = splitLegacyMixerModifiers(row.modifiers, row.mixer_product_id, row.mixer)
@@ -85,7 +85,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
   const client = requireSupabase()
   const response = await client.rpc('pos_restaurant_map', { p_tenant_id: context.tenantId, p_venue_id: context.venueId, p_cash_session_id: cashSessionId ?? null, p_include_production: hasTenantCapability(context, 'production') })
   if (response.error && !['PGRST202','42883'].includes(response.error.code)) throw response.error
-  const snapshot = response.error ? null : response.data as { areas: AreaRow[]; tables: TableRow[]; orders: OrderRow[]; lines: OrderLineRow[]; links: OrderTableRow[]; splits: Array<{ order_group_id: string; paid_cents: number }>; reservations: ReservationMapRow[]; allocations: Array<{ current_order_line_id: string; ready_quantity: number }>; layout: SessionTableLayout | null }
+  const snapshot = response.error ? null : response.data as { areas: AreaRow[]; tables: TableRow[]; orders: OrderRow[]; lines: OrderLineRow[]; links: OrderTableRow[]; splits: Array<{ order_group_id: string; paid_cents: number }>; reservations: ReservationMapRow[]; allocations: Array<{ current_order_line_id: string; ready_quantity: number }>; layout: VenueTableLayout | null }
   let loadedAreas: DiningArea[] = snapshot ? snapshot.areas.map(mapArea) : []
   let tablesResult = { data: (snapshot?.tables ?? []) as NonNullable<typeof snapshot>['tables'] | null, error: null as unknown }
   let linksResult = { data: (snapshot?.links ?? []) as NonNullable<typeof snapshot>['links'] | null, error: null as unknown }
@@ -96,10 +96,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
     const { data: venue, error: venueError } = await client.from('venues').select('timezone').eq('tenant_id', context.tenantId).eq('id', context.venueId).single<{ timezone: string }>()
     if (venueError) throw venueError
     const reservationRange = getDateRange(localDateKey(new Date(), venue.timezone), venue.timezone)
-    let tablesQuery = client.from('restaurant_tables').select(tableColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('is_active', true).order('sort_order')
-    tablesQuery = cashSessionId
-      ? tablesQuery.or(`cash_session_id.is.null,cash_session_id.eq.${cashSessionId}`)
-      : tablesQuery.is('cash_session_id', null)
+    const tablesQuery = client.from('restaurant_tables').select(tableColumns).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('is_active', true).order('sort_order')
     ;[loadedAreas, tablesResult, linksResult, ordersResult, equalSplitsResult, reservationsResult] = await Promise.all([
       loadDiningAreas(context), tablesQuery,
       client.from('order_tables').select('order_id, order_group_id, table_id, joined_at, released_at').eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).is('released_at', null),
@@ -114,9 +111,9 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
     if (reservationsResult.error) throw reservationsResult.error
   }
   const tables = ((tablesResult.data ?? []) as TableRow[]).map(mapTable)
-  const hasVirtualArea = Boolean(cashSessionId && tables.some((table) => table.areaId === `virtual:${cashSessionId}`))
+  const hasVirtualArea = tables.some((table) => table.areaId === `virtual:${context.venueId}`)
   const virtualArea: DiningArea | null = hasVirtualArea ? {
-    id: `virtual:${cashSessionId}`, tenantId: context.tenantId, venueId: context.venueId, name: 'Virtual',
+    id: `virtual:${context.venueId}`, tenantId: context.tenantId, venueId: context.venueId, name: 'Virtual',
     sortOrder: Number.MAX_SAFE_INTEGER, isActive: true, canvasWidth: 1200, canvasHeight: 800,
     mapElements: [], createdAt: '', updatedAt: '',
   } : null
@@ -190,7 +187,7 @@ export async function loadRestaurantMap(context: TenantContext, cashSessionId?: 
       for (const order of result.assist.orders) order.zoneName = zoneNames.get(order.zoneId ?? '')
     } catch { /* Secondary projection failure must never prevent loading tables. */ }
   }
-  return snapshot?.layout ? applySessionLayout(result, snapshot.layout) : result
+  return snapshot?.layout ? applyVenueLayout(result, snapshot.layout) : result
 }
 
 const orderReads = new Map<string, Promise<RestaurantOrderDetail>>()
@@ -603,7 +600,7 @@ export function subscribeToRestaurantMap(
     venueConfig.clear()
     onChange()
   })
-  ;(['order_groups', 'orders', 'order_tables', 'order_lines', 'restaurant_tables', 'restaurant_order_equal_splits', 'restaurant_order_equal_split_payments', 'reservations', 'reservation_tables', 'production_line_allocations'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
+  ;(['dining_areas', 'order_groups', 'orders', 'order_tables', 'order_lines', 'restaurant_tables', 'restaurant_order_equal_splits', 'restaurant_order_equal_split_payments', 'reservations', 'reservation_tables', 'production_line_allocations'] as const).forEach((table) => channel.on('postgres_changes', { event: '*', schema: 'public', table, filter: `venue_id=eq.${context.venueId}` }, onChange))
   channel.subscribe((status, error) => onStatus?.(status, error))
   return () => { void supabase?.removeChannel(channel) }
 }

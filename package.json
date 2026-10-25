@@ -5,8 +5,11 @@
   "packageManager": "pnpm@10.15.1",
   "type": "module",
   "scripts": {
+    "dev:api": "pnpm --filter @tickit/api dev",
+    "start:api": "pnpm --filter @tickit/api start",
+    "build:api": "pnpm --filter @tickit/api build",
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "pnpm run build:api && tsc -b && vite build",
     "test": "node --test tests/*.test.mjs",
     "lint": "oxlint",
     "preview": "vite preview"

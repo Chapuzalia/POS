@@ -22,7 +22,7 @@ export function RemoveOrderLineModal({ isBusy, line, onCancel, onConfirm, sentQu
           <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" disabled={isBusy} onClick={onCancel} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
         </div>
 
-        <p className="mt-4 rounded-[var(--radius)] border border-[var(--warning)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">Este producto ya está marcado como servido. Confirma que quieres eliminarlo igualmente.</p>
+        <p className="mt-4 rounded-[var(--radius)] border border-[var(--warning)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">{line.components.some((component) => component.type === 'menu_component') ? 'Este menú contiene platos marcados como servidos.' : 'Este producto ya está marcado como servido.'} Confirma que quieres eliminarlo igualmente.</p>
         {sentQuantity > 0 ? <p className="mt-4 rounded-[var(--radius)] border border-[var(--danger)] p-3 text-sm font-semibold text-[var(--danger)]">{sentQuantity} unidad(es) ya se enviaron a producción. Al confirmar se generará una anulación visible en KDS y, si corresponde, en impresora.</p> : null}
 
         <div className="mt-5 grid grid-cols-2 gap-2">
