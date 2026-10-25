@@ -499,7 +499,7 @@ test('payment journal: cancel on a confirmed charge retains the accepted money e
   assert.equal(accepted.state, 'accepted')
   assert.equal(accepted.payload.payment.receivedCents, 700)
   assert.equal(accepted.payload.payment.changeCents, 100)
-  await assert.rejects(durable.preparePaymentOperation(fixture.key.replace('restaurant:close:order', 'quick-sale'), 'new', fixture.payload), /otro cobro pendiente/)
+  await assert.rejects(durable.preparePaymentOperation(fixture.key.replace('restaurant:close:order', 'quick-sale'), 'new', fixture.payload), /ticket ya tiene/)
   const service = await restaurantRecovery(store)
   const [recovered] = await service.recoverRestaurantPayments(fixture.context, fixture.session)
   assert.equal(recovered.payload.payment.receivedCents, 700)

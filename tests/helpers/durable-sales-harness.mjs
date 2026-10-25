@@ -6,6 +6,7 @@ export function createDurableSalesHarness(onCommit = () => {}) {
     paymentScope: (context, session) => `${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}:${session}`,
     withPaymentLock: (_key, work) => work(),
     loadPaymentOperation: async key => operations.get(key),
+    loadPaymentOperations: async () => [...operations.values()],
     preparePaymentOperation: async (key, fingerprint, payload, params) => {
       const previous = operations.get(key)
       if (previous && previous.fingerprint !== fingerprint && previous.state !== 'committed') throw new Error('Pending payment')

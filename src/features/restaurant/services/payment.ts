@@ -1,6 +1,6 @@
 import type { CashSession, SaleCreatedPayload, TenantContext } from '../../../types/index.ts'
 import type { CashlogyTransaction } from '../../local-printing/types.ts'
-import { acceptPaymentOperation, commitPaymentOperation, discardPreparedPaymentOperation, loadPaymentOperation, loadPendingPaymentOperations, markPaymentCharging, markRestaurantCheckoutReserved, paymentScope, preparePaymentOperation, withPaymentLock } from '../../../lib/durableSales.ts'
+import { acceptPaymentOperation, commitPaymentOperation, discardPreparedPaymentOperation, loadPaymentOperation, loadPaymentOperations, loadPendingPaymentOperations, markPaymentCharging, markRestaurantCheckoutReserved, paymentScope, preparePaymentOperation, withPaymentLock } from '../../../lib/durableSales.ts'
 import { getCashlogyPaymentAmounts, isCashlogyPaymentConfigured, settleCashlogyPaymentIfConfigured } from '../../local-printing/cashlogy/useCashlogyStore.ts'
 import { resolveLocalFiscalMode } from '../../fiscal/local/tenantMode.ts'
 import { preflightPosInvoice } from '../../fiscal/local/posInvoice.ts'
@@ -18,12 +18,16 @@ type Input = {
   draft: SaleCreatedPayload
   params: Record<string, unknown>
   confirmedCashlogy?: CashlogyTransaction | null
+  recovery?: boolean
 }
 
 /** Recover original payments independently of the current table/order map. This
  * replays saved RPC parameters and only queries hardware already in progress. */
-export async function recoverRestaurantPayments(context: TenantContext, session: CashSession) {
-  const operations = await loadPendingPaymentOperations(context, session.id)
+export async function recoverRestaurantPayments(context: TenantContext, session: CashSession, confirmedCashlogy?: CashlogyTransaction) {
+  const operations = confirmedCashlogy
+    ? (await loadPaymentOperations(context, session.id)).filter(operation => operation.payload.sale.id === confirmedCashlogy.saleId
+      && (operation.cashlogyRequestId ?? `cashlogy:sale:${operation.payload.sale.id}`) === confirmedCashlogy.requestId)
+    : await loadPendingPaymentOperations(context, session.id)
   const recovered = []
   for (const operation of operations) {
     const action = operation.key.split('|restaurant:')[1]?.split(':')[0]
@@ -32,10 +36,11 @@ export async function recoverRestaurantPayments(context: TenantContext, session:
     const target = action === 'equal_part' ? operation.params.splitId : operation.params.orderId
     if (typeof target !== 'string') throw new Error('Falta la comanda del cobro original.')
     const payment = await payRestaurantSale<{ requiresConfirmation?: boolean; ticketId?: string }>({ context, session, action,
-      target, draft: operation.payload, params: operation.params })
+      target, draft: operation.payload, params: operation.params, confirmedCashlogy, recovery: true })
     if (payment.result.requiresConfirmation) throw new Error('El cobro original requiere confirmar las unidades pendientes de su comanda. No vuelvas a cobrarlo.')
     recovered.push(payment)
   }
+  if (confirmedCashlogy && !recovered.length) throw new Error('No se ha encontrado la comanda original de este cobro. La operación se conserva pendiente.')
   return recovered
 }
 
@@ -52,7 +57,8 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
     const pending = await loadPaymentOperation(key)
     const savedMode = pending && ['accepted', 'charging', 'committed'].includes(pending.state) ? pending.params?.fiscalMode : undefined
     let production = savedMode === 'verifactu' || (savedMode !== 'legacy' && await resolveLocalFiscalMode(context.tenantId) !== 'disabled')
-    let operation = pending && (pending.state === 'accepted' || pending.state === 'charging' || (pending.state === 'prepared' && pending.checkoutReserved)) ? pending
+    let operation = pending && (pending.state === 'accepted' || pending.state === 'charging' || (pending.state === 'prepared' && pending.checkoutReserved)
+      || (input.recovery && pending.state === 'committed')) ? pending
       : await preparePaymentOperation(key, JSON.stringify({ params: economicParams, sequence: input.sequence,
           lines: input.draft.lines.map(({ id: _id, ticketId: _ticketId, ...line }) => line), totalCents: input.draft.sale.totalCents,
           fiscalMode: production ? 'verifactu' : 'legacy' }), input.draft, { ...checkoutParams, fiscalMode: production ? 'verifactu' : 'legacy' })

@@ -47,8 +47,8 @@ function harness({ saleId = null, lines = [{ quantity: 1 }], intentPatch = {}, b
     '../../../lib/offlineStore': { enqueueOfflineEvent: (event) => calls.events.push(event) },
     '../../../lib/durableSales.ts': {
       paymentScope: () => 'scope', withPaymentLock: (_key, work) => work(),
-      loadPaymentOperation: async () => operation,
-      preparePaymentOperation: async (key, fingerprint, payload) => operation ??= { key, fingerprint, payload, state: 'prepared', eventId: 'event', cashlogy: null },
+      loadPaymentOperations: async () => operation ? [operation] : [],
+      preparePaymentOperation: async (key, fingerprint, payload, params) => operation ??= { key, fingerprint, payload, params, state: 'prepared', eventId: 'event', cashlogy: null },
       acceptPaymentOperation: async (current, payload, cashlogy) => operation = { ...current, payload, cashlogy, state: 'accepted' },
       markPaymentCharging: async current => operation = { ...current, state: 'charging' },
       discardPreparedPaymentOperation: async () => { operation = undefined },
@@ -200,7 +200,7 @@ function nodes(tree) {
 }
 const flush = () => new Promise((resolve) => setImmediate(resolve))
 
-test('el modal muestra el fallo al aplicar y ofrece cancelación sin ocultar un cobro pendiente', async () => {
+test('el modal conserva el fallo al aplicar y permite continuar con otros tickets sin perder el cobro', async () => {
   const h = harness({ lines: [] })
   h.state.hide = () => { h.state.modalOpen = false }
   const render = modalHarness(h.state, (transaction) => h.pay('cash', null, transaction))
@@ -218,6 +218,12 @@ test('el modal muestra el fallo al aplicar y ofrece cancelación sin ocultar un 
   assert.ok(h.state.intent)
   assert.equal(h.calls.finishes, 0)
   assert.equal(h.calls.charges, 0)
+  const continueButton = after.find((node) => node.type === 'button' && node.props.children === 'Continuar con otros tickets')
+  assert.ok(continueButton)
+  continueButton.props.onClick()
+  assert.equal(h.state.modalOpen, false)
+  assert.ok(h.state.intent)
+  assert.equal(h.calls.finishes, 0)
 })
 
 test('el botón Aplicar registra la venta recuperada y cierra el modal', async () => {

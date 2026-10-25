@@ -43,6 +43,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
     cancel: value.cancel,
     recover: value.recover,
     retryPayment: value.retryPayment,
+    hide: value.hide,
   })))
   const acceptedCents = (state.transaction?.automaticAcceptedCents ?? 0) + (state.transaction?.manualAcceptedCents ?? 0)
 
@@ -164,6 +165,7 @@ export function CashlogyPaymentModal({ finalizeDisabled, onFinalizeRecovered }: 
         </label> : null}
       </div>
       <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-[var(--separator)] bg-[var(--surface)] p-4">
+        {!busy ? <Button disabled={isFinalizing} onClick={state.hide}>Continuar con otros tickets</Button> : null}
         {!state.isStarting && !state.isPolling && !interruptedBeforeRequest ? <Button disabled={state.isRecovering || state.isCancelling || isFinalizing} onClick={() => void state.recover().catch(() => undefined)}>Consultar estado</Button> : null}
         <Button disabled={state.isCancelling || isFinalizing} onClick={cancelPayment} variant="dangerSoft">
           {state.isCancelling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : null}
