@@ -16,6 +16,11 @@ visibilidad ni la caja que recibe el cobro. El acceso al TPV y la creación de c
 siguen utilizando la selección de caja del dispositivo; una caja cerrada no impide
 trabajar con sus comandas desde otro terminal con una sesión abierta.
 
+En «Editar mesas» aparece «Recuperar mapa inicial». Restaura las posiciones de las
+mesas permanentes al plano base actual del CRM en todo el local y conserva las mesas
+temporales, comandas y reservas. Solo se permite sin mesas juntadas en ninguna sala;
+el servidor también valida esta condición y rechaza una revisión desactualizada.
+
 ## Cobro y cierre
 
 Cada operación de cobro incluye la sesión seleccionada, el dispositivo y su identidad

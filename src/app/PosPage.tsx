@@ -562,6 +562,14 @@ export function PosPage(props: Props) {
             throw error
           }
         }}
+        onLayoutRestore={async (expectedRevision) => {
+          try {
+            return await restaurant.restoreVenueLayout(expectedRevision)
+          } catch (error) {
+            try { await restaurant.reloadMap() } catch { /* conserva el mapa confirmado */ }
+            throw error
+          }
+        }}
         onMove={restaurant.moveOrder}
         onSaveQuickSale={saveQuickSaleToTable}
         onCreateVirtual={restaurant.createVirtualTable}

@@ -25,7 +25,7 @@ import {
   getMovedRestaurantPrintLines,
   getRestaurantPrintSubtotal,
 } from '../services/restaurantPrintPayload'
-import { applyVenueLayout, saveVenueTableLayout } from '../../tables/layout-service'
+import { applyVenueLayout, restoreVenueTableLayout, saveVenueTableLayout } from '../../tables/layout-service'
 import { getOrderPendingUnits } from '../../tables/service-status'
 import {
   cancelEmptyRestaurantOrder,
@@ -1337,6 +1337,18 @@ export function useRestaurantController(options: Options) {
     }
   }, [options, realtime])
 
+  const restoreVenueLayout = useCallback(async (expectedRevision: number) => {
+    if (!options.context) throw new UserFacingError('No hay un local seleccionado.')
+    options.setBusy(true)
+    try {
+      const saved = await restoreVenueTableLayout(options.context, expectedRevision)
+      realtime.setMap((current) => applyVenueLayout(current, saved))
+      return saved
+    } finally {
+      options.setBusy(false)
+    }
+  }, [options, realtime])
+
   const reset = useCallback((areaId?: string) => {
     draft.clearOrder()
     setPosView({ type: 'quick_sale', areaId })
@@ -1413,6 +1425,7 @@ export function useRestaurantController(options: Options) {
     tablesEnabled: realtime.tablesEnabled,
     updateDraft: draft.updateDraft,
     updateVenueLayout,
+    restoreVenueLayout,
     reloadMap: realtime.refreshMap,
   }
 }

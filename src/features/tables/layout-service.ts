@@ -20,6 +20,12 @@ export async function saveVenueTableLayout(context: TenantContext, expectedRevis
   return data as VenueTableLayout
 }
 
+export async function restoreVenueTableLayout(context: TenantContext, expectedRevision: number): Promise<VenueTableLayout> {
+  const { data, error } = await client().rpc('restore_venue_table_layout', { p_venue_id: context.venueId, p_expected_revision: expectedRevision })
+  if (error) throw new Error(getReadableError(error, { operation: 'features.tables.layout-service.restore' }))
+  return data as VenueTableLayout
+}
+
 export function applyVenueLayout(map: RestaurantMap, layout: VenueTableLayout): RestaurantMap {
   const groupMembers = new Map<string, string[]>()
   for (const [tableId, entry] of Object.entries(layout.tables)) {
