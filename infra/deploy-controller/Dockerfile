@@ -9,8 +9,21 @@ COPY --chown=0:0 apps/deploy-controller/src/ /opt/tickit/apps/deploy-controller/
 RUN test -f /opt/tickit/apps/deploy-controller/src/gateway.ts \
  && test -f /opt/tickit/apps/deploy-controller/src/worker.ts
 
+
+RUN chmod 0755 /opt/tickit \
+    /opt/tickit/apps \
+    /opt/tickit/apps/deploy-controller \
+    /opt/tickit/apps/deploy-controller/src \
+ && find /opt/tickit/apps/deploy-controller/src \
+    -type d -exec chmod 0755 {} + \
+ && find /opt/tickit/apps/deploy-controller/src \
+    -type f -exec chmod 0644 {} +
+    
+
 FROM source AS api
 USER 10001:2010
+RUN test -r /opt/tickit/apps/deploy-controller/src/gateway.ts \
+ && test -r /opt/tickit/apps/deploy-controller/src/http.ts
 EXPOSE 8080
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
   CMD ["node", "-e", "fetch('http://127.0.0.1:8080/health',{signal:AbortSignal.timeout(3000)}).then(r=>{if(r.status!==200)process.exit(1)}).catch(()=>process.exit(1))"]
