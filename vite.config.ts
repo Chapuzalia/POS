@@ -62,7 +62,7 @@ export default defineConfig({
       this.emitFile({
         type: 'asset',
         fileName: 'app-version.json',
-        source: JSON.stringify({ supportedVersions: supportedAppVersions }),
+        source: JSON.stringify({ currentVersion: appVersion, supportedVersions: supportedAppVersions }),
       })
     },
   }, sentryVitePlugin({

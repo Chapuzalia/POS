@@ -1,5 +1,7 @@
 # Edge Functions desde GitHub Actions
 
+> Referencia histórica de compatibilidad y recuperación. El pipeline automático actual usa el [controlador privado de despliegues](deployment-controller.md). Las instrucciones SSH, Tailscale, baselines, excepciones y credenciales GitHub de esta guía describen el procedimiento anterior; no se deben activar como un segundo pipeline. Consultar la guía del controlador antes de cualquier instalación o despliegue. No se ha aplicado ningún cambio en producción.
+
 Los workflows `production.yml` (`main`) y `staging.yml` (rama exacta `Staging`)
 usan `scripts/send-pos-migrations.sh` y el receptor instalado `deploy-pos.py`.
 El paquete de protocolo **4** contiene migraciones, `supabase/functions/`, el

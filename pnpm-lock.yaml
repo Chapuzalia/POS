@@ -128,6 +128,8 @@ importers:
         specifier: ~6.0.2
         version: 6.0.3
 
+  apps/deploy-controller: {}
+
 packages:
 
   '@adobe/react-spectrum-ui@1.2.1':

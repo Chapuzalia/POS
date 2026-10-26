@@ -1,4 +1,4 @@
-name: Deploy production
+name: Verify and request production deployment
 
 on:
   push:
@@ -6,9 +6,7 @@ on:
       - main
 
 permissions:
-  actions: read
   contents: read
-  id-token: write
 
 concurrency:
   group: pos-production
@@ -16,152 +14,57 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  migrate-and-deploy:
-    name: Migrate database and deploy
+  verify:
+    name: Verify release without production access
     runs-on: ubuntu-latest
     timeout-minutes: 60
-    env:
-      COOLIFY_SUPABASE_PROJECT: dbdtluvsdqycxl5tecuwljie
-      COOLIFY_APPLICATION_UUID: ezpjwb28qiq7uueykidpitdl
-      COOLIFY_URL: ${{ vars.COOLIFY_URL }}
-
     steps:
-      - name: Checkout repository
+      - name: Checkout release
         uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Resolve last successful production release
-        id: release
-        uses: actions/github-script@v7
-        env:
-          CONFIGURED_BASELINE_SHA: ${{ vars.PRODUCTION_BASE_SHA }}
-        with:
-          script: |
-            const runs = await github.paginate(
-              github.rest.actions.listWorkflowRuns,
-              {
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                workflow_id: 'production.yml',
-                branch: 'main',
-                status: 'success',
-                per_page: 100,
-              },
-            )
-            const previous = runs.find((run) => run.head_sha !== context.sha)
-            const configuredBaseline = process.env.CONFIGURED_BASELINE_SHA?.trim()
-            const baselineSha = previous?.head_sha ?? configuredBaseline
-            if (!baselineSha || !/^[0-9a-f]{40}$/i.test(baselineSha)) {
-              core.setFailed('No previous successful production release was found. Set the PRODUCTION_BASE_SHA repository variable to the exact commit currently in production for the first protected deploy.')
-              return
-            }
-            core.setOutput('base_sha', baselineSha)
-            core.info(`Production baseline: ${baselineSha}${previous ? '' : ' (configured bootstrap)'}`)
 
       - name: Configure Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22.19.0
-
-      - name: Connect to the private Coolify network
-        uses: tailscale/github-action@d1b6cd204f8dceda5b3eaad7f1f767be390056cd # v4
-        with:
-          oauth-client-id: ${{ secrets.PROD_TS_CLIENT_ID }}
-          audience: ${{ secrets.PROD_TS_AUDIENCE }}
-          tags: tag:github-actions-production
-          ping: tickit-vps.tail723c3c.ts.net
-
-      - name: Verify Coolify frontend configuration before database changes
-        env:
-          COOLIFY_API_TOKEN: ${{ secrets.PROD_COOLIFY_API_TOKEN }}
-          APP_VERSION: ${{ github.sha }}
-          PREVIOUS_APP_VERSION: ${{ steps.release.outputs.base_sha }}
-        run: node scripts/deploy-coolify.mjs --check
-
-      - name: Validate migrations directory
-        shell: bash
-        run: |
-          set -Eeuo pipefail
-
-          if [[ ! -d "supabase/migrations" ]]; then
-            echo "Missing supabase/migrations directory."
-            exit 1
-          fi
-
-          migration_count="$(
-            find supabase/migrations \
-              -maxdepth 1 \
-              -type f \
-              -name '*.sql' \
-              | wc -l
-          )"
-
-          if [[ "$migration_count" -eq 0 ]]; then
-            echo "No SQL migrations found."
-            exit 1
-          fi
-
-          echo "Found $migration_count migration files."
-
-      - name: Resolve reviewed one-release migration exception
-        id: migration-exception
-        env:
-          BASE_SHA: ${{ steps.release.outputs.base_sha }}
-          APPROVED_BASE_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_BASE_SHA }}
-          APPROVED_HEAD_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_HEAD_SHA }}
-          APPROVED_MERGE_BASE_SHA: ${{ vars.MIGRATION_SAFETY_EXCEPTION_MERGE_BASE_SHA }}
-        run: node scripts/check-migration-safety-exception.mjs
-
-      - name: Check migrations for destructive operations
-        if: steps.migration-exception.outputs.approved != 'true'
-        env:
-          BASE_SHA: ${{ steps.release.outputs.base_sha }}
-          HEAD_SHA: ${{ github.sha }}
-        run: bash scripts/check-pr-migrations.sh "$BASE_SHA" "$HEAD_SHA"
+          node-version: 24.12.0
 
       - name: Enable pinned pnpm
-        shell: bash
         run: |
           npm install --global corepack@0.36.0
           corepack enable
           corepack prepare pnpm@10.15.1 --activate
-          pnpm --version
 
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      - name: Verify application before database changes
+      - name: Verify application and migration tooling
         run: |
-          python3 -m unittest discover -s tests -p 'test_deploy_pos.py'
-          pnpm run lint
-          pnpm run build
+          python3 -B -m unittest discover -s tests -p 'test_*.py'
+          pnpm lint
+          pnpm test
+          pnpm build
 
-      - name: Check database and Edge target before production changes
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
-          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
-          SSH_USER: ${{ secrets.PROD_SSH_USER }}
-          SSH_PORT: ${{ vars.PROD_SSH_PORT || '22' }}
-          APP_VERSION: ${{ github.sha }}
-          DEPLOY_OPERATION: check
-        run: bash scripts/send-pos-migrations.sh
+  request-deployment:
+    name: Request private production deployment
+    needs: verify
+    # Deliberately disabled until the private controller is installed and approved.
+    if: vars.PRIVATE_DEPLOY_PRODUCTION_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - name: Checkout verified release
+        uses: actions/checkout@v4
 
-      - name: Back up production, apply migrations and deploy verified Edge Functions
-        env:
-          SSH_PRIVATE_KEY: ${{ secrets.PROD_SSH_PRIVATE_KEY }}
-          SSH_KNOWN_HOSTS: ${{ secrets.PROD_SSH_KNOWN_HOSTS }}
-          SSH_HOST: ${{ secrets.PROD_SSH_HOST }}
-          SSH_USER: ${{ secrets.PROD_SSH_USER }}
-          SSH_PORT: ${{ vars.PROD_SSH_PORT || '22' }}
-          APP_VERSION: ${{ github.sha }}
-          DEPLOY_OPERATION: apply
-        run: bash scripts/send-pos-migrations.sh
+      - name: Configure Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24.12.0
 
-      - name: Deploy the verified Git SHA in Coolify and wait for completion
+      - name: Request deployment and wait for the private result
         env:
-          COOLIFY_API_TOKEN: ${{ secrets.PROD_COOLIFY_API_TOKEN }}
-          APP_VERSION: ${{ github.sha }}
-          PREVIOUS_APP_VERSION: ${{ steps.release.outputs.base_sha }}
-        run: node scripts/deploy-coolify.mjs
+          DEPLOY_ENVIRONMENT: production
+          CF_ACCESS_CLIENT_ID: ${{ secrets.PROD_DEPLOY_CF_ACCESS_CLIENT_ID }}
+          CF_ACCESS_CLIENT_SECRET: ${{ secrets.PROD_DEPLOY_CF_ACCESS_CLIENT_SECRET }}
+        run: node scripts/request-deployment.mjs

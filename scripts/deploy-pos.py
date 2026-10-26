@@ -6,6 +6,7 @@ Input is protocol 4; protocol-2/3 migration packages remain compatible.
 """
 
 import io
+import hashlib
 import ipaddress
 import json
 import os
@@ -30,6 +31,8 @@ MAX_SQL = 256 * 1024 * 1024
 MIGRATION = re.compile(r'migrations/([0-9]{14})_[A-Za-z0-9_-]+\.sql')
 EDGE_SEGMENT = re.compile(r'[A-Za-z0-9_-][A-Za-z0-9_.-]*')
 FUNCTION_NAME = re.compile(r'[a-z][a-z0-9-]*')
+ENVIRONMENT = re.compile(r'[a-z][a-z0-9-]{0,31}')
+CONFIG_ARGUMENT = re.compile(r'/etc/tickit-deploy/receiver\.([a-z][a-z0-9-]{0,31})\.json')
 COOLIFY_SERVICES = Path('/data/coolify/services')
 EDGE_DESTINATION = '/home/deno/functions'
 
@@ -127,11 +130,58 @@ def edge_release(supabase, commit):
     return {'commit': commit, 'functions': translated}
 
 
+def trusted_file(path):
+    if not path.is_absolute() or not path.is_file() or path.resolve() != path:
+        raise DeployError('Deployment configuration and safety tools must be plain absolute files.')
+    for candidate in (path, *path.parents):
+        info = candidate.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise DeployError('Deployment configuration and safety tools must be root-owned and not writable by group/others.')
+
+
+def trusted_directory(path):
+    if not path.is_absolute() or not path.is_dir() or path.resolve() != path:
+        raise DeployError('Expected a plain absolute deployment state directory.')
+    for candidate in (path, *path.parents):
+        info = candidate.stat()
+        if info.st_uid != 0 or info.st_mode & 0o022:
+            raise DeployError('Deployment state directories must be root-owned and not writable by group/others.')
+
+
+def config_path(arguments):
+    if not arguments:
+        return CONFIG_FILE
+    if len(arguments) == 2 and arguments[0] == '--config' and CONFIG_ARGUMENT.fullmatch(arguments[1]):
+        return Path(arguments[1])
+    raise DeployError('Use --config /etc/tickit-deploy/receiver.<environment>.json or no arguments.')
+
+
 def load_config(path):
-    info = path.stat()
-    if info.st_uid != 0 or info.st_mode & 0o022:
-        raise DeployError('Deployment config must be root-owned and not writable by group/others.')
+    trusted_file(path)
     config = json.loads(path.read_text())
+    config.setdefault('environment', 'production')
+    if not isinstance(config['environment'], str) or not ENVIRONMENT.fullmatch(config['environment']):
+        raise DeployError('Invalid deployment environment.')
+    match = CONFIG_ARGUMENT.fullmatch(str(path))
+    if match and match[1] != config['environment']:
+        raise DeployError('Receiver filename and configured environment must match.')
+    # Only the new explicitly selected environment protocol requires the registry.
+    # Preserve the installed no-argument SSH receiver's invocation compatibility.
+    config['migration_history_file'] = (
+        f"/var/lib/tickit-deploy/migration-history.{config['environment']}.json" if match else None)
+    if config['migration_history_file']:
+        trusted_directory(Path(config['migration_history_file']).parent)
+    config.setdefault('node_bin', '/usr/bin/node')
+    config.setdefault('migration_safety_checker', '/opt/tickit/scripts/pending-migration-safety.mjs')
+    checker = Path(config['migration_safety_checker'])
+    trusted_file(checker)
+    trusted_file(checker.with_name('check-migrations.mjs'))
+    trusted_file(Path(config['node_bin']))
+    if not isinstance(config.get('migration_approvals', []), list):
+        raise DeployError('Migration approvals must be an array in the installed configuration.')
+    if 'backup_copy_dir' in config:
+        destination = Path(config['backup_copy_dir'])
+        trusted_directory(destination)
     for key in ('coolify_project', 'docker_network'):
         if not re.fullmatch(r'[a-z0-9_-]+', config.get(key, '')):
             raise DeployError('Invalid Coolify project/network configuration.')
@@ -146,6 +196,113 @@ def load_config(path):
         if not Path(config.get(key, '')).is_absolute():
             raise DeployError('Deployment paths must be absolute.')
     return config
+
+
+def phase(state):
+    print(f'POS_PHASE:{state}', flush=True)
+
+
+def valid_expiry(value):
+    if not isinstance(value, str) or not re.fullmatch(r'\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,6})?Z', value):
+        return False
+    try:
+        return datetime.fromisoformat(value.replace('Z', '+00:00')) > datetime.now(timezone.utc)
+    except ValueError:
+        return False
+
+
+def bootstrap_allowed(config):
+    bootstrap = config.get('bootstrap')
+    return (isinstance(bootstrap, dict) and bootstrap.get('allow_empty_ledger') is True
+            and bootstrap.get('environment') == config['environment']
+            and valid_expiry(bootstrap.get('expires_at')))
+
+
+def migration_hashes(project_dir, versions):
+    result = {}
+    directory = project_dir / 'supabase/migrations'
+    for version in sorted(versions):
+        paths = list(directory.glob(f'{version}_*.sql'))
+        if (len(paths) != 1 or paths[0].is_symlink() or not paths[0].is_file()
+                or not MIGRATION.fullmatch('migrations/' + paths[0].name)):
+            raise DeployError('Missing, duplicate or unsafe migration in the applied history package.')
+        result[version] = hashlib.sha256(paths[0].read_bytes()).hexdigest()
+    return result
+
+
+def history_fingerprint(hashes):
+    return hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+
+
+def write_migration_history(config, hashes):
+    path = Path(config['migration_history_file'])
+    trusted_directory(path.parent)
+    if path.exists() or path.is_symlink():
+        trusted_file(path)
+    temporary = None
+    try:
+        with tempfile.NamedTemporaryFile(mode='w', encoding='utf-8', prefix='.migration-history-',
+                                         dir=path.parent, delete=False) as output:
+            temporary = Path(output.name)
+            os.chmod(temporary, 0o600)
+            json.dump({'environment': config['environment'], 'hashes': hashes}, output, sort_keys=True)
+            output.flush()
+            os.fsync(output.fileno())
+        os.replace(temporary, path)
+        temporary = None
+        if hasattr(os, 'O_DIRECTORY'):
+            descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+    finally:
+        if temporary is not None:
+            temporary.unlink(missing_ok=True)
+
+
+def verify_migration_history(config, project_dir, applied, *, persist=True):
+    if not config.get('migration_history_file'):
+        return None
+    path = Path(config['migration_history_file'])
+    trusted_directory(path.parent)
+    current = migration_hashes(project_dir, applied)
+    if path.exists() or path.is_symlink():
+        trusted_file(path)
+        saved = json.loads(path.read_text(encoding='utf-8'))
+        if (not isinstance(saved, dict) or saved.get('environment') != config['environment']
+                or saved.get('hashes') != current):
+            raise DeployError('Applied migration history differs from the private content registry.')
+    else:
+        approval = config.get('migration_history_bootstrap')
+        approved = (isinstance(approval, dict) and approval.get('environment') == config['environment']
+                    and valid_expiry(approval.get('expires_at'))
+                    and approval.get('sha256') == history_fingerprint(current))
+        if not approved and not (not applied and bootstrap_allowed(config)):
+            raise DeployError('Initialize private migration history with an exact, expiring root approval of the applied content fingerprint.')
+        if persist:
+            write_migration_history(config, current)
+    return current
+
+
+def record_applied_history(runner, container, config, project_dir, before, packaged):
+    actual = ledger(runner, container, config)
+    if not before <= actual or not actual <= packaged:
+        raise DeployError('Database history changed unexpectedly; private migration registry requires operator review.')
+    write_migration_history(config, migration_hashes(project_dir, actual))
+    return actual
+
+
+def check_pending(runner, config, project_dir, pending, applied):
+    with tempfile.TemporaryFile() as request:
+        request.write(json.dumps({'directory': str((project_dir / 'supabase/migrations').resolve()),
+                                 'pending': sorted(pending), 'applied': sorted(applied),
+                                 'environment': config.get('environment', 'production'),
+                                 'approvals': config.get('migration_approvals', [])}).encode())
+        request.seek(0)
+        runner.command([config.get('node_bin', '/usr/bin/node'),
+                        config.get('migration_safety_checker', '/opt/tickit/scripts/pending-migration-safety.mjs')],
+                       stdin=request, env={'PATH': '/usr/local/bin:/usr/bin:/bin'}, timeout=120)
 
 
 class Runner:
@@ -177,12 +334,35 @@ class Runner:
                 'docker', 'exec', container, 'pg_dump', '-U', config['db_user'],
                 '-d', config['db_name'], '--format=custom',
             ], stdout=output)
+            output.flush()
+            os.fsync(output.fileno())
         if not partial.stat().st_size:
             raise DeployError('Database backup is empty.')
         for args in (['--list'], ['--file=/dev/null']):
             with partial.open('rb') as source:
                 self.command(['docker', 'exec', '-i', container, 'pg_restore', *args], stdin=source)
         partial.rename(path)
+        if hasattr(os, 'O_DIRECTORY'):
+            descriptor = os.open(path.parent, os.O_RDONLY | os.O_DIRECTORY)
+            try:
+                os.fsync(descriptor)
+            finally:
+                os.close(descriptor)
+        if config.get('backup_copy_dir'):
+            # Opt-in second filesystem/mount copy; no pruning or shell hooks.
+            # Failure stops SQL while preserving the validated local backup.
+            destination = Path(config['backup_copy_dir']) / path.name
+            copy_partial = destination.with_suffix('.partial')
+            if destination.exists():
+                raise DeployError('Refusing to replace an existing external backup.')
+            with path.open('rb') as source, copy_partial.open('xb') as output:
+                shutil.copyfileobj(source, output)
+                output.flush()
+                os.fsync(output.fileno())
+            with path.open('rb') as source, copy_partial.open('rb') as copied:
+                if hashlib.file_digest(source, 'sha256').digest() != hashlib.file_digest(copied, 'sha256').digest():
+                    raise DeployError('External backup copy verification failed.')
+            copy_partial.rename(destination)
 
 
 def find_database(runner, config):
@@ -218,6 +398,8 @@ def ledger(runner, container, config):
                    'ORDER BY version) TO STDOUT; COMMIT;')
     # psql -q suppresses transaction command tags.
     versions = output.splitlines()
+    if not versions and bootstrap_allowed(config):
+        return set()
     if not versions or any(not re.fullmatch(r'[0-9]{14}', version) for version in versions):
         raise DeployError('Missing or invalid database migration history.')
     if len(set(versions)) != len(versions) or config['required_migration'] not in versions:
@@ -226,6 +408,8 @@ def ledger(runner, container, config):
 
 
 def migrate(runner, config, project_dir, versions, backup_path, *, check_only=False):
+    if config['required_migration'] not in versions:
+        raise DeployError('The package does not contain the configured migration guard.')
     cli = config['supabase_bin']
     if runner.command([cli, '--version']) != config['supabase_version']:
         raise DeployError('Unexpected Supabase CLI version.')
@@ -233,6 +417,11 @@ def migrate(runner, config, project_dir, versions, backup_path, *, check_only=Fa
     before = ledger(runner, container, config)
     if not before <= versions:
         raise DeployError('Remote history contains migrations missing from this package; refusing downgrade.')
+    history = verify_migration_history(config, project_dir, before, persist=not check_only)
+    pending = versions - before
+    if not pending:
+        return 0
+    check_pending(runner, config, project_dir, pending, before)
     # Fetch only the current database password, without dumping Docker environment metadata.
     # Register it BEFORE logging any command result.
     result = subprocess.run(['docker', 'exec', container, 'printenv', 'POSTGRES_PASSWORD'],
@@ -252,13 +441,25 @@ def migrate(runner, config, project_dir, versions, backup_path, *, check_only=Fa
         if ledger(runner, container, config) != before:
             raise DeployError('Database history changed during the deployment check.')
         return len(versions - before)
+    phase('backing_up')
     runner.backup(container, config, backup_path)
     # dry-run also verifies TCP authentication and CLI history compatibility before any SQL is applied.
     runner.command([cli, 'db', 'push', '--db-url', url, '--include-all', '--skip-vault', '--dry-run', '--yes'],
                    cwd=project_dir, env=env)
-    runner.command([cli, 'db', 'push', '--db-url', url, '--include-all', '--skip-vault', '--yes'],
-                   cwd=project_dir, env=env)
-    after = ledger(runner, container, config)
+    if ledger(runner, container, config) != before:
+        raise DeployError('Database history changed before applying pending migrations.')
+    phase('migrating')
+    try:
+        runner.command([cli, 'db', 'push', '--db-url', url, '--include-all', '--skip-vault', '--yes'],
+                       cwd=project_dir, env=env)
+    except (DeployError, OSError, subprocess.SubprocessError):
+        if history is not None:
+            # db push can commit some migrations before a later migration fails.
+            # Preserve exactly those immutable bytes for the retry.
+            record_applied_history(runner, container, config, project_dir, before, versions)
+        raise
+    after = (record_applied_history(runner, container, config, project_dir, before, versions)
+             if history is not None else ledger(runner, container, config))
     if after != versions:
         raise DeployError('Post-migration history does not match the complete deployment package.')
     query(runner, container, config, "NOTIFY pgrst, 'reload schema';")
@@ -416,11 +617,12 @@ def deploy_edge(runner, config, edge, backup_path):
 
 
 def main():
-    if len(sys.argv) != 1 or os.geteuid() != 0:
-        raise DeployError('Run the installed receiver as root without arguments.')
+    selected_config = config_path(sys.argv[1:])
+    if os.geteuid() != 0:
+        raise DeployError('Run the installed receiver as root.')
     os.umask(0o077)
     os.environ['PATH'] = '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin'
-    config = load_config(CONFIG_FILE)
+    config = load_config(selected_config)
     # Imported here so package-validation tests can also run on Windows.
     import fcntl
     with LOCK_FILE.open('a') as lock:
@@ -430,6 +632,7 @@ def main():
             raise DeployError('Another database deployment holds the migration lock.') from error
         for key in ('backup_dir', 'log_dir'):
             Path(config[key]).mkdir(mode=0o700, parents=True, exist_ok=True)
+            trusted_directory(Path(config[key]))
         stamp = datetime.now(timezone.utc).strftime('%Y%m%dT%H%M%S_%fZ')
         log_path = Path(config['log_dir']) / f'deploy_{stamp}.log'
         with log_path.open('x') as log, tempfile.TemporaryDirectory(prefix='pos-deploy-') as directory:
@@ -441,19 +644,25 @@ def main():
             signal.alarm(0)
             print(f"Coolify project: {config['coolify_project']}; commit: {manifest['commit']}", flush=True)
             print(f'Private VPS log: {log_path}', flush=True)
-            backup_path = Path(config['backup_dir']) / f'postgres_{stamp}.dump'
+            prefix = config['environment'] + '_' if config.get('migration_history_file') else ''
+            backup_path = Path(config['backup_dir']) / f'postgres_{prefix}{stamp}.dump'
             check_only = manifest.get('operation') == 'check'
             runner = Runner(log)
+            phase('preflight')
             edge = prepare_edge(runner, config, project, manifest['commit']) if manifest['protocol'] == 4 else None
             count = migrate(runner, config, project, versions, backup_path, check_only=check_only)
             if edge and not check_only:
-                edge_backup = Path(config['backup_dir']) / f'functions_{stamp}'
+                phase('deploying_edge')
+                edge_backup = Path(config['backup_dir']) / f'functions_{prefix}{stamp}'
                 deploy_edge(runner, config, edge, edge_backup)
                 print(f"Edge release verified: {manifest['commit']}; code backup: {edge_backup}", flush=True)
             if check_only:
                 print(f'Check complete: {count} pending migrations; no backup, SQL or Edge runtime changes executed.', flush=True)
             else:
-                print(f'Backup verified: {backup_path}; migrations applied: {count}', flush=True)
+                if count:
+                    print(f'Backup verified: {backup_path}; migrations applied: {count}', flush=True)
+                else:
+                    print('No pending migrations; database backup and push skipped.', flush=True)
 
 
 if __name__ == '__main__':

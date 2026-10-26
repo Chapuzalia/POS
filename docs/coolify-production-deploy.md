@@ -1,5 +1,7 @@
 # Despliegue de main en Coolify
 
+> Referencia histórica de compatibilidad y recuperación. El pipeline automático actual usa el [controlador privado de despliegues](deployment-controller.md). Las instrucciones SSH, Tailscale, baselines, excepciones y credenciales GitHub de esta guía describen el procedimiento anterior; no se deben activar como un segundo pipeline. Consultar la guía del controlador antes de cualquier instalación o despliegue. No se ha aplicado ningún cambio en producción.
+
 ## Recursos y orden
 
 Actualización de Edge Functions: los workflows usan ahora protocolo 4 y

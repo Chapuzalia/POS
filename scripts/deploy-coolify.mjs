@@ -16,15 +16,19 @@ export function deploymentSettings(env) {
   if (!uuidPattern.test(env.COOLIFY_APPLICATION_UUID ?? '') || !env.COOLIFY_API_TOKEN?.trim()) {
     throw new Error('Configure the Coolify application UUID and API token.')
   }
-  if (!shaPattern.test(env.APP_VERSION ?? '') || (!shaPattern.test(env.PREVIOUS_APP_VERSION ?? '') && env.PREVIOUS_APP_VERSION !== 'development')) {
-    throw new Error('The current version must be a full Git SHA; the previous version must be a full Git SHA or development for the initial rollout.')
+  if (!shaPattern.test(env.APP_VERSION ?? '')) throw new Error('APP_VERSION must be a full Git SHA.')
+  // Installed host policy, independent of GitHub release history. Removing an
+  // older version is an explicit operational decision after checking PWAs.
+  const supportedVersions = env.SUPPORTED_APP_VERSIONS?.split(',').map(version => version.trim())
+  if (!supportedVersions?.length || supportedVersions.some(version => !shaPattern.test(version) && version !== 'development')) {
+    throw new Error('Configure SUPPORTED_APP_VERSIONS explicitly with compatible full Git SHAs (or development for an initial rollout).')
   }
   const branch = env.DEPLOY_BRANCH ?? 'main'
   if (branch !== 'main' && branch !== 'Staging') throw new Error('DEPLOY_BRANCH must be main or Staging (case sensitive).')
   return {
     base: `${origin.origin}/api/v1`, token: env.COOLIFY_API_TOKEN,
     uuid: env.COOLIFY_APPLICATION_UUID, sha: env.APP_VERSION, branch,
-    supportedVersions: [...new Set([env.PREVIOUS_APP_VERSION, env.APP_VERSION])].join(','),
+    supportedVersions: [...new Set([...supportedVersions, env.APP_VERSION])].join(','),
   }
 }
 
@@ -91,7 +95,7 @@ export async function deployApplication(api, settings, {
       { key: 'SUPPORTED_APP_VERSIONS', value: settings.supportedVersions },
     ].map(item => ({ ...item, is_buildtime: true, is_runtime: false, is_preview: false, is_literal: true })),
   })
-  const queued = await api('/deploy', 'POST', { uuid: settings.uuid, force: false })
+  const queued = await api('/deploy', 'POST', { uuid: settings.uuid, force: true })
   const matches = queued.deployments?.filter(item => item.resource_uuid === settings.uuid) ?? []
   if (matches.length !== 1 || !uuidPattern.test(matches[0].deployment_uuid ?? '')) {
     throw new Error('Coolify did not return exactly one deployment for the requested application. Inspect its queue before retrying.')
@@ -108,7 +112,7 @@ export async function deployApplication(api, settings, {
       lastStatus = deployment.status
     }
     if (deployment.status === 'finished') {
-      if (deployment.commit !== settings.sha) throw new Error('Coolify deployed a different Git SHA. Release baseline must not advance.')
+      if (deployment.commit !== settings.sha) throw new Error('Coolify deployed a different Git SHA.')
       return deploymentUuid
     }
     if (!activeStatuses.has(deployment.status)) throw new Error('Coolify deployment failed, was cancelled or returned an unknown state.')

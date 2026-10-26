@@ -1,0 +1,72 @@
+services:
+  deploy-api:
+    build:
+      context: .
+      dockerfile: infra/deploy-controller/Dockerfile
+      target: api
+    user: "10001:2010"
+    init: true
+    restart: unless-stopped
+    depends_on:
+      deploy-worker:
+        condition: service_healthy
+    read_only: true
+    cap_drop: [ALL]
+    security_opt: ["no-new-privileges:true"]
+    pids_limit: 64
+    mem_limit: 128m
+    environment:
+      TICKIT_DEPLOY_SOCKET: /run/tickit-deploy/worker.sock
+    ports:
+      - "127.0.0.1:18080:8080"
+    volumes:
+      - deploy-ipc:/run/tickit-deploy:ro
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  deploy-worker:
+    build:
+      context: .
+      dockerfile: infra/deploy-controller/Dockerfile
+      target: worker
+    user: "0:2010"
+    init: true
+    restart: unless-stopped
+    read_only: true
+    stop_grace_period: 60s
+    pids_limit: 128
+    mem_limit: 768m
+    security_opt: ["no-new-privileges:true"]
+    # Host networking reaches the existing private Supabase bridges and Tailscale.
+    # The worker listens only on its Unix socket; it opens no TCP listener.
+    network_mode: host
+    environment:
+      DEPLOY_CONTROLLER_CONFIG: ${DEPLOY_CONTROLLER_CONFIG:?}
+      DEPLOY_REPOSITORY_KEY: ${DEPLOY_REPOSITORY_KEY:?}
+      DEPLOY_GITHUB_KNOWN_HOSTS: ${DEPLOY_GITHUB_KNOWN_HOSTS:?}
+    volumes:
+      - deploy-data:/var/lib/tickit-deploy
+      - deploy-ipc:/run/tickit-deploy
+      - /var/run/docker.sock:/var/run/docker.sock
+      - /run/lock:/run/lock
+      - /data/coolify/services:/data/coolify/services
+      - /opt/pos-deploy/backups:/opt/pos-deploy/backups
+      - deploy-receiver-logs:/var/log/pos-deploy
+    tmpfs:
+      - /etc/tickit-deploy:rw,noexec,nosuid,nodev,mode=0700,size=1m
+      - /tmp:rw,noexec,nosuid,nodev,size=512m
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  deploy-data:
+  deploy-ipc:
+  deploy-receiver-logs:
