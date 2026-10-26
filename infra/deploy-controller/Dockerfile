@@ -4,7 +4,10 @@ FROM docker:29-cli AS docker-cli
 FROM node:24.12.0-bookworm-slim AS source
 WORKDIR /opt/tickit
 COPY --chown=0:0 --chmod=0644 apps/deploy-controller/package.json ./apps/deploy-controller/package.json
-COPY --chown=0:0 --chmod=0644 apps/deploy-controller/src/*.ts ./apps/deploy-controller/src/
+COPY --chown=0:0 apps/deploy-controller/src/ /opt/tickit/apps/deploy-controller/src/
+
+RUN test -f /opt/tickit/apps/deploy-controller/src/gateway.ts \
+ && test -f /opt/tickit/apps/deploy-controller/src/worker.ts
 
 FROM source AS api
 USER 10001:2010
