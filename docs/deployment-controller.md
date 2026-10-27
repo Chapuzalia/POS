@@ -94,14 +94,26 @@ python3 -c 'import getpass,hashlib; print(hashlib.sha256(getpass.getpass("Access
    | `PROD_DEPLOY_CF_ACCESS_CLIENT_SECRET` | `STAGING_DEPLOY_CF_ACCESS_CLIENT_SECRET` |
 
 6. Access usa `CF-Access-Client-Id` y `CF-Access-Client-Secret`.
-   `Authorization` queda reservado para GitHub OIDC.
+   En cada POST y consulta de estado, `scripts/request-deployment.mjs` envía
+   también `X-Tickit-Deploy-Client-Id` y `X-Tickit-Deploy-Client-Secret` con
+   los mismos valores, siempre por HTTPS. Esta segunda pareja permite al
+   worker validar las credenciales aunque Access consuma o modifique las
+   cabeceras originales. El gateway reenvía al worker por socket Unix solo
+   la pareja `X-Tickit-Deploy-*` y `Authorization`, además de las cabeceras
+   de contenido necesarias; no reenvía la pareja `CF-Access-*`.
+   El worker exige el Client ID del entorno y compara en tiempo constante
+   el SHA-256 del secreto con el digest configurado, sin registrar credenciales
+   ni incluirlas en respuestas. No se necesitan secretos nuevos.
+   `Authorization: Bearer …` queda reservado para GitHub OIDC, que sigue
+   siendo obligatorio: el Service Token por sí solo no autoriza despliegues.
 7. Probar `/health`: sin credenciales Access no debe devolver 200; con Access
-   válido debe devolver 200. Un POST sin OIDC debe seguir rechazado.
+   válido debe devolver 200. Un POST con la pareja propia válida pero sin
+   OIDC devuelve 401; sin esa pareja o con valores incorrectos devuelve 403.
 8. Confirmar que Coolify sigue accesible solo por Tailscale y que PostgreSQL
    y SSH no tienen nuevas rutas públicas.
 
 El worker verifica firma, issuer, audience, repositorio/ID, workflow, rama,
-evento, SHA y ejecución. Staging no autoriza producción. GitHub no recibe
+evento, SHA, ejecución y caducidad. Staging no autoriza producción. GitHub no recibe
 credenciales PostgreSQL, SSH del VPS ni tokens de Coolify.
 
 Referencia: [Access Service Tokens](https://developers.cloudflare.com/cloudflare-one/access-controls/service-credentials/service-tokens/).

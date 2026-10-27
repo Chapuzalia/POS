@@ -1,12 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest'
+import { afterEach, describe, expect, it, vi } from 'vitest'
+import type { IncomingHttpHeaders } from 'node:http'
 import type { AddressInfo } from 'node:net'
-import { generateKeyPairSync, sign, createHash } from 'node:crypto'
+import { generateKeyPairSync, sign, createHash, randomUUID } from 'node:crypto'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { dirname, join } from 'node:path'
 import { authorize, GitHubVerifier, HttpError, parseDeployment } from '../../apps/deploy-controller/src/auth.ts'
 import { DeploymentStore } from '../../apps/deploy-controller/src/store.ts'
-import { boundedServer, workerHandler } from '../../apps/deploy-controller/src/http.ts'
+import { boundedServer, gatewayHandler, workerHandler } from '../../apps/deploy-controller/src/http.ts'
 
 const sha = 'a'.repeat(40)
 const secret = 'test-service-secret'
@@ -39,24 +40,26 @@ function verifier() {
 }
 describe('deployment identity', () => {
   it('verifies signed GitHub identity and environment service credentials', async () => {
-    const result = await authorize({ authorization: `Bearer ${jwt()}`, 'cf-access-client-id': policy.clientId, 'cf-access-client-secret': secret }, payload, { staging: policy }, verifier())
+    const result = await authorize({ authorization: `Bearer ${jwt()}`, 'x-tickit-deploy-client-id': policy.clientId, 'x-tickit-deploy-client-secret': secret }, payload, { staging: policy }, verifier())
     expect(result).toMatchObject({ environment: 'staging', commit: sha, run: '42:1' })
   })
   it.each([
     { iss: 'https://attacker' }, { aud: 'other' }, { exp: 999 }, { nbf: 1001 },
+    { iat: 1001 }, { iat: 399 }, { exp: 1591 },
     { repository: 'fork/POS' }, { repository_id: '456' }, { event_name: 'pull_request' },
     { ref: 'refs/heads/main' }, { workflow_ref: 'Chapuzalia/POS/.github/workflows/evil.yml@refs/heads/Staging' },
-    { workflow_sha: 'b'.repeat(40) }, { sha: 'invalid' },
+    { workflow_sha: 'b'.repeat(40) }, { sha: 'b'.repeat(40) },
+    { run_id: '' }, { run_attempt: '' }, { jti: '' },
   ])('fails closed on untrusted claims %j', async overrides => {
     await expect(verifier().verify(jwt(overrides), payload)).rejects.toBeInstanceOf(HttpError)
   })
   it('rejects tampering, missing credentials, disabled environment and cross-environment identity', async () => {
     await expect(verifier().verify(jwt().slice(0, -8) + 'aaaaaaaa', payload)).rejects.toBeInstanceOf(HttpError)
-    for (const headers of [{}, { authorization: `Bearer ${jwt()}`, 'cf-access-client-id': policy.clientId, 'cf-access-client-secret': 'wrong' }]) {
+    for (const headers of [{}, { authorization: `Bearer ${jwt()}`, 'x-tickit-deploy-client-id': policy.clientId, 'x-tickit-deploy-client-secret': 'wrong' }]) {
       await expect(authorize(headers, payload, { staging: policy }, verifier())).rejects.toBeInstanceOf(HttpError)
     }
     await expect(verifier().verify(jwt(), { ...payload, environment: 'production' })).rejects.toBeInstanceOf(HttpError)
-    await expect(authorize({ authorization: `Bearer ${jwt()}`, 'cf-access-client-id': policy.clientId, 'cf-access-client-secret': secret }, payload, { staging: { ...policy, enabled: false } }, verifier())).rejects.toBeInstanceOf(HttpError)
+    await expect(authorize({ authorization: `Bearer ${jwt()}`, 'x-tickit-deploy-client-id': policy.clientId, 'x-tickit-deploy-client-secret': secret }, payload, { staging: { ...policy, enabled: false } }, verifier())).rejects.toBeInstanceOf(HttpError)
   })
   it('rejects unknown fields, malformed SHAs, oversized IDs and invalid environments', () => {
     for (const value of [{ ...payload, command: 'id' }, { ...payload, commit: '-x' }, { ...payload, request_id: 'x'.repeat(129) }, { ...payload, environment: 'preview' }]) expect(() => parseDeployment(value)).toThrow(HttpError)
@@ -67,7 +70,7 @@ it('serves authenticated deployment API with strict paths, payload limits and ru
   const server = boundedServer(workerHandler(db, verifier(), { staging: policy }, () => {}))
   await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
   const base = `http://127.0.0.1:${(server.address() as AddressInfo).port}`
-  const headers = { authorization: `Bearer ${jwt()}`, 'cf-access-client-id': policy.clientId, 'cf-access-client-secret': secret, 'content-type': 'application/json' }
+  const headers = { authorization: `Bearer ${jwt()}`, 'x-tickit-deploy-client-id': policy.clientId, 'x-tickit-deploy-client-secret': secret, 'content-type': 'application/json' }
   try {
     expect((await fetch(`${base}/health`)).status).toBe(200)
     expect((await fetch(`${base}/deploy`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(payload) })).status).toBe(403)
@@ -84,6 +87,93 @@ it('serves authenticated deployment API with strict paths, payload limits and ru
     expect((await fetch(`${base}/deploy`, { method: 'POST', headers, body: '{' })).status).toBe(400)
   } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
 })
+describe('worker authentication behind Cloudflare Access', () => {
+  const accessHeaders = { 'cf-access-client-id': policy.clientId, 'cf-access-client-secret': secret }
+  const deployHeaders = { 'x-tickit-deploy-client-id': policy.clientId, 'x-tickit-deploy-client-secret': secret }
+  it.each([
+    { name: 'Cloudflare headers alone', headers: accessHeaders, status: 403 },
+    { name: 'Cloudflare headers with valid OIDC but no controller headers', headers: { ...accessHeaders, authorization: `Bearer ${jwt()}` }, status: 403 },
+    { name: 'controller credentials without OIDC', headers: deployHeaders, status: 401 },
+    { name: 'incorrect controller ID despite valid Cloudflare credentials', headers: { ...accessHeaders, ...deployHeaders, 'x-tickit-deploy-client-id': 'wrong-id', authorization: `Bearer ${jwt()}` }, status: 403 },
+    { name: 'incorrect controller secret despite valid Cloudflare credentials', headers: { ...accessHeaders, ...deployHeaders, 'x-tickit-deploy-client-secret': 'wrong-secret', authorization: `Bearer ${jwt()}` }, status: 403 },
+    { name: 'valid controller credentials and OIDC', headers: { ...deployHeaders, authorization: `Bearer ${jwt()}` }, status: 202 },
+    { name: 'invalid OIDC signature', headers: { ...deployHeaders, authorization: `Bearer ${jwt().slice(0, -8)}aaaaaaaa` }, status: 403 },
+    { name: 'invalid OIDC claims', headers: { ...deployHeaders, authorization: `Bearer ${jwt({ repository_id: '456' })}` }, status: 403 },
+  ])('$name returns HTTP $status without disclosing credentials', async ({ headers, status }) => {
+    const db = store()
+    const notify = vi.fn()
+    const logs = ['log', 'info', 'warn', 'error', 'debug'] as const
+    const spies = logs.map(method => vi.spyOn(console, method).mockImplementation(() => {}))
+    const server = boundedServer(workerHandler(db, verifier(), { staging: policy }, notify))
+    await new Promise<void>(resolve => server.listen(0, '127.0.0.1', resolve))
+    try {
+      const response = await fetch(`http://127.0.0.1:${(server.address() as AddressInfo).port}/deploy`, {
+        method: 'POST', headers: { ...headers, 'content-type': 'application/json' }, body: JSON.stringify(payload),
+      })
+      expect(response.status).toBe(status)
+      const text = await response.text()
+      const output = text + JSON.stringify(spies.flatMap(spy => spy.mock.calls))
+      for (const credential of [policy.clientId, secret, 'wrong-id', 'wrong-secret', headers.authorization?.slice(7)].filter(Boolean)) {
+        expect(output).not.toContain(credential)
+      }
+      if (status === 202) {
+        const result = JSON.parse(text) as { id: string }
+        expect(db.get(result.id)?.status).toBe('queued')
+        expect(notify).toHaveBeenCalledOnce()
+      } else {
+        expect(db.claim()).toBeUndefined()
+        expect(notify).not.toHaveBeenCalled()
+      }
+    } finally { server.closeAllConnections(); await new Promise<void>(resolve => server.close(() => resolve())) }
+  })
+})
+
+it('gateway forwards only controller credentials and OIDC over its local socket for submission and polling', async () => {
+  const db = store()
+  const socketPath = process.platform === 'win32'
+    ? `\\\\.\\pipe\\tickit-controller-${randomUUID()}`
+    : join(mkdtempSync(join(tmpdir(), 'tickit-gateway-')), 'worker.sock')
+  if (process.platform !== 'win32') directories.push(dirname(socketPath))
+  const received: IncomingHttpHeaders[] = []
+  const handler = workerHandler(db, verifier(), { staging: policy }, () => {})
+  const worker = boundedServer(async (request, response) => {
+    received.push(request.headers)
+    await handler(request, response)
+  })
+  const gateway = boundedServer(gatewayHandler(socketPath))
+  try {
+    await new Promise<void>((resolve, reject) => { worker.once('error', reject); worker.listen(socketPath, resolve) })
+    await new Promise<void>(resolve => gateway.listen(0, '127.0.0.1', resolve))
+    const base = `http://127.0.0.1:${(gateway.address() as AddressInfo).port}`
+    const token = jwt()
+    const headers = {
+      'X-Tickit-Deploy-Client-Id': policy.clientId, 'X-Tickit-Deploy-Client-Secret': secret,
+      Authorization: `Bearer ${token}`, 'Content-Type': 'application/json',
+      'CF-Access-Client-Id': 'rewritten-by-access', 'CF-Access-Client-Secret': 'rewritten-secret',
+      Cookie: 'private-cookie', 'X-Unrelated': 'untrusted',
+    }
+    const posted = await fetch(`${base}/deploy`, { method: 'POST', headers, body: JSON.stringify(payload) })
+    expect(posted.status).toBe(202)
+    const result = await posted.json() as { id: string }
+    const polled = await fetch(`${base}/deployments/${result.id}`, { headers })
+    expect(polled.status).toBe(200)
+    expect(await polled.json()).toMatchObject({ id: result.id, status: 'queued' })
+    expect(received).toHaveLength(2)
+    for (const forwarded of received) {
+      expect(forwarded).toMatchObject({
+        'x-tickit-deploy-client-id': policy.clientId, 'x-tickit-deploy-client-secret': secret,
+        authorization: `Bearer ${token}`,
+      })
+      for (const name of ['cf-access-client-id', 'cf-access-client-secret', 'cookie', 'x-unrelated']) expect(forwarded).not.toHaveProperty(name)
+    }
+  } finally {
+    for (const server of [gateway, worker]) {
+      server.closeAllConnections()
+      await new Promise<void>(resolve => server.close(() => resolve()))
+    }
+  }
+})
+
 describe('durable deployments', () => {
   it('retains admitted PWA versions across A to B to C until explicit retirement', () => {
     const db = store(), a = 'a'.repeat(40), b = 'b'.repeat(40), c = 'c'.repeat(40)

@@ -27,6 +27,8 @@ function controller(statuses = ['queued', 'preflight', 'success']) {
     assert.equal(init.headers.Authorization, `Bearer oidc-${tokenNumber}`)
     assert.equal(init.headers['CF-Access-Client-Id'], 'access-id')
     assert.equal(init.headers['CF-Access-Client-Secret'], 'access-secret')
+    assert.equal(init.headers['X-Tickit-Deploy-Client-Id'], 'access-id')
+    assert.equal(init.headers['X-Tickit-Deploy-Client-Secret'], 'access-secret')
     return Response.json({ id, status: statuses[statusIndex++], environment: 'production', commit: sha, request_id: 'production-42-2' })
   }
   return { calls, fetchImpl }
@@ -79,6 +81,18 @@ test('failed and interrupted deployments fail CI without printing private contro
     const logs = []
     await assert.rejects(requestDeployment(requestSettings(env), { fetchImpl, sleep: async () => {}, log: value => logs.push(value) }), /failed|interrupted/)
     assert.ok(logs.every(value => !value.includes('secret') && !value.includes('oidc')))
+  }
+})
+
+test('requester never logs credentials or reflects private authentication failures', async () => {
+  for (const status of [401, 403]) {
+    const logs = []
+    const fetchImpl = async url => new URL(url).hostname === 'pipelines.actions.githubusercontent.com'
+      ? Response.json({ value: 'private-oidc-token' })
+      : Response.json({ error: 'access-id access-secret github-secret private-oidc-token' }, { status })
+    await assert.rejects(requestDeployment(requestSettings(env), { fetchImpl, log: value => logs.push(value) }),
+      { message: `Deployment controller returned HTTP ${status}.` })
+    assert.deepEqual(logs, [])
   }
 })
 

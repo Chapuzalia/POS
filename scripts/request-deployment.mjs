@@ -68,7 +68,9 @@ export async function requestDeployment(settings, {
     return fetchJson(fetchImpl, `${origin}${path}`, {
       method, headers: {
         Authorization: `Bearer ${token.value}`, 'CF-Access-Client-Id': settings.accessId,
-        'CF-Access-Client-Secret': settings.accessSecret, Accept: 'application/json', 'Content-Type': 'application/json',
+        'CF-Access-Client-Secret': settings.accessSecret,
+        'X-Tickit-Deploy-Client-Id': settings.accessId, 'X-Tickit-Deploy-Client-Secret': settings.accessSecret,
+        Accept: 'application/json', 'Content-Type': 'application/json',
       }, ...(body === undefined ? {} : { body: JSON.stringify(body) }),
     }, 'Deployment controller')
   }

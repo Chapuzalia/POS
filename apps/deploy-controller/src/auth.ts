@@ -76,8 +76,8 @@ export class GitHubVerifier {
 export async function authorize(headers: IncomingHttpHeaders, request: Pick<DeploymentRequest, 'environment' | 'commit'>,
   policies: Partial<Record<Environment, AccessPolicy>>, verifier: GitHubVerifier): Promise<Identity> {
   const policy = policies[request.environment]
-  const secret = headers['cf-access-client-secret']
-  if (!policy?.enabled || headers['cf-access-client-id'] !== policy.clientId || typeof secret !== 'string' || secret.length > 1024 ||
+  const secret = headers['x-tickit-deploy-client-secret']
+  if (!policy?.enabled || headers['x-tickit-deploy-client-id'] !== policy.clientId || typeof secret !== 'string' || secret.length > 1024 ||
     !/^[0-9a-f]{64}$/.test(policy.clientSecretSha256) ||
     !timingSafeEqual(createHash('sha256').update(secret).digest(), Buffer.from(policy.clientSecretSha256, 'hex'))) throw new HttpError(403, 'Deployment access rejected.')
   const authorization = headers.authorization

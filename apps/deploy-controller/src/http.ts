@@ -64,8 +64,8 @@ export function gatewayHandler(socketPath: string) {
     const data = await body(request)
     await new Promise<void>((resolve, reject) => {
       const forwarded = httpRequest({ socketPath, method: request.method, path, timeout: 12_000, headers: {
-        authorization: request.headers.authorization ?? '', 'cf-access-client-id': request.headers['cf-access-client-id'] ?? '',
-        'cf-access-client-secret': request.headers['cf-access-client-secret'] ?? '', 'content-type': request.headers['content-type'] ?? '', 'content-length': data.length,
+        authorization: request.headers.authorization ?? '', 'x-tickit-deploy-client-id': request.headers['x-tickit-deploy-client-id'] ?? '',
+        'x-tickit-deploy-client-secret': request.headers['x-tickit-deploy-client-secret'] ?? '', 'content-type': request.headers['content-type'] ?? '', 'content-length': data.length,
       } }, upstream => {
         let size = 0; const chunks: Buffer[] = []
         upstream.on('data', chunk => { size += chunk.length; if (size > 16_384) upstream.destroy(new Error('Oversized worker response.')); else chunks.push(chunk) })
