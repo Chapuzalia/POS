@@ -60,6 +60,7 @@ services:
     tmpfs:
       - /etc/tickit-deploy:rw,noexec,nosuid,nodev,mode=0700,size=1m
       - /tmp:rw,noexec,nosuid,nodev,size=512m
+      - /root/.supabase:rw,noexec,nosuid,nodev,mode=0700,size=32m
     logging:
       driver: json-file
       options:
