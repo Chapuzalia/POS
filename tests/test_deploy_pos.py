@@ -1,4 +1,5 @@
 import importlib.util
+import hashlib
 import io
 import json
 from pathlib import Path
@@ -6,6 +7,8 @@ import subprocess
 import tarfile
 import tempfile
 import unittest
+from types import SimpleNamespace
+from contextlib import redirect_stdout
 from unittest.mock import patch
 
 spec = importlib.util.spec_from_file_location('deploy_pos', Path(__file__).parents[1] / 'scripts/deploy-pos.py')
@@ -18,6 +21,8 @@ CONFIG = {
     'coolify_project': PROJECT, 'docker_network': PROJECT, 'db_user': 'supabase_admin',
     'db_name': 'postgres', 'supabase_bin': '/usr/bin/supabase', 'supabase_version': '2.121.0',
     'required_migration': VERSION,
+    'environment': 'production', 'node_bin': 'node',
+    'migration_safety_checker': str(Path(__file__).parents[1] / 'scripts/pending-migration-safety.mjs'),
 }
 
 
@@ -59,6 +64,11 @@ class FakeRunner:
             if 'COPY' in args[-1]:
                 return '\n'.join(self.after if self.applied else self.before)
             return ''
+        if args[1:2] == [CONFIG['migration_safety_checker']]:
+            result = subprocess.run(args, stdin=options['stdin'], capture_output=True, check=False)
+            if result.returncode:
+                raise deploy.DeployError('Unsafe pending migration')
+            return result.stdout.decode().strip()
         if 'push' in args:
             if self.fail == 'dry-run':
                 raise deploy.DeployError('TCP failed')
@@ -108,8 +118,138 @@ class ReceiverTests(unittest.TestCase):
 
     def run_migration(self, runner, *, check_only=False):
         credential = subprocess.CompletedProcess([], 0, b'current-password:@/%\n', b'')
-        with patch.object(deploy.subprocess, 'run', return_value=credential):
-            return deploy.migrate(runner, CONFIG, Path('/project'), {VERSION, NEW_VERSION}, Path('/backup.dump'), check_only=check_only)
+        original_run = subprocess.run
+        def run(args, **options):
+            return credential if 'printenv' in args else original_run(args, **options)
+        with tempfile.TemporaryDirectory() as directory, patch.object(deploy.subprocess, 'run', side_effect=run):
+            project = Path(directory)
+            migrations = project / 'supabase/migrations'
+            migrations.mkdir(parents=True)
+            for version in (VERSION, NEW_VERSION):
+                (migrations / f'{version}_example.sql').write_text(
+                    "-- migration-safety: expand\nset lock_timeout = '5s';\nset statement_timeout = '5min';\nselect 1;", encoding='utf-8')
+            return deploy.migrate(runner, CONFIG, project, {VERSION, NEW_VERSION}, Path('/backup.dump'), check_only=check_only)
+
+    def test_zero_pending_skips_backup_password_and_all_pushes(self):
+        runner = FakeRunner(before=[VERSION, NEW_VERSION])
+        with patch.object(deploy.subprocess, 'run') as external:
+            self.assertEqual(deploy.migrate(runner, CONFIG, Path('/project'), {VERSION, NEW_VERSION}, Path('/backup.dump')), 0)
+        external.assert_not_called()
+        self.assertFalse(any('push' in args or args == ['backup'] for args, _ in runner.calls))
+
+    def test_pending_safety_failure_stops_before_backup_and_password(self):
+        runner = FakeRunner()
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            migrations = project / 'supabase/migrations'
+            migrations.mkdir(parents=True)
+            (migrations / f'{NEW_VERSION}_unsafe.sql').write_text('drop table public.sales;')
+            with self.assertRaises(deploy.DeployError), patch.object(deploy.subprocess, 'run', wraps=subprocess.run) as external:
+                deploy.migrate(runner, CONFIG, project, {VERSION, NEW_VERSION}, Path('/backup.dump'))
+            self.assertFalse(any('printenv' in call.args[0] for call in external.call_args_list))
+        self.assertNotIn(['backup'], [args for args, _ in runner.calls])
+
+    def test_only_sql_missing_from_ledger_is_safety_checked(self):
+        runner = FakeRunner()
+        credential = subprocess.CompletedProcess([], 0, b'password\n', b'')
+        original_run = subprocess.run
+        def run(args, **options):
+            return credential if 'printenv' in args else original_run(args, **options)
+        with tempfile.TemporaryDirectory() as directory, patch.object(deploy.subprocess, 'run', side_effect=run):
+            project = Path(directory)
+            migrations = project / 'supabase/migrations'
+            migrations.mkdir(parents=True)
+            (migrations / f'{VERSION}_historical.sql').write_text('drop table public.historical;')
+            (migrations / f'{NEW_VERSION}_new.sql').write_text(
+                "-- migration-safety: expand\nset lock_timeout = '5s';\nset statement_timeout = '5min';\nselect 1;")
+            self.assertEqual(deploy.migrate(runner, CONFIG, project, {VERSION, NEW_VERSION}, Path('/backup.dump')), 1)
+
+    def test_empty_ledger_requires_expiring_environment_bound_bootstrap_config(self):
+        runner = FakeRunner(before=[])
+        with self.assertRaises(deploy.DeployError):
+            deploy.ledger(runner, 'db', CONFIG)
+        approved = {**CONFIG, 'bootstrap': {'allow_empty_ledger': True, 'environment': 'production',
+                                          'expires_at': '2099-01-01T00:00:00Z'}}
+        self.assertEqual(deploy.ledger(runner, 'db', approved), set())
+        for change in ({'environment': 'staging'}, {'expires_at': '2000-01-01T00:00:00Z'}, {'allow_empty_ledger': 'true'}):
+            with self.subTest(change=change), self.assertRaises(deploy.DeployError):
+                deploy.ledger(runner, 'db', {**approved, 'bootstrap': {**approved['bootstrap'], **change}})
+
+    def test_config_argument_only_allows_installed_environment_paths(self):
+        self.assertEqual(deploy.config_path([]), deploy.CONFIG_FILE)
+        self.assertEqual(deploy.config_path(['--config', '/etc/tickit-deploy/receiver.production.json']).as_posix(),
+                         '/etc/tickit-deploy/receiver.production.json')
+        for args in (['--config', '/tmp/custom.json'], ['--config', '/etc/tickit-deploy/receiver...json'],
+                     ['--config', '/etc/tickit-deploy/receiver.production.json', 'extra'], ['--help']):
+            with self.subTest(args=args), self.assertRaises(deploy.DeployError):
+                deploy.config_path(args)
+
+    def test_pending_phases_are_structured_and_ordered(self):
+        output = io.StringIO()
+        with redirect_stdout(output):
+            self.run_migration(FakeRunner())
+        self.assertEqual(output.getvalue().splitlines(), ['POS_PHASE:backing_up', 'POS_PHASE:migrating'])
+
+    def test_main_still_deploys_edge_when_database_has_no_pending_migrations(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            config = {**CONFIG, 'backup_dir': str(root / 'backups'), 'log_dir': str(root / 'logs'),
+                      'migration_history_file': str(root / 'migration-history.production.json')}
+            manifest = {'protocol': 4, 'commit': 'a' * 40}
+            output = io.StringIO()
+            fcntl = SimpleNamespace(flock=lambda *_: None, LOCK_EX=2, LOCK_NB=4)
+            def prepare(*_args):
+                self.assertIn('POS_PHASE:preflight', output.getvalue())
+                return {'prepared': True}
+            with patch.dict(deploy.sys.modules, {'fcntl': fcntl}), patch.dict(deploy.os.environ), \
+                    patch.object(deploy.os, 'geteuid', return_value=0, create=True), \
+                    patch.object(deploy.os, 'umask'), patch.object(deploy.sys, 'argv', ['receiver']), \
+                    patch.object(deploy.sys, 'stdin', SimpleNamespace(buffer=io.BytesIO())), \
+                    patch.object(deploy, 'load_config', return_value=config), \
+                    patch.object(deploy, 'trusted_directory'), \
+                    patch.object(deploy, 'LOCK_FILE', root / 'deploy.lock'), \
+                    patch.object(deploy.signal, 'SIGALRM', 14, create=True), \
+                    patch.object(deploy.signal, 'signal'), patch.object(deploy.signal, 'alarm', create=True), \
+                    patch.object(deploy, 'unpack_package', return_value=(manifest, {VERSION})), \
+                    patch.object(deploy, 'prepare_edge', side_effect=prepare), \
+                    patch.object(deploy, 'migrate', return_value=0) as migrations, \
+                    patch.object(deploy, 'deploy_edge') as edge, redirect_stdout(output):
+                deploy.main()
+            edge.assert_called_once()
+            self.assertTrue(edge.call_args.args[-1].name.startswith('functions_production_'))
+            self.assertTrue(migrations.call_args.args[-1].name.startswith('postgres_production_'))
+            self.assertIn('POS_PHASE:deploying_edge', output.getvalue())
+            self.assertNotIn('Backup verified:', output.getvalue())
+
+    def test_external_ledger_change_during_dry_run_stops_sql_apply(self):
+        runner = FakeRunner()
+        command = runner.command
+        def mutate_history(args, **options):
+            result = command(args, **options)
+            if 'push' in args and '--dry-run' in args:
+                runner.before = [VERSION, NEW_VERSION]
+            return result
+        runner.command = mutate_history
+        with self.assertRaises(deploy.DeployError):
+            self.run_migration(runner)
+        self.assertFalse(runner.applied)
+
+    def test_backup_optional_second_copy_is_verified_without_removing_existing_backups(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            external = root / 'external'
+            external.mkdir()
+            old = external / 'older.dump'
+            old.write_bytes(b'keep')
+            path = root / 'postgres.dump'
+            runner = deploy.Runner(io.StringIO())
+            def command(args, **options):
+                if 'pg_dump' in args:
+                    options['stdout'].write(b'valid-archive-content')
+            runner.command = command
+            runner.backup('db', {**CONFIG, 'backup_copy_dir': str(external)}, path)
+            self.assertEqual((external / path.name).read_bytes(), b'valid-archive-content')
+            self.assertEqual(old.read_bytes(), b'keep')
 
     def test_check_mode_only_reads_history_and_runs_readonly_dry_run(self):
         runner = FakeRunner()
@@ -206,6 +346,134 @@ class ReceiverTests(unittest.TestCase):
         self.assertNotIn('secret-password', log.getvalue())
         self.assertIn('[REDACTED]', log.getvalue())
         self.assertNotIn('secret-password', str(failure.exception))
+
+
+class HistoryRegistryTests(unittest.TestCase):
+    def setUp(self):
+        self.temporary = tempfile.TemporaryDirectory()
+        self.root = Path(self.temporary.name)
+        self.project = self.root / 'project'
+        self.migrations = self.project / 'supabase/migrations'
+        self.migrations.mkdir(parents=True)
+        self.sql = b"-- migration-safety: expand\nset lock_timeout = '5s';\nset statement_timeout = '5min';\nselect 1;"
+        self.third = '20261020120000'
+        for version in (VERSION, NEW_VERSION, self.third):
+            (self.migrations / f'{version}_example.sql').write_bytes(self.sql)
+        self.registry = self.root / 'state' / 'history.production.json'
+        self.registry.parent.mkdir()
+        self.config = {**CONFIG, 'migration_history_file': str(self.registry)}
+        self.permissions = patch.object(deploy, 'trusted_directory')
+        self.files = patch.object(deploy, 'trusted_file')
+        self.permissions.start()
+        self.files.start()
+
+    def tearDown(self):
+        self.permissions.stop()
+        self.files.stop()
+        self.temporary.cleanup()
+
+    def approve(self, versions):
+        hashes = {version: hashlib.sha256(self.sql).hexdigest() for version in versions}
+        digest = hashlib.sha256(json.dumps(hashes, sort_keys=True, separators=(',', ':')).encode()).hexdigest()
+        self.config['migration_history_bootstrap'] = {
+            'environment': 'production', 'expires_at': '2099-01-01T00:00:00Z', 'sha256': digest,
+        }
+
+    def migrate(self, runner, *, check_only=False):
+        original = subprocess.run
+        def run(args, **options):
+            if 'printenv' in args:
+                return subprocess.CompletedProcess([], 0, b'password\n', b'')
+            return original(args, **options)
+        with patch.object(deploy.subprocess, 'run', side_effect=run):
+            return deploy.migrate(runner, self.config, self.project,
+                                  {VERSION, NEW_VERSION, self.third}, self.root / 'backup.dump', check_only=check_only)
+
+    def test_first_registry_requires_environment_expiry_and_exact_applied_content_approval(self):
+        with self.assertRaises(deploy.DeployError):
+            deploy.verify_migration_history(self.config, self.project, {VERSION})
+        self.approve({VERSION})
+        approved = dict(self.config['migration_history_bootstrap'])
+        for change in ({'environment': 'staging'}, {'expires_at': '2000-01-01T00:00:00Z'}, {'sha256': 'a' * 64}):
+            self.config['migration_history_bootstrap'] = {**approved, **change}
+            with self.subTest(change=change), self.assertRaises(deploy.DeployError):
+                deploy.verify_migration_history(self.config, self.project, {VERSION})
+            self.assertFalse(self.registry.exists())
+        self.config['migration_history_bootstrap'] = approved
+        fingerprint = subprocess.run([CONFIG['node_bin'], CONFIG['migration_safety_checker'], '--history-hash'],
+                                     input=json.dumps({'directory': str(self.migrations), 'applied': [VERSION]}).encode(),
+                                     capture_output=True, check=True)
+        self.assertEqual(json.loads(fingerprint.stdout)['sha256'], approved['sha256'])
+        deploy.verify_migration_history(self.config, self.project, {VERSION})
+        saved = json.loads(self.registry.read_text())
+        self.assertEqual(saved['environment'], 'production')
+        self.assertEqual(saved['hashes'], {VERSION: hashlib.sha256(self.sql).hexdigest()})
+
+    def test_changed_applied_sql_and_removed_applied_versions_stop_before_backup(self):
+        self.approve({VERSION})
+        deploy.verify_migration_history(self.config, self.project, {VERSION})
+        historical = self.migrations / f'{VERSION}_example.sql'
+        historical.write_bytes(self.sql + b'\n-- edited historical content')
+        runner = FakeRunner()
+        with self.assertRaises(deploy.DeployError):
+            self.migrate(runner)
+        self.assertNotIn(['backup'], [args for args, _ in runner.calls])
+        historical.write_bytes(self.sql)
+        with self.assertRaises(deploy.DeployError):
+            deploy.verify_migration_history(self.config, self.project, set())
+
+    def test_check_only_does_not_seed_local_registry(self):
+        self.approve({VERSION})
+        self.assertEqual(self.migrate(FakeRunner(), check_only=True), 2)
+        self.assertFalse(self.registry.exists())
+
+    def test_partial_apply_records_only_actual_ledger_and_retry_checks_remaining_sql(self):
+        self.approve({VERSION})
+        runner = FakeRunner(after=[VERSION, NEW_VERSION])
+        command = runner.command
+        def partial(args, **options):
+            result = command(args, **options)
+            if 'push' in args and '--dry-run' not in args:
+                raise deploy.DeployError('Interrupted after first pending migration')
+            return result
+        runner.command = partial
+        with self.assertRaises(deploy.DeployError):
+            self.migrate(runner)
+        saved = json.loads(self.registry.read_text())
+        self.assertEqual(set(saved['hashes']), {VERSION, NEW_VERSION})
+        retry = FakeRunner(before=[VERSION, NEW_VERSION], after=[VERSION, NEW_VERSION, self.third])
+        self.assertEqual(self.migrate(retry), 1)
+        self.assertEqual(set(json.loads(self.registry.read_text())['hashes']), {VERSION, NEW_VERSION, self.third})
+
+
+class TrustBoundaryTests(unittest.TestCase):
+    def test_nonroot_file_or_writable_ancestor_cannot_authorize_sql_or_history(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory).resolve()
+            file = root / 'root-policy.json'
+            file.write_text('{}')
+            original = Path.stat
+            bad = None
+            def metadata(path, *args, **options):
+                values = list(original(path, *args, **options))
+                values[0] &= ~0o022
+                values[4] = 0
+                if bad == 'owner' and path == file:
+                    values[4] = 1000
+                if bad == 'ancestor' and path == root:
+                    values[0] |= 0o020
+                return deploy.os.stat_result(values)
+            with patch.object(Path, 'stat', metadata):
+                deploy.trusted_file(file)
+                deploy.trusted_directory(root)
+                bad = 'owner'
+                with self.assertRaises(deploy.DeployError):
+                    deploy.trusted_file(file)
+                bad = 'ancestor'
+                with self.assertRaises(deploy.DeployError):
+                    deploy.trusted_file(file)
+                with self.assertRaises(deploy.DeployError):
+                    deploy.trusted_directory(root)
 
 
 class EdgeTests(unittest.TestCase):

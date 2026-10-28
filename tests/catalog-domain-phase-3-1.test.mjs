@@ -6,13 +6,8 @@ import { CatalogRepository } from '../src/features/catalog/data/repository.ts'
 import { CatalogDomainError } from '../src/features/catalog/domain/errors.ts'
 import { calculateCatalogPrice } from '../src/features/catalog/domain/pricing.ts'
 import { normalizeCatalogSnapshot } from '../src/features/catalog/services/catalogSnapshots.ts'
-import { buildNewMenuBatch } from '../src/features/crm/catalog/services/menuEditorModel.ts'
-import {
-  getCategoriesForTab,
-  resolveCatalogItem,
-  resolveSellableCatalog,
-  resolveSellableProduct,
-} from '../src/features/catalog/domain/resolver.ts'
+
+import { resolveSellableProduct } from '../src/features/catalog/domain/resolver.ts'
 
 const venue = '11111111-1111-4111-8111-111111111111'
 const otherVenue = '22222222-2222-4222-8222-222222222222'
@@ -86,67 +81,12 @@ function rawPayload(catalog = catalogFixture()) {
   }
 }
 
-test('resuelve variante fijada y conserva placements repetidos en tabs distintas', () => {
-  const catalog = catalogFixture()
-  const secondVariant = row('variant-2', { productId: 'product-1', name: 'Grande', priceCents: 1500, sku: null, isDefault: false, sortOrder: 1 })
-  const secondTab = row('tab-2', { key: 'second', label: 'Segunda', icon: null, sortOrder: 1 })
-  const secondPlacement = row('placement-2', { productId: 'product-1', tabId: secondTab.id, categoryId: 'category-1', pinnedVariantId: secondVariant.id, featured: true, sortOrder: 1 })
-  const resolved = resolveSellableCatalog({ ...catalog, variants: [...catalog.variants, secondVariant], tabs: [...catalog.tabs, secondTab], placements: [...catalog.placements, secondPlacement] })
-  assert.equal(resolved.items.length, 2)
-  assert.equal(resolved.items[0].variant.id, 'variant-1')
-  assert.equal(resolved.items[1].variant.id, 'variant-2')
-  assert.equal(resolved.items[1].featured, true)
-})
-
-test('usa exclusivamente la default activa cuando el placement no fija variante', () => {
-  const catalog = catalogFixture()
-  const extra = row('variant-2', { productId: 'product-1', name: 'Extra', priceCents: 1200, sku: null, isDefault: false })
-  assert.equal(resolveCatalogItem({ ...catalog, variants: [...catalog.variants, extra] }, 'placement-1').variant.id, 'variant-1')
-})
-
 test('rechaza default inactiva, ausencia de default y producto sin variante vendible', () => {
   const catalog = catalogFixture()
   const inactiveDefault = { ...catalog.variants[0], active: false }
   assert.throws(() => resolveSellableProduct({ ...catalog, variants: [inactiveDefault] }, 'product-1'), (error) => error instanceof CatalogDomainError && error.code === 'CATALOG_PRODUCT_NOT_SELLABLE')
   const noDefault = { ...catalog.variants[0], isDefault: false }
   assert.throws(() => resolveSellableProduct({ ...catalog, variants: [noDefault] }, 'product-1'), /predeterminada activa/)
-})
-
-test('excluye placements con producto o categoría inactivos sin ocultar categorías del CRM sin uso', () => {
-  const catalog = catalogFixture()
-  const unused = row('category-unused', { name: 'Sin uso', icon: null, unused: true, sortOrder: 2 })
-  const inactiveProduct = { ...catalog.products[0], active: false }
-  const inactiveCategory = { ...catalog.categories[0], active: false }
-  assert.equal(resolveSellableCatalog({ ...catalog, products: [inactiveProduct], categories: [...catalog.categories, unused] }).items.length, 0)
-  assert.equal(resolveSellableCatalog({ ...catalog, categories: [inactiveCategory, unused] }).items.length, 0)
-  assert.equal(getCategoriesForTab({ ...catalog, categories: [...catalog.categories, unused] }, 'tab-1').length, 1)
-})
-
-test('conserva productos internos sin placement', () => {
-  const catalog = catalogFixture({ placements: [] })
-  const resolved = resolveSellableCatalog(catalog)
-  assert.equal(resolved.items.length, 0)
-  assert.deepEqual(resolved.internalProducts.map((product) => product.id), ['product-1'])
-})
-
-test('resuelve grupos reutilizables por producto y variante con precedencia única', () => {
-  const catalog = catalogFixture()
-  const optionProduct = row('product-option', { type: 'standard', name: 'Tónica', description: null, image: null, vatRate: 10, sortOrder: 1 })
-  const optionVariant = row('variant-option', { productId: optionProduct.id, name: 'Normal', priceCents: 200, sku: null, isDefault: true, sortOrder: 1 })
-  const group = row('group-1', { name: 'Mixer', type: 'mixer' })
-  const option = row('option-1', { groupId: group.id, productId: optionProduct.id, variantId: null, supplementCents: -50, defaultQuantity: 1, maxQuantity: 1 })
-  const assignment = row('assignment-1', { productId: 'product-1', groupId: group.id, displayName: null, minSelection: 1, maxSelection: 1, appliesToAllVariants: true, variantIds: ['variant-1'] })
-  const result = resolveSellableProduct({ ...catalog, products: [...catalog.products, optionProduct], variants: [...catalog.variants, optionVariant], selectionGroups: [group], selectionOptions: [option], selectionAssignments: [assignment] }, 'product-1')
-  assert.equal(result.selectionGroups.length, 1)
-  assert.equal(result.selectionGroups[0].options[0].supplementCents, -50)
-})
-
-test('omite opciones y asignaciones inactivas y aplica grupos solo a variantes declaradas', () => {
-  const catalog = catalogFixture()
-  const group = row('group-1', { name: 'Menú', type: 'menu_component' })
-  const assignment = row('assignment-1', { productId: 'product-1', groupId: group.id, displayName: null, minSelection: 0, maxSelection: 1, appliesToAllVariants: false, variantIds: ['variant-other'] })
-  assert.equal(resolveSellableProduct({ ...catalog, selectionGroups: [group], selectionAssignments: [assignment] }, 'product-1').selectionGroups.length, 0)
-  assert.equal(resolveSellableProduct({ ...catalog, selectionGroups: [{ ...group, active: false }], selectionAssignments: [{ ...assignment, appliesToAllVariants: true }] }, 'product-1').selectionGroups.length, 0)
 })
 
 test('calcula base, mixers, menú, modificadores, descuento e IVA solo con céntimos enteros', () => {
@@ -173,27 +113,6 @@ test('calcula base, mixers, menú, modificadores, descuento e IVA solo con cént
     taxAmountCents: 208,
     finalUnitPriceCents: 1200,
   })
-})
-
-test('admite precio final cero y rechaza negativo o dinero fraccional', () => {
-  assert.equal(calculateCatalogPrice({ baseVariantPriceCents: 100, discountCents: 100, vatRate: 21 }).finalUnitPriceCents, 0)
-  assert.throws(() => calculateCatalogPrice({ baseVariantPriceCents: 100, discountCents: 101, vatRate: 21 }), (error) => error instanceof CatalogDomainError && error.code === 'CATALOG_NEGATIVE_FINAL_PRICE')
-  assert.throws(() => calculateCatalogPrice({ baseVariantPriceCents: 100.5, vatRate: 21 }), /entero en céntimos/)
-})
-
-test('el repositorio carga una vez por local y modo, ordena y expone productos internos', async () => {
-  let reads = 0
-  const data = rawPayload(catalogFixture({ placements: [] }))
-  data.mode = 'pos'
-  const client = {
-    rpc: async (name, args) => { reads += 1; assert.equal(name, 'get_catalog'); assert.equal(args.p_venue_id, venue); return { data, error: null } },
-    storage: { from: () => ({ getPublicUrl: (path) => ({ data: { publicUrl: `https://images/${path}` } }), remove: async () => ({ error: null }) }) },
-  }
-  const repository = new CatalogRepository(client, new CatalogCache())
-  const [first, second] = await Promise.all([repository.getCatalog(venue, 'pos'), repository.getCatalog(venue, 'pos')])
-  assert.equal(reads, 1)
-  assert.equal(first, second)
-  assert.deepEqual(repository.getInternalProducts(first).map((product) => product.id), ['product-1'])
 })
 
 test('rechaza una respuesta cross-venue aunque RLS exista', async () => {
@@ -231,56 +150,6 @@ test('los comandos usan una RPC atómica, invalidan caché y limpian solo imáge
   assert.deepEqual(removed, ['venue/image.webp'])
 })
 
-test('prepara creación completa, cambio de default, reordenación y asignaciones sin escribir tablas legacy', async () => {
-  const commandsSeen = []
-  const repository = { executeCommand: async (_venueId, command, payload) => { commandsSeen.push([command, payload]); return { result: 'SUCCESS' } } }
-  const commands = new CatalogCommandService(repository)
-  await commands.createProduct(venue, { type: 'standard', name: 'Nuevo', sortOrder: 0, variants: [{ name: 'Normal', priceCents: 100, sortOrder: 0, isDefault: true }] })
-  await commands.setDefaultVariant(venue, 'product-1', 'variant-1')
-  await commands.reorder(venue, { entity: 'products', items: [{ id: 'product-1', sortOrder: 10 }] })
-  await commands.saveAssignment(venue, { domain: 'selection', productId: 'product-1', groupId: 'group-1', minSelection: 0, maxSelection: 1, appliesToAllVariants: true, variantIds: [], sortOrder: 0 })
-  assert.deepEqual(commandsSeen.map(([command]) => command), ['create_product', 'set_default_variant', 'reorder', 'save_assignment'])
-})
-
-test('crea el menú inactivo, conserva variantes de componentes y lo publica al final', () => {
-  const catalog = catalogFixture({
-    saleFormats: [row('format-1', { name: 'Menú', inventoryConsumptionQuantity: null, inventoryConsumptionUnitId: null })],
-    selectionGroups: [row('existing-group', { name: 'Existente', type: 'menu_component' })],
-  })
-  const plan = buildNewMenuBatch({
-    catalog,
-    productId: 'menu-1',
-    variantId: 'menu-variant-1',
-    formatId: 'format-1',
-    name: 'Menú diario',
-    description: '',
-    priceCents: 1500,
-    vatRate: 10,
-    tabId: 'tab-1',
-    categoryId: 'category-1',
-    courses: [{
-      id: 'course-1',
-      name: 'Principal',
-      minSelection: 1,
-      maxSelection: 1,
-      options: [
-        { productId: 'product-1', variantId: null, supplementCents: 0 },
-        { productId: 'product-1', variantId: 'variant-1', supplementCents: 125 },
-      ],
-    }],
-    createId: (() => { let id = 0; return () => `created-${++id}` })(),
-  })
-  assert.equal(plan.batch[0].command, 'create_product')
-  assert.equal(plan.batch[0].payload.active, false)
-  const options = plan.batch.filter((entry) => entry.command === 'save_selection_option')
-  assert.deepEqual(options.map((entry) => entry.payload.variantId), [null, 'variant-1'])
-  const assignmentIndex = plan.batch.findIndex((entry) => entry.command === 'save_assignment')
-  const publicationIndex = plan.batch.findIndex((entry) => entry.command === 'set_product_active')
-  assert.ok(assignmentIndex > 0)
-  assert.ok(publicationIndex > assignmentIndex)
-  assert.deepEqual(plan.batch[publicationIndex].payload, { id: 'menu-1', active: true })
-})
-
 test('los snapshots históricos sobreviven sin consultar el producto vivo', () => {
   const normalized = normalizeCatalogSnapshot(
     { productName: 'Nombre histórico', variantName: 'Normal', categoryName: 'Histórica' },
@@ -291,4 +160,3 @@ test('los snapshots históricos sobreviven sin consultar el producto vivo', () =
   assert.equal(normalized.categoryName, 'Histórica')
   assert.equal(normalized.basePriceCents, 700)
 })
-

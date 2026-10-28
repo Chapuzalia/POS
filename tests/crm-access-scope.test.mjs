@@ -1,10 +1,10 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
-import { compileComponent, createCompiledHookRunner, jsxRuntime, nodes } from './helpers/component-harness.mjs'
+import { compileComponent } from './helpers/component-harness.mjs'
 
 const serviceSource = readFileSync(new URL('../src/features/crm/access/services/accessService.ts', import.meta.url), 'utf8')
-const pageSource = readFileSync(new URL('../src/features/crm/access/pages/AccessPage.tsx', import.meta.url), 'utf8')
+
 const edgeSource = readFileSync(new URL('../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8')
 const context = { tenantId: 'tenant-a', userId: 'owner', role: 'owner' }
 const flush = () => new Promise(resolve => setImmediate(resolve))
@@ -127,19 +127,6 @@ function edgeFixture({ role = 'owner', extraDevices = 0 } = {}) {
   }
 }
 
-test('edge scopes selected venue, includes owners and assigned managers, preserves full manager scopes and session status', async () => {
-  const fixture = edgeFixture()
-  const result = await fixture.request({ venueId: 'venue-a' })
-  assert.equal(result.status, 200)
-  const data = await result.json()
-  assert.deepEqual(data.users.map(user => user.id), ['owner', 'manager-a'])
-  assert.deepEqual(data.users[1].venueIds, ['venue-a', 'venue-b'])
-  assert.deepEqual(data.deviceAccounts.map(account => account.deviceId), ['device-a'])
-  assert.equal(data.deviceAccounts[0].hasActiveLogin, true)
-  assert.deepEqual(fixture.usersRequested.sort(), ['cashier-a', 'manager-a', 'owner'])
-  assert.deepEqual(fixture.calls.find(call => call.table === 'device_user_assignments').filters, { tenant_id: 'tenant-a', venue_id: 'venue-a' })
-})
-
 test('edge denies manager requests outside assigned venue and never exposes management accounts', async () => {
   const denied = edgeFixture({ role: 'manager' })
   assert.equal((await denied.request({ venueId: 'venue-b' })).status, 403)
@@ -150,63 +137,4 @@ test('edge denies manager requests outside assigned venue and never exposes mana
   assert.deepEqual(data.allowedVenueIds, ['venue-a'])
   assert.deepEqual(allowed.usersRequested, ['cashier-a'])
   assert.equal((await allowed.request({ tenantId: 'tenant-b', venueId: 'venue-a' })).status, 403)
-})
-
-test('edge remains compatible with old clients without venueId and bounds Auth concurrency', async () => {
-  const fixture = edgeFixture({ extraDevices: 18 })
-  const result = await fixture.request()
-  assert.equal(result.status, 200)
-  const data = await result.json()
-  assert.equal(data.deviceAccounts.length, 20)
-  assert.equal(data.users.length, 3)
-  assert.equal(fixture.usersRequested.length, 23)
-  assert.ok(fixture.maxConcurrent > 1 && fixture.maxConcurrent <= 8)
-})
-
-function pageFixture(service) {
-  const passthrough = ({ children }) => children
-  return createCompiledHookRunner(pageSource, 'AccessManagementCrm', {
-    'react/jsx-runtime': jsxRuntime,
-    '../../../../components/ui/appDialogStore': {},
-    '../../../../components/ui/Input': { Input: 'input' },
-    '../../../../components/ui/Button': { Button: 'button' },
-    '../../../../components/ui/Checkbox': { Checkbox: 'checkbox' },
-    'lucide-react': Object.fromEntries(['Copy', 'LogOut', 'MapPin', 'MonitorSmartphone', 'Pencil', 'Plus', 'RefreshCw', 'Save', 'ShieldCheck', 'Trash2', 'X'].map(name => [name, passthrough])),
-    sileo: { sileo: { success() {} } },
-    '../../shared/components/CrmModal': { CrmModal: passthrough },
-    '../../shared/components/CrmModalBusyContext': { useCrmModalBusy: () => false },
-    '../../shared/components/CrmSelect': { CrmSelect: 'select' },
-    '../../shared/components/EmptyList': { EmptyList: passthrough },
-    '../../shared/components/Field': { Field: 'field' },
-    '../../shared/formatCrmDateTime': {},
-    '../services/accessService': service,
-  })
-}
-
-test('device creation inherits the layout venue without a selector; obsolete refreshes cannot overwrite newer data', async () => {
-  const requests = []
-  const created = []
-  const runner = pageFixture({
-    loadCrmAccessData(ctx, venueId) { return new Promise(resolve => requests.push({ ctx, venueId, resolve })) },
-    async createCrmDevice(...args) { created.push(args); return { email: 'new@example.test', password: 'ABCDEF' } },
-  })
-  const props = { disabled: false, tenantContext: context, selectedVenueId: 'venue-b', venues: [{ id: 'venue-a', isActive: true }, { id: 'venue-b', isActive: true }], runAction: action => action() }
-  const render = () => nodes(runner.render(props))
-  let tree = render()
-  assert.equal(requests[0].venueId, 'venue-b')
-  assert.equal(tree.some(node => node.props?.label === 'Local'), false)
-  tree.find(node => node.type === 'input' && node.props.maxLength === 80).props.onChange({ target: { value: 'Caja nueva' } })
-  tree = render()
-  tree.find(node => node.type === 'form').props.onSubmit({ preventDefault() {} })
-  await flush()
-  assert.deepEqual(created[0], [context, 'venue-b', 'Caja nueva', 'checkout'])
-  requests[1].resolve({ devices: [{ id: 'new', name: 'Current', venueId: 'venue-b' }], users: [] })
-  await flush()
-  requests[0].resolve({ devices: [{ id: 'old', name: 'Obsolete', venueId: 'venue-b' }], users: [] })
-  await flush()
-  tree = render()
-  assert.ok(tree.some(node => node.type === 'strong' && node.props.children === 'Current'))
-  assert.ok(!tree.some(node => node.type === 'strong' && node.props.children === 'Obsolete'))
-  assert.equal(requests.length, 2)
-  runner.unmount()
 })

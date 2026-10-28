@@ -4,7 +4,7 @@
 
 Cada release debe mantener compatibilidad N-1: durante el despliegue pueden seguir activos clientes de la versión anterior. Las migraciones ya desplegadas son inmutables; cualquier corrección requiere una migración nueva.
 
-El checker compara `baseSha` (último baseline desplegado correctamente) con `headSha`. Solo acepta migraciones añadidas, rechaza versiones/timestamps duplicados y no permite modificar, renombrar ni eliminar migraciones existentes, salvo la retirada exacta de `CONCURRENTLY` de los cinco índices históricos identificados en la sección de compatibilidad del pipeline.
+El checker de PR compara `baseSha` (SHA base del PR) con `headSha` (merge de prueba del PR). Esta comparación revisa código; no acredita qué versión está desplegada. Solo acepta migraciones añadidas, rechaza versiones/timestamps duplicados y no permite modificar, renombrar ni eliminar migraciones existentes, salvo la retirada exacta de `CONCURRENTLY` de los cinco índices históricos identificados en la sección de compatibilidad del pipeline.
 
 ## Expand
 
@@ -78,7 +78,7 @@ Para aceptar el contract se exige que:
 3. la migración contract sea nueva en `headSha`;
 4. la entry desaparezca de `contracts-pending.yml` en ese mismo PR.
 
-`baseSha` garantiza que el expand ya pertenecía al baseline de producción anterior. No basta con añadir expand, pending y contract juntos en `headSha`: EXPAND y CONTRACT nunca se despliegan juntos.
+`baseSha` acredita que expand y su pending contract ya están en la rama base del PR. No basta con añadir expand, pending y contract juntos en `headSha`. Antes de autorizar el contract para un entorno, el operador debe comprobar además que su expand está aplicado en la base real y que todos los clientes admitidos son compatibles. La rama base de Git no sustituye esa comprobación.
 
 ## Ciclo de vida
 
@@ -101,7 +101,7 @@ Para aceptar el contract se exige que:
 - Eliminar la entry pendiente en el mismo PR.
 - Desplegar el cleanup.
 
-No se fuerzan siempre tres releases. El contract puede ir en el segundo release si el `baseSha` ya contiene el expand y la ventana N-1 garantiza que ningún cliente compatible depende de la estructura antigua. La regla es el baseline desplegado y la compatibilidad real, no un número fijo de releases.
+No se fuerzan siempre tres releases. La retirada depende de que el expand esté aplicado en la base real y de que ningún cliente compatible use la estructura antigua. La política explícita de versiones PWA y el ledger de la base son la autoridad operativa.
 
 ## Operaciones y bloqueos
 
@@ -113,24 +113,51 @@ No se fuerzan siempre tres releases. El contract puede ir en el segundo release 
 - Mantener `lock_timeout = '5s'` y `statement_timeout = '5min'` en expand y contract.
 - Confirmar antes del contract que la versión N-1 ya no usa la API o estructura retirada.
 
-El pipeline calcula el rango desde el último deploy completo correcto. Si un deploy falla, esas migraciones se vuelven a revisar. En el primer despliegue protegido, `PRODUCTION_BASE_SHA` debe señalar el commit realmente desplegado; después, el último workflow de producción correcto actúa como baseline.
+Los workflows de `main` y `Staging` ejecutan Python, lint, tests y build, y después pueden solicitar el despliegue al controlador privado. No consultan workflows anteriores ni necesitan un SHA previamente desplegado. Las variables de activación están deshabilitadas por defecto: producción requiere `PRIVATE_DEPLOY_PRODUCTION_ENABLED=true`; staging requiere tanto `PRIVATE_DEPLOY_STAGING_ENABLED=true` como `STAGING_DEPLOY_ENABLED=true`. GitHub no recibe credenciales SSH, de Coolify ni de PostgreSQL.
+
+En el host, el receptor lee `supabase_migrations.schema_migrations` en la base objetivo y calcula las migraciones pendientes por versión. Valida el contenido SQL real antes de cualquier escritura. Un commit que omite versiones ya aplicadas se rechaza. Si no hay pendientes, no cambia la contraseña de PostgreSQL, no genera backup ni ejecuta `db push`; continúa con Edge y frontend. La misma SHA puede volver a desplegarse con un request ID nuevo. El idempotency key identifica entorno, run y attempt, no el contenido del commit.
 
 Las migraciones nuevas deben guardarse en UTF-8 sin BOM. `scripts/prepare-production-migrations.mjs` elimina el BOM inicial únicamente de la copia SQL que se empaqueta para producción, conservando las fuentes históricas y el resto de bytes. PostgreSQL rechaza ese marcador con `SQLSTATE 42601` antes de ejecutar la primera sentencia; una migración posterior no puede corregir ese fallo de lectura.
 
 La CLI de producción ejecuta migraciones en pipeline, donde PostgreSQL rechaza `CREATE INDEX CONCURRENTLY` con `SQLSTATE 25001`. Por autorización explícita, se retira únicamente esa palabra de los tres índices de `20260912222539_paginate_pos_session_tickets.sql` y los dos de `20261003183458_optimize_pos_sale_latency.sql`. El checker compara el texto completo con el baseline y permite exclusivamente esas cinco retiradas en esos dos archivos; cualquier otra modificación histórica sigue bloqueada. La preparación acepta las fuentes corregidas y conserva la adaptación de copias antiguas, comprobando el número esperado de índices. Los índices normales pueden bloquear escrituras mientras se crean; `lock_timeout = '5s'` limita la espera para adquirir el bloqueo y `statement_timeout = '5min'` limita la ejecución.
 
-## Excepción revisada para una única promoción
+## Autorizaciones de SQL del worker
 
-La excepción está inactiva por defecto. No acredita la seguridad del SQL: solo omite el checker del PR y del despliegue para un merge previamente revisado. Conserva las pruebas del checker, lint, tests, build, backup y ejecución de migraciones.
+El análisis de SQL pendiente se incluye junto al receptor en la imagen del worker de Coolify. Los comentarios de revisión dentro del SQL descargado no se aceptan como autoautorización. Una operación destructiva, contract o finding del checker bloquea el despliegue salvo autorización exacta del operador en la configuración privada del entorno.
 
-Para activarla, después de hacer commit de los cambios revisados en `Staging`, configurar estas **repository variables** en GitHub, en Settings → Secrets and variables → Actions → Variables:
+La configuración del receptor puede declarar:
 
-- `MIGRATION_SAFETY_EXCEPTION_BASE_SHA`: SHA completo del último despliegue correcto (baseline de producción).
-- `MIGRATION_SAFETY_EXCEPTION_HEAD_SHA`: SHA completo final de `Staging`, incluyendo los cambios de estos workflows.
-- `MIGRATION_SAFETY_EXCEPTION_MERGE_BASE_SHA`: opcional; SHA completo del `main` actual cuando avanzó tras un despliegue fallido. Debe descender del baseline. Si está vacía, se usa `MIGRATION_SAFETY_EXCEPTION_BASE_SHA` como primer padre.
+```json
+{
+  "migration_approvals": [
+    {
+      "environment": "production",
+      "migration": "20261019120000_example.sql",
+      "sha256": "<64 caracteres hex del SQL preparado>",
+      "expires_at": "2026-10-27T00:00:00Z",
+      "reason": "Revisión del SQL exacto y de compatibilidad de clientes",
+      "expand_migration": "20261018120000_example_expand.sql"
+    }
+  ]
+}
+```
 
-Abrir o actualizar el PR `Staging` → `main` y usar **Create a merge commit**. La excepción exige el `main` fijado y el `Staging` fijado como padres, en ese orden, tanto en el merge de prueba del PR como en producción; el baseline de producción debe seguir coincidiendo exactamente con `MIGRATION_SAFETY_EXCEPTION_BASE_SHA`. El SHA sintético que aparece como `merged PR` no es el HEAD de `Staging`. Squash, rebase, cambios posteriores en cualquiera de las ramas, forks y otros eventos no quedan exentos. Si el PR ya tenía un check fallido, volver a ejecutar el workflow después de configurar las variables.
+El hash corresponde a los bytes SQL que recibe el receptor, después de la preparación compatible de BOM y de los índices históricos. La autorización debe coincidir con el entorno, nombre completo, hash y fecha UTC futura; exige una razón de revisión. No basta el nombre, un commit anterior, un workflow correcto ni un waiver global. Cambiar un byte invalida la autorización. Para un contract, la autorización exige además `expand_migration`, cuyo timestamp debe existir en el ledger aplicado real; no se permite aplicar expand y contract juntos. La revisión debe confirmar que ningún cliente admitido depende del contrato antiguo.
 
-La ejecución deja una advertencia y un resumen con los commits exentos. Si la excepción no coincide, registra los SHA esperados y los padres reales para diagnosticarlo. Tras un despliegue correcto, el baseline avanza y la excepción deja de aplicarse a futuras promociones. Eliminar las variables de excepción después de confirmar el despliegue; si falla, los reintentos del mismo merge pueden seguir usando la excepción mientras el baseline anterior permanezca vigente.
+El receptor mantiene además un registro instalado de contenido SQL por entorno (`/var/lib/tickit-deploy/migration-history.<environment>.json`). Esto permite detectar cambios posteriores de bytes en versiones ya aplicadas sin depender de una SHA anterior. Inicializar ese registro sobre una base existente exige una autorización `migration_history_bootstrap` con entorno, caducidad y digest de su mapa canónico aplicado; ver [operaciones del controlador](deployment-controller.md). El directorio del registro debe ser propiedad de root y no permitir escritura de otros usuarios.
 
-Para la promoción revisada el 2026-10-04, el baseline observado es `17aea9a3a9c92316ae5aa06c18648266e95df3cf`. El SHA de `Staging` debe obtenerse después del commit definitivo; no utilizar el SHA anterior a la preparación de la excepción. No cambiar `PRODUCTION_BASE_SHA` para saltarse validaciones.
+El ledger debe existir. Un ledger existente pero vacío necesita una autorización de bootstrap instalada y con caducidad: `bootstrap: {allow_empty_ledger: true, environment: "production", expires_at: "...Z"}`. Esa opción nunca crea ni sustituye una tabla de historial ausente. Un `contracts-pending.yml` enviado por el commit es documentación de revisión, no una autorización del host.
+
+Coolify recibe `DEPLOY_CONTROLLER_CONFIG`; el bloque `receiver` de cada entorno genera `/etc/tickit-deploy/receiver.<environment>.json` dentro del contenedor. El receptor, checker, configuración, ejecutables y sus directorios se validan como archivos de confianza root. Las autorizaciones no se distribuyen dentro del checkout descargado ni requieren un instalador en el VPS.
+
+## Backups, compatibilidad PWA y resultados
+
+Antes de aplicar SQL pendiente, el receptor mantiene el backup y la verificación de integridad existentes. `backup_copy_dir` permite una segunda copia verificada por SHA-256 en un directorio o montaje instalado; si esa copia falla, no se aplica SQL. No hay borrado ni poda automática de backups.
+
+`SUPPORTED_APP_VERSIONS` es una lista explícita instalada por entorno en el host, separada del historial de despliegues. Debe contener todas las versiones de PWA que deban seguir funcionando; se añade siempre la SHA actual. Retirar una versión requiere revisar el uso de PWAs y las operaciones offline pendientes. No se fuerza una actualización durante operaciones críticas. `app-version.json` conserva `supportedVersions` y añade `currentVersion` para comprobar la SHA realmente servida.
+
+Coolify conserva las comprobaciones de repositorio, rama, Railpack, auto-deploy deshabilitado y ausencia de despliegues en curso. Cada solicitud fuerza rebuild, incluso para la misma SHA, y el resultado debe informar exactamente la SHA solicitada. El controlador comprueba también la versión servida. Un fallo o estado `interrupted` exige inspeccionar los eventos privados; no se deduce éxito por el estado de un workflow anterior.
+
+El workflow de PR conserva su checker contra la base del PR. Las variables antiguas `PRODUCTION_BASE_SHA`, `STAGING_BASE_SHA`, `STAGING_PREVIOUS_APP_VERSION` y `MIGRATION_SAFETY_EXCEPTION_*` ya no habilitan ni omiten validaciones del nuevo pipeline. Los scripts antiguos permanecen únicamente para compatibilidad; no hay un segundo pipeline automático activo.
+
+Activar o instalar este sistema sobre producción, configurar autorizaciones, ejecutar migraciones, reiniciar servicios o desplegar necesita permiso explícito del usuario. La preparación local y las comprobaciones de solo lectura no activan producción.

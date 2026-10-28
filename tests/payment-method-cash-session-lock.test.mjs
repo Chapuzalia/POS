@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
 
 const migration = readFileSync(new URL('../supabase/migrations/20261005232109_fix_payment_method_cash_session_lock.sql', import.meta.url), 'utf8')
 const original = readFileSync(new URL('../supabase/migrations/20260930170000_safe_payment_method_change.sql', import.meta.url), 'utf8')
@@ -16,10 +15,6 @@ const payment = '77777777-7777-4777-8777-777777777777'
 const event = '88888888-8888-4888-8888-888888888888'
 const user = '99999999-9999-4999-8999-999999999999'
 const other = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
-
-test('payment lock migration satisfies expand/N-1 rules', () => {
-  assert.deepEqual(analyzeMigration(migration), [])
-})
 
 test('payment changes retain RLS while locking read-only cash sessions', async t => {
   const db = new PGlite()

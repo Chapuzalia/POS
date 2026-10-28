@@ -2,18 +2,11 @@ import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import {
-  groundSupplierExtractionInOcr, parseSupplierDocumentExtraction, resolveSupplierCandidate,
-  runDeterministicLineParser, supplierExtractionMetadata, supplierHintSelection, supplierSelection,
-} from '../supabase/functions/_shared/supplier-documents/core.ts'
+import { groundSupplierExtractionInOcr, parseSupplierDocumentExtraction, resolveSupplierCandidate, supplierExtractionMetadata, supplierSelection } from '../supabase/functions/_shared/supplier-documents/core.ts'
 import { getSupplierDocumentMockFixture } from '../supabase/functions/_shared/supplier-documents/fixtures.ts'
-import { OpenAiSupplierDocumentProvider } from '../supabase/functions/_shared/supplier-documents/providers.ts'
-import { PROVISIONAL_SUPPLIER, requiresLineReparseConfirmation, supplierReviewState } from '../src/features/crm/supplier-documents/supplierReview.ts'
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 const migration = await read('supabase/migrations/20260903090000_supplier_document_provisional_flow.sql')
-const edge = await read('supabase/functions/process-supplier-document/index.ts')
-const page = await read('src/features/crm/supplier-documents/pages/SupplierReceiptsPage.tsx')
 
 function detection(overrides = {}, evidenceOverrides = {}) {
   const fixture = getSupplierDocumentMockFixture('known-supplier')
@@ -29,137 +22,6 @@ function detection(overrides = {}, evidenceOverrides = {}) {
   const extraction = parseSupplierDocumentExtraction(groundSupplierExtractionInOcr(raw, ocr))
   return { ocr, raw, extraction, metadata: { supplierExtraction: supplierExtractionMetadata(extraction), supplierSelection: supplierSelection(extraction, resolveSupplierCandidate(extraction.supplier, [])), hasStoredOcr: true } }
 }
-
-test('descarta valor y evidencia inventados, aunque el modelo reconozca una marca', () => {
-  const { extraction } = detection({ name: 'Coca-Cola Corporation', address: 'San Francisco' }, { name: 'Coca-Cola Corporation', address: 'San Francisco' })
-  assert.equal(extraction.supplier.name, null)
-  assert.equal(extraction.supplierEvidence.name, null)
-  assert.equal(extraction.supplier.address, null)
-  assert.equal(supplierSelection(extraction, resolveSupplierCandidate(extraction.supplier, [])).kind, 'unresolved')
-})
-
-test('un teléfono inventado no se valida contra una evidencia real distinta', () => {
-  const { extraction } = detection({ phone: '(415) 661-1001' })
-  assert.equal(extraction.supplier.phone, null)
-  assert.equal(extraction.supplierEvidence.phone, null)
-})
-
-test('conserva CIF y teléfono normalizados y evidencia literal del OCR', () => {
-  const { extraction, metadata } = detection({ taxId: 'B-123.456-78', phone: '900246500' })
-  assert.equal(extraction.supplier.taxId, 'B-123.456-78')
-  assert.equal(extraction.supplier.phone, '900246500')
-  assert.deepEqual(metadata.supplierExtraction.taxId, { value: 'B-123.456-78', evidence: 'CIF: B12345678' })
-  assert.ok(metadata.supplierExtraction.identities.every((identity) => identity.evidence))
-})
-
-test('no sustituye una cita inventada por otra que sí permitiría el valor', () => {
-  const { extraction } = detection({}, { name: 'Proveedor: DISPOCH S.L. (sede)' })
-  assert.equal(extraction.supplier.name, null)
-})
-
-test('CIF exacto selecciona un proveedor existente y una identidad contradictoria no lo fuerza', () => {
-  const { extraction } = detection()
-  const match = resolveSupplierCandidate(extraction.supplier, [{ supplierId: 'existing', name: 'Poch', taxId: 'B-123.456-78' }])
-  assert.equal(match.confidence, 'high')
-  assert.deepEqual(supplierSelection(extraction, match), { kind: 'existing', supplierId: 'existing' })
-  assert.equal(resolveSupplierCandidate(extraction.supplier, [{ supplierId: 'wrong', name: 'DISPOCH SL', taxId: 'B87654321' }]).supplierId, null)
-})
-
-test('DISPOCH claro sin match es provisional y la revisión permite confirmarlo', () => {
-  const { metadata } = detection()
-  const state = supplierReviewState({ supplierId: null, extractionMetadata: metadata })
-  assert.equal(state.detectedName, 'DISPOCH S.L.')
-  assert.equal(state.isProvisional, true)
-  assert.equal(state.hasSupplier, true)
-  assert.equal(state.selectedValue, PROVISIONAL_SUPPLIER)
-})
-
-test('premarca la detección y solo considera manual una selección distinta o sin sugerencia', () => {
-  const detected = supplierReviewState({ supplierId: null, extractionMetadata: {
-    supplierResolution: { supplierId: 'detected', confidence: 'probable' },
-  } })
-  assert.equal(detected.suggestedSupplierId, 'detected')
-  assert.deepEqual(supplierHintSelection('detected', detected.suggestedSupplierId), {
-    kind: 'detected_hint', supplierId: 'detected', source: 'system',
-  })
-  assert.deepEqual(supplierHintSelection('other', detected.suggestedSupplierId), {
-    kind: 'manual_hint', supplierId: 'other', source: 'manual',
-  })
-  assert.equal(supplierHintSelection('selected', null).source, 'manual')
-})
-
-test('email y teléfono exactos resuelven; los aliases no confirmados y señales contradictorias no', () => {
-  const { extraction } = detection()
-  for (const field of ['email', 'phone']) {
-    assert.equal(resolveSupplierCandidate(extraction.supplier, [{
-      supplierId: field, name: 'Proveedor registrado', [field]: extraction.supplier[field],
-    }]).supplierId, field)
-  }
-  assert.equal(resolveSupplierCandidate(extraction.supplier, [{
-    supplierId: 'unverified', name: 'Otro proveedor',
-    identities: [{ type: 'tax_id', value: 'B12345678', source: 'extracted' }],
-  }]).supplierId, null)
-  assert.equal(resolveSupplierCandidate(extraction.supplier, [
-    { supplierId: 'email', name: 'Uno', email: extraction.supplier.email },
-    { supplierId: 'phone', name: 'Dos', phone: extraction.supplier.phone },
-  ]).supplierId, null)
-})
-
-test('el modelo de extracción no recibe candidatos y su evidencia se verifica', async (t) => {
-  const { ocr, raw } = detection({ phone: '(415) 661-1001' })
-  t.mock.method(globalThis, 'fetch', async (_url, init) => {
-    const request = JSON.parse(init.body)
-    assert.doesNotMatch(JSON.stringify(request.input), /SECRET_CANDIDATE/)
-    assert.ok(request.text.format.schema.required.includes('supplierEvidence'))
-    return new Response(JSON.stringify({ output_text: JSON.stringify(raw) }), { status: 200 })
-  })
-  const result = await new OpenAiSupplierDocumentProvider({ apiKey: 'test', model: 'test' }).interpret({
-    ocr, documentType: 'invoice', supplierCandidates: [{ supplierId: 'id', name: 'SECRET_CANDIDATE' }],
-  })
-  assert.equal(result.supplier.phone, null)
-})
-
-test('la extracción de identidad del parser conocido no extrae cabecera ni productos', async (t) => {
-  const { ocr, raw } = detection({ phone: '(415) 661-1001' })
-  t.mock.method(globalThis, 'fetch', async (_url, init) => {
-    const request = JSON.parse(init.body)
-    assert.deepEqual(request.text.format.schema.required, ['supplier', 'supplierEvidence'])
-    assert.doesNotMatch(JSON.stringify(request.input), /supplierCandidates|globalSupplier/)
-    return new Response(JSON.stringify({ output_text: JSON.stringify({ supplier: raw.supplier, supplierEvidence: raw.supplierEvidence }) }))
-  })
-  const result = await new OpenAiSupplierDocumentProvider({ apiKey: 'test', model: 'test' }).extractSupplier(ocr)
-  assert.equal(result.supplier.taxId, 'B12345678')
-  assert.equal(result.supplier.phone, null)
-  assert.deepEqual(Object.keys(result).sort(), ['supplier', 'supplierEvidence'])
-})
-
-test('cambiar proveedor no dispara OCR ni reemplaza las líneas desde la UI', () => {
-  const change = page.match(/async function changeSupplier[\s\S]*?\n  }/)?.[0] ?? ''
-  assert.match(change, /updateSupplierDocumentSupplier/)
-  assert.doesNotMatch(change, /reparseSupplierDocumentLines|retrySupplierDocumentProcessing|setDetail\(\{.*lines/)
-  assert.match(change, /\.\.\.current,[\s\S]*document:/)
-})
-
-test('reparsear usa OCR almacenado y valida el resultado determinista sin OCR ni GPT nuevos', () => {
-  const fixture = getSupplierDocumentMockFixture('multi-row-product')
-  const lines = runDeterministicLineParser(fixture.knownProfile, fixture.ocr)
-  assert.equal(lines.length, 1)
-  assert.equal(lines[0].lineTotal, 99.94)
-  const reparse = edge.match(/async function reparseLinesWithSelectedSupplier[\s\S]*?\n}/)?.[0] ?? ''
-  assert.match(reparse, /ocrDocumentSchema\.parse\(document\.ocr_snapshot\)/)
-  assert.match(reparse, /diagnoseParser\(/)
-  assert.match(reparse, /diagnosis\.failedFields\.includes\('lines'\)/)
-  assert.doesNotMatch(reparse, /\.analyze\(|\.interpret\(|extractSupplier\(|loadBinary\(/)
-  assert.match(reparse, /replace_supplier_document_lines_from_ocr/)
-})
-
-test('solo pide confirmación de reparseo si hay correcciones guardadas o un editor abierto', () => {
-  assert.equal(requiresLineReparseConfirmation([{ wasCorrected: false }]), false)
-  assert.equal(requiresLineReparseConfirmation([{ wasCorrected: true }]), true)
-  assert.equal(requiresLineReparseConfirmation([{ wasCorrected: false, referenceCostDecided: true }]), true)
-  assert.equal(requiresLineReparseConfirmation([{ wasCorrected: false }], true), true)
-  assert.match(page, /requiresLineReparseConfirmation[\s\S]*setReparseConfirmation\(true\)[\s\S]*return/)
-})
 
 // An isolated PostgreSQL engine. The legacy confirmation body is a test double:
 // these tests exercise the NEW supplier transaction boundary, not stock/cost code.

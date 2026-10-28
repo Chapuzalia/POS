@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
+
 import { createProductionDatabase, readProductionSql, uuid, tenant, venue, pos, kds, pass, order, line, product, user } from './helpers/production-db.mjs'
 import { reconcileMenuEdit } from '../src/features/restaurant/services/menuCourses.ts'
 import { getProductionUnsentQuantity, buildOptimisticProductionEntries } from '../src/features/production/routing.ts'
@@ -9,7 +9,9 @@ import { buildSaleLine, canonicalizeProductLineSelection } from '../src/features
 import { resolveSellableProduct } from '../src/features/catalog/domain/resolver.ts'
 import { createMenuCatalog } from './helpers/menu-catalog.mjs'
 
-const migration = readProductionSql('20261024123435_flexible_restaurant_menu_courses')
+// pg_get_functiondef is normalized to LF inside this migration. Match that
+// format in its multiline patch literals when the checkout uses Windows CRLF.
+const migration = readProductionSql('20261024123435_flexible_restaurant_menu_courses').replaceAll('\r\n', '\n')
 const baseline = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
 const routine = (source, name) => {
   const match = source.match(new RegExp(`create (?:or replace )?function public\\.${name}\\([\\s\\S]*?\\$\\$;`, 'i'))
@@ -22,8 +24,6 @@ const optionIds = [uuid(31), uuid(32), uuid(33), uuid(34)]
 const component = (index, extra = {}) => ({ id: optionIds[index], type: 'menu_component', selectionGroupId: groupIds[Math.min(index, 2)],
   selectionGroupName: ['Primero', 'Segundo', 'Postre', 'Postre'][index], productId: product, variantId: variant,
   productName: ['Ensalada', 'Pollo', 'Flan', 'Helado'][index], variantName: 'Normal', quantity: 1, priceDeltaCents: 0, sortOrder: index, modifiers: [], ...extra })
-
-test('flexible menus pass migration safety checks', () => assert.deepEqual(analyzeMigration(migration), []))
 
 test('only restaurant menus can defer choices; maxima, modifiers and non-menu selections stay strict', () => {
   const catalog = createMenuCatalog()

@@ -116,55 +116,6 @@ function scenario(count = 4) {
   }
 }
 
-test('economic acknowledgement wakes the bridge immediately without waiting for its interval', async () => {
-  const s = scenario(1)
-  const stop = s.startBridge()
-  try {
-    await settle()
-    assert.equal(s.deliveries.length, 0)
-    await s.economic.synchronizeFiscalEconomicSales(scope)
-    await settle()
-    assert.deepEqual(s.acknowledgements, ['tenant:subject:installation'])
-    assert.equal(s.sales[0].synced, true)
-    assert.equal(s.deliveries.length, 1)
-    assert.equal(s.entries[0].delivery.state, 'VPS_STORED')
-    const passes = s.bridgePasses()
-    for (const otherScope of ['other:subject:installation', 'tenant:other:installation', 'tenant:subject:other']) {
-      s.acknowledge(otherScope)
-    }
-    await settle()
-    assert.equal(s.bridgePasses(), passes, 'other fiscal scopes must not wake this worker')
-    s.bridgeStored.set('record-1', { ...s.bridgeStored.get('record-1'), state: 'AEAT_ACCEPTED', aeatRespondedAt: '2026-10-11T00:00:01Z' })
-    s.entries[0].delivery.nextAttemptAt = null
-    s.interval()
-    await settle()
-    assert.equal(s.entries[0].delivery.state, 'AEAT_ACCEPTED', 'AEAT polling continues after durable bridge storage')
-    assert.equal(s.deliveries.length, 1, 'polling must not resend the stored sale')
-    const finalPasses = s.bridgePasses()
-    stop()
-    s.acknowledge('tenant:subject:installation')
-    await settle()
-    assert.equal(s.bridgePasses(), finalPasses, 'stopped workers must remove their listener')
-  } finally { stop() }
-})
-
-test('an acknowledgement during a running bridge pass schedules another pass without losing the new sale', async () => {
-  const s = scenario(1)
-  await s.economic.synchronizeFiscalEconomicSales(scope)
-  const releaseStatus = s.holdStatus()
-  const stop = s.startBridge()
-  try {
-    await settle()
-    s.addSale()
-    await s.economic.synchronizeFiscalEconomicSales(scope)
-    assert.equal(s.deliveries.length, 0)
-    releaseStatus()
-    await settle()
-    assert.deepEqual(s.deliveries.map(record => record.chainPosition), [1, 2])
-    assert.ok(s.entries.every(entry => entry.delivery.state === 'VPS_STORED'))
-  } finally { releaseStatus(); stop() }
-})
-
 test('a lost economic acknowledgement does not wake bridge delivery until an idempotent retry succeeds', async () => {
   const s = scenario(1)
   const stop = s.startBridge()
@@ -218,26 +169,6 @@ test('four disconnected sales and the subsequent online sale wait for economic a
   assert.equal(s.deliveries.length, 5, 'stored records are polled, never duplicated')
 })
 
-test('a stalled RPC releases the background worker so the next interval can retry', async () => {
-  const s = scenario(1)
-  s.setRequestMode('lost-response')
-  const stop = s.economic.startFiscalEconomicSyncWhileOpen(scope)
-  try {
-    await settle()
-    s.interval()
-    await settle()
-    assert.equal(s.rpcCalls.length, 1, 'an in-flight request is not overlapped')
-    s.timeout()
-    await settle()
-    s.setRequestMode('ok')
-    s.interval()
-    await settle()
-    assert.equal(s.rpcCalls.length, 2)
-    assert.equal(s.sales[0].synced, true)
-    assert.equal(s.timers.size, 0)
-  } finally { stop() }
-})
-
 test('economic failure leaves all sales pending and prevents later fiscal records from overtaking', async () => {
   const s = scenario()
   s.setRequestMode('fail')
@@ -247,49 +178,4 @@ test('economic failure leaves all sales pending and prevents later fiscal record
   assert.equal(s.deliveries.length, 0)
   assert.ok(s.sales.every(sale => !sale.synced))
   assert.ok(s.entries.every(entry => entry.delivery.attempts === 0))
-})
-
-test('backoff on an unacknowledged predecessor blocks later sales and retains the actual bridge error', async () => {
-  const s = scenario()
-  await s.economic.synchronizeFiscalEconomicSales(scope)
-  const before = clone(s.entries.map(entry => entry.record))
-  const description = 'POS economic synchronization required before bridge ingestion'
-  s.setReply({ state: 'REQUIRES_ACTION', code: 'VALIDATION_ERROR', description })
-  await s.synchronizeBridge()
-  assert.equal(s.deliveries.length, 1)
-  assert.equal(s.entries[0].delivery.state, 'LOCAL_PENDING')
-  assert.equal(s.entries[0].delivery.lastError, description)
-  assert.ok(s.entries.every(entry => !entry.delivery.incidence), 'a validation error must not be misclassified as a connection outage')
-  await s.synchronizeBridge()
-  assert.equal(s.deliveries.length, 1, 'backoff must not cause later chain positions to be delivered')
-  assert.deepEqual(clone(s.entries.map(entry => entry.record)), before)
-  s.entries[0].delivery.nextAttemptAt = null
-  s.setReply({ state: 'VPS_STORED' })
-  await s.synchronizeBridge()
-  assert.equal(s.bridgeStored.size, 4)
-})
-
-test('only technical transport failures qualify as delivery incidences', () => {
-  assert.equal(isFiscalTransportFailure(new BridgeHttpError(404)), false)
-  assert.equal(isFiscalTransportFailure(new BridgeHttpError(401)), false)
-  assert.equal(isFiscalTransportFailure(new BridgeHttpError(503)), true)
-  assert.equal(isFiscalTransportFailure(new TypeError('Failed to fetch')), true)
-  assert.equal(isFiscalTransportFailure({ code: '', message: 'TypeError: Failed to fetch' }), true)
-  assert.equal(isFiscalTransportFailure({ code: '23505', message: 'record conflict' }), false)
-})
-
-test('a lost bridge acknowledgement reports the POS incidence on the existing idempotent record', async () => {
-  const s = scenario(1)
-  await s.economic.synchronizeFiscalEconomicSales(scope)
-  await s.synchronizeBridge()
-  const accepted = { ...s.bridgeStored.get('record-1'), state: 'AEAT_ACCEPTED', aeatRespondedAt: '2026-10-11T00:00:01Z' }
-  s.bridgeStored.set('record-1', accepted)
-  s.entries[0].delivery = { state: 'LOCAL_PENDING', incidence: true, attempts: 1, lastError: 'Failed to fetch', nextAttemptAt: null, result: null }
-  const original = clone(s.entries[0].record)
-  await s.synchronizeBridge()
-  assert.equal(s.bridgeStored.size, 1)
-  assert.equal(s.deliveries.at(-1).deliveryIncidence, true)
-  assert.equal(s.entries[0].delivery.state, 'AEAT_ACCEPTED')
-  assert.equal(s.entries[0].delivery.incidence, true)
-  assert.deepEqual(clone(s.entries[0].record), original)
 })

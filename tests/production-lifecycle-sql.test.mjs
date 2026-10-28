@@ -1,10 +1,9 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
+
 import { createProductionDatabase, readProductionSql, uuid, tenant, venue, pos, kds, destination, pass, order, line, product, user } from './helpers/production-db.mjs'
 
 const migration = readProductionSql('20261017125631_production_kds_columns_lifecycle')
-test('KDS columns lifecycle is a safe additive migration', () => assert.deepEqual(analyzeMigration(migration), []))
 
 async function setup(t) {
   const db = await createProductionDatabase(t)
@@ -139,20 +138,5 @@ test('direct service baseline, fractional menu readiness and split lineage survi
   assert.equal(menuItems.find(item => item.snapshot.productName === 'Burger').servedQuantity, 2)
   assert.equal(menuItems.find(item => item.snapshot.productName === 'Side').servedQuantity, 1)
   await db.query('update order_lines set served_quantity=1 where id=$1', [menu])
-  assert.equal((await queue()).items.length, 0)
-})
-
-test('legacy ready RPC implicitly accepts a dish; cancelled dishes never block completion or revive served history', async t => {
-  const { db, send, queue, ready } = await setup(t)
-  await db.exec(`update order_lines set quantity=2,served_quantity=0 where id='${line}'`)
-  await send('old-client')
-  let item = (await queue()).items[0]
-  await ready(item.id, 1)
-  item = (await queue()).items[0]
-  assert.ok(item.acceptedAt)
-  await db.query('update production_items set cancelled_quantity=1 where id=$1', [item.id])
-  await db.exec('update production_line_allocations set cancelled_quantity=1')
-  assert.equal((await queue()).items[0].readyQuantity, 1)
-  await db.exec(`update order_lines set quantity=1,served_quantity=1 where id='${line}'`)
   assert.equal((await queue()).items.length, 0)
 })

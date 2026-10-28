@@ -62,11 +62,21 @@ function stopPaymentRequests() {
   transactionPollingController = null
 }
 
+function paymentIdentity(intent: CashlogyIntent) {
+  return {
+    requestId: intent.requestId, saleId: intent.saleId,
+    requestedAmountCents: intent.amountCents, terminalCode: intent.terminalCode, test: false,
+    ...(intent.transactionId ? { id: intent.transactionId } : {}),
+  }
+}
+
 async function findPaymentTransaction(intent: CashlogyIntent, signal?: AbortSignal) {
   try {
     return (intent.recoveredFromConflict && intent.transactionId
+      // A conflict placeholder still carries the new sale's identity until
+      // the blocker is fetched. Only its transactionId is authoritative here.
       ? await client().getCashlogyTransaction(intent.transactionId, signal)
-      : await client().getCashlogyTransactionByRequestId(intent.requestId, signal)).transaction
+      : await client().getCashlogyTransactionByRequestId(intent.requestId, signal, paymentIdentity(intent))).transaction
   } catch (error) {
     if (!isMissingCashlogyTransaction(error)) throw error
     return null
@@ -108,6 +118,7 @@ function adoptBlockingTransaction(transaction: CashlogyTransaction) {
   }
   persistIntent(intent)
   useCashlogyStore.setState({ intent, transaction, modalOpen: true, error: null })
+  return intent
 }
 
 async function openBlockingTransaction(id: string, signal?: AbortSignal) {
@@ -136,10 +147,13 @@ function acknowledgeClosed(transaction: CashlogyTransaction | null, reviewed = f
   return () => { void queue.flush(acknowledge).catch(() => undefined) }
 }
 
-async function getRecoverableTransaction(id: string, signal?: AbortSignal) {
-  const response = await client().getCashlogyTransaction(id, signal)
+async function getRecoverableTransaction(id: string, signal: AbortSignal | undefined, expected: CashlogyTransaction) {
+  const response = await client().getCashlogyTransaction(id, signal, {
+    requestId: expected.requestId, requestedAmountCents: expected.requestedAmountCents,
+    saleId: expected.saleId, terminalCode: expected.terminalCode, test: expected.test,
+  })
   return response.transaction.warning?.code === 'CASHLOGY_RECOVERY_PENDING'
-    ? client().recoverCashlogyTransaction(id, signal)
+    ? client().recoverCashlogyTransaction(id, signal, expected)
     : response
 }
 
@@ -151,7 +165,7 @@ function pollTransaction(transaction: CashlogyTransaction, signal?: AbortSignal,
   const pollingSignal = signal
     ? AbortSignal.any([signal, transactionPollingController.signal])
     : transactionPollingController.signal
-  transactionPollingPromise = pollCashlogyTransaction(getRecoverableTransaction, transaction, {
+  transactionPollingPromise = pollCashlogyTransaction((id, nextSignal) => getRecoverableTransaction(id, nextSignal, transaction), transaction, {
     signal: pollingSignal,
     timeoutMs,
     onUpdate: (next) => {
@@ -331,7 +345,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
           await openBlockingTransaction(health.activeTransaction.id, signal)
           throw new CashlogyError({ code: 'CASHLOGY_BUSY', message: 'Se ha recuperado una operación anterior. Resuélvela antes de iniciar este cobro.' })
         }
-        if (!(health.enabled && health.ok && health.sessionState === 'ready')) {
+        if (!(health.enabled === true && health.ok === true && health.sessionState === 'ready')) {
           throw new CashlogyError({
             code: health.enabled ? 'CASHLOGY_NOT_READY' : 'CASHLOGY_DISABLED',
             originalCode: health.lastError?.code,
@@ -370,7 +384,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
           }
           if (!isUncertainCashlogyError(chargeError)) throw chargeError
           try {
-            transaction = (await client().getCashlogyTransactionByRequestId(requestedIntent.requestId, signal)).transaction
+            transaction = (await client().getCashlogyTransactionByRequestId(requestedIntent.requestId, signal, paymentIdentity(requestedIntent))).transaction
           } catch {
             throw chargeError
           }
@@ -417,9 +431,9 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
           throw new CashlogyError({ code: 'CASHLOGY_TRANSACTION_NOT_FOUND' })
         }
         set({ missingTransaction: false })
-        if (intent.recoveredFromConflict) adoptBlockingTransaction(transaction)
+        if (intent.recoveredFromConflict) intent = adoptBlockingTransaction(transaction)
         if (transaction.warning?.code === 'CASHLOGY_RECOVERY_PENDING')
-          transaction = (await client().recoverCashlogyTransaction(transaction.id, signal)).transaction
+          transaction = (await client().recoverCashlogyTransaction(transaction.id, signal, paymentIdentity(intent))).transaction
         assertCurrentPayment(generation)
         if (!intent.recoveredFromConflict && intent.transactionId !== transaction.id) {
           const identified = { ...intent, transactionId: transaction.id }
@@ -446,7 +460,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
 
   async cancel(reviewed = false) {
     if (get().isCancelling) throw new CashlogyError({ code: 'CASHLOGY_BUSY' })
-    const intent = get().intent
+    let intent = get().intent
     if (!intent) return null
     stopPaymentRequests()
     const generation = paymentGeneration
@@ -460,6 +474,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
       }
       transaction ??= await findPaymentTransaction(intent)
       assertCurrentPayment(generation)
+      if (transaction && intent.recoveredFromConflict) intent = adoptBlockingTransaction(transaction)
       if (!transaction) {
         // A 404 is different from a timeout. Check that the agent has not
         // identified this request as active before releasing its local intent.
@@ -480,7 +495,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
           set({ isPolling: true })
           transaction = await pollTransaction(transaction, undefined, 30_000)
         } else {
-          const next = (await client().cancelCashlogyTransaction(transaction.id)).transaction
+          const next = (await client().cancelCashlogyTransaction(transaction.id, undefined, paymentIdentity(intent))).transaction
           assertCurrentPayment(generation)
           set({ transaction: next, isPolling: cashlogyActiveStatuses.has(next.status) })
           transaction = await pollTransaction(next, undefined, 30_000)
@@ -506,7 +521,7 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
   },
 
   async retryPayment(reviewed = false) {
-    const intent = get().intent
+    let intent = get().intent
     if (!intent || get().isStarting || get().isCancelling || get().isRecovering || get().isPolling) {
       throw new CashlogyError({ code: 'CASHLOGY_BUSY' })
     }
@@ -517,9 +532,10 @@ export const useCashlogyStore = create<CashlogyState>((set, get) => ({
       let transaction = await findPaymentTransaction(intent)
       assertCurrentPayment(generation)
       if (transaction) {
+        if (intent.recoveredFromConflict) intent = adoptBlockingTransaction(transaction)
         // Never recover an absent transaction. For an existing one, consult
         // the agent before deciding whether another physical charge is needed.
-        transaction = (await client().recoverCashlogyTransaction(transaction.id)).transaction
+        transaction = (await client().recoverCashlogyTransaction(transaction.id, undefined, paymentIdentity(intent))).transaction
         assertCurrentPayment(generation)
         set({ transaction, missingTransaction: false })
         if (cashlogyActiveStatuses.has(transaction.status)) return await resolveTransaction(transaction)
@@ -604,7 +620,10 @@ export async function settleCashlogyPaymentIfConfigured(amountCents: number, sal
     const generation = paymentGeneration
     let transaction: CashlogyTransaction
     try {
-      transaction = (await client().getCashlogyTransactionByRequestId(requestId)).transaction
+      transaction = (await client().getCashlogyTransactionByRequestId(requestId, undefined, {
+        requestedAmountCents: amountCents, saleId, test: false,
+        terminalCode: useCashlogyStore.getState().intent?.terminalCode,
+      })).transaction
       assertCurrentPayment(generation)
     }
     catch (error) {

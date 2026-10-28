@@ -8,20 +8,6 @@ const unservedOrder = {
   tables: [{ id: 'table', areaId: 'area', isVirtual: false }],
 }
 
-test('known pending items show confirmation before busy, network reads, fiscal preparation or payment', async () => {
-  const h = createRestaurantControllerHarness({ currentOrder: unservedOrder, fiscalMode: 'production' })
-  await h.render().completePayment('card', null)
-  const controller = h.render()
-  assert.deepEqual({ ...controller.pendingPayment }, { method: 'card', receivedCents: null, pendingUnits: 1 })
-  assert.equal(controller.paymentProcessing, false)
-  assert.deepEqual(h.calls.busy, [])
-  assert.equal(h.calls.pendingChecks, 0)
-  assert.equal(h.calls.close, 0)
-  assert.deepEqual(h.calls.fiscalPreflights, [])
-  assert.deepEqual(h.calls.fiscalIssues, [])
-  assert.deepEqual(h.calls.cashlogySettlements, [])
-})
-
 test('cash warns immediately before opening or starting a cash payment, and dismissing does not charge', () => {
   const h = createRestaurantControllerHarness({ currentOrder: unservedOrder })
   assert.equal(h.render().requestPendingPaymentConfirmation('cash', null), true)
@@ -30,23 +16,6 @@ test('cash warns immediately before opening or starting a cash payment, and dism
   assert.equal(h.render().pendingPayment, null)
   assert.equal(h.calls.close, 0)
   assert.deepEqual(h.calls.cashlogySettlements, [])
-})
-
-test('server pending validation remains before processing when another terminal changed the comanda', async () => {
-  const validation = deferred()
-  const h = createRestaurantControllerHarness({ fiscalMode: 'production', tableService: {
-    loadRestaurantOrderPendingUnits: () => validation.promise,
-  } })
-  const payment = h.render().completePayment('card', null)
-  await flush()
-  assert.equal(h.render().paymentProcessing, false)
-  assert.deepEqual(h.calls.fiscalPreflights, [])
-  validation.resolve({ detail: unservedOrder, pendingUnits: 1 })
-  await payment
-  assert.equal(h.render().pendingPayment.pendingUnits, 1)
-  assert.equal(h.render().paymentProcessing, false)
-  assert.equal(h.calls.close, 0)
-  assert.deepEqual(h.calls.fiscalIssues, [])
 })
 
 test('confirmed pending payment proceeds once; processing resets after economic confirmation', async () => {

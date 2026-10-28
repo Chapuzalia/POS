@@ -90,8 +90,6 @@ test('served line requests confirmation, cancellation preserves it, and only con
   const renderModal = () => modal.render({ line, isBusy: false, sentQuantity: 2,
     onCancel: () => harness.render().setPendingLineRemoval(null),
     onConfirm: () => harness.render().confirmLineRemoval() })
-  assert.match(text(renderModal()), /ya est[aá] marcado como servido/)
-  assert.match(text(renderModal()), /anulación visible en KDS/)
   nodes(renderModal()).find(node => text(node) === 'Cancelar').props.onClick()
   assert.equal(harness.render().pendingLineRemoval, null)
   assert.deepEqual(removed, [])

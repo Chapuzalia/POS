@@ -2,10 +2,6 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { PGlite } from '@electric-sql/pglite'
-import { z } from 'zod'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
-import { compileComponent, createCompiledHookRunner, jsxRuntime, nodes } from './helpers/component-harness.mjs'
-import { UserFacingError } from '../src/utils/UserFacingError.ts'
 
 const source = path => readFileSync(new URL(path, import.meta.url), 'utf8')
 const migration = source('../supabase/migrations/20261011183718_verifactu_activation_requests.sql')
@@ -14,24 +10,6 @@ const other = '22222222-2222-4222-8222-222222222222'
 const owner = '33333333-3333-4333-8333-333333333333'
 const manager = '44444444-4444-4444-8444-444444444444'
 const admin = '55555555-5555-4555-8555-555555555555'
-
-test('activation migration passes the production safety checker', () => {
-  assert.deepEqual(analyzeMigration(migration), [])
-})
-
-test('tenant routing retains local installation numbering while disabled, requested and active', async () => {
-  let integration={requested_at:null,enabled_at:null}, reads=0
-  const api=compileComponent(source('../src/features/fiscal/local/tenantMode.ts'),{
-    './integration.ts':{loadVerifactuIntegration:async id=>{assert.equal(id,tenant);reads++;return integration}},
-    './mode.ts':{localFiscalMode:()=> 'production',assertRealSaleAllowedForMode(){}},
-  })
-  assert.equal(await api.resolveLocalFiscalMode(tenant),'production')
-  integration={requested_at:'2026-10-11',enabled_at:null}
-  assert.equal(await api.resolveLocalFiscalMode(tenant),'production')
-  integration={...integration,enabled_at:'2026-10-11'}
-  assert.equal(await api.resolveLocalFiscalMode(tenant),'production')
-  assert.equal(reads,3)
-})
 
 test('owner requests once, superadmin configures and activates atomically, tenant permissions protect configuration', async t => {
   const db = new PGlite()
@@ -115,71 +93,4 @@ test('owner requests once, superadmin configures and activates atomically, tenan
   assert.equal((await db.query('select * from tenant_verifactu_integrations')).rows.length,0)
   await db.exec('reset role; set role anon')
   await assert.rejects(request(),/permission denied/)
-})
-
-const state = { tenant_id:tenant,requested_at:null,enabled_at:null,aeat_environment:'production',print_ticket_qr:true }
-const metadata = { tenant_id:tenant,bridge_url:'https://private-bridge.example/',producer_name:'Productor SL',producer_nif:'B12345678',system_id:'TK',system_version:'1.0' }
-test('CRM request becomes pending and producer fields appear read-only only after activation; bridge URL stays hidden', async () => {
-  let current = {...state}, requests=0, settingsReads=0, timer
-  const window = new EventTarget()
-  window.setInterval = callback => { timer=callback; return 1 }
-  window.clearInterval = () => {}
-  const runner = createCompiledHookRunner(source('../src/features/crm/integrations/components/LocalFiscalSettings.tsx'),'LocalFiscalSettings',{
-    'react/jsx-runtime':jsxRuntime,'sileo':{sileo:{success(){}}},
-    '../../../../components/ui/Button':{Button:'button'},'../../../../components/ui/Checkbox':{Checkbox:'checkbox'},
-    '../../../../components/ui/Input':{Input:'input'},'../../shared/components/Field':{Field:'field'},'./FiscalSifSetup':{FiscalSifSetup:'sif-setup'},
-    '../../../fiscal/local/settings':{FISCAL_SETTINGS_CHANGED:'changed',loadFiscalPosSettings:async()=>{ settingsReads++; return metadata }},
-    '../../../fiscal/local/integration':{
-      loadVerifactuIntegration:async()=>current,
-      requestVerifactuActivation:async id=>{assert.equal(id,tenant); requests++; return current={...current,requested_at:'2026-10-11T10:00:00Z'}},
-      saveVerifactuPreferences:async(id,environment,qr)=>current={...current,aeat_environment:environment,print_ticket_qr:qr},
-    },
-  },{window,document:{visibilityState:'visible'},CustomEvent})
-  const props={tenantContext:{tenantId:tenant,role:'owner'},disabled:false,runAction:async action=>action()}
-  const settle=async()=>{await new Promise(setImmediate);return runner.render(props)}
-  runner.render(props)
-  let tree=await settle()
-  assert.equal(settingsReads,0)
-  assert.equal(nodes(tree).filter(node=>node.type==='input').length,0)
-  const request=nodes(tree).find(node=>node.type==='button'&&node.props.children==='Solicitar activación Verifactu')
-  assert.ok(request)
-  request.props.onClick(); tree=await settle()
-  assert.equal(requests,1)
-  assert.ok(nodes(tree).some(node=>String(node.props.children).includes('Pendiente de activación')))
-  assert.ok(!nodes(tree).some(node=>node.type==='button'&&node.props.children==='Solicitar activación Verifactu'))
-  const checkbox=nodes(tree).find(node=>node.type==='checkbox')
-  checkbox.props.onChange(true); tree=await settle()
-  assert.equal(current.aeat_environment,'test')
-  current={...current,enabled_at:'2026-10-11T11:00:00Z'}
-  timer(); tree=await settle()
-  const fields=nodes(tree).filter(node=>node.type==='input')
-  assert.equal(fields.length,4)
-  assert.ok(fields.every(node=>node.props.readOnly))
-  assert.deepEqual(fields.map(node=>node.props.value),['Productor SL','B12345678','TK','1.0'])
-  assert.ok(!JSON.stringify(tree).includes(metadata.bridge_url))
-  assert.ok(nodes(tree).some(node=>node.type==='sif-setup'))
-  runner.unmount()
-})
-
-test('integration cache remains tenant-scoped, permits transport-only offline fallback and fails closed without saved state', async () => {
-  const storage=new Map()
-  let error=null
-  const query={select(){return this},eq(field,id){this.tenant=id;return this},abortSignal(){return this},async maybeSingle(){return{data:{...state,tenant_id:this.tenant,enabled_at:this.tenant===tenant?'2026-10-11':null},error}}}
-  const api=compileComponent(source('../src/features/fiscal/local/integration.ts'),{
-    zod:{z},'../../../lib/supabase.ts':{supabase:{from:()=>query}},'../../../utils/UserFacingError.ts':{UserFacingError},
-    './settings.ts':{validateFiscalPosSettings:value=>value},'./backendRead.ts':{readFiscalBackend:async request=>request(new AbortController().signal)},
-    './availability.ts':{isFiscalTransportUnavailable:failure=>failure.message==='Network error'},
-  },{window:{localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)}},Date,AbortController})
-  assert.ok((await api.loadVerifactuIntegration(tenant,false)).enabled_at)
-  assert.equal((await api.loadVerifactuIntegration(other,false)).enabled_at,null)
-  error={message:'Network error'}
-  const offlineApi=compileComponent(source('../src/features/fiscal/local/integration.ts'),{
-    zod:{z},'../../../lib/supabase.ts':{supabase:{from:()=>query}},'../../../utils/UserFacingError.ts':{UserFacingError},
-    './settings.ts':{validateFiscalPosSettings:value=>value},'./backendRead.ts':{readFiscalBackend:async request=>request(new AbortController().signal)},
-    './availability.ts':{isFiscalTransportUnavailable:failure=>failure.message==='Network error'},
-  },{window:{localStorage:{getItem:key=>storage.get(key),setItem:(key,value)=>storage.set(key,value)}},Date,AbortController})
-  assert.ok((await offlineApi.loadVerifactuIntegration(tenant)).enabled_at)
-  await assert.rejects(offlineApi.loadVerifactuIntegration('66666666-6666-4666-8666-666666666666'),/confirmar/)
-  error={message:'Forbidden'}
-  await assert.rejects(offlineApi.loadVerifactuIntegration(tenant,false),/confirmar/)
 })

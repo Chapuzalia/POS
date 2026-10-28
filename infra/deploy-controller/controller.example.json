@@ -1,0 +1,44 @@
+{
+  "repositoryId": "REPLACE_WITH_NUMERIC_GITHUB_REPOSITORY_ID",
+  "audience": "https://deploy.alteilsolutions.com",
+  "environments": {
+    "production": {
+      "enabled": false,
+      "retiredAppVersions": [],
+      "clientId": "REPLACE_WITH_PRODUCTION_ACCESS_CLIENT_ID",
+      "clientSecretSha256": "REPLACE_WITH_LOWERCASE_SHA256_OF_PRODUCTION_ACCESS_SECRET",
+      "healthUrl": "https://REPLACE_PRODUCTION_HOST/app-version.json",
+      "coolify": {
+        "COOLIFY_URL": "https://REPLACE_PRIVATE_COOLIFY_HOST",
+        "COOLIFY_APPLICATION_UUID": "REPLACE_PRODUCTION_APPLICATION_UUID",
+        "COOLIFY_API_TOKEN": "REPLACE_PRODUCTION_ONLY_TOKEN",
+        "SUPPORTED_APP_VERSIONS": "REPLACE_WITH_EXPLICIT_SUPPORTED_VERSION_POLICY"
+      },
+      "receiver": {
+        "coolify_project": "dbdtluvsdqycxl5tecuwljie",
+        "docker_network": "REPLACE_PRODUCTION_SUPABASE_NETWORK",
+        "required_migration": "20261015120000",
+        "migration_approvals": []
+      }
+    },
+    "staging": {
+      "enabled": false,
+      "retiredAppVersions": [],
+      "clientId": "REPLACE_WITH_STAGING_ACCESS_CLIENT_ID",
+      "clientSecretSha256": "REPLACE_WITH_LOWERCASE_SHA256_OF_STAGING_ACCESS_SECRET",
+      "healthUrl": "https://REPLACE_STAGING_HOST/app-version.json",
+      "coolify": {
+        "COOLIFY_URL": "https://REPLACE_PRIVATE_COOLIFY_HOST",
+        "COOLIFY_APPLICATION_UUID": "REPLACE_STAGING_APPLICATION_UUID",
+        "COOLIFY_API_TOKEN": "REPLACE_STAGING_ONLY_TOKEN",
+        "SUPPORTED_APP_VERSIONS": "REPLACE_WITH_EXPLICIT_SUPPORTED_VERSION_POLICY"
+      },
+      "receiver": {
+        "coolify_project": "irsdd2liytrh7dttjr5rzj3j",
+        "docker_network": "REPLACE_STAGING_SUPABASE_NETWORK",
+        "required_migration": "20261015120000",
+        "migration_approvals": []
+      }
+    }
+  }
+}

@@ -1,5 +1,25 @@
 # POS Project Instructions
 
+## Engineering Quality Rules
+
+- Prefer simple, readable, maintainable code.
+- Follow existing architecture and conventions.
+- Avoid unnecessary abstractions and dependencies.
+- Keep business logic separate from UI components.
+- Do not modify unrelated functionality.
+
+## Testing
+
+- Test observable behavior, not implementation details.
+- Use Vitest for unit and integration tests.
+- Use Playwright for critical end-to-end flows.
+- Cover edge cases, errors and failure scenarios.
+- Keep tests deterministic, isolated and fast.
+- Mock external services only at appropriate boundaries.
+- Prefer focused tests during development.
+- Run the full relevant suite before completing changes.
+- Never claim tests passed without executing them.
+
 ## Project priorities
 
 This is a production-oriented, multi-tenant POS/CRM/KDS. Favor correctness of sales, cash, fiscal, offline, printing, auth and tenant isolation over cosmetic refactors or architectural novelty.
@@ -118,3 +138,7 @@ Never claim a test/build passed unless it actually ran. If credentials/services 
 - Make low-risk assumptions from the repo instead of asking unnecessary questions.
 - Ask before destructive data changes, breaking schema/API changes, changing fiscal semantics, replacing core dependencies or removing compatibility.
 - Finish with a concise summary of changes, important files touched and verification commands actually run.
+- Run linting and relevant tests.
+- Check for regressions and duplicated logic.
+- Report failing tests and remaining risks.
+- Never hide errors just to make tests pass.

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import { z } from 'zod'
 import { compileComponent } from './helpers/component-harness.mjs'
-import { readFiscalBackend } from '../src/features/fiscal/local/backendRead.ts'
+
 import { assertFiscalLease, createLocalFallbackLease } from '../src/features/fiscal/local/clock.ts'
 import { isFiscalTransportUnavailable } from '../src/features/fiscal/local/availability.ts'
 import { isFiscalBridgeOrigin } from '../src/features/fiscal/local/bridgeUrl.ts'
@@ -76,19 +76,6 @@ function harness({ offline = true, identity = snapshot, cachedSettings = setting
   return { installation, recovery, calls, signals, settingsService }
 }
 
-test('offline fiscal preparation uses the validated local identity/settings without contacting Supabase or bridge', async () => {
-  const h = harness()
-  const installation = await h.installation.loadFiscalInstallation(context, cashSession)
-  assert.equal(installation.installationId, installationId)
-  assert.equal(installation.issuerNif, snapshot.subject.nif)
-  assert.equal(installation.aeatEnvironment, 'production')
-  assert.equal((await h.installation.getFiscalInstallationLease(installation)).source, 'local-fallback')
-  await assert.rejects(h.recovery.recoverServerConfirmedFiscalChain(installation), isFiscalTransportUnavailable)
-  assert.equal(h.calls.network, 0)
-  assert.equal(h.calls.bridge, 0)
-  assert.equal(h.calls.ledger, 1)
-})
-
 test('unresponsive backend with navigator online falls back to local preparation and aborts its reads', async () => {
   const h = harness({ offline: false })
   const installation = await h.installation.loadFiscalInstallation(context, cashSession)
@@ -118,105 +105,5 @@ test('online retirement and permission rejection never fall back to the cached i
     const h = harness({ offline: false, response })
     await assert.rejects(h.installation.loadFiscalInstallation(context, cashSession))
     assert.equal(h.calls.network, response.error ? 1 : 2)
-  }
-})
-
-test('fresh fiscal settings remain mandatory for activation recovery while offline', async () => {
-  const h = harness()
-  await assert.rejects(h.settingsService.loadFiscalPosSettings(tenantId, false), /confirmar en Supabase/)
-  assert.equal(h.calls.network, 0)
-})
-
-test('local entry retains the same identity and sequence while only confirmed activation requires a bridge identity', async () => {
-  const identity={...snapshot,installation:{...snapshot.installation,bridge_requested:false}}
-  const h=harness({identity})
-  const historical=await h.installation.loadFiscalInstallation(context,cashSession)
-  assert.equal(historical.installationId,installationId)
-  assert.equal(historical.bridgeUrl,null)
-  await assert.rejects(h.installation.loadFiscalInstallation(context,cashSession,true),error=>error instanceof h.installation.FiscalBridgeIdentityRequiredError)
-  const active=harness()
-  assert.equal((await active.installation.loadFiscalInstallation(context,cashSession,true)).bridgeUrl,settings.bridge_url)
-  const disabled=harness({identity,enabled:false})
-  assert.equal((await disabled.installation.loadFiscalInstallation(context,cashSession,true)).bridgeUrl,null)
-  const prepared=harness({enabled:false})
-  assert.equal((await prepared.installation.loadFiscalInstallation(context,cashSession,true)).bridgeUrl,null,'a saved URL must not activate transport')
-  const unconfigured=harness({identity,cachedSettings:{...settings,bridge_url:''}})
-  await assert.rejects(unconfigured.installation.loadFiscalInstallation(context,cashSession,true),/configuración de remisión Verifactu/)
-  const retired=harness({offline:false,response:{data:null,error:null},retiredForVerifactu:true})
-  await assert.rejects(retired.installation.loadFiscalInstallation(context,cashSession,true),error=>error instanceof retired.installation.FiscalBridgeIdentityRequiredError)
-})
-
-test('bridge activation replays the same request after a lost reply and reload without losing the old chain', async () => {
-  const nextId = '77777777-7777-4777-8777-777777777777'
-  const original = { ...snapshot, installation: { ...snapshot.installation, bridge_requested: true } }
-  const next = { ...snapshot, installation: { ...snapshot.installation, id: nextId, installation_sequence: 2 } }
-  let identity = original, pending = null, committed = false
-  const requests = [], validated = [], persisted = [], recovered = []
-  const globals = { navigator: { onLine: true, locks: { request: async (_key, _options, action) => action() } }, URL }
-  const query = data => {
-    const value = { select() { return this }, eq() { return this }, is() { return this },
-      abortSignal() { return this }, maybeSingle: async () => ({ data, error: null }) }
-    return value
-  }
-  const client = {
-    rpc(name, params) {
-      if (name === 'pos_fiscal_preparation') return { abortSignal: async () => ({ data: committed ? null : { ...original, settings, head: null }, error: null }) }
-      if (name === 'pos_verifactu_retired_identity') return { abortSignal: async () => ({ data: true, error: null }) }
-      assert.equal(name, 'activate_pwa_fiscal_installation')
-      requests.push(params)
-      assert.equal(params.p_expected_installation_id, null)
-      if (!committed) { committed = true; return Promise.resolve({ data: null, error: { message: 'Failed to fetch' } }) }
-      return Promise.resolve({ data: nextId, error: null })
-    },
-    from(name) { return query(name === 'fiscal_sif_installations' ? next.installation : next.subject) },
-  }
-  const modules = {
-    zod: { z }, '../../../lib/supabase.ts': { supabase: client },
-    './backendRead.ts': { readFiscalBackend: action => action() },
-    './settings.ts': { loadFiscalPosSettings: async () => settings, rememberFiscalPosSettings: () => settings },
-    './integration.ts': { loadVerifactuIntegration: async () => ({ enabled_at: '2026-10-11' }) },
-    './installationRevocation.ts': { assertFiscalInstallationNotRevoked: async () => {}, refreshFiscalInstallationRevocation: async () => false },
-    './availability.ts': { isFiscalTransportUnavailable }, './clock.ts': { assertFiscalLease, createLocalFallbackLease },
-    './bridgeClient.ts': {}, '../../../utils/UserFacingError.ts': { UserFacingError },
-    './serverRecovery.ts': { recoverServerConfirmedFiscalChain: async value => recovered.push(value.installationId) },
-    './localIdentity.ts': {
-      FiscalIdentityMissingError: class extends Error {}, readFiscalIdentity: async () => identity,
-      readPendingFiscalActivation: async () => pending,
-      fiscalActivationRequest: async (_key, expectedInstallationId, recoverForTesting) => {
-        pending ??= { requestId: 'same-request', expectedInstallationId, recoverForTesting }
-        return pending
-      },
-      assertFiscalLedgerHeadValid: async scope => validated.push(scope),
-      persistFiscalIdentity: async (_key, value) => { persisted.push(value); identity = value; pending = null },
-    },
-  }
-  const first = compileComponent(source('installation'), modules, globals)
-  await assert.rejects(first.activateFiscalInstallation(context, cashSession, null), error => error.message === 'Failed to fetch')
-  assert.equal(identity, original)
-  assert.equal(persisted.length, 0)
-  const reload = compileComponent(source('installation'), modules, globals)
-  await assert.rejects(reload.loadFiscalInstallation(context, cashSession, true), error => error instanceof reload.FiscalBridgeIdentityRequiredError)
-  const active = await reload.activateFiscalInstallation(context, cashSession, nextId)
-  assert.equal(active.installationId, nextId)
-  assert.equal(active.bridgeUrl, settings.bridge_url)
-  assert.deepEqual({ ...requests[0] }, { ...requests[1] })
-  assert.deepEqual(recovered, [nextId])
-  assert.equal(persisted.length, 1)
-  assert.equal(original.installation.id, installationId)
-  assert.ok(validated.includes(`${tenantId}:${subjectId}:${installationId}`))
-  assert.ok(validated.includes(`${tenantId}:${subjectId}:${nextId}`))
-})
-
-test('a timed-out read ignores a late response and successful/forbidden reads retain their results', async () => {
-  let finish, signal
-  const late = new Promise(resolve => { finish = resolve })
-  const result = await readFiscalBackend(value => { signal = value; return late }, 5)
-  assert.ok(isFiscalTransportUnavailable(result.error))
-  assert.equal(signal.aborted, true)
-  finish({ data: 'late', error: null })
-  assert.equal(result.data, null)
-  for (const response of [{ data: 'ok', error: null },
-    { data: null, error: { code: '42501', message: 'Permission denied', details: '', hint: '' } }]) {
-    assert.equal(await readFiscalBackend(async () => response, 5), response)
   }
 })

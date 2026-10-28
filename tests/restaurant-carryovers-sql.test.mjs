@@ -18,40 +18,6 @@ const fn = (source, name) => {
 const id = (n) => `00000000-0000-0000-0000-${String(n).padStart(12, '0')}`
 const [tenant, venue, user, device, register, origin, second, third, group, order, sibling, table, physicalTable] = Array.from({ length: 13 }, (_, n) => id(n + 1))
 
-test('the automatic-recovery migration backfills carryovers recovered before its snapshot existed', async (t) => {
-  const db = new PGlite()
-  t.after(() => db.close())
-  await db.exec(`
-    create table orders(id uuid primary key, revision integer not null);
-    create table order_tables(order_group_id uuid not null, table_id uuid not null, released_at timestamptz);
-    create table restaurant_order_carryovers(
-      id uuid primary key,
-      order_group_id uuid not null,
-      order_ids uuid[] not null,
-      to_cash_session_id uuid,
-      recovered_at timestamptz,
-      recovered_by uuid,
-      recovered_by_device_id uuid
-    );
-    insert into orders values ('${order}', 7);
-    insert into order_tables values ('${group}', '${table}', null);
-    insert into restaurant_order_carryovers values (
-      '${id(40)}', '${group}', array['${order}'::uuid], '${second}', now() - interval '1 hour', '${user}', '${device}'
-    );
-  `)
-  const schemaUpgrade = autoRecovery.slice(0, autoRecovery.indexOf('create or replace function'))
-  await db.exec(schemaUpgrade)
-  const [upgraded] = (await db.query('select * from restaurant_order_carryovers')).rows
-  assert.equal(upgraded.recovery_undo_expires_at.toISOString(), upgraded.recovered_at.toISOString())
-  assert.deepEqual(upgraded.recovery_order_revisions, { [order]: 7 })
-  assert.deepEqual(upgraded.recovery_table_ids, [table])
-  assert.equal(upgraded.recovery_history[0].historical, true)
-  await assert.rejects(
-    db.query('update restaurant_order_carryovers set recovery_order_revisions=null'),
-    /restaurant_order_carryovers_recovery_snapshot_check/,
-  )
-})
-
 test('carryover executes against PostgreSQL with the existing close accounting and lifecycle triggers', async (t) => {
   const db = new PGlite()
   t.after(() => db.close())

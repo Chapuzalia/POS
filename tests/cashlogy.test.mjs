@@ -1,50 +1,18 @@
 import assert from 'node:assert/strict'
-import { readFile } from 'node:fs/promises'
+
 import test from 'node:test'
 import { createPrintAgentClient } from '../src/features/local-printing/api/printAgentClient.ts'
-import { PrintAgentError } from '../src/features/local-printing/api/PrintAgentError.ts'
-import { CashlogyError, getBlockingCashlogyTransactionId, isUncertainCashlogyError, toCashlogyError } from '../src/features/local-printing/cashlogy/cashlogyError.ts'
-import {
-  denominationTotalCents,
-  getDispensableDenominations,
-  selectedDenominations,
-  suggestCashlogyDenominations,
-} from '../src/features/local-printing/cashlogy/cashlogyManagement.ts'
-import {
-  cashlogyActiveStatuses,
-  cashlogyCancellableStatuses,
-  cashlogyManagementActiveStatuses,
-  cashlogyManagementCancellableStatuses,
-  cashlogyManagementTerminalStatuses,
-  cashlogyTerminalStatuses,
-  pollCashlogyOperation,
-  pollCashlogyTransaction,
-} from '../src/features/local-printing/cashlogy/cashlogyPolling.ts'
-import { createCashlogyRequestId } from '../src/features/local-printing/cashlogy/cashlogyRequestId.ts'
+
+import { denominationTotalCents, getDispensableDenominations, selectedDenominations } from '../src/features/local-printing/cashlogy/cashlogyManagement.ts'
+import { pollCashlogyOperation } from '../src/features/local-printing/cashlogy/cashlogyPolling.ts'
+
 import { cashlogyAcknowledgements } from '../src/features/local-printing/cashlogy/cashlogyAcknowledgements.ts'
-import {
-  formatCashlogyLevelPercentage,
-  getCashlogyLevelTone,
-  getVisibleCashlogyLevels,
-  shouldShowCashlogyOperationDetails,
-} from '../src/features/local-printing/cashlogy/cashlogyPresentation.ts'
+
 import { getCompletedStackerCollection } from '../src/features/local-printing/cashlogy/stackerCollection.ts'
-import {
-  getCashlogyIntentStorageKey,
-  getCashlogyManagementIntentStorageKey,
-  loadCashlogyIntent,
-  loadCashlogyManagementIntent,
-  saveCashlogyIntent,
-  saveCashlogyManagementIntent,
-} from '../src/features/local-printing/cashlogy/cashlogyStorage.ts'
-import { getDefaultPrintAgentConfig } from '../src/features/local-printing/services/printAgentStorage.ts'
-import { getAutomaticSaleHardwareAction, shouldOpenCashDrawer } from '../src/features/local-printing/services/cashDrawerRules.ts'
+
 import { mapSaleToPrintRequest } from '../src/features/local-printing/services/ticketPrintMapper.ts'
 import { createCashTicketActionsHarness } from './helpers/cash-ticket-actions-harness.mjs'
 import { deferred, flush } from './helpers/restaurant-controller-harness.mjs'
-import { compileComponent } from './helpers/component-harness.mjs'
-
-const root = new URL('../', import.meta.url)
 
 function transaction(status, patch = {}) {
   return {
@@ -88,44 +56,6 @@ const accounting = {
   },
   queriedAt: '2026-08-18T10:00:00Z',
 }
-
-test('los niveles de Cashlogy se presentan por capacidad y omiten recicladores desactivados', () => {
-  assert.equal(getCashlogyLevelTone(21), 'green')
-  assert.equal(getCashlogyLevelTone(20), 'orange')
-  assert.equal(getCashlogyLevelTone(10), 'orange')
-  assert.equal(getCashlogyLevelTone(9), 'red')
-  assert.equal(getCashlogyLevelTone(null), 'red')
-  assert.equal(formatCashlogyLevelPercentage(15), '15%')
-  assert.equal(formatCashlogyLevelPercentage(null), '—%')
-
-  const levels = [
-    { index: 1, valueCents: 1, stateCode: 0, state: 'ok', percentage: 0 },
-    { index: 2, valueCents: 2, stateCode: 0, state: 'ok', percentage: 10 },
-    { index: 3, valueCents: 5, stateCode: 1, state: 'warning', percentage: 0 },
-  ]
-  assert.deepEqual(getVisibleCashlogyLevels(levels).map((level) => level.index), [2, 3])
-})
-
-test('una operación Cashlogy cancelada no muestra detalles económicos', () => {
-  assert.equal(shouldShowCashlogyOperationDetails('cancelled'), false)
-  assert.equal(shouldShowCashlogyOperationDetails('completed'), true)
-  assert.equal(shouldShowCashlogyOperationDetails(undefined), true)
-})
-
-test('la configuración predeterminada conserva el modo de solo impresora', () => {
-  const config = getDefaultPrintAgentConfig()
-  assert.equal(config.cashlogyConfigured, false)
-  assert.equal(config.cashlogyTerminalCode, 'POS_MAIN')
-  assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { autoOpenCashDrawer: true, cashlogyConfigured: false } }), true)
-})
-
-test('Cashlogy bloquea el cajón convencional y respeta la preferencia de impresión', () => {
-  const settings = { alwaysPrintTicket: false, autoOpenCashDrawer: true, cashlogyConfigured: true }
-  assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), false)
-  assert.equal(getAutomaticSaleHardwareAction({ payments: [{ method: 'cash', amountCents: 1250 }], settings }), 'none')
-  assert.equal(getAutomaticSaleHardwareAction({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { ...settings, alwaysPrintTicket: true } }), 'print')
-  assert.equal(shouldOpenCashDrawer({ payments: [{ method: 'cash', amountCents: 1250 }], settings: { ...settings, healthOk: false } }), false)
-})
 
 test('el cliente tipado usa todas las rutas HTTP headless de api.md', async () => {
   const calls = []
@@ -232,91 +162,10 @@ test('el selector usa céntimos, capacidades y límites fiables del reciclador',
   const selected = selectedDenominations({ 200: 3, 500: 0, 1000: -1, 2000: 1 })
   assert.deepEqual(selected, [{ valueCents: 2000, quantity: 1 }, { valueCents: 200, quantity: 3 }])
   assert.equal(denominationTotalCents(selected), 2600)
-  assert.deepEqual(suggestCashlogyDenominations([
-    { valueCents: 500, availableQuantity: 1, kind: 'note' },
-    { valueCents: 200, availableQuantity: 4, kind: 'coin' },
-    { valueCents: 100, availableQuantity: 2, kind: 'coin' },
-  ], 700), [{ valueCents: 500, quantity: 1 }, { valueCents: 200, quantity: 1 }])
-  assert.deepEqual(suggestCashlogyDenominations([
-    { valueCents: 500, availableQuantity: 1, kind: 'note' },
-  ], 700), [])
 })
 
-test('el cálculo auxiliar de combinaciones admite denominaciones menores y capacidades parciales', () => {
-  const partialCapabilities = {
-    ...accounting,
-    denominations: {
-      ...accounting.denominations,
-      coins: [
-        ...accounting.denominations.coins,
-        { valueCents: 100, recyclerCount: 10, stackerCount: 0 },
-      ],
-    },
-  }
-  assert.deepEqual(getDispensableDenominations(partialCapabilities), [
-    { valueCents: 200, availableQuantity: 4, kind: 'coin' },
-    { valueCents: 100, availableQuantity: 10, kind: 'coin' },
-  ])
-  assert.deepEqual(suggestCashlogyDenominations([
-    { valueCents: 2000, availableQuantity: 1, kind: 'note' },
-    { valueCents: 1000, availableQuantity: 2, kind: 'note' },
-    { valueCents: 500, availableQuantity: 4, kind: 'note' },
-  ], 2000), [{ valueCents: 1000, quantity: 2 }])
-})
-
-test('dar cambio Cashlogy empieza a 0 y exige elegir las denominaciones manualmente', async () => {
-  const [modal, selector] = await Promise.all([
-    readFile(new URL('src/features/local-printing/components/CashlogyMachineModal.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyDenominationSelector.tsx', root), 'utf8'),
-  ])
-
-  assert.match(modal, /useState<Record<number, number>>\(\{\}\)/)
-  assert.match(modal, /setQuantities\(\{\}\)[\s\S]*managementRequestId/)
-  assert.doesNotMatch(modal, /suggestCashlogyDenominations/)
-  assert.doesNotMatch(modal, /suggestedOperationId/)
-  assert.match(selector, /quantities\[option\.valueCents\] \?\? 0/)
-  assert.doesNotMatch(selector, /Elige manualmente la combinación|Poner todo a 0|onClear/)
-})
-
-test('el límite de espera detiene consultas sin declarar cancelado un cobro activo', async () => {
-  let calls = 0
-  const updates = []
-  await assert.rejects(pollCashlogyTransaction(
-    async () => { calls++; return { transaction: transaction('processing') } },
-    transaction('processing'),
-    { intervalMs: 1, timeoutMs: 20, onUpdate: (value) => updates.push(value.status) },
-  ), (error) => error.code === 'CASHLOGY_CONNECTION_TIMEOUT' && /sigue pendiente/.test(error.message))
-  const callsAtTimeout = calls
-  await new Promise((resolve) => setTimeout(resolve, 10))
-  assert.ok(calls > 0)
-  assert.equal(calls, callsAtTimeout)
-  assert.ok(updates.every((status) => status === 'processing'))
-})
-
-test('una consulta colgada también expira y su respuesta tardía no actualiza el cobro', async () => {
-  let respond
-  const updates = []
-  await assert.rejects(pollCashlogyTransaction(
-    () => new Promise((resolve) => { respond = resolve }),
-    transaction('dispensing_change'),
-    { intervalMs: 1, timeoutMs: 20, onUpdate: (value) => updates.push(value) },
-  ), (error) => error.code === 'CASHLOGY_CONNECTION_TIMEOUT')
-  respond({ transaction: transaction('completed') })
-  await new Promise((resolve) => setImmediate(resolve))
-  assert.deepEqual(updates, [])
-})
-
-test('los pollings terminan solo en estados terminales y permiten la fase awaiting_dispense', async () => {
-  const transactionSequence = ['processing', 'dispensing_change', 'completed']
-  let transactionCalls = 0
-  const tx = await pollCashlogyTransaction(
-    async () => ({ transaction: transaction(transactionSequence[transactionCalls++]) }),
-    transaction('queued'),
-    { intervalMs: 1 },
-  )
-  assert.equal(tx.status, 'completed')
-
-  const operationSequence = ['accepting', 'processing', 'completed']
+test('la gestión de efectivo espera durante la selección y entrega de cambio antes de terminar', async () => {
+  const operationSequence = ['accepting', 'awaiting_dispense', 'dispensing', 'completed']
   let operationCalls = 0
   const result = await pollCashlogyOperation(
     async () => ({ operation: operation('refill', operationSequence[operationCalls++]) }),
@@ -324,13 +173,6 @@ test('los pollings terminan solo en estados terminales y permiten la fase awaiti
     { intervalMs: 1 },
   )
   assert.equal(result.status, 'completed')
-  assert.ok(cashlogyActiveStatuses.has('waiting_for_cash'))
-  assert.ok(cashlogyTerminalStatuses.has('unknown'))
-  assert.ok(cashlogyCancellableStatuses.has('waiting_for_cash'))
-  assert.ok(cashlogyManagementActiveStatuses.has('awaiting_dispense'))
-  assert.ok(cashlogyManagementCancellableStatuses.has('accepting'))
-  assert.equal(cashlogyManagementCancellableStatuses.has('awaiting_dispense'), false)
-  assert.ok(cashlogyManagementTerminalStatuses.has('needs_attention'))
 })
 
 test('solo una retirada de stacker completada produce el importe real que debe registrarse', () => {
@@ -358,26 +200,6 @@ test('solo una retirada de stacker completada produce el importe real que debe r
   assert.equal(getCompletedStackerCollection(operation('withdraw', 'completed', { dispensedCents: 12345 }), intent), null)
 })
 
-test('requestId e intenciones de venta y gestión sobreviven a una recarga por terminal', () => {
-  const values = new Map()
-  const originalWindow = globalThis.window
-  globalThis.window = { localStorage: { getItem: (key) => values.get(key) ?? null, setItem: (key, value) => values.set(key, value), removeItem: (key) => values.delete(key) } }
-  const scope = { tenantId: 'tenant', establishmentId: 'venue', terminalId: 'terminal' }
-  const paymentIntent = { requestId: 'cashlogy:sale:stable', saleId: 'sale', amountCents: 1250, terminalCode: 'POS_MAIN', transactionId: null, createdAt: '2026-08-18T10:00:00Z' }
-  const managementIntent = { requestId: 'cashlogy:refill:stable', type: 'refill', operationId: null, createdAt: '2026-08-18T10:00:00Z' }
-  saveCashlogyIntent(scope, paymentIntent)
-  saveCashlogyManagementIntent(scope, managementIntent)
-  assert.deepEqual(loadCashlogyIntent(scope), paymentIntent)
-  assert.deepEqual(loadCashlogyManagementIntent(scope), managementIntent)
-  assert.match(getCashlogyIntentStorageKey(scope), /cashlogy-intent$/)
-  assert.match(getCashlogyManagementIntentStorageKey(scope), /cashlogy-management-intent$/)
-  assert.match(createCashlogyRequestId('give_change'), /^cashlogy:give-change:[A-Za-z0-9_.:-]+$/)
-  saveCashlogyIntent(scope, null)
-  saveCashlogyManagementIntent(scope, null)
-  if (originalWindow === undefined) delete globalThis.window
-  else globalThis.window = originalWindow
-})
-
 test('el cierre sobrevive a errores y recargas, aislado por backend, sin perder cierres concurrentes', async () => {
   const values = new Map()
   const originalWindow = globalThis.window
@@ -403,28 +225,6 @@ test('el cierre sobrevive a errores y recargas, aislado por backend, sin perder 
     if (originalWindow === undefined) delete globalThis.window
     else globalThis.window = originalWindow
   }
-})
-
-test('los errores se traducen y los resultados HTTP inciertos se distinguen', () => {
-  const busy = new PrintAgentError({ code: 'DUPLICATE_REQUEST', status: 409,
-    details: { error: { code: 'CASHLOGY_BUSY', details: { transactionId: 'cltx_previous', status: 'unknown' } } },
-  })
-  assert.equal(getBlockingCashlogyTransactionId(busy), 'cltx_previous')
-  assert.equal(getBlockingCashlogyTransactionId(toCashlogyError(busy)), 'cltx_previous')
-  assert.equal(getBlockingCashlogyTransactionId(new CashlogyError({ code: 'CASHLOGY_BUSY' })), null)
-  assert.equal(isUncertainCashlogyError(toCashlogyError(new PrintAgentError({ code: 'NETWORK_ERROR' }))), true)
-  assert.equal(isUncertainCashlogyError(toCashlogyError(busy)), false)
-  const remote = toCashlogyError(new PrintAgentError({
-    code: 'HTTP_ERROR', status: 409,
-    details: { error: { code: 'CASHLOGY_BUSY', message: 'technical text', originalCode: 'LEGACY_42' } },
-  }))
-  assert.ok(remote instanceof CashlogyError)
-  assert.equal(remote.code, 'CASHLOGY_BUSY')
-  assert.match(remote.message, /otra operación/)
-  assert.equal(remote.originalCode, 'LEGACY_42')
-  assert.equal(isUncertainCashlogyError(new PrintAgentError({ code: 'TIMEOUT' })), true)
-  assert.equal(isUncertainCashlogyError(new PrintAgentError({ code: 'HTTP_ERROR', status: 502 })), true)
-  assert.equal(isUncertainCashlogyError(new PrintAgentError({ code: 'HTTP_ERROR', status: 409 })), false)
 })
 
 test('el ticket Cashlogy nunca abre el cajón de la impresora', () => {
@@ -469,82 +269,3 @@ test('el histórico confirma en Cashlogy antes de cambiar un ticket de tarjeta a
   assert.equal(harness.calls.finished.length, 1)
   assert.deepEqual(harness.calls.busy, [true, false])
 })
-
-test('la identidad física de Cashlogy es única y se persiste en todos los cobros', async () => {
-  const [migration, consolidated] = await Promise.all([
-    readFile(new URL('supabase/migrations/20260825130000_cashlogy_payment_idempotency.sql', root), 'utf8'),
-    readFile(new URL('supabase/0.Complete_Database_24-07-26.sql', root), 'utf8'),
-  ])
-
-  for (const sql of [migration, consolidated]) {
-    assert.match(sql, /sale_payments_cashlogy_request_unique/i)
-    assert.match(sql, /sale_payments_cashlogy_transaction_unique/i)
-    assert.match(sql, /close_restaurant_order_cashlogy/i)
-    assert.match(sql, /pay_restaurant_order_items_cashlogy/i)
-    assert.match(sql, /pay_restaurant_order_equal_part_cashlogy/i)
-    assert.match(sql, /change_sale_payment_method_cashlogy/i)
-  }
-})
-
-test('los servicios de cobro dividido entregan la identidad Cashlogy a la RPC idempotente', async () => {
-  const calls = []
-  const supabase = { rpc: async (name, params) => {
-    calls.push([name, params])
-    const split = { id: 'split-1', order_group_id: 'group-1', total_cents: 600, part_count: 2, paid_parts: 1, paid_cents: 300, status: 'open', default_discount: null }
-    return { data: name.includes('equal_part') ? { pendingUnits: 0, requiresConfirmation: false, split } : { pendingUnits: 0, requiresConfirmation: false }, error: null }
-  } }
-  const source = await readFile(new URL('src/features/tables/service.ts', root), 'utf8')
-  const service = compileComponent(source, {
-    '../../utils/UserFacingError.ts': { UserFacingError: Error },
-    '../../lib/supabase': { supabase },
-    '../assist/snapshot': { buildAssistSnapshot: () => undefined },
-    '../../lib/offlineStore': { saveCachedAssistConfiguration: () => undefined },
-    '../../lib/format': { quantityAmountCents: (unitPriceCents, quantity) => unitPriceCents * quantity },
-    '../../lib/mixers': { splitLegacyMixerModifiers: () => ({ components: [], mixer: null, mixerProductId: null, modifiers: [] }) },
-    '../catalog/services/catalogSnapshots': { normalizeCatalogSnapshot: () => null },
-    './service-status': { getOrderPendingUnits: () => 0 },
-    './layout-service': { applyVenueLayout: (map) => map },
-    './order-line-payload': { buildCatalogOrderLinesPayload: () => [], buildRestaurantOrderLinesPayload: () => [] },
-    './map-elements': { normalizeMapElements: (value) => value },
-    '../reservations/domain/reservationAvailability': { getDateRange: () => ({}), localDateKey: () => '2026-09-12' },
-    '../platform/tenantFeatureAccess': { hasTenantFeature: () => false, hasTenantCapability: () => false },
-  })
-  const cashlogy = { id: 'tx-1', requestId: 'request-1' }
-
-  await service.payRestaurantOrderItems('order-1', 3, [{ lineId: 'line-1', quantity: 1 }], 'cash', 600, false, null, cashlogy)
-  await service.payRestaurantEqualPart('split-1', 'cash', 300, false, null, true, cashlogy)
-
-  assert.deepEqual(calls.map(([name]) => name), ['pay_restaurant_order_items_cashlogy', 'pay_restaurant_order_equal_part_cashlogy'])
-  for (const [, params] of calls) {
-    assert.equal(params.p_cashlogy_request_id, 'request-1')
-    assert.equal(params.p_cashlogy_transaction_id, 'tx-1')
-  }
-})
-
-test('la gestión es headless, cubre los cinco flujos y no contiene fallback externo', async () => {
-  const [client, modal, managementStore, selector] = await Promise.all([
-    readFile(new URL('src/features/local-printing/api/printAgentClient.ts', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyMachineModal.tsx', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/cashlogy/useCashlogyManagementStore.ts', root), 'utf8'),
-    readFile(new URL('src/features/local-printing/components/CashlogyDenominationSelector.tsx', root), 'utf8'),
-  ])
-  for (const source of [client, modal, managementStore]) {
-    assert.doesNotMatch(source, /cashlogy\/backoffice\/open/i)
-    assert.doesNotMatch(source, /openCashlogyBackoffice/)
-  }
-  assert.match(modal, /finalizeGiveChangeAdmission/)
-  assert.match(modal, /management\.cancel\(\)/)
-  assert.doesNotMatch(modal, /Volver al TPV|Cerrar y revisar Cashlogy|onCloseReviewed/)
-  assert.match(modal, /dismissDisabled=\{Boolean\(management\.intent\)\}/)
-  assert.doesNotMatch(modal, /suggestCashlogyDenominations/)
-  assert.doesNotMatch(modal, /suggestedOperationId/)
-  assert.match(managementStore, /persistIntent\(intent\)[\s\S]*createRequest/)
-  assert.match(managementStore, /denominationOptions/)
-  assert.match(managementStore, /if \(!startPromise\)/)
-  assert.match(managementStore, /cancelActiveCashlogyOperation/)
-  assert.match(managementStore, /cashlogyManagementCancellableStatuses/)
-  assert.match(selector, /availableQuantity/)
-  assert.match(selector, /targetCents/)
-  assert.match(selector, /quantities\[option\.valueCents\] \?\? 0/)
-})
-

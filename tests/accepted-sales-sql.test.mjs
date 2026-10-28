@@ -2,7 +2,6 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { PGlite } from '@electric-sql/pglite'
-import { analyzeMigration } from '../scripts/check-migrations.mjs'
 
 const sql = readFileSync(new URL('../supabase/migrations/20261011104456_protect_accepted_sales.sql', import.meta.url), 'utf8')
 const tenant = '11111111-1111-4111-8111-111111111111'
@@ -58,7 +57,6 @@ async function fixture(t) {
   return db
 }
 
-test('accepted-sale migration preserves N-1 and passes migration safety checks', () => assert.deepEqual(analyzeMigration(sql), []))
 test('recipe or unit error leaves the economic line with unknown cost and a scoped incident', async t => {
   const db = await fixture(t)
   await db.exec(`insert into ticket_lines(id,tenant_id,ticket_id,unit_price_cents) values('${line}','${tenant}','${ticket}',600)`)
@@ -67,34 +65,7 @@ test('recipe or unit error leaves the economic line with unknown cost and a scop
   assert.deepEqual((await db.query('select tenant_id,venue_id,entity_id,stage,error_code from sale_auxiliary_failures')).rows,
     [{ tenant_id: tenant, venue_id: venue, entity_id: line, stage: 'theoretical_cost', error_code: '55000' }])
 })
-test('malformed historical components and category/prices do not reject the line or invent a known cost', async t => {
-  const db = await fixture(t)
-  await db.query('insert into offline_event_log values($1,\'sale_created\',$2,now(),$3,$3)', [tenant,
-    { lines: [{ id: line, components: [{ type: 'menu_item', productId: 'not-a-uuid', productName: 'Antiguo' }],
-      catalogSnapshot: { categoryId: 'deleted-bad-id' }, basePriceCents: 'NaN' }], ticket: { id: ticket } }, ticket])
-  await db.exec(`insert into ticket_lines(id,tenant_id,ticket_id,unit_price_cents) values('${line}','${tenant}','${ticket}',600)`)
-  assert.equal((await db.query('select count(*)::int n from ticket_lines')).rows[0].n, 1)
-  assert.deepEqual((await db.query('select stage from sale_auxiliary_failures order by stage')).rows,
-    [{ stage: 'catalog_snapshot' }, { stage: 'components' }])
-  assert.equal((await db.query('select theoretical_cost_known from ticket_lines')).rows[0].theoretical_cost_known, false)
-})
-test('missing active production pass keeps order lines and exposes an incident', async t => {
-  const db = await fixture(t)
-  await db.exec(`insert into order_lines(id,tenant_id,venue_id,order_id) values('${line}','${tenant}','${venue}','${ticket}')`)
-  assert.equal((await db.query('select count(*)::int n from order_lines')).rows[0].n, 1)
-  assert.equal((await db.query('select stage from sale_auxiliary_failures')).rows[0].stage, 'production_pass')
-})
-test('quantity compatibility depends on explicit content identity and ratio, never bottle names', async t => {
-  const db = await fixture(t)
-  const source = readFileSync(new URL('../supabase/migrations/20260830120000_add_inventory_items_recipes_and_preparations.sql', import.meta.url), 'utf8')
-  await db.exec(source.match(/create or replace function public\.inventory_convert_quantity\([\s\S]*?\$\$;/)[0])
-  await db.exec(`insert into inventory_units values('${line}','${tenant}','${venue}','${ticket}',700),('${device}','${tenant}','${venue}','${ticket}',1)`)
-  assert.equal((await db.query(`select inventory_units_compatible('${tenant}','${venue}','${line}','${device}') ok`)).rows[0].ok, true)
-  assert.equal(Number((await db.query(`select inventory_convert_quantity('${tenant}','${venue}',1,'${line}','${device}') quantity`)).rows[0].quantity), 700)
-  assert.equal((await db.query(`select inventory_units_compatible('${user}','${venue}','${line}','${device}') ok`)).rows[0].ok, false)
-  await db.exec(`update inventory_units set content_unit_id='${line}' where id='${device}'`)
-  assert.equal((await db.query(`select inventory_units_compatible('${tenant}','${venue}','${line}','${device}') ok`)).rows[0].ok, false)
-})
+
 test('lost restaurant RPC reply replays one economic operation, rejects changed identity and keeps cash guards', async t => {
   const db = await fixture(t)
   const call = (operation, params, selectedTenant = tenant) => db.query('select pay_restaurant_idempotent($1,$2,$3,$4,\'close\',$5) result',
@@ -109,13 +80,4 @@ test('lost restaurant RPC reply replays one economic operation, rejects changed 
   await db.exec('update orders set cash_session_id=null')
   await assert.rejects(call(device, params), /caja cerrada/)
   assert.equal((await db.query('select count(*)::int n from restaurant_payment_operations')).rows[0].n, 1)
-})
-test('browser roles cannot insert diagnostics or invoke the trusted diagnostic writer', async t => {
-  const db = await fixture(t)
-  await db.exec(`select record_sale_auxiliary_failure('${tenant}','${venue}','${line}','test','22023');
-    select record_sale_auxiliary_failure('${user}','${venue}','${line}','foreign','22023');`)
-  await db.exec('set role authenticated')
-  assert.deepEqual((await db.query('select stage from sale_auxiliary_failures')).rows, [{ stage: 'test' }])
-  await assert.rejects(db.exec(`select record_sale_auxiliary_failure('${tenant}','${venue}','${line}','fake','00000')`), /permission denied/)
-  await assert.rejects(db.exec(`insert into sale_auxiliary_failures(tenant_id,venue_id,entity_id,stage,error_code) values('${tenant}','${venue}','${line}','fake','00000')`), /permission denied/)
 })

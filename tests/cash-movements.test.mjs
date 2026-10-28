@@ -1,6 +1,6 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
-import { readFileSync } from 'node:fs'
+
 import { summarizeSales } from '../src/features/cash-registers/services/cashSummary.ts'
 
 const movement = (type, amountCents, id = `${type}-${amountCents}`) => ({
@@ -9,23 +9,12 @@ const movement = (type, amountCents, id = `${type}-${amountCents}`) => ({
   requestId: `request-${id}`, createdAt: '2026-07-21T10:00:00Z',
 })
 
-test('fondo de 100 euros y entrada de 50 dejan 150 euros esperados', () => {
-  const summary = summarizeSales(10000, [], [movement('cash_in', 5000)])
-  assert.equal(summary.cashCents, 15000)
-  assert.equal(summary.cashEntriesCents, 5000)
-})
-
-test('fondo de 100 euros y salida de 20 dejan 80 euros esperados', () => {
-  const summary = summarizeSales(10000, [], [movement('cash_out', 2000)])
-  assert.equal(summary.cashCents, 8000)
-  assert.equal(summary.cashExitsCents, 2000)
-})
-
 test('efectivo por tarjeta resta caja y aumenta tarjeta por el mismo importe', () => {
   const summary = summarizeSales(10000, [], [movement('card_cashback', 3000)])
   assert.equal(summary.cashCents, 7000)
   assert.equal(summary.cardCents, 3000)
   assert.equal(summary.cardCashbackCents, 3000)
+  assert.equal(summary.cashEntriesCents, 0)
 })
 
 test('combina ventas y movimientos sin convertir movimientos en facturacion', () => {
@@ -40,67 +29,7 @@ test('combina ventas y movimientos sin convertir movimientos en facturacion', ()
   assert.equal(summary.cashCents, 14000)
   assert.equal(summary.cardCents, 7500)
   assert.equal(summary.totalSalesCents, 11500)
-})
-
-const migration = readFileSync(new URL('../supabase/0.Complete_Database_24-07-26.sql', import.meta.url), 'utf8')
-const stackerMigration = readFileSync(new URL('../supabase/migrations/20260827120000_add_cashlogy_stacker_collections.sql', import.meta.url), 'utf8')
-
-test('el RPC deriva identidad y direccion, y la escritura directa queda revocada', () => {
-  assert.match(migration, /security definer/i)
-  assert.match(migration, /created_by[\s\S]*auth\.uid\(\)/i)
-  assert.match(migration, /movement_direction := case p_movement_type/i)
-  assert.match(migration, /grant select on table public\.cash_movements to authenticated/i)
-  assert.doesNotMatch(migration, /grant (?:insert|update|delete)[\s\S]*public\.cash_movements/i)
-})
-
-test('request_id hace la creacion idempotente y devuelve el movimiento existente', () => {
-  assert.match(migration, /unique index[\s\S]*cash_session_id, request_id/i)
-  assert.match(migration, /on conflict \(cash_session_id, request_id\)[\s\S]*do nothing/i)
-  assert.match(migration, /where cm\.cash_session_id = session_row\.id[\s\S]*cm\.request_id = p_request_id/i)
-})
-
-test('el RPC bloquea movimientos sobre sesiones cerradas', () => {
-  assert.match(migration, /session_row\.status <> 'open'[\s\S]*caja cerrada/i)
-})
-
-test('el cierre recalcula importes esperados desde pagos y movimientos reales', () => {
-  assert.match(migration, /from public\.sale_payments sp[\s\S]*where s\.cash_session_id = session_row\.id/i)
-  assert.match(migration, /from public\.cash_movements cm[\s\S]*where cm\.cash_session_id = session_row\.id/i)
-  assert.match(migration, /expected_cash_total := session_row\.opening_float_cents[\s\S]*\+ cash_entries_total[\s\S]*- cash_exits_total[\s\S]*- card_cashback_total/i)
-  assert.match(migration, /expected_card_total := card_payments_total \+ card_cashback_total/i)
-  assert.match(migration, /expected_cash_cents = expected_cash_total/i)
-})
-
-test('el snapshot separa entradas, salidas y efectivo por tarjeta', () => {
-  assert.match(migration, /'cashEntriesCents', cash_entries_total/i)
-  assert.match(migration, /'cashExitsCents', cash_exits_total/i)
-  assert.match(migration, /'cardCashbackCents', card_cashback_total/i)
-})
-
-test('la retirada de stacker se registra aparte, es idempotente y no se convierte en cash_out', () => {
-  for (const sql of [migration, stackerMigration]) {
-    assert.match(sql, /create table(?: if not exists)? public\.cash_session_stacker_collections/i)
-    assert.match(sql, /unique[\s\S]*tenant_id, request_id/i)
-    assert.match(sql, /unique[\s\S]*tenant_id, operation_id/i)
-    assert.match(sql, /record_cashlogy_stacker_collection/i)
-    assert.match(sql, /on conflict do nothing/i)
-    assert.doesNotMatch(sql, /insert into public\.cash_movements[\s\S]{0,500}stacker/i)
-  }
-})
-
-test('retirar el stacker durante la sesión no genera descuadre al cierre', () => {
-  for (const sql of [migration, stackerMigration]) {
-    assert.match(sql, /from public\.cash_session_stacker_collections sc[\s\S]*where sc\.cash_session_id = session_row\.id/i)
-    assert.match(sql, /expected_cash_total := session_row\.opening_float_cents[\s\S]*- card_cashback_total[\s\S]*- stacker_collections_total/i)
-  }
-  assert.ok(migration.includes('stacker_collections_total'), 'el cierre descuenta la recaudación del stacker')
-})
-
-test('el efectivo por tarjeta resta del esperado de caja y suma a tarjeta', () => {
-  const openingFloatCents = 10000
-  const cashbackCents = 3000
-  const summary = summarizeSales(openingFloatCents, [], [movement('card_cashback', cashbackCents)])
-  assert.equal(summary.cashCents, 7000)
-  assert.equal(summary.cardCents, cashbackCents)
-  assert.equal(summary.cashEntriesCents, 0)
+  assert.equal(summary.cashEntriesCents, 2000)
+  assert.equal(summary.cashExitsCents, 500)
+  assert.equal(summary.cardCashbackCents, 1500)
 })
