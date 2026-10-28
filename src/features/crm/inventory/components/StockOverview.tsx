@@ -6,7 +6,7 @@ import { formatMoney } from '../../../../lib/format'
 import { CrmSelect } from '../../shared/components/CrmSelect'
 import { EmptyList } from '../../shared/components/EmptyList'
 import { formatInventoryQuantity } from '../inventoryModel'
-import { buildStockRows, filterStockRows, stockCoverage, stockStateLabels, summarizeStock, type StockActivity, type StockFilter, type StockRow } from '../stockControlModel'
+import { buildStockRows, filterStockRows, prioritizeStockAlerts, stockCoverage, stockStateLabels, summarizeStock, type StockActivity, type StockFilter, type StockRow } from '../stockControlModel'
 import type { InventorySnapshot } from '../types'
 
 type Props = {
@@ -73,8 +73,7 @@ export function StockOverview({ snapshot, disabled, onOpen, onRefresh, onRepleni
   const rows = useMemo(() => buildStockRows(snapshot), [snapshot])
   const summary = useMemo(() => summarizeStock(rows), [rows])
   const visibleRows = useMemo(() => filterStockRows(rows, filter, deferredQuery, warehouseId, kind, activity), [rows, filter, deferredQuery, warehouseId, kind, activity])
-  const alerts = useMemo(() => rows.filter((row) => row.quantity < 0 || row.controlled && row.shortage > 0)
-    .toSorted((a, b) => Number(b.quantity < 0) - Number(a.quantity < 0) || a.item.name.localeCompare(b.item.name, 'es')), [rows])
+  const alerts = useMemo(() => prioritizeStockAlerts(rows), [rows])
 
   function showFilter(next: StockFilter) {
     setFilter(next)
@@ -98,7 +97,7 @@ export function StockOverview({ snapshot, disabled, onOpen, onRefresh, onRepleni
     <p className="m-0 text-xs text-[var(--crm-text-muted)]">Valoración por coste medio; en su ausencia, última compra o referencia. Incluye saldos negativos. Los costes desconocidos no se consideran cero.</p>
 
     <section className="min-w-0 rounded-[var(--crm-radius-lg)] bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]">
-      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="m-0 text-base font-bold">Necesitan atención</h3><p className="mt-1 mb-0 text-xs text-[var(--crm-text-muted)]">{alerts.length ? `${alerts.length} situaciones por artículo y almacén. Revisa primero los saldos negativos.` : 'No hay saldos negativos ni faltantes respecto a los objetivos configurados.'}</p></div><Button onClick={() => showFilter('replenish')} type="button" variant="secondary">Ver artículos por reponer</Button></div>
+      <div className="mb-4 flex flex-wrap items-center justify-between gap-3"><div><h3 className="m-0 text-base font-bold">Necesitan atención</h3><p className="mt-1 mb-0 text-xs text-[var(--crm-text-muted)]">{alerts.length ? `${alerts.length} situaciones por artículo y almacén. Primero, el mayor porcentaje por reponer; los saldos sin objetivo positivo se muestran después.` : 'No hay saldos negativos ni faltantes respecto a los objetivos configurados.'}</p></div><Button onClick={() => showFilter('replenish')} type="button" variant="secondary">Ver artículos por reponer</Button></div>
       <div className="grid gap-3 lg:grid-cols-2">{alerts.slice(0, 6).map((row) => <article className="grid min-w-0 gap-3 rounded-[var(--crm-radius-md)] border border-[var(--crm-border-subtle)] p-4" key={row.key}><div className="flex flex-wrap items-start justify-between gap-2"><div className="min-w-0"><button className="min-h-10 break-words text-left font-bold hover:text-[var(--crm-blue)]" onClick={() => onOpen(row.item.id, row.warehouse?.id)} type="button">{row.item.name}</button><p className="m-0 text-xs text-[var(--crm-text-muted)]">{row.warehouse?.name ?? 'Almacén no disponible'}{!row.controlled ? ' · Fuera de control activo' : ''}</p></div><StockStatus row={row} /></div><StockTarget row={row} /><div className="flex flex-wrap gap-2"><Button onClick={() => onOpen(row.item.id, row.warehouse?.id)} size="sm" type="button" variant="tertiary">Ver artículo <ChevronRight className="size-4" /></Button><ReplenishButton disabled={disabled} onReplenish={onReplenish} row={row} /></div></article>)}</div>
       {alerts.length > 6 ? <Button className="mt-4" onClick={() => showFilter('negative')} type="button" variant="tertiary">Ver saldos negativos</Button> : null}
       {alerts.length > 6 ? <Button className="mt-4" onClick={() => showFilter('replenish')} type="button" variant="tertiary">Ver todos los faltantes</Button> : null}

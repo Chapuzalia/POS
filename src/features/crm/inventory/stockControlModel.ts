@@ -47,6 +47,22 @@ export function stockCoverage(quantity: number, target: number | null) {
   return { percentage, tone } as const
 }
 
+export function prioritizeStockAlerts(rows: StockRow[]) {
+  return rows.filter((row) => row.quantity < 0 || row.controlled && row.shortage > 0)
+    .toSorted((a, b) => {
+      const left = a.target !== null && a.target > 0 ? a.shortage / a.target : null
+      const right = b.target !== null && b.target > 0 ? b.shortage / b.target : null
+      // A missing/zero target cannot provide a meaningful percentage. Keep
+      // those negative balances visible after alerts with a comparable target.
+      if (left === null && right !== null) return 1
+      if (right === null && left !== null) return -1
+      if (left !== null && right !== null && left !== right) return right - left
+      return a.item.name.localeCompare(b.item.name, 'es')
+        || (a.warehouse?.name ?? '').localeCompare(b.warehouse?.name ?? '', 'es')
+        || a.key.localeCompare(b.key)
+    })
+}
+
 export function buildStockRows(snapshot: InventorySnapshot): StockRow[] {
   const units = new Map(snapshot.units.map((unit) => [unit.id, unit]))
   const warehouses = new Map(snapshot.warehouses.map((warehouse) => [warehouse.id, warehouse]))

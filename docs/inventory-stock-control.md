@@ -27,6 +27,10 @@ requiere migraciones adicionales.
 - **Por reponer:** artículos activos con al menos un almacén activo y habilitado
   cuyo saldo es inferior al objetivo configurado. El faltante suma únicamente
   diferencias positivas por almacén; el exceso de otro almacén no lo compensa.
+  Las seis tarjetas de atención se ordenan por faltante / objetivo, de mayor a
+  menor, por artículo y almacén. Los negativos pueden superar el 100 % faltante.
+  Los saldos negativos sin objetivo positivo se conservan al final, sin inventar
+  un porcentaje. Los empates se resuelven por nombre y almacén.
 - **Negativos:** artículos con algún saldo negativo, incluso fuera del control
   activo. No se interpreta un cero sin objetivo como una alerta.
 - En el listado inferior, **Estado** muestra disponible / objetivo en porcentaje:

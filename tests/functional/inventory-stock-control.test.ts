@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildStockRows, filterStockRows, inventoryUnitCost, replenishmentQuantities, stockCoverage, stockState, summarizeStock } from '../../src/features/crm/inventory/stockControlModel'
+import { buildStockRows, filterStockRows, inventoryUnitCost, prioritizeStockAlerts, replenishmentQuantities, stockCoverage, stockState, summarizeStock } from '../../src/features/crm/inventory/stockControlModel'
 import { consumptionComparison, inventoryHistoryPeriod, movementLabel, recordedStockSegments } from '../../src/features/crm/inventory/stockHistoryModel'
 import type { InventoryItem, InventorySnapshot, InventoryStockMovement } from '../../src/features/crm/inventory/types'
 import { createInventoryItemDraft, parseInventoryItemDraft } from '../../src/features/crm/inventory/inventoryItemEditorModel'
@@ -178,6 +178,35 @@ describe('stock table percentage scale', () => {
     expect(stockCoverage(0, 12)).toEqual({ percentage: 0, tone: 'red' })
     expect(stockCoverage(3, null)).toBeNull()
     expect(stockCoverage(3, 0)).toBeNull()
+  })
+})
+
+describe('attention cards prioritize the percentage missing in each warehouse', () => {
+  function row(name: string, quantity: number, target: number | null) {
+    const snapshot = stockFixture()
+    snapshot.items = [{ ...item, name }]
+    snapshot.levels = [{ inventoryItemId: item.id, warehouseId: 'bar', quantity, targetQuantity: target, enabled: true }]
+    snapshot.itemRoutes = []
+    return buildStockRows(snapshot)[0]
+  }
+  it('shows the six greatest proportional shortages, including negative balances above 100 percent', () => {
+    const rows = [row('Black Label', -0.14, 2), row('Corona', -18, 48), row('Absolut', 2.44, 4), row('Agua', 40, 96), row('Alhambra', 43, 48), row('Bacardí', 0.93, 2), row('Zumo', 0, 12)]
+    expect(prioritizeStockAlerts(rows).slice(0, 6).map((entry) => entry.item.name)).toEqual(['Corona', 'Black Label', 'Zumo', 'Agua', 'Bacardí', 'Absolut'])
+    expect(rows[0].item.name).toBe('Black Label')
+  })
+  it('compares proportions instead of absolute quantities or rounded display percentages', () => {
+    expect(prioritizeStockAlerts([row('Mucho volumen', 9500, 10000), row('Poco volumen', 1, 2)]).map((entry) => entry.item.name)).toEqual(['Poco volumen', 'Mucho volumen'])
+    expect(prioritizeStockAlerts([row('A', 0.9002, 1), row('Z', 0.9001, 1)]).map((entry) => entry.item.name)).toEqual(['Z', 'A'])
+  })
+  it('retains unrankable negative balances without assigning a fictitious percentage', () => {
+    const rows = [row('Sin objetivo', -1000, null), row('Objetivo cero', -2000, 0), row('Reposición', 9, 10), row('Correcto', 10, 10), row('Cero permitido', 0, null)]
+    expect(prioritizeStockAlerts(rows).map((entry) => entry.item.name)).toEqual(['Reposición', 'Objetivo cero', 'Sin objetivo'])
+  })
+  it('keeps separate warehouse alerts and breaks equal percentages deterministically', () => {
+    const snapshot = stockFixture()
+    snapshot.items = [item]
+    snapshot.levels = snapshot.levels.filter((level) => level.inventoryItemId === item.id).map((level) => ({ ...level, quantity: 5, targetQuantity: 10 }))
+    expect(prioritizeStockAlerts(buildStockRows(snapshot)).map((entry) => entry.key)).toEqual(['beer:store', 'beer:bar'])
   })
 })
 

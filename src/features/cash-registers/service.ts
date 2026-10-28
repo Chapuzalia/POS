@@ -97,7 +97,7 @@ export async function loadCashMovements(context: TenantContext, cashSessionId: s
   return ((data ?? []) as CashMovementRow[]).map(mapCashMovement)
 }
 
-export async function createCashMovement(context: TenantContext, input: {
+export async function createCashMovement(context: Pick<TenantContext, 'deviceId'>, input: {
   cashSessionId: string
   type: CashMovementType
   amountCents: number

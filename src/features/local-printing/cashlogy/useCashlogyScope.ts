@@ -41,7 +41,9 @@ export function useCashlogyScope(context: TenantContext | null, cashSessionId: s
         && !management.isStarting
         && !management.isMutating
         && !management.isCancelling
+        && !management.isRecordingCashMovement
         && (management.stackerCollectionPending
+          || management.cashMovementPending
           || !management.operation
           || (cashlogyManagementActiveStatuses.has(management.operation.status)
             && management.operation.status !== 'awaiting_dispense'))
