@@ -411,15 +411,22 @@ export function ProductDialog({
   }
 
   function handleVariantSelect(variantId: string, sourceElement: HTMLElement) {
+    if (initialSelection && variantId === selectedVariantId) return;
     const sellable = resolveSellableProduct(
       catalog,
       item.product.id,
       variantId,
     );
     setSelectedVariantId(variantId);
-    resetVariantState(sellable);
+    if (initialSelection) {
+      setSelectedQuantities(initialQuantities(sellable, selection));
+      setSelectedModifiers(initialModifiers(sellable.modifierGroups, selection.modifiers));
+      setSelectedComponentModifiers(initialComponentModifiers(catalog, sellable, initialQuantities(sellable, selection), selection));
+    } else {
+      resetVariantState(sellable);
+    }
     setHasChosenVariant(true);
-    if (!sellable.selectionGroups.length && !sellable.modifierGroups.length) {
+    if (!initialSelection && !sellable.selectionGroups.length && !sellable.modifierGroups.length) {
       completeAdd(
         sellable,
         { modifiers: [], components: [], mixerProductId: null, mixer: null },
@@ -564,7 +571,7 @@ export function ProductDialog({
         selectedSellable,
         nextSelection,
       );
-      if (!selectedSellable.modifierGroups.length && !menuAssignments.length)
+      if (!initialSelection && !selectedSellable.modifierGroups.length && !menuAssignments.length)
         completeAdd(selectedSellable, nextSelection, sourceElement);
     } catch {
       /* el botón final comunica que la selección sigue incompleta */
@@ -657,13 +664,14 @@ export function ProductDialog({
 
         {canOrderByCourses ? <div className="mt-4 max-w-sm"><MenuEntryMode mode="individual" disabled={isBusy || hasSubmitted} onChange={(mode) => { if (mode === 'courses') enterBatchMode() }} /></div> : null}
 
-        {isChoosingVariant ? (
+        {isChoosingVariant || (initialSelection && allowVariantSelection && variants.length > 1) ? (
           <div className="mt-5 grid gap-2">
+            {initialSelection ? <h3 className="text-sm font-semibold text-[var(--muted)]">Variante</h3> : null}
             {variants.map((variant) => (
               <Button
                 active={variant.id === selectedVariantId}
-                disabled={hasSubmitted}
-                className={variant.id === selectedVariantId ? "min-h-22" : "min-h-22 bg-(--field) !border-1"}
+                disabled={isBusy || hasSubmitted}
+                className={cx(initialSelection ? "min-h-12" : "min-h-22", variant.id !== selectedVariantId && "bg-(--field) !border-1")}
                 fullWidth
                 key={variant.id}
                 onClick={(event) =>

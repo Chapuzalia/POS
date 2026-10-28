@@ -53,6 +53,7 @@ async function setup(t) {
     create function production_table_label_for_line(uuid) returns text language sql as $$ select 'Mesa 1' $$;
     create function production_create_event_dispatch(uuid) returns void language sql as $$ select $$;
     create function production_cancel_line_excess_decimal(uuid,numeric,boolean) returns numeric language sql as $$ select 0::numeric $$;`)
+  await db.exec(readProductionSql('20261028220358_kds_current_kitchen_comments'))
   for (const name of ['products', 'product_variants', 'selection_groups', 'selection_group_options',
     'product_selection_group_assignments', 'product_selection_group_assignment_variants', 'modifier_groups', 'modifiers',
     'product_modifier_group_assignments', 'product_modifier_group_assignment_variants', 'order_line_components']) {
@@ -203,10 +204,13 @@ test('identical menus stay separate, direct service is never resent, quantity re
 })
 
 test('kitchen notes affect only outstanding sent dishes and repeat saves leave no extra notices', async t => {
-  const { db, save, send, serve } = await setup(t)
+  const { db, save, send, serve, queue } = await setup(t)
   await db.exec(readProductionSql('20261024203609_kitchen_order_comments'))
   await save([component(0), component(1)], 1, { note: 'Salsa aparte' })
   await send('both', 2)
+  const sentItems = (await db.query('select id,source_component_id from production_items')).rows
+  const firstItemId = sentItems.find(item => item.source_component_id === optionIds[0]).id
+  const secondItemId = sentItems.find(item => item.source_component_id === optionIds[1]).id
   assert.ok((await db.query('select snapshot from production_items')).rows.every(row => row.snapshot.note === 'Salsa aparte'))
   await serve(optionIds[0], 1, 2)
   await save([component(0), component(1)], 3, { note: 'Segundo sin sal' })
@@ -215,12 +219,19 @@ test('kitchen notes affect only outstanding sent dishes and repeat saves leave n
   assert.equal(events[0].event_type, 'modified')
   assert.equal(events[0].payload.productName, 'Menú diario')
   assert.equal(events[0].payload.note, 'Segundo sin sal')
+  assert.equal(events[0].payload.tableName, 'Mesa 1')
+  assert.equal((await queue()).items.find(item => item.id === secondItemId).snapshot.note, 'Segundo sin sal')
+  assert.equal((await queue()).items.find(item => item.id === firstItemId).snapshot.note, 'Salsa aparte', 'served dishes keep their original note')
+  for (const event of (await queue()).events) await db.query('select acknowledge_kds_event($1,$2)', [kds, event.id])
+  assert.equal((await queue()).events.length, 0)
+  assert.equal((await queue()).items.find(item => item.id === secondItemId).snapshot.note, 'Segundo sin sal')
   assert.ok((await db.query('select production_render_event_lines(id) lines from production_events')).rows[0].lines.includes('NOTA: Segundo sin sal'))
   assert.ok((await db.query('select snapshot from production_items')).rows.every(row => row.snapshot.note === 'Salsa aparte'), 'already sent snapshots remain immutable')
   await save([component(0), component(1)], 4, { note: 'Segundo sin sal' })
   assert.equal((await db.query('select count(*)::int n from production_events')).rows[0].n, 1)
   await save([component(0), component(1)], 5, { note: null })
   assert.equal((await db.query('select count(*)::int n from production_events')).rows[0].n, 2)
+  assert.equal((await queue()).items.find(item => item.id === secondItemId).snapshot.note, null)
   assert.ok((await db.query("select production_render_event_lines(id) lines from production_events where payload->>'note' is null")).rows[0].lines.includes('NOTA: SIN COMENTARIO'))
 })
 

@@ -304,13 +304,13 @@ export function PosPage(props: Props) {
           const item = resolvedCatalog?.items.find((candidate) => (
             candidate.product.id === line.productId
             && (line.variantId ? candidate.variant.id === line.variantId : true)
-          )) ?? null
+          )) ?? resolvedCatalog?.items.find((candidate) => candidate.product.id === line.productId) ?? null
           if (!item) {
             props.onSetError('El producto de esta línea ya no está disponible.')
             return
           }
           quickSale.openProductDialog({
-            allowVariantSelection: false,
+            allowVariantSelection: true,
             initialSelection: {
               modifiers: line.modifiers,
               components: line.components,

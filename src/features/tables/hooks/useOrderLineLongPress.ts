@@ -5,7 +5,9 @@ export function isOrderLineActionTarget(target: EventTarget | null) {
     && Boolean(target.closest('button, a, input, textarea, select, summary, [role="button"], [data-order-line-action="true"]'))
 }
 
-export function useOrderLineLongPress(disabled: boolean, onOpen: () => void) {
+export type OrderLineActionPoint = { x: number; y: number }
+
+export function useOrderLineLongPress(disabled: boolean, onOpen: (point: OrderLineActionPoint) => void) {
   const timer = useRef<number | null>(null)
   const origin = useRef<{ x: number; y: number } | null>(null)
   const held = useRef(false)
@@ -32,10 +34,11 @@ export function useOrderLineLongPress(disabled: boolean, onOpen: () => void) {
       held.current = false
       if (disabled || event.button !== 0 || event.isPrimary === false || isOrderLineActionTarget(event.target)) return
       origin.current = { x: event.clientX, y: event.clientY }
+      const point = origin.current
       timer.current = window.setTimeout(() => {
         timer.current = null
         held.current = true
-        open.current()
+        open.current(point)
       }, 600)
     },
     onPointerMove(event: PointerEvent<HTMLElement>) {
@@ -47,7 +50,7 @@ export function useOrderLineLongPress(disabled: boolean, onOpen: () => void) {
       if (disabled || isOrderLineActionTarget(event.target)) return
       event.preventDefault()
       cancel()
-      if (!held.current) open.current()
+      if (!held.current) open.current({ x: event.clientX, y: event.clientY })
       held.current = true
     },
     onClickCapture(event: MouseEvent<HTMLElement>) {
@@ -59,7 +62,8 @@ export function useOrderLineLongPress(disabled: boolean, onOpen: () => void) {
     onKeyDown(event: KeyboardEvent<HTMLElement>) {
       if (disabled || event.target !== event.currentTarget || !(event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10'))) return
       event.preventDefault()
-      open.current()
+      const bounds = event.currentTarget.getBoundingClientRect()
+      open.current({ x: bounds.left + Math.min(32, bounds.width / 2), y: bounds.top + Math.min(48, bounds.height) })
     },
   }
 }
