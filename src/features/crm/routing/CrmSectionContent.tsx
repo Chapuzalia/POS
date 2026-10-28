@@ -24,7 +24,6 @@ const PurchasesInvoicesCrm = lazy(() => import('../purchases/pages/PurchasesInvo
 const PurchasesSuppliersCrm = lazy(() => import('../purchases/pages/PurchasesSuppliersPage').then((module) => ({ default: module.PurchasesSuppliersCrm })))
 const InventoryWarehousesCrm = lazy(() => import('../inventory/pages/InventoryWarehousesPage').then((module) => ({ default: module.InventoryWarehousesCrm })))
 const InventorySettingsCrm = lazy(() => import('../inventory/pages/InventorySettingsPage').then((module) => ({ default: module.InventorySettingsCrm })))
-const InventoryItemsCrm = lazy(() => import('../inventory/pages/InventoryItemsPage').then((module) => ({ default: module.InventoryItemsCrm })))
 const InventoryPreparationsCrm = lazy(() => import('../inventory/pages/InventoryPreparationsPage').then((module) => ({ default: module.InventoryPreparationsCrm })))
 const InventoryConfigurationCrm = lazy(() => import('../inventory/pages/InventoryConfigurationPage').then((module) => ({ default: module.InventoryConfigurationCrm })))
 const IntegrationsCrm = lazy(() => import('../integrations/pages/IntegrationsPage').then((module) => ({ default: module.IntegrationsCrm })))
@@ -84,7 +83,7 @@ export function CrmSectionContent({
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
   }
 
-  if (!inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock') {
+  if (!inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock' && activeSection !== 'inventory-items') {
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">Control de stock desactivado</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Actívalo desde la página Stock para acceder a esta configuración.</p></section>
   }
 
@@ -112,17 +111,16 @@ export function CrmSectionContent({
     case 'production':
       return catalog ? <ProductionCrm catalog={catalog} context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} /> : null
     case 'inventory-stock':
-      return <InventoryStockCrm disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'inventory-items':
+      return <InventoryStockCrm dayChangeTime={selectedVenue?.dayChangeTime ?? null} disabled={disabled} inventoryEnabled={inventoryEnabled} key={`${context.tenantId}:${selectedVenueId}`} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} timeZone={selectedVenue?.timeZone ?? 'Europe/Madrid'} />
     case 'purchases-summary':
       return <PurchasesOverviewCrm selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'purchases-replenishment':
-      return <PurchasesReplenishmentCrm selectedVenueId={selectedVenueId} tenantContext={context} />
+      return <PurchasesReplenishmentCrm key={`${context.tenantId}:${selectedVenueId}`} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'purchases-invoices':
       return <PurchasesInvoicesCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'purchases-suppliers':
       return <PurchasesSuppliersCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
-    case 'inventory-items':
-      return <InventoryItemsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-preparations':
       return <InventoryPreparationsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-warehouses':

@@ -1,4 +1,5 @@
 import { reportOperationError } from '../../../../lib/observability.ts'
+import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
 import { validateInventoryDecimalPlaces, validateInventoryName, validateInventoryUnitSymbol } from '../inventoryModel'
@@ -7,7 +8,7 @@ import type {
   InventoryProductionRecipe, InventoryProductionRecipeLine, InventoryRecipe,
   InventoryRecipeLine, InventorySnapshot, InventoryStockLevel, InventoryUnit,
   InventoryWarehouse, InventoryWarehouseRouting, InventoryWarehouseStockSummary,
-  ModifierInventoryEffect,
+  ModifierInventoryEffect, InventoryStockMovement, InventoryConsumptionReport,
 } from '../types'
 
 type DbRow = Record<string, unknown>
@@ -105,7 +106,6 @@ export async function createInventoryWarehouse(context: TenantContext, venueId: 
   if (error) throw error
 }
 
-export type InventoryItemsPageData = Pick<InventorySnapshot, 'items' | 'itemRoutes' | 'levels' | 'productionRecipes' | 'recipeLines' | 'recipes' | 'units' | 'warehouses'>
 export type InventoryPreparationsPageData = Pick<InventorySnapshot, 'items' | 'itemRoutes' | 'productionRecipeLines' | 'productionRecipes' | 'units' | 'warehouses'>
 export type InventoryStockPageData = Pick<InventorySnapshot, 'items' | 'itemRoutes' | 'levels' | 'productionRecipes' | 'units' | 'warehouses'>
 export type SupplierReceiptInventoryData = Pick<InventorySnapshot, 'items' | 'units' | 'warehouses'>
@@ -123,14 +123,44 @@ function mapProductionRecipes(rows: DbRow[]) {
 }
 
 export async function loadInventoryStockPageData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventoryStockPageData> {
-  const [units, warehouses, itemRows, routeRows, levelRows, productionRows] = await Promise.all([
-    loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
-    rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
-    rows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId),
-    rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled, target_quantity', context, venueId),
-    rows('inventory_production_recipes', 'id, inventory_item_id, production_warehouse_id, reference_quantity, reference_unit_id, is_active', context, venueId),
+  const [unitRows, warehouseRows, itemRows, routeRows, levelRows, productionRows] = await Promise.all([
+    stockPageRows('inventory_units', '*', context, venueId),
+    stockPageRows('inventory_warehouses', '*', context, venueId),
+    stockPageRows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
+    stockPageRows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId, ['inventory_item_id', 'warehouse_id']),
+    stockPageRows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled, target_quantity', context, venueId, ['inventory_item_id', 'warehouse_id']),
+    stockPageRows('inventory_production_recipes', 'id, inventory_item_id, production_warehouse_id, reference_quantity, reference_unit_id, is_active', context, venueId),
   ])
+  const units = unitRows.map(mapInventoryUnit).toSorted((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'es'))
+  const warehouses = warehouseRows.map(mapInventoryWarehouse).toSorted((a, b) => a.sortOrder - b.sortOrder || a.name.localeCompare(b.name, 'es'))
   return { units, warehouses, items: itemRows.map(mapInventoryItem), itemRoutes: mapInventoryItemRoutes(routeRows), levels: mapInventoryLevels(levelRows), productionRecipes: mapProductionRecipes(productionRows) }
+}
+
+async function stockPageRows(table: string, columns: string, context: Pick<TenantContext, 'tenantId'>, venueId: string, order = ['id'], itemId?: string) {
+  const result: DbRow[] = []
+  let total: number | null = null
+  do {
+    let query = requireSupabase().from(table).select(columns, { count: 'exact' })
+      .eq('tenant_id', context.tenantId).eq('venue_id', venueId)
+    if (itemId) query = query.eq('inventory_item_id', itemId)
+    for (const column of order) query = query.order(column)
+    const { data, count, error } = await query.range(result.length, result.length + 499)
+    if (error) throw error
+    const batch = (data ?? []) as unknown as DbRow[]
+    total = count
+    if (!batch.length) {
+      if (total !== null && result.length < total) throw new UserFacingError('El inventario ha cambiado durante la consulta. Actualiza para obtener todas las existencias.')
+      break
+    }
+    result.push(...batch)
+    if (total === null && batch.length < 500) break
+  } while (total === null || result.length < total)
+  return result
+}
+
+export async function loadInventoryItemVariantCount(context: Pick<TenantContext, 'tenantId'>, venueId: string, itemId: string) {
+  const lines = await stockPageRows('inventory_recipe_lines', 'id, recipe_id', context, venueId, ['id'], itemId)
+  return new Set(lines.map((line) => string(line.recipe_id))).size
 }
 
 export async function loadSupplierReceiptInventoryData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<SupplierReceiptInventoryData> {
@@ -139,26 +169,6 @@ export async function loadSupplierReceiptInventoryData(context: Pick<TenantConte
     rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
   ])
   return { units, warehouses, items: itemRows.map(mapInventoryItem) }
-}
-
-export async function loadInventoryItemsPageData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventoryItemsPageData> {
-  const [units, warehouses, itemRows, routeRows, levelRows, recipeRows, recipeLineRows, productionRows] = await Promise.all([
-    loadInventoryUnits(context, venueId), loadInventoryWarehouses(context, venueId),
-    rows('inventory_items', 'id, tenant_id, venue_id, name, description, base_unit_id, reference_cost, last_purchase_cost, average_cost, is_active, created_at, updated_at', context, venueId),
-    rows('inventory_item_warehouse_routes', 'inventory_item_id, warehouse_id, priority, is_enabled', context, venueId),
-    rows('inventory_stock_levels', 'inventory_item_id, warehouse_id, quantity, is_enabled, target_quantity', context, venueId),
-    rows('inventory_recipes', 'id, variant_id, mode, is_active', context, venueId),
-    rows('inventory_recipe_lines', 'id, recipe_id, inventory_item_id, quantity, unit_id, uses_format_default, sort_order', context, venueId),
-    rows('inventory_production_recipes', 'id, inventory_item_id, production_warehouse_id, reference_quantity, reference_unit_id, is_active', context, venueId),
-  ])
-  return {
-    units, warehouses, items: itemRows.map(mapInventoryItem),
-    itemRoutes: routeRows.map<InventoryItemWarehouseRoute>((row) => ({ inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id), priority: number(row.priority), enabled: Boolean(row.is_enabled) })),
-    levels: levelRows.map<InventoryStockLevel>((row) => ({ inventoryItemId: string(row.inventory_item_id), warehouseId: string(row.warehouse_id), quantity: number(row.quantity), enabled: Boolean(row.is_enabled), targetQuantity: row.target_quantity == null ? null : number(row.target_quantity) })),
-    recipes: recipeRows.map<InventoryRecipe>((row) => ({ id: string(row.id), variantId: string(row.variant_id), mode: row.mode === 'direct' ? 'direct' : 'recipe', active: Boolean(row.is_active) })),
-    recipeLines: recipeLineRows.map<InventoryRecipeLine>((row) => ({ id: string(row.id), recipeId: string(row.recipe_id), inventoryItemId: string(row.inventory_item_id), quantity: row.quantity == null ? null : number(row.quantity), unitId: row.unit_id == null ? null : string(row.unit_id), usesFormatDefault: Boolean(row.uses_format_default), sortOrder: number(row.sort_order) })),
-    productionRecipes: productionRows.map<InventoryProductionRecipe>((row) => ({ id: string(row.id), inventoryItemId: string(row.inventory_item_id), productionWarehouseId: string(row.production_warehouse_id), referenceQuantity: number(row.reference_quantity), referenceUnitId: string(row.reference_unit_id), active: Boolean(row.is_active) })),
-  }
 }
 
 export async function loadInventoryPreparationsPageData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<InventoryPreparationsPageData> {
@@ -237,15 +247,49 @@ export async function saveInventoryItem(venueId: string, input: {
   return String(data)
 }
 
-export async function saveInventoryItemStock(context: TenantContext, venueId: string, inventoryItemId: string, levels: Array<{ enabled: boolean; warehouseId: string; quantity: number }>) {
-  const { error } = await requireSupabase().rpc('set_inventory_item_stock', {
+export async function saveInventoryItemStock(context: TenantContext, venueId: string, inventoryItemId: string, levels: Array<{ enabled: boolean; warehouseId: string; quantity: number; expectedQuantity?: number }>, options: { mode: 'add' | 'set'; requestId: string }) {
+  const { error } = await requireSupabase().rpc('update_inventory_item_stock', {
     p_tenant_id: context.tenantId, p_venue_id: venueId, p_inventory_item_id: inventoryItemId,
-    p_levels: levels.map((level) => ({ enabled: level.enabled, warehouseId: level.warehouseId, quantity: level.quantity })),
+    p_levels: levels.map((level) => ({ ...level, mode: options.mode, requestId: options.requestId })),
   })
   if (error) {
     reportOperationError(error, { operation: 'inventory.stock', operationId: inventoryItemId, step: 'set_stock' })
+    if (error.message.includes('INVENTORY_STOCK_CHANGED')) throw new UserFacingError('Las existencias han cambiado en otro terminal. Actualiza el inventario antes de establecer un total.')
+    if (error.code === 'PGRST202') throw new UserFacingError('La actualización de inventario necesita la migración de trazabilidad. Contacta con el administrador antes de guardar.')
     throw error
   }
+}
+
+export async function loadInventoryItemMovements(context: Pick<TenantContext, 'tenantId'>, venueId: string, itemId: string, startIso: string, endIso: string, warehouseId: string | null, offset = 0) {
+  let query = requireSupabase().from('inventory_stock_movements')
+    .select('id, created_at, warehouse_id, unit_id, source_type, source_id, ticket_line_id, production_id, stock_quantity_before, stock_quantity_delta, stock_quantity_after')
+    .eq('tenant_id', context.tenantId).eq('venue_id', venueId).eq('inventory_item_id', itemId)
+    .gte('created_at', startIso).lt('created_at', endIso)
+    .order('created_at', { ascending: false }).order('id', { ascending: false })
+  if (warehouseId) query = query.eq('warehouse_id', warehouseId)
+  const { data, error } = await query.range(offset, offset + 49)
+  if (error) throw error
+  return ((data ?? []) as DbRow[]).map<InventoryStockMovement>((row) => ({
+    id: string(row.id), createdAt: string(row.created_at), warehouseId: string(row.warehouse_id),
+    unitId: row.unit_id == null ? null : string(row.unit_id), sourceType: string(row.source_type),
+    sourceId: row.source_id == null ? null : string(row.source_id),
+    ticketLineId: row.ticket_line_id == null ? null : string(row.ticket_line_id),
+    productionId: row.production_id == null ? null : string(row.production_id),
+    before: number(row.stock_quantity_before), delta: number(row.stock_quantity_delta), after: number(row.stock_quantity_after),
+  }))
+}
+
+export async function loadInventoryItemConsumption(context: Pick<TenantContext, 'tenantId'>, venueId: string, itemId: string, startIso: string, endIso: string, warehouseId: string | null): Promise<InventoryConsumptionReport> {
+  const { data, error } = await requireSupabase().rpc('inventory_item_consumption_report', {
+    p_tenant_id: context.tenantId, p_venue_id: venueId, p_inventory_item_id: itemId,
+    p_start: startIso, p_end: endIso, p_warehouse_id: warehouseId,
+  })
+  if (error) {
+    reportOperationError(error, { operation: 'inventory.stock', operationId: itemId, step: 'load_consumption' })
+    throw new UserFacingError(error.code === 'PGRST202' ? 'El análisis de consumo requiere la migración de inventario pendiente.' : 'No se pudo consultar el consumo registrado. Vuelve a intentarlo.')
+  }
+  const report = data as { daily: Array<{ day: string; quantity: number | string }>; failureCount: number; incompatibleCount: number }
+  return { ...report, daily: report.daily.map((day) => ({ day: day.day, quantity: number(day.quantity) })) }
 }
 
 export async function saveVariantInventoryRecipe(variantId: string, mode: 'none' | 'direct' | 'recipe', lines: Array<{

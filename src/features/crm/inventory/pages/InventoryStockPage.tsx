@@ -1,16 +1,15 @@
-import { ChevronRight, Package, Pencil, Plus, Save, X } from "lucide-react";
+import { Pencil, Plus, Save, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { Button, Input } from "../../../../components/ui";
-import { DataTable } from "../../../../components/ui/DataTable";
+import { formatMoney } from "../../../../lib/format";
 import type { TenantContext } from "../../../../types";
 import { CrmModal } from "../../shared/components/CrmModal";
 import { useCrmModalBusy } from "../../shared/components/CrmModalBusyContext";
 import { EmptyList } from "../../shared/components/EmptyList";
 import type { RunAction } from "../../shared/types";
 import {
-  addInventoryStockQuantity,
+  buildInventoryStockTotalChanges,
   formatInventoryQuantity,
-  parseInventoryQuantity,
   parseInventoryStockQuantity,
 } from "../inventoryModel";
 import {
@@ -19,6 +18,12 @@ import {
   setVenueInventoryEnabled,
 } from "../services/inventoryService";
 import type { InventorySnapshot } from "../types";
+import { StockOverview, StockQuantity, StockStatus, StockTarget } from "../components/StockOverview";
+import { InventoryItemHistory } from "../components/InventoryItemHistory";
+import { InventoryItemEditor } from "../components/InventoryItemEditor";
+import { InventoryItemSummary } from "../components/InventoryItemSummary";
+import { buildStockRows, type StockRow } from "../stockControlModel";
+import { QuickStockReplenishment } from "../components/QuickStockReplenishment";
 
 type Props = {
   disabled: boolean;
@@ -27,9 +32,9 @@ type Props = {
   runAction: RunAction;
   selectedVenueId: string;
   tenantContext: TenantContext;
+  dayChangeTime: string | null;
+  timeZone: string;
 };
-
-type StockEditMode = "add" | "set";
 
 const emptySnapshot: InventorySnapshot = {
   items: [],
@@ -51,51 +56,45 @@ export function InventoryStockCrm({
   runAction,
   selectedVenueId,
   tenantContext,
+  dayChangeTime,
+  timeZone,
 }: Props) {
   const modalBusy = useCrmModalBusy(disabled)
 
   const [snapshot, setSnapshot] = useState<InventorySnapshot>(emptySnapshot);
-  const [query, setQuery] = useState("");
+  const [initialWarehouseId, setInitialWarehouseId] = useState<string>();
+  const [requestId, setRequestId] = useState(() => crypto.randomUUID());
+  const [loadState, setLoadState] = useState<'loading' | 'ready' | 'error'>('loading');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [stockEditMode, setStockEditMode] = useState<StockEditMode>("add");
+  const [quickReplenishment, setQuickReplenishment] = useState<StockRow | null>(null);
+  const [creatingItem, setCreatingItem] = useState(false);
+  const [detailMode, setDetailMode] = useState<'stock' | 'configuration'>('stock');
   const [quantities, setQuantities] = useState<Record<string, string>>({});
   const [error, setError] = useState<string | null>(null);
 
   const refresh = useCallback(async () => {
-    if (!selectedVenueId || !inventoryEnabled)
-      return setSnapshot(emptySnapshot);
-    setSnapshot({ ...emptySnapshot, ...(await loadInventoryStockPageData(tenantContext, selectedVenueId)) });
+    if (!selectedVenueId || !inventoryEnabled) {
+      setSnapshot(emptySnapshot);
+      setLoadState('loading');
+      return;
+    }
+    setLoadState('loading');
+    try {
+      const next = { ...emptySnapshot, ...(await loadInventoryStockPageData(tenantContext, selectedVenueId)) };
+      setSnapshot(next);
+      setLoadState('ready');
+      return next;
+    } catch (cause) {
+      setLoadState('error');
+      throw cause;
+    }
   }, [inventoryEnabled, selectedVenueId, tenantContext]);
 
   useEffect(() => {
-    void runAction(refresh);
+    void runAction(async () => { await refresh(); });
   }, [refresh, runAction]);
 
-  const rows = useMemo(() => {
-    const unitsById = new Map(snapshot.units.map((unit) => [unit.id, unit]));
-    const warehousesById = new Map(snapshot.warehouses.map((warehouse) => [warehouse.id, warehouse]));
-    const totalsByItemId = new Map<string, number>();
-    for (const level of snapshot.levels) {
-      if (level.enabled) totalsByItemId.set(level.inventoryItemId, (totalsByItemId.get(level.inventoryItemId) ?? 0) + level.quantity);
-    }
-    const primaryRouteByItemId = new Map<string, (typeof snapshot.itemRoutes)[number]>();
-    for (const route of snapshot.itemRoutes) {
-      if (!route.enabled) continue;
-      const current = primaryRouteByItemId.get(route.inventoryItemId);
-      if (!current || route.priority < current.priority) primaryRouteByItemId.set(route.inventoryItemId, route);
-    }
-    const preparations = new Set(snapshot.productionRecipes.filter((recipe) => recipe.active).map((recipe) => recipe.inventoryItemId));
-    return snapshot.items.map((item) => {
-      const primaryRoute = primaryRouteByItemId.get(item.id);
-      return {
-        item,
-        unit: unitsById.get(item.baseUnitId),
-        total: totalsByItemId.get(item.id) ?? 0,
-        warehouse: primaryRoute ? warehousesById.get(primaryRoute.warehouseId) : undefined,
-        isPreparation: preparations.has(item.id),
-      };
-    }).toSorted((a, b) => a.item.name.localeCompare(b.item.name, "es"));
-  }, [snapshot]);
+  const selectedRows = useMemo(() => buildStockRows(snapshot).filter((row) => row.item.id === selectedId), [snapshot, selectedId]);
 
   const selected = snapshot.items.find((item) => item.id === selectedId);
   const selectedUnit = snapshot.units.find(
@@ -115,91 +114,59 @@ export function InventoryStockCrm({
     .toSorted((a, b) => a.priority - b.priority);
   const decimalPlaces = selectedUnit?.decimalPlaces ?? 6;
   const unitLabel = selectedUnit?.symbol ?? selectedUnit?.name ?? "";
-  const hasAddition =
-    stockEditMode === "set" ||
-    Object.values(quantities).some(
-      (value) => value.trim() !== "" && Number(value.replace(",", ".")) !== 0,
-    );
+  let totalChanges: ReturnType<typeof buildInventoryStockTotalChanges> | null = null;
+  try {
+    totalChanges = buildInventoryStockTotalChanges(selectedRoutes.map((route) => ({ warehouseId: route.warehouseId, quantity: selectedStockByWarehouse.get(route.warehouseId) ?? 0 })), quantities, decimalPlaces);
+  } catch { /* Invalid drafts are explained beside their warehouse input. */ }
 
-  function open(itemId: string) {
+  function open(itemId: string, warehouseId?: string) {
+    setCreatingItem(false);
+    setDetailMode('stock');
     setSelectedId(itemId);
-    setStockEditMode("add");
+    setInitialWarehouseId(warehouseId);
+    setRequestId(crypto.randomUUID());
     setQuantities(
       Object.fromEntries(
-        snapshot.warehouses.map((warehouse) => [warehouse.id, ""]),
+        snapshot.warehouses.map((warehouse) => [warehouse.id, String(snapshot.levels.find((level) => level.inventoryItemId === itemId && level.warehouseId === warehouse.id)?.quantity ?? 0)]),
       ),
     );
     setError(null);
   }
 
-  function changeStockEditMode(nextMode: StockEditMode) {
-    if (nextMode === stockEditMode) return;
-    setStockEditMode(nextMode);
-    setQuantities(
-      Object.fromEntries(
-        snapshot.warehouses.map((warehouse) => [
-          warehouse.id,
-          nextMode === "add"
-            ? ""
-            : String(selectedStockByWarehouse.get(warehouse.id) ?? 0),
-        ]),
-      ),
-    );
-    setError(null);
+  async function itemSaved(itemId: string) {
+    // Close the saved draft before refreshing: a failed read must not invite
+    // creating the same article again after its write has already committed.
+    setCreatingItem(false);
+    setSelectedId(null);
+    await refresh();
+    open(itemId);
   }
 
-  function addQuickQuantity(warehouseId: string, amount: number) {
-    setQuantities((current) => {
-      const value = current[warehouseId]?.trim() || "0";
-      let currentAddition = 0;
-      try {
-        currentAddition = parseInventoryQuantity(value, decimalPlaces);
-      } catch {
-        // A preset replaces an invalid draft so the user can recover in one tap.
-      }
-      return {
-        ...current,
-        [warehouseId]: String(
-          addInventoryStockQuantity(
-            currentAddition,
-            String(amount),
-            decimalPlaces,
-          ),
-        ),
-      };
+  async function reloadTotals() {
+    await runAction(async () => {
+      const next = await refresh();
+      if (!next) return;
+      setQuantities(Object.fromEntries(next.warehouses.map((warehouse) => [warehouse.id, String(next.levels.find((level) => level.inventoryItemId === selectedId && level.warehouseId === warehouse.id)?.quantity ?? 0)])));
+      setRequestId(crypto.randomUUID());
+      setError(null);
     });
-    setError(null);
   }
 
   async function save() {
     if (!selected) return;
     try {
-      const levels = snapshot.warehouses.map((warehouse) => ({
-        warehouseId: warehouse.id,
-        enabled: selectedRoutes.some(
-          (route) => route.warehouseId === warehouse.id,
-        ),
-        quantity:
-          stockEditMode === "add"
-            ? addInventoryStockQuantity(
-                selectedStockByWarehouse.get(warehouse.id) ?? 0,
-                quantities[warehouse.id]?.trim() || "0",
-                decimalPlaces,
-              )
-            : parseInventoryStockQuantity(
-                quantities[warehouse.id] ?? "0",
-                decimalPlaces,
-              ),
-      }));
+      const levels = buildInventoryStockTotalChanges(selectedRoutes.map((route) => ({ warehouseId: route.warehouseId, quantity: selectedStockByWarehouse.get(route.warehouseId) ?? 0 })), quantities, decimalPlaces);
+      if (!levels.length) return;
       await runAction(async () => {
         await saveInventoryItemStock(
           tenantContext,
           selectedVenueId,
           selected.id,
           levels,
+          { mode: "set", requestId },
         );
-        await refresh();
         setSelectedId(null);
+        await refresh();
       });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : "Cantidad no válida.");
@@ -207,16 +174,17 @@ export function InventoryStockCrm({
   }
 
   return (
-    <section className="overflow-hidden rounded-2xl bg-[var(--crm-surface)] shadow-[var(--crm-shadow-card)]">
-      <header className="flex flex-wrap items-center justify-between gap-4 border-b border-[var(--crm-border-subtle)] p-5">
+    <section className="grid min-w-0 gap-5">
+      <header className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--crm-radius-lg)] bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]">
         <div>
-          <h2 className="text-lg font-bold">Stock físico</h2>
+          <h2 className="text-lg font-bold">Artículos y stock</h2>
           <p className="text-sm text-[var(--crm-text-muted)]">
-            Existencias por artículo y almacén. El stock negativo está
-            permitido.
+            Artículos físicos, almacenes y existencias en una sola vista.
           </p>
         </div>
-        <label className="flex items-center gap-3 rounded-xl bg-[var(--crm-surface-soft)] px-4 py-3 text-sm font-semibold">
+        <div className="flex flex-wrap items-center gap-3">
+        {inventoryEnabled ? <Button disabled={disabled || loadState !== 'ready' || !snapshot.units.some((unit) => unit.active) || !snapshot.warehouses.some((warehouse) => warehouse.active)} onClick={() => { setSelectedId(null); setCreatingItem(true); }} type="button"><Plus className="size-4" /> Nuevo artículo</Button> : null}
+        <label className="flex items-center gap-3 rounded-[var(--crm-radius-md)] bg-[var(--crm-surface-soft)] px-4 py-3 text-sm font-semibold">
           <input
             checked={inventoryEnabled}
             disabled={disabled}
@@ -233,98 +201,27 @@ export function InventoryStockCrm({
           />{" "}
           Control de inventario activo
         </label>
+        </div>
       </header>
 
+      {inventoryEnabled && loadState === 'ready' && (!snapshot.units.some((unit) => unit.active) || !snapshot.warehouses.some((warehouse) => warehouse.active)) ? <p className="m-0 text-sm text-[var(--crm-text-muted)]">Para crear artículos, configura al menos una unidad física y un almacén activos en Inventario.</p> : null}
+
       {inventoryEnabled ? (
-        <>
-          {rows.length ? (
-            <DataTable
-              aria-label="Stock por artículo"
-              className="!w-full !min-w-[720px] !border-collapse"
-              filterPlaceholder="Buscar artículo físico…"
-              filterValue={query}
-              onFilterChange={setQuery}
-            >
-              <thead>
-                <tr className="!border-b !border-[var(--crm-border-subtle)] !text-left !text-xs !font-bold !uppercase !text-[var(--crm-text-muted)]">
-                  <th className="!min-w-[220px] !px-5 !py-3">Artículo</th>
-                  <th className="!w-[140px] !px-3 !py-3">Disponible</th>
-                  <th className="!min-w-[170px] !px-3 !py-3">Ruta principal</th>
-                  <th className="!w-[130px] !px-3 !py-3">Tipo</th>
-                  <th
-                    aria-label="Acciones"
-                    className="!w-[64px] !px-3 !py-3"
-                    data-sortable="false"
-                  />
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((row) => (
-                  <tr
-                    className="!border-b !border-[var(--crm-border-subtle)] hover:!bg-[var(--crm-surface-hover)] last:!border-0"
-                    key={row.item.id}
-                  >
-                    <td className="!px-5 !py-3">
-                      <span className="flex items-center gap-3">
-                        <span className="grid size-9 place-items-center rounded-xl bg-[var(--crm-blue-soft)] text-[var(--crm-blue)]">
-                          <Package className="size-4" />
-                        </span>
-                        <span>
-                          <strong className="block">{row.item.name}</strong>
-                          <small className="text-[var(--crm-text-muted)]">
-                            {row.item.active ? "Activo" : "Inactivo"}
-                          </small>
-                        </span>
-                      </span>
-                    </td>
-                    <td
-                      className="!whitespace-nowrap !px-3 !py-3"
-                      data-sort-value={row.total}
-                    >
-                      <strong className="font-mono">
-                        {formatInventoryQuantity(
-                          row.total,
-                          row.unit?.decimalPlaces ?? 6,
-                        )}{" "}
-                        {row.unit?.symbol}
-                      </strong>
-                    </td>
-                    <td className="!px-3 !py-3">
-                      {row.warehouse?.name ?? "Sin ruta"}
-                    </td>
-                    <td className="!px-3 !py-3">
-                      {row.isPreparation ? "Elaboración" : "Artículo"}
-                    </td>
-                    <td className="!px-3 !py-3">
-                      <Button
-                        aria-label={`Editar stock de ${row.item.name}`}
-                        disabled={disabled}
-                        onClick={() => open(row.item.id)}
-                        size="sm"
-                        type="button"
-                        variant="tertiary"
-                      >
-                        <ChevronRight className="size-4" />
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </DataTable>
-          ) : (
-            <div className="p-5">
-              <EmptyList message="No hay artículos de inventario. Créelos desde Inventario → Artículos." />
-            </div>
-          )}
-        </>
+        loadState === 'ready' ? <StockOverview disabled={disabled} onOpen={open} onRefresh={() => void runAction(async () => { await refresh(); })} onReplenish={setQuickReplenishment} snapshot={snapshot} />
+          : <div className="rounded-[var(--crm-radius-lg)] bg-[var(--crm-surface)] p-6" role="status">{loadState === 'loading' ? 'Cargando inventario…' : <><p>No se pudo consultar el inventario. Las cifras no están disponibles.</p><Button onClick={() => void runAction(async () => { await refresh(); })} type="button" variant="secondary">Volver a intentar</Button></>}</div>
       ) : (
-        <div className="p-6">
-          <EmptyList message="Activa el control de inventario para gestionar existencias." />
-        </div>
+        <div className="rounded-[var(--crm-radius-lg)] bg-[var(--crm-surface)] p-6"><EmptyList message="Activa el control de inventario para gestionar existencias." /></div>
       )}
 
+      {creatingItem ? <CrmModal dismissDisabled={modalBusy} label="Nuevo artículo de inventario" onClose={() => setCreatingItem(false)} size="large">
+        <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] p-5"><h2 className="m-0 text-lg font-bold">Nuevo artículo</h2><Button aria-label="Cerrar" disabled={modalBusy} onClick={() => setCreatingItem(false)} type="button" variant="tertiary"><X className="size-4" /></Button></div>
+        <InventoryItemEditor disabled={disabled} item={null} onCancel={() => setCreatingItem(false)} onSaved={itemSaved} runAction={runAction} snapshot={snapshot} venueId={selectedVenueId} />
+      </CrmModal> : null}
+
+      {quickReplenishment ? <QuickStockReplenishment context={tenantContext} disabled={disabled} key={quickReplenishment.key} onClose={() => setQuickReplenishment(null)} onSaved={async () => { setQuickReplenishment(null); await refresh(); }} row={quickReplenishment} runAction={runAction} venueId={selectedVenueId} /> : null}
+
       {selected ? (
-        <CrmModal dismissDisabled={modalBusy}
+        <CrmModal dismissDisabled={modalBusy} size="large"
           label={`Stock de ${selected.name}`}
           onClose={() => setSelectedId(null)}
         >
@@ -345,33 +242,19 @@ export function InventoryStockCrm({
             </Button>
           </div>
 
+          <div aria-label="Secciones de la ficha del artículo" className="flex flex-wrap gap-2 border-b border-[var(--crm-border-subtle)] px-5 py-3" role="group">
+            <Button active={detailMode === 'stock'} aria-pressed={detailMode === 'stock'} disabled={modalBusy} onClick={() => setDetailMode('stock')} type="button" variant="tertiary">Stock y movimientos</Button>
+            <Button active={detailMode === 'configuration'} aria-pressed={detailMode === 'configuration'} disabled={modalBusy} onClick={() => setDetailMode('configuration')} type="button" variant="tertiary"><Pencil className="size-4" /> Configurar artículo</Button>
+          </div>
+          {detailMode === 'configuration' ? <InventoryItemEditor disabled={disabled} item={selected} key={selected.id} onCancel={() => setDetailMode('stock')} onSaved={itemSaved} runAction={runAction} snapshot={snapshot} venueId={selectedVenueId} /> : <>
+          <InventoryItemSummary context={tenantContext} item={selected} key={`summary:${selected.id}`} unit={selectedUnit} venueId={selectedVenueId} />
+          <div className="grid gap-3 p-5 sm:grid-cols-2">
+            {selectedRows.map((row) => <article className="grid gap-3 rounded-[var(--crm-radius-md)] bg-[var(--crm-surface-soft)] p-4" key={row.key}><div className="flex flex-wrap items-center justify-between gap-2"><strong>{row.warehouse?.name ?? 'Sin almacén configurado'}</strong><StockStatus row={row} /></div><StockTarget row={row} /><p className="m-0 text-xs text-[var(--crm-text-muted)]">Valor estimado: {row.valueCents === null ? 'Sin coste conocido' : `≈ ${formatMoney(row.valueCents)}`} · <StockQuantity row={row} /></p></article>)}
+          </div>
+          <details className="border-t border-[var(--crm-border-subtle)]" open>
+            <summary className="min-h-12 cursor-pointer px-5 py-4 text-sm font-bold">Establecer total por almacén</summary>
           <div className="grid gap-4 p-5">
-            <div className="grid gap-2">
-              <div
-                aria-label="Modo de actualización del stock"
-                className="flex justify-between gap-1 rounded-xl bg-[var(--crm-surface-soft)] p-1"
-                role="group"
-              >
-                <Button
-                  active={stockEditMode === "add"}
-                  className="!flex-1 !rounded-r-none !rounded-l-xl"
-                  onClick={() => changeStockEditMode("add")}
-                  type="button"
-                  variant="tertiary"
-                >
-                  <Plus className="size-4" /> Añadir stock
-                </Button>
-                <Button
-                  active={stockEditMode === "set"}
-                  className="!flex-1 !rounded-l-none !rounded-r-xl"
-                  onClick={() => changeStockEditMode("set")}
-                  type="button"
-                  variant="tertiary"
-                >
-                  <Pencil className="size-4" /> Establecer total
-                </Button>
-              </div>
-            </div>
+            <p className="m-0 text-xs text-[var(--crm-text-muted)]">Introduce las existencias totales contadas en cada almacén. Solo se guardan los almacenes modificados y se comprueba que su saldo no haya cambiado en otro terminal.</p>
 
             {selectedRoutes.map((route) => {
               const warehouse = snapshot.warehouses.find(
@@ -382,21 +265,14 @@ export function InventoryStockCrm({
               const draftValue = quantities[route.warehouseId] ?? "";
               let resultingQuantity: number | null = null;
               try {
-                resultingQuantity =
-                  stockEditMode === "add"
-                    ? addInventoryStockQuantity(
-                        currentQuantity,
-                        draftValue.trim() || "0",
-                        decimalPlaces,
-                      )
-                    : parseInventoryStockQuantity(draftValue, decimalPlaces);
+                resultingQuantity = parseInventoryStockQuantity(draftValue, decimalPlaces);
               } catch {
                 resultingQuantity = null;
               }
 
               return (
                 <div
-                  className="grid gap-4 rounded-xl bg-[var(--crm-surface-soft)] p-4 sm:grid-cols-[minmax(0,1fr)_210px] sm:items-start"
+                  className="grid gap-4 rounded-[var(--crm-radius-md)] bg-[var(--crm-surface-soft)] p-4 sm:grid-cols-[minmax(0,1fr)_210px] sm:items-start"
                   key={route.warehouseId}
                 >
                   <div>
@@ -420,25 +296,14 @@ export function InventoryStockCrm({
                       className="grid gap-1 text-xs font-semibold"
                       htmlFor={`stock-${route.warehouseId}`}
                     >
-                      {stockEditMode === "add"
-                        ? "Cantidad recibida"
-                        : "Nuevo stock total"}
+                      Nuevo stock total
                       <span className="relative block">
-                        {stockEditMode === "add" ? (
-                          <span
-                            aria-hidden
-                            className="pointer-events-none absolute left-3 top-1/2 z-10 -translate-y-1/2 text-lg font-bold text-[var(--crm-blue)]"
-                          >
-                            +
-                          </span>
-                        ) : null}
                         <Input
-                          className={
-                            stockEditMode === "add" ? "!pl-8" : undefined
-                          }
+                          disabled={modalBusy}
                           id={`stock-${route.warehouseId}`}
                           inputMode="decimal"
                           onChange={(event) => {
+                            setRequestId(crypto.randomUUID());
                             setQuantities((current) => ({
                               ...current,
                               [route.warehouseId]: event.target.value,
@@ -450,29 +315,6 @@ export function InventoryStockCrm({
                         />
                       </span>
                     </label>
-
-                    {stockEditMode === "add" ? (
-                      <div
-                        aria-label={`Cantidades rápidas para ${warehouse?.name ?? "almacén"}`}
-                        className="grid grid-cols-3 gap-2"
-                        role="group"
-                      >
-                        {[1, 5, 10].map((amount) => (
-                          <Button
-                            className="!min-h-9 !px-2 !text-xs"
-                            disabled={disabled}
-                            key={amount}
-                            onClick={() =>
-                              addQuickQuantity(route.warehouseId, amount)
-                            }
-                            type="button"
-                            variant="tertiary"
-                          >
-                            +{amount} {unitLabel}
-                          </Button>
-                        ))}
-                      </div>
-                    ) : null}
 
                     <small
                       className={
@@ -505,10 +347,11 @@ export function InventoryStockCrm({
               <EmptyList message="Configura una ruta de almacenes en la ficha del artículo." />
             ) : null}
             {error ? (
-              <p className="rounded-xl bg-[var(--crm-red-soft)] p-3 text-sm font-semibold text-[var(--crm-red)]">
+              <p className="rounded-[var(--crm-radius-md)] bg-[var(--crm-red-soft)] p-3 text-sm font-semibold text-[var(--crm-red)]">
                 {error}
               </p>
             ) : null}
+            <Button disabled={modalBusy} onClick={() => void reloadTotals()} size="sm" type="button" variant="tertiary">Actualizar existencias</Button>
           </div>
 
           <div className="flex justify-end gap-2 border-t border-[var(--crm-border-subtle)] p-4">
@@ -520,18 +363,16 @@ export function InventoryStockCrm({
               Cancelar
             </Button>
             <Button
-              disabled={disabled || !selectedRoutes.length || !hasAddition}
+              disabled={disabled || modalBusy || !totalChanges?.length}
               onClick={() => void save()}
               type="button"
             >
-              {stockEditMode === "add" ? (
-                <Plus className="size-4" />
-              ) : (
-                <Save className="size-4" />
-              )}
-              {stockEditMode === "add" ? "Añadir stock" : "Guardar total"}
+              <Save className="size-4" /> Guardar total
             </Button>
           </div>
+          </details>
+          <InventoryItemHistory context={tenantContext} dayChangeTime={dayChangeTime} initialWarehouseId={initialWarehouseId} item={selected} key={selected.id} snapshot={snapshot} timeZone={timeZone} venueId={selectedVenueId} />
+          </>}
         </CrmModal>
       ) : null}
     </section>

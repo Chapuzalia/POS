@@ -131,3 +131,23 @@ export type InventorySnapshot = {
   units: InventoryUnit[]
   warehouses: InventoryWarehouse[]
 }
+
+export type InventoryStockMovement = {
+  id: string
+  createdAt: string
+  warehouseId: string
+  unitId: string | null
+  sourceType: string
+  sourceId: string | null
+  ticketLineId: string | null
+  productionId: string | null
+  before: number
+  delta: number
+  after: number
+}
+
+export type InventoryConsumptionReport = {
+  daily: Array<{ day: string; quantity: number }>
+  failureCount: number
+  incompatibleCount: number
+}

@@ -1,7 +1,8 @@
 import type { TenantContext } from '../../../../types'
 import { requireSupabase } from '../../shared/services/crmServiceSupport'
-import { loadInventorySnapshot } from '../../inventory/services/inventoryService'
-import type { InventorySnapshot } from '../../inventory/types'
+import { loadInventoryStockPageData, type InventoryStockPageData } from '../../inventory/services/inventoryService'
+import type { InventoryStockLevel } from '../../inventory/types'
+import { replenishmentQuantities } from '../../inventory/stockControlModel'
 import { loadPurchaseDocuments } from './purchaseService'
 import { loadVenueSuppliers } from './supplierService'
 import type { VenueSupplier } from '../types'
@@ -17,7 +18,7 @@ export type ReplenishmentRow = {
   suppliers: ReplenishmentSupplier[]
 }
 
-export type ReplenishmentData = { snapshot: InventorySnapshot; rows: ReplenishmentRow[] }
+export type ReplenishmentData = { snapshot: InventoryStockPageData; rows: ReplenishmentRow[] }
 
 export async function loadReplenishmentData(context: Pick<TenantContext, 'tenantId'>, venueId: string): Promise<ReplenishmentData> {
   const replenishmentHistoryStart = new Date()
@@ -25,7 +26,7 @@ export async function loadReplenishmentData(context: Pick<TenantContext, 'tenant
   const historyStart = replenishmentHistoryStart.toISOString().slice(0, 10)
   const historyEnd = new Date().toISOString().slice(0, 10)
   const [snapshot, suppliers, documents] = await Promise.all([
-    loadInventorySnapshot(context, venueId),
+    loadInventoryStockPageData(context, venueId),
     loadVenueSuppliers(context, venueId),
     loadPurchaseDocuments(context, venueId, historyStart, historyEnd, { includeUnconfirmed: false, includeLines: true }),
   ])
@@ -58,9 +59,10 @@ export async function loadReplenishmentData(context: Pick<TenantContext, 'tenant
       : { sum: current.sum + line.normalizedUnitCost, count: current.count + 1 })
     itemSupplierCosts.set(line.inventoryItemId, bySupplier)
   }
-  const levelsByItemId = new Map<string, InventorySnapshot['levels']>()
+  const levelsByItemId = new Map<string, InventoryStockLevel[]>()
+  const activeWarehouseIds = new Set(snapshot.warehouses.filter((warehouse) => warehouse.active).map((warehouse) => warehouse.id))
   for (const level of snapshot.levels) {
-    if (!level.enabled) continue
+    if (!level.enabled || !activeWarehouseIds.has(level.warehouseId)) continue
     const levels = levelsByItemId.get(level.inventoryItemId) ?? []
     levels.push(level)
     levelsByItemId.set(level.inventoryItemId, levels)
@@ -69,9 +71,7 @@ export async function loadReplenishmentData(context: Pick<TenantContext, 'tenant
     const levels = levelsByItemId.get(item.id) ?? []
     const targets = levels.filter((level) => level.targetQuantity !== null)
     if (!targets.length) return []
-    const stock = levels.reduce((sum, level) => sum + level.quantity, 0)
-    const target = targets.reduce((sum, level) => sum + (level.targetQuantity ?? 0), 0)
-    const shortage = Math.max(target - stock, 0)
+    const { stock, target, shortage } = replenishmentQuantities(levels)
     if (shortage <= 0) return []
     const costs = itemSupplierCosts.get(item.id) ?? new Map()
     const itemSuppliers: ReplenishmentSupplier[] = [...costs].flatMap(([id, value]) => {
