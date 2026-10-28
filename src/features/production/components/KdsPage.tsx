@@ -7,6 +7,7 @@ import { acceptKdsBatch, acknowledgeKdsEvent, markKdsItemQuantityReady, markKdsI
 import type { KdsQueue } from '../types'
 import { getKdsRemainingQuantity, getKdsUnservedQuantity, groupKdsItems, groupKdsItemsByPass, kdsColumns } from '../kds-queue'
 import { useKdsQueue } from '../useKdsQueue'
+import { getKdsEventChanges } from '../kds-event-changes'
 import { InventoryPreparationsPanel } from '../../inventory'
 import { hasTenantCapability } from '../../platform/tenantFeatureAccess'
 import { formatQuantity } from '../../../lib/format'
@@ -129,7 +130,7 @@ export function KdsPage({ context, isOnline, onBusyChange, onLogout }: Props) {
           <div className="min-w-0 flex-1"><strong>{event.event_type === 'cancelled' ? 'ANULACIÓN' : 'MODIFICACIÓN'} · {formatQuantity(event.quantity)} unidad(es)</strong>
             <p className="mt-1 break-words font-black text-[var(--warning)]">{typeof event.payload.tableName === 'string' && event.payload.tableName.trim() ? event.payload.tableName : 'Comanda'}</p>
             <p className="text-sm text-[var(--muted)]">{String(event.payload.productName ?? 'Producto')} · {new Date(event.created_at).toLocaleTimeString()}</p>
-            {event.event_type === 'modified' && Object.hasOwn(event.payload, 'note') ? <p className="mt-2 whitespace-pre-wrap break-words text-sm font-bold">Comentario: {typeof event.payload.note === 'string' && event.payload.note.trim() ? event.payload.note : 'sin comentario'}</p> : null}
+            {getKdsEventChanges(event).map((change, index) => <p className="mt-2 whitespace-pre-wrap break-words text-sm font-bold" key={index}>{change}</p>)}
           </div>
           <Button aria-label="Reconocer y cerrar aviso" disabled={!isOnline || busyId !== null} onClick={() => void runAction(event.id, () => acknowledgeKdsEvent(context.deviceId, event.id))} size="lg" type="button" variant="tertiary"><X className="h-5 w-5" /></Button>
         </article>)}

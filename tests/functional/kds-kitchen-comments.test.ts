@@ -2,6 +2,7 @@ import { PGlite } from '@electric-sql/pglite'
 import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from 'vitest'
 import { createProductionDatabase, readProductionSql, uuid, tenant, venue, pos, kds, destination, order, line } from '../helpers/production-db.mjs'
 import type { KdsQueue } from '../../src/features/production/types'
+import { getKdsEventChanges } from '../../src/features/production/kds-event-changes'
 
 let db: PGlite
 
@@ -17,9 +18,10 @@ beforeAll(async () => {
     .match(/create or replace function public\.production_notify_line_change\([\s\S]*?\n\$\$;/)
   if (!notify) throw new Error('Production notification trigger not found')
   await db.exec(notify[0])
-  await db.exec(`create trigger notify_note after update of note on order_lines
+  await db.exec(`create trigger notify_note after update of note, modifiers, variant_name on order_lines
     for each row execute function production_notify_line_change();`)
   await db.exec(readProductionSql('20261028220358_kds_current_kitchen_comments'))
+  await db.exec(readProductionSql('20261028230136_kds_modifier_updates_and_change_notices'))
 }, 30_000)
 
 beforeEach(async () => { await db.exec('begin') })
@@ -28,6 +30,47 @@ afterEach(async () => { await db.exec('rollback') })
 const queue = async (deviceId = kds) => (await db.query<{ value: KdsQueue }>('select get_kds_workflow_queue($1) value', [deviceId])).rows[0].value
 const send = async (requestId: string) => db.query('select send_production_batch($1,1,$2,$3,null)', [order, pos, requestId])
 const setNote = async (note: string | null) => db.query('update order_lines set note=$1 where id=$2', [note, line])
+
+it('adds and removes modifiers on the existing card and reports only each actual change', async () => {
+  await send('burger')
+  const original = (await queue()).items[0]
+  const cheese = { id: 'cheese', groupId: 'extras', name: 'Queso', priceCents: 100 }
+  const bacon = { id: 'bacon', groupId: 'extras', name: 'Bacon', priceCents: 150 }
+  const setModifiers = async (modifiers: object[]) => db.query('update order_lines set modifiers=$1 where id=$2', [JSON.stringify(modifiers), line])
+  await setModifiers([cheese])
+  let result = await queue()
+  expect(result.items[0].snapshot.lineModifiers).toEqual([cheese])
+  expect(getKdsEventChanges(result.events[0])).toEqual(['Añadido: Queso'])
+  await setModifiers([cheese, bacon])
+  result = await queue()
+  expect(getKdsEventChanges(result.events[0])).toEqual(['Añadido: Bacon'])
+  await setModifiers([bacon])
+  result = await queue()
+  expect(getKdsEventChanges(result.events[0])).toEqual(['Quitado: Queso'])
+  await setModifiers([])
+  result = await queue()
+  expect(result.items[0].snapshot.lineModifiers).toEqual([])
+  expect(getKdsEventChanges(result.events[0])).toEqual(['Quitado: Bacon'])
+  for (const event of result.events) await db.query('select acknowledge_kds_event($1,$2)', [kds, event.id])
+  expect((await queue()).events).toEqual([])
+  expect((await queue()).items[0]).toEqual({ ...original, snapshot: { ...original.snapshot, lineModifiers: [] } })
+  expect((await db.query<{ snapshot: unknown }>('select snapshot from production_items')).rows[0].snapshot).toEqual(original.snapshot)
+})
+
+it('retains modifiers after acknowledging/expiring alerts and after a later comment update', async () => {
+  await send('burger')
+  const modifiers = [{ id: 'cheese', name: 'Queso' }]
+  await db.query('update order_lines set modifiers=$1 where id=$2', [JSON.stringify(modifiers), line])
+  const event = (await queue()).events[0]
+  await db.query('select acknowledge_kds_event($1,$2)', [kds, event.id])
+  await db.exec("update production_events set created_at=created_at-interval '10 hours'")
+  expect((await queue()).items[0].snapshot.lineModifiers).toEqual(modifiers)
+  await setNote('Salsa aparte')
+  const result = await queue()
+  expect(result.items[0].snapshot.lineModifiers).toEqual(modifiers)
+  expect(result.items[0].snapshot.note).toBe('Salsa aparte')
+  expect(getKdsEventChanges(result.events[0])).toEqual(['Comentario: Salsa aparte'])
+})
 
 it('adds the current note to the sent card while preserving its snapshot, quantities and workflow', async () => {
   await send('initial')
