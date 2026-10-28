@@ -75,6 +75,60 @@ Calcular el digest Access sin imprimir el secreto:
 python3 -c 'import getpass,hashlib; print(hashlib.sha256(getpass.getpass("Access secret: ").encode()).hexdigest())'
 ```
 
+## Aprobar migraciones sensibles por Telegram
+
+El controller puede pausar una release antes de ejecutar SQL y pedir una
+decisión en el grupo. En Coolify, añadir al **worker**, solo como runtime:
+
+| Variable | Valor |
+| --- | --- |
+| `DEPLOY_TELEGRAM_BOT_TOKEN` | El token del bot, como secreto; no guardarlo en Git ni en el JSON del repositorio |
+| `DEPLOY_TELEGRAM_CHAT_ID` | `-5165186404` (valor predeterminado del Compose) |
+
+Añadir el bot al grupo y hacerlo administrador: Telegram garantiza así la
+consulta de pertenencia de los demás usuarios. **Cualquier miembro actual
+del grupo puede pulsar Desplegar o Cancelar**, no solo sus administradores.
+El bot debe estar dedicado al controller, sin webhook ni otro consumidor de
+`getUpdates`; el controller no elimina webhooks ni cambia permisos del bot.
+
+Cuando una migración pendiente tiene riesgos sin aprobación vigente, se envía
+un mensaje con entorno, commit, nombre completo, hash del SQL preparado,
+enlace al archivo y todos los motivos detectados, explicados en español.
+Por ejemplo, `DROP` indica eliminación de objetos/datos, `DELETE FROM`
+eliminación de filas y `CREATE OR REPLACE ROUTINE` sustitución de RPC en uso.
+Los botones son **Desplegar** y **Cancelar**.
+
+- El estado pasa a `awaiting_approval`; todavía no se obtiene la contraseña
+  de PostgreSQL, no se genera el backup de la release y no se aplica SQL.
+- Si hay varias migraciones sensibles, se revisan una a una. Se exige aprobar
+  todas antes de continuar. Hay un máximo de **15 minutos en total** para
+  decidir; una cancelación o caducidad detiene la release completa.
+- La primera respuesta válida decide para cada archivo. Se comprueban grupo,
+  mensaje, un identificador aleatorio de un solo uso y pertenencia actual del
+  usuario. Los botones se retiran tras la decisión, cuando Telegram responde.
+- Aprobar vale solo para el commit, entorno y contenido mostrado. Se vuelven
+  a comprobar los hashes y el análisis completo antes de continuar con
+  backup, dry-run y SQL. La aprobación no se guarda para otras releases.
+- Una cancelación queda `cancelled` y no bloquea la siguiente solicitud.
+  Fallos de Telegram o errores de integridad fallan de forma cerrada. Un
+  reinicio durante la espera queda `interrupted` y requiere la reconciliación
+  existente; los botones antiguos no autorizan una petición nueva.
+- Las decisiones y el ID de usuario quedan en el log privado del receptor.
+  No se envían SQL completo, credenciales o datos del negocio a Telegram.
+
+Los errores de autenticación, historial incompatible, SQL histórico modificado
+o dependencias contract no demostradas siguen bloqueando el despliegue: un
+botón no elimina esas garantías. Las aprobaciones exactas ya instaladas en la
+configuración continúan siendo válidas hasta caducar. El modo de comprobación
+de solo lectura no envía mensajes ni solicita aprobaciones.
+
+Tras preparar las variables, actualizar el controller desde Coolify dentro de
+la autorización de ese entorno y verificarlo primero en staging. Esta sección
+no activa ni modifica automáticamente producción. Telegram usa llamadas
+salientes HTTPS, sin endpoint público adicional.
+
+Referencia: [Telegram Bot API](https://core.telegram.org/bots/api#getchatmember).
+
 ## Cloudflare y GitHub
 
 1. Crear o reutilizar un Cloudflare Tunnel.

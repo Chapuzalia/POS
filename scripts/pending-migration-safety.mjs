@@ -41,10 +41,11 @@ export function migrationHistoryFingerprint({ directory, applied }) {
   return { sha256: createHash('sha256').update(JSON.stringify(hashes)).digest('hex'), applied_count: applied.length }
 }
 
-function approved(approvals, environment, migration, bytes, now) {
+function approved(approvals, environment, migration, bytes, now, commit) {
   const hash = createHash('sha256').update(bytes).digest('hex')
   return approvals.find(approval => approval && typeof approval === 'object'
     && approval.environment === environment && approval.migration === migration
+    && (approval.commit === undefined || approval.commit === commit)
     && approval.sha256 === hash && typeof approval.reason === 'string' && approval.reason.trim()
     && typeof approval.expires_at === 'string'
     && /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,3})?Z$/.test(approval.expires_at)
@@ -118,7 +119,7 @@ function requiresAnonymousBlockApproval(sql) {
   return false
 }
 
-export function checkPendingMigrations(request, now = Date.now()) {
+export function pendingMigrationReport(request, now = Date.now()) {
   const { directory, pending, applied, environment, approvals = [] } = request
   if (typeof directory !== 'string' || !isAbsolute(directory) || !environmentPattern.test(environment ?? '')
     || !Array.isArray(pending) || !Array.isArray(applied) || !Array.isArray(approvals)
@@ -128,6 +129,7 @@ export function checkPendingMigrations(request, now = Date.now()) {
     throw new Error('Invalid pending migration safety request.')
   }
   const files = migrationFiles(directory)
+  const sensitive = []
   for (const version of pending) {
     const name = files.get(version)
     const bytes = migrationBytes(directory, files, version)
@@ -139,7 +141,7 @@ export function checkPendingMigrations(request, now = Date.now()) {
     // The range analyzer's historical DO exceptions are not deployment authority.
     // Inspect statement boundaries before erasing bodies or consulting source comments.
     if (requiresAnonymousBlockApproval(sql)) findings.push('ANONYMOUS DO BLOCK REQUIRES ROOT CONTENT APPROVAL')
-    const approval = approved(approvals, environment, name, bytes, now)
+    const approval = approved(approvals, environment, name, bytes, now, request.commit)
     if (/^-- migration-safety: contract\r?$/m.test(sql)) {
       const expand = typeof approval?.expand_migration === 'string'
         ? migrationPattern.exec(approval.expand_migration) : null
@@ -148,10 +150,19 @@ export function checkPendingMigrations(request, now = Date.now()) {
       }
     }
     if (findings.length && !approval) {
-      throw new Error(`Unsafe pending migration ${name}: ${findings.join(', ')}`)
+      sensitive.push({ migration: name, sha256: createHash('sha256').update(bytes).digest('hex'), reasons: [...new Set(findings)] })
     }
   }
-  return pending.length
+  return { pending_count: pending.length, sensitive }
+}
+
+export function checkPendingMigrations(request, now = Date.now()) {
+  const report = pendingMigrationReport(request, now)
+  if (report.sensitive.length) {
+    const first = report.sensitive[0]
+    throw new Error(`Unsafe pending migration ${first.migration}: ${first.reasons.join(', ')}`)
+  }
+  return report.pending_count
 }
 
 if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
@@ -159,10 +170,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) 
     const request = JSON.parse(readFileSync(0, 'utf8'))
     if (process.argv.length === 3 && process.argv[2] === '--history-hash') {
       console.log(JSON.stringify(migrationHistoryFingerprint(request)))
+    } else if (process.argv.length === 3 && process.argv[2] === '--report') {
+      console.log(JSON.stringify(pendingMigrationReport(request)))
     } else if (process.argv.length === 2) {
       console.log(`Pending migration safety verified: ${checkPendingMigrations(request)}`)
     } else {
-      throw new Error('Usage: pending-migration-safety.mjs [--history-hash] < request.json')
+      throw new Error('Usage: pending-migration-safety.mjs [--history-hash|--report] < request.json')
     }
   } catch (error) {
     console.error(error instanceof Error ? error.message : 'Pending migration safety failed.')

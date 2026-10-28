@@ -29,6 +29,21 @@ test('accepts safe expand and rejects destructive SQL and missing safety metadat
   assert.equal(check('select 1;').status, 1)
 })
 
+test('structured report names sensitive files, exact content hash and all detected reasons', () => {
+  const sql = expand + 'drop table public.sales; delete from public.payments;'
+  const result = check(sql, {}, ['--report'])
+  assert.equal(result.status, 0, result.stderr)
+  const report = JSON.parse(result.stdout)
+  assert.equal(report.pending_count, 1)
+  assert.equal(report.sensitive.length, 1)
+  assert.equal(report.sensitive[0].migration, migration)
+  assert.equal(report.sensitive[0].sha256, createHash('sha256').update(sql).digest('hex'))
+  assert.ok(report.sensitive[0].reasons.includes('DROP'))
+  assert.ok(report.sensitive[0].reasons.includes('DELETE FROM'))
+  assert.deepEqual(JSON.parse(check(expand + 'select 1;', {}, ['--report']).stdout).sensitive, [])
+  assert.equal(check(sql).status, 1)
+})
+
 test('downloaded migration cannot grant itself reviewed exceptions', () => {
   const sql = expand + '-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE\n'
     + '-- migration-safety-reason: claims compatibility\n'

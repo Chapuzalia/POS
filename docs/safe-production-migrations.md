@@ -144,6 +144,15 @@ La configuración del receptor puede declarar:
 
 El hash corresponde a los bytes SQL que recibe el receptor, después de la preparación compatible de BOM y de los índices históricos. La autorización debe coincidir con el entorno, nombre completo, hash y fecha UTC futura; exige una razón de revisión. No basta el nombre, un commit anterior, un workflow correcto ni un waiver global. Cambiar un byte invalida la autorización. Para un contract, la autorización exige además `expand_migration`, cuyo timestamp debe existir en el ledger aplicado real; no se permite aplicar expand y contract juntos. La revisión debe confirmar que ningún cliente admitido depende del contrato antiguo.
 
+El controller también permite una aprobación interactiva por Telegram para
+riesgos SQL pendientes sin autorización vigente. El grupo recibe el archivo y
+los motivos detectados; todos los archivos sensibles deben aprobarse antes de
+backup y SQL. Cada voto está ligado a contenido, entorno y commit, se verifica
+la pertenencia al grupo y la autorización solo vive en ese intento. Cancelar
+o dejar caducar la solicitud no aplica SQL. No sustituye los controles de
+historial, hashes históricos o dependencias de contracts. Ver
+[configuración de Telegram](deployment-controller.md#aprobar-migraciones-sensibles-por-telegram).
+
 El receptor mantiene además un registro instalado de contenido SQL por entorno (`/var/lib/tickit-deploy/migration-history.<environment>.json`). Esto permite detectar cambios posteriores de bytes en versiones ya aplicadas sin depender de una SHA anterior. Inicializar ese registro sobre una base existente exige una autorización `migration_history_bootstrap` con entorno, caducidad y digest de su mapa canónico aplicado; ver [operaciones del controlador](deployment-controller.md). El directorio del registro debe ser propiedad de root y no permitir escritura de otros usuarios.
 
 El ledger debe existir. Un ledger existente pero vacío necesita una autorización de bootstrap instalada y con caducidad: `bootstrap: {allow_empty_ledger: true, environment: "production", expires_at: "...Z"}`. Esa opción nunca crea ni sustituye una tabla de historial ausente. Un `contracts-pending.yml` enviado por el commit es documentación de revisión, no una autorización del host.

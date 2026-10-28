@@ -24,6 +24,14 @@ def configuration():
 
 
 class CoolifyWorkerStartupTests(unittest.TestCase):
+    def test_telegram_token_stays_in_private_receiver_config_not_the_http_controller(self):
+        token = '123456789:FAKE_TEST_TOKEN_WITH_MORE_THAN_25_CHARS'
+        files = worker_start.configuration_files(json.dumps(configuration()), telegram_token=token, telegram_chat_id='-123456789')
+        self.assertNotIn(token, files['controller.json'])
+        self.assertEqual(json.loads(files['receiver.staging.json'])['telegram'],
+                         {'bot_token': token, 'chat_id': '-123456789', 'timeout_seconds': 900})
+        self.assertNotIn('telegram', json.loads(worker_start.configuration_files(json.dumps(configuration()))['receiver.staging.json']))
+
     def test_one_coolify_json_generates_private_controller_and_receiver_configuration(self):
         files = worker_start.configuration_files(json.dumps(configuration()))
         controller = json.loads(files['controller.json'])

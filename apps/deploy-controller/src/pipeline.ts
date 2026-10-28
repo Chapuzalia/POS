@@ -6,14 +6,15 @@ import { dataRoot, installRoot } from './config.ts'
 import type { EnvironmentConfig } from './config.ts'
 import type { Deployment, State } from './store.ts'
 
-type CommandOptions = { env?: NodeJS.ProcessEnv; stdinFile?: string; timeoutMs?: number }
+type CommandOptions = { env?: NodeJS.ProcessEnv; stdinFile?: string; timeoutMs?: number; cancellationExitCode?: 3 }
+export class DeploymentCancelled extends Error {}
 export type Command = (bin: string, args: string[], options?: CommandOptions) => Promise<string>
 export const safeEnv: NodeJS.ProcessEnv = {
   PATH: '/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin', HOME: '/root', LANG: 'C.UTF-8',
   GIT_TERMINAL_PROMPT: '0', GIT_SSH_COMMAND: '/usr/bin/ssh -i /etc/tickit-deploy/repository_ed25519 -oIdentitiesOnly=yes -oBatchMode=yes -oStrictHostKeyChecking=yes -oUserKnownHostsFile=/etc/tickit-deploy/github_known_hosts',
 }
 export function commandRunner(log: (line: string) => void, phase: (state: State) => void): Command {
-  return (bin, args, { env = safeEnv, stdinFile, timeoutMs = 25 * 60_000 } = {}) => new Promise((resolve, reject) => {
+  return (bin, args, { env = safeEnv, stdinFile, timeoutMs = 25 * 60_000, cancellationExitCode } = {}) => new Promise((resolve, reject) => {
     const child = spawn(bin, args, { env, stdio: ['pipe', 'pipe', 'pipe'], detached: process.platform !== 'win32' })
     let size = 0, output = '', lines = '', stopped = false
     const stop = () => {
@@ -32,7 +33,7 @@ export function commandRunner(log: (line: string) => void, phase: (state: State)
         output += text; lines += text
         const split = lines.split('\n'); lines = split.pop() ?? ''
         for (const line of split) {
-          const match = /^POS_PHASE:(preflight|backing_up|migrating|deploying_edge)$/.exec(line.trim())
+          const match = /^POS_PHASE:(preflight|awaiting_approval|backing_up|migrating|deploying_edge)$/.exec(line.trim())
           if (match) phase(match[1] as State)
         }
       }
@@ -41,7 +42,8 @@ export function commandRunner(log: (line: string) => void, phase: (state: State)
     child.on('error', () => { clearTimeout(timeout); source?.destroy(); reject(new Error('Deployment tool could not start.')) })
     child.on('close', code => {
       clearTimeout(timeout); source?.destroy()
-      if (code !== 0 || stopped) reject(new Error('Deployment tool failed or timed out; inspect the private log.'))
+      if (!stopped && code === cancellationExitCode) reject(new DeploymentCancelled('Deployment cancelled before SQL was applied.'))
+      else if (code !== 0 || stopped) reject(new Error('Deployment tool failed or timed out; inspect the private log.'))
       else resolve(output.trim())
     })
   })
@@ -91,7 +93,9 @@ export async function runRelease(deployment: Deployment, config: EnvironmentConf
       APP_VERSION: deployment.commit, DEPLOY_BRANCH: deployment.environment === 'production' ? 'main' : 'Staging',
     }
     await command('/usr/bin/node', [join(installRoot, 'scripts/deploy-coolify.mjs'), '--check'], { env: coolifyEnv })
-    await command('/usr/bin/python3', [join(installRoot, 'scripts/deploy-pos.py'), '--config', receiverPath], { stdinFile: packagePath })
+    await command('/usr/bin/python3', [join(installRoot, 'scripts/deploy-pos.py'), '--config', receiverPath], {
+      stdinFile: packagePath, timeoutMs: 45 * 60_000, cancellationExitCode: 3,
+    })
     phase('deploying_application')
     await command('/usr/bin/node', [join(installRoot, 'scripts/deploy-coolify.mjs')], { env: coolifyEnv })
     phase('verifying')
@@ -99,6 +103,7 @@ export async function runRelease(deployment: Deployment, config: EnvironmentConf
     log(`\nVerified release ${deployment.commit}.\n`)
   } catch (error) {
     log(`\nSTOPPED: ${error instanceof Error ? error.message : 'Unknown tool error'}\n`)
+    if (error instanceof DeploymentCancelled) throw error
     throw new Error('Deployment stopped; inspect the private worker log and reconcile before retrying.')
   } finally { await rm(work, { recursive: true, force: true }) }
 }

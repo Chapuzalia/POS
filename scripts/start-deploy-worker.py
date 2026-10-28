@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import re
 import stat
 import subprocess
 import sys
@@ -17,7 +18,7 @@ FIXED_RECEIVER = {
 }
 
 
-def configuration_files(value):
+def configuration_files(value, *, telegram_token='', telegram_chat_id='-5165186404'):
     if not isinstance(value, str) or not value or len(value) > 262144:
         raise ValueError('Set DEPLOY_CONTROLLER_CONFIG in Coolify (maximum 256 KiB).')
     try:
@@ -27,6 +28,9 @@ def configuration_files(value):
     if not isinstance(config, dict) or not isinstance(config.get('environments'), dict):
         raise ValueError('Configure environments in DEPLOY_CONTROLLER_CONFIG.')
     config.setdefault('audience', 'https://deploy.alteilsolutions.com')
+    if telegram_token and (not re.fullmatch(r'[0-9]{6,}:[A-Za-z0-9_-]{25,100}', telegram_token)
+                           or not re.fullmatch(r'-[1-9][0-9]{0,18}', telegram_chat_id)):
+        raise ValueError('Invalid Telegram bot token or group ID in private Coolify variables.')
     files = {}
     for environment in ('production', 'staging'):
         policy = config['environments'].get(environment)
@@ -45,6 +49,8 @@ def configuration_files(value):
         receiver.setdefault('db_name', 'postgres')
         receiver.setdefault('edge_image', 'supabase/edge-runtime:v1.76.2')
         receiver.setdefault('migration_approvals', [])
+        if telegram_token:
+            receiver['telegram'] = {'bot_token': telegram_token, 'chat_id': telegram_chat_id, 'timeout_seconds': 900}
         files[f'receiver.{environment}.json'] = json.dumps(receiver)
     files['controller.json'] = json.dumps(config)
     return files
@@ -69,7 +75,9 @@ def main():
     if os.geteuid() != 0:
         raise ValueError('Only the internal worker container runs this entrypoint.')
     os.umask(0o077)
-    files = configuration_files(os.environ.get('DEPLOY_CONTROLLER_CONFIG'))
+    files = configuration_files(os.environ.get('DEPLOY_CONTROLLER_CONFIG'),
+                                telegram_token=os.environ.get('DEPLOY_TELEGRAM_BOT_TOKEN', ''),
+                                telegram_chat_id=os.environ.get('DEPLOY_TELEGRAM_CHAT_ID', '-5165186404'))
     key = os.environ.get('DEPLOY_REPOSITORY_KEY', '')
     known_hosts = os.environ.get('DEPLOY_GITHUB_KNOWN_HOSTS', '')
     if not key.startswith('-----BEGIN OPENSSH PRIVATE KEY-----') or len(key) > 32768 or not known_hosts or len(known_hosts) > 32768:

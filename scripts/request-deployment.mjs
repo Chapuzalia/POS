@@ -5,8 +5,8 @@ import { pathToFileURL } from 'node:url'
 const origin = 'https://deploy.alteilsolutions.com'
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const statuses = new Set([
-  'queued', 'preflight', 'backing_up', 'migrating', 'deploying_edge',
-  'deploying_application', 'verifying', 'success', 'failed', 'interrupted',
+  'queued', 'preflight', 'awaiting_approval', 'backing_up', 'migrating', 'deploying_edge',
+  'deploying_application', 'verifying', 'success', 'failed', 'interrupted', 'cancelled',
 ])
 
 export function requestSettings(env) {
@@ -93,6 +93,7 @@ export async function requestDeployment(settings, {
       lastStatus = deployment.status
     }
     if (deployment.status === 'success') return deployment
+    if (deployment.status === 'cancelled') throw new Error(`Deployment ${id} cancelled before applying SQL.`)
     if (deployment.status === 'failed') throw new Error(`Deployment ${id} failed. Inspect private controller events.`)
     if (deployment.status === 'interrupted') throw new Error(`Deployment ${id} interrupted. Manual reconciliation is required before retrying.`)
     await sleep(10_000)

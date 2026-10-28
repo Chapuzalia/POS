@@ -7,6 +7,7 @@ Input is protocol 4; protocol-2/3 migration packages remain compatible.
 
 import io
 import hashlib
+import importlib.util
 import ipaddress
 import json
 import os
@@ -47,6 +48,10 @@ def edge_package_path(name, *, directory=False):
 
 
 class DeployError(Exception):
+    pass
+
+
+class DeployCancelled(DeployError):
     pass
 
 
@@ -293,16 +298,66 @@ def record_applied_history(runner, container, config, project_dir, before, packa
     return actual
 
 
-def check_pending(runner, config, project_dir, pending, applied):
+def telegram_approvals(config, sensitive, commit, runner):
+    if not config.get('telegram'):
+        raise DeployError('Sensitive migrations require confirmation; configure Telegram approval in Coolify.')
+    path = Path(__file__).resolve().with_name('telegram_migration_approval.py')
+    trusted_file(path)
+    spec = importlib.util.spec_from_file_location('tickit_telegram_approval', path)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    def audit(record):
+        runner.log.write(json.dumps({'at': datetime.now(timezone.utc).isoformat(), 'telegram_approval': record}) + '\n')
+        runner.log.flush()
+        os.fsync(runner.log.fileno())
+
+    try:
+        return module.request_approvals(config['telegram'], sensitive, environment=config['environment'], commit=commit, audit=audit)
+    except module.ApprovalCancelled as error:
+        raise DeployCancelled(str(error)) from None
+    except module.ApprovalError as error:
+        raise DeployError(str(error)) from None
+
+
+def run_pending_checker(runner, config, payload, *, report=False):
     with tempfile.TemporaryFile() as request:
-        request.write(json.dumps({'directory': str((project_dir / 'supabase/migrations').resolve()),
-                                 'pending': sorted(pending), 'applied': sorted(applied),
-                                 'environment': config.get('environment', 'production'),
-                                 'approvals': config.get('migration_approvals', [])}).encode())
+        request.write(json.dumps(payload).encode())
         request.seek(0)
-        runner.command([config.get('node_bin', '/usr/bin/node'),
-                        config.get('migration_safety_checker', '/opt/tickit/scripts/pending-migration-safety.mjs')],
-                       stdin=request, env={'PATH': '/usr/local/bin:/usr/bin:/bin'}, timeout=120)
+        return runner.command([config.get('node_bin', '/usr/bin/node'),
+                               config.get('migration_safety_checker', '/opt/tickit/scripts/pending-migration-safety.mjs'),
+                               *(['--report'] if report else [])],
+                              stdin=request, env={'PATH': '/usr/local/bin:/usr/bin:/bin'}, timeout=120)
+
+
+def check_pending(runner, config, project_dir, pending, applied, *, commit=None, check_only=False):
+    payload = {'directory': str((project_dir / 'supabase/migrations').resolve()),
+               'pending': sorted(pending), 'applied': sorted(applied), 'commit': commit,
+               'environment': config.get('environment', 'production'), 'approvals': config.get('migration_approvals', [])}
+    report = json.loads(run_pending_checker(runner, config, payload, report=True))
+    if (not isinstance(report, dict) or type(report.get('pending_count')) is not int or report['pending_count'] != len(pending)
+            or not isinstance(report.get('sensitive'), list) or len(report['sensitive']) > len(pending)):
+        raise DeployError('Invalid pending migration safety report.')
+    sensitive = report['sensitive']
+    if not sensitive:
+        return
+    if check_only:
+        raise DeployError('Sensitive pending migrations require human confirmation during apply; check mode sends no messages.')
+    for item in sensitive:
+        name = item.get('migration', '') if isinstance(item, dict) else ''
+        match = MIGRATION.fullmatch('migrations/' + name)
+        if not match or match[1] not in pending:
+            raise DeployError('Invalid sensitive migration identity.')
+    phase('awaiting_approval')
+    approved = telegram_approvals(config, sensitive, commit, runner)
+    # Every decision is for the prepared bytes that were shown, not a filename
+    # that can change during the wait. Do not persist approval for later jobs.
+    for item in sensitive:
+        contents = (project_dir / 'supabase/migrations' / item['migration']).read_bytes()
+        if hashlib.sha256(contents).hexdigest() != item['sha256']:
+            raise DeployError('Prepared migration changed after Telegram review; refusing deployment.')
+    payload['approvals'] = [*payload['approvals'], *approved]
+    run_pending_checker(runner, config, payload)
 
 
 class Runner:
@@ -407,7 +462,7 @@ def ledger(runner, container, config):
     return set(versions)
 
 
-def migrate(runner, config, project_dir, versions, backup_path, *, check_only=False):
+def migrate(runner, config, project_dir, versions, backup_path, *, check_only=False, commit=None):
     if config['required_migration'] not in versions:
         raise DeployError('The package does not contain the configured migration guard.')
     cli = config['supabase_bin']
@@ -421,7 +476,7 @@ def migrate(runner, config, project_dir, versions, backup_path, *, check_only=Fa
     pending = versions - before
     if not pending:
         return 0
-    check_pending(runner, config, project_dir, pending, before)
+    check_pending(runner, config, project_dir, pending, before, commit=commit, check_only=check_only)
     # Fetch only the current database password, without dumping Docker environment metadata.
     # Register it BEFORE logging any command result.
     result = subprocess.run(['docker', 'exec', container, 'printenv', 'POSTGRES_PASSWORD'],
@@ -648,9 +703,11 @@ def main():
             backup_path = Path(config['backup_dir']) / f'postgres_{prefix}{stamp}.dump'
             check_only = manifest.get('operation') == 'check'
             runner = Runner(log)
+            if config.get('telegram', {}).get('bot_token'):
+                runner.secrets.append(config['telegram']['bot_token'])
             phase('preflight')
             edge = prepare_edge(runner, config, project, manifest['commit']) if manifest['protocol'] == 4 else None
-            count = migrate(runner, config, project, versions, backup_path, check_only=check_only)
+            count = migrate(runner, config, project, versions, backup_path, check_only=check_only, commit=manifest['commit'])
             if edge and not check_only:
                 phase('deploying_edge')
                 edge_backup = Path(config['backup_dir']) / f'functions_{prefix}{stamp}'
@@ -668,6 +725,9 @@ def main():
 if __name__ == '__main__':
     try:
         main()
+    except DeployCancelled as error:
+        print(f'CANCELLED: {error}', file=sys.stderr)
+        sys.exit(3)
     except DeployError as error:
         print(f'ERROR: {error}', file=sys.stderr)
         sys.exit(1)

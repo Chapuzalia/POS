@@ -149,6 +149,70 @@ class ReceiverTests(unittest.TestCase):
             self.assertFalse(any('printenv' in call.args[0] for call in external.call_args_list))
         self.assertNotIn(['backup'], [args for args, _ in runner.calls])
 
+    def test_sensitive_sql_is_not_applied_until_telegram_approves_exact_content(self):
+        runner = FakeRunner()
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            migrations = project / 'supabase/migrations'
+            migrations.mkdir(parents=True)
+            name = f'{NEW_VERSION}_sensitive.sql'
+            sql = "-- migration-safety: expand\nset lock_timeout = '5s';\nset statement_timeout = '5min';\ndrop table public.example;"
+            (migrations / name).write_text(sql, encoding='utf-8')
+            def approve(config, sensitive, commit, audit_runner):
+                self.assertFalse(runner.applied)
+                self.assertNotIn(['backup'], [args for args, _ in runner.calls])
+                self.assertEqual(sensitive[0]['migration'], name)
+                self.assertIn('DROP', sensitive[0]['reasons'])
+                return [{'environment': 'production', 'migration': name, 'sha256': hashlib.sha256((migrations / name).read_bytes()).hexdigest(),
+                         'commit': commit, 'expires_at': '2099-01-01T00:00:00Z', 'reason': 'Telegram approval'}]
+            original_run = subprocess.run
+            def run(args, **options):
+                return subprocess.CompletedProcess([], 0, b'password\n', b'') if 'printenv' in args else original_run(args, **options)
+            with patch.object(deploy, 'telegram_approvals', side_effect=approve), patch.object(deploy.subprocess, 'run', side_effect=run):
+                self.assertEqual(deploy.migrate(runner, CONFIG, project, {VERSION, NEW_VERSION}, Path('/backup.dump'), commit='a' * 40), 1)
+            self.assertTrue(runner.applied)
+            self.assertIn(['backup'], [args for args, _ in runner.calls])
+
+    def test_telegram_cancellation_stops_before_password_backup_and_push(self):
+        runner = FakeRunner()
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            migrations = project / 'supabase/migrations'
+            migrations.mkdir(parents=True)
+            (migrations / f'{NEW_VERSION}_sensitive.sql').write_text('drop table public.example;', encoding='utf-8')
+            with patch.object(deploy, 'telegram_approvals', side_effect=deploy.DeployCancelled('cancelled')), \
+                    patch.object(deploy.subprocess, 'run', wraps=subprocess.run) as external, self.assertRaises(deploy.DeployCancelled):
+                deploy.migrate(runner, CONFIG, project, {VERSION, NEW_VERSION}, Path('/backup.dump'), commit='a' * 40)
+            self.assertFalse(any('printenv' in call.args[0] for call in external.call_args_list))
+            self.assertFalse(runner.applied)
+            self.assertNotIn(['backup'], [args for args, _ in runner.calls])
+
+    def test_changed_sql_after_human_approval_is_rejected(self):
+        runner = FakeRunner()
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            migrations = project / 'supabase/migrations'
+            migrations.mkdir(parents=True)
+            path = migrations / f'{NEW_VERSION}_sensitive.sql'
+            path.write_text('drop table public.example;', encoding='utf-8')
+            def changed(config, sensitive, commit, audit_runner):
+                path.write_text('drop table public.sales;', encoding='utf-8')
+                return [{'environment': 'production', 'migration': sensitive[0]['migration'], 'sha256': sensitive[0]['sha256'],
+                         'commit': commit, 'expires_at': '2099-01-01T00:00:00Z', 'reason': 'Telegram approval'}]
+            with patch.object(deploy, 'telegram_approvals', side_effect=changed), self.assertRaises(deploy.DeployError):
+                deploy.check_pending(runner, CONFIG, project, {NEW_VERSION}, {VERSION}, commit='a' * 40)
+
+    def test_readonly_check_never_sends_telegram_messages(self):
+        runner = FakeRunner()
+        with tempfile.TemporaryDirectory() as directory:
+            project = Path(directory)
+            migrations = project / 'supabase/migrations'
+            migrations.mkdir(parents=True)
+            (migrations / f'{NEW_VERSION}_sensitive.sql').write_text('drop table public.example;', encoding='utf-8')
+            with patch.object(deploy, 'telegram_approvals') as approve, self.assertRaises(deploy.DeployError):
+                deploy.migrate(runner, CONFIG, project, {VERSION, NEW_VERSION}, Path('/backup.dump'), check_only=True)
+            approve.assert_not_called()
+
     def test_only_sql_missing_from_ledger_is_safety_checked(self):
         runner = FakeRunner()
         credential = subprocess.CompletedProcess([], 0, b'password\n', b'')

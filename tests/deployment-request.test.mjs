@@ -57,7 +57,7 @@ test('rerunning the same SHA changes identity by run attempt, never a previous S
 })
 
 test('requester follows every private deployment phase with refreshed credentials', async () => {
-  const phases = ['queued', 'preflight', 'backing_up', 'migrating', 'deploying_edge', 'deploying_application', 'verifying', 'success']
+  const phases = ['queued', 'preflight', 'awaiting_approval', 'backing_up', 'migrating', 'deploying_edge', 'deploying_application', 'verifying', 'success']
   const { calls, fetchImpl } = controller(phases)
   const logs = []
   await requestDeployment(requestSettings(env), { fetchImpl, sleep: async () => {}, log: value => logs.push(value) })
@@ -76,10 +76,10 @@ test('requester rejects invalid identities and credentials before requesting dep
 })
 
 test('failed and interrupted deployments fail CI without printing private controller results', async () => {
-  for (const status of ['failed', 'interrupted']) {
+  for (const status of ['failed', 'interrupted', 'cancelled']) {
     const { fetchImpl } = controller(['queued', status])
     const logs = []
-    await assert.rejects(requestDeployment(requestSettings(env), { fetchImpl, sleep: async () => {}, log: value => logs.push(value) }), /failed|interrupted/)
+    await assert.rejects(requestDeployment(requestSettings(env), { fetchImpl, sleep: async () => {}, log: value => logs.push(value) }), /failed|interrupted|cancelled/)
     assert.ok(logs.every(value => !value.includes('secret') && !value.includes('oidc')))
   }
 })

@@ -3,7 +3,7 @@ import { pathToFileURL } from 'node:url'
 import { GitHubVerifier } from './auth.ts'
 import { assertRootOwned, dataRoot, installRoot, loadConfig, socketPath } from './config.ts'
 import { boundedServer, workerHandler } from './http.ts'
-import { runRelease } from './pipeline.ts'
+import { DeploymentCancelled, runRelease } from './pipeline.ts'
 import { DeploymentStore } from './store.ts'
 
 async function main() {
@@ -11,7 +11,7 @@ async function main() {
   process.umask(0o077)
   assertRootOwned(installRoot)
   for (const name of ['auth.ts', 'config.ts', 'gateway.ts', 'http.ts', 'pipeline.ts', 'store.ts', 'worker.ts']) assertRootOwned(`${installRoot}/apps/deploy-controller/src/${name}`)
-  for (const name of ['controller-package.py', 'deploy-coolify.mjs', 'deploy-pos.py', 'prepare-edge-functions.mjs', 'prepare-production-migrations.mjs', 'edge-router.ts', 'pending-migration-safety.mjs', 'check-migrations.mjs']) assertRootOwned(`${installRoot}/scripts/${name}`)
+  for (const name of ['controller-package.py', 'deploy-coolify.mjs', 'deploy-pos.py', 'telegram_migration_approval.py', 'prepare-edge-functions.mjs', 'prepare-production-migrations.mjs', 'edge-router.ts', 'pending-migration-safety.mjs', 'check-migrations.mjs']) assertRootOwned(`${installRoot}/scripts/${name}`)
   const config = loadConfig(process.env.TICKIT_DEPLOY_CONFIG)
   mkdirSync(dataRoot, { recursive: true, mode: 0o700 }); assertRootOwned(dataRoot)
   const store = new DeploymentStore(`${dataRoot}/state.sqlite`)
@@ -35,7 +35,10 @@ async function main() {
           const supported = store.admitVersions(deployment.environment, environment.coolify.SUPPORTED_APP_VERSIONS, deployment.commit, environment.retiredAppVersions)
           await runRelease(deployment, { ...environment, coolify: { ...environment.coolify, SUPPORTED_APP_VERSIONS: supported } }, state => store.transition(id, state))
           store.transition(id, 'success')
-        } catch { store.transition(id, 'failed', 'Deployment stopped; private logs and operator reconciliation required.') }
+        } catch (error) {
+          if (error instanceof DeploymentCancelled) store.transition(id, 'cancelled', 'Telegram approval was cancelled or expired; SQL was not applied.')
+          else store.transition(id, 'failed', 'Deployment stopped; private logs and operator reconciliation required.')
+        }
       }
     } finally { pumping = false }
   }

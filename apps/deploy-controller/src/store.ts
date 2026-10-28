@@ -3,9 +3,9 @@ import { randomUUID } from 'node:crypto'
 import { HttpError, shaPattern } from './auth.ts'
 import type { DeploymentRequest, Identity, Environment } from './auth.ts'
 
-export type State = 'queued' | 'preflight' | 'backing_up' | 'migrating' | 'deploying_edge' | 'deploying_application' | 'verifying' | 'success' | 'failed' | 'interrupted'
+export type State = 'queued' | 'preflight' | 'awaiting_approval' | 'backing_up' | 'migrating' | 'deploying_edge' | 'deploying_application' | 'verifying' | 'success' | 'failed' | 'interrupted' | 'cancelled'
 export type Deployment = DeploymentRequest & { id: string; status: State; run: string; created_at: number; updated_at: number; started_at: number | null; finished_at: number | null; duration_ms: number | null; error: string | null }
-const terminal = new Set<State>(['success', 'failed', 'interrupted'])
+const terminal = new Set<State>(['success', 'failed', 'interrupted', 'cancelled'])
 export class DeploymentStore {
   readonly path: string
   private readonly db: DatabaseSync
@@ -72,7 +72,7 @@ export class DeploymentStore {
   }
   claim(): Deployment | undefined {
     return this.transaction(() => {
-      const active = this.db.prepare("SELECT id FROM deployments WHERE status NOT IN ('queued','success','failed','interrupted') LIMIT 1").get()
+      const active = this.db.prepare("SELECT id FROM deployments WHERE status NOT IN ('queued','success','failed','interrupted','cancelled') LIMIT 1").get()
       if (active) return undefined
       const row = this.decode(this.db.prepare(`SELECT * FROM deployments q WHERE status='queued' AND NOT EXISTS (
         SELECT 1 FROM deployments b WHERE b.environment=q.environment AND b.status IN ('failed','interrupted') AND b.reconciled=0)
@@ -88,7 +88,7 @@ export class DeploymentStore {
       .run(status, now, now, terminal.has(status) ? now : null, error, id)
   }
   recover() {
-    this.db.prepare("UPDATE deployments SET status='interrupted', updated_at=?, finished_at=?, error='Worker interrupted; operator reconciliation required.' WHERE status NOT IN ('queued','success','failed','interrupted')").run(Date.now(), Date.now())
+    this.db.prepare("UPDATE deployments SET status='interrupted', updated_at=?, finished_at=?, error='Worker interrupted; operator reconciliation required.' WHERE status NOT IN ('queued','success','failed','interrupted','cancelled')").run(Date.now(), Date.now())
   }
   reconcile(id: string) {
     const row = this.get(id)

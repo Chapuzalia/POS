@@ -2,11 +2,35 @@ import { expect, it } from 'vitest'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { runRelease } from '../../apps/deploy-controller/src/pipeline.ts'
+import { commandRunner, DeploymentCancelled, runRelease } from '../../apps/deploy-controller/src/pipeline.ts'
 import type { Deployment } from '../../apps/deploy-controller/src/store.ts'
 const sha = 'a'.repeat(40)
 const deployment = { id: 'run-1', environment: 'staging', commit: sha } as Deployment
 const config = { enabled: true, clientId: 'id', clientSecretSha256: 'a'.repeat(64), coolify: { COOLIFY_API_TOKEN: 'private', SUPPORTED_APP_VERSIONS: 'b'.repeat(40) }, healthUrl: 'https://staging.example/app-version.json' }
+it('recognizes approval wait and cancellation only for the receiver command', async () => {
+  const phases: string[] = []
+  const run = commandRunner(() => {}, value => phases.push(value))
+  await expect(run(process.execPath, ['-e', 'console.log("POS_PHASE:awaiting_approval");process.exit(3)'], { cancellationExitCode: 3 })).rejects.toBeInstanceOf(DeploymentCancelled)
+  expect(phases).toEqual(['awaiting_approval'])
+  await expect(run(process.execPath, ['-e', 'process.exit(3)'])).rejects.not.toBeInstanceOf(DeploymentCancelled)
+})
+it('Telegram cancellation does not start Edge/frontend stages or health verification', async () => {
+  const directory = mkdtempSync(join(tmpdir(), 'tickit-pipeline-')); let frontend = false, probe = false
+  try {
+    await expect(runRelease(deployment, config, () => {}, {
+      workspace: directory,
+      command: async (_bin, args) => {
+        if (args.includes('get-url')) return 'git@github.com:Chapuzalia/POS.git'
+        if (args.includes('rev-parse')) return sha
+        if (args.some(arg => arg.endsWith('deploy-pos.py'))) throw new DeploymentCancelled('Cancelled')
+        if (args.some(arg => arg.endsWith('deploy-coolify.mjs')) && !args.includes('--check')) frontend = true
+        return ''
+      },
+      probe: async () => { probe = true },
+    })).rejects.toBeInstanceOf(DeploymentCancelled)
+    expect(frontend).toBe(false); expect(probe).toBe(false)
+  } finally { rmSync(directory, { recursive: true, force: true }) }
+})
 it('does not run previously queued jobs after an environment is disabled', async () => {
   const directory = mkdtempSync(join(tmpdir(), 'tickit-pipeline-'))
   let calls = 0

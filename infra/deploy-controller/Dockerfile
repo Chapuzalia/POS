@@ -50,7 +50,7 @@ RUN set -eu; \
     chmod 0755 /usr/bin/supabase; \
     rm /tmp/supabase.tar.gz; \
     test "$(/usr/bin/supabase --version)" = 2.121.0
-COPY --chown=0:0 --chmod=0644 scripts/controller-package.py scripts/start-deploy-worker.py \
+COPY --chown=0:0 --chmod=0644 scripts/controller-package.py scripts/start-deploy-worker.py scripts/telegram_migration_approval.py \
     scripts/deploy-pos.py scripts/deploy-backup-retention.py scripts/deploy-coolify.mjs \
     scripts/prepare-production-migrations.mjs scripts/prepare-edge-functions.mjs \
     scripts/edge-router.ts scripts/pending-migration-safety.mjs scripts/check-migrations.mjs ./scripts/

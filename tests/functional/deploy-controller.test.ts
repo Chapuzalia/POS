@@ -175,6 +175,18 @@ it('gateway forwards only controller credentials and OIDC over its local socket 
 })
 
 describe('durable deployments', () => {
+  it('keeps awaiting approval active and cancellation releases the queue without reconciliation', () => {
+    const db = store()
+    const first = db.enqueue(payload, identity)
+    const second = db.enqueue({ ...payload, request_id: 'request-2' }, { ...identity, jti: 'token-2' })
+    db.claim()
+    db.transition(first.id, 'awaiting_approval')
+    expect(db.claim()).toBeUndefined()
+    db.transition(first.id, 'cancelled')
+    db.recover()
+    expect(db.get(first.id)?.status).toBe('cancelled')
+    expect(db.claim()?.id).toBe(second.id)
+  })
   it('retains admitted PWA versions across A to B to C until explicit retirement', () => {
     const db = store(), a = 'a'.repeat(40), b = 'b'.repeat(40), c = 'c'.repeat(40)
     expect(db.admitVersions('staging', a, b)).toBe(`${a},${b}`)
