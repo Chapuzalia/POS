@@ -7,8 +7,7 @@ import { formatMoney } from '../../lib/format'
 import type { ProductLineSelection } from '../../types'
 import { MenuEntryMode } from '../pos/MenuEntryMode'
 import { MenuBatchOptionCard } from './MenuBatchOptionCard'
-import { Button, Input } from '../ui'
-import { MenuDialogLayout } from './MenuDialogLayout'
+import { Button, Input, MenuDialogLayout } from '../ui'
 
 type Props = {
   catalog: CatalogData

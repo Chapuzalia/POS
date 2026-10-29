@@ -1,7 +1,8 @@
 import { X } from 'lucide-react'
 import type { ReactNode, Ref } from 'react'
 import { formatMoney } from '../../lib/format'
-import { AppModal, Button } from '../ui'
+import { AppModal } from './AppModal'
+import { Button } from './Button'
 
 type Props = {
   children: ReactNode

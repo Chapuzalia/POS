@@ -26,7 +26,6 @@ const modules = {
   '../../features/restaurant/services/menuBatch': menuBatch,
   '../pos/MenuEntryMode': { MenuEntryMode: empty },
   './MenuBatchDialog': { MenuBatchDialog: empty },
-  './MenuDialogLayout': { MenuDialogLayout: empty },
 }
 const text = (node: unknown): string => {
   if (node == null) return ''

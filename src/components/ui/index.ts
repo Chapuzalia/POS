@@ -1,5 +1,6 @@
 export { Checkbox } from './Checkbox'
 export { AppModal } from './AppModal'
+export { MenuDialogLayout } from './MenuDialogLayout'
 export { Button } from './Button'
 export { Chip } from './Chip'
 export { Metric } from './Metric'

@@ -14,13 +14,12 @@ import type { AddCatalogLine } from "../../features/quick-sale/hooks/useQuickSal
 import { formatMoney } from "../../lib/format";
 import type { ProductLineSelection, TicketLineModifier } from "../../types";
 import { cx } from "../../utils/cx";
-import { AppModal, Button } from "../ui";
+import { AppModal, Button, MenuDialogLayout } from "../ui";
 import { PosMixerCard } from "../pos/PosMixerCard";
 import { reconcileMenuEdit } from "../../features/restaurant/services/menuCourses";
 import { createMenuBatchDraft, type MenuBatchDraft } from "../../features/restaurant/services/menuBatch";
 import { MenuEntryMode } from "../pos/MenuEntryMode";
 import { MenuBatchDialog } from "./MenuBatchDialog";
-import { MenuDialogLayout } from "./MenuDialogLayout";
 
 type ProductDialogProps = {
   allowDeferredMenu?: boolean;
