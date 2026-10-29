@@ -29,6 +29,7 @@ import { getMenuComponentSearchText } from '../../../components/pos/menuComponen
 
 type PendingPayment = {
   method: PaymentMethod | null
+  customCashCents?: number
   receivedCents: number | null
   pendingUnits: number
   discount: AppliedDiscount | null
@@ -50,6 +51,7 @@ type Props = {
     receivedCents: number | null,
     allowPending: boolean,
     discount: AppliedDiscount | null,
+    customCashCents?: number,
   ) => Promise<PayRestaurantOrderItemsResult>
   order: RestaurantOrderDetail
   venueId: string
@@ -126,6 +128,7 @@ export function SplitOrderModal({
     receivedCents: number | null,
     allowPending = false,
     paymentDiscount = currentDiscount,
+    customCashCents?: number,
   ) {
     if (moves.length === 0 || paying) return
 
@@ -139,6 +142,7 @@ export function SplitOrderModal({
         receivedCents,
         allowPending,
         paymentDiscount,
+        customCashCents,
       )
 
       if (result.requiresConfirmation) {
@@ -147,6 +151,7 @@ export function SplitOrderModal({
           receivedCents,
           pendingUnits: result.pendingUnits,
           discount: paymentDiscount,
+          customCashCents,
         })
         return
       }
@@ -390,6 +395,7 @@ export function SplitOrderModal({
             </div>
 
             <PaymentPanel
+              onCustomPayment={(cashCents) => void completePayment('card', null, false, currentDiscount, cashCents)}
               discount={currentDiscount}
               disabled={isBusy || paying}
               feedback={feedback}
@@ -485,6 +491,7 @@ export function SplitOrderModal({
                   pendingPayment.receivedCents,
                   true,
                   pendingPayment.discount,
+                  pendingPayment.customCashCents,
                 )}
                 type="button"
               >

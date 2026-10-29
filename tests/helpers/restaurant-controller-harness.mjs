@@ -1,3 +1,4 @@
+import * as customPayments from '../../src/lib/customPayments.ts'
 import { readFile } from 'node:fs/promises'
 
 import { compileComponent, createCompiledHookRunner } from './component-harness.mjs'
@@ -151,6 +152,7 @@ export function createRestaurantControllerHarness({
   const operations = new Map()
   const paymentService = compileComponent(paymentSource, {
     './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
+    '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': {
       paymentScope: () => 'scope', withPaymentLock: (_key, work) => work(),

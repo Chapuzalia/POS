@@ -1,3 +1,4 @@
+import * as customPayments from '../src/lib/customPayments.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -107,6 +108,7 @@ function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssu
     '../../../utils/errors.ts': { getReadableError: (error) => error?.message ?? String(error) },
     '../../../lib/format': { createId: () => 'event-1' },
     '../../../lib/durableSales.ts': createDurableSalesHarness(enqueue => calls.push(enqueue ? 'persist' : 'persistFiscal')),
+    '../../../lib/customPayments': customPayments,
     '../services/salePayload': { buildSalePayload: (...args) => buildQuickSalePayload(...args) },
     '../../fiscal/service': { loadFiscalReceiptData: async () => { calls.push('fiscal'); return { status: 'accepted', verificationUrl: 'https://verify.local' } } },
     '../../customers/service': { loadTicketInvoice: async () => null },

@@ -8,6 +8,7 @@ import { issueRestaurantInvoice } from '../../fiscal/local/restaurantInvoice.ts'
 import { payRestaurantIdempotent } from '../../tables/service.ts'
 import { withConfirmedRestaurantPayments } from './paymentPayload.ts'
 import { prepareRestaurantCheckout, releaseRestaurantCheckout, startRestaurantCheckout } from './checkout.ts'
+import { getPayloadPayments, withCustomPayments } from '../../../lib/customPayments'
 
 type Input = {
   context: TenantContext
@@ -55,17 +56,23 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
     const checkoutParams: Record<string, unknown> = { ...input.params, cashSessionId: session.id }
     const { allowPending: _allowPending, receivedCents: _received, ...economicParams } = checkoutParams
     const pending = await loadPaymentOperation(key)
+    const customCashCents = input.params.customCashCents
+    const draft = typeof customCashCents === 'number' ? withCustomPayments(input.draft, customCashCents,
+      input.params.singleTicket === true ? Number(input.params.amountCents) : input.draft.sale.totalCents) : input.draft
     const savedMode = pending && ['accepted', 'charging', 'committed'].includes(pending.state) ? pending.params?.fiscalMode : undefined
     let production = savedMode === 'verifactu' || (savedMode !== 'legacy' && await resolveLocalFiscalMode(context.tenantId) !== 'disabled')
     let operation = pending && (pending.state === 'accepted' || pending.state === 'charging' || (pending.state === 'prepared' && pending.checkoutReserved)
       || (input.recovery && pending.state === 'committed')) ? pending
       : await preparePaymentOperation(key, JSON.stringify({ params: economicParams, sequence: input.sequence,
           lines: input.draft.lines.map(({ id: _id, ticketId: _ticketId, ...line }) => line), totalCents: input.draft.sale.totalCents,
-          fiscalMode: production ? 'verifactu' : 'legacy' }), input.draft, { ...checkoutParams, fiscalMode: production ? 'verifactu' : 'legacy' })
+          fiscalMode: production ? 'verifactu' : 'legacy' }), draft, { ...checkoutParams, fiscalMode: production ? 'verifactu' : 'legacy' })
     let payload = operation.payload
     const singleTicket = operation.params?.singleTicket === true
     const intermediatePart = singleTicket && operation.params?.finalPart !== true
     const settlementCents = singleTicket ? Number(operation.params?.amountCents) : payload.sale.totalCents
+    const cashPayment = getPayloadPayments(payload).find(payment => payment.method === 'cash')
+      ?? (payload.sale.paymentMethod === 'cash' ? payload.payment : null)
+    const cashAmountCents = cashPayment?.amountCents ?? settlementCents
     if (operation.state === 'committed' && operation.result) return {
       result: operation.result as T, payload, transaction: operation.cashlogy,
       receivedCents: payload.payment?.receivedCents ?? null, changeCents: payload.payment?.changeCents ?? null,
@@ -96,15 +103,21 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
     let transaction = operation.cashlogy
     await startRestaurantCheckout(context, operation.eventId)
     if (operation.state !== 'accepted') {
-      if (payload.sale.paymentMethod === 'cash') {
+      if (cashPayment) {
         const recovery = operation.state === 'charging'
         if (!recovery && isCashlogyPaymentConfigured()) operation = await markPaymentCharging(operation)
-        transaction = input.confirmedCashlogy ?? await settleCashlogyPaymentIfConfigured(settlementCents,
+        transaction = input.confirmedCashlogy ?? await settleCashlogyPaymentIfConfigured(cashAmountCents,
           payload.sale.id, operation.cashlogyRequestId ?? `cashlogy:sale:${payload.sale.id}`, recovery, operation.key)
-        if (transaction && (transaction.requestedAmountCents !== settlementCents || (transaction.saleId && transaction.saleId !== payload.sale.id))) {
+        if (transaction && (transaction.requestedAmountCents !== cashAmountCents || (transaction.saleId && transaction.saleId !== payload.sale.id))) {
           throw new Error('El cobro Cashlogy no coincide con la operación original.')
         }
-        const amounts = getCashlogyPaymentAmounts(transaction, settlementCents)
+        const amounts = getCashlogyPaymentAmounts(transaction, cashAmountCents)
+        if (transaction && payload.payments) {
+          const confirmed = transaction
+          payload = { ...payload, payments: payload.payments.map(payment => payment.method === 'cash'
+            ? { ...payment, receivedCents: amounts.receivedCents, changeCents: amounts.changeCents ?? 0,
+                cashlogyRequestId: confirmed.requestId, cashlogyTransactionId: confirmed.id } : payment) }
+        }
         if (transaction && payload.payment) payload = { ...payload, payment: { ...payload.payment,
           receivedCents: amounts.receivedCents, changeCents: amounts.changeCents ?? 0,
           cashlogyRequestId: transaction.requestId, cashlogyTransactionId: transaction.id } }
@@ -112,6 +125,7 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
       operation = await acceptPaymentOperation(operation, payload, transaction)
     }
     const params = { ...originalParams, receivedCents: payload.payment?.receivedCents ?? null,
+      ...(typeof operation.params?.customCashCents === 'number' ? { customCashReceivedCents: getPayloadPayments(payload).find(payment => payment.method === 'cash')?.receivedCents } : {}),
       cashlogyRequestId: transaction?.requestId ?? null, cashlogyTransactionId: transaction?.id ?? null }
     let legacyResult: Record<string, unknown> | null = null
     if (!production || intermediatePart) {

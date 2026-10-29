@@ -1,3 +1,4 @@
+import * as customPayments from '../src/lib/customPayments.ts'
 import { UserFacingError } from '../src/utils/UserFacingError.ts'
 import { createDurableSalesHarness } from './helpers/durable-sales-harness.mjs'
 import * as observability from '../src/lib/observability.ts'
@@ -196,7 +197,7 @@ test('4 y 7: venta offline en la caja existente, validar → lease → sincroniz
   const pay = load('features/quick-sale/hooks/useQuickSalePayment', {
     '../../../lib/durableSales.ts': h.durable,
     react: paymentRunner.react, '../../../lib/offlineStore': h.store,
-    '../../../lib/format': { createId: () => crypto.randomUUID() }, '../services/salePayload': { buildSalePayload },
+    '../../../lib/format': { createId: () => crypto.randomUUID() }, '../../../lib/customPayments': customPayments, '../services/salePayload': { buildSalePayload },
     '../../local-printing/cashlogy/useCashlogyStore': { getCashlogyPaymentAmounts: () => ({}), finishCashlogyPayment() {} },
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },

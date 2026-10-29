@@ -384,7 +384,7 @@ export function PosPage(props: Props) {
     try { await action() }
     finally { setPaymentProgress((current) => current === progress ? null : current) }
   }
-  const handlePayment = (method: PaymentMethod | null) => {
+  const handlePayment = (method: PaymentMethod | null, customCashCents?: number) => {
     if (cashlogyPaymentLocked && method === 'cash' && cashlogyEnabled && cashlogyConfigured) {
       showCashlogyPayment()
       return
@@ -393,7 +393,7 @@ export function PosPage(props: Props) {
       props.onSetError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
       return
     }
-    if (restaurant.posView.type === 'table_order' && restaurant.requestPendingPaymentConfirmation(method, null)) return
+    if (restaurant.posView.type === 'table_order' && restaurant.requestPendingPaymentConfirmation(method, null, customCashCents)) return
     if (method === 'cash') {
       if (cashlogyEnabled && cashlogyConfigured) {
         if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', null))
@@ -403,8 +403,8 @@ export function PosPage(props: Props) {
       quickSale.openCashPayment()
       return
     }
-    if (restaurant.posView.type === 'table_order') void showPaymentProgress(method, () => restaurant.completePayment(method, null))
-    else void showPaymentProgress(method, () => quickSale.completePayment(method, null))
+    if (restaurant.posView.type === 'table_order') void showPaymentProgress(method, () => restaurant.completePayment(method, null, false, null, customCashCents))
+    else void showPaymentProgress(method, () => quickSale.completePayment(method, null, null, undefined, customCashCents))
   }
 
   const requestReturnFromQuickSale = () => {
@@ -601,6 +601,7 @@ export function PosPage(props: Props) {
             heading={undefined}
             onOpenDiscount={quickSale.openDiscountModal}
             onPayment={handlePayment}
+            onCustomPayment={(cashCents) => handlePayment('card', cashCents)}
             onRemoveDiscount={quickSale.removeDiscount}
             subtotalCents={subtotalCents}
             totalCents={totalCents}
@@ -642,6 +643,7 @@ export function PosPage(props: Props) {
               heading={undefined}
               onOpenDiscount={quickSale.openDiscountModal}
               onPayment={handlePayment}
+              onCustomPayment={(cashCents) => handlePayment('card', cashCents)}
               onRemoveDiscount={quickSale.removeDiscount}
               subtotalCents={subtotalCents}
               totalCents={totalCents}
@@ -672,7 +674,7 @@ export function PosPage(props: Props) {
                 quickSale.openCashPayment()
                 return
               }
-              if (payment) void showPaymentProgress(payment.method, () => restaurant.completePayment(payment.method, payment.receivedCents, true))
+              if (payment) void showPaymentProgress(payment.method, () => restaurant.completePayment(payment.method, payment.receivedCents, true, null, payment.customCashCents))
             }} type="button">Cobrar igualmente</UiButton>
           </div>
         </section>

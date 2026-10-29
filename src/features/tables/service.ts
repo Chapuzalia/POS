@@ -360,11 +360,17 @@ function mapEqualSplit(value: unknown): RestaurantEqualSplit {
     id: String(row.id), orderId: String(read('orderId', 'order_id')), orderGroupId: String(read('orderGroupId', 'order_group_id')),
     totalCents, partCount, paidParts, paidCents,
     singleTicket: Boolean(read('singleTicket', 'single_ticket')),
-    tenders: ((row.tenders ?? []) as Array<Record<string, unknown>>).map((tender) => ({
+    tenders: ((row.tenders ?? []) as Array<Record<string, unknown>>).flatMap((tender) => Array.isArray(tender.custom_payments)
+      ? (tender.custom_payments as Array<Record<string, unknown>>).map((payment, index) => ({
+          id: String(payment.id), partNumber: Number(tender.part_number), method: payment.method as PaymentMethod,
+          amountCents: Number(payment.amountCents), discountAmountCents: index === 0 ? Number(tender.discount_amount_cents) : 0,
+          receivedCents: payment.receivedCents === null ? null : Number(payment.receivedCents), changeCents: Number(payment.changeCents),
+        }))
+      : [{
       id: String(tender.id), partNumber: Number(tender.part_number), method: tender.method as PaymentMethod | null,
       amountCents: Number(tender.amount_cents), discountAmountCents: Number(tender.discount_amount_cents),
       receivedCents: tender.received_cents === null ? null : Number(tender.received_cents), changeCents: Number(tender.change_cents),
-    })),
+    }]),
     remainingParts: Number(read('remainingParts', 'remaining_parts') ?? partCount - paidParts),
     remainingCents: Number(read('remainingCents', 'remaining_cents') ?? totalCents - paidCents),
     nextPartCents: Number(read('nextPartCents', 'next_part_cents') ?? nextPartCents),

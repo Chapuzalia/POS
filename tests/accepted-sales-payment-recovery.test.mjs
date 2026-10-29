@@ -1,3 +1,4 @@
+import * as customPayments from '../src/lib/customPayments.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
@@ -29,6 +30,7 @@ test('a lost checkout-reservation response recovers the original prepared operat
   setup()
   const operations = [],phases = []
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
+    '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     './checkout.ts': {
       prepareRestaurantCheckout: async (_context,id,_action,params) => {
@@ -122,6 +124,7 @@ test('invalid VAT/identity fails before Cashlogy; a corrected preflight can safe
   let charges = 0, preflights = 0
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
     './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
+    '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': { settleCashlogyPaymentIfConfigured: async () => { charges++; throw new Error('Reached hardware') } },
@@ -153,6 +156,7 @@ for (const state of ['accepted', 'restarted']) test(`opening a session restores 
     '../../../lib/observability.ts': { reportOperationError() {}, operationBreadcrumb() {} },
     '../../../utils/errors.ts': { getReadableError: error => error.message },
     '../../../services/posService': {},
+    '../../../lib/customPayments': customPayments,
     '../services/salePayload': { buildSalePayload: () => { drafts++; throw new Error('New sale') } },
     '../../customers/service': {},
     '../../local-printing/cashlogy/useCashlogyStore': {

@@ -1,3 +1,4 @@
+import * as customPayments from '../src/lib/customPayments.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
@@ -53,6 +54,7 @@ function harness({ saleId = null, lines = [{ quantity: 1 }], intentPatch = {}, b
       discardPreparedPaymentOperation: async () => { operation = undefined },
       commitPaymentOperation: async (current, payload) => { operation = { ...current, payload, state: 'committed' }; calls.events.push({ payload }) },
     },
+    '../../../lib/customPayments': customPayments,
     '../services/salePayload': { buildSalePayload: (_context, _session, _lines, _method, _received, _discount, _customer, identity) => ({
       sale: { id: identity?.saleId ?? 'new-sale', totalCents: 600, createdAt: 'now', paymentMethod: _method }, ticket: { id: 'ticket' }, payment: {},
     }) },

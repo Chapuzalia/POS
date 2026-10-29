@@ -95,6 +95,7 @@ async function loadTicketNumberForPrint(context: TenantContext, cashSession: Cas
 
 type PendingPayment = {
   method: PaymentMethod | null
+  customCashCents?: number
   receivedCents: number | null
   pendingUnits: number
   cashlogyTransaction?: CashlogyTransaction | null
@@ -601,6 +602,7 @@ export function useRestaurantController(options: Options) {
     allowPending: boolean,
     discount: AppliedDiscount | null,
     useDefaultDiscount: boolean,
+    customCashCents?: number,
   ): Promise<PayRestaurantEqualPartResult> => {
     assertRealSaleAllowed()
     const current = draft.getCurrentOrder()
@@ -648,7 +650,7 @@ export function useRestaurantController(options: Options) {
       const payment = await payRestaurantSale<PayRestaurantEqualPartResult>({
         context: options.context, session: options.cashSession, action: 'equal_part', target: equalSplit.id, sequence: equalSplit.paidParts,
         draft: paymentDraft,
-        params: { splitId: equalSplit.id, expectedPaidParts: equalSplit.paidParts, method, receivedCents, allowPending,
+        params: { splitId: equalSplit.id, expectedPaidParts: equalSplit.paidParts, method, receivedCents, allowPending, customCashCents,
           ...(singleTicket ? { singleTicket, finalPart, amountCents } : {}),
           discount: withCalculationLines(discount, paymentLines), useDefaultDiscount },
       })
@@ -657,7 +659,7 @@ export function useRestaurantController(options: Options) {
       const cashlogy = payment
       const prepared = { payload: payment.payload }
       const production = Boolean(payment.payload?.localFiscal)
-      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + (result.saleId ?? `${equalSplit.id}:${equalSplit.paidParts}`) + ':payment', payments: [{ method, amountCents }] })
+      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + (result.saleId ?? `${equalSplit.id}:${equalSplit.paidParts}`) + ':payment', payments: [{ method: customCashCents === undefined ? method : 'cash', amountCents: customCashCents ?? amountCents }] })
       setEqualSplit(result.split)
       if (!result.requiresConfirmation) {
         if (singleTicket && !result.completed) {
@@ -727,6 +729,7 @@ export function useRestaurantController(options: Options) {
     receivedCents: number | null,
     allowPending: boolean,
     discount: AppliedDiscount | null,
+    customCashCents?: number,
   ): Promise<PayRestaurantOrderItemsResult> => {
     assertRealSaleAllowed()
     const current = draft.getCurrentOrder()
@@ -755,7 +758,7 @@ export function useRestaurantController(options: Options) {
           receivedCents, changeCents: null, saleId: createId(), subtotalCents: getRestaurantPrintSubtotal(paymentLines),
           ticketId: createId(), totalCents: amountCents }),
         params: { orderId: saved.order.id, expectedRevision: saved.order.revision,
-          moves: moves.map(move => ({ lineId: move.lineId, quantity: move.quantity })), method, receivedCents, allowPending,
+          moves: moves.map(move => ({ lineId: move.lineId, quantity: move.quantity })), method, receivedCents, allowPending, customCashCents,
           discount: withCalculationLines(discount, paymentLines) },
       })
       const result = payment.result
@@ -763,7 +766,7 @@ export function useRestaurantController(options: Options) {
       const cashlogy = payment
       const prepared = { payload: payment.payload }
       const production = Boolean(payment.payload?.localFiscal)
-      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + result.saleId + ':payment', payments: [{ method, amountCents }] })
+      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + result.saleId + ':payment', payments: [{ method: customCashCents === undefined ? method : 'cash', amountCents: customCashCents ?? amountCents }] })
       if (!result.requiresConfirmation) {
         if (production && !prepared?.payload) throw new Error('Falta la factura fiscal del cobro confirmado.')
         finishCashlogyPayment(cashlogy.transaction)
@@ -891,12 +894,12 @@ export function useRestaurantController(options: Options) {
     setSplitOrderGroup(null)
   }, [draft, options, splitOrderGroup])
 
-  const requestPendingPaymentConfirmation = useCallback((method: PaymentMethod | null, receivedCents: number | null) => {
+  const requestPendingPaymentConfirmation = useCallback((method: PaymentMethod | null, receivedCents: number | null, customCashCents?: number) => {
     const currentOrder = draft.getCurrentOrder()
     if (!options.context?.canTakePayments || !options.cashSession || !options.isOnline || paymentLockRef.current || !currentOrder) return false
     const pendingUnits = getOrderPendingUnits(currentOrder.lines)
     if (pendingUnits <= 0) return false
-    setPendingPayment({ method, receivedCents, pendingUnits })
+    setPendingPayment({ method, receivedCents, pendingUnits, customCashCents })
     return true
   }, [draft, options.context, options.cashSession, options.isOnline])
 
@@ -905,6 +908,7 @@ export function useRestaurantController(options: Options) {
     receivedCents: number | null,
     forceWithPending = false,
     confirmedCashlogyTransaction: CashlogyTransaction | null = null,
+    customCashCents?: number,
   ) => {
     const context = options.context
     const cashSession = options.cashSession
@@ -915,7 +919,7 @@ export function useRestaurantController(options: Options) {
       return
     }
     if (!context?.canTakePayments || !cashSession || !draft.getCurrentOrder() || !options.isOnline || paymentLockRef.current) return
-    if (!forceWithPending && requestPendingPaymentConfirmation(method, receivedCents)) return
+    if (!forceWithPending && requestPendingPaymentConfirmation(method, receivedCents, customCashCents)) return
     paymentLockRef.current = true
     options.setBusy(true)
     options.onError(null)
@@ -927,7 +931,7 @@ export function useRestaurantController(options: Options) {
         const pendingCheck = await loadRestaurantOrderPendingUnits(context, saved.order.id)
         draft.replaceOrder(pendingCheck.detail)
         if (pendingCheck.pendingUnits > 0) {
-          setPendingPayment({ method, receivedCents, pendingUnits: pendingCheck.pendingUnits })
+          setPendingPayment({ method, receivedCents, pendingUnits: pendingCheck.pendingUnits, customCashCents })
           return
         }
       }
@@ -944,7 +948,7 @@ export function useRestaurantController(options: Options) {
           ticketId: createId(), totalCents: amountCents,
           invoice: invoiceCustomer ? { customerId: invoiceCustomer.id, customer: customerFiscalSnapshot(invoiceCustomer),
             series: null, number: null, issuedAt: null } : null }),
-        params: { orderId: saved.order.id, expectedRevision: saved.order.revision, method, receivedCents, allowPending: forceWithPending,
+        params: { orderId: saved.order.id, expectedRevision: saved.order.revision, method, receivedCents, customCashCents, allowPending: forceWithPending,
           discount: withCalculationLines(options.appliedDiscount, saved.lines), customerId: invoiceCustomer?.id ?? null,
           customerSnapshot: invoiceCustomer ? customerFiscalSnapshot(invoiceCustomer) : null },
       })
@@ -952,9 +956,9 @@ export function useRestaurantController(options: Options) {
       const cashlogy = payment
       const prepared = { payload: payment.payload }
       const production = Boolean(payment.payload?.localFiscal)
-      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + result.saleId + ':payment', payments: [{ method, amountCents }] })
+      const cashDrawerAlreadyRequested = !result.requiresConfirmation && requestEarlyCashDrawer({ requestId: 'drawer:' + result.saleId + ':payment', payments: [{ method: customCashCents === undefined ? method : 'cash', amountCents: customCashCents ?? amountCents }] })
       if (result.requiresConfirmation) {
-        setPendingPayment({ method, receivedCents: cashlogy.receivedCents, pendingUnits: result.pendingUnits, cashlogyTransaction: cashlogy.transaction, cashDrawerAlreadyRequested })
+        setPendingPayment({ method, receivedCents: cashlogy.receivedCents, customCashCents, pendingUnits: result.pendingUnits, cashlogyTransaction: cashlogy.transaction, cashDrawerAlreadyRequested })
         return
       }
       economicCommitted = true
