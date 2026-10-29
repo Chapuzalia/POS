@@ -7,6 +7,7 @@ import { addMenuBatchChoice, addMenuBatchPreparation, getMenuBatchChoiceCapacity
 import { formatMoney } from '../../lib/format'
 import type { TicketLineModifier } from '../../types'
 import { Button } from '../ui/Button'
+import { MenuOptionCard } from '../pos/MenuOptionCard'
 
 type Props = {
   catalog: CatalogData
@@ -72,19 +73,15 @@ export function MenuBatchOptionCard({ catalog, draft, group, option, disabled, c
     } catch (failure) { setError(failure instanceof Error ? failure.message : 'No se ha guardado la preparación.') }
   }
 
-  return <article aria-label={`Plato ${option.product.name}`} className={`min-w-0 self-start overflow-hidden rounded-[12px] border ${quantity || configuring ? 'border-[var(--accent)]' : 'border-[var(--separator)]'} bg-[var(--background)]`}>
-    <div className={`flex items-center gap-1 p-2 ${quantity ? 'bg-[var(--accent-soft)]/40' : ''}`}>
-      <button aria-label={`Pedir ${option.product.name}`} className="min-h-14 min-w-0 flex-1 cursor-pointer rounded-[8px] px-2 py-1 text-left disabled:cursor-default" disabled={cardDisabled || full} onClick={request} type="button">
-        <strong className="block text-sm">{option.product.name}</strong><span className="text-xs text-[var(--muted)]">{option.variant.name}{option.supplementCents ? ` · +${formatMoney(option.supplementCents)}` : ''}</span>
-        {hasModifiers ? <span className="block text-xs font-semibold text-[var(--accent)]">Elegir preparación</span> : null}
-      </button>
-      <div className="flex shrink-0 items-center">
+  return <MenuOptionCard name={option.product.name} variantName={option.variant.name} supplementCents={option.supplementCents}
+    selected={quantity > 0 || configuring} disabled={cardDisabled || full} hasModifiers={hasModifiers} onSelect={request}
+    controls={<>
         {!hasModifiers ? <Button aria-label={`Quitar una ración de ${option.product.name}`} className="!size-11 !min-h-11 !min-w-11 !p-0" disabled={cardDisabled || quantity === 0}
           onClick={() => onChange(removeMenuBatchChoice(draft, group.group.id, option.id))} type="button" variant="tertiary"><Minus aria-hidden="true" className="h-4 w-4" /></Button> : null}
         <output aria-label={`Raciones de ${option.product.name}`} className="min-w-6 text-center font-mono text-lg font-bold tabular-nums">{quantity}</output>
         <Button aria-label={hasModifiers ? `Añadir preparación de ${option.product.name}` : `Añadir una ración de ${option.product.name}`} className="!size-11 !min-h-11 !min-w-11 !p-0" disabled={cardDisabled || full} onClick={request} type="button" variant="tertiary"><Plus aria-hidden="true" className="h-4 w-4" /></Button>
-      </div>
-    </div>
+    </>}
+  >
 
     {hasModifiers && preparations.length ? <div className="divide-y divide-[var(--separator)] border-t border-[var(--separator)] bg-[var(--surface)] px-3">
       {preparations.map((preparation) => {
@@ -126,5 +123,5 @@ export function MenuBatchOptionCard({ catalog, draft, group, option, disabled, c
       <div className="flex gap-2"><Button className="!min-h-11 !px-3" disabled={disabled} onClick={close} type="button" variant="tertiary">Cancelar</Button>
         <Button className="!min-h-11 flex-1 !px-3 !font-bold" disabled={disabled || !valid || amount < 1} onClick={confirm} type="button" variant="primary">{editor.previous ? 'Guardar preparación' : `Añadir ${amount} ${amount === 1 ? 'ración' : 'raciones'}`}</Button></div>
     </div> : null}
-  </article>
+  </MenuOptionCard>
 }

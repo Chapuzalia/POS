@@ -18,7 +18,8 @@ import { AppModal, Button, MenuDialogLayout } from "../ui";
 import { PosMixerCard } from "../pos/PosMixerCard";
 import { reconcileMenuEdit } from "../../features/restaurant/services/menuCourses";
 import { createMenuBatchDraft, type MenuBatchDraft } from "../../features/restaurant/services/menuBatch";
-import { MenuEntryMode } from "../pos/MenuEntryMode";
+import { MenuCountControl } from "../pos/MenuCountControl";
+import { MenuOptionCard } from "../pos/MenuOptionCard";
 import { MenuBatchDialog } from "./MenuBatchDialog";
 
 type ProductDialogProps = {
@@ -32,7 +33,6 @@ type ProductDialogProps = {
   item: ResolvedCatalogItem;
   onAdd: AddCatalogLine;
   onAddMenus?: (sellable: ResolvedSellableProduct, selections: ProductLineSelection[], item: ResolvedCatalogItem, sourceElement?: HTMLElement | null) => boolean;
-  suggestedMenuCount?: number;
   onCancel: () => void;
 };
 
@@ -236,7 +236,6 @@ export function ProductDialog({
   item,
   onAdd,
   onAddMenus,
-  suggestedMenuCount = 2,
   onCancel,
 }: ProductDialogProps) {
   const variants = useMemo(
@@ -286,7 +285,6 @@ export function ProductDialog({
     !startsWithVariantSelection,
   );
   const [hasSubmitted, setHasSubmitted] = useState(false);
-  const [menuEntryMode, setMenuEntryMode] = useState<'individual' | 'courses'>('individual');
   const [menuBatch, setMenuBatch] = useState<MenuBatchDraft | null>(null);
   const submittedRef = useRef(false);
   const dialogRef = useRef<HTMLElement>(null);
@@ -610,21 +608,19 @@ export function ProductDialog({
 
   const canOrderByCourses = Boolean(onAddMenus && allowDeferredMenu && !initialSelection && !isChoosingVariant && menuAssignments.length && selectedSellable.product.type === 'menu');
 
-  function enterBatchMode() {
-    setMenuBatch((current) => current ? { ...current, selections: [selection, ...current.selections.slice(1)] }
-      : createMenuBatchDraft(selection, suggestedMenuCount > 1 ? suggestedMenuCount : 2));
-    setMenuEntryMode('courses');
+  function changeMenuBatch(draft: MenuBatchDraft) {
+    setMenuBatch(draft);
+    if (draft.selections.length === 1) {
+      const first = draft.selections[0];
+      const quantities = initialQuantities(selectedSellable, first);
+      setSelectedQuantities(quantities);
+      setSelectedModifiers(initialModifiers(selectedSellable.modifierGroups, first.modifiers));
+      setSelectedComponentModifiers(initialComponentModifiers(catalog, selectedSellable, quantities, first));
+    }
   }
 
-  if (canOrderByCourses && menuEntryMode === 'courses' && menuBatch && onAddMenus) return <MenuBatchDialog catalog={catalog} item={item} sellable={selectedSellable}
-    draft={menuBatch} disabled={isBusy || hasSubmitted} onChange={setMenuBatch} onCancel={onCancel}
-    onIndividual={() => {
-      const first = menuBatch.selections[0];
-      setSelectedQuantities(initialQuantities(selectedSellable, first));
-      setSelectedModifiers(initialModifiers(selectedSellable.modifierGroups, first.modifiers));
-      setSelectedComponentModifiers(initialComponentModifiers(catalog, selectedSellable, initialQuantities(selectedSellable, first), first));
-      setMenuEntryMode('individual');
-    }}
+  if (canOrderByCourses && menuBatch && menuBatch.selections.length >= 2 && onAddMenus) return <MenuBatchDialog catalog={catalog} item={item} sellable={selectedSellable}
+    draft={menuBatch} disabled={isBusy || hasSubmitted} onChange={changeMenuBatch} onCancel={onCancel}
     onAdd={(selections, sourceElement) => onAddMenus(selectedSellable, selections, item, sourceElement)}
     renderEditor={(menuSelection, onSave, onClose) => <ProductDialog allowDeferredMenu allowVariantSelection={false} catalog={catalog} item={item}
       initialVariantId={selectedVariantId} initialSelection={menuSelection} isBusy={isBusy} onAdd={(_sellable, edited) => { onSave(edited); return true }} onCancel={onClose} />} />;
@@ -741,22 +737,14 @@ export function ProductDialog({
         ) : null}
 
         {!isChoosingVariant && menuAssignments.length ? (
-          <div className="mt-5 grid gap-5 lg:grid-cols-[minmax(0,1fr)_280px]">
-            <div className="space-y-4">
-              <div className="flex flex-wrap gap-2" aria-label="Progreso del menú">
-                {groupProgress.map((group, index) => (
-                  <span className={cx("rounded-full px-3 py-1 text-xs font-bold", group.complete ? "bg-[var(--success-soft)] text-[var(--success)]" : "bg-[var(--warning-soft)] text-[var(--warning)]")} key={group.id}>
-                    {index + 1}. {group.label} · {group.selected}/{group.maximum}
-                  </span>
-                ))}
-              </div>
+          <div className="space-y-5">
               {menuAssignments.map((group) => (
-              <div key={group.group.id}>
-                <div className="mb-2 flex items-center justify-between gap-3">
-                  <p className="text-base font-bold text-[var(--foreground)]">{group.assignment.displayName ?? group.group.name}</p>
-                  <span className="text-xs font-semibold text-[var(--muted)]">Elige {group.assignment.minSelection === group.assignment.maxSelection ? group.assignment.minSelection : `${group.assignment.minSelection}–${group.assignment.maxSelection}`}</span>
+              <section aria-label={`Elegir ${group.assignment.displayName ?? group.group.name}`} key={group.group.id}>
+                <div className="mb-3">
+                  <h3 className="text-lg font-bold">{group.assignment.displayName ?? group.group.name}</h3>
+                  <p className="text-sm text-[var(--muted)]">Elige {group.assignment.minSelection === group.assignment.maxSelection ? group.assignment.minSelection : `${group.assignment.minSelection}–${group.assignment.maxSelection}`} {group.assignment.maxSelection === 1 ? 'plato' : 'platos'}{allowDeferredMenu ? '. Puedes dejar elecciones para después.' : '.'}</p>
                 </div>
-                <div className="grid gap-2 sm:grid-cols-2">
+                <div className="grid items-start gap-2 sm:grid-cols-2">
                   {group.options.map((option) => {
                     const quantity =
                       selectedQuantities[group.group.id]?.[option.id] ?? 0;
@@ -769,68 +757,49 @@ export function ProductDialog({
                     const maximum =
                       option.maxQuantity ?? group.assignment.maxSelection;
                     return (
-                      <div className="grid gap-2" key={option.id}>
-                        <Button
-                          active={selected}
-                          disabled={hasSubmitted}
-                          fullWidth
-                          className={selected ? "min-h-12" : "min-h-12 bg-(--field) !border-1"}
-                          onClick={() => toggleOption(group, option)}
-                          type="button"
-                          variant="tertiary"
-                        >
-                          <span className="flex w-full items-center  justify-between gap-3">
-                            <span className="text-left">{option.product.name}{option.variant.name ? <small className="mt-0.5 block text-[var(--muted)]">{option.variant.name}</small> : null}</span>
-                            <span>
-                              {option.supplementCents
-                                ? `+${formatMoney(option.supplementCents)}`
-                                : "Incluido"}
-                            </span>
-                          </span>
-                        </Button>
-                        {selected && maximum > 1 ? (
-                          <div className="flex items-center justify-center gap-2">
+                      <MenuOptionCard key={option.id} name={option.product.name} variantName={option.variant.name} supplementCents={option.supplementCents}
+                        selected={selected} disabled={isBusy || hasSubmitted} hasModifiers={component.modifierGroups.length > 0} onSelect={() => toggleOption(group, option)}
+                        controls={<>
                             <Button
-                              disabled={hasSubmitted || quantity <= 1}
+                              aria-label={`Quitar una ración de ${option.product.name}`}
+                              className="!size-11 !min-h-11 !min-w-11 !p-0"
+                              disabled={isBusy || hasSubmitted || quantity === 0}
                               onClick={() =>
                                 setOptionQuantity(group, option, quantity - 1)
                               }
-                              size="sm"
                               type="button"
                               variant="tertiary"
                             >
-                              <Minus className="h-3 w-3" />
+                              <Minus aria-hidden="true" className="h-4 w-4" />
                             </Button>
-                            <span className="min-w-8 text-center font-mono">
+                            <output aria-label={`Raciones de ${option.product.name}`} className="min-w-6 text-center font-mono text-lg font-bold tabular-nums">
                               {quantity}
-                            </span>
+                            </output>
                             <Button
-                              disabled={hasSubmitted || quantity >= maximum}
-                              onClick={() =>
-                                setOptionQuantity(group, option, quantity + 1)
-                              }
-                              size="sm"
+                              aria-label={`Añadir una ración de ${option.product.name}`}
+                              className="!size-11 !min-h-11 !min-w-11 !p-0"
+                              disabled={isBusy || hasSubmitted || quantity >= maximum}
+                              onClick={() => quantity === 0 ? toggleOption(group, option) : setOptionQuantity(group, option, quantity + 1)}
                               type="button"
                               variant="tertiary"
                             >
-                              <Plus className="h-3 w-3" />
+                              <Plus aria-hidden="true" className="h-4 w-4" />
                             </Button>
-                          </div>
-                        ) : null}
+                        </>}
+                      >
                         {selected && component.modifierGroups.length ? (
-                          <div className="rounded-[var(--radius)] border border-[var(--separator)] p-3">
+                          <div className="space-y-4 border-t border-[var(--separator)] bg-[var(--surface)] p-3">
                             {component.modifierGroups.map((modifierGroup) => (
                               <div
                                 className="mb-3 last:mb-0"
                                 key={modifierGroup.group.id}
                               >
-                                <p className="mb-2 text-xs font-semibold text-[var(--muted)]">
+                                <p className="mb-2 text-sm font-semibold">
                                   {modifierGroup.assignment.displayName ??
-                                    modifierGroup.group.name}{" "}
-                                  · {modifierGroup.assignment.minSelection}-
-                                  {modifierGroup.assignment.maxSelection}
+                                    modifierGroup.group.name}
+                                  <span className="ml-2 text-xs text-[var(--muted)]">{modifierGroup.assignment.minSelection === modifierGroup.assignment.maxSelection ? `Elige ${modifierGroup.assignment.minSelection}` : modifierGroup.assignment.minSelection === 0 ? `Opcional · hasta ${modifierGroup.assignment.maxSelection}` : `Elige ${modifierGroup.assignment.minSelection}–${modifierGroup.assignment.maxSelection}`}</span>
                                 </p>
-                                <div className="grid gap-2">
+                                <div className="flex flex-wrap gap-2">
                                   {modifierGroup.modifiers.map((modifier) => (
                                     <Button
                                       active={
@@ -838,8 +807,9 @@ export function ProductDialog({
                                           modifierGroup.group.id
                                         ]?.includes(modifier.id) ?? false
                                       }
-                                      disabled={hasSubmitted}
-                                      fullWidth
+                                      aria-label={`Elegir ${modifier.name} para ${option.product.name}`}
+                                      className="!min-h-11 !px-3 text-sm"
+                                      disabled={isBusy || hasSubmitted}
                                       key={modifier.id}
                                       onClick={() =>
                                         toggleModifier(
@@ -848,18 +818,10 @@ export function ProductDialog({
                                           option.id,
                                         )
                                       }
-                                      size="sm"
                                       type="button"
-                                      variant="tertiary"
+                                      variant="secondary"
                                     >
-                                      <span className="flex w-full items-center justify-between gap-3">
-                                        <span>{modifier.name}</span>
-                                        <span>
-                                          {modifier.supplementCents
-                                            ? `+${formatMoney(modifier.supplementCents)}`
-                                            : "Incluido"}
-                                        </span>
-                                      </span>
+                                      {modifier.name}{modifier.supplementCents ? ` ${modifier.supplementCents > 0 ? '+' : ''}${formatMoney(modifier.supplementCents)}` : ''}
                                     </Button>
                                   ))}
                                 </div>
@@ -867,30 +829,13 @@ export function ProductDialog({
                             ))}
                           </div>
                         ) : null}
-                      </div>
+                      </MenuOptionCard>
                     );
                   })}
                 </div>
-              </div>
+              </section>
               ))}
-            </div>
-            <aside className="h-fit rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] p-4 lg:sticky lg:top-0">
-              <h3 className="text-base font-bold">Resumen del menú</h3>
-              <div className="mt-3 space-y-3">
-                {groupProgress.map((group) => (
-                  <div className="flex items-center justify-between gap-2 text-sm" key={group.id}>
-                    <span className="truncate">{group.label}</span>
-                    <strong className={group.complete ? "text-[var(--success)]" : "text-[var(--warning)]"}>{group.complete ? "Completo" : `Falta ${Math.max(0, group.minimum - group.selected)}`}</strong>
-                  </div>
-                ))}
-              </div>
-              <div className="mt-4 border-t border-[var(--separator)] pt-4">
-                <span className="text-sm text-[var(--muted)]">Total</span>
-                <strong className="mt-1 block font-mono text-2xl tabular-nums">{formatMoney(selectionTotals.grossBeforeDiscountCents)}</strong>
-                {selectionTotals.componentDeltaCents + selectionTotals.modifierDeltaCents !== 0 ? <span className="text-xs text-[var(--muted)]">Base {formatMoney(selectionTotals.basePriceCents)} · suplementos {formatMoney(selectionTotals.componentDeltaCents + selectionTotals.modifierDeltaCents)}</span> : null}
-              </div>
-              {missingSelections.length ? <p className="mt-4 rounded-[var(--radius)] bg-[var(--warning-soft)] p-3 text-sm font-semibold text-[var(--warning)]">{allowDeferredMenu ? `Puedes elegir más tarde: ${missingSelections.map((group) => group.label).join(', ')}. Los platos incluidos no añaden precio al menú.` : `Completa ${missingSelections.map((group) => group.label).join(', ')} para continuar.`}</p> : null}
-            </aside>
+            {missingSelections.length ? <p className="text-sm text-[var(--muted)]">{allowDeferredMenu ? `Puedes elegir más tarde: ${missingSelections.map((group) => group.label).join(', ')}. Los platos incluidos no añaden precio al menú.` : `Completa ${missingSelections.map((group) => group.label).join(', ')} para continuar.`}</p> : null}
           </div>
         ) : null}
 
@@ -943,6 +888,7 @@ export function ProductDialog({
           selectedSellable.selectionGroups.length > 0 ||
           initialSelection) ? (
           <div className={menuAssignments.length ? undefined : "mt-5"}>
+            {menuAssignments.length ? <div className="mb-3 flex items-center justify-between gap-3"><span className="text-sm font-semibold">1 menú</span><strong className="font-mono text-xl tabular-nums">{formatMoney(selectionTotals.grossBeforeDiscountCents)}</strong></div> : null}
             <Button
               disabled={isBusy || hasSubmitted || !isSelectionValid}
               className={menuAssignments.length ? "!min-h-12 !font-bold" : undefined}
@@ -960,7 +906,7 @@ export function ProductDialog({
 
   if (menuAssignments.length) return (
     <MenuDialogLayout
-      controls={canOrderByCourses ? <div className="flex flex-wrap items-center justify-between gap-3"><MenuEntryMode mode="individual" animateFrom={menuBatch ? 'courses' : undefined} disabled={isBusy || hasSubmitted} onChange={(mode) => { if (mode === 'courses') enterBatchMode() }} /></div> : null}
+      controls={canOrderByCourses ? <MenuCountControl count={1} disabled={isBusy || hasSubmitted} onChange={(count) => { if (!isBusy && !hasSubmitted) setMenuBatch(createMenuBatchDraft(selection, count)) }} /> : null}
       disabled={isBusy || hasSubmitted}
       footer={footer}
       onClose={onCancel}

@@ -1,13 +1,13 @@
-import { ChevronRight, Minus, Pencil, Plus } from 'lucide-react'
+import { ChevronRight, Pencil } from 'lucide-react'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../features/catalog/domain/types'
 import { buildSaleLine } from '../../features/catalog/services/saleLineBuilder'
 import { getMenuBatchGroupCount, MAX_MENU_BATCH_SIZE, resizeMenuBatch, type MenuBatchDraft } from '../../features/restaurant/services/menuBatch'
 import { formatMoney } from '../../lib/format'
 import type { ProductLineSelection } from '../../types'
-import { MenuEntryMode } from '../pos/MenuEntryMode'
+import { MenuCountControl } from '../pos/MenuCountControl'
 import { MenuBatchOptionCard } from './MenuBatchOptionCard'
-import { Button, Input, MenuDialogLayout } from '../ui'
+import { Button, MenuDialogLayout } from '../ui'
 
 type Props = {
   catalog: CatalogData
@@ -16,17 +16,15 @@ type Props = {
   draft: MenuBatchDraft
   disabled: boolean
   onChange: (draft: MenuBatchDraft) => void
-  onIndividual: () => void
   onCancel: () => void
   onAdd: (selections: ProductLineSelection[], sourceElement: HTMLElement | null) => boolean
   renderEditor: (selection: ProductLineSelection, onSave: (selection: ProductLineSelection) => void, onCancel: () => void) => ReactNode
 }
 
-export function MenuBatchDialog({ catalog, item, sellable, draft, disabled, onChange, onIndividual, onCancel, onAdd, renderEditor }: Props) {
+export function MenuBatchDialog({ catalog, item, sellable, draft, disabled, onChange, onCancel, onAdd, renderEditor }: Props) {
   const [configuringOption, setConfiguringOption] = useState<string | null>(null)
   const [activeGroup, setActiveGroup] = useState(0)
   const [editing, setEditing] = useState<number | null>(null)
-  const [countInput, setCountInput] = useState(String(draft.selections.length))
   const [pendingSize, setPendingSize] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
   const submitted = useRef(false)
@@ -45,13 +43,10 @@ export function MenuBatchDialog({ catalog, item, sellable, draft, disabled, onCh
 
   function requestSize(size: number) {
     if (!Number.isSafeInteger(size) || size < 1 || size > MAX_MENU_BATCH_SIZE) {
-      setCountInput(String(count))
       return
     }
-    setCountInput(String(size))
     if (size < count && draft.selections.slice(size).some((selection) => selection.components.some((component) => component.type === 'menu_component'))) {
       setPendingSize(size)
-      setCountInput(String(count))
       return
     }
     onChange(resizeMenuBatch(draft, size))
@@ -71,15 +66,7 @@ export function MenuBatchDialog({ catalog, item, sellable, draft, disabled, onCh
 
   return <MenuDialogLayout
     controls={<>
-        {configuringOption === null ? <div className="flex flex-wrap items-center justify-between gap-3">
-          <MenuEntryMode mode="courses" animateFrom="individual" disabled={navigationBlocked} onChange={(mode) => { if (mode === 'individual') onIndividual() }} />
-          <div className="flex items-center gap-2"><span className="text-sm font-semibold">Menús</span><div className="flex items-center rounded-[12px] border border-[var(--separator)] p-1">
-            <Button aria-label="Un menú menos" className="!size-11 !min-h-11 !min-w-11 !p-0" disabled={navigationBlocked || count <= 1} onClick={() => requestSize(count - 1)} type="button" variant="tertiary"><Minus aria-hidden="true" className="h-4 w-4" /></Button>
-            <Input aria-label="Número de menús" className="w-14 !px-1 text-center text-lg font-bold tabular-nums" disabled={navigationBlocked} inputMode="numeric" max={MAX_MENU_BATCH_SIZE} min={1}
-              onBlur={() => requestSize(Number(countInput))} onChange={(event) => setCountInput(event.target.value)} onKeyDown={(event) => { if (event.key === 'Enter') event.currentTarget.blur() }} type="number" value={countInput} />
-            <Button aria-label="Un menú más" className="!size-11 !min-h-11 !min-w-11 !p-0" disabled={navigationBlocked || count >= MAX_MENU_BATCH_SIZE} onClick={() => requestSize(count + 1)} type="button" variant="tertiary"><Plus aria-hidden="true" className="h-4 w-4" /></Button>
-          </div></div>
-        </div> : null}
+        <MenuCountControl count={count} disabled={navigationBlocked} onChange={requestSize} />
         <nav aria-label="Pases del menú" className="flex gap-2 overflow-x-auto pb-1">
           {groups.map((current, index) => <button aria-current={activeGroup === index ? 'step' : undefined} className={`min-h-12 min-w-24 flex-1 cursor-pointer rounded-[10px] border px-3 py-2 text-left disabled:opacity-50 ${activeGroup === index ? 'border-[var(--accent)] bg-[var(--accent-soft)] text-[var(--accent)]' : 'border-[var(--separator)] bg-[var(--background)] text-[var(--muted)]'}`}
             disabled={navigationBlocked} key={current.group.id} onClick={() => setActiveGroup(index)} type="button"><span className="block text-sm font-bold">{current.assignment.displayName ?? current.group.name}</span>
@@ -104,7 +91,7 @@ export function MenuBatchDialog({ catalog, item, sellable, draft, disabled, onCh
         {pendingSize !== null ? <div className="space-y-3 rounded-[12px] border border-[var(--warning)] p-4" role="alert">
           <p className="text-sm font-semibold">Los últimos {count - pendingSize} menús ya tienen platos. Si reduces a {pendingSize}, se quitarán sus elecciones.</p>
           <div className="flex flex-wrap gap-2"><Button className="!min-h-11" onClick={() => setPendingSize(null)} type="button" variant="tertiary">Mantener {count}</Button>
-            <Button className="!min-h-11" onClick={() => { onChange(resizeMenuBatch(draft, pendingSize)); setCountInput(String(pendingSize)); setPendingSize(null) }} type="button" variant="secondary">Reducir a {pendingSize}</Button></div>
+            <Button className="!min-h-11" onClick={() => { onChange(resizeMenuBatch(draft, pendingSize)); setPendingSize(null) }} type="button" variant="secondary">Reducir a {pendingSize}</Button></div>
         </div> : null}
         {group ? <section aria-label={`Elegir ${group.assignment.displayName ?? group.group.name}`}>
           <div className="mb-3"><h3 className="text-lg font-bold">{group.assignment.displayName ?? group.group.name}</h3><p className="text-sm text-[var(--muted)]">Elige platos y sus preparaciones. Puedes dejar elecciones para después.</p></div>

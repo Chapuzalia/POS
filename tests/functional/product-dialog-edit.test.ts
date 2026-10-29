@@ -24,7 +24,8 @@ const modules = {
   '../pos/PosMixerCard': { PosMixerCard },
   '../../features/restaurant/services/menuCourses': menuCourses,
   '../../features/restaurant/services/menuBatch': menuBatch,
-  '../pos/MenuEntryMode': { MenuEntryMode: empty },
+  '../pos/MenuCountControl': { MenuCountControl: empty },
+  '../pos/MenuOptionCard': { MenuOptionCard: empty },
   './MenuBatchDialog': { MenuBatchDialog: empty },
 }
 const text = (node: unknown): string => {
