@@ -1,4 +1,4 @@
-import { ChevronRight, Minus, Pencil, Plus, X } from 'lucide-react'
+import { ChevronRight, Minus, Pencil, Plus } from 'lucide-react'
 import { useMemo, useRef, useState, type ReactNode } from 'react'
 import type { CatalogData, ResolvedCatalogItem, ResolvedSellableProduct } from '../../features/catalog/domain/types'
 import { buildSaleLine } from '../../features/catalog/services/saleLineBuilder'
@@ -7,7 +7,8 @@ import { formatMoney } from '../../lib/format'
 import type { ProductLineSelection } from '../../types'
 import { MenuEntryMode } from '../pos/MenuEntryMode'
 import { MenuBatchOptionCard } from './MenuBatchOptionCard'
-import { AppModal, Button, Input } from '../ui'
+import { Button, Input } from '../ui'
+import { MenuDialogLayout } from './MenuDialogLayout'
 
 type Props = {
   catalog: CatalogData
@@ -69,13 +70,10 @@ export function MenuBatchDialog({ catalog, item, sellable, draft, disabled, onCh
     setEditing(null)
   }, () => setEditing(null))
 
-  return <AppModal dismissDisabled={disabled} label="Pedir menús por pases" maxWidth={800} onClose={onCancel} placement="center" scroll="content">
-    <section className="flex max-h-[inherit] min-h-0 flex-col overflow-hidden bg-[var(--surface)] text-[var(--foreground)]">
-      <header className="shrink-0 space-y-4 border-b border-[var(--separator)] p-4 sm:p-5">
-        <div className="flex items-center justify-between gap-3"><div className="min-w-0"><h2 className="text-xl font-bold">{item.product.name}</h2><p className="text-sm text-[var(--muted)]">{sellable.variant.name} · {formatMoney(sellable.variant.priceCents)} por menú</p></div>
-          <Button aria-label="Cerrar menús por pases" className="!size-11 !min-h-11 !min-w-11 !p-0" disabled={disabled} onClick={onCancel} type="button" variant="tertiary"><X aria-hidden="true" className="h-5 w-5" /></Button></div>
+  return <MenuDialogLayout
+    controls={<>
         {configuringOption === null ? <div className="flex flex-wrap items-center justify-between gap-3">
-          <MenuEntryMode mode="courses" disabled={navigationBlocked} onChange={(mode) => { if (mode === 'individual') onIndividual() }} />
+          <MenuEntryMode mode="courses" animateFrom="individual" disabled={navigationBlocked} onChange={(mode) => { if (mode === 'individual') onIndividual() }} />
           <div className="flex items-center gap-2"><span className="text-sm font-semibold">Menús</span><div className="flex items-center rounded-[12px] border border-[var(--separator)] p-1">
             <Button aria-label="Un menú menos" className="!size-11 !min-h-11 !min-w-11 !p-0" disabled={navigationBlocked || count <= 1} onClick={() => requestSize(count - 1)} type="button" variant="tertiary"><Minus aria-hidden="true" className="h-4 w-4" /></Button>
             <Input aria-label="Número de menús" className="w-14 !px-1 text-center text-lg font-bold tabular-nums" disabled={navigationBlocked} inputMode="numeric" max={MAX_MENU_BATCH_SIZE} min={1}
@@ -88,9 +86,22 @@ export function MenuBatchDialog({ catalog, item, sellable, draft, disabled, onCh
             disabled={navigationBlocked} key={current.group.id} onClick={() => setActiveGroup(index)} type="button"><span className="block text-sm font-bold">{current.assignment.displayName ?? current.group.name}</span>
             <span className="text-xs tabular-nums">{getMenuBatchGroupCount(draft.selections, current.group.id)} / {count * current.assignment.maxSelection}</span></button>)}
         </nav>
-      </header>
+    </>}
+    disabled={disabled}
+    footer={<>
 
-      <div className="min-h-0 space-y-5 overflow-y-auto overscroll-contain p-4 sm:p-5">
+        <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">{count} {count === 1 ? 'menú' : 'menús'}</span><strong className="font-mono text-xl tabular-nums">{invalid >= 0 ? 'Desde ' : ''}{formatMoney(total)}</strong></div>
+        {configuringOption === null ? <div className="flex gap-2">
+          <Button className="!min-h-12 flex-1 !px-3 !font-bold" disabled={navigationBlocked || invalid >= 0} onClick={(event) => save(event.currentTarget)} type="button" variant={nextGroup ? 'secondary' : 'primary'}>Añadir {count} {count === 1 ? 'menú' : 'menús'}</Button>
+          {nextGroup ? <Button className="!min-h-12 flex-1 !px-3 !font-bold" disabled={navigationBlocked} onClick={() => setActiveGroup(activeGroup + 1)} type="button" variant="primary">{nextGroup.assignment.displayName ?? nextGroup.group.name}<ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0" /></Button> : null}
+        </div> : <p className="text-xs text-[var(--muted)]">Confirma o cancela la preparación para continuar.</p>}
+    </>}
+    onClose={onCancel}
+    priceCents={sellable.variant.priceCents}
+    skipEnterAnimation
+    title={item.product.name}
+    variantName={sellable.variant.name}
+  >
         {pendingSize !== null ? <div className="space-y-3 rounded-[12px] border border-[var(--warning)] p-4" role="alert">
           <p className="text-sm font-semibold">Los últimos {count - pendingSize} menús ya tienen platos. Si reduces a {pendingSize}, se quitarán sus elecciones.</p>
           <div className="flex flex-wrap gap-2"><Button className="!min-h-11" onClick={() => setPendingSize(null)} type="button" variant="tertiary">Mantener {count}</Button>
@@ -117,15 +128,5 @@ export function MenuBatchDialog({ catalog, item, sellable, draft, disabled, onCh
           </div>)}</div>
         </details>
         {error ? <p className="text-sm font-semibold text-[var(--danger)]" role="alert">{error}</p> : null}
-      </div>
-
-      <footer className="shrink-0 space-y-3 border-t border-[var(--separator)] bg-[var(--background)] p-4 sm:px-5">
-        <div className="flex items-center justify-between gap-3"><span className="text-sm font-semibold">{count} {count === 1 ? 'menú' : 'menús'}</span><strong className="font-mono text-xl tabular-nums">{invalid >= 0 ? 'Desde ' : ''}{formatMoney(total)}</strong></div>
-        {configuringOption === null ? <div className="flex gap-2">
-          <Button className="!min-h-12 flex-1 !px-3 !font-bold" disabled={navigationBlocked || invalid >= 0} onClick={(event) => save(event.currentTarget)} type="button" variant={nextGroup ? 'secondary' : 'primary'}>Añadir {count} {count === 1 ? 'menú' : 'menús'}</Button>
-          {nextGroup ? <Button className="!min-h-12 flex-1 !px-3 !font-bold" disabled={navigationBlocked} onClick={() => setActiveGroup(activeGroup + 1)} type="button" variant="primary">{nextGroup.assignment.displayName ?? nextGroup.group.name}<ChevronRight aria-hidden="true" className="h-4 w-4 shrink-0" /></Button> : null}
-        </div> : <p className="text-xs text-[var(--muted)]">Confirma o cancela la preparación para continuar.</p>}
-      </footer>
-    </section>
-  </AppModal>
+  </MenuDialogLayout>
 }

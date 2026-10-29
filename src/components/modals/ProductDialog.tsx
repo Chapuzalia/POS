@@ -20,6 +20,7 @@ import { reconcileMenuEdit } from "../../features/restaurant/services/menuCourse
 import { createMenuBatchDraft, type MenuBatchDraft } from "../../features/restaurant/services/menuBatch";
 import { MenuEntryMode } from "../pos/MenuEntryMode";
 import { MenuBatchDialog } from "./MenuBatchDialog";
+import { MenuDialogLayout } from "./MenuDialogLayout";
 
 type ProductDialogProps = {
   allowDeferredMenu?: boolean;
@@ -629,41 +630,8 @@ export function ProductDialog({
     renderEditor={(menuSelection, onSave, onClose) => <ProductDialog allowDeferredMenu allowVariantSelection={false} catalog={catalog} item={item}
       initialVariantId={selectedVariantId} initialSelection={menuSelection} isBusy={isBusy} onAdd={(_sellable, edited) => { onSave(edited); return true }} onCancel={onClose} />} />;
 
-  return (
-    <AppModal
-      containerClassName={isChoosingMixer ? "!w-[calc(100vw-32px)] !p-0" : "!p-4"}
-      maxWidth={isChoosingMixer || menuAssignments.length ? 1024 : 576}
-      dialogClassName={cx(
-        isChoosingMixer && "!w-full",
-      )}
-      dismissDisabled={isBusy || hasSubmitted}
-      label="Configurar producto"
-      onClose={onCancel}
-    >
-      <section
-        ref={dialogRef}
-        className={cx(
-          "max-h-[calc(100svh-32px)] w-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]",
-          isChoosingMixer || menuAssignments.length ? "max-w-none" : "max-w-xl",
-        )}
-      >
-        <div className="flex items-start justify-between gap-4">
-          <h2 className="text-2xl font-bold">
-            {isChoosingVariant ? "Variante" : item.product.type === "menu" ? item.product.name : `${item.product.name} con`}
-          </h2>
-          <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar"
-            disabled={isBusy || hasSubmitted}
-            onClick={onCancel}
-            size="sm"
-            type="button"
-            variant="tertiary"
-          >
-            <X className="h-4 w-4" />
-          </Button>
-        </div>
-
-        {canOrderByCourses ? <div className="mt-4 max-w-sm"><MenuEntryMode mode="individual" disabled={isBusy || hasSubmitted} onChange={(mode) => { if (mode === 'courses') enterBatchMode() }} /></div> : null}
-
+  const content = (
+    <>
         {isChoosingVariant || (initialSelection && allowVariantSelection && variants.length > 1) ? (
           <div className="mt-5 grid gap-2">
             {initialSelection ? <h3 className="text-sm font-semibold text-[var(--muted)]">Variante</h3> : null}
@@ -968,14 +936,17 @@ export function ProductDialog({
             ))}
           </div>
         ) : null}
+    </>
+  );
 
-        {!isChoosingVariant &&
+  const footer = !isChoosingVariant &&
         (selectedSellable.modifierGroups.length > 0 ||
           selectedSellable.selectionGroups.length > 0 ||
           initialSelection) ? (
-          <div className="mt-5">
+          <div className={menuAssignments.length ? undefined : "mt-5"}>
             <Button
               disabled={isBusy || hasSubmitted || !isSelectionValid}
+              className={menuAssignments.length ? "!min-h-12 !font-bold" : undefined}
               fullWidth
               onClick={(event) => submitSelection(event.currentTarget)}
               size="lg"
@@ -986,7 +957,59 @@ export function ProductDialog({
             </Button>
             {!isSelectionValid && menuAssignments.length ? <p className="mt-2 text-center text-sm font-semibold text-[var(--warning)]">Revisa las elecciones pendientes antes de añadir el menú.</p> : null}
           </div>
-        ) : null}
+        ) : null;
+
+  if (menuAssignments.length) return (
+    <MenuDialogLayout
+      controls={canOrderByCourses ? <div className="flex flex-wrap items-center justify-between gap-3"><MenuEntryMode mode="individual" animateFrom={menuBatch ? 'courses' : undefined} disabled={isBusy || hasSubmitted} onChange={(mode) => { if (mode === 'courses') enterBatchMode() }} /></div> : null}
+      disabled={isBusy || hasSubmitted}
+      footer={footer}
+      onClose={onCancel}
+      priceCents={selectedSellable.variant.priceCents}
+      sectionRef={dialogRef}
+      skipEnterAnimation={menuBatch !== null}
+      title={isChoosingVariant ? "Variante" : item.product.name}
+      variantName={selectedSellable.variant.name}
+    >
+      {content}
+    </MenuDialogLayout>
+  );
+
+  return (
+    <AppModal
+      containerClassName={isChoosingMixer ? "!w-[calc(100vw-32px)] !p-0" : "!p-4"}
+      maxWidth={isChoosingMixer || menuAssignments.length ? 1024 : 576}
+      dialogClassName={cx(
+        isChoosingMixer && "!w-full",
+      )}
+      dismissDisabled={isBusy || hasSubmitted}
+      label="Configurar producto"
+      onClose={onCancel}
+    >
+      <section
+        ref={dialogRef}
+        className={cx(
+          "max-h-[calc(100svh-32px)] w-full overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--surface)] p-5 text-[var(--foreground)] shadow-[var(--shadow)]",
+          isChoosingMixer || menuAssignments.length ? "max-w-none" : "max-w-xl",
+        )}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <h2 className="text-2xl font-bold">
+            {isChoosingVariant ? "Variante" : item.product.type === "menu" ? item.product.name : `${item.product.name} con`}
+          </h2>
+          <Button className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar"
+            disabled={isBusy || hasSubmitted}
+            onClick={onCancel}
+            size="sm"
+            type="button"
+            variant="tertiary"
+          >
+            <X className="h-4 w-4" />
+          </Button>
+        </div>
+
+        {content}
+        {footer}
       </section>
     </AppModal>
   );

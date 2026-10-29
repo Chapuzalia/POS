@@ -221,6 +221,14 @@ button {
   --crm-popover-hover: #24282c;
 }
 
+@keyframes menu-mode-to-courses {
+  from { translate: 0; }
+  to { translate: calc(100% + 4px) 0; }
+}
+@keyframes menu-mode-to-individual {
+  from { translate: calc(100% + 4px) 0; }
+  to { translate: 0; }
+}
 @keyframes product-dialog-backdrop-close {
   to { opacity: 0; }
 }
