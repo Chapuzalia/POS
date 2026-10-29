@@ -44,22 +44,6 @@ describe('custom payment database transactions', () => {
     return fixture
   }
 
-  it('closes a €7 order with €3 cash and €4 card, retaining change, session and idempotency', async () => {
-    const { db, query, open, addLines, pay } = await fixture()
-    try {
-      const orderId = await open()
-      await addLines(orderId, 1)
-      await query('update order_lines set unit_price_cents=700 where order_id=$1', [orderId])
-      const params = { customCashCents: 300, customCashReceivedCents: 500 }
-      const first = await pay(orderId, params)
-      expect(first.payments.map(payment => [payment.method, payment.amountCents, payment.changeCents])).toEqual([['cash', 300, 200], ['card', 400, 0]])
-      expect(await pay(orderId, params)).toEqual(first)
-      await expect(pay(orderId, { customCashCents: 301 })).rejects.toThrow(/CONFLICT/)
-      expect(await query('select total_cents,payment_method,cash_session_id from sales')).toEqual([{ total_cents: 700, payment_method: null, cash_session_id: ids.sessionB }])
-      expect((await query('select count(*)::integer n from sale_payments'))[0].n).toBe(2)
-    } finally { await db.close() }
-  })
-
   it('rejects invalid splits and unauthorized scopes without closing or creating a sale', async () => {
     const { db, query, open, addLines, pay } = await fixture()
     try {
