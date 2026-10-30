@@ -14,7 +14,7 @@ import type { AddCatalogLine } from "../../features/quick-sale/hooks/useQuickSal
 import { formatMoney } from "../../lib/format";
 import type { ProductLineSelection, TicketLineModifier } from "../../types";
 import { cx } from "../../utils/cx";
-import { AppModal, Button, MenuDialogLayout } from "../ui";
+import { AppModal, Button, MenuDialogLayout, MenuOptionList } from "../ui";
 import { PosMixerCard } from "../pos/PosMixerCard";
 import { reconcileMenuEdit } from "../../features/restaurant/services/menuCourses";
 import { createMenuBatchDraft, type MenuBatchDraft } from "../../features/restaurant/services/menuBatch";
@@ -744,8 +744,7 @@ export function ProductDialog({
                   <h3 className="text-lg font-bold">{group.assignment.displayName ?? group.group.name}</h3>
                   <p className="text-sm text-[var(--muted)]">Elige {group.assignment.minSelection === group.assignment.maxSelection ? group.assignment.minSelection : `${group.assignment.minSelection}–${group.assignment.maxSelection}`} {group.assignment.maxSelection === 1 ? 'plato' : 'platos'}{allowDeferredMenu ? '. Puedes dejar elecciones para después.' : '.'}</p>
                 </div>
-                <div className="grid items-start gap-2 sm:grid-cols-2">
-                  {group.options.map((option) => {
+                <MenuOptionList disabled={isBusy || hasSubmitted} groupLabel={group.assignment.displayName ?? group.group.name} options={group.options} renderOption={(option) => {
                     const quantity =
                       selectedQuantities[group.group.id]?.[option.id] ?? 0;
                     const selected = quantity > 0;
@@ -831,8 +830,7 @@ export function ProductDialog({
                         ) : null}
                       </MenuOptionCard>
                     );
-                  })}
-                </div>
+                  }} />
               </section>
               ))}
             {missingSelections.length ? <p className="text-sm text-[var(--muted)]">{allowDeferredMenu ? `Puedes elegir más tarde: ${missingSelections.map((group) => group.label).join(', ')}. Los platos incluidos no añaden precio al menú.` : `Completa ${missingSelections.map((group) => group.label).join(', ')} para continuar.`}</p> : null}
