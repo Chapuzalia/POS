@@ -15,6 +15,7 @@ const Button = () => null
 const Input = () => null
 const MenuCountControl = () => null
 const MenuOptionCard = () => null
+const MenuOptionList = () => null
 const MenuBatchDialog = () => null
 const MenuBatchOptionCard = () => null
 const MenuDialogLayout = () => null
@@ -27,7 +28,7 @@ const modules = {
   '../../features/restaurant/services/menuBatch': menuBatch,
   '../../lib/format': format,
   '../../utils/cx': { cx },
-  '../ui': { AppModal: empty, Button, Input, MenuDialogLayout },
+  '../ui': { AppModal: empty, Button, Input, MenuDialogLayout, MenuOptionList },
   '../pos/PosMixerCard': { PosMixerCard: empty },
   '../pos/MenuCountControl': { MenuCountControl },
   '../pos/MenuOptionCard': { MenuOptionCard },
@@ -63,7 +64,10 @@ function setup(withPreparation = false) {
   }
   const all = () => {
     const tree = render()
-    return nodes([tree.props.controls, tree.props.children, tree.props.footer])
+    // The list renders cards through renderOption instead of children.
+    return nodes([tree.props.controls, tree.props.children, tree.props.footer]).flatMap(node => (
+      node.type === MenuOptionList ? [node, ...nodes(node.props.options.map(node.props.renderOption))] : [node]
+    ))
   }
   const counter = () => all().find(node => node.type === MenuCountControl)
   const button = (label: string) => all().find(node => node.type === Button && text(node) === label)
