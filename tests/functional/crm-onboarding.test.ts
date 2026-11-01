@@ -76,7 +76,8 @@ it('does not advance or click a disabled creation control', () => {
   const description = { querySelector: () => ({ textContent: '' }) }
   const driver = { moveNext, getState: () => ({ popover: { description } }) } as unknown as Driver
   const button = new Control()
-  const topic = model.onboardingTopics.find(topic => topic.id === 'inventory-stock')!
+  const topic = model.onboardingTopics.find(topic => topic.id === 'inventory-stock')
+  if (!topic) throw new Error('Missing stock guide')
   const open = getOnboardingSteps(topic)[0].popover?.onNextClick
   open?.(button as unknown as Element, {}, { driver, config: {}, state: {}, index: 0 })
   expect(button.click).not.toHaveBeenCalled()
@@ -91,6 +92,42 @@ it('provides multi-step task flows with separate guides for assignments, targets
   const topics = getOnboardingTopics(context, venue)
   expect(topics.map(topic => topic.id)).toEqual(expect.arrayContaining(['mixers', 'product-mixers', 'stock-targets', 'stock-count', 'stock-replenishment', 'product-inventory']))
   for (const topic of topics) expect(getOnboardingSteps(topic).length, topic.id).toBeGreaterThanOrEqual(4)
+})
+
+it('groups every permitted guide once and counts only reviewed guides available in each theme', () => {
+  const topics = getOnboardingTopics(context, venue)
+  const groups = model.getOnboardingGroups(topics, ['products', 'stock-targets', 'stock-targets', 'unknown'])
+  expect(groups).toHaveLength(5)
+  expect(groups.flatMap(group => group.guides.map(topic => topic.id)).sort()).toEqual(topics.map(topic => topic.id).sort())
+  expect(groups.find(group => group.id === 'inventory')?.completed).toBe(1)
+  expect(groups.reduce((sum, group) => sum + group.completed, 0)).toBe(2)
+  const basicTopics = getOnboardingTopics({ ...context, features: [] }, venue)
+  expect(model.getOnboardingGroups(basicTopics, []).map(group => group.id)).toEqual(['business', 'catalog', 'options'])
+})
+
+it('expands themes independently, retains them when returning to the index and launches the selected guide', () => {
+  const start = vi.fn()
+  const runner = createCompiledHookRunner(readFileSync(new URL('../../src/features/crm/onboarding/OnboardingIndex.tsx', import.meta.url), 'utf8'), 'OnboardingIndex', {
+    'react/jsx-runtime': jsxRuntime,
+    'react-dom': { createPortal: (children: unknown) => children },
+    'lucide-react': { CheckCircle2: 'svg', ChevronDown: 'svg', Circle: 'svg', X: 'svg' },
+    '../../../components/ui/Button': { Button: 'button' },
+    './onboardingModel': model, './onboardingTours': { getOnboardingSteps },
+  }, { document: { body: {} } })
+  onTestFinished(() => runner.unmount())
+  const props = { disabled: false, isOpen: true, onClose: vi.fn(), onStart: start, reviewed: ['products'], theme: 'light', topics: getOnboardingTopics(context, venue) }
+  const render = (isOpen = true) => runner.render({ ...props, isOpen })
+  const disclosures = () => nodes(render()).filter((node: { type?: string }) => node.type === 'details')
+  expect(disclosures().map((node: { props: { open: boolean } }) => node.props.open)).toEqual([false, false, false, false, false])
+  disclosures()[1].props.onToggle({ currentTarget: { open: true } })
+  disclosures()[3].props.onToggle({ currentTarget: { open: true } })
+  expect(render(false)).toBeNull()
+  expect(disclosures().map((node: { props: { open: boolean } }) => node.props.open)).toEqual([false, true, false, true, false])
+  nodes(render()).find((node: { props?: { 'aria-label'?: string } }) => node.props?.['aria-label'] === 'Iniciar guía: Definir el stock objetivo')?.props.onClick()
+  expect(start).toHaveBeenCalledWith(expect.objectContaining({ id: 'stock-targets' }))
+  disclosures()[1].props.onToggle({ currentTarget: { open: false } })
+  expect(disclosures()[1].props.open).toBe(false)
+  expect(disclosures()[3].props.open).toBe(true)
 })
 
 it('keeps progress separate per tenant, user and venue and tolerates blocked or corrupt storage', () => {
@@ -117,14 +154,13 @@ function setup(response = detail) {
   type GuideConfig = { onDoneClick: () => void; onDestroyed: () => void }
   let guideConfig: GuideConfig | undefined
   const guide = { drive: vi.fn(), destroy: vi.fn(() => guideConfig?.onDestroyed()) }
-  let checklistConfig: { items: Array<{ id: string; action: () => void; completeWhen: () => boolean }> } | undefined
-  const widget = { show: vi.fn(), hide: vi.fn(), open: vi.fn(), complete: vi.fn() }
   const navigate = vi.fn()
+  const observers: Array<() => void> = []
+  let dialog: { querySelector: () => object | null } | null = null
   const runner = createCompiledHookRunner(readFileSync(new URL('../../src/features/crm/onboarding/CrmOnboarding.tsx', import.meta.url), 'utf8'), 'default', {
     'react/jsx-runtime': jsxRuntime,
     'lucide-react': { BookOpen: 'svg' }, 'driver.js': { driver: (config: GuideConfig) => { guideConfig = config; return guide } },
-    'driver.js/checklist': { checklist: (config: typeof checklistConfig) => { checklistConfig = config; return widget } },
-    'driver.js/dist/driver.css': {}, 'driver.js/dist/checklist.css': {}, './onboarding.css': {},
+    'driver.js/dist/driver.css': {}, './onboarding.css': {}, './OnboardingIndex': { OnboardingIndex: 'onboarding-index' },
     '../../../components/ui/Button': { Button: 'button' }, '../shared/components/CrmModal': { CrmModal: 'dialog' },
     '../../billing/service': { billingRequest: request }, './onboardingModel': {
       ...model, readOnboardingProgress: (key: string) => readOnboardingProgress(key, storage),
@@ -133,12 +169,18 @@ function setup(response = detail) {
     './onboardingTours': { getOnboardingSteps }, '../../../utils/notifications': { notifyOperationalError: vi.fn() },
   }, {
     window: { localStorage: storage, matchMedia: () => ({ matches: false }) },
-    document: { querySelector: () => null, body: {} }, MutationObserver: class { observe() {} disconnect() {} },
+    document: { querySelector: () => null, querySelectorAll: () => ({ length: dialog ? 1 : 0, item: () => dialog }), body: {} }, MutationObserver: class { constructor(callback: () => void) { observers.push(callback) } observe() {} disconnect() {} },
   })
   onTestFinished(() => runner.unmount())
   const render = (activeSection = 'dashboard', isOnline = true) => runner.render({ context, venue, activeSection, isOnline, disabled: false, onSectionChange: navigate })
   const click = (tree: unknown, label: string) => nodes(tree).find((node: { props?: { 'aria-label'?: string; children?: unknown } }) => node.props?.['aria-label'] === label || node.props?.children === label)?.props.onClick()
-  return { render, click, request, navigate, widget, guide, store, startProduct: () => checklistConfig?.items.find(item => item.id === 'products')?.action(), finish: () => guideConfig?.onDoneClick(), productReviewed: () => checklistConfig?.items.find(item => item.id === 'products')?.completeWhen() }
+  const indexProps = () => nodes(render()).find((node: { type?: string }) => node.type === 'onboarding-index')?.props
+  return { render, click, request, navigate, guide, store,
+    setDialog: (known: boolean | null) => { dialog = known === null ? null : { querySelector: () => known ? {} : null }; observers.forEach(callback => callback()) },
+    startProduct: () => indexProps()?.onStart(model.onboardingTopics.find(topic => topic.id === 'products')),
+    finish: () => guideConfig?.onDoneClick(), productReviewed: () => indexProps()?.reviewed.includes('products'),
+    isIndexOpen: () => indexProps()?.isOpen,
+  }
 }
 
 it('opens the optional welcome after verification, remembers postponement, and keeps manual help available', async () => {
@@ -151,7 +193,7 @@ it('opens the optional welcome after verification, remembers postponement, and k
   expect([...f.store.values()].some(value => JSON.parse(value).offered)).toBe(true)
   f.click(f.render(), 'Inicio guiado')
   f.render()
-  expect(f.widget.open).toHaveBeenCalled()
+  expect(f.isIndexOpen()).toBe(true)
 })
 
 it('does not offer unconfirmed accounts or interrupt the CRM after a billing read error', async () => {
@@ -183,9 +225,24 @@ it('marks only a finished guide as reviewed, permits topic jumps and cleans up o
   f.startProduct()
   f.render('products')
   f.finish()
-  expect(f.widget.complete).toHaveBeenCalledWith('products')
   expect(f.productReviewed()).toBe(true)
   f.startProduct()
   f.render('products', false)
   expect(f.guide.destroy).toHaveBeenCalledTimes(3)
+})
+
+
+it('pauses safely when another editor takes focus and returns to the index after closing it', () => {
+  const f = setup()
+  f.click(f.render(), 'Inicio guiado')
+  f.render()
+  f.startProduct()
+  f.setDialog(true)
+  expect(f.guide.destroy).not.toHaveBeenCalled()
+  f.setDialog(false)
+  expect(f.guide.destroy).toHaveBeenCalledOnce()
+  expect(f.isIndexOpen()).toBe(false)
+  expect(f.productReviewed()).toBe(false)
+  f.setDialog(null)
+  expect(f.isIndexOpen()).toBe(true)
 })

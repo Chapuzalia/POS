@@ -59,7 +59,7 @@ export function QuickStockReplenishment({ row, context, venueId, disabled, runAc
           <div><dt className="text-xs text-[var(--crm-text-muted)]">Disponible ahora</dt><dd className="m-0 mt-1 font-mono font-bold">{format(row.quantity)}</dd></div>
           <div><dt className="text-xs text-[var(--crm-text-muted)]">Objetivo del almacén</dt><dd className="m-0 mt-1 font-mono font-bold">{row.target === null ? 'Sin objetivo' : format(row.target)}</dd></div>
         </dl>
-        <label data-onboarding="replenishment-quantity" className="grid gap-2 text-sm font-semibold">Cantidad recibida ({row.unit?.symbol})
+        <div data-onboarding="replenishment-quantity" className="grid gap-4"><label className="grid gap-2 text-sm font-semibold">Cantidad recibida ({row.unit?.symbol})
           <Input autoFocus disabled={disabled || busy} inputMode="decimal" onChange={(event) => change(event.target.value)} onFocus={(event) => event.target.select()} value={draft} />
         </label>
         <div aria-label="Cantidades rápidas de reposición" className="flex flex-wrap gap-2" role="group">
@@ -69,6 +69,7 @@ export function QuickStockReplenishment({ row, context, venueId, disabled, runAc
             change(String(addInventoryStockQuantity(current, String(amount), decimals)))
           }} size="sm" type="button" variant="tertiary">+{amount} {row.unit?.symbol}</Button>)}
           {suggested > 0 ? <Button disabled={disabled || busy} onClick={() => change(String(suggested))} size="sm" type="button" variant="secondary">Completar objetivo</Button> : null}
+        </div>
         </div>
         <div data-onboarding="replenishment-result" aria-live="polite" className="rounded-[var(--crm-radius-md)] bg-[var(--crm-blue-soft)] p-4">
           <p className="m-0 text-xs text-[var(--crm-text-muted)]">Existencias tras la entrada</p><strong className="mt-1 block font-mono text-xl">{result === null ? draft.trim() ? 'Cantidad no válida' : 'Pendiente de cantidad' : format(result)}</strong>

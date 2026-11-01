@@ -1,9 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { BookOpen } from 'lucide-react'
 import { driver, type Driver } from 'driver.js'
-import { checklist, type Checklist } from 'driver.js/checklist'
 import 'driver.js/dist/driver.css'
-import 'driver.js/dist/checklist.css'
 import './onboarding.css'
 import { Button } from '../../../components/ui/Button'
 import { CrmModal } from '../shared/components/CrmModal'
@@ -13,6 +11,8 @@ import type { CrmVenue, TenantContext } from '../../../types'
 import type { CrmSection } from '../routing/crmNavigation'
 import { getOnboardingTopics, onboardingStorageKey, readOnboardingProgress, shouldOfferOnboarding, writeOnboardingProgress } from './onboardingModel'
 import { getOnboardingSteps } from './onboardingTours'
+import { OnboardingIndex } from './OnboardingIndex'
+import type { OnboardingTopic } from './onboardingModel'
 import { notifyOperationalError } from '../../../utils/notifications'
 
 type Props = {
@@ -30,7 +30,11 @@ export default function CrmOnboarding({ context, venue, activeSection, disabled,
   const progress = useRef(initialProgress)
   const [welcome, setWelcome] = useState(false)
   const [indexVisible, setIndexVisible] = useState(false)
-  const index = useRef<Checklist | null>(null)
+  const [isIndexOpen, setIndexOpen] = useState(false)
+  const [reviewed, setReviewed] = useState(initialProgress.reviewed)
+  const [indexTheme, setIndexTheme] = useState('light')
+  const index = useRef<((topic: OnboardingTopic) => void) | null>(null)
+  const launcher = useRef<HTMLButtonElement | null>(null)
   const tour = useRef<Driver | null>(null)
   const tourSection = useRef<CrmSection | null>(null)
   const navigate = useRef(onSectionChange)
@@ -68,7 +72,10 @@ export default function CrmOnboarding({ context, venue, activeSection, disabled,
       element.classList.add('crm-shell')
       element.dataset.crmTheme = shell?.dataset.crmTheme ?? 'light'
     }
-    const findDialog = () => document.querySelector('[data-onboarding-dialog]')?.closest('[role="dialog"]') ?? null
+    const findDialog = () => {
+      const dialogs = document.querySelectorAll('.modal__dialog[role="dialog"]')
+      return dialogs.item(dialogs.length - 1)
+    }
     const attachToDialog = (popover: HTMLElement, dialog: Element) => {
       const overlay = document.querySelector('.driver-overlay')
       if (overlay && overlay.parentElement !== dialog) dialog.appendChild(overlay)
@@ -80,96 +87,81 @@ export default function CrmOnboarding({ context, venue, activeSection, disabled,
       if (back) back.textContent = 'Pausar guía'
     }
     const showIndex = () => {
-      if (disposed) return
-      index.current?.show()
-      const widget = document.querySelector<HTMLElement>('.crm-onboarding-index')
-      if (widget) applyTheme(widget)
+      if (!disposed) setIndexOpen(true)
     }
-    const widget = checklist({
-      id: key,
-      title: 'Tu inicio guiado',
-      description: 'Elige un tema y sigue los pasos. Puedes saltar de uno a otro. Las marcas indican guías vistas, no datos guardados.',
-      launcher: false,
-      progressText: '{{done}} de {{total}} guías vistas',
-      completeTitle: 'Ya has visto todas las guías',
-      completeDescription: 'Puedes volver a cualquiera de ellas cuando lo necesites.',
-      className: 'crm-onboarding-index',
-      completed: progress.current.reviewed,
-      items: available.map(topic => ({
-        id: topic.id, title: topic.title, description: `${topic.description} · ${getOnboardingSteps(topic).length} pasos`,
-        completeWhen: () => progress.current.reviewed.includes(topic.id),
-        action: () => {
-          if (!canStart.current) return
-          tour.current?.destroy()
-          widget.hide()
-          tourSection.current = topic.section
-          navigate.current(topic.section)
-          const guide = driver({
-            animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
-            showProgress: true, progressText: '{{current}} de {{total}}',
-            nextBtnText: 'Siguiente', prevBtnText: 'Anterior', doneBtnText: 'Terminar guía', closeBtnLabel: 'Cerrar guía',
-            overlayClickBehavior: 'none', popoverClass: 'crm-onboarding-popover',
-            steps: getOnboardingSteps(topic),
-            onPopoverRender: popover => {
-              applyTheme(popover.wrapper)
-              popover.wrapper.dataset.reactAriaTopLayer = 'true'
-              // Keep the help inside the form's focus scope while a modal is open.
-              const dialog = findDialog()
-              if (dialog) attachToDialog(popover.wrapper, dialog)
-              const back = document.createElement('button')
-              back.type = 'button'
-              back.className = 'crm-onboarding-back'
-              back.textContent = dialog ? 'Pausar guía' : 'Volver al índice'
-              back.onclick = () => guide.destroy()
-              popover.footer.appendChild(back)
-            },
-            onHighlighted: (element, step) => {
-              if (step.element && (!element || element.id === 'driver-dummy-element')) {
-                notifyOperationalError('No se pudo encontrar este paso. Espera a que termine de cargar la sección y vuelve a abrir el índice.')
-                guide.destroy()
-              }
-            },
-            onDoneClick: () => {
-              progress.current = { ...progress.current, reviewed: [...new Set([...progress.current.reviewed, topic.id])] }
-              writeOnboardingProgress(key, progress.current)
-              widget.complete(topic.id)
-              guide.destroy()
-            },
-            onDestroyed: () => {
-              tour.current = null
-              tourSection.current = null
-              // A modal still owns focus: the index can be reopened from the header after closing it.
-              returnToIndex = true
-              if (!findDialog()) {
-                showIndex()
-                if (!disposed) widget.open()
-              }
-            },
-          })
-          tour.current = guide
-          guide.drive()
+    index.current = topic => {
+      if (!canStart.current || !available.some(candidate => candidate.id === topic.id)) return
+      tour.current?.destroy()
+      setIndexOpen(false)
+      tourSection.current = topic.section
+      navigate.current(topic.section)
+      const guide = driver({
+        animate: !window.matchMedia('(prefers-reduced-motion: reduce)').matches,
+        showProgress: true, progressText: '{{current}} de {{total}}',
+        nextBtnText: 'Siguiente', prevBtnText: 'Anterior', doneBtnText: 'Terminar guía', closeBtnLabel: 'Cerrar guía',
+        overlayClickBehavior: 'none', popoverClass: 'crm-onboarding-popover',
+        steps: getOnboardingSteps(topic),
+        onPopoverRender: popover => {
+          applyTheme(popover.wrapper)
+          popover.wrapper.dataset.reactAriaTopLayer = 'true'
+          // Keep the help inside the form's focus scope while a modal is open.
+          const dialog = findDialog()
+          if (dialog) attachToDialog(popover.wrapper, dialog)
+          const back = document.createElement('button')
+          back.type = 'button'
+          back.className = 'crm-onboarding-back'
+          back.textContent = dialog ? 'Pausar guía' : 'Volver al índice'
+          back.onclick = () => guide.destroy()
+          popover.footer.appendChild(back)
         },
-      })),
-    })
-    index.current = widget
+        onHighlighted: (element, step) => {
+          if (step.element && (!element || element.id === 'driver-dummy-element')) {
+            notifyOperationalError('No se pudo encontrar este paso. Espera a que termine de cargar la sección y vuelve a abrir el índice.')
+            guide.destroy()
+          }
+        },
+        onDoneClick: () => {
+          progress.current = { ...progress.current, reviewed: [...new Set([...progress.current.reviewed, topic.id])] }
+          writeOnboardingProgress(key, progress.current)
+          setReviewed(progress.current.reviewed)
+          guide.destroy()
+        },
+        onDestroyed: () => {
+          tour.current = null
+          tourSection.current = null
+          // A modal still owns focus: the index can be reopened from the header after closing it.
+          returnToIndex = true
+          if (!findDialog()) {
+            showIndex()
+          }
+        },
+      })
+      tour.current = guide
+      guide.drive()
+    }
     showIndex()
-    widget.open()
+    setIndexTheme(shell?.dataset.crmTheme ?? 'light')
     const themeObserver = new MutationObserver(() => {
-      const element = document.querySelector<HTMLElement>('.crm-onboarding-index')
-      if (element) applyTheme(element)
+      setIndexTheme(shell?.dataset.crmTheme ?? 'light')
     })
     if (shell) themeObserver.observe(shell, { attributes: true, attributeFilter: ['data-crm-theme'] })
     const formObserver = new MutationObserver(() => {
       const dialog = findDialog()
       if (dialog === activeDialog) return
+      const previousDialog = activeDialog
       activeDialog = dialog
       if (dialog) {
-        widget.hide()
+        setIndexOpen(false)
+        if (previousDialog || !dialog.querySelector('[data-onboarding-dialog]')) {
+          // A different editor/confirmation owns focus. Let it work normally.
+          tour.current?.destroy()
+          return
+        }
         const popover = document.querySelector<HTMLElement>('.crm-onboarding-popover')
         if (popover) attachToDialog(popover, dialog)
       }
       else if (tour.current) tour.current.destroy()
-      else if (returnToIndex && !disposed) { showIndex(); widget.open() }
+      else if (returnToIndex && !disposed) showIndex()
     })
     formObserver.observe(document.body, { childList: true, subtree: true })
     return () => {
@@ -178,7 +170,6 @@ export default function CrmOnboarding({ context, venue, activeSection, disabled,
       formObserver.disconnect()
       tour.current?.destroy()
       tour.current = null
-      widget.hide()
       index.current = null
     }
   }, [indexVisible, key, topicIds])
@@ -191,10 +182,11 @@ export default function CrmOnboarding({ context, venue, activeSection, disabled,
   }
 
   return <>
-    <Button aria-label="Inicio guiado" className="!min-h-11 !shrink-0 !gap-2 !bg-[var(--crm-blue-soft)] !px-3 !text-[var(--crm-blue)]" disabled={disabled || !topics.length} onClick={() => {
+    <Button ref={launcher} aria-label="Inicio guiado" className="!min-h-11 !shrink-0 !gap-2 !bg-[var(--crm-blue-soft)] !px-3 !text-[var(--crm-blue)]" disabled={disabled || !topics.length} onClick={() => {
       if (!indexVisible) setIndexVisible(true)
-      else { index.current?.show(); index.current?.open() }
+      else setIndexOpen(true)
     }} type="button"><BookOpen className="size-4" /><span className="hidden sm:inline">Inicio guiado</span></Button>
+    {indexVisible ? <OnboardingIndex disabled={disabled} isOpen={isIndexOpen} onClose={() => { setIndexOpen(false); launcher.current?.focus() }} onStart={topic => index.current?.(topic)} reviewed={reviewed} theme={indexTheme} topics={topics} /> : null}
     {welcome && !disabled ? <CrmModal label="Bienvenido a Tickit" onClose={() => dismissWelcome(false)}>
       <div className="!grid !gap-5 !p-6">
         <div className="!grid !size-12 !place-items-center !rounded-2xl !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]"><BookOpen className="size-6" /></div>
