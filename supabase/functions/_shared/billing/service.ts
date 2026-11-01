@@ -5,6 +5,7 @@ import { StripeGateway, StripeRequestError } from './stripe.ts'
 import type { StripeInvoice, StripeSubscription } from './stripe.ts'
 import { promotionPhases, renewalOnOrAfter, resolvePromotions } from './promotions.ts'
 import type { PromotionPhase, PromotionPreview } from './promotions.ts'
+import { spanishVatRate } from './taxes.ts'
 
 export type Account = {
   tenant_id: string; stripe_customer_id: string | null; stripe_subscription_id: string | null
@@ -18,16 +19,17 @@ export type Operation = {
   id: string; tenant_id: string; actor_id: string; kind: 'change' | 'cancel' | 'cancel_now'; reason: string
   status: string; contract: Contract | null; restore_contract: Contract | null
   timing: 'immediate' | 'period_end'; preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string; promotions?: PromotionPreview[]; afterPromotionCents?: number }
-  stripe_params: { subscriptionId: string | null; items?: ReturnType<typeof stripeItems>; discounts?: Array<{ coupon: string }> | ''; scheduleId?: string; baseline?: string; scheduleBaseline?: string; phases?: PromotionPhase[]; cancelSchedule?: boolean }
+  stripe_params: { subscriptionId: string | null; taxRateId?: string; items?: ReturnType<typeof stripeItems>; discounts?: Array<{ coupon: string }> | ''; scheduleId?: string; baseline?: string; scheduleBaseline?: string; phases?: PromotionPhase[]; cancelSchedule?: boolean }
   result: { url?: string; checkoutId?: string; scheduleId?: string; pendingInvoiceId?: string | null } | null; created_at: string; proration_date: number; effective_at: string | null
 }
 type VersionRow = { id: string; product_key: string; interval: 'month' | 'year'; amount_cents: number; features: string[]; limits: Version['limits']; included: Record<string, number>; maximum: number | null; requires: string[]; stripe_price_id: string | null; published: boolean }
 type ProductRow = { key: string; kind: Product['kind']; name: string; description: string; scope: Product['scope']; feature_key: string | null; resource: Product['resource']; active: boolean; sort_order: number }
 type StripePrice = { id: string; unit_amount: number; currency: string; recurring: { interval: string }; active: boolean; metadata: Record<string, string> }
 const iso = (seconds: number | undefined | null) => seconds ? new Date(seconds * 1000).toISOString() : null
-const subscriptionBaseline = (sub: StripeSubscription) => JSON.stringify({ status: sub.status, anchor: sub.billing_cycle_anchor, items: sub.items.data.map(item => [item.id,item.price.id,item.quantity,item.current_period_start,item.current_period_end]), pending: sub.pending_update, schedule: sub.schedule, cancellation: sub.cancel_at_period_end, discounts: sub.discounts, invoice: typeof sub.latest_invoice === 'object' ? sub.latest_invoice?.id : sub.latest_invoice })
+const subscriptionBaseline = (sub: StripeSubscription) => JSON.stringify({ status: sub.status, anchor: sub.billing_cycle_anchor, items: sub.items.data.map(item => [item.id,item.price.id,item.quantity,item.current_period_start,item.current_period_end,item.tax_rates]), taxes: sub.default_tax_rates, automaticTax: sub.automatic_tax, pending: sub.pending_update, schedule: sub.schedule, cancellation: sub.cancel_at_period_end, discounts: sub.discounts, invoice: typeof sub.latest_invoice === 'object' ? sub.latest_invoice?.id : sub.latest_invoice })
 type Schedule = { id: string; subscription: string; status: string; current_phase: { start_date: number; end_date: number }; phases: unknown[]; metadata: Record<string, string> }
 const scheduleBaseline = (schedule: Schedule) => JSON.stringify({ phases: schedule.phases, status: schedule.status, current: schedule.current_phase })
+const previewItems = (items: ReturnType<typeof stripeItems> | undefined, taxRateId?: string) => items?.map(item => taxRateId && !item.deleted ? { ...item, tax_rates: '' } : item)
 
 export class BillingService {
   readonly db: SupabaseClient
@@ -245,20 +247,23 @@ export class BillingService {
     const discounts = await this.materialize(next, tenantId)
     if (restore) await this.materialize(restore, tenantId)
     const prorationDate = Math.floor(Date.now() / 1000)
+    const taxRateId = await spanishVatRate(this.stripe)
     const items = subscription ? stripeItems(subscription.items.data, next.lines) : next.lines.map(line => ({ price: line.stripePriceId ?? undefined, quantity: line.quantity }))
-    const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', { customer: account.stripe_customer_id ?? undefined, ...(subscription ? { subscription: subscription.id } : {}), ...(timing === 'period_end' ? { preview_mode: 'recurring' } : {}), subscription_details: { items, proration_behavior: timing === 'immediate' && subscription ? 'always_invoice' : undefined, proration_date: timing === 'immediate' && subscription ? prorationDate : undefined }, discounts })
+    const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', { customer: account.stripe_customer_id ?? undefined, customer_details: { tax_exempt: 'none' }, automatic_tax: { enabled: false }, ...(subscription ? { subscription: subscription.id } : {}), ...(timing === 'period_end' ? { preview_mode: 'recurring' } : {}), subscription_details: { default_tax_rates: [taxRateId], items: previewItems(items, taxRateId), proration_behavior: timing === 'immediate' && subscription ? 'always_invoice' : undefined, proration_date: timing === 'immediate' && subscription ? prorationDate : undefined }, discounts })
     if (preview && preview.currency !== 'eur') throw new Error('BILLING_CURRENCY_MISMATCH')
-    return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing, stripeParams: { subscriptionId: subscription?.id ?? null, items, discounts, baseline: subscription ? subscriptionBaseline(subscription) : undefined }, preview: { amountDueCents: timing === 'immediate' ? preview.amount_due : 0, renewalCents: timing === 'period_end' ? preview.amount_due : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? account.period_end : null, details: timing === 'period_end' ? 'Cambio al vencimiento; sin cargo inmediato. Vista previa de renovación calculada por Stripe.' : 'Vista previa de Stripe; incluye los ajustes e impuestos configurados.' }, reason, prorationDate })
+    return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing, stripeParams: { subscriptionId: subscription?.id ?? null, taxRateId, items, discounts, baseline: subscription ? subscriptionBaseline(subscription) : undefined }, preview: { amountDueCents: timing === 'immediate' ? preview.amount_due : 0, renewalCents: timing === 'period_end' ? preview.amount_due : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? account.period_end : null, details: timing === 'period_end' ? 'Cambio al vencimiento; sin cargo inmediato. Vista previa de renovación calculada por Stripe con IVA del 21 %. Cuotas recurrentes sin IVA.' : 'Vista previa de Stripe con IVA del 21 % y los ajustes aplicables. Cuotas recurrentes sin IVA.' }, reason, prorationDate })
   }
-  async promotionInvoice(account: Account, sub: StripeSubscription, contract: Contract, discounts: PromotionPhase['discounts']) {
+  async promotionInvoice(account: Account, sub: StripeSubscription, contract: Contract, discounts: PromotionPhase['discounts'], taxRateId?: string) {
     const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', {
       customer: account.stripe_customer_id ?? undefined, subscription: sub.id, preview_mode: 'recurring',
-      subscription_details: { items: stripeItems(sub.items.data, contract.lines), proration_behavior: 'none' }, discounts,
+      ...(taxRateId ? { customer_details: { tax_exempt: 'none' }, automatic_tax: { enabled: false } } : {}),
+      subscription_details: { ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}), items: previewItems(stripeItems(sub.items.data, contract.lines), taxRateId), proration_behavior: 'none' }, discounts,
     })
     if (preview.currency !== 'eur') throw new Error('BILLING_CURRENCY_MISMATCH')
     return preview.amount_due
   }
   async quotePromotions(account: Account, actorId: string, selection: Selection, exception: CommercialException, reason: string, products: Product[], versions: Version[], sub: StripeSubscription, owned: Schedule | null, now: number, agreement: Contract | null) {
+    const taxRateId = await spanishVatRate(this.stripe)
     const current = account.billed_contract ?? account.contract
     if (!current) throw new Error('BILLING_CONTRACT_REQUIRED')
     const renewal = sub.items.data[0].current_period_end
@@ -298,13 +303,13 @@ export class BillingService {
       const discounts = await this.materialize(after, account.tenant_id)
       const line = after.lines.find(l => l.key === promotion.key)
       const version = versions.find(v => v.id === selection.addons.find(a => a.key === promotion.key)?.versionId)
-      previews.push({ id: promotion.id, key: promotion.key, freeUnits: promotion.freeUnits, activationAt: iso(promotion.startsAt) ?? '', endsAt: iso(promotion.endsAt) ?? '', firstChargeAt: line && line.amountCents > 0 && exception.discountBasisPoints < 10_000 ? iso(firstCharge) : null, regularUnitCents: exception.customAmounts[promotion.key] ?? version?.amountCents ?? 0, firstAddonChargeCents: line ? Number((BigInt(line.amountCents) * BigInt(line.quantity) * BigInt(10_000 - exception.discountBasisPoints) + 5_000n) / 10_000n) : 0, firstInvoiceCents: await this.promotionInvoice(account, sub, after, discounts), prorated: false })
+      previews.push({ id: promotion.id, key: promotion.key, freeUnits: promotion.freeUnits, activationAt: iso(promotion.startsAt) ?? '', endsAt: iso(promotion.endsAt) ?? '', firstChargeAt: line && line.amountCents > 0 && exception.discountBasisPoints < 10_000 ? iso(firstCharge) : null, regularUnitCents: exception.customAmounts[promotion.key] ?? version?.amountCents ?? 0, firstAddonChargeCents: line ? Number((BigInt(line.amountCents) * BigInt(line.quantity) * BigInt(10_000 - exception.discountBasisPoints) + 5_000n) / 10_000n) : 0, firstInvoiceCents: await this.promotionInvoice(account, sub, after, discounts, taxRateId), prorated: false })
     }
     const renewalPhase = phases.find(p => p.start <= renewal && renewal < p.end) ?? phases.at(-1)
-    const renewalCents = renewalPhase ? await this.promotionInvoice(account, sub, renewalPhase.contract, renewalPhase.discounts) : 0
+    const renewalCents = renewalPhase ? await this.promotionInvoice(account, sub, renewalPhase.contract, renewalPhase.discounts, taxRateId) : 0
     return this.transition<Operation>('quote', { tenantId: account.tenant_id, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: null, timing: immediate ? 'immediate' : 'period_end',
-      stripeParams: { subscriptionId: sub.id, scheduleId: owned?.id, baseline: subscriptionBaseline(sub), scheduleBaseline: owned ? scheduleBaseline(owned) : undefined, phases },
-      preview: { amountDueCents: 0, recurringCents: next.recurringCents, afterPromotionCents: phases.at(-1)?.contract.recurringCents, renewalCents, currency: 'eur', effectiveAt: iso(effective), promotions: previews, details: 'Sin cargos ni prorrateos ahora o al cambiar de fase. Si la promoción termina entre renovaciones, el tramo restante es gratuito y el precio habitual se cobra en la siguiente renovación. Cambios de plan, cantidades o retirada de promociones: próxima renovación. Importes recurrentes sin impuestos; primera factura estimada por Stripe con la configuración actual, sujeta a cambios fiscales, de saldo y de contrato.' }, reason, prorationDate: now })
+      stripeParams: { subscriptionId: sub.id, taxRateId, scheduleId: owned?.id, baseline: subscriptionBaseline(sub), scheduleBaseline: owned ? scheduleBaseline(owned) : undefined, phases },
+      preview: { amountDueCents: 0, recurringCents: next.recurringCents, afterPromotionCents: phases.at(-1)?.contract.recurringCents, renewalCents, currency: 'eur', effectiveAt: iso(effective), promotions: previews, details: 'Sin cargos ni prorrateos ahora o al cambiar de fase. Si la promoción termina entre renovaciones, el tramo restante es gratuito y el precio habitual se cobra en la siguiente renovación. Cambios de plan, cantidades o retirada de promociones: próxima renovación. Importes recurrentes sin IVA; facturas estimadas por Stripe con IVA del 21 %, sujetas a cambios de saldo y de contrato.' }, reason, prorationDate: now })
   }
   async quoteCancel(tenantId: string, actorId: string, immediate: boolean, reason: string) {
     const account = await this.account(tenantId)
@@ -326,6 +331,8 @@ export class BillingService {
     if (before.error) throw new Error('BILLING_OPERATION_NOT_FOUND')
     if (before.data.status !== 'quoted' && !retry) return { operation: before.data, url: before.data.result?.url }
     if (retry && (before.data.status !== 'applying' || Date.now() - Date.parse(before.data.created_at) > 23 * 3600_000)) throw new Error('BILLING_MANUAL_RECONCILIATION_REQUIRED')
+    // Requote old offers; an in-flight retry must retain its original Stripe parameters.
+    if (!retry && before.data.kind === 'change' && !before.data.stripe_params.taxRateId) throw new Error('BILLING_STALE_STRIPE_QUOTE')
     if (!retry && before.data.stripe_params.baseline) {
       const account = await this.account(tenantId)
       const sub = await this.subscription(account)
@@ -341,22 +348,24 @@ export class BillingService {
       if (!sub || phases[0].end <= Math.floor(Date.now() / 1000)) throw new Error('BILLING_STALE_STRIPE_QUOTE')
       const renewal = sub.items.data[0].current_period_end
       const phase = phases.find(p => p.start <= renewal && renewal < p.end) ?? phases.at(-1)
-      if (!phase || await this.promotionInvoice(account, sub, phase.contract, phase.discounts) !== before.data.preview.renewalCents) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+      if (!phase || await this.promotionInvoice(account, sub, phase.contract, phase.discounts, before.data.stripe_params.taxRateId) !== before.data.preview.renewalCents) throw new Error('BILLING_STALE_STRIPE_QUOTE')
       for (const promotion of before.data.preview.promotions ?? []) {
         if (!promotion.firstChargeAt) continue
         const at = Date.parse(promotion.firstChargeAt) / 1000
         const after = phases.find(p => p.start <= at && at < p.end) ?? phases.at(-1)
-        if (!after || await this.promotionInvoice(account, sub, after.contract, after.discounts) !== promotion.firstInvoiceCents) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+        if (!after || await this.promotionInvoice(account, sub, after.contract, after.discounts, before.data.stripe_params.taxRateId) !== promotion.firstInvoiceCents) throw new Error('BILLING_STALE_STRIPE_QUOTE')
       }
     } else if (!retry && before.data.kind === 'change') {
       const account = await this.account(tenantId)
       const immediate = before.data.timing === 'immediate'
       const subId = before.data.stripe_params.subscriptionId
+      const taxRateId = before.data.stripe_params.taxRateId
       const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', {
         customer: account.stripe_customer_id ?? undefined,
+        ...(taxRateId ? { customer_details: { tax_exempt: 'none' }, automatic_tax: { enabled: false } } : {}),
         subscription: subId ?? undefined,
         preview_mode: immediate ? undefined : 'recurring',
-        subscription_details: { items: before.data.stripe_params.items, proration_behavior: immediate && subId ? 'always_invoice' : undefined, proration_date: immediate && subId ? before.data.proration_date : undefined },
+        subscription_details: { ...(taxRateId ? { default_tax_rates: [taxRateId] } : {}), items: previewItems(before.data.stripe_params.items, taxRateId), proration_behavior: immediate && subId ? 'always_invoice' : undefined, proration_date: immediate && subId ? before.data.proration_date : undefined },
         discounts: before.data.stripe_params.discounts,
       })
       const expected = immediate ? before.data.preview.amountDueCents : before.data.preview.renewalCents
@@ -368,6 +377,14 @@ export class BillingService {
     if (op.status !== 'applying') return { operation: op, url: op.result?.url }
     const account = await this.account(tenantId)
     const idempotencyKey = `tickit:${op.id}`
+    const taxRateId = op.stripe_params.taxRateId
+    const taxes = taxRateId ? { default_tax_rates: [taxRateId] } : {}
+    const phaseTaxes = taxRateId ? { ...taxes, automatic_tax: { enabled: false } } : {}
+    // A prior tax configuration write may have succeeded even if its response was lost.
+    const configuredCustomerTax = op.kind === 'change' && Boolean(taxRateId && account.stripe_customer_id)
+    if (configuredCustomerTax) {
+      await this.applyStripeMutation(op, () => this.stripe.request('POST', `/customers/${account.stripe_customer_id}`, { tax_exempt: 'none' }, `${idempotencyKey}:vat-customer`), !retry)
+    }
     let result: Operation['result'] = {}
     let status = 'payment_pending'
     // A retry may follow earlier effects: only a first, definitively rejected mutation can release.
@@ -383,7 +400,7 @@ export class BillingService {
       const contract = op.contract
       let customerId = account.stripe_customer_id
       if (!customerId) {
-        const customer = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string }>('POST', '/customers', { name: account.legal_name ?? undefined, email: account.email ?? undefined, metadata: { tickit_tenant_id: tenantId } }, `${idempotencyKey}:customer`), !retry)
+        const customer = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string }>('POST', '/customers', { name: account.legal_name ?? undefined, email: account.email ?? undefined, ...(taxRateId ? { tax_exempt: 'none' } : {}), metadata: { tickit_tenant_id: tenantId } }, `${idempotencyKey}:customer`), !retry)
         customerId = customer.id
         await this.transition('link_customer', { tenantId, customerId })
       }
@@ -391,32 +408,44 @@ export class BillingService {
       if (existing.some(sub => !['canceled','incomplete_expired'].includes(sub.status))) throw new Error('BILLING_EXISTING_SUBSCRIPTION')
       const checkout = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string; url: string }>('POST', '/checkout/sessions', {
         customer: customerId, mode: 'subscription',
+        ...(taxRateId ? { automatic_tax: { enabled: false } } : {}),
         billing_address_collection: 'required', tax_id_collection: { enabled: true }, customer_update: { address: 'auto', name: 'auto' },
         client_reference_id: tenantId, metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId },
-        subscription_data: { metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId } },
+        subscription_data: { ...taxes, metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId } },
         line_items: contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })),
         discounts: op.stripe_params.discounts || undefined,
         success_url: `${this.appUrl}/crm?billing=success`, cancel_url: `${this.appUrl}/crm?billing=cancelled`,
-      }, idempotencyKey), !retry)
+      }, idempotencyKey), !retry && !configuredCustomerTax)
       result = { checkoutId: checkout.id, url: checkout.url }
     } else if (op.stripe_params.phases) {
-      const schedule = op.stripe_params.scheduleId ? { id: op.stripe_params.scheduleId } : await this.applyStripeMutation(op, () => this.stripe.request<{ id: string }>('POST', '/subscription_schedules', { from_subscription: op.stripe_params.subscriptionId }, `${idempotencyKey}:schedule`), !retry)
-      const phases = op.stripe_params.phases.map((phase,index) => ({ start_date: phase.start, end_date: phase.end, items: phase.contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })), discounts: phase.discounts, proration_behavior: 'none', metadata: { tickit_operation_id: op.id, tickit_phase: String(index), tickit_exception_restored: '' } }))
+      const schedule = op.stripe_params.scheduleId ? { id: op.stripe_params.scheduleId } : await this.applyStripeMutation(op, () => this.stripe.request<{ id: string }>('POST', '/subscription_schedules', { from_subscription: op.stripe_params.subscriptionId }, `${idempotencyKey}:schedule`), !retry && !configuredCustomerTax)
+      const phases = op.stripe_params.phases.map((phase,index) => ({ ...phaseTaxes, start_date: phase.start, end_date: phase.end, items: phase.contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity, ...(taxRateId ? { tax_rates: '' } : {}) })), discounts: phase.discounts, proration_behavior: 'none', metadata: { tickit_operation_id: op.id, tickit_phase: String(index), tickit_exception_restored: '' } }))
       await this.applyStripeMutation(op, () => this.stripe.request('POST', `/subscription_schedules/${schedule.id}`, { end_behavior: 'release', proration_behavior: 'none', metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId }, phases }, `${idempotencyKey}:phases`), false)
       result = { scheduleId: schedule.id }; status = 'scheduled'
     } else if (op.timing === 'period_end') {
       if (!op.contract) throw new Error('BILLING_CONTRACT_REQUIRED')
       const sub = await this.subscription(account)
       if (!sub || sub.pending_update || (sub.schedule && !retry)) throw new Error('BILLING_PENDING_CHANGE')
-      const schedule = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string; current_phase: { start_date: number; end_date: number } }>('POST', '/subscription_schedules', { from_subscription: sub.id }, `${idempotencyKey}:schedule`), !retry)
-      const basePhase = { start_date: schedule.current_phase.start_date, end_date: schedule.current_phase.end_date, items: sub.items.data.map(item => ({ price: item.price.id, quantity: item.quantity })), proration_behavior: 'none', discounts: account.contract?.exception?.discountBasisPoints ? [{ coupon: `tickit_discount_${account.contract.exception.discountBasisPoints}` }] : '' }
-      const nextPhase = { items: op.contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })), discounts: op.stripe_params.discounts, proration_behavior: 'none', metadata: { tickit_operation_id: op.id, tickit_exception_restored: '' }, duration: { interval: op.contract.interval, interval_count: op.contract.exception?.cycles ?? 1 } }
-      const phases = [basePhase, nextPhase, ...(op.restore_contract ? [{ items: op.restore_contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })), discounts: '', proration_behavior: 'none', duration: { interval: op.restore_contract.interval, interval_count: 1 }, metadata: { tickit_operation_id: op.id, tickit_exception_restored: 'true' } }] : [])]
+      const schedule = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string; current_phase: { start_date: number; end_date: number } }>('POST', '/subscription_schedules', { from_subscription: sub.id }, `${idempotencyKey}:schedule`), !retry && !configuredCustomerTax)
+      const basePhase = { ...phaseTaxes, start_date: schedule.current_phase.start_date, end_date: schedule.current_phase.end_date, items: sub.items.data.map(item => ({ price: item.price.id, quantity: item.quantity, ...(taxRateId ? { tax_rates: '' } : {}) })), proration_behavior: 'none', discounts: account.contract?.exception?.discountBasisPoints ? [{ coupon: `tickit_discount_${account.contract.exception.discountBasisPoints}` }] : '' }
+      const nextPhase = { ...phaseTaxes, items: op.contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity, ...(taxRateId ? { tax_rates: '' } : {}) })), discounts: op.stripe_params.discounts, proration_behavior: 'none', metadata: { tickit_operation_id: op.id, tickit_exception_restored: '' }, duration: { interval: op.contract.interval, interval_count: op.contract.exception?.cycles ?? 1 } }
+      const phases = [basePhase, nextPhase, ...(op.restore_contract ? [{ ...phaseTaxes, items: op.restore_contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity, ...(taxRateId ? { tax_rates: '' } : {}) })), discounts: '', proration_behavior: 'none', duration: { interval: op.restore_contract.interval, interval_count: 1 }, metadata: { tickit_operation_id: op.id, tickit_exception_restored: 'true' } }] : [])]
       // A schedule already exists. Even a definitive phase rejection must retain the lock.
       await this.applyStripeMutation(op, () => this.stripe.request('POST', `/subscription_schedules/${schedule.id}`, { end_behavior: 'release', proration_behavior: 'none', phases }, `${idempotencyKey}:phases`), false)
       result = { scheduleId: schedule.id }; status = 'scheduled'
     } else {
-      const updated = await this.applyStripeMutation(op, () => this.stripe.request<StripeSubscription>('POST', `/subscriptions/${op.stripe_params.subscriptionId}`, { items: op.stripe_params.items, discounts: op.stripe_params.discounts, payment_behavior: 'pending_if_incomplete', proration_behavior: 'always_invoice', proration_date: op.proration_date }, idempotencyKey), !retry)
+      if (taxRateId) {
+        const sub = await this.subscription(account)
+        if (!sub) throw new Error('BILLING_SUBSCRIPTION_REQUIRED')
+        const configured = !sub.automatic_tax?.enabled && sub.default_tax_rates?.length === 1 && sub.default_tax_rates[0].id === taxRateId && sub.items.data.every(item => !item.tax_rates?.length)
+        if (!configured) {
+          // Tax settings are unsupported by pending_if_incomplete. Configure them
+          // without proration first; the paid upgrade remains a pending update.
+          if (sub.pending_update) throw new Error('BILLING_PENDING_CHANGE')
+          await this.applyStripeMutation(op, () => this.stripe.request('POST', `/subscriptions/${sub.id}`, { ...taxes, automatic_tax: { enabled: false }, items: sub.items.data.map(item => ({ id: item.id, tax_rates: '' })), proration_behavior: 'none' }, `${idempotencyKey}:vat-subscription`), !retry && !configuredCustomerTax)
+        }
+      }
+      const updated = await this.applyStripeMutation(op, () => this.stripe.request<StripeSubscription>('POST', `/subscriptions/${op.stripe_params.subscriptionId}`, { items: op.stripe_params.items, discounts: op.stripe_params.discounts, payment_behavior: 'pending_if_incomplete', proration_behavior: 'always_invoice', proration_date: op.proration_date }, idempotencyKey), !retry && !taxRateId)
       result = { pendingInvoiceId: typeof updated.latest_invoice === 'object' ? updated.latest_invoice?.id : updated.latest_invoice }
     }
     const operation = await this.transition<Operation>('apply_result', { tenantId, operationId, status, result, effectiveAt: op.timing === 'period_end' ? account.period_end : null })

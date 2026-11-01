@@ -2,6 +2,18 @@
 
 La ampliación preparada en `Staging` añade [promociones gratuitas por addon con inicio inmediato](stripe-billing-promotions.md), conservando las excepciones y contratos anteriores. Esa guía detalla la política sin prorrateo, los calendarios modificables y el despliegue Self-Hosted en Coolify.
 
+## IVA manual del 21 % (01-11-2026)
+
+La política comercial acordada aplica siempre un IVA fijo del 21 % sobre los precios netos de planes y addons. El servicio busca o crea una tasa manual de Stripe `IVA`, país `ES`, tipo `vat` y `inclusive=false`, identificada por `tickit_tax_policy=es_vat_21_exclusive_v1`. La creación usa una clave de idempotencia compartida y la lectura recorre la paginación; no requiere configurar un ID por entorno ni activar Stripe Tax. Una clave restringida necesita lectura y escritura de Tax Rates además de los permisos de Billing existentes.
+
+Checkout configura `subscription_data.default_tax_rates`. Las vistas previas y cada fase de los calendarios usan la misma tasa, incluidos los descuentos temporales, las promociones de addons y la restauración de tarifas. Stripe calcula el impuesto y el redondeo después de los descuentos: un plan de 49 € sin descuento queda en 59,29 € con IVA. Las cuotas contractuales y MRR/ARR siguen siendo netas. Los clientes se configuran con `tax_exempt=none` al confirmar; Stripe Tax permanece desactivado y las tasas particulares de línea se limpian para heredar el 21 %.
+
+Las ampliaciones mantienen `pending_if_incomplete`: si una suscripción anterior necesita ajustar sus impuestos, se hace antes en una petición idempotente sin prorrateos ni factura. El cambio de plan continúa condicionado al pago. Las operaciones guardan el ID de tasa para conservar los parámetros en los reintentos; los fallos inciertos mantienen el bloqueo. Una oferta antigua aún sin confirmar exige generar un presupuesto nuevo; un reintento ya en curso conserva los parámetros anteriores, sin alterar una sesión o un cobro que pueda existir.
+
+No se necesita migración SQL. El cambio está preparado localmente: no se han creado recursos remotos, desplegado funciones ni modificado suscripciones existentes en Stripe. Al desplegar las tres funciones de Billing, las nuevas contrataciones y los cambios confirmados utilizarán esta política; las suscripciones existentes sin cambios y las sesiones Checkout ya abiertas **no se actualizan en bloque**. Esa regularización necesita una actuación independiente revisada, sin modificar facturas históricas. El bloqueo de claves live continúa vigente.
+
+Regresión: `tests/functional/stripe-billing-vat.test.ts` usa Vitest, el servicio real y PostgreSQL embebido con un doble de Stripe. Cubre creación/reutilización de tasa, paginación, rechazo de tasa inválida, 49 € → 59,29 €, renovaciones, descuentos y addons, configuración anterior, ampliación con pago fallido y reintento, calendarios/promociones y compatibilidad de operaciones anteriores. No sustituye una aceptación contra la API de Stripe en sandbox.
+
 ## Corrección de Checkout y recuperación en Staging (20-10-2026)
 
 Cambios preparados en la rama `Staging`, sin desplegar esta corrección ni aplicar su migración remota. No se ha modificado producción.
@@ -150,7 +162,7 @@ El navegador usa las variables públicas Supabase ya existentes. No necesita Str
 1. Preparar una base **aislada** con el baseline actual de Tickit. Revisar/aplicar allí la migración nueva; no ejecutar `db push` contra producción. Las pruebas SQL incluidas ya ejercitan el expand en PostgreSQL embebido, sin servicios externos.
 2. Configurar los secretos anteriores fuera de Git. La autorización MCP no los sustituye.
 3. Ejecutar las tres funciones localmente o desplegarlas únicamente en un staging autorizado. Confirmar que `/crm` redirige a la entrada CRM habitual.
-4. En Stripe test, configurar los datos legales del emisor y la política tributaria aplicable. No se ha supuesto ni codificado un IVA, ni activado Stripe Tax automáticamente. Antes de cobrar realmente, validar cómo se aplicarán impuestos y exenciones a Checkout y a las suscripciones.
+4. En Stripe test, configurar los datos legales del emisor. Tickit crea y aplica el IVA manual del 21 % descrito arriba; no activar Stripe Tax para este flujo. Comprobar en sandbox el desglose de base, IVA y total en Checkout, renovaciones y cambios de suscripción.
 5. Crear una configuración Portal test que permita actualizar métodos de pago/datos de facturación y consultar facturas. Deshabilitar `subscription_update` y `subscription_cancel`. Guardar su ID en el secreto correspondiente. La ficha interna de Tickit no sustituye al Portal para modificar datos fiscales del cliente Stripe ya creado.
 6. Crear el endpoint test `/functions/v1/billing-webhook` con API version `2026-09-30.endive`, registrar los eventos indicados y guardar su secreto. Para desarrollo con Stripe CLI autenticada en el sandbox, `stripe listen --forward-to http://127.0.0.1:54321/functions/v1/billing-webhook`; usar su secreto de escucha para la función local.
 7. En Superadmin crear/activar el plan, introducir los precios confirmados e inclusiones, guardar cada intervalo como versión independiente y publicar. Configurar también addon de local/dispositivo adicional si se van a comercializar esas unidades.

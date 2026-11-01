@@ -50,7 +50,7 @@ export function billingClient(db) {
 }
 
 export class FakeStripe {
-  subscriptions=[]; invoices=[]; calls=[]; sessions=new Map(); schedules=new Map(); prices=new Map(); cache=new Map()
+  subscriptions=[]; invoices=[]; calls=[]; sessions=new Map(); schedules=new Map(); prices=new Map(); cache=new Map(); taxRates=[]; customerTaxExempt='none'
   previewRecurring=false; priceAmounts=new Map([['price_base',10000],['price_production',1000]])
   failPayment=false; offline=false; now=Math.floor(Date.now()/1000)
   async list(path) {
@@ -58,14 +58,21 @@ export class FakeStripe {
     if(path==='/subscriptions')return structuredClone(this.subscriptions)
     if(path==='/invoices')return structuredClone(this.invoices)
     if(path==='/prices')return [...this.prices.values()]
+    if(path==='/tax_rates')return structuredClone(this.taxRates.filter(rate=>rate.active))
     throw new Error(path)
   }
-  invoice(paid=true){const invoice={id:`in_${this.invoices.length+1}`,customer:'cus_test',status:paid?'paid':'open',currency:'eur',amount_due:10000,amount_paid:paid?10000:0,total:10000,total_excluding_tax:10000,subtotal_excluding_tax:10000,created:this.now,number:null,hosted_invoice_url:null,invoice_pdf:null,status_transitions:{paid_at:paid?this.now:null}};this.invoices.push(invoice);return invoice}
+  totals(lines,rates,discounts=[],taxExempt=this.customerTaxExempt) {
+    let subtotal=lines.filter(item=>!item.deleted).reduce((sum,item)=>sum+(this.priceAmounts.get(item.price?.id??item.price)??0)*item.quantity,0)
+    for(const discount of discounts||[]){const coupon=discount.coupon??discount.source?.coupon;if(coupon?.startsWith('tickit_discount_'))subtotal=Math.round(subtotal*(10000-Number(coupon.split('_').at(-1)))/10000)}
+    const tax=(rates??[]).reduce((sum,value)=>{const rate=this.taxRates.find(row=>row.id===(value.id??value));return sum+(rate&&taxExempt==='none'?Math.round(subtotal*rate.percentage/100):0)},0)
+    return {subtotal,total:subtotal+tax}
+  }
+  invoice(paid=true){const sub=this.subscriptions[0],amounts=this.totals(sub.items.data,sub.default_tax_rates,sub.discounts);const invoice={id:`in_${this.invoices.length+1}`,customer:'cus_test',status:paid?'paid':'open',currency:'eur',amount_due:amounts.total,amount_paid:paid?amounts.total:0,total:amounts.total,total_excluding_tax:amounts.subtotal,subtotal_excluding_tax:amounts.subtotal,created:this.now,number:null,hosted_invoice_url:null,invoice_pdf:null,status_transitions:{paid_at:paid?this.now:null}};this.invoices.push(invoice);return invoice}
   items(lines){return lines.map((line,index)=>({id:`si_${index}`,price:{id:line.price},quantity:line.quantity,current_period_start:this.now,current_period_end:this.now+2592000}))}
   discounts(value){return value?value.map(discount=>({source:{coupon:discount.coupon}})):[]}
-  completeCheckout(){const session=[...this.sessions.values()].at(-1);session.status='complete';const invoice=this.invoice();this.subscriptions=[{id:'sub_test',customer:'cus_test',livemode:false,status:'active',billing_cycle_anchor:this.now,items:{data:this.items(session.params.line_items),has_more:false},pending_update:null,cancel_at_period_end:false,latest_invoice:invoice,schedule:null,discounts:this.discounts(session.params.discounts),metadata:session.params.subscription_data.metadata}]}
+  completeCheckout(){const session=[...this.sessions.values()].at(-1);session.status='complete';this.subscriptions=[{id:'sub_test',customer:'cus_test',livemode:false,status:'active',billing_cycle_anchor:this.now,items:{data:this.items(session.params.line_items),has_more:false},default_tax_rates:(session.params.subscription_data.default_tax_rates??[]).map(id=>({id})),automatic_tax:{enabled:false},pending_update:null,cancel_at_period_end:false,latest_invoice:null,schedule:null,discounts:this.discounts(session.params.discounts),metadata:session.params.subscription_data.metadata}];this.subscriptions[0].latest_invoice=this.invoice()}
   pay(){const sub=this.subscriptions[0]; if(sub.pending_update){const params=sub.pending_update;sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null}sub.status='active';sub.latest_invoice=this.invoice()}
-  advancePhase(index=1){const sub=this.subscriptions[0],schedule=this.schedules.get(sub.schedule),phase=schedule.phases[index];this.now=schedule.current_phase.end_date+(index-1)*2592000;sub.items.data=this.items(phase.items);sub.metadata={...sub.metadata,...phase.metadata};sub.discounts=this.discounts(phase.discounts);sub.latest_invoice=this.invoice()}
+  advancePhase(index=1){const sub=this.subscriptions[0],schedule=this.schedules.get(sub.schedule),phase=schedule.phases[index];this.now=schedule.current_phase.end_date+(index-1)*2592000;sub.items.data=this.items(phase.items);sub.metadata={...sub.metadata,...phase.metadata};sub.discounts=this.discounts(phase.discounts);if(phase.default_tax_rates)sub.default_tax_rates=phase.default_tax_rates.map(id=>({id}));sub.latest_invoice=this.invoice()}
   applyScheduledPhase(at) {
     const sub=this.subscriptions[0], schedule=this.schedules.get(sub.schedule)
     if(!schedule?.phases)return
@@ -75,6 +82,8 @@ export class FakeStripe {
     const start=period.current_period_start,end=period.current_period_end
     sub.items.data=this.items(phase.items).map(item=>({...item,current_period_start:start,current_period_end:end}))
     sub.metadata={...sub.metadata,...phase.metadata};sub.discounts=this.discounts(phase.discounts)
+    if(phase.default_tax_rates)sub.default_tax_rates=phase.default_tax_rates.map(id=>({id}))
+    if(phase.automatic_tax)sub.automatic_tax=phase.automatic_tax
     schedule.current_phase={start_date:phase.start_date,end_date:phase.end_date}
   }
   advanceTo(at,fail=false) {
@@ -92,8 +101,12 @@ export class FakeStripe {
     const cacheKey=`${method}:${path}:${idempotencyKey}`
     if(idempotencyKey&&this.cache.has(cacheKey))return structuredClone(this.cache.get(cacheKey))
     let result
-    if(path==='/invoices/create_preview')result={amount_due:this.previewRecurring&&params.preview_mode==='recurring'?params.subscription_details.items.filter(item=>!item.deleted).reduce((sum,item)=>sum+(this.priceAmounts.get(item.price)??0)*item.quantity,0):500,currency:'eur'}
-    else if(path==='/customers')result={id:'cus_test'}
+    if(path==='/invoices/create_preview'){
+      const amounts=this.previewRecurring?this.totals(params.subscription_details.items,params.subscription_details.default_tax_rates,params.discounts,params.customer_details?.tax_exempt):{total:params.subscription_details.default_tax_rates?.length?605:500,subtotal:500}
+      result={amount_due:amounts.total,currency:'eur',total:amounts.total,total_excluding_tax:amounts.subtotal}
+    }
+    else if(path==='/tax_rates'){result={id:`txr_test_${this.taxRates.length}`,active:true,...params};this.taxRates.push(result)}
+    else if(path==='/customers'||path==='/customers/cus_test'){if(params.tax_exempt)this.customerTaxExempt=params.tax_exempt;result={id:'cus_test',tax_exempt:this.customerTaxExempt}}
     else if(path==='/checkout/sessions'){result={id:`cs_test_${this.sessions.size}`,url:'https://checkout.stripe.com/test'};this.sessions.set(result.id,{...result,status:'open',params})}
     else if(path.startsWith('/checkout/sessions/'))result=this.sessions.get(path.split('/').at(-1))
     else if(path==='/subscription_schedules'){result={id:'sub_sched_test',current_phase:{start_date:this.subscriptions[0].items.data[0].current_period_start,end_date:this.subscriptions[0].items.data[0].current_period_end}};this.subscriptions[0].schedule=result.id;this.schedules.set(result.id,result)}
@@ -105,6 +118,11 @@ export class FakeStripe {
       const sub=this.subscriptions[0]
       if(method==='DELETE')sub.status='canceled'
       else if(method==='POST'&&params.cancel_at_period_end)sub.cancel_at_period_end=true
+      else if(method==='POST'&&params.default_tax_rates){
+        if(params.payment_behavior==='pending_if_incomplete')throw new Error('Tax settings unsupported by pending updates')
+        sub.default_tax_rates=params.default_tax_rates.map(id=>({id}));sub.automatic_tax=params.automatic_tax
+        sub.items.data.forEach(item=>{item.tax_rates=[]})
+      }
       else if(method==='POST'){
         if(this.failPayment){sub.pending_update=params;sub.latest_invoice=this.invoice(false)}
         else{sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.latest_invoice=this.invoice()}
@@ -118,14 +136,15 @@ export class FakeStripe {
     return structuredClone(result)
   }
 }
-export async function createBillingService(t) {
+export async function createBillingService(t,baseAmountCents=10000) {
   const {db,transition}=await createBillingDb(t)
-  const base=await transition('catalog_save',{actorId:ids.owner,product:{key:'base',kind:'plan',name:'Synthetic base',description:'',scope:'tenant',featureKey:null,resource:null,active:true,sortOrder:0},version:{interval:'month',amountCents:10000,features:['restaurant'],limits:{venues:3,devices:5},included:{},maximum:null,requires:[]},reason:'Test fixture'})
+  const base=await transition('catalog_save',{actorId:ids.owner,product:{key:'base',kind:'plan',name:'Synthetic base',description:'',scope:'tenant',featureKey:null,resource:null,active:true,sortOrder:0},version:{interval:'month',amountCents:baseAmountCents,features:['restaurant'],limits:{venues:3,devices:5},included:{},maximum:null,requires:[]},reason:'Test fixture'})
   // The migration seeds a production addon draft, without price assumptions.
   const production=await transition('catalog_save',{actorId:ids.owner,product:{key:'production',kind:'addon',name:'Production',description:'',scope:'venue',featureKey:'production',resource:null,active:true,sortOrder:1},version:{interval:'month',amountCents:1000,features:[],limits:{venues:1,devices:0},included:{},maximum:10,requires:['restaurant']},reason:'Test fixture'})
   await db.query('update billing_price_versions set stripe_price_id=$1,published=true where id=$2',['price_base',base.id])
   await db.query('update billing_price_versions set stripe_price_id=$1,published=true where id=$2',['price_production',production.id])
   const stripe=new FakeStripe(),service=new BillingService(billingClient(db),stripe,'http://localhost:5173','bpc_test')
+  stripe.priceAmounts.set('price_base',baseAmountCents)
   const selection={planVersionId:base.id,addons:[]}
   const activate=async()=>{const quote=await service.quote(ids.tenant,ids.owner,selection,null,'Test onboarding');await service.confirm(ids.tenant,ids.owner,quote.id);stripe.completeCheckout();await service.reconcile(ids.tenant)}
   return {db,stripe,service,selection,base,production,activate,transition}

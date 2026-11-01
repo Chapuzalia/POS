@@ -1,4 +1,4 @@
-export type StripeItem = { id: string; price: { id: string; unit_amount: number }; quantity: number; current_period_start: number; current_period_end: number }
+export type StripeItem = { id: string; price: { id: string; unit_amount: number }; quantity: number; current_period_start: number; current_period_end: number; tax_rates?: Array<{ id: string }> }
 export type StripeSubscription = {
   id: string; customer: string; status: string; livemode: boolean
   items: { data: StripeItem[]; has_more: boolean }
@@ -7,6 +7,8 @@ export type StripeSubscription = {
   schedule: string | null
   billing_cycle_anchor?: number
   discounts: Array<string | { source: { coupon: string | { id: string } } }>
+  default_tax_rates?: Array<{ id: string }>
+  automatic_tax?: { enabled: boolean }
   metadata: Record<string, string>
 }
 export type StripeInvoice = {
@@ -59,7 +61,7 @@ export class StripeGateway {
     this.transport = transport
   }
   async request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, params: Record<string, FormValue> = {}, idempotencyKey?: string): Promise<T> {
-    if (!/^\/(customers|products|prices|checkout\/sessions|subscriptions|subscription_schedules|invoices|billing_portal\/(sessions|configurations)|coupons)(\/|$)/.test(path)) throw new Error('BILLING_INVALID_STRIPE_PATH')
+    if (!/^\/(customers|products|prices|tax_rates|checkout\/sessions|subscriptions|subscription_schedules|invoices|billing_portal\/(sessions|configurations)|coupons)(\/|$)/.test(path)) throw new Error('BILLING_INVALID_STRIPE_PATH')
     const form = encodeStripeForm(params)
     const result = await this.transport(`https://api.stripe.com/v1${path}${method === 'GET' && form.size ? `?${form}` : ''}`, {
       method,
