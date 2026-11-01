@@ -19,11 +19,12 @@ type Props = {
   onLogout: () => void
   onSectionChange: (section: CrmSection) => void
   onVenueChange: (venueId: string) => void
+  onboarding?: ReactNode
   selectedVenueId: string
   venues: CrmVenue[]
 }
 
-export function CrmShell({ activeSection, children, context, disabled, error, inventoryEnabled, isOnline, onLogout, onSectionChange, onVenueChange, selectedVenueId, venues }: Props) {
+export function CrmShell({ activeSection, children, context, disabled, error, inventoryEnabled, isOnline, onLogout, onSectionChange, onVenueChange, onboarding, selectedVenueId, venues }: Props) {
   useEffect(() => { if (error) notifyOperationalError(error) }, [error])
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [crmTheme, setCrmTheme] = useState<CrmTheme>(getInitialCrmTheme)
@@ -75,6 +76,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
           </div>
 
           <div className="!flex !w-auto !min-w-0 !basis-[130px] !items-center !justify-end !gap-2.5 !overflow-visible sm:!basis-[180px] md:!basis-auto">
+            {onboarding}
             {!context.billingActivationRequired ? <CrmVenueSelector
               disabled={disabled}
               onChange={onVenueChange}
@@ -99,7 +101,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
         ) : null}
 
         <main className="!mx-auto !min-h-0 !w-full !max-w-[1720px] !flex-1 !overflow-auto !px-4 !pt-[26px] !pb-7 md:!px-7 md:!pt-[42px] md:!pb-9">
-          {children}
+          <div data-onboarding="section-content" data-crm-section={activeSection}>{children}</div>
         </main>
       </section>
     </div>

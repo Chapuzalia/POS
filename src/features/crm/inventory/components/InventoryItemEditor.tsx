@@ -44,13 +44,13 @@ export function InventoryItemEditor({ disabled, item, snapshot, venueId, runActi
     setError(null)
   }
 
-  return <form onSubmit={(event) => { event.preventDefault(); void save() }}>
+  return <form data-onboarding-dialog onSubmit={(event) => { event.preventDefault(); void save() }}>
     <div className="grid gap-4 p-5">
       <div className="grid gap-4 sm:grid-cols-2">
         <label className="grid gap-1 text-xs font-semibold">Nombre
-          <Input autoFocus disabled={disabled} maxLength={120} onChange={(event) => setDraft({ ...draft, name: event.target.value })} value={draft.name} />
+          <Input data-onboarding="item-name" autoFocus disabled={disabled} maxLength={120} onChange={(event) => setDraft({ ...draft, name: event.target.value })} value={draft.name} />
         </label>
-        <label className="grid gap-1 text-xs font-semibold">Unidad física
+        <label data-onboarding="item-unit" className="grid gap-1 text-xs font-semibold">Unidad física
           <CrmSelect ariaLabel="Unidad física del artículo" disabled={disabled || hasStock} onChange={(baseUnitId) => setDraft({ ...draft, baseUnitId })} options={units.map((unit) => ({ label: `${unit.name} (${unit.symbol})${unit.active ? '' : ' · Inactiva'}`, value: unit.id, disabled: !unit.active && unit.id !== item?.baseUnitId }))} value={draft.baseUnitId} />
         </label>
       </div>
@@ -59,17 +59,17 @@ export function InventoryItemEditor({ disabled, item, snapshot, venueId, runActi
         <TextArea disabled={disabled} maxLength={500} onChange={(event) => setDraft({ ...draft, description: event.target.value })} value={draft.description} />
       </label>
       <Checkbox checked={draft.active} disabled={disabled} onChange={(active) => setDraft({ ...draft, active })}>Artículo activo</Checkbox>
-      <div className="grid gap-3">
+      <div data-onboarding="item-routes" className="grid gap-3">
         <div><h3 className="m-0 text-sm font-bold">Almacenes, objetivos y orden de consumo</h3><p className="mt-1 mb-0 text-xs text-[var(--crm-text-muted)]">Una prioridad menor se consume primero. Deja el objetivo vacío si no necesitas un nivel de reposición. Guardar la configuración conserva las cantidades actuales.</p></div>
         {warehouses.map((warehouse) => {
           const route = draft.routes[warehouse.id]
           return <div className="grid gap-3 rounded-[var(--crm-radius-md)] bg-[var(--crm-surface-soft)] p-4 sm:grid-cols-[minmax(0,1fr)_110px_150px] sm:items-center" key={warehouse.id}>
             <Checkbox checked={route?.enabled ?? false} disabled={disabled} onChange={(enabled) => updateRoute(warehouse.id, { enabled })}>{warehouse.name}{warehouse.active ? '' : ' · Inactivo'}</Checkbox>
             <label className="grid gap-1 text-xs font-semibold">Prioridad
-              <Input aria-label={`Prioridad ${warehouse.name}`} disabled={disabled || !route?.enabled} max="9999" min="1" onChange={(event) => updateRoute(warehouse.id, { priority: event.target.value })} type="number" value={route?.priority ?? ''} />
+              <Input data-onboarding={route?.enabled ? "item-priority-enabled" : undefined} aria-label={`Prioridad ${warehouse.name}`} disabled={disabled || !route?.enabled} max="9999" min="1" onChange={(event) => updateRoute(warehouse.id, { priority: event.target.value })} type="number" value={route?.priority ?? ''} />
             </label>
             <label className="grid gap-1 text-xs font-semibold">Stock objetivo
-              <Input aria-label={`Stock objetivo ${warehouse.name}`} disabled={disabled || !route?.enabled} inputMode="decimal" onChange={(event) => updateRoute(warehouse.id, { targetQuantity: event.target.value })} placeholder="Sin objetivo" value={route?.targetQuantity ?? ''} />
+              <Input data-onboarding={route?.enabled ? "item-target-enabled" : undefined} aria-label={`Stock objetivo ${warehouse.name}`} disabled={disabled || !route?.enabled} inputMode="decimal" onChange={(event) => updateRoute(warehouse.id, { targetQuantity: event.target.value })} placeholder="Sin objetivo" value={route?.targetQuantity ?? ''} />
             </label>
           </div>
         })}
@@ -78,7 +78,7 @@ export function InventoryItemEditor({ disabled, item, snapshot, venueId, runActi
     </div>
     <div className="flex flex-wrap justify-end gap-2 border-t border-[var(--crm-border-subtle)] p-4">
       <Button disabled={modalBusy} onClick={onCancel} type="button" variant="tertiary">Cancelar</Button>
-      <Button disabled={disabled} type="submit"><Save className="size-4" /> {item ? 'Guardar artículo' : 'Crear artículo'}</Button>
+      <Button data-onboarding="item-save" disabled={disabled} type="submit"><Save className="size-4" /> {item ? 'Guardar artículo' : 'Crear artículo'}</Button>
     </div>
   </form>
 }

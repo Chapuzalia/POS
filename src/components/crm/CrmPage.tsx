@@ -1,4 +1,4 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { CrmModalBusyContext } from '../../features/crm/shared/components/CrmModalBusyContext'
 import { CrmShell } from '../../features/crm/layout/CrmShell'
 import { canAccessCrm, canAccessCrmSection } from '../../features/crm/routing/crmPermissions'
@@ -14,6 +14,8 @@ import { recoverSupabaseRealtimeConnection } from '../../lib/supabase'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 import { BillingActivationPanel } from '../../features/billing/BillingActivationPanel'
+
+const CrmOnboarding = lazy(() => import('../../features/crm/onboarding/CrmOnboarding'))
 
 export type CrmPageProps = {
   context: TenantContext
@@ -244,10 +246,12 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onCatalogChanged
   if (!canAccessCrm(context.role)) return null
   const disabled = !isOnline || isBusy || (shouldLoadCatalog && isCatalogLoading)
 
-  return <CrmModalBusyContext value={isBusy || (shouldLoadCatalog && isCatalogLoading)}><CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
+  function changeSection(section: CrmSection) {
     const inventorySectionBlocked = !inventoryEnabled && section.startsWith('inventory-') && section !== 'inventory-stock'
     if (canAccessCrmSection(context.role, section, context.features, selectedVenue) && !inventorySectionBlocked) setActiveSection(section)
-  }} onVenueChange={(venueId) => {
+  }
+
+  return <CrmModalBusyContext value={isBusy || (shouldLoadCatalog && isCatalogLoading)}><CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onboarding={selectedVenue ? <Suspense fallback={null}><CrmOnboarding key={`${context.tenantId}:${context.userId}:${selectedVenueId}`} activeSection={activeSection} context={context} disabled={disabled} isOnline={isOnline} onSectionChange={changeSection} venue={selectedVenue} /></Suspense> : null} onSectionChange={changeSection} onVenueChange={(venueId) => {
     setStats(null)
     setComparisonStats(null)
     setSelectedVenueId(venueId)

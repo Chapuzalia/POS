@@ -288,14 +288,14 @@ export function AccessManagementCrm({
             <span>Nuevo dispositivo</span>
             <MonitorSmartphone className="h-4 w-4" />
           </div>
-          <form
+          <form data-onboarding="device-form"
             className="grid gap-3 p-3.5 !grid !gap-3.5 !px-[22px] !pt-5 !pb-[22px]"
             onSubmit={(event) => void submitDevice(event)}
           >
             <p className="m-0 text-xs text-[var(--crm-text-muted)]">
               Local: {selectedVenue?.name ?? "Selecciona un local en la cabecera"}
             </p>
-            <Field label="Nombre del dispositivo">
+            <Field data-onboarding="device-name" label="Nombre del dispositivo">
               <UiInput
                 className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
                 disabled={disabled}
@@ -305,7 +305,7 @@ export function AccessManagementCrm({
                 value={deviceName}
               />
             </Field>
-            <Field label="Modo">
+            <Field data-onboarding="device-mode" label="Modo">
               <CrmSelect
                 onChange={(value) => setDeviceMode(value as DeviceMode)}
                 options={modeOptions}
@@ -313,7 +313,7 @@ export function AccessManagementCrm({
               />
             </Field>
             
-            <UiButton
+            <UiButton data-onboarding="device-save"
               className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
               disabled={disabled || !selectedVenue?.isActive || !deviceName.trim()}
               type="submit"
@@ -504,7 +504,7 @@ export function AccessManagementCrm({
                   {visibleUsers.length} usuarios gestores
                 </p>
               </div>
-              <UiButton
+              <UiButton data-onboarding="user-create"
                 className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !shrink-0 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
                 disabled={disabled}
                 onClick={openUserModal}
@@ -573,7 +573,7 @@ export function AccessManagementCrm({
           label="Añadir usuario CRM"
           onClose={() => setIsUserModalOpen(false)}
         >
-          <form onSubmit={(event) => void submitUser(event)}>
+          <form data-onboarding-dialog onSubmit={(event) => void submitUser(event)}>
             <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
               <div>
                 <h2 className="!m-0 !text-lg !font-bold">Nuevo usuario CRM</h2>
@@ -592,7 +592,7 @@ export function AccessManagementCrm({
               </UiButton>
             </div>
             <div className="!grid !gap-4 !px-5 !py-5">
-              <Field label="Email">
+              <Field data-onboarding="user-email" label="Email">
                 <UiInput
                   autoComplete="email"
                   autoFocus
@@ -606,7 +606,7 @@ export function AccessManagementCrm({
                   value={userEmail}
                 />
               </Field>
-              <Field label="Contraseña">
+              <Field data-onboarding="user-password" label="Contraseña">
                 <UiInput
                   autoComplete="new-password"
                   className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
@@ -619,7 +619,7 @@ export function AccessManagementCrm({
                   value={userPassword}
                 />
               </Field>
-              <Field label="Rol">
+              <Field data-onboarding="user-role" label="Rol">
                 <CrmSelect
                   disabled={disabled}
                   onChange={(value) =>
@@ -653,7 +653,7 @@ export function AccessManagementCrm({
                 >
                   Cancelar
                 </UiButton>
-                <UiButton
+                <UiButton data-onboarding="user-save"
                   className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
                   disabled={
                     disabled ||
@@ -833,7 +833,7 @@ function VenueScopePicker({
     activeVenues.length > 0 &&
     activeVenues.every((venue) => selectedVenueIds.includes(venue.id));
   return (
-    <fieldset className="!grid !gap-2 !rounded-[10px] !border !border-[var(--crm-border-subtle)] !p-3">
+    <fieldset data-onboarding="user-venues" className="!grid !gap-2 !rounded-[10px] !border !border-[var(--crm-border-subtle)] !p-3">
       <legend className="!px-1 !text-xs !font-semibold !text-[var(--crm-text-muted)]">
         Locales permitidos
       </legend>

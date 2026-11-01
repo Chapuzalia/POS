@@ -49,17 +49,17 @@ export function QuickStockReplenishment({ row, context, venueId, disabled, runAc
   }
 
   return <CrmModal dismissDisabled={busy} label={`Reposición rápida de ${row.item.name}`} onClose={onClose}>
-    <form onSubmit={(event) => { event.preventDefault(); void save() }}>
+    <form data-onboarding="replenishment-form" data-onboarding-dialog onSubmit={(event) => { event.preventDefault(); void save() }}>
       <header className="flex items-start justify-between gap-3 border-b border-[var(--crm-border-subtle)] p-5">
         <div><h2 className="m-0 text-lg font-bold">Reponer {row.item.name}</h2><p className="mt-1 mb-0 text-sm text-[var(--crm-text-muted)]">{row.warehouse?.name} · Entrada manual de existencias</p></div>
         <Button aria-label="Cerrar" disabled={busy} onClick={onClose} type="button" variant="tertiary"><X className="size-4" /></Button>
       </header>
       <div className="grid gap-4 p-5">
-        <dl className="m-0 grid grid-cols-2 gap-3 rounded-[var(--crm-radius-md)] bg-[var(--crm-surface-soft)] p-4 text-sm">
+        <dl data-onboarding="replenishment-current" className="m-0 grid grid-cols-2 gap-3 rounded-[var(--crm-radius-md)] bg-[var(--crm-surface-soft)] p-4 text-sm">
           <div><dt className="text-xs text-[var(--crm-text-muted)]">Disponible ahora</dt><dd className="m-0 mt-1 font-mono font-bold">{format(row.quantity)}</dd></div>
           <div><dt className="text-xs text-[var(--crm-text-muted)]">Objetivo del almacén</dt><dd className="m-0 mt-1 font-mono font-bold">{row.target === null ? 'Sin objetivo' : format(row.target)}</dd></div>
         </dl>
-        <label className="grid gap-2 text-sm font-semibold">Cantidad recibida ({row.unit?.symbol})
+        <label data-onboarding="replenishment-quantity" className="grid gap-2 text-sm font-semibold">Cantidad recibida ({row.unit?.symbol})
           <Input autoFocus disabled={disabled || busy} inputMode="decimal" onChange={(event) => change(event.target.value)} onFocus={(event) => event.target.select()} value={draft} />
         </label>
         <div aria-label="Cantidades rápidas de reposición" className="flex flex-wrap gap-2" role="group">
@@ -70,7 +70,7 @@ export function QuickStockReplenishment({ row, context, venueId, disabled, runAc
           }} size="sm" type="button" variant="tertiary">+{amount} {row.unit?.symbol}</Button>)}
           {suggested > 0 ? <Button disabled={disabled || busy} onClick={() => change(String(suggested))} size="sm" type="button" variant="secondary">Completar objetivo</Button> : null}
         </div>
-        <div aria-live="polite" className="rounded-[var(--crm-radius-md)] bg-[var(--crm-blue-soft)] p-4">
+        <div data-onboarding="replenishment-result" aria-live="polite" className="rounded-[var(--crm-radius-md)] bg-[var(--crm-blue-soft)] p-4">
           <p className="m-0 text-xs text-[var(--crm-text-muted)]">Existencias tras la entrada</p><strong className="mt-1 block font-mono text-xl">{result === null ? draft.trim() ? 'Cantidad no válida' : 'Pendiente de cantidad' : format(result)}</strong>
         </div>
         {validation ? <p className="m-0 text-sm text-[var(--crm-red)]" role="alert">{validation}</p> : null}
@@ -78,7 +78,7 @@ export function QuickStockReplenishment({ row, context, venueId, disabled, runAc
       </div>
       <footer className="flex flex-wrap justify-end gap-2 border-t border-[var(--crm-border-subtle)] p-4">
         <Button disabled={busy} onClick={onClose} type="button" variant="tertiary">Cancelar</Button>
-        <Button disabled={disabled || busy || quantity === null || !row.controlled || !row.unit} type="submit"><Plus className="size-4" /> Confirmar reposición</Button>
+        <Button data-onboarding="replenishment-save" disabled={disabled || busy || quantity === null || !row.controlled || !row.unit} type="submit"><Plus className="size-4" /> Confirmar reposición</Button>
       </footer>
     </form>
   </CrmModal>

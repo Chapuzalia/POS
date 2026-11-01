@@ -174,8 +174,8 @@ export function InventoryStockCrm({
   }
 
   return (
-    <section className="grid min-w-0 gap-5">
-      <header className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--crm-radius-lg)] bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]">
+    <section data-onboarding="stock-page" className="grid min-w-0 gap-5">
+      <header data-onboarding="stock-controls" className="flex flex-wrap items-center justify-between gap-4 rounded-[var(--crm-radius-lg)] bg-[var(--crm-surface)] p-5 shadow-[var(--crm-shadow-card)]">
         <div>
           <h2 className="text-lg font-bold">Artículos y stock</h2>
           <p className="text-sm text-[var(--crm-text-muted)]">
@@ -183,7 +183,7 @@ export function InventoryStockCrm({
           </p>
         </div>
         <div className="flex flex-wrap items-center gap-3">
-        {inventoryEnabled ? <Button disabled={disabled || loadState !== 'ready' || !snapshot.units.some((unit) => unit.active) || !snapshot.warehouses.some((warehouse) => warehouse.active)} onClick={() => { setSelectedId(null); setCreatingItem(true); }} type="button"><Plus className="size-4" /> Nuevo artículo</Button> : null}
+        {inventoryEnabled ? <Button data-onboarding="stock-create" disabled={disabled || loadState !== 'ready' || !snapshot.units.some((unit) => unit.active) || !snapshot.warehouses.some((warehouse) => warehouse.active)} onClick={() => { setSelectedId(null); setCreatingItem(true); }} type="button"><Plus className="size-4" /> Nuevo artículo</Button> : null}
         <label className="flex items-center gap-3 rounded-[var(--crm-radius-md)] bg-[var(--crm-surface-soft)] px-4 py-3 text-sm font-semibold">
           <input
             checked={inventoryEnabled}
@@ -226,7 +226,7 @@ export function InventoryStockCrm({
           onClose={() => setSelectedId(null)}
         >
           <div className="flex items-center justify-between border-b border-[var(--crm-border-subtle)] p-5">
-            <div>
+            <div data-onboarding="stock-detail" data-onboarding-dialog>
               <h2 className="text-lg font-bold">{selected.name}</h2>
               <p className="text-xs text-[var(--crm-text-muted)]">
                 Unidad física: {selectedUnit?.name ?? "Sin unidad"}
@@ -244,14 +244,14 @@ export function InventoryStockCrm({
 
           <div aria-label="Secciones de la ficha del artículo" className="flex flex-wrap gap-2 border-b border-[var(--crm-border-subtle)] px-5 py-3" role="group">
             <Button active={detailMode === 'stock'} aria-pressed={detailMode === 'stock'} disabled={modalBusy} onClick={() => setDetailMode('stock')} type="button" variant="tertiary">Stock y movimientos</Button>
-            <Button active={detailMode === 'configuration'} aria-pressed={detailMode === 'configuration'} disabled={modalBusy} onClick={() => setDetailMode('configuration')} type="button" variant="tertiary"><Pencil className="size-4" /> Configurar artículo</Button>
+            <Button data-onboarding="stock-config" active={detailMode === 'configuration'} aria-pressed={detailMode === 'configuration'} disabled={modalBusy} onClick={() => setDetailMode('configuration')} type="button" variant="tertiary"><Pencil className="size-4" /> Configurar artículo</Button>
           </div>
           {detailMode === 'configuration' ? <InventoryItemEditor disabled={disabled} item={selected} key={selected.id} onCancel={() => setDetailMode('stock')} onSaved={itemSaved} runAction={runAction} snapshot={snapshot} venueId={selectedVenueId} /> : <>
           <InventoryItemSummary context={tenantContext} item={selected} key={`summary:${selected.id}`} unit={selectedUnit} venueId={selectedVenueId} />
           <div className="grid gap-3 p-5 sm:grid-cols-2">
             {selectedRows.map((row) => <article className="grid gap-3 rounded-[var(--crm-radius-md)] bg-[var(--crm-surface-soft)] p-4" key={row.key}><div className="flex flex-wrap items-center justify-between gap-2"><strong>{row.warehouse?.name ?? 'Sin almacén configurado'}</strong><StockStatus row={row} /></div><StockTarget row={row} /><p className="m-0 text-xs text-[var(--crm-text-muted)]">Valor estimado: {row.valueCents === null ? 'Sin coste conocido' : `≈ ${formatMoney(row.valueCents)}`} · <StockQuantity row={row} /></p></article>)}
           </div>
-          <details className="border-t border-[var(--crm-border-subtle)]" open>
+          <details data-onboarding="stock-totals" className="border-t border-[var(--crm-border-subtle)]" open>
             <summary className="min-h-12 cursor-pointer px-5 py-4 text-sm font-bold">Establecer total por almacén</summary>
           <div className="grid gap-4 p-5">
             <p className="m-0 text-xs text-[var(--crm-text-muted)]">Introduce las existencias totales contadas en cada almacén. Solo se guardan los almacenes modificados y se comprueba que su saldo no haya cambiado en otro terminal.</p>
@@ -298,7 +298,7 @@ export function InventoryStockCrm({
                     >
                       Nuevo stock total
                       <span className="relative block">
-                        <Input
+                        <Input data-onboarding="stock-total-input"
                           disabled={modalBusy}
                           id={`stock-${route.warehouseId}`}
                           inputMode="decimal"
@@ -362,7 +362,7 @@ export function InventoryStockCrm({
             >
               Cancelar
             </Button>
-            <Button
+            <Button data-onboarding="stock-save"
               disabled={disabled || modalBusy || !totalChanges?.length}
               onClick={() => void save()}
               type="button"

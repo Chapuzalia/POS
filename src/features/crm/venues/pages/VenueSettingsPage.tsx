@@ -190,7 +190,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
             </UiButton>
           </div> : null}
         </div>
-        <div className="!grid !gap-3 !px-[18px] !pt-5 !pb-[22px] md:!px-[22px]">
+        <div data-onboarding="settings-venues" className="!grid !gap-3 !px-[18px] !pt-5 !pb-[22px] md:!px-[22px]">
           {venues.map((venue) => {
             const contractedAddons = tenantAddonCatalog.filter((addon) => hasTenantAddon(tenantContext, addon.key))
             const activeAddons = contractedAddons.filter((addon) => hasTenantVenueAddon({ features: tenantContext.features, venue }, addon.key))
@@ -203,13 +203,13 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
                 <span className="!hidden !flex-wrap !justify-end !gap-1.5 sm:!flex">{activeAddons.slice(0, 3).map((addon) => <span className={`!rounded-full !px-2.5 !py-1 !text-[10px] !font-bold ${activeAddonClassName}`} key={addon.key}>{addon.name}</span>)}{activeAddons.length > 3 ? <span className="!rounded-full !bg-[var(--crm-input-bg)] !px-2.5 !py-1 !text-[10px] !font-bold !text-[var(--crm-text-muted)]">+{activeAddons.length - 3}</span> : null}</span>
                 <ChevronDown className={`!size-4 !shrink-0 !text-[var(--crm-text-muted)] !transition-transform ${venueExpanded ? '!rotate-180' : ''}`} />
               </button>
-              {venueExpanded ? <form className="!grid !gap-4 !border-t !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-4 md:!grid-cols-2 xl:!grid-cols-3" onSubmit={(event) => void submitVenueSettings(event, venue)}>
-                <Field label="Nombre del local"><UiInput className={inputClassName} defaultValue={venue.name} disabled={disabled} maxLength={80} name="name" required /></Field>
+              {venueExpanded ? <form data-onboarding="settings-form" className="!grid !gap-4 !border-t !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-4 md:!grid-cols-2 xl:!grid-cols-3" onSubmit={(event) => void submitVenueSettings(event, venue)}>
+                <Field data-onboarding="settings-name" label="Nombre del local"><UiInput className={inputClassName} defaultValue={venue.name} disabled={disabled} maxLength={80} name="name" required /></Field>
                 <Field label="Orden en el selector"><UiInput className={inputClassName} defaultValue={venue.sortOrder} disabled={disabled} min={0} max={2147483647} name="sortOrder" required step={1} type="number" /></Field>
-                <Field label="IVA por defecto"><CrmSelect defaultValue={String(venue.defaultTaxRate)} disabled={disabled} name="defaultTaxRate" options={COMMON_TAX_RATES.map((rate) => ({ label: rate + ' %', value: String(rate) }))} /></Field>
-                <Field label="Razón social"><UiInput autoComplete="organization" className={inputClassName} defaultValue={venue.legalName} disabled={disabled} maxLength={80} name="legalName" placeholder="Empresa Ejemplo SL" /></Field>
+                <Field data-onboarding="settings-tax" label="IVA por defecto"><CrmSelect defaultValue={String(venue.defaultTaxRate)} disabled={disabled} name="defaultTaxRate" options={COMMON_TAX_RATES.map((rate) => ({ label: rate + ' %', value: String(rate) }))} /></Field>
+                <Field data-onboarding="settings-fiscal" label="Razón social"><UiInput autoComplete="organization" className={inputClassName} defaultValue={venue.legalName} disabled={disabled} maxLength={80} name="legalName" placeholder="Empresa Ejemplo SL" /></Field>
                 <Field label="NIF/CIF"><UiInput className={inputClassName} defaultValue={venue.taxId} disabled={disabled} maxLength={80} name="taxId" placeholder="B12345678" /></Field>
-                <Field label="Hora de cambio de día"><UiInput className={inputClassName} defaultValue={venue.dayChangeTime ?? ''} disabled={disabled} name="dayChangeTime" step={60} type="time" /><span className="!mt-1.5 !block !text-[11px] !text-[var(--crm-text-muted)]">Vacío usa días naturales; el día cambia a medianoche.</span></Field>
+                <Field data-onboarding="settings-day" label="Hora de cambio de día"><UiInput className={inputClassName} defaultValue={venue.dayChangeTime ?? ''} disabled={disabled} name="dayChangeTime" step={60} type="time" /><span className="!mt-1.5 !block !text-[11px] !text-[var(--crm-text-muted)]">Vacío usa días naturales; el día cambia a medianoche.</span></Field>
                 <div className="md:!col-span-2 xl:!col-span-3"><Field label="Dirección"><UiTextArea autoComplete="street-address" className={`${inputClassName} !min-h-20 !resize-y !py-3`} defaultValue={venue.address} disabled={disabled} maxLength={300} name="address" placeholder="Calle, número, localidad" rows={2} /></Field></div>
                 <section className="!overflow-hidden !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] md:!col-span-2 xl:!col-span-3">
                   <button aria-expanded={addonsExpanded} className="!flex !min-h-14 !w-full !items-center !gap-3 !border-0 !bg-transparent !px-4 !py-3 !text-left hover:!bg-[var(--crm-surface-hover)]" onClick={() => setExpandedAddonVenueId(addonsExpanded ? null : venue.id)} type="button"><Settings2 className="!size-4 !text-[var(--crm-blue)]" /><span className="!flex-1"><strong className="!block !text-xs">Addons del local</strong><span className="!text-[11px] !text-[var(--crm-text-muted)]">{activeAddons.length} activos de {contractedAddons.length} contratados</span></span><ChevronDown className={`!size-4 !text-[var(--crm-text-muted)] !transition-transform ${addonsExpanded ? '!rotate-180' : ''}`} /></button>
@@ -228,7 +228,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
                     </section>
                   </> : null}
                 </section>
-                <div className="!flex !items-center !justify-between !gap-3 md:!col-span-2 xl:!col-span-3"><p className="!m-0 !text-[11px] !text-[var(--crm-text-muted)]">Los cambios de addons se guardan al instante. Los datos generales se guardan con el botón.</p><UiButton className="!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} type="submit"><Save className="h-4 w-4" /> Guardar local</UiButton></div>
+                <div className="!flex !items-center !justify-between !gap-3 md:!col-span-2 xl:!col-span-3"><p className="!m-0 !text-[11px] !text-[var(--crm-text-muted)]">Los cambios de addons se guardan al instante. Los datos generales se guardan con el botón.</p><UiButton data-onboarding="settings-save" className="!inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={disabled} type="submit"><Save className="h-4 w-4" /> Guardar local</UiButton></div>
               </form> : null}
               {venueExpanded && isOwner ? <CartaIntegration venueId={venue.id} disabled={disabled} /> : null}
             </article>

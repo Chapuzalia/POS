@@ -92,7 +92,7 @@ export function StockOverview({ snapshot, disabled, onOpen, onRefresh, onRepleni
     { label: 'Artículos controlados', value: summary.controlledCount, detail: 'Artículos activos con almacenes habilitados', filter: 'controlled' },
   ]
 
-  return <div className="grid min-w-0 gap-5">
+  return <div data-onboarding="stock-overview" className="grid min-w-0 gap-5">
     <div aria-label="Resumen de inventario" className="grid grid-cols-2 gap-3 xl:grid-cols-4">{metrics.map((metric) => <button className="grid min-w-0 gap-2 rounded-[var(--crm-radius-lg)] bg-[var(--crm-surface)] p-4 text-left sm:p-5 shadow-[var(--crm-shadow-card)] transition-shadow hover:ring-1 hover:ring-[var(--crm-blue)] focus-visible:outline-2 focus-visible:outline-[var(--crm-blue)]" key={metric.label} onClick={() => showFilter(metric.filter)} type="button"><span className="text-xs font-bold text-[var(--crm-text-muted)]">{metric.label}</span><strong className="break-words text-xl font-black tabular-nums sm:text-2xl">{metric.value}</strong><span className="text-xs text-[var(--crm-text-muted)]">{metric.detail}</span></button>)}</div>
     <p className="m-0 text-xs text-[var(--crm-text-muted)]">Valoración por coste medio; en su ausencia, última compra o referencia. Incluye saldos negativos. Los costes desconocidos no se consideran cero.</p>
 
