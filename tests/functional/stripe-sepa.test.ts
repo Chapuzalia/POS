@@ -17,15 +17,17 @@ async function begin() {
   return { ...fixture, quote, pending, operation }
 }
 
-it('requires fiscal details in new Checkouts and offers both cards and SEPA without changing the fixed VAT', async () => {
+it('requires fiscal details in new Checkouts and uses Dashboard payment methods without changing the fixed VAT', async () => {
   const { stripe } = await begin()
   const session = [...stripe.sessions.values()][0]
   expect(session.params).toMatchObject({
-    mode: 'subscription', payment_method_types: ['card', 'sepa_debit'],
+    mode: 'subscription',
     tax_id_collection: { enabled: true, required: 'if_supported' },
     billing_address_collection: 'required', customer_update: { address: 'auto', name: 'auto' },
     automatic_tax: { enabled: false },
   })
+  expect(session.params.payment_method_types).toBeUndefined()
+  expect(session.params.allowed_payment_method_types).toBeUndefined()
   expect(session.params.subscription_data.default_tax_rates).toHaveLength(1)
 })
 

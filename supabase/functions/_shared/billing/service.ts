@@ -283,7 +283,7 @@ export class BillingService {
     const items = subscription ? stripeItems(subscription.items.data, next.lines) : next.lines.map(line => ({ price: line.stripePriceId ?? undefined, quantity: line.quantity }))
     const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', { customer: account.stripe_customer_id ?? undefined, customer_details: { tax_exempt: 'none' }, automatic_tax: { enabled: false }, ...(subscription ? { subscription: subscription.id } : {}), ...(timing === 'period_end' ? { preview_mode: 'recurring' } : {}), subscription_details: { default_tax_rates: [taxRateId], items: previewItems(items, taxRateId), proration_behavior: timing === 'immediate' && subscription ? 'always_invoice' : undefined, proration_date: timing === 'immediate' && subscription ? prorationDate : undefined }, discounts })
     if (preview && preview.currency !== 'eur') throw new Error('BILLING_CURRENCY_MISMATCH')
-    return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing, stripeParams: { subscriptionId: subscription?.id ?? null, taxRateId, sepaDebit, ...(!subscription ? { checkoutPolicy: 'fiscal_sepa_v1' } : {}), items, discounts, baseline: subscription ? subscriptionBaseline(subscription) : undefined }, preview: { amountDueCents: timing === 'immediate' ? preview.amount_due : 0, renewalCents: timing === 'period_end' ? preview.amount_due : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? account.period_end : null, details: timing === 'period_end' ? 'Cambio al vencimiento; sin cargo inmediato. Vista previa de renovación calculada por Stripe con IVA del 21 %. Cuotas recurrentes sin IVA.' : sepaDebit ? 'Vista previa de Stripe con IVA del 21 %. La ampliación será inmediata cuando Stripe confirme que el cobro SEPA está autorizado y en trámite; el banco todavía puede rechazarlo. Cuotas recurrentes sin IVA.' : 'Vista previa de Stripe con IVA del 21 % y los ajustes aplicables. Cuotas recurrentes sin IVA.' }, reason, prorationDate })
+    return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing, stripeParams: { subscriptionId: subscription?.id ?? null, taxRateId, sepaDebit, ...(!subscription ? { checkoutPolicy: 'fiscal_sepa_v2' } : {}), items, discounts, baseline: subscription ? subscriptionBaseline(subscription) : undefined }, preview: { amountDueCents: timing === 'immediate' ? preview.amount_due : 0, renewalCents: timing === 'period_end' ? preview.amount_due : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? account.period_end : null, details: timing === 'period_end' ? 'Cambio al vencimiento; sin cargo inmediato. Vista previa de renovación calculada por Stripe con IVA del 21 %. Cuotas recurrentes sin IVA.' : sepaDebit ? 'Vista previa de Stripe con IVA del 21 %. La ampliación será inmediata cuando Stripe confirme que el cobro SEPA está autorizado y en trámite; el banco todavía puede rechazarlo. Cuotas recurrentes sin IVA.' : 'Vista previa de Stripe con IVA del 21 % y los ajustes aplicables. Cuotas recurrentes sin IVA.' }, reason, prorationDate })
   }
   async promotionInvoice(account: Account, sub: StripeSubscription, contract: Contract, discounts: PromotionPhase['discounts'], taxRateId?: string) {
     const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', {
@@ -365,7 +365,7 @@ export class BillingService {
     if (retry && (before.data.status !== 'applying' || Date.now() - Date.parse(before.data.created_at) > 23 * 3600_000)) throw new Error('BILLING_MANUAL_RECONCILIATION_REQUIRED')
     // Requote old offers; an in-flight retry must retain its original Stripe parameters.
     if (!retry && before.data.kind === 'change' && !before.data.stripe_params.taxRateId) throw new Error('BILLING_STALE_STRIPE_QUOTE')
-    if (!retry && before.data.kind === 'change' && !before.data.stripe_params.subscriptionId && before.data.stripe_params.checkoutPolicy !== 'fiscal_sepa_v1') throw new Error('BILLING_STALE_STRIPE_QUOTE')
+    if (!retry && before.data.kind === 'change' && !before.data.stripe_params.subscriptionId && before.data.stripe_params.checkoutPolicy !== 'fiscal_sepa_v2') throw new Error('BILLING_STALE_STRIPE_QUOTE')
     if (!retry && before.data.stripe_params.baseline) {
       const account = await this.account(tenantId)
       const sub = await this.subscription(account)
@@ -443,7 +443,13 @@ export class BillingService {
       const checkout = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string; url: string }>('POST', '/checkout/sessions', {
         customer: customerId, mode: 'subscription',
         ...(taxRateId ? { automatic_tax: { enabled: false } } : {}),
-        ...(op.stripe_params.checkoutPolicy === 'fiscal_sepa_v1' ? { payment_method_types: ['card', 'sepa_debit'], tax_id_collection: { enabled: true, required: 'if_supported' } } : { tax_id_collection: { enabled: true } }),
+        // Preserve historical in-flight requests: changing parameters under their key
+        // could hide a successful Checkout whose response was lost.
+        ...(op.stripe_params.checkoutPolicy === 'fiscal_sepa_v2'
+          ? { tax_id_collection: { enabled: true, required: 'if_supported' } }
+          : op.stripe_params.checkoutPolicy === 'fiscal_sepa_v1'
+            ? { payment_method_types: ['card', 'sepa_debit'], tax_id_collection: { enabled: true, required: 'if_supported' } }
+            : { tax_id_collection: { enabled: true } }),
         billing_address_collection: 'required', customer_update: { address: 'auto', name: 'auto' },
         client_reference_id: tenantId, metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId },
         subscription_data: { ...taxes, metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId } },

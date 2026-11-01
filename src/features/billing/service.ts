@@ -1,10 +1,26 @@
+import { FunctionsHttpError } from '@supabase/supabase-js'
+import { billingErrorMessages } from '../../../supabase/functions/_shared/billing/errors'
 import { requireSupabase } from '../crm/shared/services/crmServiceSupport'
 import { UserFacingError } from '../../utils/UserFacingError'
+
+function publicBillingMessage(value: unknown) {
+  if (!value || typeof value !== 'object') return undefined
+  const byCode = 'code' in value ? Object.entries(billingErrorMessages).find(([code]) => code === value.code)?.[1] : undefined
+  // N-1 functions return only the message. Match local reviewed text, never raw errors.
+  return byCode ?? ('error' in value ? Object.values(billingErrorMessages).find(message => message === value.error) : undefined)
+}
 
 export async function billingRequest<T>(body: object): Promise<T> {
   const { data, error } = await requireSupabase().functions.invoke<T & { error?: string }>('billing', { body })
   if (error || !data || data.error) {
-    throw new UserFacingError(data?.error ?? 'La facturación no está disponible. Comprueba la configuración sandbox o vuelve a intentarlo más tarde.')
+    let message = publicBillingMessage(data)
+    if (!message && error instanceof FunctionsHttpError && error.context instanceof Response) {
+      try {
+        const response: unknown = await error.context.clone().json()
+        message = publicBillingMessage(response)
+      } catch { /* Gateways and network failures may not return a billing response. */ }
+    }
+    throw new UserFacingError(message || 'La facturación no está disponible. Vuelve a intentarlo más tarde.')
   }
   return data
 }

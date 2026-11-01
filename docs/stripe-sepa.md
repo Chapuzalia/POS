@@ -50,6 +50,49 @@ Para probar los nuevos campos y métodos hay que abrir un Checkout nuevo.
 
 ## Preparación de Staging
 
+### Compatibilidad de Checkout con Endive
+
+La API fijada `2026-09-30.endive` ya no admite enviar `payment_method_types`.
+Las ofertas nuevas guardan `checkoutPolicy=fiscal_sepa_v2` y omiten la lista de
+métodos de pago. Stripe utiliza los métodos compatibles habilitados en el Dashboard;
+hay que conservar tarjeta y SEPA activados. Se mantienen los datos fiscales
+obligatorios y el IVA del 21 %. Stripe describe el cambio en su
+[guía del error payment_method_types](https://support.stripe.com/questions/fix-the-payment-method-types-error).
+
+Las ofertas v1 sin confirmar requieren un presupuesto nuevo. Las operaciones ya
+iniciadas mantienen sus parámetros y su clave original: una sesión anterior puede
+haberse creado aunque su respuesta se perdiera. No convertir automáticamente una
+operación `applying` a v2 ni reutilizar su clave con parámetros diferentes.
+
+Para recuperar un rechazo v1 de este incidente:
+
+1. Desplegar primero `billing` y sus módulos compartidos, además del frontend,
+   mediante el controlador existente. No necesita migración. Desplegar también los
+   consumidores del servicio compartido (`billing-webhook` y `billing-reconcile`).
+2. Con acceso administrativo y en el entorno autorizado, volver a leer la operación
+   y el cliente. Exigir `applying`, política v1, sin suscripción enlazada ni IDs de
+   Checkout/calendario/factura en el resultado, y diagnóstico Stripe `status=400`,
+   `type=invalid_request_error`, `param=payment_method_types`, `outcome=rejected`.
+3. Consultar Stripe con la misma cuenta y modo test, recorriendo toda la paginación.
+   Comprobar que el cliente no tiene sesiones Checkout, suscripciones ni facturas.
+   Si existen recursos o un resultado incierto, detener esta recuperación y conciliar
+   manualmente. Evitar acciones concurrentes sobre la cuenta durante la comprobación.
+4. Solo tras esas comprobaciones y la autorización del entorno, utilizar la transición
+   administrativa existente `apply_error`, con el tenant y la operación comprobados,
+   el diagnóstico conservado y `release=true`. La transición conserva el historial,
+   audita la acción y pasa la operación a `failed`; no borrar filas ni cambiar el
+   contrato, los permisos o el cliente Stripe. Verificar el estado resultante.
+5. Solicitar una oferta nueva y confirmar que su política es v2. El propietario puede
+   abrir el nuevo Checkout; la activación sigue dependiendo del pago o mandato
+   verificado. No usar «Recuperar operación» sobre el intento v1 rechazado, pues
+   conserva intencionadamente la petición original incompatible.
+
+El frontend lee también las respuestas HTTP de error y muestra únicamente mensajes
+públicos de una lista compartida con `billing`; los textos desconocidos, respuestas
+de gateway y errores de red conservan un mensaje genérico sin diagnósticos internos.
+
+### Configuración y despliegue
+
 1. En el mismo sandbox de Stripe usado por Tickit, activar **SEPA Direct Debit**
    en la configuración de métodos de pago y conservar tarjeta habilitada.
 2. Si la clave es restringida, permitir lectura de Invoice Payments, PaymentIntents,

@@ -1,4 +1,5 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0'
+import { billingErrorMessages } from '../_shared/billing/errors.ts'
 import { BillingService } from '../_shared/billing/service.ts'
 import { requestSchema } from '../_shared/billing/schemas.ts'
 import { StripeGateway } from '../_shared/billing/stripe.ts'
@@ -80,29 +81,9 @@ Deno.serve(async request => {
     }
   } catch (error) {
     const message = error instanceof Error ? error.message : ''
-    const explanations: Record<string, string> = {
-      BILLING_PORTAL_NOT_CONFIGURED: 'Configura primero el Customer Portal de Stripe sandbox.',
-      BILLING_PORTAL_UNSAFE_CONFIGURATION: 'Desactiva los cambios y cancelaciones de suscripción en la configuración del portal. Se gestionan desde Tickit.',
-      BILLING_PENDING_CHANGE: 'Hay una modificación, calendario o condición de pago pendiente. Concilia la suscripción antes de solicitar otro cambio.',
-      BILLING_STALE: 'La vista previa ha caducado o el contrato ha cambiado. Actualiza y solicita otra vista previa.',
-      BILLING_STALE_STRIPE_QUOTE: 'La suscripción ha cambiado en Stripe. Actualiza y solicita otra vista previa.',
-      BILLING_LIMIT_BELOW_USAGE: 'Los límites seleccionados son inferiores al uso actual. Reduce el uso o conserva capacidad suficiente.',
-      BILLING_TEMPORARY_REQUIRES_SUBSCRIPTION: 'Las excepciones temporales requieren una suscripción activa.',
-      BILLING_INVALID_PROMOTION_CONTRACT: 'Las promociones requieren una suscripción activa y no se combinan con los ciclos temporales de la excepción general.',
-      BILLING_INVALID_PROMOTION: 'Revisa la duración, las unidades y el consentimiento comercial de cada addon.',
-      BILLING_INVALID_PROMOTION_ADDON: 'Selecciona el addon y suficientes unidades contratadas antes de ofrecerlo gratis.',
-      BILLING_INVALID_PROMOTION_IMMEDIATE_CHANGE: 'El inicio inmediato solo puede regalar unidades de los addons promocionados, sin subir la cuota ni retirar accesos. Separa otros cambios de precio, plan o unidades de pago en otra solicitud para la renovación.',
-      BILLING_INVALID_PROMOTION_IMMUTABLE: 'Las fechas y condiciones de una promoción confirmada se conservan. Retírala para la próxima renovación antes de acordar una nueva.',
-      BILLING_INVALID_PROMOTION_PHASE_LIMIT: 'Se supera el límite de diez fases de Stripe. Reduce el número de fechas promocionales distintas.',
-      BILLING_INVALID_PROMOTION_ZERO_BASE: 'La promoción requiere conservar al menos una línea con precio positivo para mantener la fecha de renovación sin cargos intermedios.',
-      BILLING_INVALID_PROMOTION_DATE: 'Concilia la suscripción y revisa las fechas. La promoción requiere periodos alineados y un ancla de renovación conocida.',
-      BILLING_MANUAL_RECONCILIATION_REQUIRED: 'La operación requiere conciliación manual con Stripe antes de volver a ejecutarla.',
-      BILLING_FOREIGN_ASSIGNMENT: 'Las asignaciones deben pertenecer a esta empresa.',
-      BILLING_SYNC_BUSY: 'Ya hay una conciliación en curso. Espera unos instantes y actualiza.',
-      BILLING_PRODUCT_IDENTITY_IMMUTABLE: 'Conserva el identificador, tipo, ámbito y funcionalidad del producto existente.',
-    }
-    if (explanations[message]) return reply({ error: explanations[message] }, 409)
+    if (billingErrorMessages[message]) return reply({ error: billingErrorMessages[message], code: message }, 409)
     const invalid = message.startsWith('BILLING_INVALID') || message.includes('BELOW_USAGE') || message.includes('QUANTITY') || message.includes('PREREQUISITE') || message.includes('FOREIGN_ASSIGNMENT')
-    return reply({ error: invalid ? 'La selección no cumple las reglas, asignaciones o límites del catálogo.' : 'No se ha podido completar la operación. Actualiza el estado y revisa la supervisión antes de reintentar.', code: invalid ? 'BILLING_INVALID_SELECTION' : 'BILLING_ACTION_REQUIRED' }, invalid ? 400 : 409)
+    const code = invalid ? 'BILLING_INVALID_SELECTION' : 'BILLING_ACTION_REQUIRED'
+    return reply({ error: billingErrorMessages[code], code }, invalid ? 400 : 409)
   }
 })
