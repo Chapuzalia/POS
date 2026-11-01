@@ -27,7 +27,7 @@ export async function sendWelcomeEmail(input: WelcomeEmailInput, config: Welcome
   } catch { return 'not_configured' }
 
   const nextStep = input.billingMode === 'stripe'
-    ? 'Al iniciar sesión verás Mi Plan. Podrás revisar o modificar tu plan y extras y completar el pago en Stripe. Las funciones contratadas se activarán cuando se confirme el pago.'
+    ? 'Al iniciar sesión verás Mi Plan. Podrás revisar o modificar tu plan y extras y pagar con tarjeta o domiciliar el cobro en Stripe. El acceso se activará al confirmar el pago con tarjeta o verificar la autorización SEPA.'
     : 'Ya puedes iniciar sesión y acceder a tu negocio.'
   const body = JSON.stringify({
     from: welcomeFrom,

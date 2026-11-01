@@ -119,6 +119,7 @@ function edgeFixture({ role = 'owner', extraDevices = 0, pendingPayment = false 
   compileComponent(edgeSource, {
     'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
     '../_shared/billing/service.ts': {}, '../_shared/billing/stripe.ts': {},
+    '../_shared/platform-tenant-deletion.ts': {},
     '../_shared/billing/schemas.ts': {}, '../_shared/billing/onboarding.ts': {},
     '../_shared/welcome-email.ts': {},
   }, {

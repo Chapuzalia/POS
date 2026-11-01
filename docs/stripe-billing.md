@@ -1,5 +1,11 @@
 # Stripe Billing de Tickit: implementación y puesta en marcha sandbox
 
+La configuración vigente de nuevos Checkouts solicita datos fiscales y permite
+tarjeta o SEPA. Las ampliaciones SEPA se aplican con cobro en trámite y acceso tras
+verificar la autorización; las de tarjeta mantienen `pending_if_incomplete`.
+Ver [política, despliegue y aceptación de SEPA](stripe-sepa.md), que actualiza las
+referencias históricas a métodos dinámicos y activación solo después del pago.
+
 La ampliación preparada en `Staging` añade [promociones gratuitas por addon con inicio inmediato](stripe-billing-promotions.md), conservando las excepciones y contratos anteriores. Esa guía detalla la política sin prorrateo, los calendarios modificables y el despliegue Self-Hosted en Coolify.
 
 ## IVA manual del 21 % (01-11-2026)

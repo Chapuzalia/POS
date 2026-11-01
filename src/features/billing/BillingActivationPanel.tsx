@@ -14,6 +14,7 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
   const [quote, setQuote] = useState<BillingOperation | null>(null)
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  const [returnedFromCheckout] = useState(() => new URLSearchParams(window.location.search).get('billing') === 'success')
   const refresh = useCallback(async (reconcile = false) => {
     if (reconcile) await billingRequest({ action: 'reconcile', tenantId })
     const [next, products] = await Promise.all([
@@ -29,7 +30,12 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
     try { await action() } catch (failure) { setError(failure instanceof Error ? failure.message : 'No se pudo completar la operación. Vuelve a intentarlo.') }
     finally { setBusy(false) }
   }, [])
-  useEffect(() => { if (!disabled) void run(() => refresh()) }, [disabled, refresh, run])
+  useEffect(() => {
+    if (!disabled) void run(async () => {
+      const next = await refresh()
+      if (returnedFromCheckout && next.tenant.billing_activation_required !== false && next.account.stripe_customer_id) await refresh(true)
+    })
+  }, [disabled, returnedFromCheckout, refresh, run])
   const customerId = detail?.account.stripe_customer_id
   useEffect(() => {
     if (disabled || !customerId || editing || quote || busy) return
@@ -45,8 +51,9 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
   }
   return <div className="!mx-auto !grid !w-full !max-w-3xl !gap-5">
     <section className="!grid !gap-5 !rounded-2xl !bg-[var(--crm-surface)] !p-5 !shadow-[var(--crm-shadow-card)] sm:!p-7">
-      <div><p className="!m-0 !text-sm !font-semibold !text-[var(--crm-blue)]">Pendiente de activación</p><h2 className="!mb-2 !mt-2 !text-2xl !font-bold">Tu negocio está casi listo</h2><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Revisa tu plan y completa el pago en Stripe. Las funciones contratadas se activarán cuando confirmemos el pago.</p></div>
+      <div><p className="!m-0 !text-sm !font-semibold !text-[var(--crm-blue)]">Pendiente de activación</p><h2 className="!mb-2 !mt-2 !text-2xl !font-bold">Tu negocio está casi listo</h2><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Revisa tu plan y accede a Stripe para pagar con tarjeta o domiciliar el cobro. El acceso se activará al confirmar el pago con tarjeta o verificar la autorización SEPA.</p></div>
       <p className="!m-0 !text-xs !text-[var(--crm-text-muted)]">Stripe está en modo de pruebas.</p>
+      {returnedFromCheckout && busy ? <p role="status" className="!m-0 !text-sm">Estamos comprobando automáticamente tu pago o autorización SEPA…</p> : null}
       {error ? <div role="alert" className="!rounded-xl !bg-[var(--crm-red-soft)] !p-4 !text-sm !text-[var(--crm-red)]">{error}</div> : null}
       {!detail || !catalog ? <><p role="status">{error ? 'El plan no está disponible en este momento.' : 'Cargando tu plan…'}</p><Button disabled={locked} onClick={() => void run(() => refresh())}>Reintentar</Button></> : editing ? <>
         <h3 className="!m-0 !text-lg !font-semibold">Modificar plan contratado</h3>
@@ -62,7 +69,7 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
           <p className="!m-0 !text-sm">{contract.limits.venues} {contract.limits.venues === 1 ? 'local' : 'locales'} · {contract.limits.devices} dispositivos</p>
           <div className="!border-t !border-[var(--crm-border)] !pt-3"><strong className="!text-sm">Extras seleccionados</strong>{contract.addons.some(addon => addon.quantity > 0) ? <ul className="!mb-0 !mt-2 !grid !gap-2 !pl-4 !text-sm">{contract.addons.filter(addon => addon.quantity > 0).map(addon => <li key={addon.key}>{catalog.products.find(product => product.key === addon.key)?.name ?? addon.key} · {addon.quantity} {addon.billable === 0 ? '· Incluido' : ''}</li>)}</ul> : <p className="!mb-0 !mt-2 !text-sm !text-[var(--crm-text-muted)]">Sin extras adicionales.</p>}</div>
         </div>
-        {pending ? <p role="status" className="!m-0 !text-sm">{pending.status === 'payment_pending' ? 'Tienes un pago pendiente. Puedes continuarlo o modificar el plan antes de pagar.' : 'Estamos comprobando una operación. Actualiza el estado antes de continuar.'}</p> : null}
+        {pending ? <p role="status" className="!m-0 !text-sm">Estamos comprobando automáticamente tu pago o domiciliación. El acceso se activará cuando Stripe lo confirme.</p> : null}
         <div className="!flex !flex-wrap !gap-3">
           <Button className="!rounded-[10px] !bg-[var(--crm-blue)] !px-5 !font-semibold !text-white" disabled={locked || Boolean(pending && (pending.status !== 'payment_pending' || !pending.result?.url))} onClick={() => void run(async () => {
             if (pending?.result?.url) { openBillingUrl(pending.result.url); return }

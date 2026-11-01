@@ -178,7 +178,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       setOwnerEmail('')
       setOwnerPassword('')
       setTenantModal(null)
-      setSuccess(`${created.name} y su cuenta OWNER se han creado correctamente.${billingMode === 'stripe' ? ' Acceso limitado a Mi Plan hasta confirmar el pago.' : ''}${created.welcomeEmailStatus === 'sent' ? ' Correo de bienvenida enviado.' : ''}`)
+      setSuccess(`${created.name} y su cuenta OWNER se han creado correctamente.${billingMode === 'stripe' ? ' Acceso limitado a Mi Plan hasta confirmar el pago o verificar la autorización SEPA.' : ''}${created.welcomeEmailStatus === 'sent' ? ' Correo de bienvenida enviado.' : ''}`)
       setWelcomeEmailNotice(created.welcomeEmailStatus === 'sent' ? null
         : created.welcomeEmailStatus === 'unknown' ? 'El negocio ya está creado, pero no se pudo confirmar el envío del correo. Comprueba su estado en Resend antes de contactar con el cliente. No vuelvas a crear el negocio.'
         : created.welcomeEmailStatus === 'failed' ? 'El negocio ya está creado, pero el correo de bienvenida no se ha enviado. Entrega las credenciales al cliente por otro medio. No vuelvas a crear el negocio.'
@@ -264,10 +264,16 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   }
 
   async function removeTenant(tenant: PlatformTenant) {
-    if (!(await appConfirm(`¿Eliminar "${tenant.name}" de forma permanente? Se borrarán todos sus locales, productos, ventas y usuarios exclusivos. Esta acción no se puede deshacer.`))) return
+    if (!(await appConfirm(`¿Eliminar "${tenant.name}" de forma permanente? Se borrarán sus locales, productos, ventas, datos fiscales, facturación, archivos y usuarios exclusivos. También se dará de baja su cliente de Stripe y se cancelarán sus suscripciones. Esta acción no se puede deshacer.`))) return
 
     await runAction(async () => {
-      await deletePlatformTenant(tenant.id)
+      try {
+        await deletePlatformTenant(tenant.id)
+      } catch (error) {
+        // Preparation may have deactivated the tenant before a retryable failure.
+        try { await refresh() } catch { /* Keep the original deletion error. */ }
+        throw error
+      }
       await refresh()
       setTenantModal(null)
       setSuccess(`${tenant.name} se ha eliminado definitivamente.`)
@@ -433,7 +439,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
             <fieldset className="!col-span-full !grid !gap-3 !rounded-[12px] !border !border-[var(--crm-border)] !p-4">
               <legend className="!px-1 !text-xs !font-bold">Facturación</legend>
               <div className="!flex !flex-wrap !gap-4">{(['manual', 'stripe'] as const).map(mode => <label key={mode} className="!flex !min-h-11 !items-center !gap-2 !text-sm"><input type="radio" name="billing-mode" value={mode} checked={billingMode === mode} disabled={!isOnline || isBusy} onChange={() => setBillingMode(mode)} />{mode === 'manual' ? 'Facturación manual' : 'Suscripción con Stripe'}</label>)}</div>
-              {billingMode === 'stripe' ? <><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Stripe en modo de pruebas. El cliente verá este plan en Mi Plan y podrá modificarlo antes de pagar. El resto de funciones se activará tras confirmar el pago.</p>{billingCatalog ? <BillingSelectionEditor catalog={billingCatalog} selection={billingSelection} onChange={setBillingSelection} disabled={!isOnline || isBusy} /> : billingCatalogError ? <div role="alert"><p>{billingCatalogError}</p><UiButton type="button" onClick={() => setCatalogAttempt(current => current + 1)}>Reintentar catálogo</UiButton></div> : <p role="status">Cargando planes y productos…</p>}</> : <p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">El negocio tendrá acceso desde su creación, con los límites indicados.</p>}
+              {billingMode === 'stripe' ? <><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Stripe en modo de pruebas. El cliente verá este plan en Mi Plan y podrá modificarlo antes de pagar. El resto de funciones se activará tras confirmar el pago con tarjeta o verificar la autorización SEPA.</p>{billingCatalog ? <BillingSelectionEditor catalog={billingCatalog} selection={billingSelection} onChange={setBillingSelection} disabled={!isOnline || isBusy} /> : billingCatalogError ? <div role="alert"><p>{billingCatalogError}</p><UiButton type="button" onClick={() => setCatalogAttempt(current => current + 1)}>Reintentar catálogo</UiButton></div> : <p role="status">Cargando planes y productos…</p>}</> : <p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">El negocio tendrá acceso desde su creación, con los límites indicados.</p>}
             </fieldset>
             {billingMode === 'manual' ? <fieldset className="!col-span-full !grid !grid-cols-1 !gap-3 !rounded-[12px] !border-0 !bg-[var(--crm-surface-soft)] !p-4 sm:!grid-cols-2">
               <legend className="!mb-2 !px-1 !text-xs !font-bold">Límites del plan</legend>

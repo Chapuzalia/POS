@@ -50,13 +50,15 @@ export function billingClient(db) {
 }
 
 export class FakeStripe {
+  sepa=false; invoicePayments=[]; intents=new Map(); mandates=new Map();
   subscriptions=[]; invoices=[]; calls=[]; sessions=new Map(); schedules=new Map(); prices=new Map(); cache=new Map(); taxRates=[]; customerTaxExempt='none'
   previewRecurring=false; priceAmounts=new Map([['price_base',10000],['price_production',1000]])
   failPayment=false; offline=false; now=Math.floor(Date.now()/1000)
-  async list(path) {
+  async list(path,params={}) {
     if(this.offline)throw new Error('offline')
     if(path==='/subscriptions')return structuredClone(this.subscriptions)
     if(path==='/invoices')return structuredClone(this.invoices)
+    if(path==='/invoice_payments')return structuredClone(this.invoicePayments.filter(row=>row.invoice===params.invoice))
     if(path==='/prices')return [...this.prices.values()]
     if(path==='/tax_rates')return structuredClone(this.taxRates.filter(rate=>rate.active))
     throw new Error(path)
@@ -70,8 +72,20 @@ export class FakeStripe {
   invoice(paid=true){const sub=this.subscriptions[0],amounts=this.totals(sub.items.data,sub.default_tax_rates,sub.discounts);const invoice={id:`in_${this.invoices.length+1}`,customer:'cus_test',status:paid?'paid':'open',currency:'eur',amount_due:amounts.total,amount_paid:paid?amounts.total:0,total:amounts.total,total_excluding_tax:amounts.subtotal,subtotal_excluding_tax:amounts.subtotal,created:this.now,number:null,hosted_invoice_url:null,invoice_pdf:null,status_transitions:{paid_at:paid?this.now:null}};this.invoices.push(invoice);return invoice}
   items(lines){return lines.map((line,index)=>({id:`si_${index}`,price:{id:line.price},quantity:line.quantity,current_period_start:this.now,current_period_end:this.now+2592000}))}
   discounts(value){return value?value.map(discount=>({source:{coupon:discount.coupon}})):[]}
-  completeCheckout(paid=true){const session=[...this.sessions.values()].at(-1);session.status='complete';this.subscriptions=[{id:'sub_test',customer:'cus_test',livemode:false,status:paid?'active':'incomplete',billing_cycle_anchor:this.now,items:{data:this.items(session.params.line_items),has_more:false},default_tax_rates:(session.params.subscription_data.default_tax_rates??[]).map(id=>({id})),automatic_tax:{enabled:false},pending_update:null,cancel_at_period_end:false,latest_invoice:null,schedule:null,discounts:this.discounts(session.params.discounts),metadata:session.params.subscription_data.metadata}];this.subscriptions[0].latest_invoice=this.invoice(paid)}
-  pay(){const sub=this.subscriptions[0]; if(sub.pending_update){const params=sub.pending_update;sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null}sub.status='active';sub.latest_invoice=this.invoice()}
+  completeCheckout(paid=true){const session=[...this.sessions.values()].at(-1);session.status='complete';this.subscriptions=[{id:'sub_test',customer:'cus_test',livemode:false,status:paid?'active':'incomplete',billing_cycle_anchor:this.now,items:{data:this.items(session.params.line_items),has_more:false},default_tax_rates:(session.params.subscription_data.default_tax_rates??[]).map(id=>({id})),automatic_tax:{enabled:false},pending_update:null,cancel_at_period_end:false,latest_invoice:null,schedule:null,discounts:this.discounts(session.params.discounts),metadata:session.params.subscription_data.metadata}];this.subscriptions[0].latest_invoice=this.invoice(paid);Object.assign(session,{livemode:false,mode:'subscription',payment_status:paid?'paid':'unpaid',customer:'cus_test',subscription:'sub_test',invoice:this.subscriptions[0].latest_invoice.id,currency:'eur',client_reference_id:session.params.client_reference_id,metadata:session.params.metadata})}
+  authorizeSepaCheckout(){this.sepa=true;this.completeCheckout(false);this.subscriptions[0].status='active';this.processSepaInvoice()}
+  processSepaInvoice(){
+    const sub=this.subscriptions[0],invoice=sub.latest_invoice
+    const method={id:'pm_sepa_test',type:'sepa_debit',customer:'cus_test',livemode:false}
+    sub.default_payment_method=method
+    const intent={id:`pi_${invoice.id}`,customer:'cus_test',livemode:false,currency:'eur',status:'processing',amount:invoice.amount_due,last_payment_error:null,payment_method:method,
+      latest_charge:{id:`ch_${invoice.id}`,customer:'cus_test',payment_intent:`pi_${invoice.id}`,payment_method:method.id,livemode:false,status:'pending',currency:'eur',amount:invoice.amount_due,refunded:false,failure_code:null,payment_method_details:{type:'sepa_debit',sepa_debit:{mandate:'mandate_test'}}}}
+    this.intents.set(intent.id,intent)
+    this.invoicePayments.push({id:`inpay_${invoice.id}`,invoice:invoice.id,livemode:false,status:'open',currency:'eur',amount_requested:invoice.amount_due,is_default:true,payment:{type:'payment_intent',payment_intent:intent.id}})
+    this.mandates.set('mandate_test',{id:'mandate_test',livemode:false,status:'active',type:'multi_use',payment_method:method.id,payment_method_details:{type:'sepa_debit'},customer_acceptance:{type:'online',accepted_at:this.now}})
+  }
+  failSepa(){const sub=this.subscriptions[0];sub.status='past_due';const intent=this.intents.get(`pi_${sub.latest_invoice.id}`);intent.status='requires_payment_method';intent.last_payment_error={code:'insufficient_funds'};intent.latest_charge.status='failed';intent.latest_charge.failure_code='insufficient_funds'}
+  pay(){const sub=this.subscriptions[0];if(this.sepa&&sub.latest_invoice?.status==='open'){const invoice=sub.latest_invoice;invoice.status='paid';invoice.amount_paid=invoice.amount_due;invoice.status_transitions.paid_at=this.now;sub.status='active';const intent=this.intents.get(`pi_${invoice.id}`);if(intent){intent.status='succeeded';intent.latest_charge.status='succeeded'}return} if(sub.pending_update){const params=sub.pending_update;sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null}sub.status='active';sub.latest_invoice=this.invoice()}
   advancePhase(index=1){const sub=this.subscriptions[0],schedule=this.schedules.get(sub.schedule),phase=schedule.phases[index];this.now=schedule.current_phase.end_date+(index-1)*2592000;sub.items.data=this.items(phase.items);sub.metadata={...sub.metadata,...phase.metadata};sub.discounts=this.discounts(phase.discounts);if(phase.default_tax_rates)sub.default_tax_rates=phase.default_tax_rates.map(id=>({id}));sub.latest_invoice=this.invoice()}
   applyScheduledPhase(at) {
     const sub=this.subscriptions[0], schedule=this.schedules.get(sub.schedule)
@@ -106,6 +120,9 @@ export class FakeStripe {
       result={amount_due:amounts.total,currency:'eur',total:amounts.total,total_excluding_tax:amounts.subtotal}
     }
     else if(path==='/tax_rates'){result={id:`txr_test_${this.taxRates.length}`,active:true,...params};this.taxRates.push(result)}
+    else if(path.startsWith('/payment_intents/'))result=this.intents.get(path.split('/').at(-1))
+    else if(path.startsWith('/mandates/'))result=this.mandates.get(path.split('/').at(-1))
+    else if(path.startsWith('/payment_methods/'))result=this.subscriptions[0]?.default_payment_method
     else if(path==='/customers'||path==='/customers/cus_test'){if(params.tax_exempt)this.customerTaxExempt=params.tax_exempt;result={id:'cus_test',tax_exempt:this.customerTaxExempt}}
     else if(path==='/checkout/sessions'){result={id:`cs_test_${this.sessions.size}`,url:'https://checkout.stripe.com/test'};this.sessions.set(result.id,{...result,status:'open',params})}
     else if(path.startsWith('/checkout/sessions/')){result=this.sessions.get(path.split('/').at(path.endsWith('/expire')?-2:-1));if(path.endsWith('/expire')){if(result.status!=='open')throw new Error('STRIPE_CHECKOUT_NOT_OPEN');result.status='expired'}result.customer=result.params.customer}
@@ -123,7 +140,11 @@ export class FakeStripe {
         sub.default_tax_rates=params.default_tax_rates.map(id=>({id}));sub.automatic_tax=params.automatic_tax
         sub.items.data.forEach(item=>{item.tax_rates=[]})
       }
+      else if(method==='POST'&&params.payment_behavior==='allow_incomplete'){
+        sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null;sub.latest_invoice=this.invoice(false);this.processSepaInvoice();if(this.failPayment)this.failSepa()
+      }
       else if(method==='POST'){
+        if(this.sepa&&params.payment_behavior==='pending_if_incomplete')throw new Error('SEPA does not support pending_if_incomplete')
         if(this.failPayment){sub.pending_update=params;sub.latest_invoice=this.invoice(false)}
         else{sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.latest_invoice=this.invoice()}
       }

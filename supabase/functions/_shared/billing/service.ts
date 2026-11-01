@@ -7,6 +7,8 @@ import { promotionPhases, renewalOnOrAfter, resolvePromotions } from './promotio
 import type { PromotionPhase, PromotionPreview } from './promotions.ts'
 import { spanishVatRate } from './taxes.ts'
 import { onboardingContract } from './onboarding.ts'
+import { processingSepaAuthorization, subscriptionUsesSepa } from './sepa.ts'
+import type { SepaAuthorization } from './sepa.ts'
 
 export type Account = {
   tenant_id: string; stripe_customer_id: string | null; stripe_subscription_id: string | null
@@ -16,12 +18,13 @@ export type Account = {
   last_reconciled_at: string | null; sync_error: string | null; created_at: string
   schedule_operation_id: string | null
   onboarding_contract: Contract | null
+  sepa_authorization?: SepaAuthorization | null
 }
 export type Operation = {
   id: string; tenant_id: string; actor_id: string; kind: 'change' | 'cancel' | 'cancel_now'; reason: string
   status: string; contract: Contract | null; restore_contract: Contract | null
   timing: 'immediate' | 'period_end'; preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string; promotions?: PromotionPreview[]; afterPromotionCents?: number }
-  stripe_params: { subscriptionId: string | null; taxRateId?: string; items?: ReturnType<typeof stripeItems>; discounts?: Array<{ coupon: string }> | ''; scheduleId?: string; baseline?: string; scheduleBaseline?: string; phases?: PromotionPhase[]; cancelSchedule?: boolean }
+  stripe_params: { subscriptionId: string | null; taxRateId?: string; sepaDebit?: boolean; checkoutPolicy?: string; items?: ReturnType<typeof stripeItems>; discounts?: Array<{ coupon: string }> | ''; scheduleId?: string; baseline?: string; scheduleBaseline?: string; phases?: PromotionPhase[]; cancelSchedule?: boolean }
   result: { url?: string; checkoutId?: string; scheduleId?: string; pendingInvoiceId?: string | null } | null; created_at: string; proration_date: number; effective_at: string | null
 }
 type VersionRow = { id: string; product_key: string; interval: 'month' | 'year'; amount_cents: number; features: string[]; limits: Version['limits']; included: Record<string, number>; maximum: number | null; requires: string[]; stripe_price_id: string | null; published: boolean }
@@ -157,7 +160,7 @@ export class BillingService {
   }
   async subscription(account: Account) {
     if (!account.stripe_subscription_id) return null
-    const sub = await this.stripe.request<StripeSubscription>('GET', `/subscriptions/${account.stripe_subscription_id}`, { expand: ['latest_invoice','discounts'] })
+    const sub = await this.stripe.request<StripeSubscription>('GET', `/subscriptions/${account.stripe_subscription_id}`, { expand: ['latest_invoice','discounts','default_payment_method'] })
     if (sub.customer !== account.stripe_customer_id || sub.livemode !== false || sub.items.has_more) throw new Error('BILLING_SUBSCRIPTION_MISMATCH')
     return sub
   }
@@ -215,6 +218,7 @@ export class BillingService {
   }
   async quote(tenantId: string, actorId: string, selection: Selection, exception: CommercialException | null, reason: string, isSuperadmin = false) {
     const account = await this.account(tenantId)
+    if (account.last_payment_status === 'processing') throw new Error('BILLING_PENDING_CHANGE')
     if (commercialState(account.status, account.delinquent_since, account.grace_days) === 'restricted' && !['canceled','incomplete_expired'].includes(account.status)) throw new Error('BILLING_PAYMENT_REQUIRED')
     const { products, versions } = await this.catalog()
     const existingContract = account.billed_contract ?? account.contract
@@ -271,6 +275,7 @@ export class BillingService {
     const timing = exception?.cycles ? 'period_end' : subscription && account.contract ? changeTiming(account.contract, next) : 'immediate'
     if (exception?.cycles && !subscription) throw new Error('BILLING_TEMPORARY_REQUIRES_SUBSCRIPTION')
     const restore = exception?.cycles ? buildContract(effectiveProducts, versions, selection) : null
+    const sepaDebit = subscription ? await subscriptionUsesSepa(this.stripe, subscription) : false
     const discounts = await this.materialize(next, tenantId)
     if (restore) await this.materialize(restore, tenantId)
     const prorationDate = Math.floor(Date.now() / 1000)
@@ -278,7 +283,7 @@ export class BillingService {
     const items = subscription ? stripeItems(subscription.items.data, next.lines) : next.lines.map(line => ({ price: line.stripePriceId ?? undefined, quantity: line.quantity }))
     const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', { customer: account.stripe_customer_id ?? undefined, customer_details: { tax_exempt: 'none' }, automatic_tax: { enabled: false }, ...(subscription ? { subscription: subscription.id } : {}), ...(timing === 'period_end' ? { preview_mode: 'recurring' } : {}), subscription_details: { default_tax_rates: [taxRateId], items: previewItems(items, taxRateId), proration_behavior: timing === 'immediate' && subscription ? 'always_invoice' : undefined, proration_date: timing === 'immediate' && subscription ? prorationDate : undefined }, discounts })
     if (preview && preview.currency !== 'eur') throw new Error('BILLING_CURRENCY_MISMATCH')
-    return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing, stripeParams: { subscriptionId: subscription?.id ?? null, taxRateId, items, discounts, baseline: subscription ? subscriptionBaseline(subscription) : undefined }, preview: { amountDueCents: timing === 'immediate' ? preview.amount_due : 0, renewalCents: timing === 'period_end' ? preview.amount_due : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? account.period_end : null, details: timing === 'period_end' ? 'Cambio al vencimiento; sin cargo inmediato. Vista previa de renovación calculada por Stripe con IVA del 21 %. Cuotas recurrentes sin IVA.' : 'Vista previa de Stripe con IVA del 21 % y los ajustes aplicables. Cuotas recurrentes sin IVA.' }, reason, prorationDate })
+    return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing, stripeParams: { subscriptionId: subscription?.id ?? null, taxRateId, sepaDebit, ...(!subscription ? { checkoutPolicy: 'fiscal_sepa_v1' } : {}), items, discounts, baseline: subscription ? subscriptionBaseline(subscription) : undefined }, preview: { amountDueCents: timing === 'immediate' ? preview.amount_due : 0, renewalCents: timing === 'period_end' ? preview.amount_due : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? account.period_end : null, details: timing === 'period_end' ? 'Cambio al vencimiento; sin cargo inmediato. Vista previa de renovación calculada por Stripe con IVA del 21 %. Cuotas recurrentes sin IVA.' : sepaDebit ? 'Vista previa de Stripe con IVA del 21 %. La ampliación será inmediata cuando Stripe confirme que el cobro SEPA está autorizado y en trámite; el banco todavía puede rechazarlo. Cuotas recurrentes sin IVA.' : 'Vista previa de Stripe con IVA del 21 % y los ajustes aplicables. Cuotas recurrentes sin IVA.' }, reason, prorationDate })
   }
   async promotionInvoice(account: Account, sub: StripeSubscription, contract: Contract, discounts: PromotionPhase['discounts'], taxRateId?: string) {
     const preview = await this.stripe.request<StripeInvoice>('POST', '/invoices/create_preview', {
@@ -360,10 +365,12 @@ export class BillingService {
     if (retry && (before.data.status !== 'applying' || Date.now() - Date.parse(before.data.created_at) > 23 * 3600_000)) throw new Error('BILLING_MANUAL_RECONCILIATION_REQUIRED')
     // Requote old offers; an in-flight retry must retain its original Stripe parameters.
     if (!retry && before.data.kind === 'change' && !before.data.stripe_params.taxRateId) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+    if (!retry && before.data.kind === 'change' && !before.data.stripe_params.subscriptionId && before.data.stripe_params.checkoutPolicy !== 'fiscal_sepa_v1') throw new Error('BILLING_STALE_STRIPE_QUOTE')
     if (!retry && before.data.stripe_params.baseline) {
       const account = await this.account(tenantId)
       const sub = await this.subscription(account)
       if (!sub || subscriptionBaseline(sub) !== before.data.stripe_params.baseline) throw new Error('BILLING_STALE_STRIPE_QUOTE')
+      if (before.data.stripe_params.sepaDebit !== undefined && await subscriptionUsesSepa(this.stripe, sub) !== before.data.stripe_params.sepaDebit) throw new Error('BILLING_STALE_STRIPE_QUOTE')
       if (before.data.stripe_params.scheduleId && before.data.stripe_params.scheduleBaseline) {
         const schedule = await this.ownedSchedule(account, sub)
         if (!schedule || scheduleBaseline(schedule) !== before.data.stripe_params.scheduleBaseline) throw new Error('BILLING_STALE_STRIPE_QUOTE')
@@ -436,7 +443,8 @@ export class BillingService {
       const checkout = await this.applyStripeMutation(op, () => this.stripe.request<{ id: string; url: string }>('POST', '/checkout/sessions', {
         customer: customerId, mode: 'subscription',
         ...(taxRateId ? { automatic_tax: { enabled: false } } : {}),
-        billing_address_collection: 'required', tax_id_collection: { enabled: true }, customer_update: { address: 'auto', name: 'auto' },
+        ...(op.stripe_params.checkoutPolicy === 'fiscal_sepa_v1' ? { payment_method_types: ['card', 'sepa_debit'], tax_id_collection: { enabled: true, required: 'if_supported' } } : { tax_id_collection: { enabled: true } }),
+        billing_address_collection: 'required', customer_update: { address: 'auto', name: 'auto' },
         client_reference_id: tenantId, metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId },
         subscription_data: { ...taxes, metadata: { tickit_operation_id: op.id, tickit_tenant_id: tenantId } },
         line_items: contract.lines.map(line => ({ price: line.stripePriceId, quantity: line.quantity })),
@@ -472,7 +480,7 @@ export class BillingService {
           await this.applyStripeMutation(op, () => this.stripe.request('POST', `/subscriptions/${sub.id}`, { ...taxes, automatic_tax: { enabled: false }, items: sub.items.data.map(item => ({ id: item.id, tax_rates: '' })), proration_behavior: 'none' }, `${idempotencyKey}:vat-subscription`), !retry && !configuredCustomerTax)
         }
       }
-      const updated = await this.applyStripeMutation(op, () => this.stripe.request<StripeSubscription>('POST', `/subscriptions/${op.stripe_params.subscriptionId}`, { items: op.stripe_params.items, discounts: op.stripe_params.discounts, payment_behavior: 'pending_if_incomplete', proration_behavior: 'always_invoice', proration_date: op.proration_date }, idempotencyKey), !retry && !taxRateId)
+      const updated = await this.applyStripeMutation(op, () => this.stripe.request<StripeSubscription>('POST', `/subscriptions/${op.stripe_params.subscriptionId}`, { items: op.stripe_params.items, discounts: op.stripe_params.discounts, payment_behavior: op.stripe_params.sepaDebit ? 'allow_incomplete' : 'pending_if_incomplete', proration_behavior: 'always_invoice', proration_date: op.proration_date }, idempotencyKey), !retry && !taxRateId)
       result = { pendingInvoiceId: typeof updated.latest_invoice === 'object' ? updated.latest_invoice?.id : updated.latest_invoice }
     }
     const operation = await this.transition<Operation>('apply_result', { tenantId, operationId, status, result, effectiveAt: op.timing === 'period_end' ? account.period_end : null })
@@ -557,6 +565,11 @@ export class BillingService {
       let contract: Contract | null = null
       let completedOperationId: string | null = null
       let discrepancy: string | null = null
+      let sepaAuthorization: SepaAuthorization | null = null
+      if (sub && latest && match?.contract && !mayProject(sub.status, Boolean(sub.pending_update), latest.status === 'paid')) {
+        sepaAuthorization = await processingSepaAuthorization(this.stripe, tenantId, sub, latest, match.operation)
+        if (sepaAuthorization) contract = match.contract
+      }
       if (sub && mayProject(sub.status, Boolean(sub.pending_update), latest?.status === 'paid')) {
         if (phaseMatch && timeline) {
           contract = phaseMatch; completedOperationId = timeline.id
@@ -568,7 +581,12 @@ export class BillingService {
           contract = account.contract
         } else discrepancy = 'UNRECOGNIZED_STRIPE_ITEMS'
       }
-      await this.transition('sync_commit', { tenantId, token, customerId: account.stripe_customer_id, subscriptionId: sub?.id ?? null, status: sub?.status ?? account.status, contract, clearSchedule: !sub?.schedule, financialContract: sub && !sub.pending_update && ['active','past_due','unpaid'].includes(sub.status) ? phaseMatch : null, paymentStatus: latest?.status ?? null, periodEnd: iso(sub?.items.data[0]?.current_period_end), cancelAtPeriodEnd: sub?.cancel_at_period_end ?? false, completedOperationId, discrepancy })
+      const financialContract = match?.operation.stripe_params.sepaDebit && match.operation.result?.pendingInvoiceId === latest?.id ? match.contract : phaseMatch
+      const taxId = latest?.customer_tax_ids?.find(value => value.type === 'es_cif') ?? latest?.customer_tax_ids?.find(value => value.type === 'eu_vat')
+      await this.transition('sync_commit', { tenantId, token, customerId: account.stripe_customer_id, subscriptionId: sub?.id ?? null, status: sub?.status ?? account.status, contract, clearSchedule: !sub?.schedule,
+        financialContract: sub && !sub.pending_update && ['active','past_due','unpaid'].includes(sub.status) ? financialContract : null,
+        sepaAuthorization, payer: latest ? { legalName: latest.customer_name, taxId: taxId?.value, email: latest.customer_email } : null,
+        paymentStatus: sepaAuthorization ? 'processing' : latest?.status ?? null, periodEnd: iso(sub?.items.data[0]?.current_period_end), cancelAtPeriodEnd: sub?.cancel_at_period_end ?? false, completedOperationId, discrepancy })
       return { reconciled: true, discrepancy }
     } catch (error) {
       await this.transition('sync_fail', { tenantId, token })
@@ -577,7 +595,7 @@ export class BillingService {
   }
   async processEvent(event: { id: string; type: string; created: number; livemode: boolean; data: { object: { customer?: string } } }) {
     if (event.livemode !== false) throw new Error('BILLING_LIVE_MODE_FORBIDDEN')
-    const supported = ['checkout.session.completed','checkout.session.expired','checkout.session.async_payment_succeeded','customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','customer.subscription.pending_update_applied','customer.subscription.pending_update_expired','invoice.paid','invoice.payment_failed','invoice.payment_action_required','subscription_schedule.updated','subscription_schedule.completed','subscription_schedule.released','subscription_schedule.aborted']
+    const supported = ['payment_intent.processing','payment_intent.succeeded','payment_intent.payment_failed','payment_intent.canceled','charge.failed','checkout.session.async_payment_failed','checkout.session.completed','checkout.session.expired','checkout.session.async_payment_succeeded','customer.subscription.created','customer.subscription.updated','customer.subscription.deleted','customer.subscription.pending_update_applied','customer.subscription.pending_update_expired','invoice.paid','invoice.payment_failed','invoice.payment_action_required','subscription_schedule.updated','subscription_schedule.completed','subscription_schedule.released','subscription_schedule.aborted']
     const customer = event.data.object.customer
     const claim = await this.transition<{ claimed: boolean }>('event_claim', { id: event.id, type: event.type, created: event.created, customer })
     if (!claim.claimed) return

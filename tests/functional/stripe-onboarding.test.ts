@@ -60,6 +60,7 @@ it('creates Stripe tenants with a validated draft before returning success, pres
     compileComponent(source, {
       'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
       '../_shared/billing/service.ts': { BillingService }, '../_shared/billing/stripe.ts': { StripeGateway },
+      '../_shared/platform-tenant-deletion.ts': {},
       '../_shared/billing/schemas.ts': schemas, '../_shared/billing/onboarding.ts': { onboardingContract },
       '../_shared/welcome-email.ts': { sendWelcomeEmail: (input: Parameters<typeof sendWelcomeEmail>[0], config: Parameters<typeof sendWelcomeEmail>[1]) => sendWelcomeEmail(input, config, async () => {
         expect(writes.some(write => write.table === 'catalog_sale_formats')).toBe(true)

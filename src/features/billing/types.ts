@@ -12,6 +12,7 @@ export type BillingAccount = {
   email: string | null
   contract: Contract | null
   onboarding_contract: Contract | null
+  sepa_authorization?: import('../../../supabase/functions/_shared/billing/sepa').SepaAuthorization | null
   billed_contract: Contract | null
   subscription_started_at: string | null
   canceled_at: string | null

@@ -10,6 +10,7 @@ export type StripeSubscription = {
   default_tax_rates?: Array<{ id: string }>
   automatic_tax?: { enabled: boolean }
   metadata: Record<string, string>
+  default_payment_method?: import('./sepa.ts').StripePaymentMethod | string | null
 }
 export type StripeInvoice = {
   id: string; customer: string; status: string; currency: string
@@ -20,6 +21,7 @@ export type StripeInvoice = {
   account_name?: string | null; account_country?: string | null; account_tax_ids?: Array<string | { type: string; value: string }> | null
   customer_name?: string | null; customer_tax_ids?: Array<{ type: string; value: string }> | null
   customer_address?: { line1: string | null; line2: string | null; city: string | null; state: string | null; postal_code: string | null; country: string | null } | null
+  customer_email?: string | null
 }
 export type StripeList<T> = { data: T[]; has_more: boolean }
 type FormValue = string | number | boolean | null | undefined | FormValue[] | { [key: string]: FormValue }
@@ -61,7 +63,7 @@ export class StripeGateway {
     this.transport = transport
   }
   async request<T>(method: 'GET' | 'POST' | 'DELETE', path: string, params: Record<string, FormValue> = {}, idempotencyKey?: string): Promise<T> {
-    if (!/^\/(customers|products|prices|tax_rates|checkout\/sessions|subscriptions|subscription_schedules|invoices|billing_portal\/(sessions|configurations)|coupons)(\/|$)/.test(path)) throw new Error('BILLING_INVALID_STRIPE_PATH')
+    if (!/^\/(customers|products|prices|tax_rates|checkout\/sessions|subscriptions|subscription_schedules|invoices|invoice_payments|payment_intents|payment_methods|mandates|billing_portal\/(sessions|configurations)|coupons)(\/|$)/.test(path)) throw new Error('BILLING_INVALID_STRIPE_PATH')
     const form = encodeStripeForm(params)
     const result = await this.transport(`https://api.stripe.com/v1${path}${method === 'GET' && form.size ? `?${form}` : ''}`, {
       method,

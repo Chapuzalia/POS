@@ -5,6 +5,7 @@ import { selectionSchema } from '../_shared/billing/schemas.ts'
 import { onboardingContract } from '../_shared/billing/onboarding.ts'
 import { sendWelcomeEmail } from '../_shared/welcome-email.ts'
 import type { WelcomeEmailStatus } from '../_shared/welcome-email.ts'
+import { deletePlatformTenantData, TenantDeletionError } from '../_shared/platform-tenant-deletion.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -419,30 +420,14 @@ Deno.serve(async (request) => {
         return response({ error: 'Solo un superadmin puede eliminar negocios' }, 403)
       }
 
-      const targetTenantId = String(body.tenantId ?? '')
-      if (!targetTenantId) return response({ error: 'Negocio no valido' }, 400)
-
-      const [{ data: targetTenant, error: tenantLookupError }, { data: tenantMembers, error: membersError }] = await Promise.all([
-        adminClient.from('tenants').select('id').eq('id', targetTenantId).maybeSingle(),
-        adminClient.from('tenant_memberships').select('user_id').eq('tenant_id', targetTenantId),
-      ])
-      if (tenantLookupError || membersError) throw tenantLookupError ?? membersError
-      if (!targetTenant) return response({ error: 'Negocio no encontrado' }, 404)
-
-      const { error: deleteError } = await adminClient.from('tenants').delete().eq('id', targetTenantId)
-      if (deleteError) throw deleteError
-
-      for (const member of tenantMembers ?? []) {
-        const [{ data: remainingMembership }, { data: memberProfile }] = await Promise.all([
-          adminClient.from('tenant_memberships').select('id').eq('user_id', member.user_id).limit(1).maybeSingle(),
-          adminClient.from('profiles').select('is_superadmin').eq('id', member.user_id).maybeSingle(),
-        ])
-        if (!remainingMembership && memberProfile?.is_superadmin !== true) {
-          await adminClient.auth.admin.deleteUser(member.user_id, true)
-        }
+      try {
+        await deletePlatformTenantData(adminClient, String(body.tenantId ?? ''), authData.user.id,
+          () => new StripeGateway(Deno.env.get('STRIPE_TEST_SECRET_KEY') ?? ''))
+        return response({ ok: true })
+      } catch (error) {
+        return response({ error: error instanceof TenantDeletionError ? error.message : 'No se pudo completar la eliminación. Vuelve a eliminar el negocio para continuar.' },
+          error instanceof TenantDeletionError ? error.status : 503)
       }
-
-      return response({ ok: true })
     }
 
     const { data: membership, error: membershipError } = await adminClient

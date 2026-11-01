@@ -74,9 +74,12 @@ ediciones invalidan los presupuestos anteriores bajo el bloqueo de cuenta y las
 operaciones económicas conservan la exclusión e idempotencia existentes.
 
 La redirección del navegador no activa el negocio. El webhook o la conciliación
-debe confirmar una suscripción activa, factura pagada y contrato reconocido. Una
-prueba gratuita sin pago no retira el bloqueo inicial. Mi Plan comprueba el pago
-periódicamente y ofrece actualización manual; tras activarse se recarga la sesión
+debe confirmar una suscripción activa y contrato reconocido, con factura pagada o
+con [autorización SEPA verificada y cobro en trámite](stripe-sepa.md). Una prueba
+gratuita sin pago ni esa autorización no retira el bloqueo inicial. Mi Plan comprueba
+el estado inmediatamente al volver de Checkout y continúa comprobándolo cada diez
+segundos mientras esté pendiente; ofrece también actualización manual como respaldo.
+Tras activarse se recarga la sesión
 para leer las funcionalidades efectivas. Los negocios manuales y las
 suscripciones existentes mantienen su comportamiento y continuidad operativa.
 
