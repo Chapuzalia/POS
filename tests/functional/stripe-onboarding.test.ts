@@ -9,6 +9,7 @@ import { z } from 'zod'
 import { BillingService } from '../../supabase/functions/_shared/billing/service'
 import { StripeGateway } from '../../supabase/functions/_shared/billing/stripe'
 import { compileComponent } from '../helpers/component-harness.mjs'
+import { sendWelcomeEmail } from '../../supabase/functions/_shared/welcome-email'
 
 const setup = () => createBillingService({ after: onTestFinished }, 4900)
 
@@ -21,10 +22,11 @@ it('creates Stripe tenants with a validated draft before returning success, pres
   }
   const schemas = compileComponent(readFileSync(new URL('../../supabase/functions/_shared/billing/schemas.ts', import.meta.url), 'utf8'), { 'npm:zod@4.4.3': { z } })
   const source = readFileSync(new URL('../../supabase/functions/manage-pos-users/index.ts', import.meta.url), 'utf8')
-  async function create(billingMode: 'manual' | 'stripe', failBilling = false) {
+  async function create(billingMode: 'manual' | 'stripe', failBilling = false, emailFailure = false) {
     const writes: Array<{ table: string; command: string; value: Record<string, unknown> }> = []
     const deletedUsers: string[] = []
     let ownerCreations = 0
+    let emails = 0
     const client = {
       auth: {
         getUser: async () => ({ data: { user: { id: ids.owner } }, error: null }),
@@ -59,6 +61,12 @@ it('creates Stripe tenants with a validated draft before returning success, pres
       'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
       '../_shared/billing/service.ts': { BillingService }, '../_shared/billing/stripe.ts': { StripeGateway },
       '../_shared/billing/schemas.ts': schemas, '../_shared/billing/onboarding.ts': { onboardingContract },
+      '../_shared/welcome-email.ts': { sendWelcomeEmail: (input: Parameters<typeof sendWelcomeEmail>[0], config: Parameters<typeof sendWelcomeEmail>[1]) => sendWelcomeEmail(input, config, async () => {
+        expect(writes.some(write => write.table === 'catalog_sale_formats')).toBe(true)
+        expect(writes.some(write => write.table === 'tenant_memberships')).toBe(true)
+        emails++
+        return emailFailure ? Response.json({ message: 'unauthorized' }, { status: 401 }) : Response.json({ id: 'email-fixture' })
+      }) },
     }, {
       Deno: { serve: (callback: typeof handler) => { handler = callback }, env: { get: (name: string) => name === 'STRIPE_TEST_SECRET_KEY' ? 'sk_test_fixture' : 'http://localhost:5173' } },
       Response, crypto, console: { error() {} },
@@ -68,23 +76,32 @@ it('creates Stripe tenants with a validated draft before returning success, pres
       billingMode, maxVenues: billingMode === 'manual' ? 2 : -1, maxDevices: 4,
       billingSelection: { ...selection, addons: [{ key: 'production', versionId: production.id, quantity: 1, venueIds: [], deviceIds: [] }] },
     }) }))
-    return { reply, writes, ownerCreations, deletedUsers }
+    return { reply, writes, ownerCreations, deletedUsers, emails }
   }
   const stripe = await create('stripe')
   expect(stripe.reply.status).toBe(201)
+  expect((await stripe.reply.json()).welcomeEmailStatus).toBe('sent')
+  expect(stripe.emails).toBe(1)
   expect(stripe.ownerCreations).toBe(1)
   expect(stripe.writes.find(write => write.table === 'tenants')?.value).toMatchObject({ billing_activation_required: true, max_venues: 3, max_devices: 5 })
   const venueId = stripe.writes.find(write => write.table === 'venues')?.value.id
   expect(stripe.writes.find(write => write.table === 'billing_accounts')?.value).toMatchObject({ source: 'stripe', status: 'pending_payment', email: 'owner@example.test', onboarding_contract: { recurringCents: 5900, addons: [{ venueIds: [venueId] }] } })
   const manual = await create('manual')
   expect(manual.reply.status).toBe(201)
+  expect(manual.emails).toBe(1)
   expect(manual.writes.some(write => write.table === 'billing_accounts')).toBe(false)
   expect(manual.writes.find(write => write.table === 'tenants')?.value).toMatchObject({ max_venues: 2, max_devices: 4 })
   expect(manual.writes.find(write => write.table === 'tenants')?.value).not.toHaveProperty('billing_activation_required')
   const failed = await create('stripe', true)
   expect(failed.reply.status).toBe(500)
+  expect(failed.emails).toBe(0)
   expect(failed.deletedUsers).toEqual([ids.stranger])
   expect(failed.writes.filter(write => write.command === 'delete').map(write => write.table)).toEqual(['billing_accounts', 'tenants'])
+  const emailFailed = await create('stripe', false, true)
+  expect(emailFailed.reply.status).toBe(201)
+  expect((await emailFailed.reply.json()).welcomeEmailStatus).toBe('failed')
+  expect(emailFailed.deletedUsers).toEqual([])
+  expect(emailFailed.writes.filter(write => write.command === 'delete')).toEqual([])
 })
 
 it('generates eight-character passwords using unambiguous random characters', () => {

@@ -8,9 +8,50 @@ local se asignan al primer local. Las unidades adicionales quedan disponibles pa
 futuros locales.
 
 El botón Generar utiliza aleatoriedad criptográfica y crea una contraseña de ocho
-caracteres. Se puede mostrar u ocultar. No se envían correos ni se guardan
-contraseñas en las tablas de facturación. La integración de bienvenida con Resend
-queda pendiente.
+caracteres. Se puede mostrar u ocultar. La bienvenida se envía mediante Resend
+después de completar el alta. No se guardan contraseñas en tablas de facturación,
+colas de envío ni logs.
+
+## Correo de bienvenida
+
+`manage-pos-users` utiliza `RESEND_WELCOME_API_KEY`, disponible únicamente en el
+servidor. El remitente acordado está en `_shared/welcome-email.ts`:
+`Tickit <bienvenida@notificaciones.tickitpos.com>`, con
+`reply_to=info@tickitpos.com`. No se requieren variables para esos dos valores.
+El enlace de acceso usa el origen de `BILLING_APP_URL`, ya existente, con ruta
+`/crm`; no se acepta un enlace enviado por el navegador. Requiere HTTPS, salvo
+localhost en desarrollo. El subdominio remitente debe estar verificado en Resend.
+
+El mensaje incluye nombre del negocio, email del propietario y contraseña
+inicial, tanto en HTML escapado como en texto. Las altas Stripe explican el paso
+por Mi Plan y el pago; las manuales explican el acceso inmediato.
+El HTML usa una estructura de tablas con estilos inline, cabecera corporativa y
+el logotipo oficial `public/logo_black.png` adjunto mediante CID. Su copia base64
+en `_shared/welcome-email-logo.ts` conserva los bytes originales y se verifica en
+tests. No depende de que el cliente de correo pueda acceder a imágenes de
+Staging. La visualización final depende del soporte y ajustes de cada cliente.
+
+La petición a Resend tiene un tiempo máximo de ocho segundos y un único reintento
+para fallos de transporte o respuestas transitorias, conservando el mismo cuerpo
+y la clave `tickit-welcome/<ownerId>/v1`. Resend mantiene su idempotencia durante
+24 horas; aquí los reintentos solo se hacen dentro de la petición de alta. No se
+crean una cola persistente ni un endpoint de reenvío de contraseñas.
+
+La respuesta de alta añade `welcomeEmailStatus` sin cambiar los campos N-1:
+`sent` (Resend aceptó el envío, no acredita entrega en bandeja), `failed`
+(rechazo confirmado), `unknown` (resultado incierto) o `not_configured`.
+Un fallo de correo no revierte el negocio ni sus usuarios. Superadmin muestra una
+advertencia para comprobar Resend o entregar las credenciales por otro medio,
+evitando volver a crear el negocio. Un servidor antiguo sin ese campo no se
+presenta como envío correcto.
+
+Para activar en el entorno autorizado, desplegar `manage-pos-users` junto con
+`_shared/welcome-email.ts`, `_shared/welcome-email-logo.ts` y el frontend. No necesita otra migración. En el stack
+self-hosted, la clave debe llegar al entorno efectivo de `supabase-edge-functions`;
+una variable declarada en Coolify sin mapearla al servicio no es suficiente.
+Usar el controlador de despliegue existente y validar primero en Staging con una
+cuenta de prueba cuyo destinatario haya autorizado el envío. No utilizar
+`supabase functions deploy` para este stack self-hosted.
 
 ## Acceso y pago inicial
 
@@ -71,7 +112,11 @@ los permisos explícitos para cualquier actuación sobre producción.
   Checkout caducado, pago en proceso, presupuestos obsoletos y aislamiento SQL.
 - Regresión del endpoint de accesos: propietarios pendientes no pueden listar
   cuentas ni crear locales o usuarios por la API privilegiada.
-- `pnpm test`, `pnpm lint`, `pnpm build` y comprobación Deno de las cuatro funciones.
+- Bienvenida: remitente/respuesta, credenciales escapadas, enlace de confianza,
+  separación manual/Stripe, configuración ausente, rechazos, incertidumbre,
+  idempotencia y ausencia de envíos tras un alta fallida. Un fallo de correo
+  conserva el alta completada.
+- `pnpm test`, `pnpm lint`, `pnpm build` y comprobación Deno de las funciones.
 - QA local con Playwright/Edge en 1440×1000 y 390×844 y servicios sustituidos por
   datos ficticios. Recorrido: alta Stripe y generación de contraseña; Mi Plan →
   modificar extra → guardar → revisar importe → enlace Checkout. Sin errores de

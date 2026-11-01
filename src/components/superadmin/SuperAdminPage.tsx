@@ -90,6 +90,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [tenantModal, setTenantModal] = useState<TenantModalState>(null)
   const [isBusy, setIsBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
+  const [welcomeEmailNotice, setWelcomeEmailNotice] = useState<string | null>(null)
   const [tenantName, setTenantName] = useState('')
   const [tenantSlug, setTenantSlug] = useState('')
   const [slugEdited, setSlugEdited] = useState(false)
@@ -177,12 +178,17 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       setOwnerEmail('')
       setOwnerPassword('')
       setTenantModal(null)
-      setSuccess(`${created.name} y su cuenta OWNER se han creado correctamente.${billingMode === 'stripe' ? ' Acceso limitado a Mi Plan hasta confirmar el pago.' : ''} El correo de bienvenida está pendiente de configurar.`)
+      setSuccess(`${created.name} y su cuenta OWNER se han creado correctamente.${billingMode === 'stripe' ? ' Acceso limitado a Mi Plan hasta confirmar el pago.' : ''}${created.welcomeEmailStatus === 'sent' ? ' Correo de bienvenida enviado.' : ''}`)
+      setWelcomeEmailNotice(created.welcomeEmailStatus === 'sent' ? null
+        : created.welcomeEmailStatus === 'unknown' ? 'El negocio ya está creado, pero no se pudo confirmar el envío del correo. Comprueba su estado en Resend antes de contactar con el cliente. No vuelvas a crear el negocio.'
+        : created.welcomeEmailStatus === 'failed' ? 'El negocio ya está creado, pero el correo de bienvenida no se ha enviado. Entrega las credenciales al cliente por otro medio. No vuelvas a crear el negocio.'
+        : 'El negocio ya está creado, pero el envío de bienvenida no está configurado en el servidor. Entrega las credenciales al cliente por otro medio.')
       await refresh()
     })
   }
 
   function openCreateModal() {
+    setWelcomeEmailNotice(null)
     setTenantName('')
     setTenantSlug('')
     setSlugEdited(false)
@@ -360,6 +366,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
         </header>
 
         {success ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-green-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-green)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">{success}</div> : null}
+        {welcomeEmailNotice ? <div role="alert" className="!mx-auto !mt-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!w-[calc(100%_-_56px)]">{welcomeEmailNotice}</div> : null}
         {!isOnline ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">La administración global requiere conexión.</div> : null}
 
         <main className="!mx-auto !min-h-0 !w-full !max-w-[1720px] !flex-1 !overflow-auto !px-4 !pt-[26px] !pb-7 md:!px-7 md:!pt-[42px] md:!pb-9">
@@ -422,7 +429,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Primer local</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setVenueName(event.target.value)} required value={venueName} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Nombre del OWNER</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setOwnerFullName(event.target.value)} required value={ownerFullName} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Email del OWNER</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setOwnerEmail(event.target.value)} required type="email" value={ownerEmail} /></label>
-            <div><label className="!mb-1.5 !block !text-[11px] !font-semibold" htmlFor="new-owner-password">Contraseña inicial</label><div className="!flex !gap-2"><UiInput id="new-owner-password" aria-label="Contraseña inicial" autoComplete="new-password" className={`${inputClassName} !min-w-0 !flex-1`} disabled={!isOnline || isBusy} minLength={8} onChange={event => setOwnerPassword(event.target.value)} required type={showOwnerPassword ? 'text' : 'password'} value={ownerPassword} /><UiButton aria-label={showOwnerPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} disabled={isBusy} type="button" onClick={() => setShowOwnerPassword(current => !current)}><Eye className="!size-4" /></UiButton><UiButton disabled={!isOnline || isBusy} type="button" onClick={() => { setOwnerPassword(generateOwnerPassword()); setShowOwnerPassword(true) }}>Generar</UiButton></div><p className="!mt-1 !text-xs !text-[var(--crm-text-muted)]">Mínimo 8 caracteres. El envío por correo se configurará más adelante.</p></div>
+            <div><label className="!mb-1.5 !block !text-[11px] !font-semibold" htmlFor="new-owner-password">Contraseña inicial</label><div className="!flex !gap-2"><UiInput id="new-owner-password" aria-label="Contraseña inicial" autoComplete="new-password" className={`${inputClassName} !min-w-0 !flex-1`} disabled={!isOnline || isBusy} minLength={8} onChange={event => setOwnerPassword(event.target.value)} required type={showOwnerPassword ? 'text' : 'password'} value={ownerPassword} /><UiButton aria-label={showOwnerPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} disabled={isBusy} type="button" onClick={() => setShowOwnerPassword(current => !current)}><Eye className="!size-4" /></UiButton><UiButton disabled={!isOnline || isBusy} type="button" onClick={() => { setOwnerPassword(generateOwnerPassword()); setShowOwnerPassword(true) }}>Generar</UiButton></div><p className="!mt-1 !text-xs !text-[var(--crm-text-muted)]">Mínimo 8 caracteres. Se enviará con los datos de acceso al email del propietario.</p></div>
             <fieldset className="!col-span-full !grid !gap-3 !rounded-[12px] !border !border-[var(--crm-border)] !p-4">
               <legend className="!px-1 !text-xs !font-bold">Facturación</legend>
               <div className="!flex !flex-wrap !gap-4">{(['manual', 'stripe'] as const).map(mode => <label key={mode} className="!flex !min-h-11 !items-center !gap-2 !text-sm"><input type="radio" name="billing-mode" value={mode} checked={billingMode === mode} disabled={!isOnline || isBusy} onChange={() => setBillingMode(mode)} />{mode === 'manual' ? 'Facturación manual' : 'Suscripción con Stripe'}</label>)}</div>

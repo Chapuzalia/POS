@@ -3,6 +3,8 @@ import { BillingService } from '../_shared/billing/service.ts'
 import { StripeGateway } from '../_shared/billing/stripe.ts'
 import { selectionSchema } from '../_shared/billing/schemas.ts'
 import { onboardingContract } from '../_shared/billing/onboarding.ts'
+import { sendWelcomeEmail } from '../_shared/welcome-email.ts'
+import type { WelcomeEmailStatus } from '../_shared/welcome-email.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -323,6 +325,14 @@ Deno.serve(async (request) => {
           throw setupError
         }
 
+        let welcomeEmailStatus: WelcomeEmailStatus = 'unknown'
+        try {
+          welcomeEmailStatus = await sendWelcomeEmail({ ownerId, ownerEmail, ownerPassword, ownerFullName, tenantName, billingMode }, {
+            apiKey: Deno.env.get('RESEND_WELCOME_API_KEY'),
+            appUrl: Deno.env.get('BILLING_APP_URL'),
+          })
+        } catch { /* Email failure must never roll back the completed business. */ }
+
         return response({
           tenant: {
             id: createdTenant.id,
@@ -331,6 +341,7 @@ Deno.serve(async (request) => {
             createdAt: createdTenant.created_at,
           },
           ownerId,
+          welcomeEmailStatus,
         }, 201)
       } catch (setupError) {
         if (createdTenantId) {
