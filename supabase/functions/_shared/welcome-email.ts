@@ -14,6 +14,7 @@ type WelcomeEmailConfig = { apiKey?: string; appUrl?: string }
 
 const welcomeFrom = 'Tickit <bienvenida@notificaciones.tickitpos.com>'
 const welcomeReplyTo = 'info@tickitpos.com'
+const stripeWelcomeTemplateId = '23a9523e-2c39-405f-8cf4-99dfa8ba8160'
 const escapeHtml = (value: string) => value.replace(/[&<>"']/g, character => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[character] ?? character)
 
 export async function sendWelcomeEmail(input: WelcomeEmailInput, config: WelcomeEmailConfig, send: typeof fetch = fetch): Promise<WelcomeEmailStatus> {
@@ -26,10 +27,21 @@ export async function sendWelcomeEmail(input: WelcomeEmailInput, config: Welcome
     loginUrl = new URL('/crm', appUrl)
   } catch { return 'not_configured' }
 
-  const nextStep = input.billingMode === 'stripe'
-    ? 'Al iniciar sesión verás Mi Plan. Podrás revisar o modificar tu plan y extras y pagar con tarjeta o domiciliar el cobro en Stripe. El acceso se activará al confirmar el pago con tarjeta o verificar la autorización SEPA.'
-    : 'Ya puedes iniciar sesión y acceder a tu negocio.'
-  const body = JSON.stringify({
+  const nextStep = 'Ya puedes iniciar sesión y acceder a tu negocio.'
+  const body = JSON.stringify(input.billingMode === 'stripe' ? {
+    to: [input.ownerEmail],
+    template: {
+      id: stripeWelcomeTemplateId,
+      // These variables are inserted into HTML text/attributes by the template.
+      variables: {
+        OWNER_NAME: escapeHtml(input.ownerFullName),
+        BUSINESS_NAME: escapeHtml(input.tenantName),
+        USER_EMAIL: escapeHtml(input.ownerEmail),
+        INITIAL_PASSWORD: escapeHtml(input.ownerPassword),
+        LOGIN_URL: escapeHtml(loginUrl.href),
+      },
+    },
+  } : {
     from: welcomeFrom,
     reply_to: welcomeReplyTo,
     to: [input.ownerEmail],

@@ -62,9 +62,12 @@ it('creates Stripe tenants with a validated draft before returning success, pres
       '../_shared/billing/service.ts': { BillingService }, '../_shared/billing/stripe.ts': { StripeGateway },
       '../_shared/platform-tenant-deletion.ts': {},
       '../_shared/billing/schemas.ts': schemas, '../_shared/billing/onboarding.ts': { onboardingContract },
-      '../_shared/welcome-email.ts': { sendWelcomeEmail: (input: Parameters<typeof sendWelcomeEmail>[0], config: Parameters<typeof sendWelcomeEmail>[1]) => sendWelcomeEmail(input, config, async () => {
+      '../_shared/welcome-email.ts': { sendWelcomeEmail: (input: Parameters<typeof sendWelcomeEmail>[0], config: Parameters<typeof sendWelcomeEmail>[1]) => sendWelcomeEmail(input, config, async (_url, init) => {
         expect(writes.some(write => write.table === 'catalog_sale_formats')).toBe(true)
         expect(writes.some(write => write.table === 'tenant_memberships')).toBe(true)
+        const message = JSON.parse(String(init?.body))
+        if (billingMode === 'stripe') expect(message.template).toMatchObject({ id: '23a9523e-2c39-405f-8cf4-99dfa8ba8160', variables: { OWNER_NAME: 'Ana', BUSINESS_NAME: 'Café Aurora', USER_EMAIL: 'owner@example.test', INITIAL_PASSWORD: 'ABCDEFG2', LOGIN_URL: 'http://localhost:5173/crm' } })
+        else { expect(message).not.toHaveProperty('template'); expect(message.html).toContain('Ya puedes iniciar sesión') }
         emails++
         return emailFailure ? Response.json({ message: 'unauthorized' }, { status: 401 }) : Response.json({ id: 'email-fixture' })
       }) },

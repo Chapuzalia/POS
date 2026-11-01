@@ -15,18 +15,30 @@ colas de envío ni logs.
 ## Correo de bienvenida
 
 `manage-pos-users` utiliza `RESEND_WELCOME_API_KEY`, disponible únicamente en el
-servidor. El remitente acordado está en `_shared/welcome-email.ts`:
-`Tickit <bienvenida@notificaciones.tickitpos.com>`, con
-`reply_to=info@tickitpos.com`. No se requieren variables para esos dos valores.
+servidor. No se añaden variables de entorno para las plantillas.
 El enlace de acceso usa el origen de `BILLING_APP_URL`, ya existente, con ruta
 `/crm`; no se acepta un enlace enviado por el navegador. Requiere HTTPS, salvo
 localhost en desarrollo. El subdominio remitente debe estar verificado en Resend.
 
-El mensaje incluye nombre del negocio, email del propietario y contraseña
-inicial, tanto en HTML escapado como en texto. Las altas Stripe explican el paso
-por Mi Plan y el pago; las manuales explican el acceso inmediato.
-El HTML usa una estructura de tablas con estilos inline, cabecera corporativa y
-el logotipo oficial `public/logo_black.png` adjunto mediante CID. Su copia base64
+Las altas Stripe usan la plantilla publicada de Resend
+`23a9523e-2c39-405f-8cf4-99dfa8ba8160`, identificada en `_shared/welcome-email.ts`.
+El servidor envía únicamente destinatario y `template` con las variables
+`OWNER_NAME`, `BUSINESS_NAME`, `USER_EMAIL`, `INITIAL_PASSWORD` y `LOGIN_URL`.
+Son valores escapados para los nodos y atributos HTML de la plantilla; no deben
+reutilizarse como variables del asunto o encabezados, donde aparecerían entidades
+HTML. El asunto actual es fijo. No se envían `html`, `text` ni adjuntos en este flujo.
+Diseño, logo y textos de Mi Plan/pago/SEPA se gestionan en Resend. La plantilla
+debe tener también sus valores predeterminados de remitente, asunto y Reply-to:
+`Tickit <bienvenida@notificaciones.tickitpos.com>`,
+`Bienvenido a Tickit · Tus datos de acceso` e `info@tickitpos.com`.
+El servidor no los sobrescribe, por lo que pueden editarse en Resend y publicarse.
+Si la plantilla falta, no está publicada o Resend la rechaza, se informa del fallo;
+no se sustituye por otro correo local.
+
+Por decisión del usuario, las altas manuales conservan su correo actual en código,
+con esos mismos remitente/asunto/Reply-to y el texto de acceso inmediato. Incluye
+HTML escapado y texto plano. El HTML usa tablas con estilos inline, cabecera
+corporativa y el logo oficial `public/logo_black.png` adjunto mediante CID. Su copia base64
 en `_shared/welcome-email-logo.ts` conserva los bytes originales y se verifica en
 tests. No depende de que el cliente de correo pueda acceder a imágenes de
 Staging. La visualización final depende del soporte y ajustes de cada cliente.
@@ -52,6 +64,12 @@ una variable declarada en Coolify sin mapearla al servicio no es suficiente.
 Usar el controlador de despliegue existente y validar primero en Staging con una
 cuenta de prueba cuyo destinatario haya autorizado el envío. No utilizar
 `supabase functions deploy` para este stack self-hosted.
+
+La adopción de la plantilla solo cambia `_shared/welcome-email.ts` en el bundle de
+`manage-pos-users`; no necesita un nuevo frontend, migración ni secreto. Validar
+en Staging un alta Stripe y otra manual con destinatario de prueba autorizado,
+incluidos enlace, logo y credenciales renderizadas. No se ha enviado correo real
+ni desplegado esta adaptación desde la sesión local.
 
 ## Acceso y pago inicial
 
