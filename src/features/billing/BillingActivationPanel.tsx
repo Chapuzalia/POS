@@ -43,6 +43,8 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
     return () => window.clearInterval(timer)
   }, [disabled, customerId, editing, quote, busy, refresh, run])
   const pending = detail?.operations.find(operation => ['applying','payment_pending','scheduled'].includes(operation.status))
+  const checkoutReady = pending?.status === 'payment_pending' && Boolean(pending.result?.url)
+  const checkingPayment = pending?.status === 'payment_pending' && (returnedFromCheckout || detail?.account.last_payment_status === 'processing')
   const contract = pending?.contract ?? detail?.account.onboarding_contract
   const locked = disabled || busy
   let validSelection = false
@@ -69,7 +71,11 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
           <p className="!m-0 !text-sm">{contract.limits.venues} {contract.limits.venues === 1 ? 'local' : 'locales'} · {contract.limits.devices} dispositivos</p>
           <div className="!border-t !border-[var(--crm-border)] !pt-3"><strong className="!text-sm">Extras seleccionados</strong>{contract.addons.some(addon => addon.quantity > 0) ? <ul className="!mb-0 !mt-2 !grid !gap-2 !pl-4 !text-sm">{contract.addons.filter(addon => addon.quantity > 0).map(addon => <li key={addon.key}>{catalog.products.find(product => product.key === addon.key)?.name ?? addon.key} · {addon.quantity} {addon.billable === 0 ? '· Incluido' : ''}</li>)}</ul> : <p className="!mb-0 !mt-2 !text-sm !text-[var(--crm-text-muted)]">Sin extras adicionales.</p>}</div>
         </div>
-        {pending ? <p role="status" className="!m-0 !text-sm">Estamos comprobando automáticamente tu pago o domiciliación. El acceso se activará cuando Stripe lo confirme.</p> : null}
+        {pending ? <p role={pending.status === 'applying' ? 'alert' : 'status'} className="!m-0 !text-sm">{checkingPayment
+          ? 'Estamos comprobando tu pago o domiciliación. El acceso se activará cuando Stripe lo confirme.'
+          : checkoutReady
+            ? 'Tu página de pago está lista. Pulsa «Continuar pago en Stripe» para acceder a ella.'
+            : 'La apertura de la página de pago no se ha completado. Pulsa «Comprobar estado»; si el intento sigue bloqueado, contacta con soporte para recuperarlo.'}</p> : null}
         <div className="!flex !flex-wrap !gap-3">
           <Button className="!rounded-[10px] !bg-[var(--crm-blue)] !px-5 !font-semibold !text-white" disabled={locked || Boolean(pending && (pending.status !== 'payment_pending' || !pending.result?.url))} onClick={() => void run(async () => {
             if (pending?.result?.url) { openBillingUrl(pending.result.url); return }
@@ -81,14 +87,18 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
             const prepared = pending?.contract ?? next.account.onboarding_contract
             if (next.tenant.billing_activation_required && prepared) setEditing(prepared.selection)
           })}>Modificar plan contratado</Button>
-          <Button disabled={locked} onClick={() => void run(() => refresh(Boolean(customerId)))}>Comprobar pago</Button>
+          <Button disabled={locked} onClick={() => void run(() => refresh(Boolean(customerId)))}>Comprobar estado</Button>
         </div>
       </> : <p role="alert">No hay un plan preparado. Contacta con el administrador.</p>}
     </section>
     {quote ? <AppModal label="Revisar pago del plan" theme="crm" maxWidth={520} dismissDisabled={busy} onClose={() => setQuote(null)}><div className="!grid !gap-4 !p-6"><h3 className="!m-0 !text-lg !font-bold">Revisar pago</h3><p className="!m-0">{quote.contract?.planName}</p><p className="!m-0 !text-2xl !font-bold">{billingMoney(quote.preview.amountDueCents)} <span className="!text-sm !font-normal">IVA incluido</span></p><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Suscripción {quote.contract?.interval === 'year' ? 'anual' : 'mensual'}. Completarás el pago de forma segura en Stripe.</p>{error ? <p role="alert" className="!text-sm !text-[var(--crm-red)]">{error}</p> : null}<div className="!flex !flex-wrap !justify-end !gap-3"><Button disabled={locked} onClick={() => setQuote(null)}>Volver</Button><Button disabled={locked} onClick={() => void run(async () => {
       const result = await billingRequest<{ url?: string }>({ action: 'confirm', tenantId, operationId: quote.id })
       if (result.url) openBillingUrl(result.url)
-      else { setQuote(null); await refresh(Boolean(customerId)) }
+      else {
+        const next = await refresh(Boolean(customerId))
+        if (next.tenant.billing_activation_required) throw new Error('No se ha podido abrir la página de pago. Comprueba el estado o contacta con soporte para recuperar el intento.')
+        setQuote(null)
+      }
     })}>Ir al pago en Stripe</Button></div></div></AppModal> : null}
   </div>
 }
