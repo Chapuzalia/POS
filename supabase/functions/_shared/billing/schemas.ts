@@ -41,6 +41,8 @@ export const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('catalog-save'), product: productSchema, version: versionSchema.nullable(), reason: z.string().min(1).max(500) }).strict(),
   z.object({ action: z.literal('catalog-publish'), versionId: z.uuid() }).strict(),
   z.object({ action: z.literal('get'), tenantId: z.uuid() }).strict(),
+  z.object({ action: z.literal('save-onboarding'), tenantId: z.uuid(), selection: selectionSchema }).strict(),
+  z.object({ action: z.literal('restart-checkout'), tenantId: z.uuid() }).strict(),
   z.object({ action: z.literal('portal'), tenantId: z.uuid() }).strict(),
   z.object({ action: z.literal('reconcile'), tenantId: z.uuid() }).strict(),
   z.object({ action: z.literal('reconcile-batch') }).strict(),

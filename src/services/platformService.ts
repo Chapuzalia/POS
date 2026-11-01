@@ -49,6 +49,8 @@ export type CreatePlatformTenantInput = {
   ownerFullName: string
   maxDevices: number
   maxVenues: number
+  billingMode?: 'manual' | 'stripe'
+  billingSelection?: import('../features/billing/types').Selection
 }
 
 export type UpdatePlatformTenantInput = {

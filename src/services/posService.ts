@@ -75,6 +75,17 @@ export async function loadTenantFeatures(tenantId: string, venueId?: string): Pr
   return normalizeTenantFeatures(data)
 }
 
+export async function loadBillingActivationRequired(tenantId: string): Promise<boolean> {
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const { data, error } = await supabase.rpc('get_current_billing_access', { p_tenant_id: tenantId })
+  if (error) {
+    // Existing backends cannot create payment-gated tenants before the expand.
+    if (['42883', 'PGRST202'].includes(error.code ?? '')) return false
+    throw error
+  }
+  return data === true
+}
+
 export async function loginTenant(input: LoginInput): Promise<TenantContext> {
   if (!supabase) {
     throw new Error('Supabase no está configurado.')
@@ -166,6 +177,7 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
       userId: user.id,
       userName: user.user_metadata.full_name ?? user.email ?? 'Usuario CRM',
       role: membership.role,
+      billingActivationRequired: await loadBillingActivationRequired(tenant.id),
       features,
     })
   }
@@ -357,6 +369,7 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
       userId: user.id,
       userName: user.user_metadata.full_name ?? user.email ?? 'Usuario CRM',
       role: membership.role,
+      billingActivationRequired: await loadBillingActivationRequired(tenant.id),
       features,
     })
   }

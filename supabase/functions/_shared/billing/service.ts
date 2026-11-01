@@ -6,6 +6,7 @@ import type { StripeInvoice, StripeSubscription } from './stripe.ts'
 import { promotionPhases, renewalOnOrAfter, resolvePromotions } from './promotions.ts'
 import type { PromotionPhase, PromotionPreview } from './promotions.ts'
 import { spanishVatRate } from './taxes.ts'
+import { onboardingContract } from './onboarding.ts'
 
 export type Account = {
   tenant_id: string; stripe_customer_id: string | null; stripe_subscription_id: string | null
@@ -14,6 +15,7 @@ export type Account = {
   delinquent_since: string | null; grace_days: number; last_payment_status: string | null
   last_reconciled_at: string | null; sync_error: string | null; created_at: string
   schedule_operation_id: string | null
+  onboarding_contract: Contract | null
 }
 export type Operation = {
   id: string; tenant_id: string; actor_id: string; kind: 'change' | 'cancel' | 'cancel_now'; reason: string
@@ -92,7 +94,7 @@ export class BillingService {
     const account = await this.account(tenantId)
     const scheduled = await this.scheduleOperation(account)
     const [tenant, venues, devices, invoices, operations, audit] = await Promise.all([
-      this.db.from('tenants').select('id,name,max_venues,max_devices').eq('id', tenantId).single(),
+      this.db.from('tenants').select('id,name,max_venues,max_devices,billing_activation_required').eq('id', tenantId).single(),
       this.db.from('venues').select('id,name,is_active').eq('tenant_id', tenantId),
       this.db.from('devices').select('id,name,venue_id,is_active').eq('tenant_id', tenantId).eq('is_active', true),
       this.db.from('billing_invoices').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100),
@@ -127,6 +129,31 @@ export class BillingService {
     return { accounts: accounts.map(account => ({ ...account, contract: account.billed_contract ?? account.contract, name: names.get(account.tenant_id) ?? account.tenant_id, venueCount: (venues.data ?? []).filter(row => row.tenant_id === account.tenant_id).length })), events: events.data,
       metrics: { ...recurringMetrics(accounts.map(account => ({ status: account.status, contract: account.billed_contract ?? account.contract }))), paidCents: (invoices.data ?? []).reduce((sum, row) => sum + row.amount_paid_cents, 0), paidExcludingTaxCents: (invoices.data ?? []).reduce((sum, row) => sum + row.paid_excluding_tax_cents, 0) },
       truncated: (tenants.data?.length ?? 0) >= 1000 || (venues.data?.length ?? 0) >= 1000 || (invoices.data?.length ?? 0) >= 1000 }
+  }
+  async saveOnboarding(tenantId: string, selection: Selection) {
+    const contract = onboardingContract(await this.catalog(), selection)
+    await this.validateSelection(tenantId, contract)
+    const result = await this.db.rpc('billing_save_onboarding', { p_tenant_id: tenantId, p_contract: contract })
+    if (result.error) throw new Error(result.error.message === 'BILLING_PENDING_CHANGE' ? 'BILLING_PENDING_CHANGE' : 'BILLING_DB_ONBOARDING')
+    return { saved: true }
+  }
+  async restartCheckout(tenantId: string) {
+    const tenant = await this.db.from('tenants').select('billing_activation_required').eq('id', tenantId).single()
+    if (tenant.error || !tenant.data.billing_activation_required) throw new Error('BILLING_PENDING_CHANGE')
+    const account = await this.account(tenantId)
+    if (account.stripe_customer_id) await this.reconcile(tenantId)
+    const inflight = await this.db.from('billing_operations').select('*').eq('tenant_id', tenantId).in('status', ['applying','payment_pending','scheduled']).returns<Operation[]>()
+    if (inflight.error) throw new Error('BILLING_DB_OPERATION')
+    for (const op of inflight.data) {
+      if (op.status !== 'payment_pending' || !op.result?.checkoutId) throw new Error('BILLING_PENDING_CHANGE')
+      const session = await this.stripe.request<{ status: string; customer: string }>('GET', `/checkout/sessions/${op.result.checkoutId}`)
+      if (session.customer !== account.stripe_customer_id || !['open','expired'].includes(session.status)) throw new Error('BILLING_PENDING_CHANGE')
+      if (session.status === 'open') await this.stripe.request('POST', `/checkout/sessions/${op.result.checkoutId}/expire`, {}, `onboarding-expire:${op.id}`)
+      // Stripe expiry is authoritative. A race with payment fails without releasing the lock.
+      const expired = await this.db.from('billing_operations').update({ status: 'expired', updated_at: new Date().toISOString() }).eq('id', op.id).eq('status', 'payment_pending')
+      if (expired.error) throw new Error('BILLING_DB_OPERATION')
+    }
+    return { editable: true }
   }
   async subscription(account: Account) {
     if (!account.stripe_subscription_id) return null
@@ -192,7 +219,7 @@ export class BillingService {
     const { products, versions } = await this.catalog()
     const existingContract = account.billed_contract ?? account.contract
     const scheduled = await this.scheduleOperation(account)
-    const agreement = scheduled?.contract ?? existingContract
+    const agreement = scheduled?.contract ?? existingContract ?? account.onboarding_contract
     if (!isSuperadmin) {
       if (exception) throw new Error('BILLING_FORBIDDEN')
       exception = agreement?.exception ?? null

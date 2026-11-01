@@ -13,6 +13,7 @@ import { catalogAdminService } from '../../features/crm/catalog/services/catalog
 import { recoverSupabaseRealtimeConnection } from '../../lib/supabase'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
+import { BillingActivationPanel } from '../../features/billing/BillingActivationPanel'
 
 export type CrmPageProps = {
   context: TenantContext
@@ -25,6 +26,15 @@ export type CrmPageProps = {
 }
 
 export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChanged, onError, onLogout }: CrmPageProps) {
+  if (context.billingActivationRequired) return <CrmShell activeSection="plan" context={context} disabled={!isOnline} error={error} inventoryEnabled={false} isOnline={isOnline} onLogout={onLogout} onSectionChange={() => {}} onVenueChange={() => {}} selectedVenueId="" venues={[]}>
+    {context.role === 'owner' ? <BillingActivationPanel tenantId={context.tenantId} disabled={!isOnline} onActivated={reloadActivatedBusiness} /> : <p>El propietario debe completar el pago en Mi Plan para activar el negocio.</p>}
+  </CrmShell>
+  return <CrmWorkspace context={context} error={error} isOnline={isOnline} onBusyChange={onBusyChange} onCatalogChanged={onCatalogChanged} onError={onError} onLogout={onLogout} />
+}
+
+function reloadActivatedBusiness() { window.location.reload() }
+
+function CrmWorkspace({ context, error, isOnline, onBusyChange, onCatalogChanged, onError, onLogout }: CrmPageProps) {
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)

@@ -22,6 +22,10 @@ import { getReadableError } from '../../utils/errors'
 import { tenantAddonCatalog, updateTenantAddons } from '../../features/platform/tenantFeatureAccess'
 import { loadPlatformVerifactuIntegrations, type VerifactuIntegration } from '../../features/fiscal/local/integration'
 import { VerifactuConfiguration } from './VerifactuConfiguration'
+import { BillingSelectionEditor } from '../../features/billing/BillingSelectionEditor'
+import { billingRequest } from '../../features/billing/service'
+import { buildContract, emptyBillingSelection, generateOwnerPassword } from '../../features/billing/selection'
+import type { BillingCatalog, Selection } from '../../features/billing/types'
 
 const BillingAdmin = lazy(() => import('../../features/billing/BillingAdmin'))
 
@@ -93,6 +97,12 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [ownerFullName, setOwnerFullName] = useState('')
   const [ownerEmail, setOwnerEmail] = useState('')
   const [ownerPassword, setOwnerPassword] = useState('')
+  const [showOwnerPassword, setShowOwnerPassword] = useState(false)
+  const [billingMode, setBillingMode] = useState<'manual' | 'stripe'>('manual')
+  const [billingCatalog, setBillingCatalog] = useState<BillingCatalog | null>(null)
+  const [billingSelection, setBillingSelection] = useState<Selection>(emptyBillingSelection)
+  const [billingCatalogError, setBillingCatalogError] = useState('')
+  const [catalogAttempt, setCatalogAttempt] = useState(0)
   const [maxVenues, setMaxVenues] = useState(1)
   const [maxDevices, setMaxDevices] = useState(5)
   const [editingTenantName, setEditingTenantName] = useState('')
@@ -156,6 +166,8 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
         ownerFullName: ownerFullName.trim(),
         maxDevices,
         maxVenues,
+        billingMode,
+        ...(billingMode === 'stripe' ? { billingSelection } : {}),
       })
       setTenantName('')
       setTenantSlug('')
@@ -165,7 +177,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       setOwnerEmail('')
       setOwnerPassword('')
       setTenantModal(null)
-      setSuccess(`${created.name} y su cuenta OWNER se han creado correctamente.`)
+      setSuccess(`${created.name} y su cuenta OWNER se han creado correctamente.${billingMode === 'stripe' ? ' Acceso limitado a Mi Plan hasta confirmar el pago.' : ''} El correo de bienvenida está pendiente de configurar.`)
       await refresh()
     })
   }
@@ -178,9 +190,30 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
     setOwnerFullName('')
     setOwnerEmail('')
     setOwnerPassword('')
+    setShowOwnerPassword(false)
+    setBillingMode('manual')
+    setBillingSelection(emptyBillingSelection)
     setMaxVenues(1)
     setMaxDevices(5)
     setTenantModal({ mode: 'create' })
+  }
+
+  useEffect(() => {
+    if (tenantModal?.mode !== 'create' || billingMode !== 'stripe' || !isOnline) return
+    let active = true
+    setBillingCatalog(null)
+    setBillingCatalogError('')
+    void billingRequest<BillingCatalog>({ action: 'catalog' }).then(catalog => {
+      if (active) setBillingCatalog(catalog)
+    }).catch(failure => {
+      if (active) setBillingCatalogError(getReadableError(failure, { operation: 'billing.catalog' }))
+    })
+    return () => { active = false }
+  }, [tenantModal?.mode, billingMode, isOnline, catalogAttempt])
+
+  let validBillingSelection = billingMode === 'manual'
+  if (billingMode === 'stripe' && billingCatalog) {
+    try { buildContract(billingCatalog.products, billingCatalog.versions, billingSelection); validBillingSelection = true } catch { /* Selection must be complete before creating the tenant. */ }
   }
 
   function openEditModal(tenant: PlatformTenant) {
@@ -389,15 +422,20 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Primer local</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setVenueName(event.target.value)} required value={venueName} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Nombre del OWNER</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setOwnerFullName(event.target.value)} required value={ownerFullName} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Email del OWNER</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setOwnerEmail(event.target.value)} required type="email" value={ownerEmail} /></label>
-            <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Contraseña inicial</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} minLength={8} onChange={(event) => setOwnerPassword(event.target.value)} required type="password" value={ownerPassword} /></label>
-            <fieldset className="!col-span-full !grid !grid-cols-1 !gap-3 !rounded-[12px] !border-0 !bg-[var(--crm-surface-soft)] !p-4 sm:!grid-cols-2">
+            <div><label className="!mb-1.5 !block !text-[11px] !font-semibold" htmlFor="new-owner-password">Contraseña inicial</label><div className="!flex !gap-2"><UiInput id="new-owner-password" aria-label="Contraseña inicial" autoComplete="new-password" className={`${inputClassName} !min-w-0 !flex-1`} disabled={!isOnline || isBusy} minLength={8} onChange={event => setOwnerPassword(event.target.value)} required type={showOwnerPassword ? 'text' : 'password'} value={ownerPassword} /><UiButton aria-label={showOwnerPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} disabled={isBusy} type="button" onClick={() => setShowOwnerPassword(current => !current)}><Eye className="!size-4" /></UiButton><UiButton disabled={!isOnline || isBusy} type="button" onClick={() => { setOwnerPassword(generateOwnerPassword()); setShowOwnerPassword(true) }}>Generar</UiButton></div><p className="!mt-1 !text-xs !text-[var(--crm-text-muted)]">Mínimo 8 caracteres. El envío por correo se configurará más adelante.</p></div>
+            <fieldset className="!col-span-full !grid !gap-3 !rounded-[12px] !border !border-[var(--crm-border)] !p-4">
+              <legend className="!px-1 !text-xs !font-bold">Facturación</legend>
+              <div className="!flex !flex-wrap !gap-4">{(['manual', 'stripe'] as const).map(mode => <label key={mode} className="!flex !min-h-11 !items-center !gap-2 !text-sm"><input type="radio" name="billing-mode" value={mode} checked={billingMode === mode} disabled={!isOnline || isBusy} onChange={() => setBillingMode(mode)} />{mode === 'manual' ? 'Facturación manual' : 'Suscripción con Stripe'}</label>)}</div>
+              {billingMode === 'stripe' ? <><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Stripe en modo de pruebas. El cliente verá este plan en Mi Plan y podrá modificarlo antes de pagar. El resto de funciones se activará tras confirmar el pago.</p>{billingCatalog ? <BillingSelectionEditor catalog={billingCatalog} selection={billingSelection} onChange={setBillingSelection} disabled={!isOnline || isBusy} /> : billingCatalogError ? <div role="alert"><p>{billingCatalogError}</p><UiButton type="button" onClick={() => setCatalogAttempt(current => current + 1)}>Reintentar catálogo</UiButton></div> : <p role="status">Cargando planes y productos…</p>}</> : <p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">El negocio tendrá acceso desde su creación, con los límites indicados.</p>}
+            </fieldset>
+            {billingMode === 'manual' ? <fieldset className="!col-span-full !grid !grid-cols-1 !gap-3 !rounded-[12px] !border-0 !bg-[var(--crm-surface-soft)] !p-4 sm:!grid-cols-2">
               <legend className="!mb-2 !px-1 !text-xs !font-bold">Límites del plan</legend>
               <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Locales</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} min={1} onChange={(event) => setMaxVenues(Number(event.target.value))} required type="number" value={maxVenues} /></label>
               <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Dispositivos</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} min={0} onChange={(event) => setMaxDevices(Number(event.target.value))} required type="number" value={maxDevices} /></label>
-            </fieldset>
+            </fieldset> : null}
             <div className="!col-span-full !flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !pt-4">
               <UiButton disabled={isBusy} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cancelar</UiButton>
-              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={!isOnline || isBusy || !tenantSlug || ownerPassword.length < 8} type="submit"><Plus className="!size-4" />Crear negocio</UiButton>
+              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={!isOnline || isBusy || !tenantSlug || ownerPassword.length < 8 || !validBillingSelection} type="submit"><Plus className="!size-4" />Crear negocio</UiButton>
             </div>
           </form>
         </SuperAdminModal>

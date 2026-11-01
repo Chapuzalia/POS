@@ -7,7 +7,7 @@ export function billingClient(db) {
   const identifier = value => { if (!/^[a-z_][a-z0-9_]*$/.test(value)) throw new Error(value); return `"${value}"` }
   return {
     async rpc(name, params) {
-      try { return {data:(await db.query(`select ${identifier(name)}($1,$2::jsonb) result`,[params.p_action,JSON.stringify(params.p_data)])).rows[0].result,error:null} }
+      try { return {data:(await db.query(`select ${identifier(name)}($1,$2::jsonb) result`,name==='billing_save_onboarding'?[params.p_tenant_id,JSON.stringify(params.p_contract)]:[params.p_action,JSON.stringify(params.p_data)])).rows[0].result,error:null} }
       catch(error) {return {data:null,error:{code:error.code,message:error.message}}}
     },
     from(table) {
@@ -70,7 +70,7 @@ export class FakeStripe {
   invoice(paid=true){const sub=this.subscriptions[0],amounts=this.totals(sub.items.data,sub.default_tax_rates,sub.discounts);const invoice={id:`in_${this.invoices.length+1}`,customer:'cus_test',status:paid?'paid':'open',currency:'eur',amount_due:amounts.total,amount_paid:paid?amounts.total:0,total:amounts.total,total_excluding_tax:amounts.subtotal,subtotal_excluding_tax:amounts.subtotal,created:this.now,number:null,hosted_invoice_url:null,invoice_pdf:null,status_transitions:{paid_at:paid?this.now:null}};this.invoices.push(invoice);return invoice}
   items(lines){return lines.map((line,index)=>({id:`si_${index}`,price:{id:line.price},quantity:line.quantity,current_period_start:this.now,current_period_end:this.now+2592000}))}
   discounts(value){return value?value.map(discount=>({source:{coupon:discount.coupon}})):[]}
-  completeCheckout(){const session=[...this.sessions.values()].at(-1);session.status='complete';this.subscriptions=[{id:'sub_test',customer:'cus_test',livemode:false,status:'active',billing_cycle_anchor:this.now,items:{data:this.items(session.params.line_items),has_more:false},default_tax_rates:(session.params.subscription_data.default_tax_rates??[]).map(id=>({id})),automatic_tax:{enabled:false},pending_update:null,cancel_at_period_end:false,latest_invoice:null,schedule:null,discounts:this.discounts(session.params.discounts),metadata:session.params.subscription_data.metadata}];this.subscriptions[0].latest_invoice=this.invoice()}
+  completeCheckout(paid=true){const session=[...this.sessions.values()].at(-1);session.status='complete';this.subscriptions=[{id:'sub_test',customer:'cus_test',livemode:false,status:paid?'active':'incomplete',billing_cycle_anchor:this.now,items:{data:this.items(session.params.line_items),has_more:false},default_tax_rates:(session.params.subscription_data.default_tax_rates??[]).map(id=>({id})),automatic_tax:{enabled:false},pending_update:null,cancel_at_period_end:false,latest_invoice:null,schedule:null,discounts:this.discounts(session.params.discounts),metadata:session.params.subscription_data.metadata}];this.subscriptions[0].latest_invoice=this.invoice(paid)}
   pay(){const sub=this.subscriptions[0]; if(sub.pending_update){const params=sub.pending_update;sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null}sub.status='active';sub.latest_invoice=this.invoice()}
   advancePhase(index=1){const sub=this.subscriptions[0],schedule=this.schedules.get(sub.schedule),phase=schedule.phases[index];this.now=schedule.current_phase.end_date+(index-1)*2592000;sub.items.data=this.items(phase.items);sub.metadata={...sub.metadata,...phase.metadata};sub.discounts=this.discounts(phase.discounts);if(phase.default_tax_rates)sub.default_tax_rates=phase.default_tax_rates.map(id=>({id}));sub.latest_invoice=this.invoice()}
   applyScheduledPhase(at) {
@@ -108,7 +108,7 @@ export class FakeStripe {
     else if(path==='/tax_rates'){result={id:`txr_test_${this.taxRates.length}`,active:true,...params};this.taxRates.push(result)}
     else if(path==='/customers'||path==='/customers/cus_test'){if(params.tax_exempt)this.customerTaxExempt=params.tax_exempt;result={id:'cus_test',tax_exempt:this.customerTaxExempt}}
     else if(path==='/checkout/sessions'){result={id:`cs_test_${this.sessions.size}`,url:'https://checkout.stripe.com/test'};this.sessions.set(result.id,{...result,status:'open',params})}
-    else if(path.startsWith('/checkout/sessions/'))result=this.sessions.get(path.split('/').at(-1))
+    else if(path.startsWith('/checkout/sessions/')){result=this.sessions.get(path.split('/').at(path.endsWith('/expire')?-2:-1));if(path.endsWith('/expire')){if(result.status!=='open')throw new Error('STRIPE_CHECKOUT_NOT_OPEN');result.status='expired'}result.customer=result.params.customer}
     else if(path==='/subscription_schedules'){result={id:'sub_sched_test',current_phase:{start_date:this.subscriptions[0].items.data[0].current_period_start,end_date:this.subscriptions[0].items.data[0].current_period_end}};this.subscriptions[0].schedule=result.id;this.schedules.set(result.id,result)}
     else if(path.startsWith('/subscription_schedules/')){
       if(path.endsWith('/release')){result=this.schedules.get(path.split('/').at(-2));result.status='released';this.subscriptions[0].schedule=null}

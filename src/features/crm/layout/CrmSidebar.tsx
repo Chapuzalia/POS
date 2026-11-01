@@ -125,10 +125,10 @@ export function CrmSidebar({ activeSection, context, selectedVenue, inventoryEna
     if (purchaseSections.has(activeSection)) setIsPurchasesOpen(true)
   }, [activeSection])
 
-  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features, selectedVenue))
+  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features, selectedVenue, context.billingActivationRequired))
   const allowedPurchaseItems = allowed(purchaseNavItems)
   const allowedInventoryItems = inventoryNavItems
-    .filter((item) => item.id === 'inventory-stock' || canAccessCrmSection(context.role, item.id, context.features, selectedVenue))
+    .filter((item) => item.id === 'inventory-stock' || canAccessCrmSection(context.role, item.id, context.features, selectedVenue, context.billingActivationRequired))
     .filter((item) => inventoryEnabled || item.id === 'inventory-stock')
   const navigate = (section: CrmSection) => {
     onSectionChange(section)
@@ -166,7 +166,7 @@ export function CrmSidebar({ activeSection, context, selectedVenue, inventoryEna
         </header>
 
         <nav aria-label="Navegación del CRM" className="!flex !min-h-0 !flex-1 !flex-col !overflow-y-auto !px-3 !py-5 [scrollbar-color:rgba(255,255,255,0.14)_transparent] [scrollbar-width:thin]">
-          <section aria-labelledby="crm-nav-primary">
+          {!context.billingActivationRequired ? <><section aria-labelledby="crm-nav-primary">
             <p className="!mx-2.5 !mt-0 !mb-2 !text-[10px] !leading-tight !font-bold !tracking-[0.14em] !text-[var(--crm-sidebar-muted)] !uppercase" id="crm-nav-primary">Principal</p>
             <div className="!grid !gap-[3px]">
               {allowed(navItems.slice(0, 2)).map((item) => (
@@ -191,6 +191,7 @@ export function CrmSidebar({ activeSection, context, selectedVenue, inventoryEna
             </div>
           </section>
 
+          </> : null}
           <section aria-labelledby="crm-nav-account" className="!mt-[22px]">
             <p className="!mx-2.5 !mt-0 !mb-2 !text-[10px] !leading-tight !font-bold !tracking-[0.14em] !text-[var(--crm-sidebar-muted)] !uppercase" id="crm-nav-account">Cuenta</p>
             <div className="!grid !gap-[3px]">

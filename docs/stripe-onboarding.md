@@ -1,0 +1,78 @@
+# Alta de negocios con Stripe
+
+El modal de Superadmin permite mantener el alta manual o preparar una suscripción
+con un plan y extras del catálogo publicado. No crea suscripciones ni cobra al dar
+de alta. El servidor calcula importes y límites desde las versiones del catálogo;
+el navegador solo envía identificadores, cantidades y asignaciones. Los extras por
+local se asignan al primer local. Las unidades adicionales quedan disponibles para
+futuros locales.
+
+El botón Generar utiliza aleatoriedad criptográfica y crea una contraseña de ocho
+caracteres. Se puede mostrar u ocultar. No se envían correos ni se guardan
+contraseñas en las tablas de facturación. La integración de bienvenida con Resend
+queda pendiente.
+
+## Acceso y pago inicial
+
+Los negocios nuevos con Stripe nacen con
+`tenants.billing_activation_required=true`. Su selección comercial se guarda en
+`billing_accounts.onboarding_contract`, separada de los permisos efectivos. El
+propietario inicia sesión normalmente y solo ve Mi Plan: resumen de plan, extras,
+capacidad, precio recurrente sin IVA y pago. Modificar plan contratado abre el
+editor sencillo; guardar vuelve al resumen. Los importes finales con el IVA del
+21 % se revisan antes de abrir Checkout.
+
+El bloqueo se aplica también a RLS, a los helpers de autorización de negocio y a
+la API de gestión de usuarios/locales que usa service role. La lectura de tenant,
+membresía y facturación propia sigue disponible para iniciar sesión y pagar. Las
+pantallas operativas del CRM no se montan mientras haya bloqueo.
+
+Un Checkout abierto debe caducar en Stripe antes de permitir cambios en la
+selección. Un pago que ya se está procesando no se libera para crear otro. Las
+ediciones invalidan los presupuestos anteriores bajo el bloqueo de cuenta y las
+operaciones económicas conservan la exclusión e idempotencia existentes.
+
+La redirección del navegador no activa el negocio. El webhook o la conciliación
+debe confirmar una suscripción activa, factura pagada y contrato reconocido. Una
+prueba gratuita sin pago no retira el bloqueo inicial. Mi Plan comprueba el pago
+periódicamente y ofrece actualización manual; tras activarse se recarga la sesión
+para leer las funcionalidades efectivas. Los negocios manuales y las
+suscripciones existentes mantienen su comportamiento y continuidad operativa.
+
+## Preparación y despliegue
+
+Migración nueva: `20261101164502_tenant_stripe_onboarding.sql`, generada con la CLI.
+Se añaden columnas compatibles y controles para el nuevo estado, sin modificar
+migraciones históricas. Se ha revisado `supabase/contracts-pending.yml`: las
+retiradas de tickets, contabilidad y fiscalidad no pertenecen a este cambio y no
+se consumen en un expand de altas.
+
+Aplicar primero la migración, después `manage-pos-users`, `billing`,
+`billing-webhook` y `billing-reconcile`, y finalmente el frontend. Las cuentas
+manuales no envían la nueva columna al crearse. El cliente admite servidores N-1
+sin la RPC nueva, pero estos no pueden crear altas con pago pendiente.
+
+La migración instala policies restrictivas en las tablas públicas que tienen
+`tenant_id` y RLS, conservando sus policies de aislamiento actuales. Su bloque
+`DO` de instalación es señalado por el checker como `ANONYMOUS DO BLOCK`: requiere
+revisión y autorización exacta en el pipeline antes de aplicarlo; los comentarios
+no lo autoautorizan. Las tablas futuras con autorización independiente deberán
+preservar este bloqueo.
+
+Se conserva el modo sandbox y la versión de API de Stripe existente. No se han
+aplicado migraciones remotas, enviado correos, creado recursos reales en Stripe ni
+desplegado cambios. Quedan pendientes la aceptación contra Stripe sandbox real y
+los permisos explícitos para cualquier actuación sobre producción.
+
+## Verificación
+
+- Vitest: generación de contraseña, navegación restringida, validación del catálogo,
+  asignación inicial de extras, pago fallido, activación pagada, prueba gratuita,
+  Checkout caducado, pago en proceso, presupuestos obsoletos y aislamiento SQL.
+- Regresión del endpoint de accesos: propietarios pendientes no pueden listar
+  cuentas ni crear locales o usuarios por la API privilegiada.
+- `pnpm test`, `pnpm lint`, `pnpm build` y comprobación Deno de las cuatro funciones.
+- QA local con Playwright/Edge en 1440×1000 y 390×844 y servicios sustituidos por
+  datos ficticios. Recorrido: alta Stripe y generación de contraseña; Mi Plan →
+  modificar extra → guardar → revisar importe → enlace Checkout. Sin errores de
+  consola ni desbordamiento horizontal. Browser plugin no disponible.

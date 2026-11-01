@@ -25,7 +25,8 @@ export function canAccessCrm(role: TenantRole) {
   return CRM_ROLES.has(role)
 }
 
-export function canAccessCrmSection(role: TenantRole, section: CrmSection, features?: string[], venue?: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled'>) {
+export function canAccessCrmSection(role: TenantRole, section: CrmSection, features?: string[], venue?: Pick<CrmVenue, 'addonActivations' | 'inventoryEnabled' | 'tablesEnabled' | 'productionEnabled'>, billingActivationRequired = false) {
+  if (billingActivationRequired) return role === 'owner' && section === 'plan'
   const requirement = SECTION_FEATURES[section]
   const featureContext = venue ? { features, venue } : { features }
   const hasRequiredCapability = requirement ? (venue ? hasTenantVenueCapability(featureContext, requirement) : hasTenantCapability(featureContext, requirement)) : true

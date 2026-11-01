@@ -11,6 +11,7 @@ export type BillingAccount = {
   tax_id: string | null
   email: string | null
   contract: Contract | null
+  onboarding_contract: Contract | null
   billed_contract: Contract | null
   subscription_started_at: string | null
   canceled_at: string | null
@@ -40,7 +41,7 @@ export type BillingOperation = {
 export type BillingDetail = {
   account: BillingAccount
   scheduledContract: Contract | null
-  tenant: { id: string; name: string; max_venues: number; max_devices: number }
+  tenant: { id: string; name: string; max_venues: number; max_devices: number; billing_activation_required?: boolean }
   venues: Array<{ id: string; name: string; is_active: boolean }>
   devices: Array<{ id: string; name: string; venue_id: string; is_active: boolean }>
   invoices: BillingInvoice[]

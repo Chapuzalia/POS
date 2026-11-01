@@ -175,6 +175,7 @@ export type TenantContext = {
   userId: string
   userName: string
   role: TenantRole
+  billingActivationRequired?: boolean
   features?: string[]
   venueAddonActivations?: Partial<Record<string, boolean>>
   venueInventoryEnabled?: boolean

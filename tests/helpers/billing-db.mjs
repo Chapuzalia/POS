@@ -15,16 +15,19 @@ export async function createBillingDb(t) {
     grant usage on schema auth to authenticated;
     grant execute on function auth.uid() to authenticated;
     create table profiles(id uuid primary key,is_superadmin boolean default false);
-    create table tenants(id uuid primary key,name text default 'Tenant',max_venues integer default 3,max_devices integer default 5,updated_at timestamptz default now());
+    create table tenants(id uuid primary key,name text default 'Tenant',is_active boolean default true,max_venues integer default 3,max_devices integer default 5,updated_at timestamptz default now());
     create table venues(id uuid primary key,tenant_id uuid references tenants(id),name text default 'Venue',is_active boolean default true, unique(id,tenant_id));
     create table devices(id uuid primary key,tenant_id uuid,venue_id uuid,name text default 'Device',is_active boolean default true);
+    create table device_user_assignments(tenant_id uuid,user_id uuid,venue_id uuid,device_id uuid,is_active boolean default true);
     create table cash_sessions(id uuid primary key,tenant_id uuid,status text);
     create table orders(id uuid primary key,tenant_id uuid,status text);
     create table tenant_memberships(tenant_id uuid,user_id uuid,role text,is_active boolean default true);
+    alter table venues enable row level security;
+    create policy fixture_venues_read on venues for select to authenticated using (exists(select 1 from tenant_memberships where tenant_id=venues.tenant_id and user_id=auth.uid() and is_active));
     create table platform_features(key text primary key,name text,description text default '',is_core boolean default false,is_active boolean default true,sort_order integer default 0);
     create table tenant_feature_assignments(tenant_id uuid references tenants(id),feature_key text references platform_features(key),primary key(tenant_id,feature_key));
     create table venue_addon_assignments(tenant_id uuid,venue_id uuid,addon_key text references platform_features(key),is_enabled boolean,updated_at timestamptz default now(),primary key(venue_id,addon_key),foreign key(venue_id,tenant_id) references venues(id,tenant_id));
-    create function public.user_has_venue_access(uuid,uuid) returns boolean language sql stable as $$ select auth.uid()='${x.owner}'::uuid and $1='${x.tenant}'::uuid and exists(select 1 from public.venues where id=$2 and tenant_id=$1) $$;
+    create function public.user_has_venue_access(target_tenant uuid,target_venue uuid) returns boolean language sql stable as $$ select auth.uid()='${x.owner}'::uuid and target_tenant='${x.tenant}'::uuid and exists(select 1 from public.venues where id=target_venue and tenant_id=target_tenant) $$;
     create function public.get_current_tenant_features(uuid) returns text[] language sql stable security definer as $$ select array(select feature_key from public.tenant_feature_assignments where tenant_id=$1 and auth.uid()='${x.owner}'::uuid) $$;
     insert into profiles(id) values('${x.owner}'),('${x.stranger}');
     insert into tenants(id) values('${x.tenant}'),('${x.other}');
@@ -38,6 +41,7 @@ export async function createBillingDb(t) {
   await db.exec(billingMigration)
   await db.exec(billingRepairMigration)
   await db.exec(billingPromotionsMigration)
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261101164502_tenant_stripe_onboarding.sql', import.meta.url), 'utf8'))
   const transition = async (action, data) => (await db.query('select public.billing_transition($1,$2::jsonb) result', [action, JSON.stringify(data)])).rows[0].result
   return { db, transition }
 }

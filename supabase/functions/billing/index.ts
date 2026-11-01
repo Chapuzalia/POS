@@ -42,6 +42,8 @@ Deno.serve(async request => {
       }
       case 'overview': return reply(await service.overview())
       case 'get': return reply(await service.detail(body.tenantId, admin))
+      case 'save-onboarding': return reply(await service.saveOnboarding(body.tenantId, body.selection))
+      case 'restart-checkout': return reply(await service.restartCheckout(body.tenantId))
       case 'catalog-save': {
         const catalog = await service.catalog()
         const valid = new Set(catalog.features.map(row => row.key))

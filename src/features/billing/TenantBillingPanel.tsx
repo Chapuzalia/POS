@@ -27,7 +27,7 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
       billingRequest<BillingCatalog>({ action: 'catalog' }),
     ])
     setDetail(loaded); setCatalog(commercial)
-    setSelection(loaded.scheduledContract?.selection ?? loaded.account.billed_contract?.selection ?? loaded.account.contract?.selection ?? emptySelection)
+    setSelection(loaded.scheduledContract?.selection ?? loaded.account.billed_contract?.selection ?? loaded.account.contract?.selection ?? loaded.account.onboarding_contract?.selection ?? emptySelection)
     setException((loaded.scheduledContract ?? loaded.account.billed_contract ?? loaded.account.contract)?.exception ?? null)
   }, [tenantId])
   const run = useCallback(async (action: () => Promise<void>) => {
@@ -37,9 +37,9 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
   }, [])
   useEffect(() => { if (!disabled) void run(refresh) }, [refresh, run, disabled])
   const locked = disabled || busy
-  const financialContract = detail?.account.billed_contract ?? detail?.account.contract
+  const financialContract = detail?.account.billed_contract ?? detail?.account.contract ?? detail?.account.onboarding_contract
   const published = catalog?.versions.filter(version => version.published) ?? []
-  const retained = detail?.scheduledContract ?? detail?.account.billed_contract ?? detail?.account.contract
+  const retained = detail?.scheduledContract ?? detail?.account.billed_contract ?? detail?.account.contract ?? detail?.account.onboarding_contract
   const retainedIds = new Set([retained?.selection.planVersionId, ...(retained?.selection.addons.map(addon => addon.versionId) ?? [])])
   const versions = published.filter((version, index) => admin || retainedIds.has(version.id) || published.findIndex(row => row.productKey === version.productKey && row.interval === version.interval) === index)
   const plan = versions.find(version => version.id === selection.planVersionId)
@@ -58,7 +58,7 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
   }
 
   async function requestQuote() {
-    const requestedException = exception ?? ((detail?.scheduledContract ?? detail?.account.billed_contract ?? detail?.account.contract)?.exception?.promotions?.length ? { freeUnits: {}, limits: {}, discountBasisPoints: 0, customAmounts: {}, cycles: null, reason, promotions: [] } : null)
+    const requestedException = exception ?? ((detail?.scheduledContract ?? detail?.account.billed_contract ?? detail?.account.contract ?? detail?.account.onboarding_contract)?.exception?.promotions?.length ? { freeUnits: {}, limits: {}, discountBasisPoints: 0, customAmounts: {}, cycles: null, reason, promotions: [] } : null)
     setQuote(await billingRequest<BillingOperation>({ action: 'quote', tenantId, selection, exception: admin ? requestedException : null, reason }))
   }
   return <div className="!grid !gap-5 [&_button]:!min-h-11">
