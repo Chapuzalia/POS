@@ -3,65 +3,10 @@ import * as observability from '../src/lib/observability.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import vm from 'node:vm'
-import ts from 'typescript'
+import { createCompiledHookRunner } from './helpers/component-harness.mjs'
 import { getReadableError } from '../src/utils/errors.ts'
 
-// Run the actual hooks with isolated React state, browser events and timers.
-// No database connection or additional test dependencies are needed.
-const sources = Object.fromEntries(await Promise.all(['useRestaurantRealtime', 'useRestaurantController'].map(async (name) => [
-  name,
-  ts.transpileModule(await readFile(new URL(`../src/features/restaurant/hooks/${name}.ts`, import.meta.url), 'utf8'), {
-    compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023 },
-  }).outputText,
-])))
-
-function hookRunner(name, modules, globals = {}) {
-  const slots = []
-  let cursor = 0
-  let effects = []
-  const react = {
-    useState(initial) {
-      const index = cursor++
-      slots[index] ??= { value: typeof initial === 'function' ? initial() : initial }
-      return [slots[index].value, (value) => { slots[index].value = typeof value === 'function' ? value(slots[index].value) : value }]
-    },
-    useRef(initial) {
-      const index = cursor++
-      return slots[index] ??= { current: initial }
-    },
-    useCallback(callback, deps) {
-      const index = cursor++
-      if (!slots[index] || deps.some((dep, i) => !Object.is(dep, slots[index].deps[i]))) slots[index] = { callback, deps }
-      return slots[index].callback
-    },
-    useEffect(callback, deps) {
-      const index = cursor++
-      if (!slots[index] || deps.some((dep, i) => !Object.is(dep, slots[index].deps[i]))) {
-        effects.push(() => {
-          slots[index]?.cleanup?.()
-          slots[index] = { deps, cleanup: callback() }
-        })
-      }
-    },
-  }
-  const exports = {}
-  vm.runInNewContext(sources[name], {
-    exports,
-    require: (id) => id === 'react' ? react : id === '../../../utils/errors' ? { getReadableError } : (id.endsWith('/UserFacingError.ts') ? { UserFacingError } : id.endsWith('/observability.ts') ? observability : modules[id] ?? {}),
-    ...globals,
-  })
-  return {
-    render(options) {
-      cursor = 0
-      effects = []
-      const result = exports[name](options)
-      effects.forEach((effect) => effect())
-      return result
-    },
-    unmount() { slots.forEach((slot) => slot.cleanup?.()) },
-  }
-}
+const source = await readFile(new URL('../src/features/restaurant/hooks/useRestaurantRealtime.ts', import.meta.url), 'utf8')
 
 const flush = () => new Promise((resolve) => setImmediate(resolve))
 
@@ -94,7 +39,11 @@ async function realtimeHarness(overrides = {}) {
     setSplitOrderGroup() {},
     ...overrides,
   }
-  const runner = hookRunner('useRestaurantRealtime', {
+  const runner = createCompiledHookRunner(source, 'useRestaurantRealtime', {
+    '../../../lib/observability.ts': observability,
+    '../../../lib/offlineStore': {},
+    '../../../utils/UserFacingError.ts': { UserFacingError },
+    '../../../utils/errors': { getReadableError },
     '../../tables/layout-service': { subscribeToVenueTableLayout: () => () => {} },
     '../../tables/service': {
       loadVenueTablesEnabled: async () => true,

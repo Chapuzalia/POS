@@ -949,7 +949,7 @@ export function useRestaurantController(options: Options) {
         realtime.setMap((current) => ({
           ...current,
           tables: current.tables
-            .filter((table) => !releasedTableIds.has(table.id) || !table.isVirtual)
+            .filter((table) => !releasedTableIds.has(table.id) || !table.isVirtual || !table.areaId.startsWith('virtual:'))
             .map((table) => releasedTableIds.has(table.id) ? {
               ...table,
               status: table.nextReservation ? 'reserved' : 'free',

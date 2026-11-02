@@ -28,45 +28,6 @@ export function compileComponent(source, modules, globals = {}) {
   return exports
 }
 
-export function createHookHarness() {
-  const states = []
-  const refs = []
-  let stateCursor = 0
-  let refCursor = 0
-
-  const react = {
-    ...React,
-    useCallback: (callback) => callback,
-    useDeferredValue: (value) => value,
-    useEffect: () => undefined,
-    useLayoutEffect: () => undefined,
-    useMemo: (factory) => factory(),
-    useRef(initialValue) {
-      const index = refCursor++
-      if (!(index in refs)) refs[index] = { current: initialValue }
-      return refs[index]
-    },
-    useState(initialValue) {
-      const index = stateCursor++
-      if (!(index in states)) {
-        states[index] = typeof initialValue === 'function' ? initialValue() : initialValue
-      }
-      return [states[index], (nextValue) => {
-        states[index] = typeof nextValue === 'function' ? nextValue(states[index]) : nextValue
-      }]
-    },
-  }
-
-  return {
-    react,
-    render(component, props) {
-      stateCursor = 0
-      refCursor = 0
-      return component(props)
-    },
-  }
-}
-
 export function createCompiledHookRunner(source, exportName, modules = {}, globals = {}) {
   const slots = []
   let cursor = 0
