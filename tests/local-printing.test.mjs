@@ -1,3 +1,4 @@
+import * as personalPermissions from '../src/features/personal/permissions.ts'
 import * as customPayments from '../src/lib/customPayments.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -108,6 +109,7 @@ function quickSalePaymentHarness({ isOnline, fiscalMode = 'disabled', fiscalIssu
     '../../../utils/errors.ts': { getReadableError: (error) => error?.message ?? String(error) },
     '../../../lib/format': { createId: () => 'event-1' },
     '../../../lib/durableSales.ts': createDurableSalesHarness(enqueue => calls.push(enqueue ? 'persist' : 'persistFiscal')),
+    '../../personal/permissions': personalPermissions,
     '../../../lib/customPayments': customPayments,
     '../services/salePayload': { buildSalePayload: (...args) => buildQuickSalePayload(...args) },
     '../../fiscal/service': { loadFiscalReceiptData: async () => { calls.push('fiscal'); return { status: 'accepted', verificationUrl: 'https://verify.local' } } },

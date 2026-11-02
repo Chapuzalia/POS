@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import * as personalPermissions from '../../src/features/personal/permissions'
 import { expect, it } from 'vitest'
 import { createCompiledHookRunner } from '../helpers/component-harness.mjs'
 import type { OfflineEvent, SaleRecord } from '../../src/types/index.ts'
@@ -14,6 +15,7 @@ function cashSession(queue: OfflineEvent[] = [], journalPending = false) {
   const remote = new Promise<SaleRecord[]>(done => { resolve = done })
   const cachedLedgers: unknown[] = []
   const modules = {
+    '../../personal/permissions': personalPermissions,
     '../../../lib/observability.ts': {}, '../../../utils/UserFacingError.ts': { UserFacingError: Error },
     '../../tables/service': { loadOpenRestaurantOrders: async () => [] },
     sileo: { sileo: { warning() {} } },

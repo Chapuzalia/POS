@@ -152,6 +152,7 @@ export type ThemeDefinition = {
 }
 
 export type TenantContext = {
+  personalStaff?: { employee: import('../../apps/api/src/personal-contracts').StaffSnapshot | null; venueId: string; deviceCanManageCash: boolean }
   tenantId: string
   tenantName: string
   tenantSlug: string

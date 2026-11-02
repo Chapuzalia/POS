@@ -2,6 +2,7 @@ import { reportOperationError } from '../../../lib/observability.ts'
 import { UserFacingError } from '../../../utils/UserFacingError.ts'
 import { loadOpenRestaurantOrders } from '../../tables/service'
 import { useCallback, useEffect, useMemo, useRef, useState, type SetStateAction } from 'react'
+import { assertStaffPermission, staffCan } from '../../personal/permissions'
 import { sileo } from 'sileo'
 import {
   clearSaleLedger,
@@ -364,6 +365,7 @@ export function useCashSession(options: Options) {
   }) => {
     const context = options.context
     const activeSession = session
+    assertStaffPermission(context, 'pos.cash.move', 0, input.amountCents)
     if (!context || !activeSession || !options.isOnline) {
       throw new Error('Los movimientos de caja requieren una caja abierta y conexión.')
     }
@@ -432,6 +434,7 @@ export function useCashSession(options: Options) {
   }, [cashOptions.registers, open, options.context?.defaultCashRegisterId])
 
   const printClosing = useCallback(async (closing: CashClosingRecord, printOptions: { isReprint?: boolean; copyNumber?: number; confirmedNotPrinted?: boolean } = {}) => {
+    if (printOptions.isReprint && !staffCan(options.context, 'pos.sales.read')) { options.onError('El trabajador no tiene permiso para reimprimir cierres.'); return false }
     if (!options.context || printingClosingId) return false
     const state = usePrintAgentStore.getState()
     const printerId = state.selectedPrinterId || state.selectedPrinter?.id
@@ -499,9 +502,10 @@ export function useCashSession(options: Options) {
     } finally {
       setPrintingClosingId(null)
     }
-  }, [options.context, printingClosingId])
+  }, [options, printingClosingId])
 
   const openClosingHistory = useCallback(async () => {
+    if (!staffCan(options.context, 'pos.sales.read')) { options.onError('El trabajador no tiene permiso para consultar cierres.'); return }
     if (!options.context || !options.isOnline) {
       options.onError('El histórico de cierres requiere conexión.')
       return
@@ -570,6 +574,7 @@ export function useCashSession(options: Options) {
   }, [cashOptions, cashlogyClosingStackerCollectionsCents, options, persistSession, printClosing, setTickets, setLedger])
 
   const openCloseModal = useCallback(async () => {
+    if (!staffCan(cashContext, 'pos.cash.close')) { reportError('El trabajador no tiene permiso para cerrar caja.'); return false }
     if (!cashContext || !session) return false
     setGlobalBusy(true)
     reportError(null)

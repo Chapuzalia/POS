@@ -1,4 +1,5 @@
 import * as customPayments from '../../src/lib/customPayments.ts'
+import * as personalPermissions from '../../src/features/personal/permissions.ts'
 import { readFile } from 'node:fs/promises'
 
 import { compileComponent, createCompiledHookRunner } from './component-harness.mjs'
@@ -99,6 +100,7 @@ export function createRestaurantControllerHarness({
     ...tableServiceOverrides,
   }
   const modules = {
+    '../../personal/permissions': personalPermissions,
     '../../../lib/discounts': { calculateDiscountForLines: realPayloads ? calculateDiscountForLines : () => ({ totalCents: 600 }) },
     '../../../lib/format': { createId: idFactory, getLineSignature: () => 'signature', isValidQuantity: (value) => Number.isFinite(value) && value > 0, roundQuantity: (value) => value },
     '../../../lib/observability.ts': { reportOperationError() {} },

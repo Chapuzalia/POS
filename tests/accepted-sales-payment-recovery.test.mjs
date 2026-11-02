@@ -1,3 +1,4 @@
+import * as personalPermissions from '../src/features/personal/permissions.ts'
 import * as customPayments from '../src/lib/customPayments.ts'
 import test from 'node:test'
 import assert from 'node:assert/strict'
@@ -158,6 +159,7 @@ for (const state of ['accepted', 'restarted']) test(`opening a session restores 
     '../../../lib/observability.ts': { reportOperationError() {}, operationBreadcrumb() {} },
     '../../../utils/errors.ts': { getReadableError: error => error.message },
     '../../../services/posService': {},
+    '../../personal/permissions': personalPermissions,
     '../../../lib/customPayments': customPayments,
     '../services/salePayload': { buildSalePayload: () => { drafts++; throw new Error('New sale') } },
     '../../customers/service': {},

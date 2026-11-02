@@ -29,6 +29,7 @@ import {
 } from '../services/ticketLines'
 import { applyQuickSaleLinesUpdate } from '../services/lineUpdates'
 import { useQuickSalePayment } from './useQuickSalePayment'
+import { assertStaffDiscount, staffCan } from '../../personal/permissions'
 
 export type AddCatalogLine = (
   sellable: ResolvedSellableProduct,
@@ -107,11 +108,13 @@ export function useQuickSale(options: Options) {
   }, [])
 
   const applyDiscount = useCallback((nextDiscount: AppliedDiscount) => {
+    try { assertStaffDiscount(options.context, nextDiscount, lines.map(line => ({ ...line, grossCents: getLineTotal(line) }))) }
+    catch (error) { options.onError(error instanceof Error ? error.message : 'Descuento no autorizado.'); return }
     if (nextDiscount.discountId) {
       setExcludedAutomaticDiscountIds((current) => current.filter((id) => id !== nextDiscount.discountId))
     }
     setDiscount(nextDiscount)
-  }, [])
+  }, [lines, options])
 
   const removeDiscount = useCallback(() => {
     const automaticDiscountId = activeDiscount?.automatic ? activeDiscount.discountId : null
@@ -170,6 +173,7 @@ export function useQuickSale(options: Options) {
   })
 
   const addLine = useCallback<AddCatalogLine>((sellable, selection, item, sourceElement) => {
+    if (!staffCan(options.context, 'pos.order.create')) return false
     const catalog = options.catalog
     if (!catalog) return false
     updateLines((previous) => addQuickSaleTicketLine(previous, catalog, sellable, selection, item))
@@ -185,7 +189,7 @@ export function useQuickSale(options: Options) {
     sourceElement?: HTMLElement | null,
   ) => {
     const catalog = options.catalog
-    if (!catalog) return false
+    if (!catalog || !staffCan(options.context, 'pos.order.modify')) return false
     updateLines((previous) => replaceQuickSaleTicketLine(previous, lineId, catalog, sellable, selection, item))
     options.onAddFeedback({ feedbackType: 'updated', productName: sellable.product.name, sourceElement })
     return true
@@ -244,6 +248,7 @@ export function useQuickSale(options: Options) {
     applyDiscount,
     cashPaymentOpen,
     changeQuantity: (lineId: string, direction: 1 | -1) => {
+      if (!staffCan(options.context, direction < 0 ? 'pos.item.void' : 'pos.order.modify')) return
       updateLines((previous) => changeQuickSaleTicketLineQuantity(previous, lineId, direction))
     },
     clear: () => {
@@ -272,15 +277,17 @@ export function useQuickSale(options: Options) {
     productDialog,
     removeDiscount,
     removeInvoiceCustomer: () => setInvoiceCustomer(null),
-    removeLine: (lineId: string) => updateLines((previous) => previous.filter((line) => line.id !== lineId)),
+    removeLine: (lineId: string) => { if (staffCan(options.context, 'pos.item.void')) updateLines((previous) => previous.filter((line) => line.id !== lineId)) },
     reset,
     selectProduct,
     setInvoiceCustomer,
     setDiscount: resetDiscount,
     setQuantity: (lineId: string, quantity: number) => {
+      if (!staffCan(options.context, quantity < (lines.find(line => line.id === lineId)?.quantity ?? 0) ? 'pos.item.void' : 'pos.order.modify')) return
       updateLines((previous) => setQuickSaleTicketLineQuantity(previous, lineId, quantity))
     },
     setUnitPrice: (lineId: string, unitPriceCents: number) => {
+      if (!staffCan(options.context, 'pos.price.modify', 0, unitPriceCents)) return
       updateLines((previous) => setQuickSaleTicketLineUnitPrice(previous, lineId, unitPriceCents))
     },
     subtotalCents,

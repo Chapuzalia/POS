@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { beforeEach, expect, it, vi } from 'vitest'
 import { loadApplicationState, loadOfflineApplicationState } from '../../src/app/application-bootstrap'
 import type { TenantContext } from '../../src/types'
+import * as tenantFeatureAccess from '../../src/features/platform/tenantFeatureAccess'
 import { createCompiledHookRunner, jsxRuntime } from '../helpers/component-harness.mjs'
 
 const loaders = vi.hoisted(() => ({ online: vi.fn(), offline: vi.fn(), persist: vi.fn() }))
@@ -69,6 +70,7 @@ function shellHarness(loadOffline: () => Promise<unknown>) {
     '../config/themes.json': { default: [{ id: 'theme' }] },
     '../features/offline/hooks/useOfflineController': { useOfflineController: () => ({ pendingCount: 0 }) },
     '../features/platform/useTenantFeatures': { useTenantFeatures() {} },
+    '../features/platform/tenantFeatureAccess': tenantFeatureAccess,
     '../features/session': { useLoginActivity() {}, useTenantSession: (value: typeof options) => { options = value; value.setIsBootstrapping(false); return {} } },
     '../hooks/useThemeTokens': { useThemeTokens: () => ({ selectedTheme: {}, themeId: 'theme', setThemeId() {} }) },
     '../lib/offlineStore': { getCachedContext: () => null, saveCachedContext() {} },

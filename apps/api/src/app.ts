@@ -3,6 +3,7 @@ import type { ErrorRequestHandler } from 'express'
 import { rateLimit } from 'express-rate-limit'
 import { createHash, randomBytes, randomUUID } from 'node:crypto'
 import { orderSchema, sessionSchema, tableLinkSchema } from './contracts.ts'
+import { personalRouter } from './personal.ts'
 
 export interface Database {
   rpc(
@@ -31,6 +32,7 @@ export function createApp(db: Database, trustProxyHops = 0, storageBaseUrl?: str
     next()
   })
   app.get('/health', (_req, res) => res.json({ status: 'ok', apiVersion: '1' }))
+  app.use('/personal', personalRouter(db))
   app.use(
     '/v1',
     rateLimit({ windowMs: 60_000, limit: 3000, standardHeaders: 'draft-8', legacyHeaders: false }),

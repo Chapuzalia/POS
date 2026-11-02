@@ -1,4 +1,5 @@
 import { readFileSync } from 'node:fs'
+import * as personalPermissions from '../../src/features/personal/permissions'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { beforeEach, afterEach, expect, it, vi } from 'vitest'
 import { createCompiledHookRunner, compileComponent } from '../helpers/component-harness.mjs'
@@ -53,6 +54,7 @@ function actions({ cacheFails = false, hardware = false, loadRemote = async () =
     setError: (message: string | null) => { if (message) errors.push(message) },
   }
   const runner = createCompiledHookRunner(source('features/cash-registers/hooks/useCashTicketActions.ts'), 'useCashTicketActions', {
+    '../../personal/permissions': personalPermissions,
     '../../../lib/format': { createId: () => crypto.randomUUID() },
     '../../../lib/offlineStore': offline,
     '../../../lib/durableSales.ts': durable,

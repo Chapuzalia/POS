@@ -18,6 +18,7 @@ import type { SessionTicketHistoryPage } from '../services/sessionTicketHistoryM
 import { createLocalSessionTicketHistoryPage } from '../services/sessionTicketHistoryModel.ts'
 import { loadLocalSessionTickets } from '../services/localSessionTickets.ts'
 import { changeTicketPayment } from '../services/paymentChange.ts'
+import { assertStaffPermission, staffCan } from '../../personal/permissions'
 
 type Options = {
   context: TenantContext | null
@@ -55,6 +56,7 @@ export function useCashTicketActions(options: Options) {
   const syncHistoryPendingEvents = options.syncPendingEvents
   const openHistory = useCallback(() => {
     if (!historyContext || !historyCashSession) return
+    if (!staffCan(historyContext, 'pos.sales.read')) { setHistoryError('El trabajador no tiene permiso para consultar ventas.'); return }
     setHistoryError(null)
     setHistoryOpen(true)
     if (!historyIsOnline) return
@@ -74,6 +76,7 @@ export function useCashTicketActions(options: Options) {
   }, [historyCashSession, historyContext, historyIsOnline, setHistoryError, setHistoryOpen, syncHistoryPendingEvents])
 
   const loadHistoryPage = useCallback(async (page: number, query: string): Promise<SessionTicketHistoryPage> => {
+    assertStaffPermission(historyContext, 'pos.sales.read')
     // Changing this version intentionally invalidates the callback so an open
     // history refreshes after its background offline sync has settled.
     void historyRefreshVersion
@@ -159,6 +162,7 @@ export function useCashTicketActions(options: Options) {
 
   const reprint = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
+    if (!staffCan(context, 'pos.sales.read')) { options.setError('El trabajador no tiene permiso para reimprimir ventas.'); return }
     if (!context || !(context.canManageCash || context.canCloseCashSession || ['manager', 'owner'].includes(context.role))) {
       options.setError('Tu usuario no tiene permiso para reimprimir tickets.'); return
     }
@@ -215,6 +219,7 @@ export function useCashTicketActions(options: Options) {
 
   const changePayment = useCallback(async (ticket: SessionTicketRecord, paymentMethod: PaymentMethod, confirmedCashlogyTransaction: CashlogyTransaction | null = null) => {
     const { context } = options
+    if (!staffCan(context, 'pos.payment.modify')) { options.setError('El trabajador no tiene permiso para cambiar cobros.'); return }
     const currentPayment = ticket.payload.payment
     if (!context || !currentPayment || ticket.status !== 'active' || ticket.paymentMethod === paymentMethod || paymentChangeLockRef.current) return
     if (ticket.cashSessionId !== options.cashSession?.id) {
@@ -261,6 +266,7 @@ export function useCashTicketActions(options: Options) {
 
   const refund = useCallback(async (ticket: SessionTicketRecord, lines: Array<{ lineId: string; quantity: number }>, paymentMethod: PaymentMethod) => {
     const { context, cashSession } = options
+    if (!staffCan(context, 'pos.refund', 0, ticket.totalCents)) { options.setError('El trabajador no tiene permiso para esta devolución.'); return }
     if (!context || !cashSession || ticket.status !== 'active' || refundLockRef.current) return
     if (!options.isOnline) { options.setError('La devolución requiere conexión para guardar conjuntamente el documento económico y fiscal.'); return }
     if (ticket.cashSessionId !== cashSession.id) { options.setError('La devolución solo puede hacerse mientras siga abierta la caja original.'); return }
@@ -285,6 +291,7 @@ export function useCashTicketActions(options: Options) {
 
   const voidTicket = useCallback(async (ticket: SessionTicketRecord) => {
     const { context } = options
+    if (!staffCan(context, 'pos.order.void', 0, ticket.totalCents)) { options.setError('El trabajador no tiene permiso para anular esta venta.'); return }
     if (!context || !options.cashSession || ticket.status !== 'active' || voidLockRef.current) return
     const pendingSale = getOfflineQueue().find((event) =>
       event.kind === 'sale_created' && event.payload.sale.id === ticket.payload.sale.id)

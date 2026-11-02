@@ -29,6 +29,7 @@ type AppHeaderProps = {
   cashSession: CashSession | null;
   canCloseCash: boolean;
   canManageCash: boolean;
+  canReadSales?: boolean;
   canGenerateInvoice: boolean;
   canOpenCashDrawer: boolean;
   canOpenReservations: boolean;
@@ -59,6 +60,7 @@ export function AppHeader({
   cashSession,
   canCloseCash,
   canManageCash,
+  canReadSales,
   canGenerateInvoice,
   canOpenCashDrawer,
   canOpenReservations,
@@ -97,10 +99,10 @@ export function AppHeader({
 
   if (cashSession) {
     if (canGenerateInvoice) menuItems.push({ action: onGenerateInvoice, disabled: !isOnline || isLoading, icon: FileText, id: 'invoice', label: 'Generar factura' })
-    if (canCloseCash) menuItems.push({ action: onOpenTicketHistory, icon: ReceiptText, id: 'tickets', label: 'Histórico de tickets' })
+    if (canReadSales ?? canCloseCash) menuItems.push({ action: onOpenTicketHistory, icon: ReceiptText, id: 'tickets', label: 'Histórico de tickets' })
     if (canManageCash) menuItems.push({ action: onOpenCashMovements, disabled: isLoading || !isOnline, icon: ArrowLeftRight, id: 'movements', label: 'Entradas / salidas' })
     menuItems.push({ action: onCloseCash, icon: Euro, id: 'close-cash', label: 'Cerrar caja' })
-    menuItems.push({ action: onOpenShiftSummary, icon: ChartPie, id: 'shift-summary', label: 'Resumen de turno' })
+    if (canReadSales !== false) menuItems.push({ action: onOpenShiftSummary, icon: ChartPie, id: 'shift-summary', label: 'Resumen de turno' })
   }
   if (canCloseCash) menuItems.push({ action: onOpenCashClosingHistory, icon: WalletCards, id: 'closings', label: 'Histórico de cierres' })
   if (cashlogyConnected) menuItems.push({ action: onOpenCashlogyMachine, icon: Vault, id: 'cashlogy-machine', label: 'Máquina de efectivo' })

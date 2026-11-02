@@ -1,3 +1,4 @@
+import * as personalPermissions from '../src/features/personal/permissions.ts'
 import * as customPayments from '../src/lib/customPayments.ts'
 import { UserFacingError } from '../src/utils/UserFacingError.ts'
 import { createDurableSalesHarness } from './helpers/durable-sales-harness.mjs'
@@ -164,7 +165,8 @@ test('4 y 7: venta offline en la caja existente, validar → lease → sincroniz
     '../../customers/service': {},
     '../../../lib/durableSales.ts': h.durable,
     '../../../lib/offlineStore': h.store,
-    '../../../lib/format': { createId: () => crypto.randomUUID() }, '../../../lib/customPayments': customPayments, '../services/salePayload': { buildSalePayload },
+    '../../../lib/format': { createId: () => crypto.randomUUID() }, '../../personal/permissions': personalPermissions,
+    '../../../lib/customPayments': customPayments, '../services/salePayload': { buildSalePayload },
     '../../local-printing/cashlogy/useCashlogyStore': { getCashlogyPaymentAmounts: () => ({}), finishCashlogyPayment() {} },
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },

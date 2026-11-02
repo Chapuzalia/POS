@@ -19,6 +19,7 @@ import type {
 import { nowIso } from '../../../utils/dates'
 import { getReadableError } from '../../../utils/errors'
 import { loadTicketNumberFromSupabase } from '../../../services/posService'
+import { assertStaffDiscount, assertStaffPermission, staffCan } from '../../personal/permissions'
 import {
   buildRestaurantPrintPayload,
   getRestaurantCalculationLines,
@@ -387,6 +388,7 @@ export function useRestaurantController(options: Options) {
   }, [options, realtime, invoiceOrderId])
 
   const deleteVirtualTable = useCallback(async (tableId: string) => {
+    if (!staffCan(options.context, 'pos.order.void')) { options.onError('El trabajador no tiene permiso para eliminar esta mesa temporal.'); return false }
     if (!options.context?.canTakeOrders || !options.cashSession || !options.isOnline || options.isBusy) return false
     options.setBusy(true)
     options.onError(null)
@@ -439,6 +441,7 @@ export function useRestaurantController(options: Options) {
   }, [draft, options, posView, realtime, invoiceOrderId])
 
   const cancelEmptyOrder = useCallback(() => runBusy(async () => {
+    assertStaffPermission(options.context, 'pos.order.void')
     const current = draft.getCurrentOrder()
     if (!options.context || !options.isOnline || !current || current.lines.length > 0) return
     const saved = await draft.flush()
@@ -456,15 +459,17 @@ export function useRestaurantController(options: Options) {
   }), [cleanupVirtualRoomTable, draft, options, realtime, runBusy])
 
   const prepareMove = useCallback(async () => {
+    if (!staffCan(options.context, 'pos.order.modify')) { options.onError('El trabajador no tiene permiso para mover comandas.'); return }
     const current = draft.getCurrentOrder()
     if (!current) return
     const saved = await draft.flush()
     if (!saved) return
     setMoveOrderId(saved.order.id)
     setPosView({ type: 'table_map', areaId: saved.tables[0]?.areaId })
-  }, [draft])
+  }, [draft, options])
 
   const moveOrder = useCallback((tableId: string) => runBusy(async () => {
+    assertStaffPermission(options.context, 'pos.order.modify')
     if (!moveOrderId || !options.isOnline) return
     const sourceOrder = draft.getCurrentOrder()
     await moveRestaurantOrder(moveOrderId, tableId)
@@ -472,9 +477,10 @@ export function useRestaurantController(options: Options) {
     await refreshState(moveOrderId)
     setPosView({ type: 'table_order', orderId: moveOrderId })
     setMoveOrderId(null)
-  }), [cleanupVirtualRoomTable, draft, moveOrderId, options.isOnline, refreshState, runBusy])
+  }), [cleanupVirtualRoomTable, draft, moveOrderId, options.context, options.isOnline, refreshState, runBusy])
 
   const removeLine = useCallback((lineId: string, confirmed: boolean) => runBusy(async () => {
+    assertStaffPermission(options.context, 'pos.item.void')
     if (!options.context || !options.isOnline) return
     const saved = await draft.flush()
     if (!saved) return
@@ -553,6 +559,7 @@ export function useRestaurantController(options: Options) {
   }), [draft, options, runBusy])
 
   const configureEqualSplit = useCallback(async (partCount: number) => {
+    assertStaffPermission(options.context, 'pos.order.modify')
     const current = draft.getCurrentOrder()
     if (!current) throw new UserFacingError('No hay una comanda abierta.')
     options.setBusy(true)
@@ -589,6 +596,7 @@ export function useRestaurantController(options: Options) {
     assertRealSaleAllowed()
     const current = draft.getCurrentOrder()
     if (!options.context || !options.cashSession || !equalSplit || !current) throw new UserFacingError('No hay una división activa.')
+    assertStaffPermission(options.context, 'pos.payment.take')
     if (paymentLockRef.current) throw new UserFacingError('Ya hay un cobro en curso.')
     paymentLockRef.current = true
     options.setBusy(true)
@@ -596,6 +604,7 @@ export function useRestaurantController(options: Options) {
     let committedResult: PayRestaurantEqualPartResult | null = null
     try {
       const paymentLines = getEqualSplitPrintLines(current.lines, equalSplit)
+      assertStaffDiscount(options.context, discount, getRestaurantCalculationLines(paymentLines))
       if (!allowPending) {
         const pending = await loadRestaurantOrderPendingUnits(options.context, current.order.id)
         draft.replaceOrder(pending.detail)
@@ -714,6 +723,7 @@ export function useRestaurantController(options: Options) {
     assertRealSaleAllowed()
     const current = draft.getCurrentOrder()
     if (!options.context || !options.cashSession || !options.isOnline || !current) throw new UserFacingError('No hay una comanda abierta.')
+    assertStaffPermission(options.context, 'pos.payment.take')
     if (paymentLockRef.current) throw new UserFacingError('Ya hay un cobro en curso.')
     paymentLockRef.current = true
     options.setBusy(true)
@@ -723,6 +733,7 @@ export function useRestaurantController(options: Options) {
       const saved = await draft.flush()
       if (!saved) throw new Error('No se pudo guardar la comanda antes del cobro.')
       const paymentLines = getMovedRestaurantPrintLines(saved.lines, moves)
+      assertStaffDiscount(options.context, discount, getRestaurantCalculationLines(paymentLines))
       if (!allowPending) {
         const pending = await loadRestaurantOrderPendingUnits(options.context, saved.order.id)
         draft.replaceOrder(pending.detail)
@@ -815,6 +826,7 @@ export function useRestaurantController(options: Options) {
     targetOrderId: string | null,
     moves: RestaurantOrderLineMove[],
   ): Promise<string | null> => {
+    if (!staffCan(options.context, 'pos.order.modify')) { options.onError('El trabajador no tiene permiso para dividir comandas.'); return null }
     if (!options.context || !options.isOnline || !splitOrderGroup) return null
     const source = splitOrderGroup.orders.find((detail) => detail.order.id === sourceOrderId)
     const target = targetOrderId ? splitOrderGroup.orders.find((detail) => detail.order.id === targetOrderId) : null
@@ -914,6 +926,7 @@ export function useRestaurantController(options: Options) {
         }
       }
       setPaymentProcessing(true)
+      assertStaffDiscount(context, options.appliedDiscount, getRestaurantCalculationLines(saved.lines))
       const amountCents = calculateDiscountForLines(getRestaurantCalculationLines(saved.lines), options.appliedDiscount).totalCents
       const payment = await payRestaurantSale<Awaited<ReturnType<typeof closeRestaurantOrder>>>({
         context, session: cashSession, action: 'close', target: saved.order.id,
@@ -1057,6 +1070,7 @@ export function useRestaurantController(options: Options) {
     const current = draft.getCurrentOrder()
     if (!current || !options.context || !options.catalog) return false
     const candidate = buildSaleLine(createId(), options.catalog, sellable, selection, item, true)
+    if (!staffCan(options.context, lineId ? 'pos.order.modify' : 'pos.order.create')) return false
     if (lineId) {
       const previous = current.lines.find((line) => line.id === lineId)
       if (!previous) return false
@@ -1150,6 +1164,7 @@ export function useRestaurantController(options: Options) {
   }, [draft, options])
 
   const changeLineQuantity = useCallback((lineId: string, direction: 1 | -1) => {
+    if (!staffCan(options.context, direction < 0 ? 'pos.item.void' : 'pos.order.modify')) return
     if (!options.isOnline) return
     const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
     if (!line) return
@@ -1184,6 +1199,7 @@ export function useRestaurantController(options: Options) {
     if (!options.isOnline) return
     const line = draft.getCurrentOrder()?.lines.find((item) => item.id === lineId)
     if (!line || line.quantity === quantity) return
+    if (!staffCan(options.context, quantity < line.quantity ? 'pos.item.void' : 'pos.order.modify')) return
     const normalizedQuantity = roundQuantity(quantity)
     if (!isValidQuantity(quantity) || normalizedQuantity < line.servedQuantity || normalizedQuantity < 1) {
       options.onError('La cantidad debe ser positiva, tener como máximo tres decimales y no ser inferior a las unidades servidas.')
@@ -1199,6 +1215,7 @@ export function useRestaurantController(options: Options) {
   }, [draft, options, productionState])
 
   const setLineUnitPrice = useCallback((lineId: string, unitPriceCents: number) => {
+    if (!staffCan(options.context, 'pos.price.modify', 0, unitPriceCents)) return
     if (!options.isOnline) return
     if (!Number.isSafeInteger(unitPriceCents) || unitPriceCents < 0) {
       options.onError('El precio unitario no es válido.')
@@ -1213,6 +1230,7 @@ export function useRestaurantController(options: Options) {
   }, [draft, options])
 
   const setLineNote = useCallback(async (lineId: string, value: string) => {
+    if (!staffCan(options.context, 'pos.order.modify')) return false
     if (!options.context?.canTakeOrders || !options.isOnline || options.isBusy) return false
     const current = draft.getCurrentOrder()
     const line = current?.lines.find((item) => item.id === lineId)
@@ -1229,6 +1247,7 @@ export function useRestaurantController(options: Options) {
   }, [draft, options])
 
   const runServiceAction = useCallback((action: (order: RestaurantOrderDetail) => Promise<void>) => runBusy(async () => {
+    assertStaffPermission(options.context, 'pos.order.modify')
     if (!options.context || !options.isOnline) return
     const saved = await draft.flush()
     if (!saved) return
@@ -1240,6 +1259,7 @@ export function useRestaurantController(options: Options) {
   }), [draft, options, runBusy])
 
   const changeProductionPass = useCallback((input: { lineId: string; componentId?: string | null; passId: string }) => runBusy(async () => {
+    assertStaffPermission(options.context, 'pos.order.modify')
     if (!options.context || !options.isOnline || !productionAvailable) return
     const saved = await draft.flush()
     if (!saved) return
@@ -1248,6 +1268,7 @@ export function useRestaurantController(options: Options) {
   }), [draft, options.context, options.isOnline, productionAvailable, runBusy])
 
   const serveComponent = useCallback((lineId: string, componentId: string, quantity: number) => runBusy(async () => {
+    assertStaffPermission(options.context, 'pos.order.modify')
     if (!options.context || !options.isOnline) return
     const saved = await draft.flush()
     if (!saved) return
@@ -1261,6 +1282,7 @@ export function useRestaurantController(options: Options) {
   }), [draft, options.context, options.isOnline, refreshProduction, runBusy])
 
   const sendToProduction = useCallback((selection?: ProductionSelection[]) => runBusy(async () => {
+    assertStaffPermission(options.context, 'pos.order.modify')
     if (!options.context || !options.isOnline || !productionAvailable) return
     const saved = await draft.flush()
     if (!saved) return
@@ -1347,7 +1369,7 @@ export function useRestaurantController(options: Options) {
     cancelEmptyOrder,
     changeLineQuantity,
     changeProductionPass,
-    clearTicket: () => draft.updateDraft((detail) => ({ ...detail, lines: [] })),
+    clearTicket: () => { if (staffCan(options.context, 'pos.order.void')) draft.updateDraft((detail) => ({ ...detail, lines: [] })) },
     completePayment,
     configureEqualSplit,
     createVirtualTable,
