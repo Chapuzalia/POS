@@ -28,3 +28,7 @@ verify_jwt = false
 # Separate scheduler secret validated inside; sandbox only.
 verify_jwt = false
 
+[functions.activate-personal]
+# Validates the POS session before forwarding to the configured Personal backend.
+verify_jwt = false
+
