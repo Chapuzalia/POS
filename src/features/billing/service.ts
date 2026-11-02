@@ -1,6 +1,6 @@
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { billingErrorMessages } from '../../../supabase/functions/_shared/billing/errors'
-import { requireSupabase } from '../crm/shared/services/crmServiceSupport'
+import { requireSupabase } from '../../services/backendService'
 import { UserFacingError } from '../../utils/UserFacingError'
 
 function publicBillingMessage(value: unknown) {

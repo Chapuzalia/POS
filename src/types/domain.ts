@@ -822,3 +822,11 @@ export type CrmSalesReports = {
   byModifier: CrmSalesReportAggregate[]
   tickets: CrmSalesReportTicket[]
 }
+
+export type ReservationStatus =
+  | 'confirmed'
+  | 'arrived'
+  | 'seated'
+  | 'completed'
+  | 'cancelled'
+  | 'no_show'

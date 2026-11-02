@@ -57,7 +57,7 @@ test('access queries only selected venue devices and accounts, reuses layout ven
   const { loadCrmAccessData } = compileComponent(serviceSource, {
     '../../../../utils/UserFacingError.ts': { UserFacingError: Error },
     '../../../../lib/tax': {}, '../../../../lib/operationalDay': {},
-    '../../shared/services/crmServiceSupport': { requireSupabase: () => client },
+    '../../../../services/backendService': { requireSupabase: () => client },
   })
   const data = await loadCrmAccessData(context, 'venue-a')
   assert.deepEqual(calls[0].filters, { tenant_id: 'tenant-a', venue_id: 'venue-a' })

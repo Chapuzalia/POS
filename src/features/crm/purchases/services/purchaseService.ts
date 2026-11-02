@@ -1,7 +1,7 @@
 import { strToU8, zipSync } from 'fflate'
 import { z } from 'zod'
 import type { TenantContext } from '../../../../types'
-import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
+import { getFunctionInvokeErrorMessage, requireSupabase } from '../../../../services/backendService'
 import { UserFacingError } from '../../../../utils/UserFacingError'
 import { resolveUnambiguousPurchaseCategories } from '../purchaseCategoryModel'
 import type { PurchaseDocument, PurchaseLine } from '../types'

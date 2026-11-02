@@ -1,6 +1,6 @@
 import { Calendar } from 'lucide-react'
 import type { KeyboardEvent, MouseEvent } from 'react'
-import type { RestaurantTableReservation } from '../../tables/types'
+import type { RestaurantTableReservation } from '../types'
 
 type Props = {
   compact?: boolean

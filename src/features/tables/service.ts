@@ -14,7 +14,7 @@ import type { CloseRestaurantOrderResult, DiningArea, DiningAreaCreateInput, Din
 import { getOrderPendingUnits } from './service-status'
 import { buildCatalogOrderLinesPayload, buildRestaurantOrderLinesPayload } from './order-line-payload'
 import { normalizeMapElements } from './map-elements'
-import { getDateRange, localDateKey } from '../reservations/domain/reservationAvailability'
+import { getDateRange, localDateKey } from '../../utils/dates'
 import { hasTenantCapability } from '../platform/tenantFeatureAccess'
 import type { CashlogyTransaction } from '../local-printing/types'
 

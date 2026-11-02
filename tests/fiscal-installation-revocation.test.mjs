@@ -20,7 +20,7 @@ function harness() {
     zod: { z }, '../../../lib/supabase.ts': { supabase: { rpc(name, body) { calls.push({ name, body }); return { abortSignal: async () => response } } } },
     './backendRead.ts': { readFiscalBackend: operation => operation() }, './availability.ts': { isFiscalTransportUnavailable },
     './localIdentity.ts': { readFiscalIdentity: async () => identity, FiscalInstallationRevokedError: Revoked },
-    './localLedger.ts': { openLedger: async () => ({ transaction: () => ({ objectStore: () => ({ get: key => data.get(key), put: value => data.set(value.scope, value) }) }), close() {} }), request: async value => value, transactionDone: async () => {} },
+    '../../../lib/localDatabase.ts': { openLedger: async () => ({ transaction: () => ({ objectStore: () => ({ get: key => data.get(key), put: value => data.set(value.scope, value) }) }), close() {} }), request: async value => value, transactionDone: async () => {} },
   }, { window: { dispatchEvent: event => events.push(event) }, CustomEvent })
   return { module, data, calls, events, response: value => { response = value }, identity: value => { identity = value } }
 }

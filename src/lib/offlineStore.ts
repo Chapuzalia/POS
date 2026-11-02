@@ -1,6 +1,6 @@
 import { reportOperationError } from './observability.ts'
 import { cachedDurableEvents, updateDurableEvent } from './durableSales.ts'
-import type { PosCatalogState } from '../features/catalog/data/load-pos-catalog.ts'
+import type { PosCatalogState } from '../features/catalog/domain/types.ts'
 import { appendFrozenQueueEvent, recordQueueEventFailure } from '../features/offline/services/offlineQueueState.ts'
 import { getAppRoute, type AppRoute } from '../app/app-routes'
 import type { AssistConfiguration, AssistSituation } from '../features/assist/types'

@@ -1,4 +1,4 @@
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import type { CrmStatsPeriod, TenantContext } from '../../../../types'
 
 export type ProfitabilityMetricRow = {

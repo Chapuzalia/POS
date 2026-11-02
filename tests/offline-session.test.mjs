@@ -270,3 +270,32 @@ test('SIGNED_OUT durante una restauración pendiente no resucita el usuario', as
   assert.equal(h.state.context, null)
   assert.equal(h.store.getCachedContext(), null)
 })
+
+test('SIGNED_OUT while login loads POS state cannot reactivate the session', async () => {
+  const h = await harness()
+  let resolveLoad
+  h.service.loginTenant = async () => context
+  h.options.loadTenantState = () => new Promise(resolve => { resolveLoad = resolve })
+  h.render()
+  const login = h.actions.login({ email: 'test@example.com', password: 'test-password' })
+  await flush()
+  h.signOut()
+  resolveLoad({ cashSession: cash })
+  await login
+  assert.equal(h.state.context, null)
+  assert.equal(h.state.ready, false)
+  assert.equal(h.store.getCachedContext(), null)
+})
+
+test('SIGNED_OUT during offline validation cannot reopen the cached session', async () => {
+  const h = await harness()
+  let resolveValid
+  h.service.hasValidOfflineSession = () => new Promise(resolve => { resolveValid = resolve })
+  const enter = h.actions.enterOffline()
+  await flush()
+  h.signOut()
+  resolveValid(true)
+  await enter
+  assert.equal(h.state.context, null)
+  assert.equal(h.state.ready, false)
+})

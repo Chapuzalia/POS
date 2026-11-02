@@ -1,4 +1,4 @@
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import { type TenantContext } from '../../../../types'
 
 export type CrmPlan = {

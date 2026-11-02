@@ -10,13 +10,18 @@ export const billingCard = '!rounded-[var(--crm-radius-lg)] !bg-[var(--crm-surfa
 export const billingField = '!min-h-11 !w-full !rounded-[var(--crm-radius-sm)] !border !border-[var(--crm-border)] !bg-[var(--crm-input-bg)] !px-3 !py-2 !text-sm !text-[var(--crm-text)]'
 const emptySelection: Selection = { planVersionId: '', addons: [] }
 
-type Props = { tenantId: string; admin?: boolean; disabled?: boolean; onChanged?: () => void }
-export function TenantBillingPanel({ tenantId, admin = false, disabled = false, onChanged }: Props) {
+type Props = { tenantId: string; admin?: boolean; disabled?: boolean; onChanged?: () => void; onBusyChange?: (busy: boolean) => void }
+export function TenantBillingPanel({ tenantId, admin = false, disabled = false, onChanged, onBusyChange }: Props) {
   const [detail, setDetail] = useState<BillingDetail | null>(null)
   const [catalog, setCatalog] = useState<BillingCatalog | null>(null)
   const [selection, setSelection] = useState<Selection>(emptySelection)
   const [quote, setQuote] = useState<BillingOperation | null>(null)
-  const [busy, setBusy] = useState(false)
+  const [pendingActions, setPendingActions] = useState(0)
+  const busy = pendingActions > 0
+  useEffect(() => {
+    onBusyChange?.(busy)
+    return () => onBusyChange?.(false)
+  }, [busy, onBusyChange])
   const [error, setError] = useState('')
   const [reason, setReason] = useState('Cambio solicitado por el cliente')
   const [exception, setException] = useState<CommercialException | null>(null)
@@ -31,9 +36,9 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
     setException((loaded.scheduledContract ?? loaded.account.billed_contract ?? loaded.account.contract)?.exception ?? null)
   }, [tenantId])
   const run = useCallback(async (action: () => Promise<void>) => {
-    setBusy(true); setError(''); setMessage('')
+    setPendingActions(count => count + 1); setError(''); setMessage('')
     try { await action() } catch (failure) { setError(failure instanceof Error ? failure.message : 'No se pudo completar la operación.') }
-    finally { setBusy(false) }
+    finally { setPendingActions(count => count - 1) }
   }, [])
   useEffect(() => { if (!disabled) void run(refresh) }, [refresh, run, disabled])
   const locked = disabled || busy

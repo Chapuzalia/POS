@@ -14,6 +14,7 @@ import { recoverSupabaseRealtimeConnection } from '../../lib/supabase'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
 import { BillingActivationPanel } from '../../features/billing/BillingActivationPanel'
+import { refreshCachedPosCatalog } from '../../features/catalog/data/load-pos-catalog'
 
 const CrmOnboarding = lazy(() => import('../../features/crm/onboarding/CrmOnboarding'))
 
@@ -21,22 +22,21 @@ export type CrmPageProps = {
   context: TenantContext
   error: string | null
   isOnline: boolean
-  onCatalogChanged: (venueId: string) => Promise<void>
   onBusyChange?: (busy: boolean) => void
   onError: (error: string | null) => void
   onLogout: () => void
 }
 
-export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChanged, onError, onLogout }: CrmPageProps) {
+export function CrmPage({ context, error, isOnline, onBusyChange, onError, onLogout }: CrmPageProps) {
   if (context.billingActivationRequired) return <CrmShell activeSection="plan" context={context} disabled={!isOnline} error={error} inventoryEnabled={false} isOnline={isOnline} onLogout={onLogout} onSectionChange={() => {}} onVenueChange={() => {}} selectedVenueId="" venues={[]}>
     {context.role === 'owner' ? <BillingActivationPanel tenantId={context.tenantId} disabled={!isOnline} onActivated={reloadActivatedBusiness} /> : <p>El propietario debe completar el pago en Mi Plan para activar el negocio.</p>}
   </CrmShell>
-  return <CrmWorkspace context={context} error={error} isOnline={isOnline} onBusyChange={onBusyChange} onCatalogChanged={onCatalogChanged} onError={onError} onLogout={onLogout} />
+  return <CrmWorkspace context={context} error={error} isOnline={isOnline} onBusyChange={onBusyChange} onError={onError} onLogout={onLogout} />
 }
 
 function reloadActivatedBusiness() { window.location.reload() }
 
-function CrmWorkspace({ context, error, isOnline, onBusyChange, onCatalogChanged, onError, onLogout }: CrmPageProps) {
+function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogout }: CrmPageProps) {
   const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
   const [isBusy, setIsBusy] = useState(false)
   const [stats, setStats] = useState<CrmStats | null>(null)
@@ -68,10 +68,11 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onCatalogChanged
     }
   }, [onError])
 
-  const refreshCurrentProjectedCatalog = useCallback(async () => {
-    if (!selectedVenueId) return
-    await onCatalogChanged(selectedVenueId)
-  }, [onCatalogChanged, selectedVenueId])
+  const refreshCurrentProjectedCatalog = useCallback(async (venueId = selectedVenueId) => {
+    if (!venueId) return
+    try { await refreshCachedPosCatalog(context, venueId) }
+    catch (refreshError) { onError(getReadableError(refreshError, { operation: 'crm.catalog.projection' })) }
+  }, [context, onError, selectedVenueId])
 
   const mutateCatalog = useCallback(async (action: () => Promise<unknown>) => {
     setIsBusy(true)
@@ -95,7 +96,7 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onCatalogChanged
     try {
       if (targetVenueId === catalog.venueId) await catalogAdminService.duplicateProduct(catalog, sourceProductId)
       else await catalogAdminService.duplicateProductToVenue(catalog, targetVenueId, sourceProductId)
-      await onCatalogChanged(targetVenueId)
+      await refreshCurrentProjectedCatalog(targetVenueId)
       if (targetVenueId === selectedVenueId) await refreshAdminCatalog(true)
       return true
     } catch (actionError) {
@@ -104,7 +105,7 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onCatalogChanged
     } finally {
       setIsBusy(false)
     }
-  }, [catalog, onCatalogChanged, onError, refreshAdminCatalog, selectedVenueId])
+  }, [catalog, onError, refreshAdminCatalog, refreshCurrentProjectedCatalog, selectedVenueId])
 
   const refreshVenues = useCallback(async () => {
     const nextVenues = await loadCrmVenues(context)

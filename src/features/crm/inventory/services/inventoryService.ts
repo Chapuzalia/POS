@@ -1,7 +1,7 @@
 import { reportOperationError } from '../../../../lib/observability.ts'
 import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import { validateInventoryDecimalPlaces, validateInventoryName, validateInventoryUnitSymbol } from '../inventoryModel'
 import type {
   InventoryDeviceWarehouse, InventoryItem, InventoryItemWarehouseRoute,

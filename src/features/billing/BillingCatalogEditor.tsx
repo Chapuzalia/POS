@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { Button } from '../../components/ui/Button'
 import { Input } from '../../components/ui/Input'
 import { Checkbox } from '../../components/ui/Checkbox'
@@ -10,21 +10,26 @@ type VersionInput = Omit<Version, 'id' | 'productKey' | 'stripePriceId' | 'publi
 const newProduct: Product = { key: '', kind: 'plan', name: '', description: '', scope: 'tenant', featureKey: null, resource: null, active: false, sortOrder: 0 }
 const newVersion: VersionInput = { interval: 'month', amountCents: 0, features: [], limits: { venues: 1, devices: 0 }, included: {}, maximum: null, requires: [] }
 
-export function BillingCatalogEditor({ catalog, onSaved, disabled = false }: { catalog: BillingCatalog; onSaved: () => Promise<void>; disabled?: boolean }) {
+export function BillingCatalogEditor({ catalog, onSaved, disabled = false, onBusyChange }: { catalog: BillingCatalog; onSaved: () => Promise<void>; disabled?: boolean; onBusyChange?: (busy: boolean) => void }) {
   const [product, setProduct] = useState<Product>(newProduct)
   const [version, setVersion] = useState<VersionInput>(newVersion)
   const [createVersion, setCreateVersion] = useState(true)
   const [reason, setReason] = useState('Nueva versión comercial')
-  const [saving, setBusy] = useState(false)
+  const [pendingActions, setPendingActions] = useState(0)
+  const saving = pendingActions > 0
+  useEffect(() => {
+    onBusyChange?.(saving)
+    return () => onBusyChange?.(false)
+  }, [saving, onBusyChange])
   const busy = disabled || saving
   const [error, setError] = useState('')
   const exists = catalog.products.some(row => row.key === product.key)
   const identityLocked = catalog.versions.some(row => row.productKey === product.key)
   async function run(action: () => Promise<void>) {
     if (disabled) return
-    setBusy(true); setError('')
+    setPendingActions(count => count + 1); setError('')
     try { await action(); await onSaved() } catch (failure) { setError(failure instanceof Error ? failure.message : 'No se pudo guardar el catálogo.') }
-    finally { setBusy(false) }
+    finally { setPendingActions(count => count - 1) }
   }
   function selectProduct(key: string) {
     const selected = catalog.products.find(row => row.key === key)

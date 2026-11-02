@@ -1,5 +1,5 @@
-import { openLedger, request, transactionDone } from '../features/fiscal/local/localLedger.ts'
-import type { OfflineEvent, SaleCreatedPayload, SessionTicketRecord, TenantContext } from '../types/index.ts'
+import { openLedger, request, transactionDone } from './localDatabase.ts'
+import type { OfflineEvent, PaymentMethod, SaleCreatedPayload, SessionTicketRecord, TenantContext } from '../types/index.ts'
 import type { CashlogyIntent, CashlogyTransaction, PrintAgentScope } from '../features/local-printing/types.ts'
 import { getAppRoute, type AppRoute } from '../app/app-routes.ts'
 
@@ -243,6 +243,105 @@ export async function commitPaymentOperation(operation: PaymentOperation, payloa
   } finally { db.close() }
   if (enqueue) events = [...events.filter(event => event.id !== operation.eventId), { id: operation.eventId, kind: 'sale_created',
     route, tenantId: payload.sale.tenantId, createdAt: payload.sale.createdAt, schemaVersion: 1, attempts: 0, payload: structuredClone(payload) }]
+}
+
+/** Payment changes reuse the existing journal/stores, retaining their own event
+ * identity independently from the immutable original sale-created event. */
+export async function preparePaymentChangeOperation(context: TenantContext, ticket: SessionTicketRecord, method: PaymentMethod): Promise<PaymentOperation> {
+  if (ticket.payload.ticket.tenantId !== context.tenantId || ticket.payload.sale.tenantId !== context.tenantId
+    || ticket.payload.ticket.venueId !== context.venueId || ticket.payload.ticket.cashSessionId !== ticket.cashSessionId
+    || ticket.payload.sale.id !== ticket.id || ticket.payload.payment?.saleId !== ticket.id) {
+    throw new Error('El ticket no pertenece al ámbito del cambio de cobro.')
+  }
+  const scope = paymentScope(context, ticket.cashSessionId)
+  const key = `${scope}|payment-change:${ticket.id}`
+  const fingerprint = JSON.stringify({ payment: ticket.payload.payment, method })
+  const db = await openLedger()
+  try {
+    const tx = db.transaction('paymentOperations', 'readwrite')
+    const done = transactionDone(tx)
+    const store = tx.objectStore('paymentOperations')
+    const previous = await request(store.get(key)) as PaymentOperation | undefined
+    if (previous && (previous.state !== 'committed' || previous.result?.paymentProjectionPending
+      || (previous.fingerprint === fingerprint && !previous.result?.remotePaymentObserved))) {
+      if (previous.payload.sale.paymentMethod !== method) {
+        tx.abort()
+        throw new Error('Recupera el cambio de cobro pendiente antes de cambiar otra vez su forma de pago.')
+      }
+      await done
+      return previous
+    }
+    const eventId = crypto.randomUUID()
+    const payload = structuredClone(ticket.payload)
+    payload.sale.paymentMethod = method
+    if (payload.payment) payload.payment.method = method
+    const operation: PaymentOperation = { key, scope, fingerprint, payload, state: 'prepared', cashlogy: null, eventId,
+      cashlogyRequestId: `cashlogy:payment-change:${eventId}`,
+      params: { paymentChange: true, changedAt: new Date().toISOString(), sourceMethod: ticket.paymentMethod } }
+    store.put(operation)
+    await done
+    return operation
+  } finally { db.close() }
+}
+
+export async function commitPaymentChangeOperation(operation: PaymentOperation): Promise<void> {
+  const payload = operation.payload
+  if (!payload.payment || operation.params?.paymentChange !== true) throw new Error('Falta el pago original del cambio de cobro.')
+  const route = operation.scope.split(':')[0]
+  if (route !== 'pos' && route !== 'crm' && route !== 'superadmin') throw new Error('Falta el ámbito original del cambio de cobro.')
+  const event: DurableEvent = { id: operation.eventId, kind: 'sale_payment_changed', route,
+    tenantId: payload.sale.tenantId, createdAt: String(operation.params.changedAt), attempts: 0, schemaVersion: 1,
+    payload: { saleId: payload.sale.id, paymentId: payload.payment.id, paymentMethod: payload.payment.method,
+      receivedCents: payload.payment.receivedCents, changeCents: payload.payment.changeCents,
+      cashlogyRequestId: payload.payment.cashlogyRequestId ?? null, cashlogyTransactionId: payload.payment.cashlogyTransactionId ?? null } }
+  const db = await openLedger()
+  try {
+    const tx = db.transaction(['paymentOperations', 'durableSales', 'durableEvents'], 'readwrite')
+    const done = transactionDone(tx)
+    tx.objectStore('durableSales').put({ id: payload.sale.id, scope: operation.scope, payload } satisfies DurableSale)
+    tx.objectStore('durableEvents').put(event)
+    tx.objectStore('paymentOperations').put({ ...operation, state: 'committed', result: { paymentProjectionPending: true } } satisfies PaymentOperation)
+    await done
+  } finally { db.close() }
+  events = [...events.filter(existing => existing.id !== event.id), event]
+}
+
+export async function completePaymentChangeProjection(operation: PaymentOperation): Promise<void> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction('paymentOperations', 'readwrite')
+    const done = transactionDone(tx)
+    const store = tx.objectStore('paymentOperations')
+    const current = await request(store.get(operation.key)) as PaymentOperation | undefined
+    if (current?.eventId === operation.eventId && current.state === 'committed') {
+      store.put({ ...current, result: { ...current.result, paymentProjectionPending: false } } satisfies PaymentOperation)
+    }
+    await done
+  } finally { db.close() }
+}
+
+/** Only observations whose request began after this mutation was acknowledged
+ * can release its stale-click protection for a later change made elsewhere. */
+export async function observeRemotePaymentChanges(settledAtRead: PaymentOperation[], tickets: SessionTicketRecord[]): Promise<void> {
+  if (!settledAtRead.length) return
+  const bySale = new Map(tickets.map(ticket => [ticket.id, ticket]))
+  const db = await openLedger()
+  try {
+    const tx = db.transaction(['paymentOperations', 'durableEvents'], 'readwrite')
+    const done = transactionDone(tx)
+    const store = tx.objectStore('paymentOperations')
+    for (const original of settledAtRead) {
+      const remote = bySale.get(original.payload.sale.id)
+      if (!remote || remote.payload.ticket.tenantId !== original.payload.ticket.tenantId
+        || remote.payload.ticket.venueId !== original.payload.ticket.venueId || remote.cashSessionId !== original.payload.ticket.cashSessionId
+        || remote.paymentMethod === original.payload.sale.paymentMethod) continue
+      const current = await request(store.get(original.key)) as PaymentOperation | undefined
+      if (current?.eventId !== original.eventId || current.state !== 'committed' || current.result?.paymentProjectionPending) continue
+      if (await request(tx.objectStore('durableEvents').get(current.eventId))) continue
+      store.put({ ...current, result: { ...current.result, remotePaymentObserved: true } } satisfies PaymentOperation)
+    }
+    await done
+  } finally { db.close() }
 }
 
 export async function loadDurableEvents(): Promise<OfflineEvent[]> {

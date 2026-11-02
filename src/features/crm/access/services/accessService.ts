@@ -4,7 +4,7 @@ import { normalizeDayChangeTime } from "../../../../lib/operationalDay";
 import {
   getFunctionInvokeErrorMessage,
   requireSupabase,
-} from "../../shared/services/crmServiceSupport";
+} from "../../../../services/backendService";
 import {
   type CatalogProfile,
   type CrmAccessUser,

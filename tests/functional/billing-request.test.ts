@@ -4,7 +4,7 @@ import { billingRequest } from '../../src/features/billing/service'
 import { UserFacingError } from '../../src/utils/UserFacingError'
 
 const { invoke } = vi.hoisted(() => ({ invoke: vi.fn() }))
-vi.mock('../../src/features/crm/shared/services/crmServiceSupport', () => ({
+vi.mock('../../src/services/backendService', () => ({
   requireSupabase: () => ({ functions: { invoke } }),
 }))
 

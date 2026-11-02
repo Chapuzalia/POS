@@ -2,7 +2,7 @@ import { Checkbox as UiCheckbox } from "../../../../components/ui/Checkbox";
 import { Button as UiButton } from "../../../../components/ui/Button";
 import { EmptyList } from "../../shared/components/EmptyList";
 import { RefreshCw, Coins, CreditCard } from "lucide-react";
-import { TopProductsList } from "../../analytics/pages/StatsPage";
+import { TopProductsList } from "../../analytics/components/TopProductsList";
 import { formatMoney } from "../../../../lib/format";
 import { formatCrmDateTime } from "../../shared/formatCrmDateTime";
 import { useState } from "react";
@@ -191,51 +191,6 @@ function OpenCashSessionRow({ session }: {
         <span className="rounded-full flex flex-row gap-1 bg-[var(--crm-green-soft)] px-4 py-1"><Coins />{`${formatMoney(session.cashCents)}`}</span>
         <span className="rounded-full flex flex-row gap-1 bg-[var(--crm-green-soft)] px-4 py-1"><CreditCard />{`${formatMoney(session.cardCents)}`}</span>
       </div>
-    </div>
-  );
-}
-
-const kpiColorClasses = {
-  blue: {
-    card: "!bg-[var(--crm-blue)]",
-    label: "!text-white/85",
-    value: "!text-white",
-  },
-  green: {
-    card: "!bg-[var(--crm-green)]",
-    label: "!text-white/85",
-    value: "!text-white",
-  },
-  neutral: {
-    card: "!bg-[var(--crm-surface-soft)]",
-    label: "!text-[var(--crm-text-secondary)]",
-    value: "!text-[var(--crm-text)]",
-  },
-} as const;
-
-export function KpiCard({
-  color,
-  label,
-  value,
-}: {
-  color: keyof typeof kpiColorClasses;
-  label: string;
-  value: number | string;
-}) {
-  const colorClasses = kpiColorClasses[color];
-
-  return (
-    <div
-      className={`!flex !min-h-[126px] !flex-col !items-start !justify-end !rounded-[18px] !border-0 !p-[22px] !text-left md:!min-h-[150px] ${colorClasses.card}`}
-    >
-      <strong
-        className={`!text-[26px] !leading-none !font-bold !tracking-[-0.04em] !tabular-nums ${colorClasses.value}`}
-      >
-        {value}
-      </strong>
-      <span className={`!mt-[9px] !text-xs !font-medium ${colorClasses.label}`}>
-        {label}
-      </span>
     </div>
   );
 }

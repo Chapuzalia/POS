@@ -21,6 +21,8 @@ import { getReadableError } from '../../../utils/errors'
 import { loadTicketNumberFromSupabase } from '../../../services/posService'
 import {
   buildRestaurantPrintPayload,
+  getRestaurantCalculationLines,
+  withRestaurantCalculationLines,
   getEqualSplitPrintLines,
   getMovedRestaurantPrintLines,
   getRestaurantPrintSubtotal,
@@ -119,26 +121,6 @@ type Options = {
   setBusy: (busy: boolean) => void
   setMobileTicketOpen: (open: boolean) => void
   syncPendingEvents: () => Promise<void>
-}
-
-function withCalculationLines(
-  discount: AppliedDiscount | null,
-  lines: Array<{
-    productId: string | null
-    variantId: string | null
-    unitPriceCents: number
-    quantity: number
-  }>,
-) {
-  return discount ? {
-    ...discount,
-    calculationLines: lines.map((line) => ({
-      productId: line.productId ?? '',
-      variantId: line.variantId,
-      grossCents: line.unitPriceCents * line.quantity,
-      quantity: line.quantity,
-    })),
-  } : null
 }
 
 function getVirtualRoomTable(detail: RestaurantOrderDetail) {
@@ -580,7 +562,7 @@ export function useRestaurantController(options: Options) {
         current.order.id,
         partCount,
         current.order.revision,
-        withCalculationLines(options.appliedDiscount, current.lines),
+        withRestaurantCalculationLines(options.appliedDiscount, current.lines),
       )
       setEqualSplit(configured)
       return configured
@@ -622,9 +604,7 @@ export function useRestaurantController(options: Options) {
       const effectiveDiscount = useDefaultDiscount ? equalSplit.nextDefaultDiscount : discount
       const amountCents = useDefaultDiscount
         ? equalSplit.nextDefaultTotalCents
-        : calculateDiscountForLines(paymentLines.map((line) => ({
-            productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
-          })), effectiveDiscount).totalCents
+        : calculateDiscountForLines(getRestaurantCalculationLines(paymentLines), effectiveDiscount).totalCents
       const singleTicket = equalSplit.singleTicket === true
       const finalPart = singleTicket && equalSplit.remainingParts === 1
       const totalCents = finalPart ? (equalSplit.tenders ?? []).reduce((sum, tender) => sum + tender.amountCents, 0) + amountCents : amountCents
@@ -652,7 +632,7 @@ export function useRestaurantController(options: Options) {
         draft: paymentDraft,
         params: { splitId: equalSplit.id, expectedPaidParts: equalSplit.paidParts, method, receivedCents, allowPending, customCashCents,
           ...(singleTicket ? { singleTicket, finalPart, amountCents } : {}),
-          discount: withCalculationLines(discount, paymentLines), useDefaultDiscount },
+          discount: withRestaurantCalculationLines(discount, paymentLines), useDefaultDiscount },
       })
       const result = payment.result
       if (!result.requiresConfirmation) committedResult = result
@@ -748,9 +728,7 @@ export function useRestaurantController(options: Options) {
         draft.replaceOrder(pending.detail)
         if (pending.pendingUnits > 0) return { requiresConfirmation: true, pendingUnits: pending.pendingUnits }
       }
-      const amountCents = calculateDiscountForLines(paymentLines.map((line) => ({
-        productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.lineTotalCents ?? line.unitPriceCents * line.quantity, quantity: line.quantity,
-      })), discount).totalCents
+      const amountCents = calculateDiscountForLines(getRestaurantCalculationLines(paymentLines), discount).totalCents
       const payment = await payRestaurantSale<PayRestaurantOrderItemsResult>({
         context: options.context, session: options.cashSession, action: 'selected_items', target: saved.order.id, sequence: saved.order.revision,
         draft: buildRestaurantPrintPayload({ cashSession: options.cashSession, context: options.context, createdAt: nowIso(),
@@ -759,7 +737,7 @@ export function useRestaurantController(options: Options) {
           ticketId: createId(), totalCents: amountCents }),
         params: { orderId: saved.order.id, expectedRevision: saved.order.revision,
           moves: moves.map(move => ({ lineId: move.lineId, quantity: move.quantity })), method, receivedCents, allowPending, customCashCents,
-          discount: withCalculationLines(discount, paymentLines) },
+          discount: withRestaurantCalculationLines(discount, paymentLines) },
       })
       const result = payment.result
       if (!result.requiresConfirmation) committedResult = result
@@ -936,9 +914,7 @@ export function useRestaurantController(options: Options) {
         }
       }
       setPaymentProcessing(true)
-      const amountCents = calculateDiscountForLines(saved.lines.map((line) => ({
-        productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: line.unitPriceCents * line.quantity, quantity: line.quantity,
-      })), options.appliedDiscount).totalCents
+      const amountCents = calculateDiscountForLines(getRestaurantCalculationLines(saved.lines), options.appliedDiscount).totalCents
       const payment = await payRestaurantSale<Awaited<ReturnType<typeof closeRestaurantOrder>>>({
         context, session: cashSession, action: 'close', target: saved.order.id,
         confirmedCashlogy: confirmedCashlogyTransaction ?? (forceWithPending ? pendingPayment?.cashlogyTransaction ?? null : null),
@@ -949,7 +925,7 @@ export function useRestaurantController(options: Options) {
           invoice: invoiceCustomer ? { customerId: invoiceCustomer.id, customer: customerFiscalSnapshot(invoiceCustomer),
             series: null, number: null, issuedAt: null } : null }),
         params: { orderId: saved.order.id, expectedRevision: saved.order.revision, method, receivedCents, customCashCents, allowPending: forceWithPending,
-          discount: withCalculationLines(options.appliedDiscount, saved.lines), customerId: invoiceCustomer?.id ?? null,
+          discount: withRestaurantCalculationLines(options.appliedDiscount, saved.lines), customerId: invoiceCustomer?.id ?? null,
           customerSnapshot: invoiceCustomer ? customerFiscalSnapshot(invoiceCustomer) : null },
       })
       const result = payment.result

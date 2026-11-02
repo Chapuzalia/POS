@@ -1,5 +1,4 @@
-import type { AppliedDiscount, PaymentMethod, SaleLineCatalogSnapshot, TicketLine, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
-import type { ReservationStatus } from '../reservations/types'
+import type { AppliedDiscount, PaymentMethod, ReservationStatus, SaleLineCatalogSnapshot, TicketLine, TicketLineComponent, TicketLineMixer, TicketLineModifier } from '../../types/domain'
 import type { AssistSnapshot } from '../assist/types'
 
 export type RestaurantTableShape = 'square' | 'rectangle' | 'round'

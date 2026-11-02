@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import { Button } from '../../../../components/ui/Button'
 
 export function CartaIntegration({ venueId, disabled }: { venueId: string; disabled: boolean }) {

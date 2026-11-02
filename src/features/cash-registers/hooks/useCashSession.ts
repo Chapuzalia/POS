@@ -28,6 +28,7 @@ import type {
   TenantContext,
 } from '../../../types'
 import { getReadableError } from '../../../utils/errors'
+import { loadPendingPaymentOperations } from '../../../lib/durableSales.ts'
 import { resolveLocalFiscalMode } from '../../fiscal/local/tenantMode.ts'
 import { loadFiscalInstallation } from '../../fiscal/local/installation.ts'
 import { findLocalFiscalEntryByTicket } from '../../fiscal/local/localLedger.ts'
@@ -52,7 +53,8 @@ import { useActiveCashSession } from './useActiveCashSession'
 import { useCashRegisterOptions } from './useCashRegisterOptions'
 import { useCashTicketActions } from './useCashTicketActions'
 import { getClosedCashState } from '../services/cashState'
-import { loadLocalSessionSales } from '../services/localSessionTickets.ts'
+import { loadLocalSessionSales, loadPendingLocalSaleIds } from '../services/localSessionTickets.ts'
+import { pendingLedgerChanges, reconcileCashLedger } from '../services/cashLedgerReconciliation.ts'
 import {
   createCashMovement as createCashMovementRequest,
   loadCashClosing,
@@ -77,7 +79,13 @@ type Options = {
 export function useCashSession(options: Options) {
   const onConfirmedSale = options.onConfirmedSale
   const [session, setSession] = useState<CashSession | null>(null)
-  const [ledger, setLedger] = useState<SaleRecord[]>([])
+  const [ledger, setLedgerState] = useState<SaleRecord[]>([])
+  const ledgerRef = useRef<SaleRecord[]>([])
+  const setLedger = useCallback((value: SetStateAction<SaleRecord[]>) => {
+    const next = typeof value === 'function' ? value(ledgerRef.current) : value
+    ledgerRef.current = next
+    setLedgerState(next)
+  }, [])
   const [movements, setMovements] = useState<CashMovement[]>([])
   const [tickets, setTicketsState] = useState<SessionTicketRecord[]>([])
   const ticketsRef = useRef<SessionTicketRecord[]>([])
@@ -116,7 +124,7 @@ export function useCashSession(options: Options) {
       reportError('No se han podido recuperar todas las ventas locales. Revisa el almacenamiento antes de cerrar la caja.')
     })
     return () => { active = false }
-  }, [cashContext, isOnline, reportError, saleRefreshScope, session])
+  }, [cashContext, isOnline, reportError, saleRefreshScope, session, setLedger])
 
   useEffect(() => {
     if (!cashContext || !session) {
@@ -157,12 +165,14 @@ export function useCashSession(options: Options) {
     if (options.context) saveCachedCashSession(options.context, nextSession)
   }, [options.context])
 
-  const persistLedger = useCallback((nextLedger: SaleRecord[]) => {
+  const persistLedger = useCallback((value: SetStateAction<SaleRecord[]>) => {
+    const nextLedger = typeof value === 'function' ? value(ledgerRef.current) : value
     setLedger(nextLedger)
     if (options.context) saveSaleLedger(options.context, nextLedger)
-  }, [options.context])
+  }, [options.context, setLedger])
 
-  const persistTickets = useCallback((nextTickets: SessionTicketRecord[]) => {
+  const persistTickets = useCallback((value: SetStateAction<SessionTicketRecord[]>) => {
+    const nextTickets = typeof value === 'function' ? value(ticketsRef.current) : value
     setTickets(nextTickets)
     if (options.context && session) saveSessionTickets(options.context, session.id, nextTickets)
   }, [options.context, session, setTickets])
@@ -238,7 +248,7 @@ export function useCashSession(options: Options) {
     setCashlogyClosingStackerCollectionsCents(0)
     setHistoryOpen(false)
     options.onError('La caja con la que estabas trabajando se ha cerrado.')
-  }, [options, session, setTickets])
+  }, [options, session, setTickets, setLedger])
 
   const cashOptions = useCashRegisterOptions({
     context: options.context,
@@ -271,7 +281,7 @@ export function useCashSession(options: Options) {
     saveSaleLedger(options.context, remoteLedger)
     setTickets(getSessionTickets(options.context, nextSession.id))
     options.onError(null)
-  }, [options, setTickets])
+  }, [options, setTickets, setLedger])
 
   useActiveCashSession({
     context: options.context,
@@ -283,12 +293,18 @@ export function useCashSession(options: Options) {
   const refreshConfirmedSale = useCallback(async (ticketId: string, missingTicketTitle: string, shouldPrint = true) => {
     if (!options.context || !session) return
     const generation = ++saleRefreshGenerationRef.current
-    const [nextLedger, remoteTicket] = await Promise.all([
+    const baseline = ledgerRef.current
+    const pending = pendingLedgerChanges(getOfflineQueue(), options.context.tenantId)
+    const [nextLedger, remoteTicket, fiscalPendingIds] = await Promise.all([
       loadSalesLedgerFromSupabase(options.context, session.id),
       loadSessionTicketFromSupabase(options.context, session.id, ticketId),
+      loadPendingLocalSaleIds(options.context, session),
     ])
     if (saleRefreshScopeRef.current !== saleRefreshScope) return
-    if (generation === saleRefreshGenerationRef.current) persistLedger(nextLedger)
+    const latestPending = pendingLedgerChanges(getOfflineQueue(), options.context.tenantId)
+    for (const id of [...latestPending.changed, ...fiscalPendingIds]) pending.changed.add(id)
+    for (const id of latestPending.voided) pending.voided.add(id)
+    if (generation === saleRefreshGenerationRef.current) persistLedger(reconcileCashLedger(nextLedger, baseline, ledgerRef.current, pending))
     const confirmedTicket = remoteTicket ? mergeRemotePrintStates([remoteTicket])[0] : null
     if (confirmedTicket) {
       const alreadyKnown = ticketsRef.current.some((ticket) => ticket.payload.ticket.id === confirmedTicket.payload.ticket.id)
@@ -307,11 +323,21 @@ export function useCashSession(options: Options) {
 
   const refreshLedger = useCallback(async () => {
     if (!cashContext || !session || !isOnline) return ledger
+    const generation = ++saleRefreshGenerationRef.current
+    const baseline = ledgerRef.current
+    const pending = pendingLedgerChanges(getOfflineQueue(), cashContext.tenantId)
     await syncPendingEvents()
-    const nextLedger = await loadSalesLedgerFromSupabase(cashContext, session.id)
-    persistLedger(nextLedger)
-    return nextLedger
-  }, [cashContext, isOnline, ledger, persistLedger, session, syncPendingEvents])
+    const [remote, fiscalPendingIds] = await Promise.all([
+      loadSalesLedgerFromSupabase(cashContext, session.id), loadPendingLocalSaleIds(cashContext, session),
+    ])
+    if (saleRefreshScopeRef.current !== saleRefreshScope || generation !== saleRefreshGenerationRef.current) return ledgerRef.current
+    const latestPending = pendingLedgerChanges(getOfflineQueue(), cashContext.tenantId)
+    for (const id of [...latestPending.changed, ...fiscalPendingIds]) pending.changed.add(id)
+    for (const id of latestPending.voided) pending.voided.add(id)
+    const next = reconcileCashLedger(remote, baseline, ledgerRef.current, pending)
+    persistLedger(next)
+    return next
+  }, [cashContext, isOnline, ledger, persistLedger, session, syncPendingEvents, saleRefreshScope])
   const ticketActions = useCashTicketActions({
     context: options.context,
     cashSession: session,
@@ -496,6 +522,9 @@ export function useCashSession(options: Options) {
     options.setBusy(true)
     try {
       await options.syncPendingEvents()
+      if ((await loadPendingPaymentOperations(options.context, payload.sessionId)).length > 0) {
+        throw new UserFacingError('Recupera los cobros pendientes de registrar antes de cerrar la caja. No vuelvas a cobrarlos.')
+      }
       if (getOfflineQueue().some((event) => event.tenantId === options.context?.tenantId)) {
         throw new UserFacingError('Quedan operaciones sin sincronizar en este dispositivo. Sincronízalas antes de cerrar.')
       }
@@ -538,7 +567,7 @@ export function useCashSession(options: Options) {
     } finally {
       options.setBusy(false)
     }
-  }, [cashOptions, cashlogyClosingStackerCollectionsCents, options, persistSession, printClosing, setTickets])
+  }, [cashOptions, cashlogyClosingStackerCollectionsCents, options, persistSession, printClosing, setTickets, setLedger])
 
   const openCloseModal = useCallback(async () => {
     if (!cashContext || !session) return false
@@ -546,6 +575,9 @@ export function useCashSession(options: Options) {
     reportError(null)
     try {
       await syncPendingEvents()
+      if ((await loadPendingPaymentOperations(cashContext, session.id)).length > 0) {
+        throw new UserFacingError('Recupera los cobros pendientes de registrar antes de cerrar la caja. No vuelvas a cobrarlos.')
+      }
       if (getOfflineQueue().some((event) => event.tenantId === cashContext.tenantId)) {
         throw new UserFacingError('Quedan operaciones sin sincronizar en este dispositivo. Sincronízalas antes de cerrar.')
       }
@@ -581,7 +613,7 @@ export function useCashSession(options: Options) {
     setClosingHistoryOpen(false)
     setCashClosings([])
     setCompletedClosing(null)
-  }, [setTickets])
+  }, [setTickets, setLedger])
 
   const hydrate = useCallback((
     nextSession: CashSession | null,
@@ -596,7 +628,7 @@ export function useCashSession(options: Options) {
     setCompletedClosing(null)
     setCashlogyClosingCashCents(null)
     setCashlogyClosingStackerCollectionsCents(0)
-  }, [setTickets])
+  }, [setTickets, setLedger])
 
   const clearRejectedSession = useCallback((closedSessionId: string) => {
     if (!options.context) return
@@ -610,7 +642,7 @@ export function useCashSession(options: Options) {
     setCashlogyClosingCashCents(null)
     setCashlogyClosingStackerCollectionsCents(0)
     setHistoryOpen(false)
-  }, [options.context, setTickets])
+  }, [options.context, setTickets, setLedger])
 
   return {
     clearRejectedSession,

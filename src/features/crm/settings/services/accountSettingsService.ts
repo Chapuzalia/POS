@@ -1,4 +1,4 @@
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 
 export const CRM_PASSWORD_MIN_LENGTH = 8
 

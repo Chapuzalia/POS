@@ -33,6 +33,7 @@ type SuperAdminPageProps = {
   context: TenantContext
   error: string | null
   isOnline: boolean
+  onBusyChange?: (busy: boolean) => void
   onError: (error: string | null) => void
   onLogout: () => void
 }
@@ -80,7 +81,7 @@ function SuperAdminModal({ children, label, onClose, dismissDisabled, size = 'co
   )
 }
 
-export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: SuperAdminPageProps) {
+export function SuperAdminPage({ context, error, isOnline, onBusyChange, onError, onLogout }: SuperAdminPageProps) {
   useEffect(() => { if (error) notifyOperationalError(error) }, [error])
   const [tenants, setTenants] = useState<PlatformTenant[]>([])
   const [verifactuIntegrations, setVerifactuIntegrations] = useState<VerifactuIntegration[]>([])
@@ -88,7 +89,9 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [section, setSection] = useState<'tenants' | 'billing'>('tenants')
   const [tenantModal, setTenantModal] = useState<TenantModalState>(null)
-  const [isBusy, setIsBusy] = useState(false)
+  const [pendingActions, setPendingActions] = useState(0)
+  const isBusy = pendingActions > 0
+  const [billingBusy, setBillingBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
   const [welcomeEmailNotice, setWelcomeEmailNotice] = useState<string | null>(null)
   const [tenantName, setTenantName] = useState('')
@@ -112,6 +115,11 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [editingMaxDevices, setEditingMaxDevices] = useState(5)
   const [editingTenantFeatures, setEditingTenantFeatures] = useState<PlatformTenantFeature[]>([])
 
+  useEffect(() => {
+    onBusyChange?.(isBusy || billingBusy)
+    return () => onBusyChange?.(false)
+  }, [isBusy, billingBusy, onBusyChange])
+
   const refresh = useCallback(async () => {
     const [platform, integrations] = await Promise.all([loadPlatformTenants(), loadPlatformVerifactuIntegrations()])
     setTenants(platform.tenants)
@@ -120,7 +128,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   }, [])
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
-    setIsBusy(true)
+    setPendingActions(count => count + 1)
     setSuccess(null)
     onError(null)
     try {
@@ -128,7 +136,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
     } catch (actionError) {
       onError(getReadableError(actionError, { operation: 'components.superadmin.SuperAdminPage' }))
     } finally {
-      setIsBusy(false)
+      setPendingActions(count => count - 1)
     }
   }, [onError])
 
@@ -318,17 +326,18 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
           <UiButton
             aria-current={section === 'tenants' ? 'page' : undefined}
             className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none"
+            disabled={isBusy || billingBusy}
             onClick={() => { setSection('tenants'); setIsSidebarOpen(false) }}
             type="button"
           >
             <Building2 className="h-4 w-4" />
             <span>Negocios</span>
           </UiButton>
-          <UiButton aria-current={section === 'billing' ? 'page' : undefined} className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none" onClick={() => { setSection('billing'); setIsSidebarOpen(false) }} type="button"><Crown className="h-4 w-4" /><span>Facturación</span></UiButton>
+          <UiButton aria-current={section === 'billing' ? 'page' : undefined} className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none" disabled={isBusy || billingBusy} onClick={() => { setSection('billing'); setIsSidebarOpen(false) }} type="button"><Crown className="h-4 w-4" /><span>Facturación</span></UiButton>
         </nav>
 
         <div className="!mt-auto !grid !gap-[5px] !border-0 !pt-7">
-          <UiButton className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none" onClick={onLogout} type="button">
+          <UiButton className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none" disabled={isBusy || billingBusy} onClick={onLogout} type="button">
             <LogOut className="h-4 w-4" />
             <span>Cerrar sesión</span>
           </UiButton>
@@ -376,7 +385,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
         {!isOnline ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">La administración global requiere conexión.</div> : null}
 
         <main className="!mx-auto !min-h-0 !w-full !max-w-[1720px] !flex-1 !overflow-auto !px-4 !pt-[26px] !pb-7 md:!px-7 md:!pt-[42px] md:!pb-9">
-          {section === 'billing' ? <Suspense fallback={<p>Cargando facturación…</p>}><BillingAdmin disabled={!isOnline} /></Suspense> : <>
+          {section === 'billing' ? <Suspense fallback={<p>Cargando facturación…</p>}><BillingAdmin disabled={!isOnline} onBusyChange={setBillingBusy} /></Suspense> : <>
           {pendingVerifactu.length ? <div role="status" className="!mb-4 !grid !gap-2 !rounded-[12px] !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !text-[var(--crm-yellow)]">
             <strong>{pendingVerifactu.length} solicitudes de Verifactu pendientes</strong>
             <div className="!flex !flex-wrap !gap-2">{pendingVerifactu.map(integration => {

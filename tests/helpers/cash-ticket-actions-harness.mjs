@@ -4,6 +4,7 @@ import { compileComponent, createCompiledHookRunner } from './component-harness.
 
 const source = await readFile(new URL('../../src/features/cash-registers/hooks/useCashTicketActions.ts', import.meta.url), 'utf8')
 const historyModel = compileComponent(await readFile(new URL('../../src/features/cash-registers/services/sessionTicketHistoryModel.ts', import.meta.url), 'utf8'), {})
+const paymentChangeSource = await readFile(new URL('../../src/features/cash-registers/services/paymentChange.ts', import.meta.url), 'utf8')
 
 export function createCashTicketActionsHarness({
   isOnline = true,
@@ -27,7 +28,28 @@ export function createCashTicketActionsHarness({
       ticket: { id: 'ticket-1', tenantId: 'tenant', venueId: 'venue', cashSessionId: 'cash', cashRegisterId: 'register', deviceId: 'device' },
     },
   }
+  const durable = {
+    paymentScope: () => 'scope', loadPaymentOperations: async () => [], loadDurableEvents: async () => [],
+    observeRemotePaymentChanges: async () => {}, completePaymentChangeProjection: async () => {},
+    withPaymentLock: async (_, work) => work(),
+    preparePaymentChangeOperation: async (_, original, method) => ({ key: 'scope|payment-change:sale-1', scope: 'scope', eventId: 'event-1',
+      state: 'prepared', cashlogy: null, params: { sourceMethod: original.paymentMethod },
+      payload: { ...original.payload, sale: { ...original.payload.sale, paymentMethod: method } } }),
+    markPaymentCharging: async operation => ({ ...operation, state: 'charging' }),
+    acceptPaymentOperation: async (operation, payload, cashlogy) => ({ ...operation, state: 'accepted', payload, cashlogy }),
+    commitPaymentChangeOperation: async operation => calls.enqueued.push({ id: operation.eventId, kind: 'sale_payment_changed',
+      tenantId: 'tenant', payload: { saleId: operation.payload.sale.id, paymentId: operation.payload.payment.id,
+        paymentMethod: operation.payload.payment.method, receivedCents: operation.payload.payment.receivedCents,
+        changeCents: operation.payload.payment.changeCents, cashlogyRequestId: operation.payload.payment.cashlogyRequestId,
+        cashlogyTransactionId: operation.payload.payment.cashlogyTransactionId } }),
+  }
+  const cashlogy = { settleCashlogyPaymentIfConfigured,
+    getCashlogyPaymentAmounts: (transaction, totalCents) => ({ changeCents: transaction?.changeCents ?? 0, receivedCents: transaction?.receivedCents ?? totalCents }) }
+  const paymentChange = compileComponent(paymentChangeSource, { '../../../lib/durableSales.ts': durable,
+    '../../local-printing/cashlogy/useCashlogyStore': cashlogy })
   const runner = createCompiledHookRunner(source, 'useCashTicketActions', {
+    '../../../lib/durableSales.ts': durable,
+    '../services/paymentChange.ts': paymentChange,
     '../../../lib/format': { createId: () => 'event-1' },
     '../../../lib/offlineStore': {
       enqueueOfflineEvent: (event) => calls.enqueued.push(event),
@@ -36,7 +58,7 @@ export function createCashTicketActionsHarness({
       getSessionTickets: () => cachedTickets,
       saveSessionTickets: (_, __, tickets) => { cachedTickets = tickets; calls.savedHistory.push(tickets) },
     },
-    '../../../lib/observability.ts': { isTransportError: error => /fetch|network/i.test(error.message) || error.name === 'AbortError' },
+    '../../../lib/observability.ts': { reportOperationError() {}, isTransportError: error => /fetch|network/i.test(error.message) || error.name === 'AbortError' },
     '../../../services/posService': {
       loadSessionTicketPageFromSupabase: async (...args) => { calls.remoteHistory++; return loadSessionTicketPageFromSupabase(...args) },
     },
@@ -50,7 +72,8 @@ export function createCashTicketActionsHarness({
     '../../fiscal/local/installation.ts': { getFiscalInstallationLease: async () => null, loadFiscalInstallation: async () => null },
     '../../fiscal/local/localLedger.ts': { buildLocalRectificative: async () => null, findLocalFiscalEntryByTicket: async () => null, persistLocalRectificative: async () => undefined },
     '../../fiscal/local/clock.ts': { assertFiscalLease: () => undefined },
-    '../../local-printing': { nextPrintCopyNumber: () => 1, usePrintAgentStore: { getState: () => ({}) } },
+    '../../local-printing/services/printAgentStorage': { nextPrintCopyNumber: () => 1 },
+    '../../local-printing/store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({}) } },
     '../../local-printing/cashlogy/useCashlogyStore': {
       finishCashlogyPayment: (transaction) => calls.finished.push(transaction),
       getCashlogyPaymentAmounts: (transaction, totalCents) => ({ changeCents: transaction?.changeCents ?? 0, receivedCents: transaction?.receivedCents ?? totalCents }),
@@ -63,8 +86,8 @@ export function createCashTicketActionsHarness({
     isOnline,
     ledger: [{ id: 'sale-1', paymentMethod: 'card' }],
     mergeRemotePrintStates: (tickets) => tickets,
-    persistLedger: (ledger) => calls.ledgers.push(ledger),
-    persistTickets: (tickets) => calls.tickets.push(tickets),
+    persistLedger: (value) => { const ledger = typeof value === 'function' ? value(options.ledger) : value; calls.ledgers.push(ledger); options.ledger = ledger },
+    persistTickets: (value) => { const tickets = typeof value === 'function' ? value(options.tickets) : value; calls.tickets.push(tickets); options.tickets = tickets },
     printTicket: async () => {},
     refreshPendingCount() {},
     setBusy: (busy) => calls.busy.push(busy),

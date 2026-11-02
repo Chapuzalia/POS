@@ -4,6 +4,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { IDBFactory } from 'fake-indexeddb'
 import * as ledger from '../src/features/fiscal/local/localLedger.ts'
+import * as localDatabase from '../src/lib/localDatabase.ts'
 import * as durable from '../src/lib/durableSales.ts'
 import { compileComponent, createCompiledHookRunner } from './helpers/component-harness.mjs'
 import { withConfirmedRestaurantPayments } from '../src/features/restaurant/services/paymentPayload.ts'
@@ -73,6 +74,7 @@ for (const failure of ['lost_reply', 'local_quota']) test(`restaurant recovery p
   const service = compileComponent(source('features/fiscal/local/restaurantInvoice.ts'), {
     '../../restaurant/services/paymentPayload.ts': { withConfirmedRestaurantPayments },
     './localLedger.ts': ledger,
+    '../../../lib/localDatabase.ts': localDatabase,
     './installation.ts': { fiscalBridgeBaseUrl: () => 'https://bridge.example', fiscalBridgeAccessToken: async () => 'token' },
     './sync.ts': { synchronizeLocalFiscalQueue: async config => { deliveries.push(config) } },
     './posInvoice.ts': {
@@ -111,9 +113,9 @@ for (const failure of ['lost_reply', 'local_quota']) test(`restaurant recovery p
 
 test('an unresolved fiscal payment blocks a new fiscal issue until the original response is reconciled', async () => {
   setup()
-  const db = await ledger.openLedger()
+  const db = await localDatabase.openLedger()
   const tx = db.transaction('restaurantPayments', 'readwrite')
-  const done = ledger.transactionDone(tx)
+  const done = localDatabase.transactionDone(tx)
   tx.objectStore('restaurantPayments').put({ key: 'operation', entry: preparedEntry() })
   await done; db.close()
   await assert.rejects(ledger.assertRestaurantPaymentsReconciled(preparedEntry().record), /pendiente de conciliar/)

@@ -1,3 +1,4 @@
+import { z } from 'zod'
 import { DEFAULT_PRINT_AGENT_TIMEOUT_MS, PRINT_AGENT_HEALTH_TIMEOUT_MS } from '../constants/config.ts'
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl.ts'
 import { PrintAgentError, type PrintAgentErrorCode } from './PrintAgentError.ts'
@@ -28,6 +29,25 @@ const errorCodes = new Set<PrintAgentErrorCode>([
 const CASHLOGY_STACKER_TIMEOUT_MS = 910_000
 const CASHLOGY_RECOVERY_TIMEOUT_MS = 240_000
 const CASHLOGY_GIVE_CHANGE_DISPENSE_TIMEOUT_MS = 30_000
+
+const printJobStatusSchema = z.enum(['pending', 'resolving-printer', 'connecting', 'printing', 'printed', 'failed', 'cancelled', 'unknown'])
+const printJobSchema = z.object({
+  id: z.string().min(1).optional(), jobId: z.string().min(1).optional(),
+  requestId: z.string().min(1).optional(), status: printJobStatusSchema,
+}).passthrough().refine(job => Boolean(job.id || job.jobId))
+const printAcknowledgementSchema = z.object({
+  ok: z.literal(true), jobId: z.string().min(1).optional(),
+  requestId: z.string().min(1).optional(), status: printJobStatusSchema.optional(),
+}).passthrough()
+
+function validatePrintJob(value: unknown, jobId?: string, requestId?: string): PrintJob {
+  const parsed = printJobSchema.safeParse(value)
+  if (!parsed.success || (jobId && [parsed.data.id, parsed.data.jobId].some(id => id && id !== jobId))
+    || (requestId && parsed.data.requestId && parsed.data.requestId !== requestId)) {
+    throw new PrintAgentError({ code: 'INVALID_RESPONSE' })
+  }
+  return parsed.data
+}
 
 export function buildPrintAgentHeaders(token?: string | null, hasBody = false) {
   const headers: Record<string, string> = { Accept: 'application/json' }
@@ -178,8 +198,16 @@ export function createPrintAgentClient(options: ClientOptions) {
     selectPrinter: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; printer?: Printer }>('/api/v1/printers/select', { body: payload, method: 'POST', signal }),
     testPrinter: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/printers/test', { body: payload, method: 'POST', signal }),
     printTicket: async (payload: unknown, signal?: AbortSignal) => {
+      const send = async (body: unknown) => {
+        const parsed = printAcknowledgementSchema.safeParse(await request<unknown>('/api/v1/print', { body, method: 'POST', signal }))
+        const requestId = payload && typeof payload === 'object' && 'requestId' in payload ? payload.requestId : undefined
+        if (!parsed.success || (parsed.data.requestId && requestId && parsed.data.requestId !== requestId)) {
+          throw new PrintAgentError({ code: 'INVALID_RESPONSE' })
+        }
+        return parsed.data
+      }
       try {
-        return await request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/print', { body: payload, method: 'POST', signal })
+        return await send(payload)
       } catch (error) {
         const structured = payload as Partial<PrintRequest> | null
         if (
@@ -191,11 +219,7 @@ export function createPrintAgentClient(options: ClientOptions) {
           throw new PrintAgentError({ code: 'FISCAL_QR_UNSUPPORTED', cause: error })
         }
         const { elements: _unsupportedElements, ...legacyPayload } = structured
-        return request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/print', {
-          body: legacyPayload,
-          method: 'POST',
-          signal,
-        })
+        return send(legacyPayload)
       }
     },
     openCashDrawer: (payload: unknown, signal?: AbortSignal) => request<{ ok: boolean; jobId?: string; status?: string }>('/api/v1/cash-drawer/open', { body: payload, method: 'POST', signal }),
@@ -248,11 +272,13 @@ export function createPrintAgentClient(options: ClientOptions) {
     recoverCashlogy: (signal?: AbortSignal) => request<CashlogyRecoveryResult>('/api/v1/cashlogy/admin/recover', { body: {}, method: 'POST', signal, timeoutMs: CASHLOGY_RECOVERY_TIMEOUT_MS }),
     getCashlogyDiagnosticLogs: (limit = 100, signal?: AbortSignal) => request<{ logs: CashlogyDiagnosticLog[] }>(`/api/v1/cashlogy/diagnostics/logs?limit=${encodeURIComponent(String(limit))}`, { retries: 1, signal }),
     getJobs: (signal?: AbortSignal) => request<{ jobs?: PrintJob[] } | PrintJob[]>('/api/v1/jobs', { retries: 1, signal }),
-    getJob: (jobId: string, signal?: AbortSignal) => request<PrintJob>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, { retries: 1, signal }),
+    getJob: async (jobId: string, signal?: AbortSignal, requestId?: string) =>
+      validatePrintJob(await request<unknown>(`/api/v1/jobs/${encodeURIComponent(jobId)}`, { retries: 1, signal }), jobId, requestId),
     findJobByRequestId: async (requestId: string, signal?: AbortSignal) => {
       const result = await request<{ jobs?: PrintJob[] } | PrintJob[]>(`/api/v1/jobs?requestId=${encodeURIComponent(requestId)}`, { retries: 1, signal })
       const jobs = Array.isArray(result) ? result : result.jobs || []
-      return jobs.find((job) => job.requestId === requestId) || null
+      const found = jobs.find((job) => job.requestId === requestId)
+      return found ? validatePrintJob(found, undefined, requestId) : null
     },
     getConfig: (signal?: AbortSignal) => request<Record<string, unknown>>('/api/v1/config', { retries: 1, signal }),
     updateConfig: (payload: unknown, signal?: AbortSignal) => request<Record<string, unknown>>('/api/v1/config', { body: payload, method: 'PATCH', signal }),

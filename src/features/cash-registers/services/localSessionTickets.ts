@@ -1,5 +1,5 @@
 import { getSessionTickets } from '../../../lib/offlineStore'
-import { loadDurableSessionTickets } from '../../../lib/durableSales.ts'
+import { loadDurableSessionTickets, loadPaymentOperations } from '../../../lib/durableSales.ts'
 import type { CashSession, SaleRecord, SessionTicketRecord, TenantContext } from '../../../types'
 import { listLocalFiscalEconomicSales, listLocalFiscalEntries, listLocalFiscalScopes } from '../../fiscal/local/localLedger.ts'
 import { printPayloadWithLocalFiscal } from '../../fiscal/local/posInvoice.ts'
@@ -10,6 +10,15 @@ export async function loadLocalSessionTickets(context: TenantContext, session: C
     && ticket.payload.ticket.tenantId === context.tenantId && ticket.payload.ticket.venueId === context.venueId
   const cached = [...await loadDurableSessionTickets(context, session.id), ...loadedTickets, ...getSessionTickets(context, session.id)].filter(inSession)
   const tickets = new Map(cached.map(ticket => [ticket.payload.ticket.id, ticket]))
+  // An acknowledged event can outlive failed localStorage writes. The journal
+  // remains authoritative for this projection until both caches are repaired.
+  for (const operation of await loadPaymentOperations(context, session.id)) {
+    if (operation.params?.paymentChange !== true || !operation.result?.paymentProjectionPending) continue
+    const ticket = tickets.get(operation.payload.ticket.id)
+    if (ticket) tickets.set(ticket.payload.ticket.id, { ...ticket, paymentMethod: operation.payload.sale.paymentMethod,
+      payload: { ...ticket.payload, sale: { ...ticket.payload.sale, paymentMethod: operation.payload.sale.paymentMethod },
+        payment: operation.payload.payment, payments: operation.payload.payments } })
+  }
   const scopes = await listLocalFiscalScopes(context, session.cashRegisterId)
   for (const scope of scopes) {
     const [entries, sales] = await Promise.all([listLocalFiscalEntries(scope), listLocalFiscalEconomicSales(scope)])
@@ -43,4 +52,20 @@ export async function loadLocalSessionSales(context: TenantContext, session: Cas
   return tickets.filter(ticket => ticket.status !== 'voided').map(ticket => ({ id: ticket.id,
     cashSessionId: session.id, paymentMethod: ticket.paymentMethod, totalCents: ticket.totalCents, createdAt: ticket.createdAt,
     payments: ticket.payload.payments ?? (ticket.payload.payment ? [ticket.payload.payment] : undefined) }))
+}
+
+export async function loadPendingLocalSaleIds(context: TenantContext, session: CashSession): Promise<string[]> {
+  const [scopes, operations] = await Promise.all([
+    listLocalFiscalScopes(context, session.cashRegisterId), loadPaymentOperations(context, session.id),
+  ])
+  const sales = (await Promise.all(scopes.map(scope => listLocalFiscalEconomicSales(scope)))).flat()
+  const pending = sales.filter(sale => !sale.synced && sale.payload.ticket.tenantId === context.tenantId
+    && sale.payload.ticket.venueId === context.venueId && sale.payload.ticket.deviceId === context.deviceId
+    && sale.payload.ticket.cashSessionId === session.id).map(sale => sale.payload.sale.id)
+  for (const operation of operations) {
+    if (operation.params?.paymentChange === true && operation.state === 'committed' && operation.result?.paymentProjectionPending) {
+      pending.push(operation.payload.sale.id)
+    }
+  }
+  return [...new Set(pending)]
 }

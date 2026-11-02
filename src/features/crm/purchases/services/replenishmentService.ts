@@ -1,5 +1,5 @@
 import type { TenantContext } from '../../../../types'
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import { loadInventoryStockPageData, type InventoryStockPageData } from '../../inventory/services/inventoryService'
 import type { InventoryStockLevel } from '../../inventory/types'
 import { replenishmentQuantities } from '../../inventory/stockControlModel'

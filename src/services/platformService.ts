@@ -1,6 +1,6 @@
 import { UserFacingError } from '../utils/UserFacingError.ts'
 import { supabase } from '../lib/supabase'
-import { getFunctionInvokeErrorMessage } from '../features/crm/shared/services/crmServiceSupport'
+import { getFunctionInvokeErrorMessage } from './backendService'
 import type { TenantAddonKey } from '../features/platform/tenantFeatureAccess'
 import type { WelcomeEmailStatus } from '../../supabase/functions/_shared/welcome-email'
 

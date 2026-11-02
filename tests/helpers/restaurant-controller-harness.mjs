@@ -128,6 +128,8 @@ export function createRestaurantControllerHarness({
     '../../tables/service-status': { canDecreaseLineQuantity: () => true, getOrderPendingUnits },
     '../draft-policy': { isRestaurantRevisionConflict: () => false, requiresConfirmedRestaurantLineRemoval, shouldSaveBeforeLeavingOrder: () => false },
     '../services/restaurantPrintPayload': realPayloads ? restaurantPrintPayload : {
+      getRestaurantCalculationLines: restaurantPrintPayload.getRestaurantCalculationLines,
+      withRestaurantCalculationLines: restaurantPrintPayload.withRestaurantCalculationLines,
       buildRestaurantPrintPayload: (input) => ({ ...input,
         ticket: { id: input.ticketId, totalCents: input.totalCents, invoice: input.invoice },
         sale: { id: input.saleId, totalCents: input.totalCents, paymentMethod: input.paymentMethod },

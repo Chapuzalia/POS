@@ -4,7 +4,7 @@ import {
   localDateKey,
   shiftDateKey,
   zonedLocalToUtc,
-} from "../domain/reservationAvailability";
+} from "../../../utils/dates";
 import {
   getReservationStatusLabel,
   isReservationLate,

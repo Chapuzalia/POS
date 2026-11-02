@@ -26,10 +26,11 @@ async function harness() {
   const service = compileComponent(readFileSync(new URL('../src/features/fiscal/local/localIdentity.ts', import.meta.url), 'utf8'), {
     './localLedger.ts': {
       readLocalFiscalHead: async () => ({ entry, chain }),
+      assertInstallationBinding: (binding, device) => { if (binding?.deviceId !== device) throw new Error('wrong device') },
+    }, '../../../lib/localDatabase.ts': {
       openLedger: async () => ({ close() {}, transaction: () => ({ objectStore: name => ({
         get: () => rows[name], getAll() { throw new Error('Historical scan forbidden during emission') },
       }) }) }), request: async x => x, transactionDone: async () => {},
-      assertInstallationBinding: (binding, device) => { if (binding?.deviceId !== device) throw new Error('wrong device') },
     }, './canonical.ts': { canonicalRecordSchema: { parse(value) { schemas += 1; return canonicalRecordSchema.parse(value) } } },
     './verifactu.ts': { aeatHash }, '../../../utils/UserFacingError.ts': { UserFacingError },
   })

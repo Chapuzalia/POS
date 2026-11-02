@@ -6,7 +6,7 @@ const { client, datasets, requests, rpc } = vi.hoisted(() => ({
   requests: [] as Array<{ table: string; filters: Array<[string, unknown]>; order: string[]; range: number[] }>,
   rpc: vi.fn(),
 }))
-vi.mock('../../src/features/crm/shared/services/crmServiceSupport', () => ({ requireSupabase: () => client }))
+vi.mock('../../src/services/backendService', () => ({ requireSupabase: () => client }))
 vi.mock('../../src/lib/observability.ts', () => ({ reportOperationError: vi.fn() }))
 
 import { loadInventoryItemMovements, loadInventoryItemVariantCount, loadInventoryStockPageData, saveInventoryItemStock, saveInventoryItem } from '../../src/features/crm/inventory/services/inventoryService'

@@ -22,10 +22,8 @@ import {
 import type { CashSession } from "../../types";
 
 import { Chip } from "../ui";
-import {
-  ManualCashDrawerButton,
-  PrintAgentStatusBadge,
-} from "../../features/local-printing";
+import { ManualCashDrawerButton } from '../../features/local-printing/components/ManualCashDrawerButton'
+import { PrintAgentStatusBadge } from '../../features/local-printing/components/PrintAgentStatusBadge'
 
 type AppHeaderProps = {
   cashSession: CashSession | null;

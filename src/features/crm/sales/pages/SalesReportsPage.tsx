@@ -7,7 +7,7 @@ import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPaginat
 import { CrmModal } from '../../shared/components/CrmModal'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
-import { KpiCard } from '../../dashboard/pages/DashboardPage'
+import { KpiCard } from '../../shared/components/KpiCard'
 import { formatMoney, formatTicketNumber, normalizeText } from '../../../../lib/format'
 import { getOperationalDateKey, getOperationalDayRangeIso, shiftIsoDate } from '../../../../lib/operationalDay'
 import { loadAccountingTickets, type AccountingTicketRow } from '../services/accountingExportService'

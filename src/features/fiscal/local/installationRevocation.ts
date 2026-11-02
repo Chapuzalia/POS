@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import type { CashSession, TenantContext } from '../../../types/index.ts'
 import { supabase } from '../../../lib/supabase.ts'
-import { openLedger, request, transactionDone } from './localLedger.ts'
+import { openLedger, request, transactionDone } from '../../../lib/localDatabase.ts'
 import { readFiscalIdentity, FiscalInstallationRevokedError } from './localIdentity.ts'
 import { readFiscalBackend } from './backendRead.ts'
 import { isFiscalTransportUnavailable } from './availability.ts'

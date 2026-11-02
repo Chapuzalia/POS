@@ -1,4 +1,4 @@
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import type { SalesReportAggregateView } from './salesReportModel'
 import { type CrmSalesReportAggregate, type CrmSalesReportTicket, type HistoricalPaymentMethod, type TenantContext } from '../../../../types'
 

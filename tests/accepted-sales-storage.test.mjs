@@ -2,7 +2,7 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
 import { preparePaymentOperation, acceptPaymentOperation, commitPaymentOperation, loadDurableEvents, loadDurableSessionTickets, paymentScope, updateDurableEvent, markPaymentCharging, loadPaymentOperation, loadPaymentOperations } from '../src/lib/durableSales.ts'
-import { openLedger, request, transactionDone } from '../src/features/fiscal/local/localLedger.ts'
+import { openLedger, request, transactionDone } from '../src/lib/localDatabase.ts'
 
 const context = { tenantId: 'tenant', venueId: 'venue', deviceId: 'device', userId: 'cashier' }
 const payload = { ticket: { id: 'ticket', tenantId: 'tenant', venueId: 'venue', cashSessionId: 'session' },
