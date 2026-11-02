@@ -63,7 +63,7 @@ export function PosRuntime({ context, bootstrap, offline, isOnline, error, error
     timeZone: 'Europe/Madrid',
   })
   const [catalogStartTab, setCatalogStartTab] = useState<CatalogStartTab>(() => getCatalogStartTab())
-  const productStats = useProductSalesStats(context, isOnline)
+  const productStats = useProductSalesStats(context, isOnline && appliedBootstrap === bootstrap)
   const productSalesStats = productStats.stats
   const [isBusy, setIsBusy] = useState(false)
   const [isLoading, setIsLoading] = useState(false)

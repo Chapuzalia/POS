@@ -63,6 +63,7 @@ export function useProductSalesStats(context: TenantContext | null, isOnline: bo
         // Keep the local ranking when the backend is temporarily unavailable.
       })
     }
+    void Promise.resolve().then(refresh)
     const intervalId = window.setInterval(refresh, PRODUCT_SALES_STATS_REFRESH_MS)
     document.addEventListener('visibilitychange', refresh)
     return () => {

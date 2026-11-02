@@ -8,7 +8,6 @@ import { pendingLedgerChanges, reconcileCashLedger } from '../../cash-registers/
 import {
   loadOpenCashSession,
   loadPosCatalogFromSupabase,
-  loadProductSalesStatsFromSupabase,
   loadSalesLedgerFromSupabase,
   mergeLedgers,
 } from '../../../services/posService'
@@ -50,10 +49,9 @@ export async function loadTenantState(context: TenantContext): Promise<TenantSta
       salesLedger: [],
     }
   }
-  const [posCatalog, cashSession, productSalesStats] = await Promise.all([
+  const [posCatalog, cashSession] = await Promise.all([
     loadPosCatalogFromSupabase(context),
     loadOpenCashSession(context),
-    loadProductSalesStatsFromSupabase(context),
   ])
   let salesLedger: SaleRecord[] = []
   if (cashSession) {
@@ -76,7 +74,7 @@ export async function loadTenantState(context: TenantContext): Promise<TenantSta
     manualDiscountEnabled: hasTenantCapability(context, 'manual_discounts') && posCatalog.manualDiscountEnabled,
     manualDiscountRequiresPin: hasTenantAddon(context, 'promotions') && posCatalog.manualDiscountRequiresPin,
     cashSession,
-    productSalesStats,
+    productSalesStats: getCachedProductSalesStats(context.tenantId),
     salesLedger,
   }
   return state

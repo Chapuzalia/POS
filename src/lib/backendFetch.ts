@@ -10,6 +10,7 @@ export const backendFetch: typeof fetch = async (input, init) => {
   // Bound auth validation only; long-running business RPCs keep their existing
   // timeouts (for example, document processing).
   const requestUrl = input instanceof Request ? input.url : String(input)
+  const backgroundStats = /\/rest\/v1\/rpc\/pos_product_sales_stats(?:[?#]|$)/.test(requestUrl)
   const timer = requestUrl.includes('/auth/v1/') ? setTimeout(abort, 15_000) : undefined
   try {
     const response = await fetch(input, { ...init, signal: controller.signal })
@@ -20,7 +21,8 @@ export const backendFetch: typeof fetch = async (input, init) => {
     }
     return response
   } catch (error) {
-    if (!signal?.aborted) window.dispatchEvent(new Event(backendUnavailableEvent))
+    // Ranking failures are retried independently and must not degrade the POS session.
+    if (!signal?.aborted && !backgroundStats) window.dispatchEvent(new Event(backendUnavailableEvent))
     throw error
   } finally {
     clearTimeout(timer)

@@ -38,6 +38,23 @@ it('preserves confirmed sales and refunds in the cached product ranking', () => 
   harness.unmount()
 })
 
+it('loads the ranking in the background after hydration and keeps cached values on a SQL timeout', async () => {
+  const load = vi.fn().mockRejectedValue({ code: '57014', message: 'canceling statement due to statement timeout' })
+  const { harness, cache } = statsHarness(load)
+  harness.render(context, false).hydrate(stats)
+  harness.render(context, true)
+  await tick()
+  expect(load).toHaveBeenCalledOnce()
+  expect(harness.render(context, true).stats).toEqual(stats)
+  expect(cache).not.toHaveBeenCalled()
+  const updated = [{ productId: 'product', quantity: 3, totalCents: 597 }]
+  load.mockResolvedValue(updated)
+  await vi.advanceTimersByTimeAsync(300_000)
+  expect(harness.render(context, true).stats).toEqual(updated)
+  expect(cache).toHaveBeenLastCalledWith('tenant', updated)
+  harness.unmount()
+})
+
 it('does not overwrite a local sale with an older remote ranking', async () => {
   let resolve!: (value: typeof stats) => void
   const load = vi.fn(() => new Promise<typeof stats>((done) => { resolve = done }))
