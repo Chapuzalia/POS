@@ -3,7 +3,7 @@ import { forwardPersonalActivation } from '../../supabase/functions/_shared/pers
 
 const tenantId = '11111111-1111-4111-8111-111111111111'
 const config = { url: 'https://personal-auth.example', anonKey: 'public-key' }
-const password = 'Current-password-123'
+const password = 'Chosen-personal-password-123'
 const request = (body: unknown = { tenantId, password }, authorized = true) => new Request('https://pos-auth.example/functions/v1/activate-personal', {
   method: 'POST', headers: authorized ? { authorization: 'Bearer pos-session' } : {}, body: JSON.stringify(body),
 })
@@ -34,6 +34,14 @@ it('requires an HTTPS destination without embedded credentials', async () => {
   for (const url of ['http://personal.example', 'https://user:password@personal.example', 'https://personal.example/other-path'])
     expect((await forwardPersonalActivation(request(), { ...config, url }, fetcher)).status).toBe(503)
   expect(fetcher).not.toHaveBeenCalled()
+})
+
+it('rejects fewer than six characters before forwarding and accepts exactly six', async () => {
+  const fetcher = vi.fn().mockImplementation(async () => Response.json({ connectionId: tenantId, organizationId: tenantId, personalUrl: 'https://personal.example' }))
+  for (const short of ['', '12345']) expect((await forwardPersonalActivation(request({ tenantId, password: short }), config, fetcher)).status).toBe(400)
+  expect(fetcher).not.toHaveBeenCalled()
+  expect((await forwardPersonalActivation(request({ tenantId, password: 'abc123' }), config, fetcher)).status).toBe(200)
+  expect(JSON.parse(fetcher.mock.calls[0][1].body).password).toBe('abc123')
 })
 
 it('limits the request body before sending credentials to Personal', async () => {

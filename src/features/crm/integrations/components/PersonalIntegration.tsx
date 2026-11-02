@@ -45,12 +45,12 @@ export function PersonalIntegration({ tenantContext, disabled }: { tenantContext
   }, [canEdit, refresh])
 
   async function activate() {
-    if (!canEdit || disabled || busy || !password) return
-    const currentPassword = password
+    if (!canEdit || disabled || busy || password.length < 6) return
+    const personalPassword = password
     setPassword(''); setBusy(true); setMessage('')
     try {
       const result = await requireSupabase().functions.invoke('activate-personal', {
-        body: { tenantId: tenantContext.tenantId, password: currentPassword },
+        body: { tenantId: tenantContext.tenantId, password: personalPassword },
       })
       if (result.error) {
         let detail = 'No se pudo activar Personal. Reintenta la operación.'
@@ -65,7 +65,7 @@ export function PersonalIntegration({ tenantContext, disabled }: { tenantContext
       const data = z.object({ connectionId: z.uuid(), organizationId: z.uuid(), personalUrl: z.url().startsWith('https://') }).parse(result.data)
       setConnectionId(data.connectionId); setOrganizationId(data.organizationId); setPersonalUrl(data.personalUrl)
       setStatus((await refresh()).configuration)
-      setMessage('Personal activado. Accede con tu correo y la contraseña que acabas de introducir. Tus cambios futuros de contraseña serán independientes en cada aplicación.')
+      setMessage('Personal activado. Accede con tu correo y la contraseña que has elegido para Personal.')
     } catch (error) {
       setMessage(error instanceof Error ? error.message : 'No se pudo activar Personal.')
     } finally { setBusy(false) }
@@ -97,8 +97,9 @@ export function PersonalIntegration({ tenantContext, disabled }: { tenantContext
       <p role="status" className="text-sm">{status?.enabled ? status.linked ? 'Vinculada' : 'Pendiente de vinculación' : 'Desactivada'}</p>
       {!status?.linked ? <form className="grid gap-3" onSubmit={event => { event.preventDefault(); void activate() }}>
         <p className="text-sm">Activa Personal con tu cuenta del POS. Crearemos tu acceso y vincularemos la empresa y sus locales automáticamente.</p>
-        <label className="grid gap-1 text-sm">Contraseña actual del POS<input className={fieldClass} type="password" autoComplete="current-password" value={password} onChange={event => setPassword(event.target.value)} required disabled={disabled || busy} maxLength={1024} /></label>
-        <Button type="submit" disabled={disabled || busy || !password}>{busy ? 'Activando…' : 'Activar Tickit Personal'}</Button>
+        <label className="grid gap-1 text-sm">Contraseña para Tickit Personal<input className={fieldClass} type="password" autoComplete="new-password" value={password} onChange={event => setPassword(event.target.value)} required disabled={disabled || busy} minLength={6} maxLength={1024} /></label>
+        <p className="text-sm text-[var(--crm-text-muted)]">Mínimo 6 caracteres. Puedes usar la misma contraseña del POS u otra distinta.</p>
+        <Button type="submit" disabled={disabled || busy || password.length < 6}>{busy ? 'Activando…' : 'Activar Tickit Personal'}</Button>
       </form> : null}
       {personalUrl ? <a className="text-sm underline" href={personalUrl} target="_blank" rel="noreferrer">Abrir Tickit Personal</a> : null}
       {message ? <p role="status" className="text-sm">{message}</p> : null}

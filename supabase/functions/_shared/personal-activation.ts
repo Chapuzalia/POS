@@ -18,7 +18,7 @@ export async function forwardPersonalActivation(
   let input: { tenantId: string; password: string }
   try {
     const reader = request.body?.getReader()
-    if (!reader) return reply('Indica tu contraseña actual del POS.', 400)
+    if (!reader) return reply('Elige una contraseña de Personal de al menos 6 caracteres.', 400)
     const chunks: Uint8Array[] = []
     let size = 0
     try {
@@ -37,7 +37,7 @@ export async function forwardPersonalActivation(
     let offset = 0
     for (const chunk of chunks) { bytes.set(chunk, offset); offset += chunk.length }
     const data = JSON.parse(new TextDecoder().decode(bytes))
-    if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['tenantId', 'password'].includes(key)) || typeof data.tenantId !== 'string' || !uuid.test(data.tenantId) || typeof data.password !== 'string' || !data.password.length || data.password.length > 1024) return reply('Indica tu empresa y contraseña actual del POS.', 400)
+    if (!data || typeof data !== 'object' || Array.isArray(data) || Object.keys(data).some(key => !['tenantId', 'password'].includes(key)) || typeof data.tenantId !== 'string' || !uuid.test(data.tenantId) || typeof data.password !== 'string' || data.password.length < 6 || data.password.length > 1024) return reply('Elige una contraseña de Personal de al menos 6 caracteres.', 400)
     input = { tenantId: data.tenantId, password: data.password }
   } catch { return reply('Solicitud de activación no válida.', 400) }
   try {
