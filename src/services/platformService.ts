@@ -131,7 +131,7 @@ async function invokePlatformAction<T>(body: Record<string, unknown>, fallbackEr
 
 export async function updatePlatformTenant(input: UpdatePlatformTenantInput) {
   return invokePlatformAction<{ tenant?: Pick<PlatformTenant, 'id' | 'name' | 'slug'> }>(
-    { action: 'platform-update-tenant', featureCatalogVersion: 2, assistCatalogVersion: 1, ...input },
+    { action: 'platform-update-tenant', featureCatalogVersion: 2, assistCatalogVersion: 1, personalCatalogVersion: 1, ...input },
     'No se pudo actualizar el negocio.',
   )
 }

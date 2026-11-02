@@ -1,4 +1,5 @@
 import { readFile } from 'node:fs/promises'
+import * as personalPermissions from '../../src/features/personal/permissions.ts'
 
 import { compileComponent, createCompiledHookRunner } from './component-harness.mjs'
 
@@ -48,6 +49,7 @@ export function createCashTicketActionsHarness({
   const paymentChange = compileComponent(paymentChangeSource, { '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore': cashlogy })
   const runner = createCompiledHookRunner(source, 'useCashTicketActions', {
+    '../../personal/permissions': personalPermissions,
     '../../../lib/durableSales.ts': durable,
     '../services/paymentChange.ts': paymentChange,
     '../../../lib/format': { createId: () => 'event-1' },

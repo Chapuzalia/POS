@@ -192,7 +192,7 @@ export function VenueSettingsCrm({ disabled, onVenuesChanged, runAction, tenantC
         </div>
         <div data-onboarding="settings-venues" className="!grid !gap-3 !px-[18px] !pt-5 !pb-[22px] md:!px-[22px]">
           {venues.map((venue) => {
-            const contractedAddons = tenantAddonCatalog.filter((addon) => hasTenantAddon(tenantContext, addon.key))
+            const contractedAddons = tenantAddonCatalog.filter((addon) => addon.key !== 'tickit_personal' && hasTenantAddon(tenantContext, addon.key))
             const activeAddons = contractedAddons.filter((addon) => hasTenantVenueAddon({ features: tenantContext.features, venue }, addon.key))
             const venueExpanded = expandedVenueId === venue.id
             const addonsExpanded = expandedAddonVenueId === venue.id

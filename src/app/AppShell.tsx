@@ -6,6 +6,7 @@ import themesData from '../config/themes.json'
 import type { AppVersionStatus } from '../config/appVersion'
 import { useOfflineController } from '../features/offline/hooks/useOfflineController'
 import { useTenantFeatures } from '../features/platform/useTenantFeatures'
+import { hasTenantAddon } from '../features/platform/tenantFeatureAccess'
 import { useLoginActivity, useTenantSession } from '../features/session'
 import { useThemeTokens } from '../hooks/useThemeTokens'
 import { getCachedContext, saveCachedContext } from '../lib/offlineStore'
@@ -22,6 +23,7 @@ import { useDomainErrors } from './useDomainErrors'
 const CrmPage = lazy(() => import('../components/crm/CrmPage').then((module) => ({ default: module.CrmPage })))
 const SuperAdminPage = lazy(() => import('../components/superadmin/SuperAdminPage').then((module) => ({ default: module.SuperAdminPage })))
 const PosRuntime = lazy(() => import('./PosRuntime').then((module) => ({ default: module.PosRuntime })))
+const PersonalDeviceSession = lazy(() => import('../features/personal/PersonalDeviceSession').then((module) => ({ default: module.PersonalDeviceSession })))
 const KdsPage = lazy(() => import('../features/production/components/KdsPage').then((module) => ({ default: module.KdsPage })))
 
 const themes = themesData as ThemeDefinition[]
@@ -110,12 +112,15 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
     if (isCrmUser(context)) return <CrmPage context={context} error={error} isOnline={isOnline} onBusyChange={setApplicationBusy} onError={setGeneralError} onLogout={session.logout} />
     if (context.deviceMode === 'kds') return <KdsPage context={context} isOnline={isOnline} onBusyChange={setApplicationBusy} onLogout={session.logout} />
     if (!bootstrap) return <LoadingScreen />
-    return <PosRuntime
+    const renderPos = (posContext: TenantContext, onStaffBusyChange?: (busy: boolean) => void) => <PosRuntime
       key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}`}
-      context={context} bootstrap={bootstrap} offline={offline} isOnline={isOnline}
+      context={posContext} bootstrap={bootstrap} offline={offline} isOnline={isOnline} onStaffBusyChange={onStaffBusyChange}
       error={error} errorId={errorId} onError={setGeneralError} onLogout={session.logout}
       onBusyChange={setApplicationBusy} themes={themes} selectedThemeId={themeId} setThemeId={setThemeId}
     />
+    return hasTenantAddon(context, 'tickit_personal')
+      ? <PersonalDeviceSession key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}`} context={context} isOnline={isOnline} onLogout={session.logout}>{renderPos}</PersonalDeviceSession>
+      : renderPos(context)
   }}</AppRouter><AppUpdateBanner blocked={updateBlocked} status={versionStatus} /></>
 }
 

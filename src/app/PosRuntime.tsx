@@ -47,12 +47,13 @@ export type PosRuntimeProps = {
   onError: (message: string | null) => void
   onLogout: () => Promise<void>
   onBusyChange: (busy: boolean) => void
+  onStaffBusyChange?: (busy: boolean) => void
   themes: ThemeDefinition[]
   selectedThemeId: string
   setThemeId: (id: string) => void
 }
 
-export function PosRuntime({ context, bootstrap, offline, isOnline, error, errorId, onError, onLogout, onBusyChange, themes, selectedThemeId, setThemeId }: PosRuntimeProps) {
+export function PosRuntime({ context, bootstrap, offline, isOnline, error, errorId, onError, onLogout, onBusyChange, onStaffBusyChange, themes, selectedThemeId, setThemeId }: PosRuntimeProps) {
   const [appliedBootstrap, setAppliedBootstrap] = useState<PosBootstrap | null>(null)
   const [catalog, setCatalog] = useState<CatalogData | null>(null)
   const [discounts, setDiscounts] = useState<Discount[]>([])
@@ -269,6 +270,11 @@ export function PosRuntime({ context, bootstrap, offline, isOnline, error, error
     onBusyChange(updateBlocked || appliedBootstrap !== bootstrap)
     return () => onBusyChange(false)
   }, [appliedBootstrap, bootstrap, onBusyChange, updateBlocked])
+
+  const staffBusy = isBusy || quickSale.paymentInFlight || quickSale.cashPaymentOpen || cash.movementSaving
+    || restaurant.saveState !== 'saved' || Boolean(restaurant.pendingPayment) || restaurant.equalSplitOpen
+    || auxiliaryOperationBusy || cashlogyPaymentActive || cashlogyManagementActive || localHardwareActive
+  useEffect(() => { onStaffBusyChange?.(staffBusy) }, [onStaffBusyChange, staffBusy])
 
   if (appliedBootstrap !== bootstrap || (isOnline && !restaurant.tablesConfigLoaded)) return <LoadingScreen />
   if (!cash.session && !reservations.isOpen) return <PosStartupReveal><CashSessionGate

@@ -28,6 +28,7 @@ export const productSchema = z.object({
   active: z.boolean(), sortOrder: z.number().int().min(0).max(10000),
 }).strict().refine(product => product.scope !== 'device' || product.featureKey === null, 'Los permisos actuales son por empresa/local; los dispositivos solo pueden ampliar capacidad.')
   .refine(product => product.featureKey !== 'tickit_assist' || product.scope === 'tenant', 'Tickit Assist conserva su contrato por empresa y sus controles operativos por local.')
+  .refine(product => product.featureKey !== 'tickit_personal' || product.scope === 'tenant', 'Tickit Personal se contrata por empresa.')
   .refine(product => product.kind !== 'plan' || (product.scope === 'tenant' && product.featureKey === null && product.resource === null), 'El plan base se contrata por empresa.')
   .refine(product => product.scope !== 'venue' || product.featureKey === null || ['analytics_advanced','restaurant','reservations','production','inventory','costing','purchases','document_ai','promotions','cashlogy'].includes(product.featureKey), 'La funcionalidad no admite asignación comercial por local.')
 export const versionSchema = z.object({

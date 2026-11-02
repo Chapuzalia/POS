@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef } from 'react'
 import { acceptPaymentOperation, commitPaymentOperation, discardPreparedPaymentOperation, loadPaymentOperations, markPaymentCharging, paymentScope, preparePaymentOperation, withPaymentLock } from '../../../lib/durableSales.ts'
 import { loadSessionTicketFromSupabase } from '../../../services/posService'
 import { buildSalePayload } from '../services/salePayload'
+import { assertStaffDiscount, staffCan } from '../../personal/permissions'
 import { getPayloadPayments, withCustomPayments } from '../../../lib/customPayments'
 import { loadTicketInvoice } from '../../customers/service'
 import {
@@ -123,6 +124,11 @@ export function useQuickSalePayment(options: Options) {
       confirmedCashlogyTransaction?.saleId ? { saleId: confirmedCashlogyTransaction.saleId } : undefined,
     )
     const candidate = !pending && customCashCents !== undefined ? withCustomPayments(draft, customCashCents) : draft
+    if (!pending) {
+      if (!staffCan(context, 'pos.payment.take')) { fail('El trabajador no tiene permiso para cobrar.'); return }
+      try { if (context.personalStaff) assertStaffDiscount(context, options.discount, candidate.lines.map(line => ({ ...line, grossCents: line.lineTotalCents }))) }
+      catch (error) { fail(error instanceof Error ? error.message : 'Descuento no autorizado.'); return }
+    }
     // Additive keys retain old singleton journals and give every new ticket its
     // own recovery identity; one unresolved payment cannot occupy the register.
     const operationKey = stored?.key ?? `${quickSaleKey}:${candidate.sale.id}`
