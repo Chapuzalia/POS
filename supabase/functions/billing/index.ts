@@ -1,5 +1,6 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { billingErrorMessages } from '../_shared/billing/errors.ts'
+import { billingFailureDiagnostic } from '../_shared/billing/diagnostics.ts'
 import { BillingService } from '../_shared/billing/service.ts'
 import { requestSchema } from '../_shared/billing/schemas.ts'
 import { StripeGateway } from '../_shared/billing/stripe.ts'
@@ -10,6 +11,7 @@ Deno.serve(async request => {
   const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers })
   if (request.method === 'OPTIONS') return reply({})
   if (request.method !== 'POST') return reply({ error: 'Método no permitido.' }, 405)
+  let action = 'unvalidated'
   try {
     const url = Deno.env.get('SUPABASE_URL')
     const publicKey = Deno.env.get('SUPABASE_ANON_KEY')
@@ -27,9 +29,12 @@ Deno.serve(async request => {
     const admin = profile.data.is_superadmin === true
     const raw = await request.text()
     if (raw.length > 100_000) return reply({ error: 'Solicitud demasiado grande.' }, 413)
-    const parsed = requestSchema.safeParse(JSON.parse(raw))
-    if (!parsed.success) return reply({ error: 'Revisa los campos de facturación enviados.' }, 400)
+    let input: unknown
+    try { input = JSON.parse(raw) } catch { throw new Error('BILLING_INVALID_REQUEST') }
+    const parsed = requestSchema.safeParse(input)
+    if (!parsed.success) throw new Error('BILLING_INVALID_REQUEST')
     const body = parsed.data
+    action = body.action
     if ('tenantId' in body && !admin) {
       const membership = await db.from('tenant_memberships').select('role,is_active').eq('tenant_id', body.tenantId).eq('user_id', user.user.id).maybeSingle()
       if (membership.error || membership.data?.role !== 'owner' || !membership.data.is_active) return reply({ error: 'Solo el propietario puede acceder a la facturación de su empresa.' }, 403)
@@ -80,7 +85,9 @@ Deno.serve(async request => {
       }
     }
   } catch (error) {
+    console.error(JSON.stringify(billingFailureDiagnostic(action, error)))
     const message = error instanceof Error ? error.message : ''
+    if (message === 'BILLING_INVALID_REQUEST') return reply({ error: billingErrorMessages[message], code: message }, 400)
     if (billingErrorMessages[message]) return reply({ error: billingErrorMessages[message], code: message }, 409)
     const invalid = message.startsWith('BILLING_INVALID') || message.includes('BELOW_USAGE') || message.includes('QUANTITY') || message.includes('PREREQUISITE') || message.includes('FOREIGN_ASSIGNMENT')
     const code = invalid ? 'BILLING_INVALID_SELECTION' : 'BILLING_ACTION_REQUIRED'

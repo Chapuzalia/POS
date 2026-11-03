@@ -69,7 +69,7 @@ export class FakeStripe {
     const tax=(rates??[]).reduce((sum,value)=>{const rate=this.taxRates.find(row=>row.id===(value.id??value));return sum+(rate&&taxExempt==='none'?Math.round(subtotal*rate.percentage/100):0)},0)
     return {subtotal,total:subtotal+tax}
   }
-  invoice(paid=true){const sub=this.subscriptions[0],amounts=this.totals(sub.items.data,sub.default_tax_rates,sub.discounts);const invoice={id:`in_${this.invoices.length+1}`,customer:'cus_test',status:paid?'paid':'open',currency:'eur',amount_due:amounts.total,amount_paid:paid?amounts.total:0,total:amounts.total,total_excluding_tax:amounts.subtotal,subtotal_excluding_tax:amounts.subtotal,created:this.now,number:null,hosted_invoice_url:null,invoice_pdf:null,status_transitions:{paid_at:paid?this.now:null}};this.invoices.push(invoice);return invoice}
+  invoice(paid=true,items=this.subscriptions[0].items.data,discounts=this.subscriptions[0].discounts){const sub=this.subscriptions[0],amounts=this.totals(items,sub.default_tax_rates,discounts);const invoice={id:`in_${this.invoices.length+1}`,customer:'cus_test',status:paid?'paid':'open',currency:'eur',amount_due:amounts.total,amount_paid:paid?amounts.total:0,total:amounts.total,total_excluding_tax:amounts.subtotal,subtotal_excluding_tax:amounts.subtotal,created:this.now,number:null,hosted_invoice_url:null,invoice_pdf:null,status_transitions:{paid_at:paid?this.now:null}};this.invoices.push(invoice);return invoice}
   items(lines){return lines.map((line,index)=>({id:`si_${index}`,price:{id:line.price},quantity:line.quantity,current_period_start:this.now,current_period_end:this.now+2592000}))}
   discounts(value){return value?value.map(discount=>({source:{coupon:discount.coupon}})):[]}
   completeCheckout(paid=true){const session=[...this.sessions.values()].at(-1);session.status='complete';this.subscriptions=[{id:'sub_test',customer:'cus_test',livemode:false,status:paid?'active':'incomplete',billing_cycle_anchor:this.now,items:{data:this.items(session.params.line_items),has_more:false},default_tax_rates:(session.params.subscription_data.default_tax_rates??[]).map(id=>({id})),automatic_tax:{enabled:false},pending_update:null,cancel_at_period_end:false,latest_invoice:null,schedule:null,discounts:this.discounts(session.params.discounts),metadata:session.params.subscription_data.metadata}];this.subscriptions[0].latest_invoice=this.invoice(paid);Object.assign(session,{livemode:false,mode:'subscription',payment_status:paid?'paid':'unpaid',customer:'cus_test',subscription:'sub_test',invoice:this.subscriptions[0].latest_invoice.id,currency:'eur',client_reference_id:session.params.client_reference_id,metadata:session.params.metadata})}
@@ -85,7 +85,15 @@ export class FakeStripe {
     this.mandates.set('mandate_test',{id:'mandate_test',livemode:false,status:'active',type:'multi_use',payment_method:method.id,payment_method_details:{type:'sepa_debit'},customer_acceptance:{type:'online',accepted_at:this.now}})
   }
   failSepa(){const sub=this.subscriptions[0];sub.status='past_due';const intent=this.intents.get(`pi_${sub.latest_invoice.id}`);intent.status='requires_payment_method';intent.last_payment_error={code:'insufficient_funds'};intent.latest_charge.status='failed';intent.latest_charge.failure_code='insufficient_funds'}
-  pay(){const sub=this.subscriptions[0];if(this.sepa&&sub.latest_invoice?.status==='open'){const invoice=sub.latest_invoice;invoice.status='paid';invoice.amount_paid=invoice.amount_due;invoice.status_transitions.paid_at=this.now;sub.status='active';const intent=this.intents.get(`pi_${invoice.id}`);if(intent){intent.status='succeeded';intent.latest_charge.status='succeeded'}return} if(sub.pending_update){const params=sub.pending_update;sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null}sub.status='active';sub.latest_invoice=this.invoice()}
+  pay(){
+    const sub=this.subscriptions[0]
+    if(sub.pending_update){const params=sub.pending_update;sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null}
+    sub.status='active'
+    if(sub.latest_invoice?.status==='open'){
+      const invoice=sub.latest_invoice;invoice.status='paid';invoice.amount_paid=invoice.amount_due;invoice.status_transitions.paid_at=this.now
+      const intent=this.intents.get(`pi_${invoice.id}`);if(intent){intent.status='succeeded';intent.latest_charge.status='succeeded'}
+    }else sub.latest_invoice=this.invoice()
+  }
   advancePhase(index=1){const sub=this.subscriptions[0],schedule=this.schedules.get(sub.schedule),phase=schedule.phases[index];this.now=schedule.current_phase.end_date+(index-1)*2592000;sub.items.data=this.items(phase.items);sub.metadata={...sub.metadata,...phase.metadata};sub.discounts=this.discounts(phase.discounts);if(phase.default_tax_rates)sub.default_tax_rates=phase.default_tax_rates.map(id=>({id}));sub.latest_invoice=this.invoice()}
   applyScheduledPhase(at) {
     const sub=this.subscriptions[0], schedule=this.schedules.get(sub.schedule)
@@ -124,9 +132,9 @@ export class FakeStripe {
     else if(path.startsWith('/mandates/'))result=this.mandates.get(path.split('/').at(-1))
     else if(path.startsWith('/payment_methods/'))result=this.subscriptions[0]?.default_payment_method
     else if(path==='/customers'||path==='/customers/cus_test'){if(params.tax_exempt)this.customerTaxExempt=params.tax_exempt;result={id:'cus_test',tax_exempt:this.customerTaxExempt}}
-    else if(path==='/checkout/sessions'){result={id:`cs_test_${this.sessions.size}`,url:'https://checkout.stripe.com/test'};this.sessions.set(result.id,{...result,status:'open',params})}
+    else if(path==='/checkout/sessions'){result={id:`cs_test_${this.sessions.size}`,url:'https://checkout.stripe.com/test'};this.sessions.set(result.id,{...result,status:'open',livemode:false,mode:'subscription',customer:params.customer,subscription:null,invoice:null,client_reference_id:params.client_reference_id,metadata:params.metadata,params})}
     else if(path.startsWith('/checkout/sessions/')){result=this.sessions.get(path.split('/').at(path.endsWith('/expire')?-2:-1));if(path.endsWith('/expire')){if(result.status!=='open')throw new Error('STRIPE_CHECKOUT_NOT_OPEN');result.status='expired'}result.customer=result.params.customer}
-    else if(path==='/subscription_schedules'){result={id:'sub_sched_test',current_phase:{start_date:this.subscriptions[0].items.data[0].current_period_start,end_date:this.subscriptions[0].items.data[0].current_period_end}};this.subscriptions[0].schedule=result.id;this.schedules.set(result.id,result)}
+    else if(path==='/subscription_schedules'){result={id:'sub_sched_test',subscription:this.subscriptions[0].id,status:'active',metadata:{},current_phase:{start_date:this.subscriptions[0].items.data[0].current_period_start,end_date:this.subscriptions[0].items.data[0].current_period_end}};this.subscriptions[0].schedule=result.id;this.schedules.set(result.id,result)}
     else if(path.startsWith('/subscription_schedules/')){
       if(path.endsWith('/release')){result=this.schedules.get(path.split('/').at(-2));result.status='released';this.subscriptions[0].schedule=null}
       else {result=this.schedules.get(path.split('/').at(-1));Object.assign(result,params);if(params.metadata){result.subscription='sub_test';result.status='active';this.applyScheduledPhase(this.now)}}
@@ -145,7 +153,7 @@ export class FakeStripe {
       }
       else if(method==='POST'){
         if(this.sepa&&params.payment_behavior==='pending_if_incomplete')throw new Error('SEPA does not support pending_if_incomplete')
-        if(this.failPayment){sub.pending_update=params;sub.latest_invoice=this.invoice(false)}
+        if(this.failPayment){sub.pending_update=params;sub.latest_invoice=this.invoice(false,params.items.filter(row=>!row.deleted),this.discounts(params.discounts))}
         else{sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.latest_invoice=this.invoice()}
       }
       result=sub

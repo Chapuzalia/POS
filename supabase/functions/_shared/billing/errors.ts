@@ -1,5 +1,6 @@
 // Only reviewed public billing messages may reach the UI. Never include provider errors.
 export const billingErrorMessages: Record<string, string> = {
+  BILLING_INVALID_REQUEST: 'Revisa los campos obligatorios, importes y condiciones de facturación.',
   BILLING_PORTAL_NOT_CONFIGURED: 'Configura primero el Customer Portal de Stripe sandbox.',
   BILLING_PORTAL_UNSAFE_CONFIGURATION: 'Desactiva los cambios y cancelaciones de suscripción en la configuración del portal. Se gestionan desde Tickit.',
   BILLING_PENDING_CHANGE: 'Hay una modificación, calendario o condición de pago pendiente. Concilia la suscripción antes de solicitar otro cambio.',

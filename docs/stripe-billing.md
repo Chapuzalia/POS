@@ -1,5 +1,47 @@
 # Stripe Billing de Tickit: implementación y puesta en marcha sandbox
 
+## Diagnóstico de staging y simplificación del superadmin (03-11-2026)
+
+Inspección de solo lectura del staging actual `pre.tickitpos.com` / `pre-supa.tickitpos.com`, proyecto Compose `cvvgpifhnclvfc1evorkp74f`, y de su cuenta Stripe test. No se han desplegado cambios ni modificado datos remotos. Los destinos antiguos citados más abajo son históricos.
+
+Los logs del gateway entre el 2 de noviembre a las 18:00 y el 3 a las 07:00, hora de Madrid, contienen 123 POST a Billing: 116 respuestas 200, dos 400 de validación y cinco 409. Las cinco respuestas 409 tienen el tamaño exacto del mensaje `BILLING_INVALID_PROMOTION_CONTRACT`; es una inferencia, porque el backend anterior no registraba el código ni la acción fallida. No se conservan los cuerpos de esas solicitudes y no se puede reconstruir cada selección concreta.
+
+Stripe confirma que el alta de prueba sí funcionó: pago de 59,29 € a las 22:55:32, suscripción activa y Checkout completado. A las 22:57 se creó y actualizó un calendario; a las 22:59:30 se publicó un addon de 5 €. Los rechazos de cambios posteriores no prueban un fallo del cobro inicial. A las 23:03 se eliminaron el cliente y su suscripción de prueba y se canceló su calendario. El catálogo conserva un borrador de 5 céntimos seguido de tres de 500 céntimos, uno publicado; esto muestra el riesgo de la entrada anterior en céntimos y los guardados repetidos, sin demostrar por sí solo qué intención tenía cada guardado.
+
+Corrección local:
+
+- Precio del catálogo en euros, con coma o punto y hasta dos decimales; se envían céntimos enteros. Guardar confirma el borrador y publicar sigue siendo una acción explícita. Un doble clic o un fallo de refresco después de guardar no crea otra tarifa.
+- Las promociones requieren suscripción activa y contrato sincronizado, y no se ofrecen mientras el contrato conserve una excepción general temporal por ciclos. Los ciclos tampoco se ofrecen antes del alta ni junto con promociones. Se muestra el motivo de cada restricción y el consentimiento o justificación pendientes antes de pedir presupuesto.
+- Una operación económica pendiente se explica antes de solicitar otro cambio; las promociones con calendario propio siguen siendo editables. Los errores de confirmación aparecen dentro del diálogo y actualizar o cambiar el motivo descarta el presupuesto anterior.
+- La función Billing devuelve un código de validación revisado y registra acción validada, código público y, si existe, diagnóstico saneado de Stripe. Nunca registra cuerpos, mensajes del proveedor, datos de cliente ni credenciales.
+
+Regresión en `tests/functional/billing-admin.test.ts` y `billing-endpoint.test.ts`, con el harness de componentes existente y el handler real. No se cambian importes, impuestos, idempotencia, permisos ni migraciones. La corrección necesita desplegar frontend y las funciones `billing`, `billing-webhook` y `billing-reconcile`, porque la revisión de estados siguiente modifica su servicio compartido.
+
+Verificación local: pasan `pnpm test`, `pnpm lint` y `pnpm build`. Lint conserva dos avisos previos de hooks en CRM/restaurante; build avisa de la ausencia del token de publicación de Sentry. No se ha realizado aceptación visual ni un nuevo cobro remoto. `pnpm dlx deno check supabase/functions/billing/index.ts` no pudo arrancar por falta de permisos sobre el almacén global de pnpm; el handler sí se ejecutó en las pruebas de regresión.
+
+### Revisión de pagos pendientes, incompletos y fallidos
+
+Se reprodujeron y corrigieron incoherencias en el servicio real con PostgreSQL embebido:
+
+- Una renovación pagada podía completar una ampliación SEPA cuya factura seguía abierta. Cada alta o ampliación se contrasta ahora con **su propia factura**. También se conserva el caso inverso: una renovación posterior impagada no mantiene pendiente una ampliación ya liquidada, sin ocultar la mora actual.
+- Un Checkout completado con factura finalmente anulada podía conservar indefinidamente `payment_pending`, también en altas `incomplete_expired`. Se caduca la operación al verificar el Checkout y su factura, con comprobaciones de empresa, cliente y operación. Se excluye de las candidatas de esa misma conciliación para no reactivarla accidentalmente.
+- `uncollectible` no se trata como factura pagada ni como una anulación definitiva: la deuda y el bloqueo permanecen hasta su regularización. Los resultados inciertos conservan `applying`, la operación y sus claves de idempotencia.
+- Repetir una confirmación caducada/fallida produce un error revisado; una operación en curso exige recuperación y una completada no devuelve un Checkout antiguo. Si el Checkout ya terminó pero su factura necesita pago, la continuación utiliza la URL de esa factura, sin crear otra suscripción ni otro cargo.
+
+`tests/functional/billing-payment-states.test.ts` cubre esos casos, recuperación de tarjeta sobre la misma factura, SEPA, eventos duplicados/desordenados y rechazo de Checkouts ajenos. El doble de Stripe se corrigió para pagar la factura original en un reintento en lugar de fabricar otra, y para representar el importe objetivo de una ampliación fallida. Se conservan las pruebas existentes de autorización SEPA, aislamiento, permisos y respuestas perdidas.
+
+La nueva consulta de solo lectura a staging encontró siete cuentas manuales, ninguna operación de Billing registrada, ningún caso de operación completada con factura enlazada impagada, dos eventos ignorados y seis suscripciones canceladas en el sandbox. Esto describe esa instantánea; las correcciones anteriores se justifican por las regresiones reproducibles, no por afirmar que hubiera entonces una deuda activa afectada. No se han alterado datos remotos ni desplegado esta corrección.
+
+### Simplificación de la interfaz de Superadmin
+
+La entrada principal es Clientes, con búsqueda, estados en español y filtro de cuentas que necesitan atención. Cada ficha diferencia plan preparado de contratado y destaca el pago o recuperación pendientes. El cambio de plan sigue tres pasos (selección, revisión y confirmación); las tarifas anteriores requieren una elección explícita. Las bajas, promociones, datos internos e historial se despliegan aparte, y el registro técnico queda en Diagnóstico. Los fallos parciales de una comprobación por lotes se muestran expresamente.
+
+Planes y precios abre un producto existente sin crear otra tarifa por defecto. Explica guardar borrador y publicar como acciones distintas; los precios particulares también se editan en euros. La lista usa una presentación compacta en móvil y se restablecen foco y desplazamiento al cambiar de ficha. Se conserva el contraste de los controles en ambos temas.
+
+La prueba interactiva detectó problemas de activación con el checkbox compuesto anterior, cuyo marcado también anidaba etiquetas. El componente compartido conserva su API y usa ahora un input nativo con etiqueta única, estado controlado, deshabilitado, foco visible y zona táctil de 44 px. Se verificaron clic y teclado en la interfaz renderizada; las pruebas de accesibilidad usan el componente real y la suite completa cubre sus consumidores.
+
+QA local en navegador integrado con datos sintéticos y sin acceso económico remoto: filtro de atención, apertura de cliente, activación del complemento con ratón/teclado, revisión del cambio, guardado y publicación simulados de tarifas, tema claro/oscuro y vista móvil de 390 px. La sesión limpia no presentó errores ni avisos de consola. La página y los dobles temporales de QA se retiran tras la verificación; no forman parte de la aplicación.
+
 La configuración vigente de nuevos Checkouts solicita datos fiscales y permite
 tarjeta o SEPA. Las ampliaciones SEPA se aplican con cobro en trámite y acceso tras
 verificar la autorización; las de tarjeta mantienen `pending_if_incomplete`.
@@ -116,6 +158,8 @@ La transición de estado se ejecuta en una transacción SQL con bloqueo de la cu
 Los clientes manuales mantienen sus derechos hasta el primer contrato confirmado. Un `pending_update`, impago, cancelación o fallo de Stripe no borra derechos operativos ni información. La gracia configurable produce estados comerciales `current`, `grace` y `restricted`; tras ella se restringen nuevas ampliaciones en mora, no ventas ni caja.
 
 Una bajada confirmada que reduzca acceso mientras haya cajas o comandas abiertas difiere su proyección de permisos hasta el cierre operativo. `billed_contract` ya refleja las condiciones económicas nuevas para no inflar MRR; `contract` mantiene temporalmente los derechos anteriores. La supervisión muestra la espera. No se cierran cajas, no se modifican ventas y no se tocan números de ticket ni documentos fiscales.
+
+Una baja confirmada sustituye también los cambios de plan al renovar y las excepciones temporales creados por Tickit antes del calendario de promociones actual. Se exige coincidencia de empresa, suscripción, calendario y metadatos de las fases. La migración `20261103163503_billing_cancel_scheduled_change.sql` transfiere atómicamente el bloqueo al cancelar y conserva el historial del cambio sustituido. Si Stripe rechaza retirar el calendario, se restaura el cambio original; ante una respuesta incierta se mantiene el bloqueo y se reintenta la misma operación. Calendarios ajenos y operaciones de pago pendientes siguen bloqueados. Aplicar la migración antes de desplegar el servicio; la preparación local no modifica ninguna suscripción remota.
 
 Las pantallas antiguas de asignación no pueden saltarse un contrato Stripe. Los locales nuevos reciben desactivadas las funcionalidades con asignación comercial por local, hasta contratar/asignar sus unidades. Tickit Assist conserva su contrato por empresa y su interruptor operativo existente por local; los productos por dispositivo amplían capacidad, no crean permisos por dispositivo que el sistema actual no sabe aplicar.
 

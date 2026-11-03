@@ -307,8 +307,8 @@ export function SuperAdminPage({ context, error, isOnline, onBusyChange, onError
 
       <aside
         className={isSidebarOpen
-          ? '!fixed !top-0 !bottom-0 !left-0 !z-40 !flex !h-full !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !translate-x-0 !flex-col !overflow-y-auto !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !px-5 !pt-6 !pb-[18px] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] !transition-transform !duration-200 xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none'
-          : '!fixed !top-0 !bottom-0 !left-0 !z-40 !flex !h-full !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !-translate-x-[102%] !flex-col !overflow-y-auto !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !px-5 !pt-6 !pb-[18px] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] !transition-transform !duration-200 xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none'}
+          ? '!fixed !top-0 !bottom-0 !left-0 !z-40 !flex !h-full !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !translate-x-0 !flex-col !overflow-y-auto !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !px-5 !pt-6 !pb-[18px] !text-[var(--crm-sidebar-text)] !shadow-[var(--crm-shadow-floating)] !transition-transform !duration-200 xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none'
+          : '!fixed !top-0 !bottom-0 !left-0 !z-40 !flex !h-full !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !-translate-x-[102%] !flex-col !overflow-y-auto !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !px-5 !pt-6 !pb-[18px] !text-[var(--crm-sidebar-text)] !shadow-[var(--crm-shadow-floating)] !transition-transform !duration-200 xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none'}
         id="superadmin-sidebar"
       >
         <div className="!grid !min-h-11 !grid-cols-[40px_minmax(0,1fr)] !items-center !justify-stretch !gap-[11px] !border-0 !p-0">
@@ -316,16 +316,16 @@ export function SuperAdminPage({ context, error, isOnline, onBusyChange, onError
             <Crown className="size-5 stroke-[1.8]" />
           </div>
           <div>
-            <p className="!m-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-sm !leading-tight !font-semibold !text-[var(--crm-text)]">TICKIT</p>
-            <p className="!mt-0.5 !mb-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Superadmin</p>
+            <p className="!m-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-sm !leading-tight !font-semibold !text-[var(--crm-sidebar-text)]">TICKIT</p>
+            <p className="!mt-0.5 !mb-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-[11px] !font-medium !text-[var(--crm-sidebar-muted)]">Superadmin</p>
           </div>
         </div>
 
         <nav aria-label="Navegación del Superadmin" className="!mt-[30px] !flex !flex-col !gap-[5px]">
-          <p className="!mx-0 !mt-0 !mb-[7px] !ml-[3px] !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Menú principal</p>
+          <p className="!mx-0 !mt-0 !mb-[7px] !ml-[3px] !text-[11px] !font-medium !text-[var(--crm-sidebar-muted)]">Menú principal</p>
           <UiButton
             aria-current={section === 'tenants' ? 'page' : undefined}
-            className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none"
+            className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !text-[var(--crm-sidebar-text)] hover:!bg-white/10 aria-[current=page]:!bg-[var(--crm-blue)] aria-[current=page]:!text-white !px-3.5 !text-left !text-sm !font-medium !shadow-none"
             disabled={isBusy || billingBusy}
             onClick={() => { setSection('tenants'); setIsSidebarOpen(false) }}
             type="button"
@@ -333,11 +333,11 @@ export function SuperAdminPage({ context, error, isOnline, onBusyChange, onError
             <Building2 className="h-4 w-4" />
             <span>Negocios</span>
           </UiButton>
-          <UiButton aria-current={section === 'billing' ? 'page' : undefined} className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none" disabled={isBusy || billingBusy} onClick={() => { setSection('billing'); setIsSidebarOpen(false) }} type="button"><Crown className="h-4 w-4" /><span>Facturación</span></UiButton>
+          <UiButton aria-current={section === 'billing' ? 'page' : undefined} className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !text-[var(--crm-sidebar-text)] hover:!bg-white/10 aria-[current=page]:!bg-[var(--crm-blue)] aria-[current=page]:!text-white !px-3.5 !text-left !text-sm !font-medium !shadow-none" disabled={isBusy || billingBusy} onClick={() => { setSection('billing'); setIsSidebarOpen(false) }} type="button"><Crown className="h-4 w-4" /><span>Facturación</span></UiButton>
         </nav>
 
         <div className="!mt-auto !grid !gap-[5px] !border-0 !pt-7">
-          <UiButton className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none" disabled={isBusy || billingBusy} onClick={onLogout} type="button">
+          <UiButton className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-sidebar-muted)] hover:!text-[var(--crm-sidebar-text)] !shadow-none" disabled={isBusy || billingBusy} onClick={onLogout} type="button">
             <LogOut className="h-4 w-4" />
             <span>Cerrar sesión</span>
           </UiButton>
