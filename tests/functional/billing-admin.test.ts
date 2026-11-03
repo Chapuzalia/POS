@@ -27,7 +27,7 @@ function text(node: ReturnType<typeof nodes>[number]): string {
 const button = (tree: object, label: string) => nodes(tree).find(node => node.type === 'button' && text(node).includes(label))
 const input = (tree: object, label: string) => nodes(nodes(tree).find(node => node.type === 'label' && text(node).includes(label))).find(node => node.type === 'input')
 
-function panel(active = false, temporary = false, pending = false) {
+function panel(active = false, temporary = false, pending = false, admin = true) {
   const agreement = { ...contract, exception: temporary ? { freeUnits: {}, limits: {}, discountBasisPoints: 1000, customAmounts: {}, cycles: 3, reason: 'Descuento temporal' } : null }
   const detail = {
     account: { status: active ? 'active' : 'manual', stripe_customer_id: active ? 'cus_test' : null, stripe_subscription_id: active ? 'sub_test' : null, contract: active ? agreement : null, onboarding_contract: agreement },
@@ -38,6 +38,7 @@ function panel(active = false, temporary = false, pending = false) {
     if (action === 'catalog') return catalog
     if (action === 'get') return detail
     if (action === 'quote') return { id: 'quote', timing: 'immediate', preview: { amountDueCents: 6534, recurringCents: 5400 } }
+    if (action === 'portal') return { url: 'https://billing.stripe.com/test' }
     throw new Error('No se pudo confirmar. Revisa el estado antes de reintentar.')
   })
   const runner = createCompiledHookRunner(readFileSync(new URL('../../src/features/billing/TenantBillingPanel.tsx', import.meta.url), 'utf8'), 'TenantBillingPanel', {
@@ -47,14 +48,76 @@ function panel(active = false, temporary = false, pending = false) {
     './presentation': presentation,
     './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: vi.fn() },
   }, { Error, Date, crypto })
-  const render = () => runner.render({ tenantId: 'tenant', admin: true })
+  const render = () => runner.render({ tenantId: 'tenant', admin })
   const exceptionTree = () => {
     const editor = nodes(render()).find(node => typeof node.type === 'function' && node.type.name === 'ExceptionEditor')
     return editor.type(editor.props)
   }
   onTestFinished(() => runner.unmount())
-  return { render, request, exceptionTree }
+  return { render, request, exceptionTree, detail }
 }
+
+it('keeps the customer plan minimal until Modify plan is opened and retains the existing quote flow', async () => {
+  const h = panel(true, false, true, false)
+  const agreement = h.detail.operations[0].contract
+  h.detail.account.contract = agreement
+  h.detail.operations = []
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
+  const overview = text(h.render())
+  expect(overview).toContain('Mi plan')
+  expect(overview).toContain('Base')
+  expect(overview).toContain(formatMoney(5900))
+  expect(overview).toContain('Personal')
+  expect(overview.replace(/\s+/g, ' ')).toContain('2 unidades')
+  for (const label of ['Plan y tarifa', 'Último pago', 'Historial de cambios', 'Facturas de suscripción', 'Actualizar ficha']) expect(overview).not.toContain(label)
+  expect(button(h.render(), 'Revisar cambio')).toBeUndefined()
+  expect(h.request.mock.calls.some(([body]) => ['quote', 'confirm', 'portal'].includes(body.action))).toBe(false)
+  await button(h.render(), 'Métodos de pago').props.onClick()
+  await vi.waitFor(() => expect(h.request.mock.calls.some(([body]) => body.action === 'portal')).toBe(true))
+  button(h.render(), 'Modificar plan').props.onClick()
+  expect(text(h.render())).toContain('Plan y tarifa')
+  expect(nodes(h.render()).some(node => typeof node.type === 'function' && node.type.name === 'ExceptionEditor')).toBe(false)
+  expect(nodes(h.render()).some(node => node.type === 'section' && node.props.id === 'billing-plan-editor-tenant')).toBe(true)
+  expect(nodes(h.render()).some(node => node.props?.['aria-label'] === 'Resumen del plan')).toBe(false)
+  button(h.render(), 'Revisar cambio').props.onClick()
+  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
+  expect(h.request.mock.calls.find(([body]) => body.action === 'quote')[0]).toMatchObject({ tenantId: 'tenant', exception: null })
+  const dialog = nodes(h.render()).find(node => node.type === 'dialog')
+  nodes(dialog).find(node => node.type === 'button' && text(node) === 'Volver').props.onClick()
+  button(h.render(), 'Volver a mi plan').props.onClick()
+  expect(button(h.render(), 'Revisar cambio')).toBeUndefined()
+  expect(h.request.mock.calls.some(([body]) => body.action === 'confirm')).toBe(false)
+})
+
+it('keeps customer pending payments visible while plan modifications remain blocked', async () => {
+  const h = panel(true, false, true, false)
+  h.detail.operations[0].status = 'payment_pending'
+  Object.assign(h.detail.operations[0], { result: { url: 'https://invoice.stripe.com/test' } })
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
+  expect(text(h.render())).toContain('Completar el pago pendiente')
+  expect(button(h.render(), 'Continuar pago')).toBeDefined()
+  expect(button(h.render(), 'Revisar cambio')).toBeUndefined()
+  button(h.render(), 'Modificar plan').props.onClick()
+  expect(button(h.render(), 'Revisar cambio').props.disabled).toBe(true)
+  expect(button(h.render(), 'Continuar pago')).toBeDefined()
+})
+
+it('discards an unconfirmed customer draft when returning to the plan overview', async () => {
+  const h = panel(true, false, false, false)
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
+  button(h.render(), 'Modificar plan').props.onClick()
+  const toggle = () => nodes(h.render()).find(node => node.type === 'checkbox' && node.props['aria-label'] === 'Personal')
+  expect(toggle().props.checked).toBe(true)
+  toggle().props.onChange(false)
+  expect(toggle().props.checked).toBe(false)
+  button(h.render(), 'Volver a mi plan').props.onClick()
+  button(h.render(), 'Modificar plan').props.onClick()
+  expect(toggle().props.checked).toBe(true)
+  expect(h.request.mock.calls.some(([body]) => ['quote', 'confirm'].includes(body.action))).toBe(false)
+})
 
 it('prevents promotions and temporary cycles before activation while allowing a permanent discount', async () => {
   const h = panel()

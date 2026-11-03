@@ -167,6 +167,6 @@ export function CrmSectionContent({
     case 'settings':
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':
-      return <PlanCrm disabled={disabled} runAction={runAction} tenantContext={context} />
+      return <PlanCrm disabled={disabled} tenantContext={context} />
   }
 }
