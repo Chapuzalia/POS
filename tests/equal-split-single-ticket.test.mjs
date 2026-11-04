@@ -152,7 +152,7 @@ test('three payments traverse real IndexedDB, RPC mapping and PostgreSQL, includ
   } } })
   const charges = []
   const service = compileComponent(readFileSync(new URL('../src/features/restaurant/services/payment.ts',import.meta.url),'utf8'),{
-    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
+    './checkout.ts': { reconcileCancelledRestaurantCheckouts: async () => {}, prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
@@ -199,7 +199,7 @@ test('production issues one invoice for the full total while Cashlogy charges on
   let invoices = 0, preflights = 0
   const charged = []
   const service = compileComponent(readFileSync(new URL('../src/features/restaurant/services/payment.ts',import.meta.url),'utf8'), {
-    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
+    './checkout.ts': { reconcileCancelledRestaurantCheckouts: async () => {}, prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,

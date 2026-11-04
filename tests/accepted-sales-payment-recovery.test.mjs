@@ -34,7 +34,7 @@ test('a lost checkout-reservation response recovers the original prepared operat
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
     '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
-    './checkout.ts': {
+    './checkout.ts': { reconcileCancelledRestaurantCheckouts: async () => {},
       prepareRestaurantCheckout: async (_context,id,_action,params) => {
         operations.push(id)
         assert.equal(params.cashSessionId,session.id)
@@ -73,6 +73,7 @@ for (const failure of ['lost_reply', 'local_quota']) test(`restaurant recovery p
   const deliveries = []
   const remote = { ticketId: 'remote-ticket', saleId: 'remote-sale', paymentId: 'remote-payment', totalCents: 600 }
   const service = compileComponent(source('features/fiscal/local/restaurantInvoice.ts'), {
+    '../../../lib/supabase.ts': { supabase: null },
     '../../restaurant/services/paymentPayload.ts': { withConfirmedRestaurantPayments },
     './localLedger.ts': ledger,
     '../../../lib/localDatabase.ts': localDatabase,
@@ -126,7 +127,7 @@ test('invalid VAT/identity fails before Cashlogy; a corrected preflight can safe
   setup()
   let charges = 0, preflights = 0
   const service = compileComponent(source('features/restaurant/services/payment.ts'), {
-    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
+    './checkout.ts': { reconcileCancelledRestaurantCheckouts: async () => {}, prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,

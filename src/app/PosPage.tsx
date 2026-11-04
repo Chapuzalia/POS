@@ -192,11 +192,11 @@ export function PosPage(props: Props) {
     transaction: cashlogyPaymentTransaction,
   })
   useEffect(() => {
-    if (!displayedError || activeCashlogyError) return undefined
+    if (!displayedError || activeCashlogyError || cashlogyPaymentModalOpen) return undefined
     notifyOperationalError(displayedError)
     const timer = window.setTimeout(() => clearDisplayedError(null), POS_TRANSIENT_ERROR_DURATION_MS)
     return () => window.clearTimeout(timer)
-  }, [activeCashlogyError, clearDisplayedError, displayedError, displayedErrorId])
+  }, [activeCashlogyError, cashlogyPaymentModalOpen, clearDisplayedError, displayedError, displayedErrorId])
   useEffect(() => {
     addDiagnosticBreadcrumb('pos.mount', { venueId: props.context.venueId })
     return () => addDiagnosticBreadcrumb('pos.unmount', { venueId: props.context.venueId })
@@ -521,7 +521,7 @@ export function PosPage(props: Props) {
         /> : null}
         themeMode={props.themes.find((theme) => theme.id === props.selectedThemeId)?.mode ?? 'light'}
       />
-      {props.error && activeCashlogyError ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
+      {props.error && activeCashlogyError && !cashlogyPaymentModalOpen ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
         <div className="flex items-center gap-2.5 rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
           <span>{props.error}</span>
         </div>
@@ -739,8 +739,11 @@ export function PosPage(props: Props) {
         totalCents={totalCents}
       /> : null}
       <CashlogyPaymentModal
+        error={props.error}
+        onCancelled={() => { props.onSetError(null); restaurant.reconcileCancelledPayments() }}
         finalizeDisabled={props.isBusy}
         onFinalizeRecovered={async (transaction) => {
+          props.onSetError(null)
           const saleId = getCashlogyPaymentSaleId(transaction)
           const historicalTicket = saleId
             ? cash.tickets.find((ticket) => ticket.payload.sale.id === saleId)
@@ -751,7 +754,7 @@ export function PosPage(props: Props) {
             return
           }
           const original = cash.session && saleId ? (await loadPaymentOperations(props.context, cash.session.id))
-            .find(operation => operation.payload.sale.id === saleId) : undefined
+            .find(operation => operation.state !== 'cancelled' && operation.payload.sale.id === saleId) : undefined
           if (original?.key.includes('|quick-sale')) {
             await quickSale.completePayment('cash', null, transaction)
             return

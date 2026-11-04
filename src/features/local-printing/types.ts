@@ -169,6 +169,7 @@ export type CashlogyDeviceError = {
 }
 
 export type CashlogyTransaction = {
+  operatorConfirmed?: boolean
   id: string
   requestId: string
   saleId: string | null

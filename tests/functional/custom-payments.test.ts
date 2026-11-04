@@ -163,7 +163,7 @@ describe('custom payment database transactions', () => {
         '../../../lib/customPayments': customPayments,
         './paymentPayload.ts': { withConfirmedRestaurantPayments },
         '../../../lib/durableSales.ts': { ...durable, markRestaurantCheckoutReserved: async operation => ({ ...operation, checkoutReserved: true }) },
-        './checkout.ts': { prepareRestaurantCheckout: async () => {}, startRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true },
+        './checkout.ts': { reconcileCancelledRestaurantCheckouts: async () => {}, prepareRestaurantCheckout: async () => {}, startRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true },
         '../../fiscal/local/tenantMode.ts': { resolveLocalFiscalMode: async () => 'disabled' },
         '../../fiscal/local/posInvoice.ts': {}, '../../fiscal/local/restaurantInvoice.ts': {},
         '../../local-printing/cashlogy/useCashlogyStore.ts': {

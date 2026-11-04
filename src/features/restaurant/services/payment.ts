@@ -7,7 +7,7 @@ import { preflightPosInvoice } from '../../fiscal/local/posInvoice.ts'
 import { issueRestaurantInvoice } from '../../fiscal/local/restaurantInvoice.ts'
 import { payRestaurantIdempotent } from '../../tables/service.ts'
 import { withConfirmedRestaurantPayments } from './paymentPayload.ts'
-import { prepareRestaurantCheckout, releaseRestaurantCheckout, startRestaurantCheckout } from './checkout.ts'
+import { prepareRestaurantCheckout, releaseRestaurantCheckout, startRestaurantCheckout, reconcileCancelledRestaurantCheckouts } from './checkout.ts'
 import { getPayloadPayments, withCustomPayments } from '../../../lib/customPayments'
 
 type Input = {
@@ -26,7 +26,7 @@ type Input = {
  * replays saved RPC parameters and only queries hardware already in progress. */
 export async function recoverRestaurantPayments(context: TenantContext, session: CashSession, confirmedCashlogy?: CashlogyTransaction) {
   const operations = confirmedCashlogy
-    ? (await loadPaymentOperations(context, session.id)).filter(operation => operation.payload.sale.id === confirmedCashlogy.saleId
+    ? (await loadPaymentOperations(context, session.id)).filter(operation => operation.state !== 'cancelled' && operation.payload.sale.id === confirmedCashlogy.saleId
       && (operation.cashlogyRequestId ?? `cashlogy:sale:${operation.payload.sale.id}`) === confirmedCashlogy.requestId)
     : await loadPendingPaymentOperations(context, session.id)
   const recovered = []
@@ -52,6 +52,7 @@ export async function payRestaurantSale<T extends object>(input: Input): Promise
   const { context, session, action } = input
   const scope = paymentScope(context, session.id)
   return withPaymentLock(scope, async () => {
+    await reconcileCancelledRestaurantCheckouts(context, session, input.target)
     const key = `${scope}|restaurant:${action}:${input.target}`
     const checkoutParams: Record<string, unknown> = { ...input.params, cashSessionId: session.id }
     const { allowPending: _allowPending, receivedCents: _received, ...economicParams } = checkoutParams

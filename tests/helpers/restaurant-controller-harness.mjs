@@ -100,6 +100,7 @@ export function createRestaurantControllerHarness({
     ...tableServiceOverrides,
   }
   const modules = {
+    '../services/checkout.ts': { reconcileCancelledRestaurantCheckouts: async () => {} },
     '../../personal/permissions': personalPermissions,
     '../../../lib/discounts': { calculateDiscountForLines: realPayloads ? calculateDiscountForLines : () => ({ totalCents: 600 }) },
     '../../../lib/format': { createId: idFactory, getLineSignature: () => 'signature', isValidQuantity: (value) => Number.isFinite(value) && value > 0, roundQuantity: (value) => value },
@@ -155,7 +156,7 @@ export function createRestaurantControllerHarness({
   }
   const operations = new Map()
   const paymentService = compileComponent(paymentSource, {
-    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
+    './checkout.ts': { reconcileCancelledRestaurantCheckouts: async () => {}, prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
     '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': {

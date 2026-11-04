@@ -75,6 +75,7 @@ import type { CashlogyTransaction } from '../../local-printing/types'
 import { requestEarlyCashDrawer } from '../../local-printing/services/earlyCashDrawer'
 import { assertRealSaleAllowed } from '../../fiscal/local/mode.ts'
 import { payRestaurantSale, recoverRestaurantPayments } from '../services/payment.ts'
+import { reconcileCancelledRestaurantCheckouts } from '../services/checkout.ts'
 import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
 import { PRINT_AGENT_ENABLED } from '../../local-printing/constants/config'
 import { customerFiscalSnapshot } from '../../customers/customerValidation.ts'
@@ -145,6 +146,23 @@ export function useRestaurantController(options: Options) {
   const onError = options.onError
   const reportError = onError
   const paymentLockRef = useRef(false)
+  const [cancellationGeneration, setCancellationGeneration] = useState(0)
+  useEffect(() => {
+    if (!options.enabled || !options.isOnline || !options.context || !options.cashSession) return
+    const context = options.context
+    const session = options.cashSession
+    let active = true
+    let timer: ReturnType<typeof setTimeout> | undefined
+    const reconcile = async () => {
+      try { await reconcileCancelledRestaurantCheckouts(context, session) }
+      catch (error) {
+        reportOperationError(error, { operation: 'restaurant.action', step: 'cancel_cleanup', recoverable: true })
+        if (active) timer = setTimeout(() => void reconcile(), 15000)
+      }
+    }
+    void reconcile()
+    return () => { active = false; clearTimeout(timer) }
+  }, [cancellationGeneration, options.enabled, options.isOnline, options.context, options.cashSession])
   const recoveryScopeRef = useRef<string | null>(null)
   useEffect(() => {
     const { context, cashSession } = options
@@ -1035,6 +1053,7 @@ export function useRestaurantController(options: Options) {
       options.onError(economicCommitted
         ? 'El cobro está guardado. No se pudo completar la actualización o la impresión. Revisa el histórico; no vuelvas a cobrarlo.'
         : getReadableError(error, { operation: 'restaurant.action', cashSessionId: options.cashSession?.id, operationId: invoiceOrderId, step: 'completePayment' }))
+      if (confirmedCashlogyTransaction) throw error
     } finally {
       setPaymentProcessing(false)
       options.setBusy(false)
@@ -1364,6 +1383,7 @@ export function useRestaurantController(options: Options) {
   }, [draft])
 
   return {
+    reconcileCancelledPayments: () => setCancellationGeneration(generation => generation + 1),
     addLine,
     addMenuBatch,
     cancelEmptyOrder,

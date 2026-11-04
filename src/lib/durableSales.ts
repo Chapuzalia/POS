@@ -8,7 +8,10 @@ export type PaymentOperation = {
   scope: string
   fingerprint: string
   payload: SaleCreatedPayload
-  state: 'prepared' | 'charging' | 'accepted' | 'committed'
+  state: 'prepared' | 'charging' | 'accepted' | 'committed' | 'cancelled'
+  originalKey?: string
+  cancelledAt?: string
+  checkoutCancellationPending?: boolean
   cashlogy: CashlogyTransaction | null
   cashlogyRequestId?: string
   checkoutReserved?: boolean
@@ -57,6 +60,18 @@ export async function loadPendingPaymentOperations(context: TenantContext, cashS
     || (operation.state === 'prepared' && operation.checkoutReserved))
 }
 
+export async function finishPaymentOperationCancellation(operation: PaymentOperation): Promise<void> {
+  const db = await openLedger()
+  try {
+    const tx = db.transaction('paymentOperations', 'readwrite')
+    const done = transactionDone(tx)
+    const store = tx.objectStore('paymentOperations')
+    const current = await request(store.get(operation.key)) as PaymentOperation | undefined
+    if (current?.eventId === operation.eventId && current.state === 'cancelled') store.put({ ...current, checkoutCancellationPending: false })
+    await done
+  } finally { db.close() }
+}
+
 export async function preparePaymentOperation(key: string, fingerprint: string, payload: SaleCreatedPayload, params?: Record<string, unknown>): Promise<PaymentOperation> {
   const db = await openLedger()
   try {
@@ -72,7 +87,7 @@ export async function preparePaymentOperation(key: string, fingerprint: string, 
     const quickSale = key.startsWith(`${scope}|quick-sale:`) || key === `${scope}|quick-sale`
     const overlapping = quickSale && Array.isArray(sourceIds) ? operations.find(operation => {
       const previousIds = operation.params?.sourceLineIds
-      return operation.key !== key
+      return operation.state !== 'cancelled' && operation.key !== key
         && (operation.key.startsWith(`${scope}|quick-sale:`) || operation.key === `${scope}|quick-sale`)
         && Array.isArray(previousIds) && sourceIds.some(id => previousIds.includes(id))
     }) : undefined
@@ -111,6 +126,7 @@ export async function acceptPaymentOperation(operation: PaymentOperation, payloa
   try {
     const tx = db.transaction('paymentOperations', 'readwrite')
     const done = transactionDone(tx)
+    await assertPaymentOperationActive(tx.objectStore('paymentOperations'), operation)
     tx.objectStore('paymentOperations').put(accepted)
     await done
     return accepted
@@ -123,10 +139,35 @@ export async function markPaymentCharging(operation: PaymentOperation): Promise<
   try {
     const tx = db.transaction('paymentOperations', 'readwrite')
     const done = transactionDone(tx)
+    await assertPaymentOperationActive(tx.objectStore('paymentOperations'), operation)
     tx.objectStore('paymentOperations').put(charging)
     await done
     return charging
   } finally { db.close() }
+}
+
+async function assertPaymentOperationActive(store: IDBObjectStore, operation: PaymentOperation) {
+  // Reconciliation may restore a server-committed sale from its cancellation
+  // archive. Late completions still carry the original live operation key.
+  if (operation.state === 'cancelled' && operation.key === `${operation.scope}|cancelled:${operation.eventId}`) return
+  if (await request(store.get(`${operation.scope}|cancelled:${operation.eventId}`))) {
+    store.transaction.abort()
+    throw new Error('Este intento de cobro se ha cancelado.')
+  }
+}
+
+function hasIssuedEconomicSale(store: IDBObjectStore, saleId: string): Promise<boolean> {
+  return new Promise((resolve, reject) => {
+    const cursor = store.openCursor()
+    cursor.onerror = () => reject(cursor.error)
+    cursor.onsuccess = () => {
+      const row = cursor.result
+      if (!row) { resolve(false); return }
+      const sale = row.value as { payload: SaleCreatedPayload }
+      if (sale.payload.sale.id === saleId) resolve(true)
+      else row.continue()
+    }
+  })
 }
 
 /** Additive metadata: a prepared restaurant payment may own a server reservation
@@ -146,7 +187,7 @@ export async function markRestaurantCheckoutReserved(operation: PaymentOperation
 /** The hardware buttons own explicit cancellation/restart of an attempt. Keep
  * their request identity in the same journal used by economic recovery. */
 export async function updateCashlogyPaymentAttempt(intent: CashlogyIntent, scope: PrintAgentScope | null,
-  action: { type: 'start' } | { type: 'close'; transaction: CashlogyTransaction | null; receivedCents: number | null; changeCents: number | null }): Promise<void> {
+  action: { type: 'start' } | { type: 'cancel' } | { type: 'close'; transaction: CashlogyTransaction | null; receivedCents: number | null; changeCents: number | null }): Promise<void> {
   if (!intent.paymentOperationKey) return // Older clients and payment-method changes have no sale journal.
   if (action.type === 'close' && action.transaction?.status !== 'completed') {
     const pending = await loadPaymentOperation(intent.paymentOperationKey)
@@ -164,7 +205,7 @@ export async function updateCashlogyPaymentAttempt(intent: CashlogyIntent, scope
   }
   const db = await openLedger()
   try {
-    const tx = db.transaction('paymentOperations', 'readwrite')
+    const tx = db.transaction(['paymentOperations', 'economicSales'], 'readwrite')
     const done = transactionDone(tx)
     const store = tx.objectStore('paymentOperations')
     const operation = await request(store.get(intent.paymentOperationKey)) as PaymentOperation | undefined
@@ -180,7 +221,24 @@ export async function updateCashlogyPaymentAttempt(intent: CashlogyIntent, scope
       tx.abort()
       throw new Error('Falta el registro local del cobro original.')
     }
-    if (action.type === 'start') {
+    if (action.type === 'cancel') {
+      if (operation.state === 'committed') {
+        tx.abort()
+        throw new Error('La venta ya está registrada. Reintenta para completar el cobro.')
+      }
+      if (operation.params?.paymentChange !== true && await hasIssuedEconomicSale(tx.objectStore('economicSales'), operation.payload.sale.id)) {
+        tx.abort()
+        throw new Error('La venta ya está registrada. Reintenta para completar el cobro.')
+      }
+      if ((operation.cashlogyRequestId ?? `cashlogy:sale:${operation.payload.sale.id}`) !== intent.requestId
+        && intent.chargeRequestedAt !== null) {
+        tx.abort()
+        throw new Error('El intento cancelado no coincide con el cobro pendiente.')
+      }
+      store.put({ ...operation, key: `${operation.scope}|cancelled:${operation.eventId}`, originalKey: operation.key,
+        state: 'cancelled', cancelledAt: new Date().toISOString(), checkoutCancellationPending: operation.checkoutReserved === true } satisfies PaymentOperation)
+      store.delete(operation.key)
+    } else if (action.type === 'start') {
       if (operation.state === 'accepted' || operation.state === 'committed') {
         tx.abort()
         throw new Error('Este cobro ya está aceptado. Recupera la venta antes de iniciar otro cobro.')
@@ -193,7 +251,9 @@ export async function updateCashlogyPaymentAttempt(intent: CashlogyIntent, scope
         throw new Error('El intento cancelado no coincide con el cobro pendiente.')
       }
       if (action.transaction?.status === 'completed') {
-        if (action.transaction.requestId !== intent.requestId || action.transaction.requestedAmountCents !== operation.payload.sale.totalCents
+        const cashAmountCents = (operation.payload.payments ?? (operation.payload.payment ? [operation.payload.payment] : []))
+          .find(payment => payment.method === 'cash')?.amountCents ?? Number(operation.params?.amountCents ?? operation.payload.sale.totalCents)
+        if (action.transaction.requestId !== intent.requestId || action.transaction.requestedAmountCents !== cashAmountCents
           || (action.transaction.saleId && action.transaction.saleId !== intent.saleId)) {
           tx.abort()
           throw new Error('El cobro confirmado no coincide con la venta original.')
@@ -201,10 +261,13 @@ export async function updateCashlogyPaymentAttempt(intent: CashlogyIntent, scope
         // Closing the modal is not a refund: retain the confirmed money before
         // acknowledging/deleting the agent's transaction.
         const payment = operation.payload.payment
+        const confirmed = action.transaction
+        const withCashlogy = (value: NonNullable<SaleCreatedPayload['payment']>) => ({ ...value,
+          receivedCents: action.receivedCents, changeCents: action.changeCents ?? 0,
+          cashlogyRequestId: confirmed.requestId, cashlogyTransactionId: confirmed.id })
         store.put({ ...operation, state: 'accepted', cashlogy: action.transaction,
-          payload: { ...operation.payload, payment: payment ? { ...payment,
-            receivedCents: action.receivedCents, changeCents: action.changeCents ?? 0,
-            cashlogyRequestId: action.transaction.requestId, cashlogyTransactionId: action.transaction.id } : null } } satisfies PaymentOperation)
+          payload: { ...operation.payload, payment: payment ? withCashlogy(payment) : null,
+            ...(operation.payload.payments ? { payments: operation.payload.payments.map(value => value.method === 'cash' ? withCashlogy(value) : value) } : {}) } } satisfies PaymentOperation)
       } else store.delete(operation.key)
     }
     await done
@@ -235,6 +298,7 @@ export async function commitPaymentOperation(operation: PaymentOperation, payloa
   try {
     const tx = db.transaction(['paymentOperations', 'durableSales', 'durableEvents'], 'readwrite')
     const done = transactionDone(tx)
+    await assertPaymentOperationActive(tx.objectStore('paymentOperations'), operation)
     if (!intermediateSplit) tx.objectStore('durableSales').put({ id: payload.sale.id, scope: operation.key.split('|')[0], payload: structuredClone(payload) } satisfies DurableSale)
     tx.objectStore('paymentOperations').put({ ...operation, payload, result, state: 'committed' } satisfies PaymentOperation)
     if (enqueue) tx.objectStore('durableEvents').put({ id: operation.eventId, kind: 'sale_created', tenantId: payload.sale.tenantId,
@@ -298,6 +362,7 @@ export async function commitPaymentChangeOperation(operation: PaymentOperation):
   try {
     const tx = db.transaction(['paymentOperations', 'durableSales', 'durableEvents'], 'readwrite')
     const done = transactionDone(tx)
+    await assertPaymentOperationActive(tx.objectStore('paymentOperations'), operation)
     tx.objectStore('durableSales').put({ id: payload.sale.id, scope: operation.scope, payload } satisfies DurableSale)
     tx.objectStore('durableEvents').put(event)
     tx.objectStore('paymentOperations').put({ ...operation, state: 'committed', result: { paymentProjectionPending: true } } satisfies PaymentOperation)

@@ -88,7 +88,7 @@ export function useQuickSalePayment(options: Options) {
     }
     const quickSaleKey = `${paymentScope(context, cashSession.id)}|quick-sale`
     const operations = (await loadPaymentOperations(context, cashSession.id))
-      .filter(operation => operation.key === quickSaleKey || operation.key.startsWith(`${quickSaleKey}:`))
+      .filter(operation => operation.state !== 'cancelled' && (operation.key === quickSaleKey || operation.key.startsWith(`${quickSaleKey}:`)))
     const stored = operations.find(operation => {
       if (recoveryKey) return operation.key === recoveryKey
       if (confirmedCashlogyTransaction) return operation.payload.sale.id === confirmedCashlogyTransaction.saleId

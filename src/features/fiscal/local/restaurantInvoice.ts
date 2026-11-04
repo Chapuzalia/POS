@@ -7,6 +7,7 @@ import { readLocalFiscalRecord, reconcileLocalFiscalCopies, type LocalFiscalEntr
 import { fiscalBridgeAccessToken, fiscalBridgeBaseUrl } from './installation.ts'
 import { synchronizeLocalFiscalQueue } from './sync.ts'
 import { withConfirmedRestaurantPayments } from '../../restaurant/services/paymentPayload.ts'
+import { supabase } from '../../../lib/supabase.ts'
 
 type Action = 'close' | 'equal_part' | 'selected_items'
 
@@ -38,6 +39,37 @@ async function saveRestaurantPayment(value: PreparedRestaurantPayment): Promise<
     tx.objectStore('restaurantPayments').put(value)
     await done
   } finally { db.close() }
+}
+
+/** Only discard an unissued envelope after the server has cancelled its claim.
+ * A lost successful reply is reconciled through the original fiscal identity. */
+export async function reconcileCancelledRestaurantInvoice(context: TenantContext, session: CashSession, key: string) {
+  const pending = await pendingRestaurantPayment(key)
+  if (!pending) return null
+  if (pending.entry.record.tenantId !== context.tenantId || pending.entry.record.deviceId !== context.deviceId
+    || pending.draft.ticket.venueId !== context.venueId || pending.draft.ticket.cashSessionId !== session.id) {
+    throw new Error('El cobro pendiente no pertenece a esta caja.')
+  }
+  if (!supabase) throw new Error('Supabase no está configurado.')
+  const { data, error } = await supabase.from('fiscal_local_records').select('id')
+    .eq('id', pending.entry.id).eq('tenant_id', context.tenantId).eq('venue_id', context.venueId)
+    .eq('installation_id', pending.entry.record.installationId).abortSignal(AbortSignal.timeout(10000)).maybeSingle()
+  if (error) throw error
+  if (data) return issueRestaurantInvoice(context, session, pending.draft, pending.action, pending.params, null, key)
+  const db = await openLedger()
+  try {
+    const tx = db.transaction(['restaurantPayments', 'entries'], 'readwrite')
+    const done = transactionDone(tx)
+    if (await request(tx.objectStore('entries').get(pending.entry.id))) {
+      tx.abort()
+      throw new Error('La venta ya está registrada. Consulta el histórico.')
+    }
+    const store = tx.objectStore('restaurantPayments')
+    const current = await request(store.get(key)) as PreparedRestaurantPayment | undefined
+    if (current?.entry.id === pending.entry.id) store.delete(key)
+    await done
+  } finally { db.close() }
+  return null
 }
 
 function confirmedRestaurantPayload(draft: SaleCreatedPayload, result: Record<string, unknown>): SaleCreatedPayload {

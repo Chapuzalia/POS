@@ -410,6 +410,47 @@ describe('cobro mediante el agente de impresión', () => {
 })
 
 describe('cancelación HTTP', () => {
+  it('operator confirmation completes an uncertain payment locally without sending or recovering cash', async () => {
+    useCashlogyStore.setState({ intent: { requestId, saleId: 'sale-1', amountCents: 1250, terminalCode: 'POS_MAIN',
+      transactionId: null, chargeRequestedAt: '2026-10-25T10:00:00Z', createdAt: '2026-10-25T10:00:00Z' },
+      modalOpen: true, transaction: null })
+    const before = calls.length
+    const confirmed = await useCashlogyStore.getState().confirmPaid()
+    expect(confirmed).toMatchObject({ requestId, saleId: 'sale-1', status: 'completed', netPaidCents: 1250, operatorConfirmed: true })
+    expect(calls.length).toBe(before)
+    expect(postCount()).toBe(0)
+  })
+
+  it('operator cancellation returns immediately while the agent is unavailable and survives a reload', async () => {
+    useCashlogyStore.setState({ intent: { requestId, saleId: 'sale-1', amountCents: 1250, terminalCode: 'POS_MAIN',
+      transactionId: null, chargeRequestedAt: '2026-10-25T10:00:00Z', createdAt: '2026-10-25T10:00:00Z' },
+      modalOpen: true, transaction: null })
+    routes.set(lookupPath, () => { throw new TypeError('offline') })
+    await useCashlogyStore.getState().cancelAttempt()
+    expect(useCashlogyStore.getState().intent).toBeNull()
+    expect(useCashlogyStore.getState().modalOpen).toBe(false)
+    useCashlogyStore.getState().configureScope(scope)
+    expect(useCashlogyStore.getState().intent).toBeNull()
+    expect(postCount()).toBe(0)
+    await vi.advanceTimersByTimeAsync(5000)
+  })
+
+  it('the next payment after operator cancellation creates a different request instead of restoring the cancelled attempt', async () => {
+    useCashlogyStore.setState({ intent: { requestId, saleId: 'sale-1', amountCents: 1250, terminalCode: 'POS_MAIN',
+      transactionId: null, chargeRequestedAt: '2026-10-25T10:00:00Z', createdAt: '2026-10-25T10:00:00Z' },
+      modalOpen: true, transaction: null })
+    routes.set(lookupPath, () => Response.json({ error: { code: 'CASHLOGY_TRANSACTION_NOT_FOUND' } }, { status: 404 }))
+    await useCashlogyStore.getState().cancelAttempt()
+    routes.set(chargePath, init => {
+      const body = JSON.parse(String(init.body))
+      return lookupReply(transaction({ requestId: body.requestId, saleId: 'next-sale' }))
+    })
+    const next = await useCashlogyStore.getState().startPayment(1250, 'next-sale')
+    expect(next.requestId).not.toBe(requestId)
+    expect(next.saleId).toBe('next-sale')
+    expect(postCount()).toBe(1)
+  })
+
   it('un signal cancelado antes de iniciar impide enviar el POST', async () => {
     const controller = new AbortController()
     controller.abort()
