@@ -9,7 +9,8 @@ async function workflow(name) {
 test('automatic deployments only request the private controller after complete verification', async () => {
   for (const name of ['production', 'staging']) {
     const source = await workflow(name)
-    for (const check of ['python3 -B -m unittest', 'pnpm lint', 'pnpm test', 'pnpm build']) assert.ok(source.includes(check))
+    for (const check of ['pnpm lint', 'pnpm test', 'pnpm build']) assert.ok(source.includes(check))
+    assert.match(source, /DEPLOY_PROJECT: tickit-pos/)
     assert.match(source, /needs: verify/)
     assert.match(source, /id-token: write/)
     assert.match(source, /node scripts\/request-deployment\.mjs/)

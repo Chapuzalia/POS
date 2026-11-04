@@ -5,6 +5,8 @@ import { requestDeployment, requestSettings } from '../scripts/request-deploymen
 const sha = 'a'.repeat(40)
 const id = '12345678-1234-4234-8234-123456789012'
 const env = {
+  DEPLOY_PROJECT: 'tickit-pos', DEPLOY_CONTROLLER_URL: 'https://deploy.alteilsolutions.com',
+  DEPLOY_REPOSITORY: 'Chapuzalia/POS', DEPLOY_BRANCH: 'main', DEPLOY_WORKFLOW: 'production.yml', DEPLOY_ALLOWED_EVENTS: 'push',
   DEPLOY_ENVIRONMENT: 'production', GITHUB_REPOSITORY: 'Chapuzalia/POS',
   GITHUB_SHA: sha, GITHUB_REF: 'refs/heads/main', GITHUB_EVENT_NAME: 'push',
   GITHUB_RUN_ID: '42', GITHUB_RUN_ATTEMPT: '2',
@@ -27,9 +29,9 @@ function controller(statuses = ['queued', 'preflight', 'success']) {
     assert.equal(init.headers.Authorization, `Bearer oidc-${tokenNumber}`)
     assert.equal(init.headers['CF-Access-Client-Id'], 'access-id')
     assert.equal(init.headers['CF-Access-Client-Secret'], 'access-secret')
-    assert.equal(init.headers['X-Tickit-Deploy-Client-Id'], 'access-id')
-    assert.equal(init.headers['X-Tickit-Deploy-Client-Secret'], 'access-secret')
-    return Response.json({ id, status: statuses[statusIndex++], environment: 'production', commit: sha, request_id: 'production-42-2' })
+    assert.equal(init.headers['X-Deploy-Client-Id'], 'access-id')
+    assert.equal(init.headers['X-Deploy-Client-Secret'], 'access-secret')
+    return Response.json({ id, project: 'tickit-pos', status: statuses[statusIndex++], environment: 'production', commit: sha, request_id: 'production-42-2' })
   }
   return { calls, fetchImpl }
 }
@@ -44,7 +46,7 @@ test('requester sends only the release identity and refreshes OIDC for every pol
     [`https://deploy.alteilsolutions.com/deployments/${id}`, 'GET'],
     [`https://deploy.alteilsolutions.com/deployments/${id}`, 'GET'],
   ])
-  assert.deepEqual(JSON.parse(requests[0].body), { environment: 'production', commit: sha, request_id: 'production-42-2' })
+  assert.deepEqual(JSON.parse(requests[0].body), { project: 'tickit-pos', environment: 'production', commit: sha, request_id: 'production-42-2' })
   assert.equal(calls.length, 6)
   assert.ok(calls.every(call => call.redirect === 'error'))
 })
@@ -52,12 +54,12 @@ test('requester sends only the release identity and refreshes OIDC for every pol
 test('rerunning the same SHA changes identity by run attempt, never a previous SHA', () => {
   assert.equal(requestSettings(env).requestId, 'production-42-2')
   assert.equal(requestSettings({ ...env, GITHUB_RUN_ATTEMPT: '3' }).requestId, 'production-42-3')
-  assert.equal(requestSettings({ ...env, DEPLOY_ENVIRONMENT: 'staging', GITHUB_REF: 'refs/heads/Staging',
+  assert.equal(requestSettings({ ...env, DEPLOY_ENVIRONMENT: 'staging', DEPLOY_BRANCH: 'Staging', DEPLOY_WORKFLOW: 'staging.yml', DEPLOY_ALLOWED_EVENTS: 'push,workflow_dispatch', GITHUB_REF: 'refs/heads/Staging',
     GITHUB_WORKFLOW_REF: 'Chapuzalia/POS/.github/workflows/staging.yml@refs/heads/Staging', GITHUB_EVENT_NAME: 'workflow_dispatch' }).environment, 'staging')
 })
 
 test('requester follows every private deployment phase with refreshed credentials', async () => {
-  const phases = ['queued', 'preflight', 'backing_up', 'migrating', 'deploying_edge', 'deploying_application', 'verifying', 'success']
+  const phases = ['queued', 'preflight', 'awaiting_approval', 'backing_up', 'migrating', 'deploying_edge', 'deploying_application', 'verifying', 'success']
   const { calls, fetchImpl } = controller(phases)
   const logs = []
   await requestDeployment(requestSettings(env), { fetchImpl, sleep: async () => {}, log: value => logs.push(value) })
@@ -76,10 +78,10 @@ test('requester rejects invalid identities and credentials before requesting dep
 })
 
 test('failed and interrupted deployments fail CI without printing private controller results', async () => {
-  for (const status of ['failed', 'interrupted']) {
+  for (const status of ['failed', 'interrupted', 'cancelled']) {
     const { fetchImpl } = controller(['queued', status])
     const logs = []
-    await assert.rejects(requestDeployment(requestSettings(env), { fetchImpl, sleep: async () => {}, log: value => logs.push(value) }), /failed|interrupted/)
+    await assert.rejects(requestDeployment(requestSettings(env), { fetchImpl, sleep: async () => {}, log: value => logs.push(value) }), /failed|interrupted|cancelled/)
     assert.ok(logs.every(value => !value.includes('secret') && !value.includes('oidc')))
   }
 })
@@ -104,7 +106,7 @@ test('requester fails closed for mismatched identities, malformed status and HTT
     { id: '../private', status: 'queued', commit: sha, environment: 'production' },
   ]) {
     const fetchImpl = async url => new URL(url).hostname === 'pipelines.actions.githubusercontent.com'
-      ? Response.json({ value: 'oidc' }) : Response.json(result)
+      ? Response.json({ value: 'oidc' }) : Response.json({ project: env.DEPLOY_PROJECT, ...result })
     await assert.rejects(requestDeployment(requestSettings(env), { fetchImpl, log: () => {} }))
   }
   const fetchImpl = async url => new URL(url).hostname === 'pipelines.actions.githubusercontent.com'
@@ -136,7 +138,7 @@ test('polling rejects a deployment ID substituted after an accepted POST', async
   const fetchImpl = async url => {
     if (new URL(url).hostname === 'pipelines.actions.githubusercontent.com') return Response.json({ value: 'oidc' })
     request++
-    return Response.json({ id: request === 1 ? id : '22345678-1234-4234-8234-123456789012',
+    return Response.json({ project: env.DEPLOY_PROJECT, id: request === 1 ? id : '22345678-1234-4234-8234-123456789012',
       status: request === 1 ? 'queued' : 'success', environment: 'production', commit: sha })
   }
   await assert.rejects(requestDeployment(requestSettings(env), { fetchImpl, sleep: async () => {}, log: () => {} }), /invalid deployment identity/)
