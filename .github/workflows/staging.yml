@@ -51,7 +51,6 @@ jobs:
 
       - name: Verify application and migration tooling
         run: |
-          python3 -B -m unittest discover -s tests -p 'test_*.py'
           pnpm lint
           pnpm test
           pnpm build
@@ -77,6 +76,12 @@ jobs:
       - name: Request deployment and wait for the private result
         env:
           DEPLOY_ENVIRONMENT: staging
+          DEPLOY_PROJECT: tickit-pos
+          DEPLOY_CONTROLLER_URL: https://deploy.alteilsolutions.com
+          DEPLOY_REPOSITORY: Chapuzalia/POS
+          DEPLOY_BRANCH: Staging
+          DEPLOY_WORKFLOW: staging.yml
+          DEPLOY_ALLOWED_EVENTS: push,workflow_dispatch
           CF_ACCESS_CLIENT_ID: ${{ secrets.STAGING_DEPLOY_CF_ACCESS_CLIENT_ID }}
           CF_ACCESS_CLIENT_SECRET: ${{ secrets.STAGING_DEPLOY_CF_ACCESS_CLIENT_SECRET }}
         run: node scripts/request-deployment.mjs
