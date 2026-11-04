@@ -5,6 +5,7 @@ import { centsToInput, parseMoneyToCents, formatMoney } from '../../src/lib/form
 import { billingFailureDiagnostic } from '../../supabase/functions/_shared/billing/diagnostics'
 import { StripeRequestError } from '../../supabase/functions/_shared/billing/stripe'
 import * as presentation from '../../src/features/billing/presentation'
+import type { BillingInvoice } from '../../src/features/billing/types'
 
 const product = { key: 'base', kind: 'plan', name: 'Base', description: '', scope: 'tenant', featureKey: null, resource: null, active: true, sortOrder: 0 }
 const addon = { ...product, key: 'personal', kind: 'addon', name: 'Personal' }
@@ -32,13 +33,16 @@ function panel(active = false, temporary = false, pending = false, admin = true)
   const detail = {
     account: { status: active ? 'active' : 'manual', stripe_customer_id: active ? 'cus_test' : null, stripe_subscription_id: active ? 'sub_test' : null, contract: active ? agreement : null, onboarding_contract: agreement },
     tenant: { id: 'tenant', name: 'Empresa', max_venues: 1, max_devices: 2 },
-    venues: [{ id: 'venue', name: 'Centro' }], devices: [], operations: pending ? [{ id: 'pending', status: 'scheduled', reason: 'Añadir personal en Centro', effective_at: '2026-12-03', contract: { ...contract, recurringCents: 5900, limits: { venues: 2, devices: 4 }, addons: [{ key: 'personal', quantity: 2, included: 0, billable: 2, scope: 'venue', venueIds: ['venue'], deviceIds: [] }] } }] : [], audit: [], invoices: [],
+    venues: [{ id: 'venue', name: 'Centro' }], devices: [], operations: pending ? [{ id: 'pending', status: 'scheduled', reason: 'Añadir personal en Centro', effective_at: '2026-12-03', contract: { ...contract, recurringCents: 5900, limits: { venues: 2, devices: 4 }, addons: [{ key: 'personal', quantity: 2, included: 0, billable: 2, scope: 'venue', venueIds: ['venue'], deviceIds: [] }] } }] : [], audit: [], invoices: [] as BillingInvoice[],
   }
+  const confirm = vi.fn<() => Promise<{ url?: string }>>(async () => { throw new Error('No se pudo confirmar. Revisa el estado antes de reintentar.') })
+  const openUrl = vi.fn()
   const request = vi.fn(async ({ action }: { action: string }) => {
     if (action === 'catalog') return catalog
     if (action === 'get') return detail
-    if (action === 'quote') return { id: 'quote', timing: 'immediate', preview: { amountDueCents: 6534, recurringCents: 5400 } }
+    if (action === 'quote') return { id: 'quote', kind: 'change', timing: 'immediate', preview: { amountDueCents: 6534, recurringCents: 5400 } }
     if (action === 'portal') return { url: 'https://billing.stripe.com/test' }
+    if (action === 'confirm') return confirm()
     throw new Error('No se pudo confirmar. Revisa el estado antes de reintentar.')
   })
   const runner = createCompiledHookRunner(readFileSync(new URL('../../src/features/billing/TenantBillingPanel.tsx', import.meta.url), 'utf8'), 'TenantBillingPanel', {
@@ -46,7 +50,7 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     '../../components/ui/AppModal': { AppModal: 'dialog' },
     '../../lib/format': { parseMoneyToCents },
     './presentation': presentation,
-    './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: vi.fn() },
+    './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: openUrl },
   }, { Error, Date, crypto })
   const render = () => runner.render({ tenantId: 'tenant', admin })
   const exceptionTree = () => {
@@ -54,7 +58,7 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     return editor.type(editor.props)
   }
   onTestFinished(() => runner.unmount())
-  return { render, request, exceptionTree, detail }
+  return { render, request, exceptionTree, detail, confirm, openUrl }
 }
 
 it('keeps the customer plan minimal until Modify plan is opened and retains the existing quote flow', async () => {
@@ -70,7 +74,8 @@ it('keeps the customer plan minimal until Modify plan is opened and retains the 
   expect(overview).toContain(formatMoney(5900))
   expect(overview).toContain('Personal')
   expect(overview.replace(/\s+/g, ' ')).toContain('2 unidades')
-  for (const label of ['Plan y tarifa', 'Último pago', 'Historial de cambios', 'Facturas de suscripción', 'Actualizar ficha']) expect(overview).not.toContain(label)
+  expect(overview).toContain('Facturas de suscripción')
+  for (const label of ['Plan y tarifa', 'Último pago', 'Historial de cambios', 'Actualizar ficha']) expect(overview).not.toContain(label)
   expect(button(h.render(), 'Revisar cambio')).toBeUndefined()
   expect(h.request.mock.calls.some(([body]) => ['quote', 'confirm', 'portal'].includes(body.action))).toBe(false)
   await button(h.render(), 'Métodos de pago').props.onClick()
@@ -102,6 +107,41 @@ it('keeps customer pending payments visible while plan modifications remain bloc
   button(h.render(), 'Modificar plan').props.onClick()
   expect(button(h.render(), 'Revisar cambio').props.disabled).toBe(true)
   expect(button(h.render(), 'Continuar pago')).toBeDefined()
+})
+
+it('keeps plan configuration in superadmin without opening payment pages, including older backend responses', async () => {
+  const h = panel()
+  h.confirm.mockResolvedValue({ url: 'https://checkout.stripe.com/test' })
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Ver importes')).toBeDefined())
+  expect(button(h.render(), 'Métodos de pago')).toBeUndefined()
+  button(h.render(), 'Ver importes').props.onClick()
+  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
+  button(h.render(), 'Confirmar cambio').props.onClick()
+  await vi.waitFor(() => expect(text(h.render())).toContain('Plan configurado. El cliente debe completar el pago desde su cuenta'))
+  expect(h.openUrl).not.toHaveBeenCalled()
+  expect(h.request.mock.calls.some(([body]) => body.action === 'portal')).toBe(false)
+})
+
+it.each([true, false])('reserves pending payment and invoice links for the customer (admin=%s)', async admin => {
+  const h = panel(true, false, true, admin)
+  h.detail.operations[0].status = 'payment_pending'
+  Object.assign(h.detail.operations[0], { result: { url: 'https://checkout.stripe.com/test' } })
+  h.detail.invoices.push({ stripe_invoice_id: 'in_test', number: 'INV-1', status: 'open', amount_due_cents: 6534, amount_paid_cents: 0, created_at: '2026-11-04', hosted_invoice_url: 'https://invoice.stripe.com/test', invoice_pdf: null })
+  h.render()
+  await vi.waitFor(() => expect(text(h.render())).toContain('Base'))
+  const link = nodes(h.render()).find(node => node.type === 'a' && text(node) === 'Abrir factura')
+  expect(Boolean(link)).toBe(!admin)
+  expect(Boolean(button(h.render(), 'Continuar pago'))).toBe(!admin)
+  expect(Boolean(button(h.render(), 'Métodos de pago'))).toBe(!admin)
+  if (admin) {
+    expect(text(h.render())).toContain('El cliente debe completar el pago desde su cuenta')
+    expect(text(h.render())).not.toContain('Facturas de suscripción')
+    expect(text(h.render())).not.toContain('INV-1')
+  } else {
+    expect(text(h.render())).toContain('INV-1')
+    expect(link.props.href).toBe('https://invoice.stripe.com/test')
+  }
 })
 
 it('discards an unconfirmed customer draft when returning to the plan overview', async () => {
