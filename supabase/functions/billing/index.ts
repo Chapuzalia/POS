@@ -8,7 +8,9 @@ import { StripeGateway } from '../_shared/billing/stripe.ts'
 Deno.serve(async request => {
   const appUrl = Deno.env.get('BILLING_APP_URL')?.replace(/\/$/, '') ?? ''
   const headers = { 'Access-Control-Allow-Origin': appUrl ? new URL(appUrl).origin : 'null', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' }
-  const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body), { status, headers })
+  let admin = false
+  // Stripe URLs grant access to the customer's payment pages, including nested results.
+  const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body, (key, value: unknown) => admin && ['url', 'hosted_invoice_url', 'invoice_pdf'].includes(key) ? undefined : value), { status, headers })
   if (request.method === 'OPTIONS') return reply({})
   if (request.method !== 'POST') return reply({ error: 'Método no permitido.' }, 405)
   let action = 'unvalidated'
@@ -26,7 +28,7 @@ Deno.serve(async request => {
     if (authError || !user.user) return reply({ error: 'Sesión no válida.' }, 401)
     const profile = await db.from('profiles').select('is_superadmin').eq('id', user.user.id).single()
     if (profile.error) return reply({ error: 'Acceso no autorizado.' }, 403)
-    const admin = profile.data.is_superadmin === true
+    admin = profile.data.is_superadmin === true
     const raw = await request.text()
     if (raw.length > 100_000) return reply({ error: 'Solicitud demasiado grande.' }, 413)
     let input: unknown
@@ -41,6 +43,7 @@ Deno.serve(async request => {
     }
     const adminActions = ['overview','catalog-save','catalog-publish','retry-operation','retry-event','reconcile-batch','settings','quote-cancel']
     if (adminActions.includes(body.action) && !admin) return reply({ error: 'Esta operación requiere Superadmin.' }, 403)
+    if (body.action === 'portal' && admin) return reply({ error: 'El portal de pago solo está disponible desde la cuenta del cliente.' }, 403)
     switch (body.action) {
       case 'catalog': {
         const catalog = await service.catalog()
