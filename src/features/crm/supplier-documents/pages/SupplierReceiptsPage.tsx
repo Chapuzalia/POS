@@ -1079,7 +1079,7 @@ export function SupplierReceiptsCrm({
             {error}
           </p>
         ) : null}
-        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--crm-border-subtle)] bg-[var(--crm-surface)]/95 p-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur xl:left-[var(--crm-sidebar-width)]">
+        <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--crm-border-subtle)] bg-[var(--crm-surface)]/95 p-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur desk:left-[var(--side-w)]">
           <div className="mx-auto max-w-3xl">
             <Button
               className="!min-h-14 !w-full !rounded-2xl !text-base !font-black"
@@ -1325,7 +1325,7 @@ export function SupplierReceiptsCrm({
           {error}
         </p>
       ) : null}
-      {!isConfirmedDocument ? <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--crm-border-subtle)] bg-[var(--crm-surface)]/95 p-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur xl:left-[var(--crm-sidebar-width)]">
+      {!isConfirmedDocument ? <div className="fixed inset-x-0 bottom-0 z-30 border-t border-[var(--crm-border-subtle)] bg-[var(--crm-surface)]/95 p-3 pb-[max(12px,env(safe-area-inset-bottom))] backdrop-blur desk:left-[var(--side-w)]">
         <div className="mx-auto max-w-3xl">
           <Button
             className="!min-h-14 !w-full !rounded-2xl !text-base !font-black"

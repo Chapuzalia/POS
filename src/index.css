@@ -1,6 +1,11 @@
 @import "tailwindcss";
 @import "@heroui/styles";
 
+@theme {
+  /* Dashboard shell: fixed sidebar above 1100px, off-canvas below. */
+  --breakpoint-desk: 1101px;
+}
+
 /* Operational notices must remain visible above POS and CRM dialogs. */
 [data-sileo-viewport] {
   z-index: 110 !important;
@@ -94,7 +99,11 @@ button {
 }
 
 .crm-shell {
-  --crm-sidebar-width: 270px;
+  --crm-sidebar-width: 256px;
+  --crm-sidebar-collapsed-width: 76px;
+  --ease-power3: cubic-bezier(0.215, 0.61, 0.355, 1);
+  --ease-power4: cubic-bezier(0.165, 0.84, 0.44, 1);
+  --ease-back: cubic-bezier(0.34, 1.36, 0.64, 1);
   --crm-topbar-height: 80px;
   --crm-content-max-width: 1720px;
   --crm-radius-xs: 6px;
@@ -274,4 +283,46 @@ button {
 @keyframes pos-shell-zoom-in {
   from { opacity: 0; transform: scale(.92); }
   to { opacity: 1; transform: scale(1); }
+}
+
+/* Dashboard shell motion. Keyframe names keep the dashboard- prefix. */
+@keyframes dashboard-letter {
+  from { transform: translateY(115%) rotate(5deg); }
+}
+
+@keyframes dashboard-pop {
+  from { opacity: 0; transform: translateY(-16px) scale(.97); }
+}
+
+@keyframes dashboard-row {
+  from { opacity: 0; transform: translateY(10px); }
+}
+
+@keyframes dashboard-fade {
+  from { opacity: 0; }
+}
+
+@keyframes dashboard-flash {
+  from { color: var(--crm-blue); }
+}
+
+@keyframes dashboard-breathe {
+  0% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--crm-green) 55%, transparent); }
+  70%, 100% { box-shadow: 0 0 0 8px transparent; }
+}
+
+.crm-shell .is-flash {
+  animation: dashboard-flash 1.2s var(--ease-power3);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .crm-shell [data-motion-anim],
+  .crm-shell .is-flash {
+    animation: none !important;
+  }
+
+  .crm-shell [data-motion-transition],
+  .crm-shell [data-motion-transition] * {
+    transition: none !important;
+  }
 }

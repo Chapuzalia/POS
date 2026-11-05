@@ -19,6 +19,7 @@ const primitives = {
   '../../components/ui/Button': { Button: 'button' },
   '../../components/ui/Input': { Input: 'input' },
   '../../components/ui/Checkbox': { Checkbox: 'checkbox' },
+  '../../components/ui/DataTable': { DataTable: 'table' },
 }
 function text(node: ReturnType<typeof nodes>[number]): string {
   if (typeof node === 'string' || typeof node === 'number') return String(node)

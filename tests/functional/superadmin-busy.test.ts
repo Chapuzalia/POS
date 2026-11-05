@@ -16,6 +16,7 @@ function harness() {
     '../../utils/notifications.ts': { notifyOperationalError: vi.fn() },
     '../ui/Input': { Input: component }, '../ui/Button': { Button: component }, '../ui/Checkbox': { Checkbox: component },
     '../ui/AppModal': { AppModal: component }, '../ui/DataTable': { DataTable: component },
+    '../layout/DashboardShell': { DashboardShell: component, LiveStatus: component, dashboardMenuItemClass: '' },
     'lucide-react': icons,
     '../../services/platformService': { loadPlatformTenants: load },
     '../../utils/errors': { getReadableError: String },
@@ -53,17 +54,17 @@ it('keeps the update block while its billing child reports active work', async (
   h.finish()
   for (let i = 0; i < 10; i++) await Promise.resolve()
   let tree = h.runner.render(h.props)
-  const billingButton = nodes(tree).find(node => node.props?.onClick && nodes(node.props.children).some(child => child.props?.children === 'Facturación'))
-  expect(billingButton).toBeDefined()
-  billingButton?.props.onClick()
+  const shell = () => nodes(tree).find(node => typeof node.props?.onNavigate === 'function')
+  const navItem = (label: string) => shell()?.props.groups.flatMap((group: { items: Array<{ label: string; disabled?: boolean }> }) => group.items).find((item: { label: string }) => item.label === label)
+  expect(navItem('Facturación')).toBeDefined()
+  shell()?.props.onNavigate('billing')
   tree = h.runner.render(h.props)
   const billing = nodes(tree).find(node => typeof node.props?.onBusyChange === 'function')
   expect(billing).toBeDefined()
   billing?.props.onBusyChange(true)
   tree = h.runner.render(h.props)
   expect(h.onBusyChange).toHaveBeenLastCalledWith(true)
-  const tenantsButton = nodes(tree).find(node => node.props?.onClick && nodes(node.props.children).some(child => child.props?.children === 'Negocios'))
-  expect(tenantsButton?.props.disabled).toBe(true)
+  expect(navItem('Negocios')?.disabled).toBe(true)
   billing?.props.onBusyChange(false)
   h.runner.render(h.props)
   expect(h.onBusyChange).toHaveBeenLastCalledWith(false)

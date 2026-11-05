@@ -18,7 +18,7 @@ function setup() {
   })
   const runner = createCompiledHookRunner(readFileSync(new URL('../../src/features/billing/BillingAdmin.tsx', import.meta.url), 'utf8'), 'default', {
     'react/jsx-runtime': jsxRuntime,
-    '../../components/ui/Button': { Button: 'button' }, '../../components/ui/Input': { Input: 'input' },
+    '../../components/ui/Button': { Button: 'button' }, '../../components/ui/DataTable': { DataTable: 'table' }, '../../components/ui/Input': { Input: 'input' },
     './BillingCatalogEditor': { BillingCatalogEditor: 'catalog' },
     './TenantBillingPanel': { TenantBillingPanel: 'billing-panel', billingCard: '', billingField: '' },
     './service': { billingRequest: request, billingDate: String, billingMoney: String }, './presentation': presentation,

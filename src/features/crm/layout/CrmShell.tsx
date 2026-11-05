@@ -1,11 +1,21 @@
 import { notifyOperationalError } from '../../../utils/notifications.ts'
-import { Button as UiButton } from '../../../components/ui/Button'
-import { ChevronRight, LayoutDashboard, Menu, UserRound } from 'lucide-react'
+import { Boxes, ChevronRight, LayoutDashboard, LogOut, Moon, Package, ReceiptText, ShoppingCart, Sun } from 'lucide-react'
 import { useEffect, useState, type ReactNode } from 'react'
 import type { CrmVenue, TenantContext } from '../../../types'
 import { CrmVenueSelector } from '../../../components/crm/CrmVenueSelector'
-import { allNavItems, getSectionTitle, type CrmSection } from '../routing/crmNavigation'
-import { CrmSidebar } from './CrmSidebar'
+import { DashboardShell, LiveStatus, dashboardMenuItemClass, type DashboardNavEntry, type DashboardNavGroup } from '../../../components/layout/DashboardShell'
+import {
+  allNavItems,
+  getSectionTitle,
+  inventoryNavItems,
+  navItems,
+  productNavItems,
+  purchaseNavItems,
+  reportNavItems,
+  type CrmNavItem,
+  type CrmSection,
+} from '../routing/crmNavigation'
+import { canAccessCrmSection } from '../routing/crmPermissions'
 import { CRM_THEME_STORAGE_KEY, getInitialCrmTheme, type CrmTheme } from './crmTheme'
 
 type Props = {
@@ -24,10 +34,37 @@ type Props = {
   venues: CrmVenue[]
 }
 
+const goKeys: Record<string, CrmSection> = { o: 'dashboard', p: 'products', i: 'inventory-stock', v: 'reports', e: 'stats', s: 'settings' }
+
+function buildGroups(context: TenantContext, selectedVenue: CrmVenue | undefined, inventoryEnabled: boolean): DashboardNavGroup[] {
+  const allowed = (items: CrmNavItem[]) => items.filter((item) => canAccessCrmSection(context.role, item.id, context.features, selectedVenue, context.billingActivationRequired))
+  const parent = (id: string, label: string, icon: DashboardNavEntry['icon'], items: CrmNavItem[]): DashboardNavEntry[] => items.length ? [{ id, label, icon, items }] : []
+  const inventoryItems = inventoryNavItems
+    .filter((item) => item.id === 'inventory-stock' || canAccessCrmSection(context.role, item.id, context.features, selectedVenue, context.billingActivationRequired))
+    .filter((item) => inventoryEnabled || item.id === 'inventory-stock')
+  const account = { label: 'Cuenta', items: allowed(navItems.slice(7)) }
+  if (context.billingActivationRequired) return [account]
+  return [
+    { label: 'Principal', items: allowed(navItems.slice(0, 2)) },
+    {
+      label: 'Gestión',
+      items: [
+        ...parent('group-products', 'Productos', Boxes, allowed(productNavItems)),
+        ...parent('group-inventory', 'Inventario', Package, inventoryItems),
+        ...parent('group-purchases', 'Compras', ShoppingCart, allowed(purchaseNavItems)),
+        ...allowed(navItems.slice(2, 3)),
+        ...parent('group-reports', 'Informes de ventas', ReceiptText, allowed(reportNavItems)),
+        ...allowed(navItems.slice(3, 7)),
+      ],
+    },
+    account,
+  ]
+}
+
 export function CrmShell({ activeSection, children, context, disabled, error, inventoryEnabled, isOnline, onLogout, onSectionChange, onVenueChange, onboarding, selectedVenueId, venues }: Props) {
   useEffect(() => { if (error) notifyOperationalError(error) }, [error])
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
   const [crmTheme, setCrmTheme] = useState<CrmTheme>(getInitialCrmTheme)
+  const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
 
   function toggleCrmTheme() {
     const nextTheme: CrmTheme = crmTheme === 'dark' ? 'light' : 'dark'
@@ -40,70 +77,58 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
   }
 
   return (
-    <div className="crm-shell !flex !h-full !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased" data-crm-theme={crmTheme} data-theme={crmTheme}>
-      <CrmSidebar
-        activeSection={activeSection}
-         context={context}
-         selectedVenue={venues.find((venue) => venue.id === selectedVenueId)}
-         inventoryEnabled={inventoryEnabled}
-        isOpen={isSidebarOpen}
-        onClose={() => setIsSidebarOpen(false)}
-        onLogout={onLogout}
-        onSectionChange={onSectionChange}
-        onToggleTheme={toggleCrmTheme}
-        theme={crmTheme}
-      />
-      <section className="!flex !min-h-0 !min-w-0 !flex-1 !flex-col !overflow-hidden !bg-[var(--crm-canvas)]">
-        <header className="!relative !z-30 !flex !min-h-16 [.pwa-standalone_&]:!pt-[calc(0.625rem+env(safe-area-inset-top,0px))] md:[.pwa-standalone_&]:!min-h-[calc(5rem+env(safe-area-inset-top,0px))] md:[.pwa-standalone_&]:!basis-[calc(5rem+env(safe-area-inset-top,0px))] md:[.pwa-standalone_&]:!pt-[env(safe-area-inset-top,0px)] !w-full !flex-[0_0_auto] !flex-row !items-center !justify-between !gap-2.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-topbar-bg)] !px-4 !py-2.5 md:!min-h-20 md:!flex-[0_0_80px] md:!gap-[22px] md:!px-7 md:!py-0">
-          <UiButton
-            aria-controls="crm-sidebar"
-            aria-expanded={isSidebarOpen}
-            aria-label="Abrir menú de navegación"
-            className="!inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-[var(--crm-surface)] !text-[var(--crm-text-secondary)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150 xl:!hidden"
-            onClick={() => setIsSidebarOpen(true)}
-            type="button"
-          >
-            <Menu className="h-5 w-5" />
-          </UiButton>
-          <div className="!mr-auto !min-w-0 md:!min-w-[180px] xl:!mr-0">
-            <div className="!hidden !items-center !gap-1.5 !text-[11px] !font-medium !text-[var(--crm-text-muted)] md:!flex">
-              <LayoutDashboard className="size-3.5" />
-              <span>{allNavItems.find((item) => item.id === activeSection)?.label}</span>
-              <ChevronRight className="size-3.5" />
-              <span>{context.tenantName}</span>
-            </div>
-            <h1 className="!mt-0 !min-h-0 !overflow-hidden !text-[17px] !leading-tight !font-bold !tracking-[-0.025em] !text-ellipsis !whitespace-nowrap !text-[var(--crm-text)] md:!mt-1 md:!text-xl">{getSectionTitle(activeSection)}</h1>
-          </div>
-
-          <div className="!flex !w-auto !min-w-0 !basis-[130px] !items-center !justify-end !gap-2.5 !overflow-visible sm:!basis-[180px] md:!basis-auto">
-            {onboarding}
-            {!context.billingActivationRequired ? <CrmVenueSelector
-              disabled={disabled}
-              onChange={onVenueChange}
-              value={selectedVenueId}
-              venues={venues}
-            /> : null}
-            <div className="!hidden !min-h-[42px] !items-center !gap-2 !rounded-[11px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-xs !font-medium !whitespace-nowrap !text-[var(--crm-text-secondary)] lg:!inline-flex">{new Intl.DateTimeFormat('es-ES').format(new Date())}</div>
-            <div className={isOnline ? '!hidden !min-h-7 !items-center !gap-2 !rounded-full !border !border-transparent !bg-[var(--crm-green-soft)] !px-2.5 !text-[11px] !font-semibold !whitespace-nowrap !text-[var(--crm-green)] md:!inline-flex' : '!hidden !min-h-7 !items-center !gap-2 !rounded-full !border !border-transparent !bg-[var(--crm-red-soft)] !px-2.5 !text-[11px] !font-semibold !whitespace-nowrap !text-[var(--crm-red)] md:!inline-flex'}>
-              {isOnline ? 'Online' : 'Offline'}
-            </div>
-            <div className="!hidden !min-h-[42px] !items-center !gap-2 !rounded-[11px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-xs !font-medium !whitespace-nowrap !text-[var(--crm-text-secondary)] md:!inline-flex">
-              <UserRound className="h-4 w-4" />
-              <span>{context.userName}</span>
-            </div>
-          </div>
-        </header>
-
-        {!isOnline ? (
-          <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">
-            El CRM requiere conexión para guardar cambios en Supabase.
-          </div>
-        ) : null}
-
-        <main className="!mx-auto !min-h-0 !w-full !max-w-[1720px] !flex-1 !overflow-auto !px-4 !pt-[26px] !pb-7 md:!px-7 md:!pt-[42px] md:!pb-9">
-          <div data-onboarding="section-content" data-crm-section={activeSection}>{children}</div>
-        </main>
-      </section>
-    </div>
+    <DashboardShell
+      account={{
+        name: context.userName,
+        detail: context.tenantName,
+        menu: <>
+          <button aria-label={crmTheme === 'dark' ? 'Cambiar CRM a modo claro' : 'Cambiar CRM a modo oscuro'} className={dashboardMenuItemClass} onClick={toggleCrmTheme} type="button">
+            {crmTheme === 'dark' ? <Sun aria-hidden="true" className="size-4" /> : <Moon aria-hidden="true" className="size-4" />}
+            <span>{crmTheme === 'dark' ? 'Modo claro' : 'Modo oscuro'}</span>
+          </button>
+          <button className={dashboardMenuItemClass} onClick={onLogout} type="button">
+            <LogOut aria-hidden="true" className="size-4" />
+            <span>Salir</span>
+          </button>
+        </>,
+      }}
+      activeId={activeSection}
+      brand={<div className="flex min-w-0 items-center gap-3">
+        <img alt="Tickit" className="size-9 shrink-0 rounded-[10px]" src="/icons/apple-touch-icon.png" />
+        <div className="min-w-0">
+          <p className="m-0 truncate text-sm leading-tight font-bold tracking-[0.04em] text-[var(--crm-sidebar-text)]">TICKIT POS</p>
+          <p className="m-0 mt-0.5 text-[10px] font-semibold tracking-[0.16em] text-[var(--crm-sidebar-muted)] uppercase">Back Office</p>
+        </div>
+      </div>}
+      eyebrow={<>
+        <LayoutDashboard aria-hidden="true" className="size-3.5" />
+        <span>{allNavItems.find((item) => item.id === activeSection)?.label}</span>
+        <ChevronRight aria-hidden="true" className="size-3.5" />
+        <span className="truncate">{context.tenantName}</span>
+      </>}
+      goKeys={goKeys}
+      groups={buildGroups(context, selectedVenue, inventoryEnabled)}
+      notices={!isOnline ? (
+        <div className="mx-auto mt-3 w-[calc(100%-32px)] max-w-[1440px] rounded-[14px] bg-[var(--crm-yellow-soft)] px-4 py-3 text-[13px] font-semibold text-[var(--crm-yellow)] md:w-[calc(100%-48px)]">
+          El CRM requiere conexión para guardar cambios en Supabase.
+        </div>
+      ) : null}
+      onNavigate={(id) => onSectionChange(id as CrmSection)}
+      sideFooter={<LiveStatus isOnline={isOnline} />}
+      theme={crmTheme}
+      title={getSectionTitle(activeSection)}
+      tools={<>
+        {onboarding}
+        {!context.billingActivationRequired ? <div className="w-[150px] min-w-0 md:w-auto">
+          <CrmVenueSelector disabled={disabled} onChange={onVenueChange} value={selectedVenueId} venues={venues} />
+        </div> : null}
+      </>}
+      workspace={<div className="rounded-xl border border-[var(--crm-sidebar-border)] bg-[var(--crm-sidebar-hover)] px-3 py-2.5">
+        <p className="m-0 text-[10px] font-semibold tracking-[0.12em] text-[var(--crm-sidebar-muted)] uppercase">Negocio</p>
+        <p className="m-0 mt-0.5 truncate text-sm font-semibold text-[var(--crm-sidebar-text)]">{context.tenantName}</p>
+      </div>}
+    >
+      <div data-onboarding="section-content" data-crm-section={activeSection}>{children}</div>
+    </DashboardShell>
   )
 }

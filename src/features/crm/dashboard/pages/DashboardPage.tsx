@@ -152,7 +152,7 @@ function OpenCashSessionsList({
                   : `${group.sessions.length} cajas abiertas`}
               </span>
             </div>
-            <strong>{formatMoney(group.totalSalesCents)}</strong>
+            <strong data-count="">{formatMoney(group.totalSalesCents)}</strong>
           </div>
           <div className="grid gap-2">
             {group.sessions.map((session) => (
@@ -172,7 +172,7 @@ function OpenCashSessionRow({ session }: {
   session: CrmStats["openCashSessions"][number];
 }) {
   return (
-    <div className="!grid !grid-cols-2 !items-center !gap-3.5 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !py-[13px] md:!grid-cols-[minmax(0,1fr)_repeat(3,minmax(80px,max-content))] xl:!grid-cols-[minmax(210px,1fr)_minmax(104px,0.32fr)_minmax(78px,0.2fr)_minmax(92px,0.26fr)_minmax(240px,0.8fr)]">
+    <div data-motion="row" className="!grid !grid-cols-2 !items-center !gap-3.5 !rounded-[var(--crm-radius-md)] !border-0 !bg-[var(--crm-surface-soft)] !px-3.5 !py-[13px] md:!grid-cols-[minmax(0,1fr)_repeat(3,minmax(80px,max-content))] xl:!grid-cols-[minmax(210px,1fr)_minmax(104px,0.32fr)_minmax(78px,0.2fr)_minmax(92px,0.26fr)_minmax(240px,0.8fr)]">
       <div className="!col-span-full grid w-full min-w-0 grid-cols-[minmax(0,1fr)_repeat(2,minmax(72px,max-content))] items-center gap-3.5 xl:!col-span-4">
         <div className="grid min-w-0 gap-[3px] [&_strong]:truncate [&_strong]:text-lg [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] [&_span]:truncate [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)]">
           <strong>{session.deviceName}</strong>
@@ -180,11 +180,11 @@ function OpenCashSessionRow({ session }: {
         </div>
         <div className="grid gap-[3px] [&_span]:text-[11px] [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)] [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:tabular-nums [&_strong]:text-[var(--crm-text)]">
           <span>Facturado</span>
-          <strong>{formatMoney(session.salesCents)}</strong>
+          <strong data-count="">{formatMoney(session.salesCents)}</strong>
         </div>
         <div className="grid gap-[3px] [&_span]:text-[11px] [&_span]:font-medium [&_span]:text-[var(--crm-text-muted)] [&_strong]:text-sm [&_strong]:font-semibold [&_strong]:tabular-nums [&_strong]:text-[var(--crm-text)]">
           <span>Tickets</span>
-          <strong>{session.ticketCount}</strong>
+          <strong data-count="">{session.ticketCount}</strong>
         </div>
       </div>
       <div className="!col-span-full !flex !min-w-0 !flex-wrap justify-center !gap-[5px] xl:!col-span-1 xl:!justify-end">
@@ -197,11 +197,11 @@ function OpenCashSessionRow({ session }: {
 
 export function MiniMetric({ label, value }: { label: string; value: string }) {
   return (
-    <div className="flex min-w-0 items-center justify-between gap-3 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-surface-soft)] p-2.5 [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-secondary)] [&_strong]:whitespace-nowrap [&_strong]:text-[15px] [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] !flex !min-h-[52px] !min-w-0 !items-center !justify-between !gap-3 !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !py-[11px]">
+    <div data-motion="row" className="flex min-w-0 items-center justify-between gap-3 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-surface-soft)] p-2.5 [&_span]:text-xs [&_span]:font-medium [&_span]:text-[var(--crm-text-secondary)] [&_strong]:whitespace-nowrap [&_strong]:text-[15px] [&_strong]:font-semibold [&_strong]:text-[var(--crm-text)] !flex !min-h-[52px] !min-w-0 !items-center !justify-between !gap-3 !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-[13px] !py-[11px]">
       <span className="!text-xs !font-medium !text-[var(--crm-text-secondary)]">
         {label}
       </span>
-      <strong className="!text-[15px] !font-semibold !whitespace-nowrap !text-[var(--crm-text)] !tabular-nums">
+      <strong className="!text-[15px] !font-semibold !whitespace-nowrap !text-[var(--crm-text)] !tabular-nums" data-count="">
         {value}
       </strong>
     </div>
