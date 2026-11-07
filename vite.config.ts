@@ -1,4 +1,5 @@
 import { sentryVitePlugin } from "@sentry/vite-plugin";
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig, type PreviewServer, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -19,6 +20,8 @@ const appVersion = process.env.APP_VERSION
   ?? process.env.VERCEL_GIT_COMMIT_SHA
   ?? process.env.GITHUB_SHA
   ?? 'development'
+// Human-readable release (package.json "version"); the SHA above stays the compatibility key.
+const appDisplayVersion = (JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8')) as { version: string }).version
 const configuredSupportedVersions = process.env.SUPPORTED_APP_VERSIONS
   ?.split(',')
   .map((version) => version.trim())
@@ -41,6 +44,7 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_DISPLAY_VERSION__: JSON.stringify(appDisplayVersion),
   },
   plugins: [react(), tailwindcss(), {
     name: 'crm-canonical-entry',

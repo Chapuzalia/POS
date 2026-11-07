@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 
 import type { CashSession } from "../../types";
+import { APP_DISPLAY_VERSION } from '../../config/appVersion'
 
 import { Chip } from "../ui";
 import { ManualCashDrawerButton } from '../../features/local-printing/components/ManualCashDrawerButton'
@@ -136,6 +137,7 @@ export function AppHeader({
                   )
                 })}
               </Dropdown.Menu>
+              <p className="m-0 px-3 pt-1 pb-2 text-center text-[11px] text-[var(--muted)] tabular-nums">{APP_DISPLAY_VERSION}</p>
             </Dropdown.Popover>
           </Dropdown>
 

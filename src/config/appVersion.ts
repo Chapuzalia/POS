@@ -3,6 +3,11 @@ declare const __APP_VERSION__: string
 /** Build identifier, sourced from the Git commit deployed to Vercel. */
 export const APP_VERSION = typeof __APP_VERSION__ === 'string' ? __APP_VERSION__ : 'development'
 
+declare const __APP_DISPLAY_VERSION__: string
+
+/** Human-readable release label shown in the UI (e.g. "v1.0.3"), from package.json "version". */
+export const APP_DISPLAY_VERSION = `v${typeof __APP_DISPLAY_VERSION__ === 'string' ? __APP_DISPLAY_VERSION__ : '0.0.0'}`
+
 export type AppVersionStatus = 'compatible' | 'update-required'
 
 type AppVersionPolicy = {
