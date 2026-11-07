@@ -8,9 +8,10 @@ declare const __APP_DISPLAY_VERSION__: string
 /** Human-readable release label shown in the UI (e.g. "v1.0.3"), from package.json "version". */
 export const APP_DISPLAY_VERSION = `v${typeof __APP_DISPLAY_VERSION__ === 'string' ? __APP_DISPLAY_VERSION__ : '0.0.0'}`
 
-export type AppVersionStatus = 'compatible' | 'update-required'
+export type AppVersionStatus = 'compatible' | 'update-available' | 'update-required'
 
 type AppVersionPolicy = {
+  currentVersion?: string
   supportedVersions: string[]
 }
 
@@ -28,15 +29,20 @@ function parseAppVersionPolicy(value: unknown): AppVersionPolicy {
     throw new Error('La política de versiones del POS no es válida.')
   }
 
-  return { supportedVersions: value.supportedVersions.map((version) => version.trim()) }
+  const currentVersion = 'currentVersion' in value && typeof value.currentVersion === 'string' && value.currentVersion.trim()
+    ? value.currentVersion.trim()
+    : undefined
+  return { currentVersion, supportedVersions: value.supportedVersions.map((version) => version.trim()) }
 }
 
 export function resolveAppVersionStatus(
   currentVersion: string,
   policy: unknown,
 ): AppVersionStatus {
-  const { supportedVersions } = parseAppVersionPolicy(policy)
-  return supportedVersions.includes(currentVersion) ? 'compatible' : 'update-required'
+  const { currentVersion: servedVersion, supportedVersions } = parseAppVersionPolicy(policy)
+  if (!supportedVersions.includes(currentVersion)) return 'update-required'
+  // Supported older PWAs keep working, but are offered the newly deployed build.
+  return servedVersion && servedVersion !== currentVersion ? 'update-available' : 'compatible'
 }
 
 export async function loadAppVersionStatus(
