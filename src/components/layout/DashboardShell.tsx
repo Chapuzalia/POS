@@ -64,6 +64,23 @@ export function DashboardShell({ account, activeId, brand, children, eyebrow, go
   if (shownId === activeId) shown.current = { children, title, eyebrow }
 
   useShellIntro(rootRef)
+
+  // iOS tints the status bar from the page background (and theme-color on older versions): match the top bar.
+  useLayoutEffect(() => {
+    const root = rootRef.current
+    if (!root) return undefined
+    const color = getComputedStyle(root).getPropertyValue('--crm-topbar-bg').trim()
+    const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]')
+    const previousMeta = meta?.content
+    const targets = [document.documentElement, document.body]
+    const previous = targets.map((element) => element.style.backgroundColor)
+    targets.forEach((element) => { element.style.backgroundColor = color })
+    if (meta) meta.content = color
+    return () => {
+      targets.forEach((element, index) => { element.style.backgroundColor = previous[index] })
+      if (meta && previousMeta) meta.content = previousMeta
+    }
+  }, [theme])
   useContentEntrance(mainRef)
 
   useEffect(() => {
@@ -216,7 +233,7 @@ export function DashboardShell({ account, activeId, brand, children, eyebrow, go
       <aside
         aria-label="Tu workspace"
         aria-modal={isMobile && isOpen ? true : undefined}
-        className={`fixed inset-y-0 left-0 z-40 flex h-full w-[min(300px,86vw)] flex-col border-r border-[var(--crm-sidebar-border)] bg-[var(--crm-sidebar-bg)] text-[var(--crm-sidebar-text)] shadow-[var(--crm-shadow-floating)] [.pwa-standalone_&]:pt-[env(safe-area-inset-top,0px)] desk:visible desk:relative desk:w-[var(--side-w)] desk:min-w-[var(--side-w)] desk:translate-x-0 desk:shadow-none desk:[transition:width_450ms_var(--ease-power3),min-width_450ms_var(--ease-power3)] ${isOpen ? 'visible translate-x-0 [transition:transform_350ms_var(--ease-power3),visibility_0s]' : 'invisible -translate-x-[104%] [transition:transform_350ms_var(--ease-power3),visibility_0s_linear_350ms]'}`}
+        className={`fixed inset-y-0 left-0 z-40 flex h-full w-[min(300px,86vw)] flex-col border-r border-[var(--crm-sidebar-border)] bg-[var(--crm-sidebar-bg)] text-[var(--crm-sidebar-text)] shadow-[var(--crm-shadow-floating)] [.pwa-standalone_&]:pt-[env(safe-area-inset-top,0px)] [transition:transform_350ms_var(--ease-power3),display_350ms_allow-discrete] desk:relative desk:w-[var(--side-w)] desk:min-w-[var(--side-w)] desk:translate-x-0 desk:shadow-none desk:[transition:width_450ms_var(--ease-power3),min-width_450ms_var(--ease-power3)] ${isOpen ? 'translate-x-0 max-desk:starting:-translate-x-[104%]' : 'max-desk:hidden -translate-x-[104%]'}`}
         data-motion-transition=""
         data-shell="sidebar"
         id={sidebarId}
@@ -289,7 +306,7 @@ export function DashboardShell({ account, activeId, brand, children, eyebrow, go
         {sideFooter ? <div className={`shrink-0 border-t border-[var(--crm-sidebar-border)] px-3 py-3 [&_[data-label]]:transition-opacity [&_[data-label]]:duration-300 ${rail ? '[&_[data-label]]:opacity-0' : ''}`} data-shell-intro="">{sideFooter}</div> : null}
       </aside>
 
-      <div aria-hidden="true" className={`fixed inset-0 z-[39] bg-black/60 transition-opacity duration-300 desk:hidden ${isOpen ? 'opacity-100' : 'pointer-events-none opacity-0'}`} data-motion-transition="" onClick={() => setIsOpen(false)} />
+      <div aria-hidden="true" className={`fixed inset-0 z-[39] bg-black/60 [transition:opacity_300ms,display_300ms_allow-discrete] desk:hidden ${isOpen ? 'opacity-100 starting:opacity-0' : 'hidden opacity-0'}`} data-motion-transition="" onClick={() => setIsOpen(false)} />
 
       <div className="flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden">
         <header className="relative z-30 flex min-h-[72px] shrink-0 items-center gap-2.5 border-b border-[var(--crm-border-subtle)] bg-[color-mix(in_srgb,var(--crm-topbar-bg)_84%,transparent)] px-6 py-3.5 [-webkit-backdrop-filter:blur(14px)] [backdrop-filter:blur(14px)] max-[700px]:min-h-16 max-[700px]:px-4 max-[700px]:py-3 [.pwa-standalone_&]:pt-[calc(0.875rem+env(safe-area-inset-top,0px))]" data-shell="topbar">
