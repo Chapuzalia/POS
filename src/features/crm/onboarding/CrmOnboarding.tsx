@@ -22,9 +22,11 @@ type Props = {
   disabled: boolean
   isOnline: boolean
   onSectionChange: (section: CrmSection) => void
+  /** Increment to open the guide index (launched from Documentación y ayuda). */
+  openRequest: number
 }
 
-export default function CrmOnboarding({ context, venue, activeSection, disabled, isOnline, onSectionChange }: Props) {
+export default function CrmOnboarding({ context, venue, activeSection, disabled, isOnline, onSectionChange, openRequest }: Props) {
   const key = onboardingStorageKey(context, venue.id)
   const [initialProgress] = useState(() => readOnboardingProgress(key))
   const progress = useRef(initialProgress)
@@ -34,7 +36,6 @@ export default function CrmOnboarding({ context, venue, activeSection, disabled,
   const [reviewed, setReviewed] = useState(initialProgress.reviewed)
   const [indexTheme, setIndexTheme] = useState('light')
   const index = useRef<((topic: OnboardingTopic) => void) | null>(null)
-  const launcher = useRef<HTMLButtonElement | null>(null)
   const tour = useRef<Driver | null>(null)
   const tourSection = useRef<CrmSection | null>(null)
   const navigate = useRef(onSectionChange)
@@ -174,6 +175,12 @@ export default function CrmOnboarding({ context, venue, activeSection, disabled,
     }
   }, [indexVisible, key, topicIds])
 
+  useEffect(() => {
+    if (!openRequest || !canStart.current || !availableTopics.current.length) return
+    setIndexVisible(true)
+    setIndexOpen(true)
+  }, [openRequest])
+
   function dismissWelcome(start: boolean) {
     progress.current = { ...progress.current, offered: true }
     writeOnboardingProgress(key, progress.current)
@@ -182,16 +189,12 @@ export default function CrmOnboarding({ context, venue, activeSection, disabled,
   }
 
   return <>
-    <Button ref={launcher} aria-label="Inicio guiado" className="!min-h-11 !shrink-0 !gap-2 !bg-[var(--crm-blue-soft)] !px-3 !text-[var(--crm-blue)]" disabled={disabled || !topics.length} onClick={() => {
-      if (!indexVisible) setIndexVisible(true)
-      else setIndexOpen(true)
-    }} type="button"><BookOpen className="size-4" /><span className="hidden sm:inline">Inicio guiado</span></Button>
-    {indexVisible ? <OnboardingIndex disabled={disabled} isOpen={isIndexOpen} onClose={() => { setIndexOpen(false); launcher.current?.focus() }} onStart={topic => index.current?.(topic)} reviewed={reviewed} theme={indexTheme} topics={topics} /> : null}
+    {indexVisible ? <OnboardingIndex disabled={disabled} isOpen={isIndexOpen} onClose={() => setIndexOpen(false)} onStart={topic => index.current?.(topic)} reviewed={reviewed} theme={indexTheme} topics={topics} /> : null}
     {welcome && !disabled ? <CrmModal label="Bienvenido a Tickit" onClose={() => dismissWelcome(false)}>
       <div className="!grid !gap-5 !p-6">
         <div className="!grid !size-12 !place-items-center !rounded-2xl !bg-[var(--crm-blue-soft)] !text-[var(--crm-blue)]"><BookOpen className="size-6" /></div>
         <div><h2 className="!m-0 !text-2xl !font-bold">¡Tu negocio ya está activo!</h2><p className="!mb-0 !mt-3 !text-sm !text-[var(--crm-text-muted)]">Te acompañamos a preparar tu primer producto, el stock y las mesas de tu local. Elige por dónde empezar desde el índice y avanza a tu ritmo.</p></div>
-        <p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Puedes posponerlo y volver desde «Inicio guiado». Tú decides qué crear y guardar.</p>
+        <p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Puedes posponerlo y volver desde Cuenta › Documentación y ayuda. Tú decides qué crear y guardar.</p>
         <div className="!flex !flex-wrap !justify-end !gap-3"><Button onClick={() => dismissWelcome(false)} type="button" variant="secondary">Más tarde</Button><Button onClick={() => dismissWelcome(true)} type="button" variant="primary">Empezar inicio guiado</Button></div>
       </div>
     </CrmModal> : null}

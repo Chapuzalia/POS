@@ -3,7 +3,8 @@ import { Boxes, ChevronRight, LayoutDashboard, LogOut, Moon, Package, ReceiptTex
 import { useEffect, useState, type ReactNode } from 'react'
 import type { CrmVenue, TenantContext } from '../../../types'
 import { CrmVenueSelector } from '../../../components/crm/CrmVenueSelector'
-import { DashboardShell, LiveStatus, dashboardMenuItemClass, type DashboardNavEntry, type DashboardNavGroup } from '../../../components/layout/DashboardShell'
+import { DashboardShell, LiveStatus, dashboardMenuItemClass, type DashboardNavEntry, type DashboardNavGroup, type DashboardSearch } from '../../../components/layout/DashboardShell'
+import { loadCrmSearchItems, type CrmSearchItem } from '../search/crmSearchService'
 import {
   allNavItems,
   getSectionTitle,
@@ -27,6 +28,7 @@ type Props = {
   inventoryEnabled: boolean
   isOnline: boolean
   onLogout: () => void
+  onSearchSelect?: (item: CrmSearchItem) => void
   onSectionChange: (section: CrmSection) => void
   onVenueChange: (venueId: string) => void
   onboarding?: ReactNode
@@ -61,10 +63,16 @@ function buildGroups(context: TenantContext, selectedVenue: CrmVenue | undefined
   ]
 }
 
-export function CrmShell({ activeSection, children, context, disabled, error, inventoryEnabled, isOnline, onLogout, onSectionChange, onVenueChange, onboarding, selectedVenueId, venues }: Props) {
+export function CrmShell({ activeSection, children, context, disabled, error, inventoryEnabled, isOnline, onLogout, onSearchSelect, onSectionChange, onVenueChange, onboarding, selectedVenueId, venues }: Props) {
   useEffect(() => { if (error) notifyOperationalError(error) }, [error])
   const [crmTheme, setCrmTheme] = useState<CrmTheme>(getInitialCrmTheme)
   const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
+  const groups = buildGroups(context, selectedVenue, inventoryEnabled)
+  const allowedSections = new Set(groups.flatMap((group) => group.items.flatMap((entry) => 'items' in entry ? entry.items : [entry])).map((item) => item.id as CrmSection))
+  const search: DashboardSearch | undefined = selectedVenue && onSearchSelect ? {
+    load: async () => (await loadCrmSearchItems(context, selectedVenue, allowedSections)).map((item) => ({ ...item, onSelect: () => onSearchSelect(item) })),
+    placeholder: 'Buscar secciones, productos, formatos, cierres…',
+  } : undefined
 
   function toggleCrmTheme() {
     const nextTheme: CrmTheme = crmTheme === 'dark' ? 'light' : 'dark'
@@ -107,13 +115,14 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
         <span className="truncate">{context.tenantName}</span>
       </>}
       goKeys={goKeys}
-      groups={buildGroups(context, selectedVenue, inventoryEnabled)}
+      groups={groups}
       notices={!isOnline ? (
         <div className="mx-auto mt-3 w-[calc(100%-32px)] max-w-[1440px] rounded-[14px] bg-[var(--crm-yellow-soft)] px-4 py-3 text-[13px] font-semibold text-[var(--crm-yellow)] md:w-[calc(100%-48px)]">
           El CRM requiere conexión para guardar cambios en Supabase.
         </div>
       ) : null}
       onNavigate={(id) => onSectionChange(id as CrmSection)}
+      search={search}
       sideFooter={<LiveStatus isOnline={isOnline} />}
       theme={crmTheme}
       title={getSectionTitle(activeSection)}

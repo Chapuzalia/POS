@@ -27,6 +27,7 @@ type Props = {
   defaultTaxRate: number
   disabled: boolean
   duplicateProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
+  initialProductId?: string
   inventoryRecipesEnabled: boolean
   mutate: (action: () => Promise<unknown>) => Promise<boolean>
   venues: CrmVenue[]
@@ -48,12 +49,12 @@ function priceLabel(summary: CatalogProductSummary) {
   return `${formatMoney(summary.minPriceCents)} – ${formatMoney(summary.maxPriceCents ?? summary.minPriceCents)}`
 }
 
-export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicateProduct, inventoryRecipesEnabled, mutate, venues }: Props) {
+export function CatalogProductsCrm({ catalog, defaultTaxRate, disabled, duplicateProduct, initialProductId, inventoryRecipesEnabled, mutate, venues }: Props) {
   const [filters, setFilters] = useState(defaultFilters)
   const [sortKey, setSortKey] = useState<CatalogProductSortKey>('product')
   const [sortDirection, setSortDirection] = useState<CatalogProductSortDirection>('asc')
   const [page, setPage] = useState(1)
-  const [editorProductId, setEditorProductId] = useState<string | 'create' | 'create-menu' | null>(null)
+  const [editorProductId, setEditorProductId] = useState<string | 'create' | 'create-menu' | null>(initialProductId ?? null)
   const deferredQuery = useDeferredValue(filters.query)
   const summaries = useMemo(() => getCatalogProductSummaries(catalog), [catalog])
   const filtered = useMemo(() => {

@@ -5,6 +5,7 @@ import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../..
 import { canAccessCrmSection } from './crmPermissions'
 import { catalogSections, type CrmSection } from './crmNavigation'
 import { hasTenantVenueCapability } from '../../platform/tenantFeatureAccess'
+import { getOnboardingTopics } from '../onboarding/onboardingModel'
 
 const AccessManagementCrm = lazy(() => import('../access/pages/AccessPage').then((module) => ({ default: module.AccessManagementCrm })))
 const StatsCrm = lazy(() => import('../analytics/pages/StatsPage').then((module) => ({ default: module.StatsCrm })))
@@ -16,6 +17,7 @@ const CatalogStructureCrm = lazy(() => import('../catalog/pages/CatalogStructure
 const CatalogTransferCrm = lazy(() => import('../catalog/pages/CatalogTransferPage.tsx').then((module) => ({ default: module.CatalogTransferCrm })))
 const DashboardCrm = lazy(() => import('../dashboard/pages/DashboardPage').then((module) => ({ default: module.DashboardCrm })))
 const DiscountsCrm = lazy(() => import('../discounts/pages/DiscountsPage').then((module) => ({ default: module.DiscountsCrm })))
+const DocumentationCrm = lazy(() => import('../documentation/pages/DocumentationPage').then((module) => ({ default: module.DocumentationCrm })))
 const PlanCrm = lazy(() => import('../plan/pages/PlanPage').then((module) => ({ default: module.PlanCrm })))
 const InventoryStockCrm = lazy(() => import('../inventory/pages/InventoryStockPage').then((module) => ({ default: module.InventoryStockCrm })))
 const PurchasesOverviewCrm = lazy(() => import('../purchases/pages/PurchasesOverviewPage').then((module) => ({ default: module.PurchasesOverviewCrm })))
@@ -41,12 +43,15 @@ type Props = {
   context: TenantContext
   disabled: boolean
   duplicateCatalogProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
+  /** Record picked in the global search; `key` remounts the page so it opens that record. */
+  focus?: { key: string; targetId: string } | null
   inventoryEnabled: boolean
   isCatalogLoading: boolean
   mutateCatalog: (action: () => Promise<unknown>) => Promise<boolean>
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
   onInventoryEnabledChange: () => Promise<void>
+  onStartOnboarding: () => void
   onStatsRefresh: (options?: { comparisonPeriod?: CrmStatsPeriod; period?: CrmStatsPeriod; silent?: boolean }) => Promise<void>
   onVenuesChanged: () => Promise<void>
   runAction: RunAction
@@ -62,12 +67,14 @@ export function CrmSectionContent({
   context,
   disabled,
   duplicateCatalogProduct,
+  focus,
   inventoryEnabled,
   isCatalogLoading,
   mutateCatalog,
   onCatalogChanged,
   onError,
   onInventoryEnabledChange,
+  onStartOnboarding,
   onStatsRefresh,
   onVenuesChanged,
   runAction,
@@ -91,15 +98,15 @@ export function CrmSectionContent({
     case 'dashboard':
       return <DashboardCrm disabled={disabled} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} />
     case 'products':
-      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} venues={venues} /> : null
+      return catalog ? <CatalogProductsCrm catalog={catalog} initialProductId={focus?.targetId} key={focus?.key} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
       return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} inventoryFeatureEnabled={hasTenantVenueCapability(venueContext, 'inventory')} mutate={mutateCatalog} /> : null
     case 'categories':
       return catalog ? <CatalogStructureCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'selection-groups':
-      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" initialGroupId={focus?.targetId} key={focus?.key} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
     case 'modifiers':
-      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" initialGroupId={focus?.targetId} key={focus?.key} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
     case 'access':
       return <AccessManagementCrm disabled={disabled} key={`${context.tenantId}:${selectedVenueId}`} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} venues={venues} />
     case 'discounts':
@@ -140,6 +147,8 @@ export function CrmSectionContent({
       />
     case 'x-reports':
       return <CashClosingReportsCrm
+        initialClosingId={focus?.targetId}
+        key={focus?.key}
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
         disabled={disabled}
         runAction={runAction}
@@ -168,5 +177,7 @@ export function CrmSectionContent({
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':
       return <PlanCrm disabled={disabled} tenantContext={context} />
+    case 'documentation':
+      return <DocumentationCrm canStartOnboarding={!disabled && Boolean(selectedVenue && getOnboardingTopics(context, selectedVenue).length)} onStartOnboarding={onStartOnboarding} />
   }
 }

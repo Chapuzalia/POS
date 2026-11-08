@@ -15,6 +15,7 @@ type Props = {
   catalog: CatalogData
   disabled: boolean
   domain: 'selection' | 'modifier'
+  initialGroupId?: string
   inventoryRecipesEnabled: boolean
   mutate: (action: () => Promise<unknown>) => Promise<boolean>
 }
@@ -23,10 +24,10 @@ function money(value: string) {
   try { return parseMoneyToCents(value) } catch { return Number.NaN }
 }
 
-export function CatalogGroupsCrm({ catalog, disabled, domain, inventoryRecipesEnabled, mutate }: Props) {
+export function CatalogGroupsCrm({ catalog, disabled, domain, initialGroupId, inventoryRecipesEnabled, mutate }: Props) {
   const groups = domain === 'selection' ? catalog.selectionGroups.filter((group) => group.type === 'mixer') : catalog.modifierGroups
   const assignments = domain === 'selection' ? catalog.selectionAssignments : catalog.modifierAssignments
-  const [selectedGroupId, setSelectedGroupId] = useState(groups[0]?.id ?? '')
+  const [selectedGroupId, setSelectedGroupId] = useState(groups.find((group) => group.id === initialGroupId)?.id ?? groups[0]?.id ?? '')
   const [groupName, setGroupName] = useState('')
   const [optionProductId, setOptionProductId] = useState(catalog.products[0]?.id ?? '')
   const [optionVariantId, setOptionVariantId] = useState('')

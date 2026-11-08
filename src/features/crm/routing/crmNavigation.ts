@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Beaker, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackagePlus, PlugZap, Printer, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
+import { Armchair, BarChart3, Beaker, BookOpen, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackagePlus, PlugZap, Printer, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-replenishment' | 'purchases-invoices' | 'purchases-suppliers' | 'profitability' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'print-templates' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-replenishment' | 'purchases-invoices' | 'purchases-suppliers' | 'profitability' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'print-templates' | 'settings' | 'plan' | 'documentation'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -45,6 +45,7 @@ export const navItems: CrmNavItem[] = [
   { id: 'plan', label: 'Mi Plan', icon: Gauge },
   { id: 'print-templates', label: 'Plantillas de impresión', icon: Printer },
   { id: 'settings', label: 'Configuración', icon: Settings },
+  { id: 'documentation', label: 'Documentación y ayuda', icon: BookOpen },
 ]
 
 export const allNavItems = [...navItems, ...productNavItems, ...purchaseNavItems, ...reportNavItems, ...inventoryNavItems]
@@ -84,6 +85,7 @@ export function getSectionTitle(section: CrmSection) {
     'print-templates': 'Configuración · Impresión · Plantillas',
     settings: 'Configuración de locales',
     plan: 'Mi Plan',
+    documentation: 'Documentación y ayuda',
   }
   return titles[section] ?? 'Panel de control'
 }

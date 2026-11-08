@@ -35,6 +35,7 @@ import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
 type Props = {
   dayChangeTime: string | null;
   disabled: boolean;
+  initialClosingId?: string;
   runAction: RunAction;
   selectedVenueId: string;
   tenantContext: TenantContext;
@@ -538,6 +539,7 @@ function CashClosingDetailModal({
 export function CashClosingReportsCrm({
   dayChangeTime,
   disabled,
+  initialClosingId,
   runAction,
   selectedVenueId,
   tenantContext,
@@ -549,6 +551,7 @@ export function CashClosingReportsCrm({
   const [currentPage, setCurrentPage] = useState(1);
   const [sortDescriptor, setSortDescriptor] = useState<DataTableSortDescriptor>({ column: 'column-0', direction: 'descending' });
   const requestId = useRef(0);
+  const pendingClosingId = useRef(initialClosingId);
   const operationalDayConfig = useMemo<OperationalDayConfig>(
     () => ({ dayChangeTime, timeZone }),
     [dayChangeTime, timeZone],
@@ -571,7 +574,11 @@ export function CashClosingReportsCrm({
         { ...tenantContext, venueId: selectedVenueId },
         operationalDayConfig,
     );
-    if (currentRequest === requestId.current) setClosings(next);
+    if (currentRequest !== requestId.current) return;
+    setClosings(next);
+    const focused = next.find((closing) => closing.id === pendingClosingId.current);
+    pendingClosingId.current = undefined;
+    if (focused) setSelectedClosing(focused);
   }, [selectedVenueId, tenantContext, operationalDayConfig]);
 
   useEffect(() => {

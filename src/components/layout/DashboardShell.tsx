@@ -10,6 +10,8 @@ export type DashboardNavItem = { id: string; label: string; icon: LucideIcon; di
 export type DashboardNavParent = { id: string; label: string; icon: LucideIcon; items: DashboardNavItem[] }
 export type DashboardNavEntry = DashboardNavItem | DashboardNavParent
 export type DashboardNavGroup = { label: string; items: DashboardNavEntry[] }
+export type DashboardSearchItem = { id: string; label: string; context: string; icon: LucideIcon; keywords?: string; onSelect: () => void }
+export type DashboardSearch = { load: () => Promise<DashboardSearchItem[]>; placeholder?: string }
 
 type Props = {
   account: { name: string; detail?: string; menu: ReactNode }
@@ -21,6 +23,7 @@ type Props = {
   groups: DashboardNavGroup[]
   notices?: ReactNode
   onNavigate: (id: string) => void
+  search?: DashboardSearch
   sideFooter?: ReactNode
   theme?: 'light' | 'dark'
   title: string
@@ -43,7 +46,7 @@ function isTypingTarget(target: EventTarget | null) {
 
 const hasOpenModal = () => Boolean(document.querySelector('.modal__dialog, [aria-modal="true"]:not([data-shell="sidebar"])'))
 
-export function DashboardShell({ account, activeId, brand, children, eyebrow, goKeys = {}, groups, notices, onNavigate, sideFooter, theme, title, tools, workspace }: Props) {
+export function DashboardShell({ account, activeId, brand, children, eyebrow, goKeys = {}, groups, notices, onNavigate, search, sideFooter, theme, title, tools, workspace }: Props) {
   const rootRef = useRef<HTMLDivElement>(null)
   const navRef = useRef<HTMLElement>(null)
   const pillRef = useRef<HTMLSpanElement>(null)
@@ -341,7 +344,7 @@ export function DashboardShell({ account, activeId, brand, children, eyebrow, go
         </div>
       </div>
 
-      {isPaletteOpen ? <CommandPalette groups={groups} onClose={() => setIsPaletteOpen(false)} onSelect={(id) => { setIsPaletteOpen(false); navigate(id) }} /> : null}
+      {isPaletteOpen ? <CommandPalette groups={groups} onClose={() => setIsPaletteOpen(false)} onSelect={(id) => { setIsPaletteOpen(false); navigate(id) }} search={search} /> : null}
     </div>
   )
 }
@@ -419,26 +422,48 @@ function AccountMenu({ account }: { account: Props['account'] }) {
 
 export const dashboardMenuItemClass = `flex min-h-11 w-full items-center gap-2.5 rounded-xl border-0 bg-transparent px-2.5 text-left text-sm font-medium text-[var(--crm-text-secondary)] transition-colors duration-[180ms] hover:bg-[var(--crm-surface-soft)] hover:text-[var(--crm-text)] disabled:opacity-50 ${focusRing}`
 
-function CommandPalette({ groups, onClose, onSelect }: { groups: DashboardNavGroup[]; onClose: () => void; onSelect: (id: string) => void }) {
+const MAX_RECORD_RESULTS = 40
+const normalize = (value: string) => value.normalize('NFD').replace(/[̀-ͯ]/g, '').toLocaleLowerCase('es')
+
+function CommandPalette({ groups, onClose, onSelect, search }: { groups: DashboardNavGroup[]; onClose: () => void; onSelect: (id: string) => void; search?: DashboardSearch }) {
   const [query, setQuery] = useState('')
-  const entries = groups.flatMap((group) => group.items.flatMap((entry) => isParent(entry)
+  const [records, setRecords] = useState<{ items: DashboardSearchItem[]; status: 'loading' | 'ready' | 'error' }>({ items: [], status: 'loading' })
+  // Load once per palette opening; parent re-renders must not refetch.
+  const [load] = useState(() => search?.load)
+  useEffect(() => {
+    if (!load) return undefined
+    let active = true
+    load().then(
+      (items) => { if (active) setRecords({ items, status: 'ready' }) },
+      () => { if (active) setRecords({ items: [], status: 'error' }) },
+    )
+    return () => { active = false }
+  }, [load])
+  const sections = groups.flatMap((group) => group.items.flatMap((entry) => isParent(entry)
     ? entry.items.map((item) => ({ ...item, context: `${group.label} · ${entry.label}` }))
     : [{ ...entry, context: group.label }]))
-  const needle = query.trim().toLocaleLowerCase('es')
-  const results = entries.filter((entry) => !entry.disabled && `${entry.label} ${entry.context}`.toLocaleLowerCase('es').includes(needle))
+    .filter((entry) => !entry.disabled)
+    .map((entry) => ({ id: `section:${entry.id}`, label: entry.label, context: entry.context, icon: entry.icon, keywords: '', onSelect: () => onSelect(entry.id) }))
+  const words = normalize(query.trim()).split(/\s+/).filter(Boolean)
+  const matches = (entry: DashboardSearchItem) => { const text = normalize(`${entry.label} ${entry.context} ${entry.keywords ?? ''}`); return words.every((word) => text.includes(word)) }
+  const pick = (entry: DashboardSearchItem) => { onClose(); entry.onSelect() }
+  const results = [...sections.filter(matches), ...(words.length ? records.items.filter(matches).slice(0, MAX_RECORD_RESULTS) : [])]
+  const status = search && words.length && records.status !== 'ready'
+    ? records.status === 'loading' ? 'Buscando…' : 'No se pudieron cargar productos ni cierres.'
+    : null
   return (
     <AppModal label="Buscar en el workspace" maxWidth={560} onClose={onClose} theme="crm">
-      <form className="grid gap-2 p-3" onSubmit={(event) => { event.preventDefault(); if (results[0]) onSelect(results[0].id) }}>
+      <form className="grid gap-2 p-3" onSubmit={(event) => { event.preventDefault(); if (results[0]) pick(results[0]) }}>
         <label className="flex min-h-12 items-center gap-2.5 rounded-xl bg-[var(--crm-input-bg)] px-3.5">
           <Search aria-hidden="true" className="size-4 shrink-0 text-[var(--crm-text-muted)]" />
-          <input aria-label="Buscar sección" autoFocus className="min-w-0 flex-1 border-0 bg-transparent text-sm text-[var(--crm-text)] outline-none placeholder:text-[var(--crm-text-muted)]" onChange={(event) => setQuery(event.target.value)} placeholder="Ir a una sección…" value={query} />
+          <input aria-label="Buscar en el workspace" autoFocus className="min-w-0 flex-1 border-0 bg-transparent text-sm text-[var(--crm-text)] outline-none placeholder:text-[var(--crm-text-muted)]" onChange={(event) => setQuery(event.target.value)} placeholder={search?.placeholder ?? 'Ir a una sección…'} value={query} />
         </label>
         <ul className="m-0 grid max-h-[min(420px,60dvh)] list-none gap-0.5 overflow-y-auto p-0">
           {results.map((entry, index) => {
             const Icon = entry.icon
             return (
               <li className="animate-[dashboard-row_500ms_var(--ease-power3)_backwards]" data-motion-anim="" key={entry.id} style={{ animationDelay: `${Math.min(index, 4) * 35}ms` }}>
-                <button className={dashboardMenuItemClass} onClick={() => onSelect(entry.id)} type="button">
+                <button className={dashboardMenuItemClass} onClick={() => pick(entry)} type="button">
                   <Icon aria-hidden="true" className="size-4 shrink-0" />
                   <span className="min-w-0 flex-1 truncate">{entry.label}</span>
                   <span className="truncate text-xs text-[var(--crm-text-muted)]">{entry.context}</span>
@@ -446,7 +471,8 @@ function CommandPalette({ groups, onClose, onSelect }: { groups: DashboardNavGro
               </li>
             )
           })}
-          {results.length ? null : <li className="px-3 py-6 text-center text-sm text-[var(--crm-text-muted)]">Sin resultados.</li>}
+          {status ? <li className="px-3 py-3 text-center text-sm text-[var(--crm-text-muted)]" role="status">{status}</li> : null}
+          {results.length || status ? null : <li className="px-3 py-6 text-center text-sm text-[var(--crm-text-muted)]">Sin resultados.</li>}
         </ul>
       </form>
     </AppModal>

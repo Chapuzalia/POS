@@ -172,10 +172,12 @@ function setup(response = detail) {
     document: { querySelector: () => null, querySelectorAll: () => ({ length: dialog ? 1 : 0, item: () => dialog }), body: {} }, MutationObserver: class { constructor(callback: () => void) { observers.push(callback) } observe() {} disconnect() {} },
   })
   onTestFinished(() => runner.unmount())
-  const render = (activeSection = 'dashboard', isOnline = true) => runner.render({ context, venue, activeSection, isOnline, disabled: false, onSectionChange: navigate })
+  let openRequest = 0
+  const render = (activeSection = 'dashboard', isOnline = true) => runner.render({ context, venue, activeSection, isOnline, disabled: false, onSectionChange: navigate, openRequest })
+  const open = () => { openRequest += 1; render() }
   const click = (tree: unknown, label: string) => nodes(tree).find((node: { props?: { 'aria-label'?: string; children?: unknown } }) => node.props?.['aria-label'] === label || node.props?.children === label)?.props.onClick()
   const indexProps = () => nodes(render()).find((node: { type?: string }) => node.type === 'onboarding-index')?.props
-  return { render, click, request, navigate, guide, store,
+  return { render, click, open, request, navigate, guide, store,
     setDialog: (known: boolean | null) => { dialog = known === null ? null : { querySelector: () => known ? {} : null }; observers.forEach(callback => callback()) },
     startProduct: () => indexProps()?.onStart(model.onboardingTopics.find(topic => topic.id === 'products')),
     finish: () => guideConfig?.onDoneClick(), productReviewed: () => indexProps()?.reviewed.includes('products'),
@@ -191,7 +193,7 @@ it('opens the optional welcome after verification, remembers postponement, and k
   f.click(f.render(), 'Más tarde')
   expect(nodes(f.render()).some((node: { props?: { label?: string } }) => node.props?.label === 'Bienvenido a Tickit')).toBe(false)
   expect([...f.store.values()].some(value => JSON.parse(value).offered)).toBe(true)
-  f.click(f.render(), 'Inicio guiado')
+  f.open()
   f.render()
   expect(f.isIndexOpen()).toBe(true)
 })
@@ -207,12 +209,14 @@ it('does not offer unconfirmed accounts or interrupt the CRM after a billing rea
   f.render('dashboard', false)
   f.render()
   await vi.waitFor(() => expect(f.request).toHaveBeenCalledTimes(2))
-  expect(nodes(f.render()).some((node: { props?: { 'aria-label'?: string } }) => node.props?.['aria-label'] === 'Inicio guiado')).toBe(true)
+  f.open()
+  f.render()
+  expect(f.isIndexOpen()).toBe(true)
 })
 
 it('marks only a finished guide as reviewed, permits topic jumps and cleans up on navigation/offline', () => {
   const f = setup()
-  f.click(f.render(), 'Inicio guiado')
+  f.open()
   f.render()
   f.startProduct()
   expect(f.navigate).toHaveBeenCalledWith('products')
@@ -234,7 +238,7 @@ it('marks only a finished guide as reviewed, permits topic jumps and cleans up o
 
 it('pauses safely when another editor takes focus and returns to the index after closing it', () => {
   const f = setup()
-  f.click(f.render(), 'Inicio guiado')
+  f.open()
   f.render()
   f.startProduct()
   f.setDialog(true)
