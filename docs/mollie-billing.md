@@ -63,9 +63,45 @@ Mollie envía solo `id=tr_…`, sin firma. `billing-webhook` valida el formato, 
 
 La conciliación comprueba que suscripciones y pagos pertenecen al cliente y al negocio (`metadata.tickit_tenant_id`).
 
-## Facturas
+## Facturas (Odoo)
 
-Mollie no emite facturas de suscripción. Cada pago se guarda en `billing_invoices` (total, base sin IVA, estado, fecha de cobro) con `fiscal_export_status='pending_review'`, sin número ni PDF: la factura fiscal se emite fuera (gestoría/ERP) a partir de esos registros.
+Mollie no emite facturas de suscripción: el emisor fiscal es el Odoo de Alteil (19 Community, Veri\*Factu). Cada pago se guarda en `billing_invoices` y la conciliación, dentro de su reclamación de sincronización y antes de `sync_commit`, lo refleja en Odoo (`_shared/billing/odoo-sync.ts`, API JSON-2 en `odoo.ts`):
+
+| Pago | Odoo | `billing_odoo_documents.state` |
+| --- | --- | --- |
+| Checkout abierto o SEPA en trámite | Pedido de venta = **proforma** pendiente de pago (`client_order_ref = tr_…`) | `proforma` |
+| Liquidado | Confirmar el pedido → factura → comprobar que el total coincide al céntimo con Mollie → validar (numera Odoo) → registrar el cobro en el diario `MOLL` | `invoiced` |
+| Caducado, cancelado o fallido sin liquidar | Cancelar la proforma (no se crea ninguna si Odoo no llegó a verla) | `canceled` |
+| Devuelto | Factura (si faltaba) y **rectificativa** validada | `refunded` |
+| Error de Odoo | Nada; se reintenta en la siguiente conciliación | `failed` + código |
+
+- Siempre se busca antes de crear (pedido por `client_order_ref`, factura entre las del pedido, rectificativa por `reversed_entry_id`), así que los reintentos no duplican nada. Como mucho se procesan 10 pagos y 60 s por conciliación.
+- Odoo nunca bloquea la facturación: un fallo o Odoo sin configurar no cambia el acceso, el contrato ni la deuda.
+- Si el total de Odoo no coincide con el bruto de Mollie, la factura queda en borrador sin número (`ODOO_TOTAL_MISMATCH`).
+- Tickit refleja el estado en `billing_invoices`: `fiscal_export_status` (`pending_review`/`exported`/`failed`), `number` (número de Odoo) y `fiscal_external_reference` (`sale.order:<id>` o `account.move:<id>`). El cliente de Odoo se busca o se crea por NIF (prefijo `ES` para NIF/NIE/CIF españoles) y su ID se guarda en `billing_accounts.odoo_partner_id`.
+- `billing_odoo_documents` tiene RLS activada y ninguna política: solo la service role puede leerla.
+- **Mi Plan** muestra el número, el estado fiscal y los botones «Descargar PDF» / «Descargar rectificativa». La acción `invoice-document` (solo para el propietario o el superadmin, y solo para pagos de su negocio) obtiene el PDF del portal de Odoo desde el servidor; el token del portal no llega al navegador. Odoo no envía correos.
+- El resumen de Superadmin avisa si Odoo está desactivado o si hay documentos pendientes de emisión.
+
+### Configuración
+
+| Variable (Edge Functions) | Uso |
+| --- | --- |
+| `ODOO_URL` | URL de Odoo, p. ej. `https://invoicing.int.alteilsolutions.com`. |
+| `ODOO_DB` | Base de datos (`Alteil`). |
+| `ODOO_API_KEY` | Clave API de un usuario técnico con permisos de Facturación y Ventas. |
+
+Sin las tres variables no se envía nada a Odoo. En Odoo deben existir:
+
+1. Producto de servicio con referencia interna **`TICKIT-SUB`** («Suscripción Tickit POS»), impuesto «21% S» y facturación según cantidad pedida.
+2. Diario bancario con código **`MOLL`** («Mollie»).
+3. La opción «Factura proforma» activada en Ventas → Ajustes.
+
+Redespliega `billing`, `billing-webhook` y `billing-reconcile` después de configurar los secretos.
+
+### Paso a actividad real
+
+Mientras Odoo esté en pruebas, staging y producción envían al mismo Odoo (el origen del pedido indica `Tickit test`/`Tickit live`). Antes de empezar la actividad real: reiniciar Odoo (numeración, clientes y documentos de prueba), configurar Veri\*Factu en real (certificado, obligatorio y fuera del entorno de pruebas), y retirar los `ODOO_*` de staging o apuntarlos a una copia.
 
 ## Paso a cobros reales
 
@@ -80,4 +116,4 @@ Las cuentas sandbox enlazadas a `cus_…` devuelven `BILLING_LEGACY_PROVIDER` y 
 
 ## Pendiente
 
-Prealerta SEPA al cliente antes de cada adeudo (Mollie no la envía), pagar las renovaciones con tarjeta en lugar de SEPA, reactivar una baja programada, cancelar desde Tickit un Checkout de ampliación abierto (caduca solo en Mollie), IVA inverso intracomunitario y emisión automática de facturas.
+Prealerta SEPA al cliente antes de cada adeudo (Mollie no la envía), pagar las renovaciones con tarjeta en lugar de SEPA, reactivar una baja programada, cancelar desde Tickit un Checkout de ampliación abierto (caduca solo en Mollie), IVA inverso intracomunitario (Odoo factura todo con el 21 %) y conciliación en Odoo de las liquidaciones y devoluciones de Mollie con el banco.
