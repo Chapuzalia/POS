@@ -46,6 +46,7 @@ export const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('restart-checkout'), tenantId: z.uuid() }).strict(),
   z.object({ action: z.literal('portal'), tenantId: z.uuid() }).strict(),
   z.object({ action: z.literal('reconcile'), tenantId: z.uuid() }).strict(),
+  z.object({ action: z.literal('invoice-document'), tenantId: z.uuid(), paymentId: z.string().regex(/^tr_[A-Za-z0-9]{4,40}$/), document: z.enum(['main', 'refund']) }).strict(),
   z.object({ action: z.literal('reconcile-batch') }).strict(),
   z.object({ action: z.literal('retry-event'), eventId: z.string().regex(/^(evt_|mollie:tr_)/).max(150) }).strict(),
   // The IBAN is forwarded to Mollie to create the SEPA mandate; it is never stored or logged.

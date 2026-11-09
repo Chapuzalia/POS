@@ -72,6 +72,7 @@ Deno.serve(async request => {
       case 'retry-operation': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, true))
       case 'portal': return reply(await service.portal(body.tenantId))
       case 'reconcile': return reply(await service.reconcile(body.tenantId))
+      case 'invoice-document': return reply(await service.invoiceDocument(body.tenantId, body.paymentId, body.document))
       case 'settings': return reply(await service.transition('settings', { ...body, actorId: user.user.id }))
       case 'retry-event': {
         const stored = await db.from('billing_stripe_events').select('event_id,event_type,stripe_created,stripe_customer_id,status').eq('event_id', body.eventId).single()

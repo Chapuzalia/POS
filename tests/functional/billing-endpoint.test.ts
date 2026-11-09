@@ -18,6 +18,7 @@ function endpoint(admin = true, role = 'owner', active = true) {
   const confirm = vi.fn(async () => ({ operation, url: operation.result.url }))
   const quoteCancel = vi.fn(async () => ({ id: 'cancel' }))
   const changeMandate = vi.fn(async () => ({ mandateId: 'mdt_new', last4: '1332' }))
+  const invoiceDocument = vi.fn(async () => ({ filename: 'INV-1.pdf', contentType: 'application/pdf', base64: 'JVBERg==' }))
   const schemas = compileComponent(readFileSync(new URL('../../supabase/functions/_shared/billing/schemas.ts', import.meta.url), 'utf8'), { 'npm:zod@4.4.3': { z } })
   compileComponent(readFileSync(new URL('../../supabase/functions/billing/index.ts', import.meta.url), 'utf8'), {
     'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
@@ -31,12 +32,13 @@ function endpoint(admin = true, role = 'owner', active = true) {
       portal,
       quoteCancel,
       changeMandate,
+      invoiceDocument,
     }) },
   }, {
     Deno: { serve: (callback: typeof handler) => { handler = callback }, env: { get: () => 'https://staging.example.test' } },
     Response, Request, URL, Error, console: { error: log },
   })
-  return { log, portal, confirm, quoteCancel, changeMandate, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
+  return { log, portal, confirm, quoteCancel, changeMandate, invoiceDocument, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
 }
 
 const tenantId = '11111111-1111-4111-8111-111111111111'
@@ -130,4 +132,20 @@ it('changes the direct-debit IBAN only for the owner', async () => {
   const admin = endpoint()
   expect((await admin.send(body)).status).toBe(403)
   expect(admin.changeMandate).not.toHaveBeenCalled()
+})
+
+it('serves invoice documents to the owner and validates the payment id', async () => {
+  const h = endpoint(false)
+  const response = await h.send(JSON.stringify({ action: 'invoice-document', tenantId, paymentId: 'tr_abc123', document: 'main' }))
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ filename: 'INV-1.pdf', contentType: 'application/pdf', base64: 'JVBERg==' })
+  expect(h.invoiceDocument).toHaveBeenCalledWith(tenantId, 'tr_abc123', 'main')
+  expect((await h.send(JSON.stringify({ action: 'invoice-document', tenantId, paymentId: '../etc', document: 'main' }))).status).toBe(400)
+  expect((await h.send(JSON.stringify({ action: 'invoice-document', tenantId, paymentId: 'tr_abc123', document: 'other' }))).status).toBe(400)
+})
+
+it('denies invoice documents to non-owners of the tenant', async () => {
+  const h = endpoint(false, 'manager')
+  expect((await h.send(JSON.stringify({ action: 'invoice-document', tenantId, paymentId: 'tr_abc123', document: 'main' }))).status).toBe(403)
+  expect(h.invoiceDocument).not.toHaveBeenCalled()
 })

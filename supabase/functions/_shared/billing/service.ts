@@ -8,7 +8,7 @@ import type { PromotionPhase, PromotionPreview } from './promotions.ts'
 import { onboardingContract } from './onboarding.ts'
 import { odooSyncDiagnostic } from './diagnostics.ts'
 import type { OdooGateway } from './odoo.ts'
-import { syncOdoo } from './odoo-sync.ts'
+import { odooDocument, syncOdoo } from './odoo-sync.ts'
 
 // shortcut: the stripe_* columns/keys are kept (expand-only migrations) and now hold Mollie IDs (cst_, sub_, tr_); rename them in a contract migration.
 export type Account = {
@@ -138,12 +138,16 @@ export class BillingService {
       admin ? this.db.from('billing_audit').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
     ])
     if ([tenant, venues, devices, invoices, operations, audit].some(result => result.error)) throw new Error('BILLING_DB_DETAIL')
+    const odooDocs = await this.db.from('billing_odoo_documents').select('payment_id,state,refund_id').eq('tenant_id', tenantId).limit(1000)
+    if (odooDocs.error) throw new Error('BILLING_DB_DETAIL')
+    const docs = new Map((odooDocs.data ?? []).map(doc => [doc.payment_id, doc]))
+    const invoiceRows = (invoices.data ?? []).map(row => ({ ...row, odoo_state: docs.get(row.stripe_invoice_id)?.state ?? null, has_refund: Boolean(docs.get(row.stripe_invoice_id)?.refund_id) }))
     const history = operations.data ?? []
     if (scheduled && !history.some(row => row.id === scheduled.id)) {
       const { id, kind, status, timing, preview, result, reason, created_at, effective_at, contract } = scheduled
       history.push({ id, kind, status, timing, preview, result, reason, created_at, effective_at, contract })
     }
-    return { account, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, paymentMethod: await this.paymentMethod(account), invoices: invoices.data, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
+    return { account, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, paymentMethod: await this.paymentMethod(account), invoices: invoiceRows, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
   }
   // Masked direct-debit account of the live subscription. Never returns or logs the full IBAN.
   async paymentMethod(account: Account) {
@@ -164,16 +168,18 @@ export class BillingService {
       accounts.push(...result.data)
       if (result.data.length < 500) break
     }
-    const [tenants, venues, events, invoices] = await Promise.all([
+    const [tenants, venues, events, invoices, odooFailed] = await Promise.all([
       this.db.from('tenants').select('id,name').order('name').limit(1000),
       this.db.from('venues').select('tenant_id').limit(1000),
       this.db.from('billing_stripe_events').select('*').order('created_at', { ascending: false }).limit(100),
       this.db.from('billing_invoices').select('amount_paid_cents,paid_excluding_tax_cents').gte('paid_at', new Date(new Date().getFullYear(), new Date().getMonth(), 1).toISOString()).limit(1000),
+      this.db.from('billing_odoo_documents').select('payment_id').eq('state', 'failed').limit(1000),
     ])
-    if ([tenants, venues, events, invoices].some(result => result.error)) throw new Error('BILLING_DB_OVERVIEW')
+    if ([tenants, venues, events, invoices, odooFailed].some(result => result.error)) throw new Error('BILLING_DB_OVERVIEW')
     const names = new Map((tenants.data ?? []).map(row => [row.id, row.name]))
     return { accounts: accounts.map(account => ({ ...account, contract: account.billed_contract ?? account.contract, name: names.get(account.tenant_id) ?? account.tenant_id, venueCount: (venues.data ?? []).filter(row => row.tenant_id === account.tenant_id).length })), events: events.data,
       metrics: { ...recurringMetrics(accounts.map(account => ({ status: account.status, contract: account.billed_contract ?? account.contract }))), paidCents: (invoices.data ?? []).reduce((sum, row) => sum + row.amount_paid_cents, 0), paidExcludingTaxCents: (invoices.data ?? []).reduce((sum, row) => sum + row.paid_excluding_tax_cents, 0) },
+      odoo: { enabled: this.odoo !== null, failed: odooFailed.data?.length ?? 0 },
       truncated: (tenants.data?.length ?? 0) >= 1000 || (venues.data?.length ?? 0) >= 1000 || (invoices.data?.length ?? 0) >= 1000 }
   }
   async saveOnboarding(tenantId: string, selection: Selection) {
@@ -711,7 +717,10 @@ export class BillingService {
       throw error
     }
   }
-  async processEvent(event: { id: string; type: string; created: number; customer?: string }) {
+  invoiceDocument(tenantId: string, paymentId: string, document: 'main' | 'refund') {
+    return odooDocument({ odoo: this.odoo, db: this.db, tenantId, paymentId, document })
+  }
+  async processEvent(event:{ id: string; type: string; created: number; customer?: string }) {
     const claim = await this.transition<{ claimed: boolean }>('event_claim', event)
     if (!claim.claimed) return
     try {

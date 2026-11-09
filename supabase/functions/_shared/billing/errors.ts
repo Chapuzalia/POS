@@ -2,6 +2,7 @@
 export const billingErrorMessages: Record<string, string> = {
   BILLING_INVALID_REQUEST: 'Revisa los campos obligatorios, importes y condiciones de facturación.',
   BILLING_NOTHING_DUE: 'No hay cuotas pendientes de pago.',
+  BILLING_DOCUMENT_UNAVAILABLE: 'El documento todavía no está disponible.',
   BILLING_SEPA_REQUIRED: 'Indica el titular y el IBAN de la cuenta para domiciliar las siguientes cuotas.',
   BILLING_INVALID_IBAN: 'El IBAN no es válido. Revísalo e inténtalo de nuevo.',
   BILLING_LEGACY_PROVIDER: 'Esta cuenta sigue enlazada con la pasarela anterior. Contacta con soporte para migrarla a Mollie.',

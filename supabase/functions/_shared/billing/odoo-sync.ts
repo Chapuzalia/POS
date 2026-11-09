@@ -200,3 +200,30 @@ async function save(db: SupabaseClient, tenantId: string, paymentId: string, doc
   const mirrored = await db.from('billing_invoices').update(invoice).eq('stripe_invoice_id', paymentId).eq('tenant_id', tenantId)
   if (mirrored.error) throw new Error('BILLING_DB_ODOO')
 }
+
+function base64(bytes: Uint8Array) {
+  let binary = ''
+  for (let index = 0; index < bytes.length; index += 0x8000) binary += String.fromCharCode(...bytes.subarray(index, index + 0x8000))
+  return btoa(binary)
+}
+
+// PDF of the proforma/invoice ('main') or credit note ('refund') for one payment of this tenant, fetched server side.
+export async function odooDocument(input: { odoo: OdooGateway | null; db: SupabaseClient; tenantId: string; paymentId: string; document: 'main' | 'refund' }) {
+  const { odoo, db, tenantId, paymentId, document } = input
+  if (!odoo) throw new Error('BILLING_DOCUMENT_UNAVAILABLE')
+  const found = await db.from('billing_odoo_documents').select('sale_order_id,invoice_id,refund_id').eq('payment_id', paymentId).eq('tenant_id', tenantId).maybeSingle()
+  if (found.error) throw new Error('BILLING_DB_ODOO')
+  const doc = found.data as Pick<DocumentRow, 'sale_order_id' | 'invoice_id' | 'refund_id'> | null
+  const moveId = id(document === 'refund' ? doc?.refund_id : doc?.invoice_id)
+  const orderId = document === 'main' && !moveId ? id(doc?.sale_order_id) : null
+  if (!moveId && !orderId) throw new Error('BILLING_DOCUMENT_UNAVAILABLE')
+  const [model, recordId] = moveId ? ['account.move', moveId] : ['sale.order', orderId as number]
+  const path = await odoo.call<string>(model, 'get_portal_url', { ids: [recordId], report_type: 'pdf', download: true })
+  const bytes = await odoo.pdf(path)
+  let name = `Proforma-${paymentId}`
+  if (moveId) {
+    const [move] = await odoo.call<{ name: string }[]>('account.move', 'read', { ids: [moveId], fields: ['name'] })
+    name = (move?.name || paymentId).replace(/[^A-Za-z0-9_-]+/g, '-')
+  }
+  return { filename: `${name}.pdf`, contentType: 'application/pdf' as const, base64: base64(bytes) }
+}

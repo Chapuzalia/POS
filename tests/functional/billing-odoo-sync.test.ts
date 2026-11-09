@@ -218,3 +218,52 @@ it('creates no proforma for a payment that expired before Odoo saw it', async ()
   expect(odoo.orders).toHaveLength(0)
   expect(await doc(payment.id)).toMatchObject({ state: 'canceled', sale_order_id: null })
 })
+
+const pdfText = (result: { base64: string }) => new TextDecoder().decode(Uint8Array.from(atob(result.base64), char => char.charCodeAt(0)))
+
+it('serves the invoice PDF of the own tenant only', async () => {
+  const { service, mollie, odoo, activate } = await odooSetup()
+  await activate()
+  const paid = mollie.payment('first')
+  const result = await service.invoiceDocument(ids.tenant, paid.id, 'main')
+  expect(result).toMatchObject({ filename: 'INV-2026-00001.pdf', contentType: 'application/pdf' })
+  expect(pdfText(result)).toBe(`%PDF-1.7 /my/invoices/${odoo.moves[0].id}?access_token=tok${odoo.moves[0].id}&report_type=pdf&download=true`)
+  await expect(service.invoiceDocument(ids.other, paid.id, 'main')).rejects.toThrow('BILLING_DOCUMENT_UNAVAILABLE')
+  await expect(service.invoiceDocument(ids.tenant, paid.id, 'refund')).rejects.toThrow('BILLING_DOCUMENT_UNAVAILABLE')
+})
+
+it('serves the proforma before settlement and the refund after charge-back', async () => {
+  const { service, mollie, odoo, start } = await odooSetup()
+  const payment = await start()
+  const proforma = await service.invoiceDocument(ids.tenant, payment.id, 'main')
+  expect(proforma.filename).toBe(`Proforma-${payment.id}.pdf`)
+  expect(pdfText(proforma)).toContain(`/my/orders/${odoo.orders[0].id}?`)
+  mollie.payFirst()
+  mollie.chargeBack(payment)
+  await service.reconcile(ids.tenant)
+  const refund = await service.invoiceDocument(ids.tenant, payment.id, 'refund')
+  expect(refund.filename).toBe('RINV-2026-00002.pdf')
+})
+
+it('exposes odoo_state and has_refund in detail', async () => {
+  const { service, mollie, activate } = await odooSetup()
+  await activate()
+  const paid = mollie.payment('first')
+  mollie.chargeBack(paid)
+  await service.reconcile(ids.tenant)
+  const renewal = mollie.renew('pending')
+  await service.reconcile(ids.tenant)
+  const { invoices } = await service.detail(ids.tenant, false)
+  expect(invoices.find((row: Row) => row.stripe_invoice_id === paid.id)).toMatchObject({ odoo_state: 'refunded', has_refund: true })
+  expect(invoices.find((row: Row) => row.stripe_invoice_id === renewal.id)).toMatchObject({ odoo_state: 'proforma', has_refund: false })
+})
+
+it('reports Odoo status and failed documents in overview', async () => {
+  const plain = await setup()
+  await plain.activate()
+  expect((await plain.service.overview()).odoo).toEqual({ enabled: false, failed: 0 })
+  const { service, odoo, activate } = await odooSetup()
+  odoo.offline = true
+  await activate()
+  expect((await service.overview()).odoo).toEqual({ enabled: true, failed: 1 })
+})
