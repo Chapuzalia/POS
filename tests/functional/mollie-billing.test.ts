@@ -112,7 +112,7 @@ it('treats a charge-back of a settled renewal as debt', async () => {
   expect((await service.detail(ids.tenant, false)).invoices.find(row => row.stripe_invoice_id === renewal.id)).toMatchObject({ status: 'uncollectible', amount_paid_cents: 0, paid_excluding_tax_cents: 0 })
 })
 
-it('charges the prorated increase of an immediate upgrade by SEPA and grants access while it is in transit', async () => {
+it('charges the prorated increase of an immediate upgrade by card checkout and grants access only once paid', async () => {
   const { service, mollie, activate, withProduction, operation } = await setup()
   await activate()
   at('2026-11-25T00:00:00Z')
@@ -120,34 +120,40 @@ it('charges the prorated increase of an immediate upgrade by SEPA and grants acc
   expect(quote.timing).toBe('immediate')
   // 10 € net more for 15 of 30 days -> 5 € + 21 % VAT.
   expect(quote.preview.amountDueCents).toBe(605)
-  await service.confirm(ids.tenant, ids.owner, quote.id)
+  const confirmed = await service.confirm(ids.tenant, ids.owner, quote.id)
   const charge = mollie.payment('proration')
-  expect(charge).toMatchObject({ sequenceType: 'recurring', mandateId: mollie.mandates[0].id, amount: { value: '6.05' }, status: 'pending' })
-  expect(mollie.subscriptions[0].amount).toEqual({ currency: 'EUR', value: '71.39' })
-  const pending = await service.account(ids.tenant)
-  expect(pending.contract.features).toContain('production')
-  expect(pending.billed_contract.recurringCents).toBe(4900)
-  expect(pending.last_payment_status).toBe('pending')
+  expect(charge).toMatchObject({ sequenceType: 'oneoff', method: 'creditcard', amount: { value: '6.05' }, status: 'open' })
+  expect(confirmed.url).toBe(charge._links.checkout.href)
+  expect(mollie.calls.find(call => call.method === 'POST' && call.path === '/payments' && call.body.metadata.tickit_kind === 'proration').body.redirectUrl).toBe('http://localhost:5173/crm/plan?billing=return')
+  // Nothing changes while the card is unpaid; it is not a bank charge in progress either.
+  expect(mollie.subscriptions[0].amount.value).toBe('59.29')
+  const waiting = await service.account(ids.tenant)
+  expect(waiting.contract.features).not.toContain('production')
+  expect(waiting.last_payment_status).toBe('paid')
   expect((await operation(quote.id)).status).toBe('payment_pending')
   mollie.settle(charge)
   await service.handleWebhook(charge.id)
-  expect((await service.account(ids.tenant)).billed_contract.recurringCents).toBe(5900)
+  const paid = await service.account(ids.tenant)
+  expect(paid.contract.features).toContain('production')
+  expect(paid.billed_contract.recurringCents).toBe(5900)
+  expect(mollie.subscriptions[0].amount.value).toBe('71.39')
   expect((await operation(quote.id)).status).toBe('completed')
 })
 
-it('withdraws an upgrade whose SEPA charge fails and restores the previous amount', async () => {
+it('drops an upgrade whose card checkout expires and leaves the subscription untouched', async () => {
   const { service, mollie, activate, withProduction, operation } = await setup()
   await activate()
   at('2026-11-25T10:00:00Z')
   const quote = await service.quote(ids.tenant, ids.owner, withProduction, null, 'Añadir producción')
   await service.confirm(ids.tenant, ids.owner, quote.id)
-  const charge = mollie.settle(mollie.payment('proration'), 'failed')
+  const charge = mollie.settle(mollie.payment('proration'), 'expired')
   await service.handleWebhook(charge.id)
   const account = await service.account(ids.tenant)
   expect(account.contract.features).not.toContain('production')
-  expect(account).toMatchObject({ status: 'active', delinquent_since: null })
+  expect(account).toMatchObject({ status: 'active', delinquent_since: null, last_payment_status: 'paid' })
   expect((await operation(quote.id)).status).toBe('expired')
   expect(mollie.subscriptions[0].amount.value).toBe('59.29')
+  expect(mollie.calls.some(call => call.method === 'PATCH')).toBe(false)
 })
 
 it('schedules a downgrade at renewal: Mollie charges the new amount, access changes only on that date', async () => {
@@ -156,8 +162,10 @@ it('schedules a downgrade at renewal: Mollie charges the new amount, access chan
   await service.confirm(ids.tenant, ids.owner, quote0.id, false, { sepa, payer }); mollie.payFirst(); await service.reconcile(ids.tenant)
   at('2026-11-20T10:00:00Z')
   const quote = await service.quote(ids.tenant, ids.owner, { planVersionId: base.id, addons: [] }, null, 'Quitar producción')
-  expect(quote).toMatchObject({ timing: 'period_end', preview: { amountDueCents: 0, renewalCents: 5929, effectiveAt: '2026-12-10T00:00:00.000Z' } })
-  await service.confirm(ids.tenant, ids.owner, quote.id)
+  expect(quote).toMatchObject({ timing: 'period_end', preview: { amountDueCents: 0, renewalCents: 5929, effectiveAt: '2026-12-10T00:00:00.000Z', losses: ['Production: dejará de estar disponible.'] } })
+  // The owner must accept what stops working before the change is recorded.
+  await expect(service.confirm(ids.tenant, ids.owner, quote.id)).rejects.toThrow('BILLING_LOSSES_NOT_ACCEPTED')
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { acceptLosses: true })
   expect(mollie.subscriptions[0].amount.value).toBe('59.29')
   expect((await operation(quote.id)).status).toBe('scheduled')
   expect((await service.account(ids.tenant)).contract.features).toContain('production')
@@ -192,7 +200,7 @@ it('keeps a pending SEPA renewal collectable after an immediate cancellation and
   const quote0 = await service.quote(ids.tenant, ids.owner, withProduction, null, 'Alta')
   await service.confirm(ids.tenant, ids.owner, quote0.id, false, { sepa, payer }); mollie.payFirst(); await service.reconcile(ids.tenant)
   const downgrade = await service.quote(ids.tenant, ids.owner, { planVersionId: base.id, addons: [] }, null, 'Bajar')
-  await service.confirm(ids.tenant, ids.owner, downgrade.id)
+  await service.confirm(ids.tenant, ids.owner, downgrade.id, false, { acceptLosses: true })
   const cancel = await service.quoteCancel(ids.tenant, ids.owner, true, 'Baja inmediata')
   await service.confirm(ids.tenant, ids.owner, cancel.id)
   expect((await operation(downgrade.id)).status).toBe('expired')
@@ -271,7 +279,7 @@ it('recovers an uncertain Mollie failure on retry without a second charge', asyn
   const quote = await service.quote(ids.tenant, ids.owner, withProduction, null, 'Ampliar')
   const original = mollie.request.bind(mollie)
   mollie.request = async (method: string, path: string, ...args: unknown[]) => {
-    if (method === 'PATCH') throw new Error('network offline')
+    if (method === 'POST' && path === '/payments') throw new Error('network offline')
     return original(method, path, ...args)
   }
   await expect(service.confirm(ids.tenant, ids.owner, quote.id)).rejects.toThrow('offline')

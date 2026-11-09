@@ -15,9 +15,9 @@ type Props = {
 }
 
 export function CrmVenueSelector({ disabled, onChange, value, venues }: Props) {
-  const options = venues
-    .filter((venue) => venue.isActive)
-    .map((venue) => ({ label: venue.name, value: venue.id }))
+  // Venues switched off by a plan reduction stay reachable (read their data) after the active ones.
+  const options = [...venues.filter((venue) => venue.isActive), ...venues.filter((venue) => !venue.isActive)]
+    .map((venue) => ({ label: venue.isActive ? venue.name : `${venue.name} · inactivo`, value: venue.id }))
 
   return (
     <CrmSelect

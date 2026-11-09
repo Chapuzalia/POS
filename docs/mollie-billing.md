@@ -36,15 +36,22 @@ Un adeudo aceptado queda `pending` varios días. Mientras tanto **no se corta el
 
 ## Cambios a mitad de periodo
 
-- **Ampliación** (misma periodicidad, sin retirar nada): cargo inmediato de la parte proporcional del aumento neto (`(nuevo − actual) × tiempo restante / periodo`) + IVA, `sequenceType=recurring` sobre el mandato de la suscripción, y nuevo importe en la suscripción. Con SEPA, el acceso se amplía al aceptarse el adeudo; el contrato pagado (`billed_contract`) cambia al liquidarse. Si el cargo falla, se retira la ampliación y se restaura el importe anterior (no genera deuda).
+- **Ampliación** (misma periodicidad, sin retirar nada): el propietario paga **con tarjeta en Mollie Checkout** la parte proporcional del aumento neto (`(nuevo − actual) × tiempo restante / periodo`) + IVA (pago `oneoff`, `metadata.tickit_kind=proration`, vuelta a `/crm/plan?billing=return`). Mientras el Checkout está abierto no cambia nada (ni acceso ni importe de la suscripción, y no cuenta como «cobro en trámite»). Al pagarse, la conciliación aplica el contrato y actualiza el importe de la suscripción. Si caduca, se cancela o falla, la ampliación se descarta sin deuda. Una ampliación sin importe (p. ej. reasignar un complemento) se aplica al momento. Las ampliaciones antiguas en curso cobradas por SEPA siguen su flujo anterior.
 - **Reducción, retirada de complementos/locales o cambio de periodicidad**: sin cargo; se programa para la renovación. Con la misma periodicidad se actualiza ya el importe en Mollie (afecta solo al siguiente cobro) y el acceso cambia en la fecha de renovación. Mensual ↔ anual crea una suscripción nueva que empieza exactamente en la renovación con el mismo mandato y cancela la anterior. Las reducciones de acceso se siguen aplazando mientras haya caja u órdenes abiertas.
+- **Locales y terminales que sobran**: si el nuevo plan admite menos locales (o dispositivos) de los activos, Mi Plan pide elegir cuáles se desactivan. El contrato lleva `access` (`deactivateVenueIds`, `deactivateDeviceIds` —incluye los terminales de esos locales—, `reactivateVenueIds`, `reactivateDeviceIds`) y la proyección SQL (`billing_transition`, migración `20261109200000`) los aplica en la renovación: local inactivo, sus dispositivos y sus asignaciones de TPV inactivos. El local sigue visible en el CRM como «inactivo» con sus datos. La capacidad (`max_venues` y el trigger de alta) cuenta solo locales activos, y reactivar un local o dispositivo fuera de la proyección se comprueba contra el límite del plan.
+- **Reactivación**: al contratar más locales, Mi Plan ofrece reactivar locales inactivos en el mismo cambio. Vuelven con los terminales que la facturación había desactivado (no los retirados a mano), cuando el cambio se paga o se aplica.
+- **Funcionalidades que se pierden**: la vista previa lista lo que deja de estar disponible (locales, terminales, funcionalidades de empresa y complementos por local) y el propietario debe aceptarlo (`acceptLosses`) antes de confirmar. Los datos se conservan.
 - **Excepciones temporales (`cycles`)** y **promociones**: el contrato vigente en cada fecha se calcula igual que antes; la conciliación ajusta el importe de la suscripción para que el siguiente cobro coincida con el contrato vigente ese día. Sin prorrateos en las fases.
 - No hay reembolsos de periodos pagados.
 
 ## Bajas
 
-- **Al vencimiento** (propietario o superadmin): se cancela la suscripción en Mollie (no hay más cobros) y el plan sigue hasta `period_end`; después pasa a `canceled`. Sustituye un cambio programado. No se puede volver a contratar dentro del periodo pagado (se cobraría dos veces).
+- **Al vencimiento** (propietario desde Mi Plan → «Dar de baja», o superadmin): se cancela la suscripción en Mollie (no hay más cobros) y el plan sigue hasta `period_end`; después pasa a `canceled`. Sustituye un cambio programado. No se puede volver a contratar dentro del periodo pagado (se cobraría dos veces).
 - **Inmediata** (superadmin): cancela ya, sin reembolso.
+
+## Forma de pago
+
+Las cuotas se cobran por domiciliación SEPA y las ampliaciones con tarjeta en el momento. Mi Plan muestra los últimos 4 dígitos del IBAN domiciliado y permite **cambiar el IBAN** (`change-mandate`, solo propietario): se crea un mandato nuevo (`TICKIT-M-<requestId>`, idempotente por `requestId`), la suscripción pasa a usarlo y se revocan los mandatos SEPA anteriores. No se permite con un adeudo en trámite ni con una operación en curso. El IBAN se envía a Mollie y no se guarda ni se registra.
 
 ## Impagos
 
@@ -73,4 +80,4 @@ Las cuentas sandbox enlazadas a `cus_…` devuelven `BILLING_LEGACY_PROVIDER` y 
 
 ## Pendiente
 
-Prealerta SEPA al cliente antes de cada adeudo (Mollie no la envía), cambio de IBAN sin baja y nueva alta, reactivar una baja programada, IVA inverso intracomunitario y emisión automática de facturas.
+Prealerta SEPA al cliente antes de cada adeudo (Mollie no la envía), pagar las renovaciones con tarjeta en lugar de SEPA, reactivar una baja programada, cancelar desde Tickit un Checkout de ampliación abierto (caduca solo en Mollie), IVA inverso intracomunitario y emisión automática de facturas.

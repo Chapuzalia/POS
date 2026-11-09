@@ -51,9 +51,14 @@ export const requestSchema = z.discriminatedUnion('action', [
   // The IBAN is forwarded to Mollie to create the SEPA mandate; it is never stored or logged.
   z.object({ action: z.literal('confirm'), tenantId: z.uuid(), operationId: z.uuid(),
     sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42) }).strict().optional(),
-    payer: z.object({ legalName: z.string().trim().min(1).max(200), taxId: z.string().trim().min(1).max(40) }).strict().optional() }).strict(),
+    payer: z.object({ legalName: z.string().trim().min(1).max(200), taxId: z.string().trim().min(1).max(40) }).strict().optional(),
+    acceptLosses: z.boolean().optional() }).strict(),
+  z.object({ action: z.literal('change-mandate'), tenantId: z.uuid(), requestId: z.uuid(),
+    sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42) }).strict() }).strict(),
   z.object({ action: z.literal('retry-operation'), tenantId: z.uuid(), operationId: z.uuid() }).strict(),
-  z.object({ action: z.literal('quote'), tenantId: z.uuid(), selection: selectionSchema, exception: exceptionSchema.nullable(), reason: z.string().trim().min(1).max(500) }).strict(),
+  z.object({ action: z.literal('quote'), tenantId: z.uuid(), selection: selectionSchema, exception: exceptionSchema.nullable(), reason: z.string().trim().min(1).max(500),
+    // Optional for N-1 clients: venues/devices to switch off at renewal or back on.
+    access: z.object({ deactivateVenueIds: z.array(z.uuid()).max(1000), deactivateDeviceIds: z.array(z.uuid()).max(1000), reactivateVenueIds: z.array(z.uuid()).max(1000) }).strict().optional() }).strict(),
   z.object({ action: z.literal('quote-cancel'), tenantId: z.uuid(), immediate: z.boolean(), reason: z.string().trim().min(1).max(500) }).strict(),
   z.object({ action: z.literal('settings'), tenantId: z.uuid(), graceDays: quantity.max(365), legalName: z.string().max(200), taxId: z.string().max(40), email: z.email().or(z.literal('')), reason: z.string().min(1).max(500) }).strict(),
 ])

@@ -35,7 +35,7 @@ export type BillingInvoice = {
 }
 export type BillingOperation = {
   id: string; kind: string; status: string; timing: 'immediate' | 'period_end'; reason: string
-  preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string; afterPromotionCents?: number; promotions?: import('../../../supabase/functions/_shared/billing/promotions').PromotionPreview[] }
+  preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string; afterPromotionCents?: number; losses?: string[]; promotions?: import('../../../supabase/functions/_shared/billing/promotions').PromotionPreview[] }
   contract?: Contract | null
   result?: { url?: string } | null
   created_at: string; effective_at?: string | null
@@ -50,6 +50,8 @@ export type BillingDetail = {
   operations: BillingOperation[]
   audit: Array<{ id: string; action: string; reason: string; actor_id: string | null; created_at: string }>
   commercialState: string
+  // Masked direct-debit account of the live subscription (never the full IBAN).
+  paymentMethod?: { method: string; status: string; last4: string | null } | null
 }
 export type BillingCatalog = { products: Product[]; versions: Version[]; features: Array<{ key: string; name: string; is_core: boolean }> }
 export type BillingOverview = {

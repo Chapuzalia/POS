@@ -61,7 +61,10 @@ export type Contract = {
   limits: { venues: number; devices: number }
   recurringCents: number
   exception: CommercialException | null
+  // Venues/devices switched off (downgrade) or back on (upgrade) when this contract is projected.
+  access?: ContractAccess
 }
+export type ContractAccess = { deactivateVenueIds: string[]; deactivateDeviceIds: string[]; reactivateVenueIds: string[]; reactivateDeviceIds: string[] }
 
 function integer(value: number, label: string, max = 100_000) {
   if (!Number.isSafeInteger(value) || value < 0 || value > max) throw new Error(`BILLING_INVALID_${label}`)

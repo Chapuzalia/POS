@@ -137,6 +137,7 @@ export function CrmShell({ activeSection, children, context, disabled, error, in
         <p className="m-0 mt-0.5 truncate text-sm font-semibold text-[var(--crm-sidebar-text)]">{context.tenantName}</p>
       </div>}
     >
+      {venues.some((venue) => venue.id === selectedVenueId && !venue.isActive) ? <p role="status" className="mb-4 rounded-[var(--crm-radius-md)] bg-[var(--crm-yellow-soft)] p-4 text-sm text-[var(--crm-text)]">Este local está inactivo por el plan contratado. Se conservan sus datos, pero sus terminales TPV no pueden operar. Para reactivarlo, amplía el plan desde Mi Plan.</p> : null}
       <div data-onboarding="section-content" data-crm-section={activeSection}>{children}</div>
     </DashboardShell>
   )

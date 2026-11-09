@@ -5,6 +5,8 @@ import { Checkbox } from '../../components/ui/Checkbox'
 import { DataTable } from '../../components/ui/DataTable'
 import { SepaMandateFields } from './SepaMandateFields'
 import { emptySepaForm, sepaConfirmInput, sepaFormReady } from './sepa'
+import { accessNeeds, accessRequest, emptyAccessChoice, selectionLimits } from './access'
+import type { AccessChoice } from './access'
 import { AppModal } from '../../components/ui/AppModal'
 import { billingDate, billingMoney, billingRequest, openBillingUrl } from './service'
 import { parseMoneyToCents } from '../../lib/format'
@@ -34,6 +36,12 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
   const [showHistoricalRates, setShowHistoricalRates] = useState(false)
   const [editingPlan, setEditingPlan] = useState(false)
   const [sepa, setSepa] = useState(emptySepaForm)
+  const [access, setAccess] = useState<AccessChoice>(emptyAccessChoice)
+  const [acceptLosses, setAcceptLosses] = useState(false)
+  // Changing the IBAN: requestId makes a repeated click reuse the same Mollie mandate.
+  const [mandate, setMandate] = useState<{ requestId: string; form: typeof emptySepaForm } | null>(null)
+  // Back from Mollie Checkout: ask Mollie now instead of waiting for the webhook.
+  const [returnedFromCheckout] = useState(() => !admin && new URLSearchParams(globalThis.location?.search ?? '').has('billing'))
   const headingRef = useRef<HTMLHeadingElement>(null)
   useEffect(() => { if (!admin) headingRef.current?.focus() }, [admin, editingPlan])
   const refresh = useCallback(async () => {
@@ -51,7 +59,14 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
     try { await action() } catch (failure) { setError(failure instanceof Error ? failure.message : 'No se pudo completar la operación.') }
     finally { setPendingActions(count => count - 1) }
   }, [])
-  useEffect(() => { if (!disabled) void run(refresh) }, [refresh, run, disabled])
+  useEffect(() => {
+    if (disabled) return
+    void run(async () => {
+      // Best effort: the webhook reconciles anyway; a failure here must not hide the plan.
+      if (returnedFromCheckout) await billingRequest({ action: 'reconcile', tenantId }).catch(() => undefined)
+      await refresh()
+    })
+  }, [refresh, run, disabled, returnedFromCheckout, tenantId])
   const locked = disabled || busy
   const accountState = detail ? billingAccountState(detail.account) : null
   const financialContract = detail?.account.billed_contract ?? detail?.account.contract ?? detail?.account.onboarding_contract
@@ -81,6 +96,9 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
   const plan = versions.find(version => version.id === selection.planVersionId)
   const availablePlans = versions.filter(version => catalog?.products.some(product => product.key === version.productKey && product.kind === 'plan' && (product.active || retainedIds.has(version.id))))
   const addons = catalog?.products.filter(product => product.kind === 'addon' && (product.active || retained?.selection.addons.some(addon => addon.key === product.key))) ?? []
+  const limits = catalog && plan ? selectionLimits(catalog, selection, exception) : null
+  const needs = detail && limits ? accessNeeds(detail, limits, access) : null
+  const assignableVenues = detail?.venues.filter(venue => venue.is_active ? !access.deactivateVenueIds.includes(venue.id) : access.reactivateVenueIds.includes(venue.id)) ?? []
 
   function changePlan(planVersionId: string) {
     const target = versions.find(version => version.id === planVersionId)
@@ -90,17 +108,27 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
       const matching = versions.find(version => version.productKey === addon.key && version.interval === target?.interval)
       return matching ? { ...addon, versionId: matching.id } : addon
     }) }))
+    setAccess(emptyAccessChoice)
+    setQuote(null)
+  }
+  // A venue that will be switched off cannot keep venue addons assigned.
+  function toggleDeactivatedVenue(venueId: string, checked: boolean) {
+    setAccess(current => ({ ...current, deactivateVenueIds: checked ? [...current.deactivateVenueIds, venueId] : current.deactivateVenueIds.filter(id => id !== venueId), deactivateDeviceIds: current.deactivateDeviceIds.filter(id => detail?.devices.find(device => device.id === id)?.venue_id !== venueId) }))
+    if (checked) setSelection(current => ({ ...current, addons: current.addons.map(addon => ({ ...addon, venueIds: addon.venueIds.filter(id => id !== venueId) })) }))
     setQuote(null)
   }
 
   async function requestQuote() {
     const requestedException = exception ?? ((detail?.scheduledContract ?? detail?.account.billed_contract ?? detail?.account.contract ?? detail?.account.onboarding_contract)?.exception?.promotions?.length ? { freeUnits: {}, limits: {}, discountBasisPoints: 0, customAmounts: {}, cycles: null, reason, promotions: [] } : null)
-    setQuote(await billingRequest<BillingOperation>({ action: 'quote', tenantId, selection, exception: admin ? requestedException : null, reason }))
+    const requestedAccess = detail ? accessRequest(access, detail) : undefined
+    setAcceptLosses(false)
+    setQuote(await billingRequest<BillingOperation>({ action: 'quote', tenantId, selection, exception: admin ? requestedException : null, reason, ...(requestedAccess ? { access: requestedAccess } : {}) }))
   }
   function closePlanEditor() {
     setEditingPlan(false)
     setSelection(retained?.selection ?? emptySelection)
     setException(retained?.exception ?? null)
+    setAccess(emptyAccessChoice)
     setQuote(null)
     setError('')
   }
@@ -131,7 +159,7 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
             <div><p className="!text-xs !text-[var(--crm-text-muted)]">Último pago</p><strong>{billingStatusLabel(detail.account.last_payment_status)}</strong></div>
             <div><p className="!text-xs !text-[var(--crm-text-muted)]">Renovación</p><strong>{billingDate(detail.account.period_end)}{detail.account.cancel_at_period_end ? ' · Cancelación programada' : ''}</strong></div>
           </div>
-          <p className="!mt-4 !text-sm">Locales: {detail.venues.length} / {detail.tenant.max_venues} · Dispositivos: {detail.devices.length} / {detail.tenant.max_devices}</p>
+          <p className="!mt-4 !text-sm">Locales activos: {detail.venues.filter(venue => venue.is_active).length} / {detail.tenant.max_venues}{detail.venues.some(venue => !venue.is_active) ? ` · ${detail.venues.filter(venue => !venue.is_active).length} inactivos` : ''} · Dispositivos: {detail.devices.filter(device => device.is_active).length} / {detail.tenant.max_devices}</p>
         </> : <>
           <div className="!flex !flex-col !gap-5 sm:!flex-row sm:!items-start sm:!justify-between">
             <div className="!min-w-0"><p className="!m-0 !mb-2 !text-sm !text-[var(--crm-text-secondary)]">{detail.account.contract || detail.account.billed_contract ? 'Plan contratado' : 'Plan preparado'}</p><h3 className="!m-0 !break-words !text-2xl !font-semibold !tracking-tight">{financialContract?.planName ?? 'Asignación manual'}</h3></div>
@@ -197,29 +225,51 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
           }
           return <div className={admin ? '!rounded-[var(--crm-radius-md)] !border !border-[var(--crm-border)] !p-4' : '!border-b !border-[var(--crm-border-subtle)] !py-5'} key={product.key}>
             <div className="!flex !flex-wrap !items-center !justify-between !gap-3"><div><strong className="!text-sm">{product.name}</strong><p className="!mt-1 !text-xs !text-[var(--crm-text-muted)]">{billingMoney(version.amountCents)} / {plan.interval === 'month' ? 'mes' : 'año'} · {plan.included[product.key] ?? 0} unidades incluidas · {product.scope === 'venue' ? 'por local' : product.scope === 'device' ? 'por dispositivo' : 'por empresa'}</p></div>{product.scope === 'tenant' && !product.resource ? <Checkbox aria-label={product.name} disabled={locked} checked={Boolean(selected?.quantity)} onChange={checked => update(checked ? 1 : 0)}>{admin ? 'Añadir complemento' : selected?.quantity ? 'Añadido' : 'Añadir'}</Checkbox> : <label className="!grid !gap-1 !text-xs">Cantidad contratada<Input className={`${billingField} !w-24`} aria-label={`Cantidad de ${product.name}`} disabled={locked} type="number" min={0} max={version.maximum ?? 100000} value={selected?.quantity ?? 0} onChange={event => update(Number(event.target.value))} /></label>}</div>
-            {product.scope === 'venue' ? <div className="!mt-3 !flex !flex-wrap !gap-4">{detail.venues.filter(venue => venue.is_active).map(venue => <Checkbox key={venue.id} checked={selected?.venueIds.includes(venue.id) ?? false} disabled={locked || !selected?.quantity} onChange={checked => update(selected?.quantity ?? 0, checked ? [...(selected?.venueIds ?? []), venue.id] : (selected?.venueIds ?? []).filter(id => id !== venue.id))}>{venue.name}</Checkbox>)}</div> : null}
-            {product.scope === 'device' ? <div className="!mt-3 !flex !flex-wrap !gap-4">{detail.devices.map(device => <Checkbox key={device.id} checked={selected?.deviceIds.includes(device.id) ?? false} disabled={locked || !selected?.quantity} onChange={checked => update(selected?.quantity ?? 0, [], checked ? [...(selected?.deviceIds ?? []), device.id] : (selected?.deviceIds ?? []).filter(id => id !== device.id))}>{device.name}</Checkbox>)}</div> : null}
+            {product.scope === 'venue' ? <div className="!mt-3 !flex !flex-wrap !gap-4">{assignableVenues.map(venue => <Checkbox key={venue.id} checked={selected?.venueIds.includes(venue.id) ?? false} disabled={locked || !selected?.quantity} onChange={checked => update(selected?.quantity ?? 0, checked ? [...(selected?.venueIds ?? []), venue.id] : (selected?.venueIds ?? []).filter(id => id !== venue.id))}>{venue.name}</Checkbox>)}</div> : null}
+            {product.scope === 'device' ? <div className="!mt-3 !flex !flex-wrap !gap-4">{detail.devices.filter(device => device.is_active && !access.deactivateVenueIds.includes(device.venue_id) && !access.deactivateDeviceIds.includes(device.id)).map(device => <Checkbox key={device.id} checked={selected?.deviceIds.includes(device.id) ?? false} disabled={locked || !selected?.quantity} onChange={checked => update(selected?.quantity ?? 0, [], checked ? [...(selected?.deviceIds ?? []), device.id] : (selected?.deviceIds ?? []).filter(id => id !== device.id))}>{device.name}</Checkbox>)}</div> : null}
           </div>
         })}</div> : null}
         {admin && catalog ? <ExceptionEditor catalog={catalog} selection={selection} value={exception} disabled={locked} hasSubscription={hasSubscription} canPromote={canPromote} promotionNotice={promotionNotice} reason={reason} onChange={value => { setException(value); setQuote(null) }} /> : null}
         {admin ? <label className="!mt-4 !grid !gap-2 !text-sm">Motivo<Input className={billingField} value={reason} maxLength={500} disabled={locked} onChange={event => { setReason(event.target.value); setQuote(null) }} /></label> : null}
+        {needs && limits ? <AccessChoices needs={needs} limits={limits} value={access} disabled={locked} onToggleVenue={toggleDeactivatedVenue} onChange={value => { setAccess(value); setQuote(null) }} /> : null}
         {exceptionError ? <p role="status" className="!mt-3 !text-sm !text-[var(--crm-red)]">{exceptionError}</p> : null}
         {subscriptionBlocked && !pendingOperation ? <p role="status" className="!mt-3 !text-sm">Resuelve el pago pendiente o la baja programada antes de cambiar el plan. El método de pago se gestiona desde la cuenta del cliente.</p> : null}
         {pendingOperation ? <p role="status" className="!mt-3 !text-sm">{pendingOperation.status === 'scheduled' ? 'Hay un cambio programado para la próxima renovación. El contrato actual se mantiene hasta entonces.' : pendingOperation.status === 'payment_pending' ? admin ? 'Hay un pago pendiente. El cliente debe completarlo desde su cuenta.' : 'Hay un pago pendiente. Continúalo desde el aviso de pago.' : 'La última operación no está confirmada. Actualiza el estado con Stripe o recupérala desde el historial.'}</p> : null}
         <div className={admin ? '!mt-4' : '!mt-6 !flex !flex-col !gap-3 sm:!items-end'}>
           {!admin ? <p className="!m-0 !text-xs !leading-relaxed !text-[var(--crm-text-secondary)]">No se aplicará ningún cambio hasta que lo confirmes.</p> : null}
-          <Button className={!admin ? '!w-full !rounded-[var(--crm-radius-sm)] sm:!w-auto' : undefined} variant="primary" disabled={locked || !plan || !reason.trim() || Boolean(exceptionError) || Boolean(pendingOperation) || subscriptionBlocked || billingPaymentInTransit(detail.account.last_payment_status)} onClick={() => void run(requestQuote)}>{admin ? 'Ver importes antes de confirmar' : 'Revisar cambio'}</Button>
+          <Button className={!admin ? '!w-full !rounded-[var(--crm-radius-sm)] sm:!w-auto' : undefined} variant="primary" disabled={locked || !plan || !reason.trim() || Boolean(exceptionError) || Boolean(pendingOperation) || subscriptionBlocked || billingPaymentInTransit(detail.account.last_payment_status) || (needs ? !needs.ready : false)} onClick={() => void run(requestQuote)}>{admin ? 'Ver importes antes de confirmar' : 'Revisar cambio'}</Button>
         </div>
       </Editor> : null}
       {admin && detail.account.stripe_subscription_id ? <details className={`${billingCard} !border !border-[var(--crm-border)]`}><summary className="!cursor-pointer !py-2 !font-semibold !text-[var(--crm-red)]">Dar de baja la suscripción</summary><p className="!text-sm !text-[var(--crm-text-muted)]">Revisa primero cuándo termina el servicio. No se reembolsan periodos pagados.</p><div className="!mt-4 !flex !flex-wrap !gap-2">{[false, true].map(immediate => <Button key={String(immediate)} disabled={locked || !detail.account.stripe_subscription_id} onClick={() => void run(async () => { setQuote(await billingRequest<BillingOperation>({ action: 'quote-cancel', tenantId, immediate, reason })) })}>{immediate ? 'Revisar baja inmediata…' : 'Revisar baja al renovar…'}</Button>)}</div></details> : null}
       {admin ? <PromotionHistory detail={detail} catalog={catalog} /> : null}
       {admin ? <BillingSettings detail={detail} disabled={locked} onSave={action => void run(async () => { await action(); await refresh() })} /> : null}
+      {!admin && !editingPlan && hasSubscription ? <section aria-label="Forma de pago" className={billingCard}>
+        <h3 className="!m-0 !mb-2 !font-semibold">Forma de pago</h3>
+        <p className="!m-0 !text-sm !leading-relaxed !text-[var(--crm-text-secondary)]">Las cuotas se cobran por domiciliación SEPA{detail.paymentMethod?.method === 'directdebit' && detail.paymentMethod.last4 ? ` en la cuenta terminada en ${detail.paymentMethod.last4}` : ''}. Las ampliaciones de plan se pagan con tarjeta en el momento.</p>
+        <Button className="!mt-4 !w-full !rounded-[var(--crm-radius-sm)] sm:!w-auto" disabled={locked || Boolean(pendingOperation && pendingOperation.status !== 'scheduled') || billingPaymentInTransit(detail.account.last_payment_status)} onClick={() => setMandate({ requestId: crypto.randomUUID(), form: emptySepaForm })}>Cambiar IBAN</Button>
+        {billingPaymentInTransit(detail.account.last_payment_status) ? <p className="!mb-0 !mt-2 !text-xs !text-[var(--crm-text-secondary)]">Podrás cambiarlo cuando el banco termine de tramitar el cobro actual.</p> : null}
+      </section> : null}
+      {!admin && !editingPlan && hasSubscription && !detail.account.cancel_at_period_end ? <details className={billingCard}>
+        <summary className="!cursor-pointer !py-2 !font-semibold">Dar de baja</summary>
+        <p className="!text-sm !leading-relaxed !text-[var(--crm-text-secondary)]">Tu plan seguirá activo hasta el final del periodo pagado{detail.account.period_end ? ` (${billingDate(detail.account.period_end)})` : ''}. No se harán más cobros y no se reembolsa el periodo en curso. Un adeudo que el banco ya haya aceptado se seguirá cobrando. Tus datos se conservan.</p>
+        <Button variant="danger" disabled={locked || Boolean(pendingOperation && pendingOperation.status !== 'scheduled')} onClick={() => void run(async () => { setAcceptLosses(false); setQuote(await billingRequest<BillingOperation>({ action: 'quote-cancel', tenantId, immediate: false, reason: 'Baja solicitada por el cliente' })) })}>Revisar baja…</Button>
+      </details> : null}
       {!admin ? <section className={billingCard}><h3 className="!mb-3 !font-semibold">Facturas de suscripción</h3><p className="!mb-3 !text-xs !text-[var(--crm-text-muted)]">Circuito de Alteil; independiente de los tickets y facturas del restaurante.</p>{detail.invoices.length ? <div className="!overflow-auto"><DataTable aria-label="Facturas" className="!w-full !text-left !text-sm" filterable={false} sortable={false}><thead><tr><th className="!p-2">Factura</th><th>Fecha</th><th>Estado</th><th>Importe</th><th>Documento</th></tr></thead><tbody>{detail.invoices.map(invoice => <tr key={invoice.stripe_invoice_id} className="!border-t !border-[var(--crm-border)]"><td className="!p-2">{invoice.number ?? invoice.stripe_invoice_id}</td><td>{billingDate(invoice.created_at)}</td><td>{billingStatusLabel(invoice.status)}</td><td>{billingMoney(invoice.amount_due_cents)}</td><td>{invoice.hosted_invoice_url ? <a className="!text-[var(--crm-blue)] !underline" href={invoice.hosted_invoice_url} target="_blank" rel="noreferrer">Abrir factura</a> : '—'}</td></tr>)}</tbody></DataTable></div> : <p className="!text-sm !text-[var(--crm-text-muted)]">Todavía no hay facturas sincronizadas.</p>}</section> : null}
       {admin ? <>
       <details className={billingCard}><summary className="!cursor-pointer !py-2 !font-semibold">Historial de cambios · {detail.operations.length}</summary><div className="!grid !gap-3">{detail.operations.map(operation => <div key={operation.id} className="!flex !flex-wrap !items-center !justify-between !gap-2 !border-b !border-[var(--crm-border)] !pb-3 !text-sm"><span>{billingDate(operation.created_at)} · {billingOperationLabel(operation.kind)} · {billingStatusLabel(operation.status)}<br /><span className="!text-xs !text-[var(--crm-text-muted)]">{operation.reason}</span></span></div>)}{admin && detail.audit.length ? <details className="!mt-3"><summary className="!cursor-pointer !py-2 !text-xs !text-[var(--crm-text-muted)]">Auditoría técnica</summary>{detail.audit.map(entry => <p key={entry.id} className="!m-0 !text-xs !text-[var(--crm-text-muted)]">{billingDate(entry.created_at)} · {entry.action} · {entry.reason} · {entry.actor_id ?? 'Sistema'}</p>)}</details> : null}{!detail.operations.length ? <p className="!text-sm !text-[var(--crm-text-muted)]">Todavía no hay cambios registrados.</p> : null}</div></details>
       </> : null}
     </> : !error ? <p role="status">Cargando facturación…</p> : null}
-    {quote ? <AppModal label="Confirmar cambio de facturación" theme="crm" maxWidth={560} dismissDisabled={locked} onClose={() => setQuote(null)}><div className="!grid !gap-4 !p-6"><h3 className="!m-0 !text-lg !font-bold">{quote.kind === 'cancel' || quote.kind === 'cancel_now' ? 'Revisar baja de la suscripción' : 'Revisar cambio de suscripción'}</h3><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">{detail?.tenant.name}</p>{error ? <p role="alert" className="!text-sm !text-[var(--crm-red)]">{error}</p> : null}<p>Cargo previsto ahora: <strong>{billingMoney(quote.preview.amountDueCents)}</strong></p>{quote.kind !== 'cancel' && quote.kind !== 'cancel_now' ? <p>Nueva cuota sin IVA: <strong>{billingMoney(quote.preview.recurringCents)} / {plan?.interval === 'year' ? 'año' : 'mes'}</strong></p> : null}<p>Efectivo: {quote.timing === 'immediate' ? 'inmediato, sujeto a la condición de pago' : billingDate(quote.preview.effectiveAt)}</p>{quote.preview.promotions ? <PromotionQuote quote={quote} catalog={catalog} interval={plan?.interval ?? 'month'} /> : null}<p className="!text-sm !text-[var(--crm-text-muted)]">{quote.preview.details}</p>{signupQuote ? admin ? <p role="status" className="!text-sm">El propietario debe completar el alta desde Mi Plan, indicando el IBAN para domiciliar las siguientes cuotas.</p> : <SepaMandateFields value={sepa} disabled={locked} onChange={setSepa} /> : null}<p className="!text-sm">La contratación sustituye los derechos comerciales anteriores por el plan y las asignaciones seleccionadas. Las ventas y los documentos existentes se conservan.</p><div className="!flex !flex-wrap !justify-end !gap-2"><Button disabled={locked} onClick={() => setQuote(null)}>Volver</Button><Button variant={quote.kind === 'cancel' || quote.kind === 'cancel_now' ? 'danger' : 'primary'} disabled={locked || (signupQuote && (admin || !sepaFormReady(sepa)))} onClick={() => void run(async () => { const result = await billingRequest<{ url?: string }>({ action: 'confirm', tenantId, operationId: quote.id, ...(signupQuote ? sepaConfirmInput(sepa) : {}) }); setQuote(null); setEditingPlan(false); if (!admin && result.url) openBillingUrl(result.url); else { await refresh(); setMessage(admin && !detail?.account.stripe_subscription_id && quote.kind === 'change' ? 'Plan configurado. El cliente debe completar el pago desde su cuenta para activarlo.' : 'Solicitud registrada. El estado y los permisos se actualizarán tras la confirmación de Mollie.'); onChanged?.() } })}>{quote.kind === 'cancel' || quote.kind === 'cancel_now' ? 'Confirmar baja' : 'Confirmar cambio'}</Button></div></div></AppModal> : null}
+    {quote ? <AppModal label="Confirmar cambio de facturación" theme="crm" maxWidth={560} dismissDisabled={locked} onClose={() => setQuote(null)}><div className="!grid !gap-4 !p-6"><h3 className="!m-0 !text-lg !font-bold">{quote.kind === 'cancel' || quote.kind === 'cancel_now' ? 'Revisar baja de la suscripción' : 'Revisar cambio de suscripción'}</h3><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">{detail?.tenant.name}</p>{error ? <p role="alert" className="!text-sm !text-[var(--crm-red)]">{error}</p> : null}<p>Cargo previsto ahora: <strong>{billingMoney(quote.preview.amountDueCents)}</strong></p>{quote.kind !== 'cancel' && quote.kind !== 'cancel_now' ? <p>Nueva cuota sin IVA: <strong>{billingMoney(quote.preview.recurringCents)} / {plan?.interval === 'year' ? 'año' : 'mes'}</strong></p> : null}<p>Efectivo: {quote.timing === 'immediate' ? 'inmediato, sujeto a la condición de pago' : billingDate(quote.preview.effectiveAt)}</p>{quote.preview.promotions ? <PromotionQuote quote={quote} catalog={catalog} interval={plan?.interval ?? 'month'} /> : null}<p className="!text-sm !text-[var(--crm-text-muted)]">{quote.preview.details}</p>{quote.preview.losses?.length ? <div role="group" aria-label="Lo que dejará de estar disponible" className="!grid !gap-2 !rounded-[var(--crm-radius-sm)] !bg-[var(--crm-yellow-soft)] !p-3 !text-sm"><p className="!m-0 !font-semibold">{quote.timing === 'period_end' ? `En la renovación${quote.preview.effectiveAt ? ` (${billingDate(quote.preview.effectiveAt)})` : ''}` : 'Al confirmarse el pago'}:</p><ul className="!m-0 !pl-5">{quote.preview.losses.map(loss => <li key={loss}>{loss}</li>)}</ul><Checkbox checked={acceptLosses} disabled={locked} onChange={setAcceptLosses}>Entiendo y acepto estos cambios</Checkbox></div> : null}{signupQuote ? admin ? <p role="status" className="!text-sm">El propietario debe completar el alta desde Mi Plan, indicando el IBAN para domiciliar las siguientes cuotas.</p> : <SepaMandateFields value={sepa} disabled={locked} onChange={setSepa} /> : null}<p className="!text-sm">La contratación sustituye los derechos comerciales anteriores por el plan y las asignaciones seleccionadas. Las ventas y los documentos existentes se conservan.</p><div className="!flex !flex-wrap !justify-end !gap-2"><Button disabled={locked} onClick={() => setQuote(null)}>Volver</Button><Button variant={quote.kind === 'cancel' || quote.kind === 'cancel_now' ? 'danger' : 'primary'} disabled={locked || (signupQuote && (admin || !sepaFormReady(sepa))) || (Boolean(quote.preview.losses?.length) && !acceptLosses)} onClick={() => void run(async () => { const result = await billingRequest<{ url?: string }>({ action: 'confirm', tenantId, operationId: quote.id, ...(signupQuote ? sepaConfirmInput(sepa) : {}), ...(quote.preview.losses?.length ? { acceptLosses: true } : {}) }); setAccess(emptyAccessChoice); setQuote(null); setEditingPlan(false); if (!admin && result.url) openBillingUrl(result.url); else { await refresh(); setMessage(quote.kind === 'cancel' ? `Baja programada. El plan seguirá activo hasta ${billingDate(quote.preview.effectiveAt)}.` : admin && quote.preview.amountDueCents > 0 && quote.kind === 'change' ? 'Cambio registrado. El cliente debe completar el pago con tarjeta desde su cuenta.' : 'Solicitud registrada. El estado y los permisos se actualizarán tras la confirmación de Mollie.'); onChanged?.() } })}>{quote.kind === 'cancel' || quote.kind === 'cancel_now' ? 'Confirmar baja' : 'Confirmar cambio'}</Button></div></div></AppModal> : null}
+    {mandate ? <AppModal label="Cambiar IBAN de domiciliación" theme="crm" maxWidth={520} dismissDisabled={locked} onClose={() => setMandate(null)}><div className="!grid !gap-4 !p-6">
+      <h3 className="!m-0 !text-lg !font-bold">Cambiar IBAN de domiciliación</h3>
+      <p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Las próximas cuotas se cargarán en esta cuenta. La autorización anterior se revocará.</p>
+      <SepaMandateFields value={mandate.form} withPayer={false} disabled={locked} onChange={form => setMandate({ ...mandate, form })} />
+      {error ? <p role="alert" className="!text-sm !text-[var(--crm-red)]">{error}</p> : null}
+      <div className="!flex !flex-wrap !justify-end !gap-2"><Button disabled={locked} onClick={() => setMandate(null)}>Volver</Button><Button variant="primary" disabled={locked || !sepaFormReady(mandate.form, false)} onClick={() => void run(async () => {
+        const result = await billingRequest<{ last4: string }>({ action: 'change-mandate', tenantId, requestId: mandate.requestId, sepa: { accountHolder: mandate.form.accountHolder, iban: mandate.form.iban } })
+        setMandate(null); await refresh(); setMessage(`Domiciliación actualizada. Las próximas cuotas se cargarán en la cuenta terminada en ${result.last4}.`)
+      })}>Guardar IBAN</Button></div>
+    </div></AppModal> : null}
   </div>
 }
 
@@ -266,6 +316,38 @@ function BillingSettings({ detail, disabled, onSave }: { detail: BillingDetail; 
   const [email, setEmail] = useState(detail.account.email ?? '')
   const [reason, setReason] = useState('Configuración de la cuenta de facturación')
   return <details className={billingCard}><summary className="!cursor-pointer !py-2 !font-semibold">Datos de facturación y continuidad</summary><div className="!mt-4 !grid !gap-3 sm:!grid-cols-2">{[{ label: 'Razón social', value: legalName, set: setLegalName }, { label: 'NIF/CIF', value: taxId, set: setTaxId }, { label: 'Email de facturación', value: email, set: setEmail }, { label: 'Motivo', value: reason, set: setReason }].map(field => <label key={field.label} className="!grid !gap-2 !text-sm">{field.label}<Input className={billingField} disabled={disabled} value={field.value} onChange={event => field.set(event.target.value)} /></label>)}<label className="!grid !gap-2 !text-sm">Días de gracia<Input className={billingField} disabled={disabled} type="number" min={0} max={365} value={graceDays} onChange={event => setGraceDays(Number(event.target.value))} /></label></div><Button className="!mt-4" disabled={disabled || !reason.trim()} onClick={() => onSave(async () => { await billingRequest({ action: 'settings', tenantId: detail.account.tenant_id, graceDays, legalName, taxId, email, reason }) })}>Guardar datos</Button></details>
+}
+
+type AccessNeeds = NonNullable<ReturnType<typeof accessNeeds>>
+function AccessChoices({ needs, limits, value, disabled, onToggleVenue, onChange }: { needs: AccessNeeds; limits: { venues: number; devices: number }; value: AccessChoice; disabled: boolean; onToggleVenue: (venueId: string, checked: boolean) => void; onChange: (value: AccessChoice) => void }) {
+  const offDevices = value.deactivateDeviceIds.filter(id => needs.activeDevices.some(device => device.id === id)).length
+  if (!needs.venuesToDeactivate && !needs.devicesToDeactivate && !(needs.venueSlots && needs.inactiveVenues.length)) return null
+  return <div className="!mt-5 !grid !gap-4 !rounded-[var(--crm-radius-md)] !border !border-[var(--crm-border)] !p-4 !text-sm">
+    {needs.venuesToDeactivate ? <fieldset className="!m-0 !grid !gap-2 !border-0 !p-0">
+      <legend className="!mb-1 !font-semibold">Elige {needs.venuesToDeactivate === 1 ? 'el local' : `${needs.venuesToDeactivate} locales`} que se desactivará{needs.venuesToDeactivate === 1 ? '' : 'n'}</legend>
+      <p className="!m-0 !text-[var(--crm-text-secondary)]">El nuevo plan admite {limits.venues} {limits.venues === 1 ? 'local' : 'locales'} y tienes {needs.activeVenues.length} activos. En la renovación se desactivarán junto con sus terminales TPV. Seguirán visibles en el panel como inactivos y conservan sus datos.</p>
+      <div className="!flex !flex-wrap !gap-4">{needs.activeVenues.map(venue => {
+        const checked = value.deactivateVenueIds.includes(venue.id)
+        return <Checkbox key={venue.id} checked={checked} disabled={disabled || (!checked && value.deactivateVenueIds.length >= needs.venuesToDeactivate)} onChange={next => onToggleVenue(venue.id, next)}>{venue.name}</Checkbox>
+      })}</div>
+    </fieldset> : null}
+    {needs.devicesToDeactivate ? <fieldset className="!m-0 !grid !gap-2 !border-0 !p-0">
+      <legend className="!mb-1 !font-semibold">Elige {needs.devicesToDeactivate === 1 ? 'el terminal' : `${needs.devicesToDeactivate} terminales`} que se desactivará{needs.devicesToDeactivate === 1 ? '' : 'n'}</legend>
+      <p className="!m-0 !text-[var(--crm-text-secondary)]">El nuevo plan admite {limits.devices} dispositivos. Los terminales elegidos dejarán de poder usar el TPV en la renovación.</p>
+      <div className="!flex !flex-wrap !gap-4">{needs.activeDevices.map(device => {
+        const checked = value.deactivateDeviceIds.includes(device.id)
+        return <Checkbox key={device.id} checked={checked} disabled={disabled || (!checked && offDevices >= needs.devicesToDeactivate)} onChange={next => onChange({ ...value, deactivateDeviceIds: next ? [...value.deactivateDeviceIds, device.id] : value.deactivateDeviceIds.filter(id => id !== device.id) })}>{device.name}</Checkbox>
+      })}</div>
+    </fieldset> : null}
+    {needs.venueSlots && needs.inactiveVenues.length ? <fieldset className="!m-0 !grid !gap-2 !border-0 !p-0">
+      <legend className="!mb-1 !font-semibold">Reactivar locales inactivos</legend>
+      <p className="!m-0 !text-[var(--crm-text-secondary)]">Tienes espacio para {needs.venueSlots} {needs.venueSlots === 1 ? 'local más' : 'locales más'}. Los locales que marques se reactivarán con sus terminales al confirmarse el cambio.</p>
+      <div className="!flex !flex-wrap !gap-4">{needs.inactiveVenues.map(venue => {
+        const checked = value.reactivateVenueIds.includes(venue.id)
+        return <Checkbox key={venue.id} checked={checked} disabled={disabled || (!checked && value.reactivateVenueIds.length >= needs.venueSlots)} onChange={next => onChange({ ...value, reactivateVenueIds: next ? [...value.reactivateVenueIds, venue.id] : value.reactivateVenueIds.filter(id => id !== venue.id) })}>{venue.name}</Checkbox>
+      })}</div>
+    </fieldset> : null}
+  </div>
 }
 
 function PromotionQuote({ quote, catalog, interval }: { quote: BillingOperation; catalog: BillingCatalog | null; interval: 'month' | 'year' }) {

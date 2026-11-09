@@ -26,6 +26,7 @@ export function billingClient(db) {
         single(){one=true;return this},maybeSingle(){one=true;maybe=true;return this},
         upsert(value,config={}){mutation={type:'upsert',value};options=config;return this},
         update(value){mutation={type:'update',value};return this},
+        insert(value){mutation={type:'insert',value};return this},
         async then(resolve,reject) {
           try {
             let sql
@@ -35,7 +36,8 @@ export function billingClient(db) {
                 const primary=options.onConflict??({billing_invoices:'stripe_invoice_id',billing_accounts:'tenant_id'}[table])
                 sql=`insert into ${identifier(table)} (${keys.map(identifier).join(',')}) values (${keys.map(key=>bind(mutation.value[key])).join(',')}) on conflict (${identifier(primary)}) `
                 sql+=options.ignoreDuplicates?'do nothing':`do update set ${keys.filter(key=>key!==primary).map(key=>`${identifier(key)}=excluded.${identifier(key)}`).join(',')}`
-              }else sql=`update ${identifier(table)} set ${keys.map(key=>`${identifier(key)}=${bind(mutation.value[key])}`).join(',')}`
+              }else if(mutation.type==='insert')sql=`insert into ${identifier(table)} (${keys.map(identifier).join(',')}) values (${keys.map(key=>bind(mutation.value[key])).join(',')})`
+              else sql=`update ${identifier(table)} set ${keys.map(key=>`${identifier(key)}=${bind(mutation.value[key])}`).join(',')}`
             }else sql=`select ${columns==='*'?'*':columns.split(',').map(identifier).join(',')} from ${identifier(table)}`
             if(filters.length)sql+=` where ${filters.join(' and ')}`
             if(ordering.length)sql+=` order by ${ordering.join(',')}`
@@ -74,7 +76,11 @@ export class FakeMollie {
     let result
     if(parts[0]==='customers'&&parts.length===1){result={id:'cst_test',mode:'test',name:body.name,email:body.email,metadata:body.metadata};this.customers.set(result.id,result)}
     else if(parts[0]==='customers'&&parts.length===2){result=this.customers.get(parts[1]);if(!result)throw new MollieRequestError(404,null);if(method==='DELETE'){this.customers.delete(parts[1]);result=null}}
-    else if(parts[2]==='mandates'){
+    else if(parts[2]==='mandates'&&parts.length===4){
+      result=this.mandates.find(row=>row.id===parts[3]&&row.customerId===parts[1])
+      if(!result)throw new MollieRequestError(404,null)
+      if(method==='DELETE'){result.status='invalid';result=null}
+    }else if(parts[2]==='mandates'){
       result={id:this.id('mdt'),mode:'test',status:'valid',method:body.method,mandateReference:body.mandateReference,customerId:parts[1],details:{consumerName:body.consumerName,consumerAccount:body.consumerAccount}}
       this.mandates.push(result)
     }else if(parts[2]==='subscriptions'&&parts.length===3){

@@ -39,8 +39,11 @@ Deno.serve(async request => {
       const membership = await db.from('tenant_memberships').select('role,is_active').eq('tenant_id', body.tenantId).eq('user_id', user.user.id).maybeSingle()
       if (membership.error || membership.data?.role !== 'owner' || !membership.data.is_active) return reply({ error: 'Solo el propietario puede acceder a la facturación de su empresa.' }, 403)
     }
-    const adminActions = ['overview','catalog-save','catalog-publish','retry-operation','retry-event','reconcile-batch','settings','quote-cancel']
+    const adminActions = ['overview','catalog-save','catalog-publish','retry-operation','retry-event','reconcile-batch','settings']
     if (adminActions.includes(body.action) && !admin) return reply({ error: 'Esta operación requiere Superadmin.' }, 403)
+    // The owner may cancel at the end of the paid period; only Superadmin cancels immediately.
+    if (body.action === 'quote-cancel' && body.immediate && !admin) return reply({ error: 'Esta operación requiere Superadmin.' }, 403)
+    if (body.action === 'change-mandate' && admin) return reply({ error: 'Solo el propietario puede autorizar la domiciliación.' }, 403)
     if (body.action === 'portal' && admin) return reply({ error: 'El pago de cuotas pendientes solo está disponible desde la cuenta del cliente.' }, 403)
     if (body.action === 'confirm' && (body.sepa || body.payer) && admin) return reply({ error: 'Solo el propietario puede autorizar la domiciliación.' }, 403)
     switch (body.action) {
@@ -61,10 +64,11 @@ Deno.serve(async request => {
       case 'catalog-publish': return reply(await service.publish(body.versionId))
       case 'quote': {
         if (body.exception && !admin) return reply({ error: 'Las excepciones comerciales requieren Superadmin.' }, 403)
-        return reply(await service.quote(body.tenantId, user.user.id, body.selection, body.exception, body.reason, admin))
+        return reply(await service.quote(body.tenantId, user.user.id, body.selection, body.exception, body.reason, admin, body.access ?? null))
       }
       case 'quote-cancel': return reply(await service.quoteCancel(body.tenantId, user.user.id, body.immediate, body.reason))
-      case 'confirm': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, false, { sepa: body.sepa, payer: body.payer }))
+      case 'confirm': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, false, { sepa: body.sepa, payer: body.payer, acceptLosses: body.acceptLosses }))
+      case 'change-mandate': return reply(await service.changeMandate(body.tenantId, body.requestId, body.sepa))
       case 'retry-operation': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, true))
       case 'portal': return reply(await service.portal(body.tenantId))
       case 'reconcile': return reply(await service.reconcile(body.tenantId))

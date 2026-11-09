@@ -6,6 +6,7 @@ import { billingFailureDiagnostic } from '../../supabase/functions/_shared/billi
 import { MollieRequestError } from '../../supabase/functions/_shared/billing/mollie'
 import * as presentation from '../../src/features/billing/presentation'
 import * as sepaFields from '../../src/features/billing/sepa'
+import * as access from '../../src/features/billing/access'
 import type { BillingInvoice } from '../../src/features/billing/types'
 
 const product = { key: 'base', kind: 'plan', name: 'Base', description: '', scope: 'tenant', featureKey: null, resource: null, active: true, sortOrder: 0 }
@@ -35,14 +36,17 @@ function panel(active = false, temporary = false, pending = false, admin = true)
   const detail = {
     account: { status: active ? 'active' : 'manual', stripe_customer_id: active ? 'cst_test' : null, stripe_subscription_id: active ? 'sub_test' : null, contract: active ? agreement : null, onboarding_contract: agreement },
     tenant: { id: 'tenant', name: 'Empresa', max_venues: 1, max_devices: 2 },
-    venues: [{ id: 'venue', name: 'Centro' }], devices: [], operations: pending ? [{ id: 'pending', status: 'scheduled', reason: 'Añadir personal en Centro', effective_at: '2026-12-03', contract: { ...contract, recurringCents: 5900, limits: { venues: 2, devices: 4 }, addons: [{ key: 'personal', quantity: 2, included: 0, billable: 2, scope: 'venue', venueIds: ['venue'], deviceIds: [] }] } }] : [], audit: [], invoices: [] as BillingInvoice[],
+    venues: [{ id: 'venue', name: 'Centro', is_active: true }], devices: [], operations: pending ? [{ id: 'pending', status: 'scheduled', reason: 'Añadir personal en Centro', effective_at: '2026-12-03', contract: { ...contract, recurringCents: 5900, limits: { venues: 2, devices: 4 }, addons: [{ key: 'personal', quantity: 2, included: 0, billable: 2, scope: 'venue', venueIds: ['venue'], deviceIds: [] }] } }] : [], audit: [], invoices: [] as BillingInvoice[],
   }
+  const quoteResponse: { id: string; kind: string; timing: string; preview: { amountDueCents: number; recurringCents: number; losses?: string[] } } = { id: 'quote', kind: 'change', timing: 'immediate', preview: { amountDueCents: 6534, recurringCents: 5400 } }
   const confirm = vi.fn<() => Promise<{ url?: string }>>(async () => { throw new Error('No se pudo confirmar. Revisa el estado antes de reintentar.') })
   const openUrl = vi.fn()
   const request = vi.fn(async ({ action }: { action: string }) => {
     if (action === 'catalog') return catalog
     if (action === 'get') return detail
-    if (action === 'quote') return { id: 'quote', kind: 'change', timing: 'immediate', preview: { amountDueCents: 6534, recurringCents: 5400 } }
+    if (action === 'quote') return { ...quoteResponse, preview: { ...quoteResponse.preview } }
+    if (action === 'quote-cancel') return { id: 'cancel', kind: 'cancel', timing: 'period_end', preview: { amountDueCents: 0, recurringCents: 0, effectiveAt: '2026-12-10', details: 'No se reembolsan periodos pagados.' } }
+    if (action === 'change-mandate') return { mandateId: 'mdt_new', last4: '3000' }
     if (action === 'portal') return { url: 'https://www.mollie.com/checkout/arrears' }
     if (action === 'confirm') return confirm()
     throw new Error('No se pudo confirmar. Revisa el estado antes de reintentar.')
@@ -54,15 +58,16 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     './presentation': presentation,
     './SepaMandateFields': { SepaMandateFields: 'sepa-fields' },
     './sepa': sepaFields,
+    './access': access,
     './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: openUrl },
-  }, { Error, Date, crypto })
+  }, { Error, Date, crypto, URLSearchParams })
   const render = () => runner.render({ tenantId: 'tenant', admin })
   const exceptionTree = () => {
     const editor = nodes(render()).find(node => typeof node.type === 'function' && node.type.name === 'ExceptionEditor')
     return editor.type(editor.props)
   }
   onTestFinished(() => runner.unmount())
-  return { render, request, exceptionTree, detail, confirm, openUrl }
+  return { render, request, exceptionTree, detail, confirm, openUrl, quoteResponse }
 }
 
 it('keeps the customer plan minimal until Modify plan is opened and retains the existing quote flow', async () => {
@@ -362,4 +367,74 @@ it('logs reviewed codes and sanitized Mollie diagnostics without request data or
   expect(billingFailureDiagnostic('quote', new MollieRequestError(422, 'customer@example.com'))).toMatchObject({ mollie: { field: null } })
   expect(billingFailureDiagnostic('quote', new MollieRequestError(503, null))).toMatchObject({ mollie: { outcome: 'uncertain' } })
   expect(JSON.stringify(billingFailureDiagnostic('quote', new Error('private token and customer@example.com')))).not.toMatch(/private|token|@/)
+})
+
+const sent = (h: ReturnType<typeof panel>, action: string) => h.request.mock.calls.map(([body]) => body as Record<string, unknown>).filter(body => body.action === action)
+
+it('asks the owner which venue to switch off when the plan allows fewer venues than are active', async () => {
+  const h = panel(true, false, false, false)
+  h.detail.venues.push({ id: 'venue-b', name: 'Terraza', is_active: true })
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
+  button(h.render(), 'Modificar plan').props.onClick()
+  const choices = () => { const node = nodes(h.render()).find(item => typeof item.type === 'function' && item.type.name === 'AccessChoices'); return node.type(node.props) }
+  const venueBox = (name: string) => nodes(choices()).find(node => node.type === 'checkbox' && text(node) === name)
+  expect(text(choices()).replace(/\s+/g, ' ')).toContain('Elige el local que se desactivará')
+  expect(text(choices())).toContain('Seguirán visibles en el panel como inactivos')
+  expect(button(h.render(), 'Revisar cambio').props.disabled).toBe(true)
+  venueBox('Terraza').props.onChange(true)
+  await vi.waitFor(() => expect(button(h.render(), 'Revisar cambio').props.disabled).toBe(false))
+  // Only the required number of venues can be chosen.
+  expect(venueBox('Centro').props.disabled).toBe(true)
+  button(h.render(), 'Revisar cambio').props.onClick()
+  await vi.waitFor(() => expect(sent(h, 'quote')).toHaveLength(1))
+  expect(sent(h, 'quote')[0].access).toEqual({ deactivateVenueIds: ['venue-b'], deactivateDeviceIds: [], reactivateVenueIds: [] })
+})
+
+it('requires the owner to accept what stops working before confirming a reduction', async () => {
+  const h = panel(true, false, false, false)
+  h.quoteResponse.timing = 'period_end'
+  h.quoteResponse.preview.losses = ['Local «Terraza» y sus 1 terminal TPV: quedará inactivo (se conservan sus datos).']
+  h.confirm.mockResolvedValue({})
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
+  button(h.render(), 'Modificar plan').props.onClick()
+  expect(sent(h, 'quote')).toHaveLength(0)
+  button(h.render(), 'Revisar cambio').props.onClick()
+  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
+  expect(text(h.render())).toContain('Local «Terraza» y sus 1 terminal TPV')
+  expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(true)
+  nodes(h.render()).find(node => node.type === 'checkbox' && text(node) === 'Entiendo y acepto estos cambios').props.onChange(true)
+  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(false))
+  button(h.render(), 'Confirmar cambio').props.onClick()
+  await vi.waitFor(() => expect(sent(h, 'confirm')).toHaveLength(1))
+  expect(sent(h, 'confirm')[0]).toMatchObject({ operationId: 'quote', acceptLosses: true })
+})
+
+it('lets the owner cancel at the end of the paid period', async () => {
+  const h = panel(true, false, false, false)
+  h.confirm.mockResolvedValue({})
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Revisar baja')).toBeDefined())
+  button(h.render(), 'Revisar baja').props.onClick()
+  await vi.waitFor(() => expect(button(h.render(), 'Confirmar baja')).toBeDefined())
+  expect(sent(h, 'quote-cancel')[0]).toMatchObject({ immediate: false, reason: 'Baja solicitada por el cliente' })
+  button(h.render(), 'Confirmar baja').props.onClick()
+  await vi.waitFor(() => expect(text(h.render())).toContain('Baja programada. El plan seguirá activo hasta 2026-12-10'))
+})
+
+it('changes the direct-debit IBAN without asking for the company details again', async () => {
+  const h = panel(true, false, false, false)
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Cambiar IBAN')).toBeDefined())
+  button(h.render(), 'Cambiar IBAN').props.onClick()
+  const fields = () => nodes(h.render()).find(node => node.type === 'sepa-fields')
+  expect(fields().props.withPayer).toBe(false)
+  expect(button(h.render(), 'Guardar IBAN').props.disabled).toBe(true)
+  fields().props.onChange({ legalName: '', taxId: '', accountHolder: 'Nuevo Titular', iban: 'DE89 3704 0044 0532 0130 00', accepted: true })
+  await vi.waitFor(() => expect(button(h.render(), 'Guardar IBAN').props.disabled).toBe(false))
+  button(h.render(), 'Guardar IBAN').props.onClick()
+  await vi.waitFor(() => expect(text(h.render())).toContain('cuenta terminada en 3000'))
+  expect(sent(h, 'change-mandate')[0]).toMatchObject({ tenantId: 'tenant', sepa: { accountHolder: 'Nuevo Titular', iban: 'DE89 3704 0044 0532 0130 00' } })
+  expect(sent(h, 'change-mandate')[0].requestId).toMatch(/^[0-9a-f-]{36}$/)
 })

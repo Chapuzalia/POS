@@ -16,6 +16,8 @@ function endpoint(admin = true, role = 'owner', active = true) {
   const invoice = { number: 'INV-1', amount_due_cents: 5929, hosted_invoice_url: 'https://www.mollie.com/checkout/private-invoice', invoice_pdf: null }
   const portal = vi.fn(async () => ({ url: 'https://www.mollie.com/checkout/private-arrears' }))
   const confirm = vi.fn(async () => ({ operation, url: operation.result.url }))
+  const quoteCancel = vi.fn(async () => ({ id: 'cancel' }))
+  const changeMandate = vi.fn(async () => ({ mandateId: 'mdt_new', last4: '1332' }))
   const schemas = compileComponent(readFileSync(new URL('../../supabase/functions/_shared/billing/schemas.ts', import.meta.url), 'utf8'), { 'npm:zod@4.4.3': { z } })
   compileComponent(readFileSync(new URL('../../supabase/functions/billing/index.ts', import.meta.url), 'utf8'), {
     'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
@@ -27,12 +29,14 @@ function endpoint(admin = true, role = 'owner', active = true) {
       async detail() { return { operations: [operation], invoices: [invoice] } },
       confirm,
       portal,
+      quoteCancel,
+      changeMandate,
     }) },
   }, {
     Deno: { serve: (callback: typeof handler) => { handler = callback }, env: { get: () => 'https://staging.example.test' } },
     Response, Request, URL, Error, console: { error: log },
   })
-  return { log, portal, confirm, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
+  return { log, portal, confirm, quoteCancel, changeMandate, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
 }
 
 const tenantId = '11111111-1111-4111-8111-111111111111'
@@ -103,4 +107,27 @@ it('forwards the owner SEPA authorization and refuses it from Superadmin', async
   // The IBAN never reaches the failure log.
   await owner.send(JSON.stringify({ action: 'confirm', tenantId, operationId: tenantId, sepa: { ...sepa, extra: 1 } }))
   expect(JSON.stringify(owner.log.mock.calls)).not.toContain('ES91')
+})
+
+it('lets the owner cancel at the end of the paid period but keeps immediate cancellation for Superadmin', async () => {
+  const owner = endpoint(false)
+  expect((await owner.send(JSON.stringify({ action: 'quote-cancel', tenantId, immediate: false, reason: 'Baja solicitada por el cliente' }))).status).toBe(200)
+  expect(owner.quoteCancel).toHaveBeenCalledWith(tenantId, 'admin', false, 'Baja solicitada por el cliente')
+  expect((await owner.send(JSON.stringify({ action: 'quote-cancel', tenantId, immediate: true, reason: 'Ya' }))).status).toBe(403)
+  expect(owner.quoteCancel).toHaveBeenCalledTimes(1)
+  expect((await endpoint(false, 'manager').send(JSON.stringify({ action: 'quote-cancel', tenantId, immediate: false, reason: 'Baja' }))).status).toBe(403)
+  const admin = endpoint()
+  expect((await admin.send(JSON.stringify({ action: 'quote-cancel', tenantId, immediate: true, reason: 'Fraude' }))).status).toBe(200)
+})
+
+it('changes the direct-debit IBAN only for the owner', async () => {
+  const body = JSON.stringify({ action: 'change-mandate', tenantId, requestId: tenantId, sepa: { accountHolder: 'Titular SL', iban: 'ES91 2100 0418 4502 0005 1332' } })
+  const owner = endpoint(false)
+  const response = await owner.send(body)
+  expect(response.status).toBe(200)
+  expect(await response.json()).toEqual({ mandateId: 'mdt_new', last4: '1332' })
+  expect(owner.changeMandate).toHaveBeenCalledWith(tenantId, tenantId, { accountHolder: 'Titular SL', iban: 'ES91 2100 0418 4502 0005 1332' })
+  const admin = endpoint()
+  expect((await admin.send(body)).status).toBe(403)
+  expect(admin.changeMandate).not.toHaveBeenCalled()
 })

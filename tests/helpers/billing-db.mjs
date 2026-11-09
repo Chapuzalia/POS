@@ -44,6 +44,7 @@ export async function createBillingDb(t) {
   await db.exec(await readFile(new URL('../../supabase/migrations/20261101164502_tenant_stripe_onboarding.sql', import.meta.url), 'utf8'))
   await db.exec(await readFile(new URL('../../supabase/migrations/20261101184016_billing_sepa_authorization.sql', import.meta.url), 'utf8'))
   await db.exec(await readFile(new URL('../../supabase/migrations/20261103163503_billing_cancel_scheduled_change.sql', import.meta.url), 'utf8'))
+  await db.exec(await readFile(new URL('../../supabase/migrations/20261109200000_billing_plan_access_reduction.sql', import.meta.url), 'utf8'))
   const transition = async (action, data) => (await db.query('select public.billing_transition($1,$2::jsonb) result', [action, JSON.stringify(data)])).rows[0].result
   return { db, transition }
 }

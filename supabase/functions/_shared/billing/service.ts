@@ -1,6 +1,6 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { buildContract, changeTiming, commercialState, recurringMetrics } from './domain.ts'
-import type { CommercialException, Contract, Product, Selection, Version } from './domain.ts'
+import type { CommercialException, Contract, ContractAccess, Product, Selection, Version } from './domain.ts'
 import { MollieRequestError, cents, dateOnly, epoch, grossCents, mollieInterval, money, netFromGross, normalizeIban } from './mollie.ts'
 import type { MollieGateway, MollieMandate, MolliePayment, MollieSubscription } from './mollie.ts'
 import { addMonths, promotionPhases, renewalOnOrAfter, resolvePromotions } from './promotions.ts'
@@ -24,11 +24,16 @@ type ProviderParams = {
 export type Operation = {
   id: string; tenant_id: string; actor_id: string; kind: 'change' | 'cancel' | 'cancel_now'; reason: string
   status: string; contract: Contract | null; restore_contract: Contract | null
-  timing: 'immediate' | 'period_end'; preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string; promotions?: PromotionPreview[]; afterPromotionCents?: number }
+  timing: 'immediate' | 'period_end'; preview: { amountDueCents: number; recurringCents: number; renewalCents?: number | null; currency: string; effectiveAt: string | null; details: string; promotions?: PromotionPreview[]; afterPromotionCents?: number; losses?: string[] }
   stripe_params: ProviderParams
   result: { url?: string; paymentId?: string; mandateId?: string; scheduleId?: string } | null; created_at: string; proration_date: number; effective_at: string | null
 }
-export type ConfirmInput = { sepa?: { accountHolder: string; iban: string }; payer?: { legalName: string; taxId: string } }
+export type ConfirmInput = { sepa?: { accountHolder: string; iban: string }; payer?: { legalName: string; taxId: string }; acceptLosses?: boolean }
+// What the owner chose to switch off (downgrade) or back on (upgrade) with a plan change.
+export type AccessRequest = { deactivateVenueIds: string[]; deactivateDeviceIds: string[]; reactivateVenueIds: string[] }
+type UsageVenue = { id: string; name: string; is_active: boolean }
+type UsageDevice = { id: string; name: string; venue_id: string; is_active: boolean }
+const unique = (ids: string[] | undefined) => [...new Set(ids ?? [])].sort()
 
 function confirmationResult(operation: Operation) {
   if (['failed', 'expired'].includes(operation.status)) throw new Error('BILLING_STALE')
@@ -45,6 +50,8 @@ const settled = (payment: MolliePayment) => payment.status === 'paid' && cents(p
 const failed = (payment: MolliePayment) => ['failed', 'expired', 'canceled'].includes(payment.status) || cents(payment.amountChargedBack) > 0
 // Accepted SEPA debits stay pending for days before the money arrives. Access is kept meanwhile.
 const inTransit = (payment: MolliePayment) => ['open', 'pending', 'authorized'].includes(payment.status)
+// Upgrades are paid in Mollie Checkout (one-off); older in-flight ones were SEPA recurring debits.
+const cardCheckout = (payment: MolliePayment) => payment.metadata?.tickit_kind === 'proration' && payment.sequenceType === 'oneoff'
 const baseline = (sub: MollieSubscription) => JSON.stringify({ status: sub.status, amount: sub.amount, interval: sub.interval, next: sub.nextPaymentDate, mandate: sub.mandateId })
 const phaseAt = (phases: PromotionPhase[], at: number) => phases.find(phase => phase.start <= at && at < phase.end) ?? (at < phases[0].start ? null : phases.at(-1) ?? null)
 const restoreAt = (op: Operation) => op.effective_at && op.contract?.exception?.cycles ? addMonths(epoch(op.effective_at), op.contract.exception.cycles * months(op.contract.interval)) : null
@@ -120,7 +127,7 @@ export class BillingService {
     const [tenant, venues, devices, invoices, operations, audit] = await Promise.all([
       this.db.from('tenants').select('id,name,max_venues,max_devices,billing_activation_required').eq('id', tenantId).single(),
       this.db.from('venues').select('id,name,is_active').eq('tenant_id', tenantId),
-      this.db.from('devices').select('id,name,venue_id,is_active').eq('tenant_id', tenantId).eq('is_active', true),
+      this.db.from('devices').select('id,name,venue_id,is_active').eq('tenant_id', tenantId),
       this.db.from('billing_invoices').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100),
       this.db.from('billing_operations').select('id,kind,status,timing,preview,result,reason,created_at,effective_at,contract').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(50),
       admin ? this.db.from('billing_audit').select('*').eq('tenant_id', tenantId).order('created_at', { ascending: false }).limit(100) : Promise.resolve({ data: [], error: null }),
@@ -131,7 +138,17 @@ export class BillingService {
       const { id, kind, status, timing, preview, result, reason, created_at, effective_at, contract } = scheduled
       history.push({ id, kind, status, timing, preview, result, reason, created_at, effective_at, contract })
     }
-    return { account, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, invoices: invoices.data, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
+    return { account, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, paymentMethod: await this.paymentMethod(account), invoices: invoices.data, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
+  }
+  // Masked direct-debit account of the live subscription. Never returns or logs the full IBAN.
+  async paymentMethod(account: Account) {
+    try {
+      const sub = await this.subscription(account)
+      if (!sub?.mandateId || !live(sub)) return null
+      const mandate = await this.mollie.request<MollieMandate>('GET', `/customers/${sub.customerId}/mandates/${sub.mandateId}`)
+      const iban = mandate.details?.consumerAccount ?? ''
+      return { method: mandate.method, status: mandate.status, last4: iban.slice(-4) || null }
+    } catch { return null }
   }
   async overview() {
     // Paginate; PostgREST's default 1000-row cap must not silently undercount revenue.
@@ -201,25 +218,77 @@ export class BillingService {
     if (stored.error || !stored.data.stripe_params.phases) throw new Error('BILLING_DB_OPERATION')
     return stored.data
   }
-  async validateSelection(tenantId: string, contract: Contract) {
+  async usage(tenantId: string) {
     const [venues, devices] = await Promise.all([
-      this.db.from('venues').select('id').eq('tenant_id', tenantId),
-      this.db.from('devices').select('id').eq('tenant_id', tenantId).eq('is_active', true),
+      this.db.from('venues').select('id,name,is_active').eq('tenant_id', tenantId).returns<UsageVenue[]>(),
+      this.db.from('devices').select('id,name,venue_id,is_active').eq('tenant_id', tenantId).returns<UsageDevice[]>(),
     ])
     if (venues.error || devices.error) throw new Error('BILLING_DB_USAGE')
-    const venueIds = new Set(venues.data.map(row => row.id))
-    const deviceIds = new Set(devices.data.map(row => row.id))
-    if (venueIds.size > contract.limits.venues || deviceIds.size > contract.limits.devices) throw new Error('BILLING_LIMIT_BELOW_USAGE')
+    return { venues: venues.data, devices: devices.data }
+  }
+  // Capacity counts what stays active after the contract's own deactivations/reactivations.
+  async validateSelection(tenantId: string, contract: Contract) {
+    const { venues, devices } = await this.usage(tenantId)
+    const access = contract.access
+    const venueOff = new Set(access?.deactivateVenueIds), venueOn = new Set(access?.reactivateVenueIds)
+    const deviceOff = new Set(access?.deactivateDeviceIds), deviceOn = new Set(access?.reactivateDeviceIds)
+    const venue = new Map(venues.map(row => [row.id, row])), device = new Map(devices.map(row => [row.id, row]))
+    if ([...venueOff].some(id => !venue.get(id)?.is_active) || [...venueOn].some(id => venue.get(id)?.is_active !== false)
+      || [...deviceOff].some(id => !device.get(id)?.is_active) || [...deviceOn].some(id => { const row = device.get(id); return !row || row.is_active || !venueOn.has(row.venue_id) })) throw new Error('BILLING_FOREIGN_ASSIGNMENT')
+    const activeVenues = new Set(venues.filter(row => row.is_active ? !venueOff.has(row.id) : venueOn.has(row.id)).map(row => row.id))
+    const activeDevices = new Set(devices.filter(row => row.is_active ? !deviceOff.has(row.id) && !venueOff.has(row.venue_id) : deviceOn.has(row.id)).map(row => row.id))
+    if (activeVenues.size > contract.limits.venues || activeDevices.size > contract.limits.devices) throw new Error('BILLING_LIMIT_BELOW_USAGE')
     for (const addon of contract.addons) {
-      if (addon.venueIds.some(id => !venueIds.has(id)) || addon.deviceIds.some(id => !deviceIds.has(id))) throw new Error('BILLING_FOREIGN_ASSIGNMENT')
+      if (addon.venueIds.some(id => !activeVenues.has(id)) || addon.deviceIds.some(id => !activeDevices.has(id))) throw new Error('BILLING_FOREIGN_ASSIGNMENT')
     }
   }
-  async quote(tenantId: string, actorId: string, selection: Selection, exception: CommercialException | null, reason: string, isSuperadmin = false) {
+  // Devices of a switched-off venue go with it. Reactivating a venue brings back only the
+  // terminals billing switched off, never ones the owner retired by hand.
+  async contractAccess(tenantId: string, request: AccessRequest | null): Promise<ContractAccess | undefined> {
+    const deactivateVenueIds = unique(request?.deactivateVenueIds), reactivateVenueIds = unique(request?.reactivateVenueIds)
+    if (!deactivateVenueIds.length && !reactivateVenueIds.length && !request?.deactivateDeviceIds.length) return undefined
+    const { devices } = await this.usage(tenantId)
+    const deactivateDeviceIds = unique([...(request?.deactivateDeviceIds ?? []), ...devices.filter(row => row.is_active && deactivateVenueIds.includes(row.venue_id)).map(row => row.id)])
+    let reactivateDeviceIds: string[] = []
+    if (reactivateVenueIds.length) {
+      const history = await this.db.from('billing_operations').select('contract').eq('tenant_id', tenantId).eq('status', 'completed').returns<Pick<Operation, 'contract'>[]>()
+      if (history.error) throw new Error('BILLING_DB_OPERATION')
+      const switchedOff = new Set(history.data.flatMap(row => row.contract?.access?.deactivateDeviceIds ?? []))
+      reactivateDeviceIds = unique(devices.filter(row => !row.is_active && reactivateVenueIds.includes(row.venue_id) && switchedOff.has(row.id)).map(row => row.id))
+    }
+    return { deactivateVenueIds, deactivateDeviceIds, reactivateVenueIds, reactivateDeviceIds }
+  }
+  // Plain-language list of what stops working at renewal; the owner must accept it before confirming.
+  async losses(tenantId: string, current: Contract | null, next: Contract, products: Product[], features: { key: string; name: string }[]) {
+    const { venues, devices } = await this.usage(tenantId)
+    const venueName = (id: string) => venues.find(row => row.id === id)?.name ?? 'Local'
+    const off = new Set(next.access?.deactivateVenueIds)
+    const result = [...off].map(id => {
+      const terminals = devices.filter(row => row.venue_id === id && row.is_active).length
+      return `Local «${venueName(id)}»${terminals ? ` y sus ${terminals} ${terminals === 1 ? 'terminal' : 'terminales'} TPV` : ''}: quedará inactivo (se conservan sus datos).`
+    })
+    for (const id of next.access?.deactivateDeviceIds ?? []) {
+      const row = devices.find(item => item.id === id)
+      if (row && !off.has(row.venue_id)) result.push(`Terminal «${row.name}»: quedará inactivo.`)
+    }
+    if (current) {
+      const label = (key: string) => products.find(row => row.featureKey === key)?.name ?? features.find(row => row.key === key)?.name ?? key
+      const shown = new Set(features.map(row => row.key))
+      for (const key of current.features) if (!next.features.includes(key) && shown.has(key)) result.push(`${label(key)}: dejará de estar disponible.`)
+      for (const addon of current.addons) {
+        if (addon.scope !== 'venue' || !addon.featureKey || !next.features.includes(addon.featureKey)) continue
+        const kept = next.addons.find(row => row.key === addon.key)?.venueIds ?? []
+        for (const id of addon.venueIds) if (!kept.includes(id) && !off.has(id)) result.push(`${label(addon.featureKey)} en «${venueName(id)}»: dejará de estar disponible.`)
+      }
+    }
+    return result
+  }
+  async quote(tenantId: string, actorId: string, selection: Selection, exception: CommercialException | null, reason: string, isSuperadmin = false, accessRequest: AccessRequest | null = null) {
     const account = await this.account(tenantId)
     // Never stack a second economic change on a debit the bank has not settled yet.
     if (['processing','pending'].includes(account.last_payment_status ?? '')) throw new Error('BILLING_PENDING_CHANGE')
     if (commercialState(account.status, account.delinquent_since, account.grace_days) === 'restricted' && !['canceled','incomplete_expired'].includes(account.status)) throw new Error('BILLING_PAYMENT_REQUIRED')
-    const { products, versions } = await this.catalog()
+    const { products, versions, features } = await this.catalog()
     const existingContract = account.billed_contract ?? account.contract
     const scheduled = await this.scheduleOperation(account)
     const agreement = scheduled?.contract ?? existingContract ?? account.onboarding_contract
@@ -248,7 +317,8 @@ export class BillingService {
       return previous && requested && previous.versionId === requested.versionId && requested.quantity <= previous.quantity ? { ...product, active: true } : product
     })
     // Reject foreign assignments and invalid quantities before any Mollie request.
-    await this.validateSelection(tenantId, buildContract(effectiveProducts, versions, selection, exception))
+    const access = await this.contractAccess(tenantId, accessRequest)
+    await this.validateSelection(tenantId, { ...buildContract(effectiveProducts, versions, selection, exception), access })
     const linked = await this.subscription(account)
     if (linked && linked.status !== 'active' && live(linked)) throw new Error('BILLING_PENDING_CHANGE')
     const subscription = linked?.status === 'active' ? linked : null
@@ -257,16 +327,21 @@ export class BillingService {
     if ((await this.inflight(tenantId)).some(op => !op.stripe_params.phases)) throw new Error('BILLING_PENDING_CHANGE')
     const at = now()
     if (exception?.promotions?.length || scheduled) {
+      // Promotion timelines keep their venues; capacity changes go through a normal plan change.
+      if (access) throw new Error('BILLING_INVALID_PROMOTION_CONTRACT')
       exception ??= { freeUnits: {}, limits: {}, discountBasisPoints: 0, customAmounts: {}, cycles: null, reason }
       if (!subscription || !existingContract || exception.cycles || existingContract.exception?.cycles || !subscription.nextPaymentDate) throw new Error('BILLING_INVALID_PROMOTION_CONTRACT')
       const renewal = epoch(subscription.nextPaymentDate)
       const promotions = resolvePromotions(exception.promotions ?? [], agreement?.exception?.promotions ?? [], selection, at, renewal, existingContract.interval, epoch(subscription.startDate))
       return this.quotePromotions(account, actorId, selection, { ...exception, promotions }, reason, effectiveProducts, versions, subscription, at, agreement)
     }
-    const next = buildContract(effectiveProducts, versions, selection, exception)
+    const next: Contract = { ...buildContract(effectiveProducts, versions, selection, exception), ...(access ? { access } : {}) }
     await this.validateSelection(tenantId, next)
     if (exception?.cycles && !subscription) throw new Error('BILLING_TEMPORARY_REQUIRES_SUBSCRIPTION')
-    const timing = exception?.cycles ? 'period_end' : subscription && account.contract ? changeTiming(account.contract, next) : 'immediate'
+    // Switching venues/devices off is a reduction: it waits for the renewal like any other.
+    const switchesOff = Boolean(access?.deactivateVenueIds.length || access?.deactivateDeviceIds.length)
+    const timing = exception?.cycles || (subscription && switchesOff) ? 'period_end' : subscription && account.contract ? changeTiming(account.contract, next) : 'immediate'
+    const losses = await this.losses(tenantId, subscription ? account.contract : null, next, effectiveProducts, features)
     const restore = exception?.cycles ? buildContract(effectiveProducts, versions, selection) : null
     const periodEnd = subscription?.nextPaymentDate ? epoch(subscription.nextPaymentDate) : null
     if (subscription && (!periodEnd || !existingContract)) throw new Error('BILLING_PENDING_CHANGE')
@@ -275,10 +350,12 @@ export class BillingService {
       ? 'Primera cuota con tarjeta en Mollie, IVA del 21 % incluido. Las siguientes cuotas se cobrarán por domiciliación SEPA.'
       : timing === 'period_end'
         ? 'Cambio al vencimiento; sin cargo inmediato. La siguiente cuota se cobrará con el nuevo importe, IVA del 21 % incluido. Cuotas recurrentes sin IVA.'
-        : 'Se cobra ahora la parte proporcional del aumento hasta la renovación, IVA del 21 % incluido. Si se domicilia, el acceso se amplía al aceptar el adeudo y el banco todavía puede devolverlo. Cuotas recurrentes sin IVA.'
+        : amountDueCents > 0
+          ? 'Pagarás ahora con tarjeta en Mollie la parte proporcional del aumento hasta la renovación, IVA del 21 % incluido. El acceso se amplía al confirmarse el pago. Cuotas recurrentes sin IVA.'
+          : 'Sin cargo inmediato. El cambio se aplica ahora y la siguiente cuota se cobrará con el nuevo importe, IVA del 21 % incluido. Cuotas recurrentes sin IVA.'
     return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing,
       stripeParams: { provider: 'mollie', subscriptionId: subscription?.id ?? null, ...(!subscription ? { checkoutPolicy: 'mollie_card_sepa_v1' } : { baseline: baseline(subscription), previousContract: existingContract }) },
-      preview: { amountDueCents, renewalCents: timing === 'period_end' ? grossCents(next.recurringCents) : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? iso(periodEnd) : null, details }, reason, prorationDate: at })
+      preview: { amountDueCents, renewalCents: timing === 'period_end' ? grossCents(next.recurringCents) : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? iso(periodEnd) : null, details, ...(losses.length ? { losses } : {}) }, reason, prorationDate: at })
   }
   async quotePromotions(account: Account, actorId: string, selection: Selection, exception: CommercialException, reason: string, products: Product[], versions: Version[], sub: MollieSubscription, at: number, agreement: Contract | null) {
     const current = account.billed_contract ?? account.contract
@@ -364,6 +441,7 @@ export class BillingService {
     const signup = before.data.kind === 'change' && !before.data.stripe_params.subscriptionId
     const iban = input.sepa ? normalizeIban(input.sepa.iban) : null
     if (signup && !retry && !iban) throw new Error('BILLING_SEPA_REQUIRED')
+    if (!retry && before.data.preview.losses?.length && input.acceptLosses !== true) throw new Error('BILLING_LOSSES_NOT_ACCEPTED')
     if (!retry && before.data.stripe_params.baseline) {
       const sub = await this.subscription(await this.account(tenantId))
       if (!sub || baseline(sub) !== before.data.stripe_params.baseline) throw new Error('BILLING_STALE_PROVIDER_QUOTE')
@@ -434,21 +512,43 @@ export class BillingService {
       } else {
         const due = op.preview.amountDueCents
         if (due > 0) {
-          // Charge first: a rejected charge releases the quote without touching the subscription.
+          // The increase is paid by card in Mollie Checkout. Access and the subscription amount
+          // change only once Mollie reports it paid (reconcile); an abandoned checkout changes nothing.
           const payment = await this.operationPayment(sub.customerId, op, 'proration') ?? await this.mutate(op, () => this.mollie.request<MolliePayment>('POST', '/payments', {
-            amount: money(due), description: `Tickit ${contract.planName} · ampliación ${op.id.slice(0, 8)}`, sequenceType: 'recurring',
-            customerId: sub.customerId, mandateId: sub.mandateId ?? undefined, webhookUrl: this.webhookUrl,
+            amount: money(due), description: `Tickit ${contract.planName} · ampliación ${op.id.slice(0, 8)}`, method: 'creditcard',
+            customerId: sub.customerId, redirectUrl: `${this.appUrl}/crm/plan?billing=return`, cancelUrl: `${this.appUrl}/crm/plan?billing=cancelled`, webhookUrl: this.webhookUrl,
             metadata: { tickit_tenant_id: tenantId, tickit_operation_id: op.id, tickit_kind: 'proration' },
           }, `${key}:payment`), !retry)
-          result = { paymentId: payment.id }
-        }
-        await this.mutate(op, () => this.mollie.request('PATCH', path, { amount: money(grossCents(contract.recurringCents)) }, `${key}:amount`), false)
+          result = { paymentId: payment.id, url: payment._links.checkout?.href }
+        } else await this.mutate(op, () => this.mollie.request('PATCH', path, { amount: money(grossCents(contract.recurringCents)) }, `${key}:amount`), false)
       }
     }
     const operation = await this.transition<Operation>('apply_result', { tenantId, operationId, status, result, effectiveAt: op.timing === 'period_end' ? op.preview.effectiveAt : null })
     // Completion is determined by Mollie, not the browser redirect or this POST response.
     await this.reconcile(tenantId)
     return { operation, url: result?.url }
+  }
+  // New IBAN for the renewals: a new SEPA mandate replaces the subscription's one, then older direct-debit mandates are revoked.
+  // requestId makes a repeated click reuse the same mandate. The IBAN goes to Mollie only; it is never stored or logged.
+  async changeMandate(tenantId: string, requestId: string, sepa: { accountHolder: string; iban: string }) {
+    const iban = normalizeIban(sepa.iban)
+    const account = await this.account(tenantId)
+    const sub = await this.subscription(account)
+    if (!sub || sub.status !== 'active') throw new Error('BILLING_SUBSCRIPTION_REQUIRED')
+    // A debit already accepted on the old mandate must settle first; the change would otherwise race it.
+    if (['processing','pending'].includes(account.last_payment_status ?? '') || (await this.inflight(tenantId)).some(op => op.status !== 'scheduled')) throw new Error('BILLING_PENDING_CHANGE')
+    const path = `/customers/${sub.customerId}/mandates`
+    const reference = `TICKIT-M-${requestId.slice(0, 8).toUpperCase()}`
+    const mandates = await this.mollie.list<MollieMandate>(path, 'mandates')
+    const mandate = mandates.find(row => row.mandateReference === reference && row.method === 'directdebit' && ['valid','pending'].includes(row.status))
+      ?? await this.mollie.request<MollieMandate>('POST', path, { method: 'directdebit', consumerName: sepa.accountHolder.trim(), consumerAccount: iban, signatureDate: dateOnly(now()), mandateReference: reference }, `tickit:mandate:${requestId}`)
+    if (sub.mandateId !== mandate.id) await this.mollie.request('PATCH', `/customers/${sub.customerId}/subscriptions/${sub.id}`, { mandateId: mandate.id }, `tickit:mandate:${requestId}:subscription`)
+    for (const old of mandates) {
+      if (old.id !== mandate.id && old.method === 'directdebit' && ['valid','pending'].includes(old.status)) await this.mollie.request('DELETE', `${path}/${old.id}`, undefined, `tickit:mandate:${requestId}:revoke:${old.id}`)
+    }
+    const audit = await this.db.from('billing_audit').insert({ tenant_id: tenantId, action: 'mandate', reason: 'Cambio de IBAN de domiciliación', details: { mandateId: mandate.id } })
+    if (audit.error) throw new Error('BILLING_DB_AUDIT')
+    return { mandateId: mandate.id, last4: iban.slice(-4) }
   }
   // "Pay outstanding": a failed renewal or charge-back is settled by card through Mollie Checkout.
   async portal(tenantId: string) {
@@ -546,7 +646,8 @@ export class BillingService {
         const cancellations = sub.status === 'canceled' ? await this.db.from('billing_operations').select('stripe_params').eq('tenant_id', tenantId).eq('kind', 'cancel_now').eq('status', 'completed').returns<Pick<Operation, 'stripe_params'>[]>() : { data: [], error: null }
         if (cancellations.error) throw new Error('BILLING_DB_OPERATION')
         const cancelledNow = cancellations.data.some(row => row.stripe_params.subscriptionId === sub.id)
-        const charges = payments.filter(row => row.subscriptionId && subs.some(item => item.id === row.subscriptionId) || ['first','proration'].includes(row.metadata?.tickit_kind ?? '')).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
+        // An upgrade checkout not yet paid is not a charge in progress at the bank.
+        const charges = payments.filter(row => row.subscriptionId && subs.some(item => item.id === row.subscriptionId) || ['first','proration'].includes(row.metadata?.tickit_kind ?? '') && !(cardCheckout(row) && row.status !== 'paid')).sort((a, b) => Date.parse(b.createdAt) - Date.parse(a.createdAt))
         const debt = this.outstanding(payments)
         if (live(sub)) periodEnd = sub.nextPaymentDate ? iso(epoch(sub.nextPaymentDate)) : periodEnd
         else if (cancelledNow) periodEnd = sub.canceledAt ?? periodEnd
@@ -562,7 +663,10 @@ export class BillingService {
             const charge = upgrade.result?.paymentId ? payments.find(row => row.id === upgrade.result?.paymentId) : null
             if (upgrade.result?.paymentId && !charge) throw new Error('BILLING_PAYMENT_MISMATCH')
             if (!charge || settled(charge)) { contract = upgrade.contract; completed = upgrade.id }
-            else if (inTransit(charge)) { contract = upgrade.contract; financial = account.billed_contract ?? upgrade.stripe_params.previousContract ?? null; paymentStatus = 'pending' }
+            else if (cardCheckout(charge)) {
+              // Waiting for the card: nothing changed. Unpaid, expired or cancelled: the upgrade is dropped.
+              if (!inTransit(charge)) await this.expire(tenantId, upgrade)
+            } else if (inTransit(charge)) { contract = upgrade.contract; financial = account.billed_contract ?? upgrade.stripe_params.previousContract ?? null; paymentStatus = 'pending' }
             else {
               // An unpaid upgrade is withdrawn; the previous paid contract and amount return.
               await this.expire(tenantId, upgrade)

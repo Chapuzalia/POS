@@ -13,7 +13,7 @@ export type MollieSubscription = {
   nextPaymentDate?: string | null; canceledAt?: string | null; mandateId?: string | null; customerId: string
   metadata: Record<string, string> | null
 }
-export type MollieMandate = { id: string; mode: string; status: string; method: string; mandateReference: string | null }
+export type MollieMandate = { id: string; mode: string; status: string; method: string; mandateReference: string | null; details?: { consumerName?: string | null; consumerAccount?: string | null } | null }
 
 // Spanish VAT, exclusive. Catalog/contract amounts are net integer cents.
 export const VAT_PERCENT = 21

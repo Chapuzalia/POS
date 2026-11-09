@@ -1,0 +1,302 @@
+-- migration-safety: expand
+set lock_timeout = '5s';
+set statement_timeout = '5min';
+-- migration-safety-reviewed: CREATE OR REPLACE ROUTINE
+-- migration-safety-reason: Preserve billing_transition and enforce_tenant_plan_limit signatures, grants and N-1 actions. Contracts without the optional access object project exactly as before. A downgrade contract may name venues/devices to deactivate at renewal (deferred while cash or orders are open, like any access reduction) and an upgrade may reactivate them; venue limits now count active venues so retained inactive venues keep their data without consuming capacity. Reactivating a venue/device outside the billing projection is checked against the plan limit.
+-- Existing ticket/fiscal/accounting pending contracts are unrelated to this compatible billing change.
+
+create or replace function public.billing_transition(p_action text, p_data jsonb) returns jsonb
+language plpgsql security invoker set search_path = '' as $$
+declare
+  a public.billing_accounts;
+  next_account public.billing_accounts;
+  op public.billing_operations;
+  superseded_op public.billing_operations;
+  ev public.billing_stripe_events;
+  tid uuid := (p_data->>'tenantId')::uuid;
+  actor uuid := (p_data->>'actorId')::uuid;
+  token uuid;
+  feature text;
+  venue record;
+  addon jsonb;
+  c jsonb;
+  deferred boolean := false;
+  sepa_proof jsonb;
+  verified_sepa boolean := false;
+  feature_keys text[];
+  v public.billing_price_versions;
+begin
+  if current_user not in ('service_role','postgres','supabase_admin') then raise exception 'BILLING_FORBIDDEN' using errcode = '42501'; end if;
+  if p_action = 'event_claim' then
+    insert into public.billing_stripe_events(event_id,event_type,stripe_created,stripe_customer_id)
+    values(p_data->>'id',p_data->>'type',(p_data->>'created')::bigint,p_data->>'customer') on conflict do nothing;
+    select * into ev from public.billing_stripe_events where event_id = p_data->>'id' for update;
+    if ev.status in ('completed','ignored') then return '{"claimed":false}'; end if;
+    if ev.lock_until > now() then raise exception 'BILLING_EVENT_BUSY'; end if;
+    update public.billing_stripe_events set status='processing', attempts=attempts+1, lock_until=now()+interval '2 minutes' where event_id=ev.event_id;
+    return '{"claimed":true}';
+  elsif p_action = 'event_finish' then
+    update public.billing_stripe_events set status=p_data->>'status',error_code=p_data->>'error',lock_until=null,processed_at=now() where event_id=p_data->>'id';
+    return '{}';
+  elsif p_action = 'catalog_save' then
+    if exists(select 1 from public.billing_price_versions where product_key=p_data->'product'->>'key') and exists(select 1 from public.billing_products where key=p_data->'product'->>'key'
+      and (kind <> p_data->'product'->>'kind' or scope <> p_data->'product'->>'scope' or feature_key is distinct from p_data->'product'->>'featureKey' or resource is distinct from p_data->'product'->>'resource')) then raise exception 'BILLING_PRODUCT_IDENTITY_IMMUTABLE'; end if;
+    insert into public.billing_products(key,kind,name,description,scope,feature_key,resource,active,sort_order)
+    values(p_data->'product'->>'key',p_data->'product'->>'kind',p_data->'product'->>'name',p_data->'product'->>'description',p_data->'product'->>'scope',p_data->'product'->>'featureKey',p_data->'product'->>'resource',(p_data->'product'->>'active')::boolean,(p_data->'product'->>'sortOrder')::integer)
+    on conflict(key) do update set kind=excluded.kind,scope=excluded.scope,feature_key=excluded.feature_key,resource=excluded.resource,
+      name=excluded.name,description=excluded.description,active=excluded.active,sort_order=excluded.sort_order;
+    if p_data->'version' is not null and p_data->'version' <> 'null' then
+      insert into public.billing_price_versions(product_key,interval,amount_cents,features,limits,included,maximum,requires,created_by)
+      values(p_data->'product'->>'key',p_data->'version'->>'interval',(p_data->'version'->>'amountCents')::integer,
+        array(select jsonb_array_elements_text(p_data->'version'->'features')),p_data->'version'->'limits',p_data->'version'->'included',
+        (p_data->'version'->>'maximum')::integer,array(select jsonb_array_elements_text(p_data->'version'->'requires')),actor) returning * into v;
+    end if;
+    insert into public.billing_audit(actor_id,action,reason,details) values(actor,'catalog_save',p_data->>'reason',jsonb_build_object('key',p_data->'product'->>'key','versionId',v.id));
+    return to_jsonb(v);
+  end if;
+
+  insert into public.billing_accounts(tenant_id) values(tid) on conflict do nothing;
+  select * into a from public.billing_accounts where tenant_id=tid for update;
+  if p_action = 'link_customer' then
+    if a.stripe_customer_id is not null and a.stripe_customer_id <> p_data->>'customerId' then raise exception 'BILLING_CUSTOMER_CONFLICT'; end if;
+    update public.billing_accounts set stripe_customer_id=p_data->>'customerId' where tenant_id=tid;
+    return '{}';
+  elsif p_action = 'sync_claim' then
+    if a.sync_until > now() then raise exception 'BILLING_SYNC_BUSY'; end if;
+    token := gen_random_uuid();
+    update public.billing_accounts set sync_token=token,sync_until=now()+interval '2 minutes',last_attempt_at=now() where tenant_id=tid;
+    return jsonb_build_object('token',token);
+  elsif p_action = 'sync_fail' then
+    update public.billing_accounts set sync_token=null,sync_until=null,sync_error='STRIPE_UNAVAILABLE' where tenant_id=tid and sync_token=(p_data->>'token')::uuid;
+    return '{}';
+  elsif p_action = 'quote' then
+    if a.revision <> (p_data->>'revision')::integer or a.sync_until > now() then raise exception 'BILLING_STALE'; end if;
+    insert into public.billing_operations(tenant_id,actor_id,kind,status,expected_revision,contract,restore_contract,timing,preview,stripe_params,reason,proration_date,expires_at)
+    values(tid,actor,p_data->>'kind','quoted',a.revision,p_data->'contract',p_data->'restoreContract',p_data->>'timing',p_data->'preview',p_data->'stripeParams',p_data->>'reason',(p_data->>'prorationDate')::bigint,now()+interval '5 minutes') returning * into op;
+    return to_jsonb(op);
+  elsif p_action = 'apply_claim' then
+    select * into op from public.billing_operations where id=(p_data->>'operationId')::uuid and tenant_id=tid for update;
+    if op.id is null or op.actor_id <> actor then raise exception 'BILLING_FORBIDDEN'; end if;
+    if op.status <> 'quoted' then return to_jsonb(op); end if;
+    if op.expires_at < now() or op.expected_revision <> a.revision or a.sync_until > now() then raise exception 'BILLING_STALE'; end if;
+    if op.kind in ('cancel','cancel_now') then
+      if op.stripe_params->>'supersededOperationId' is not null then
+        select * into superseded_op from public.billing_operations
+          where tenant_id=tid and id=(op.stripe_params->>'supersededOperationId')::uuid for update;
+        if superseded_op.id is null or superseded_op.kind <> 'change' or superseded_op.status <> 'scheduled'
+          or superseded_op.stripe_params ? 'phases' or op.stripe_params->>'cancelSchedule' is distinct from 'true'
+          or op.stripe_params->>'scheduleId' is null
+          or superseded_op.result->>'scheduleId' is distinct from op.stripe_params->>'scheduleId'
+          or superseded_op.stripe_params->>'subscriptionId' is distinct from op.stripe_params->>'subscriptionId'
+          or a.stripe_subscription_id is distinct from op.stripe_params->>'subscriptionId' then
+          raise exception 'BILLING_PENDING_CHANGE';
+        end if;
+        -- Keep one in-flight operation while the cancellation releases the Stripe schedule.
+        update public.billing_operations set status='expired',updated_at=now(),
+          result=result||jsonb_build_object('supersededByOperationId',op.id) where id=superseded_op.id;
+        insert into public.billing_audit(tenant_id,actor_id,action,reason,details)
+          values(tid,actor,'supersede_scheduled_change',op.reason,
+            jsonb_build_object('operationId',superseded_op.id,'supersededByOperationId',op.id));
+      end if;
+      if exists(select 1 from public.billing_operations where tenant_id=tid and status in ('applying','payment_pending','scheduled')) then
+        raise exception 'BILLING_PENDING_CHANGE';
+      end if;
+    end if;
+    update public.billing_operations set status='applying',updated_at=now() where id=op.id returning * into op;
+    insert into public.billing_audit(tenant_id,actor_id,action,reason,details) values(tid,actor,'apply_'||op.kind,op.reason,jsonb_build_object('operationId',op.id,'preview',op.preview));
+    return to_jsonb(op);
+  elsif p_action = 'apply_error' then
+    select * into op from public.billing_operations where id=(p_data->>'operationId')::uuid and tenant_id=tid for update;
+    if op.id is null then raise exception 'BILLING_FORBIDDEN'; end if;
+    if op.status <> 'applying' then return to_jsonb(op); end if;
+    -- Only the server's first rejected mutation with no recorded economic resource may release.
+    update public.billing_operations set
+      status=case when coalesce((p_data->>'release')::boolean,false)
+        and p_data->'error'->>'outcome'='rejected'
+        and not (coalesce(result,'{}'::jsonb) ?| array['checkoutId','scheduleId','pendingInvoiceId'])
+        then 'failed' else 'applying' end,
+      result=coalesce(result,'{}'::jsonb)||jsonb_build_object('stripeError',p_data->'error'),updated_at=now()
+      where id=op.id returning * into op;
+    if op.status='failed' and op.kind in ('cancel','cancel_now') and op.stripe_params->>'supersededOperationId' is not null then
+      -- A definitive first release rejection leaves the original Stripe schedule intact.
+      update public.billing_operations set status='scheduled',updated_at=now(),result=result-'supersededByOperationId'
+        where tenant_id=tid and id=(op.stripe_params->>'supersededOperationId')::uuid and status='expired'
+          and result->>'supersededByOperationId'=op.id::text returning * into superseded_op;
+      if superseded_op.id is null then raise exception 'BILLING_PENDING_CHANGE'; end if;
+      insert into public.billing_audit(tenant_id,actor_id,action,reason,details)
+        values(tid,op.actor_id,'restore_scheduled_change',op.reason,jsonb_build_object('operationId',superseded_op.id,'cancellationId',op.id));
+    end if;
+    insert into public.billing_audit(tenant_id,actor_id,action,reason,details)
+      values(tid,op.actor_id,'apply_error','Stripe mutation outcome',jsonb_build_object('operationId',op.id,'status',op.status,'error',p_data->'error'));
+    return to_jsonb(op);
+  elsif p_action = 'apply_result' then
+    select * into op from public.billing_operations where id=(p_data->>'operationId')::uuid and tenant_id=tid for update;
+    if op.status <> 'applying' then return to_jsonb(op); end if;
+    update public.billing_operations set status=p_data->>'status',result=p_data->'result',effective_at=(p_data->>'effectiveAt')::timestamptz,updated_at=now() where id=op.id returning * into op;
+    if op.stripe_params ? 'phases' and op.result->>'scheduleId' is not null then
+      update public.billing_accounts set schedule_operation_id=op.id,revision=revision+1 where tenant_id=tid;
+    end if;
+    return to_jsonb(op);
+  elsif p_action = 'sync_commit' then
+    if a.sync_token is distinct from (p_data->>'token')::uuid or a.sync_until < now() then raise exception 'BILLING_STALE_SYNC'; end if;
+    c := p_data->'contract';
+    sepa_proof := p_data->'sepaAuthorization';
+    verified_sepa := coalesce(
+      jsonb_typeof(sepa_proof)='object' and p_data->>'paymentStatus'='processing'
+      and p_data->>'status'='active' and c is not null and c <> 'null'
+      and sepa_proof->>'customerId'=p_data->>'customerId'
+      and sepa_proof->>'subscriptionId'=p_data->>'subscriptionId'
+      and sepa_proof->>'invoiceId' ~ '^in_[A-Za-z0-9_]+$'
+      and sepa_proof->>'paymentIntentId' ~ '^pi_[A-Za-z0-9_]+$'
+      and sepa_proof->>'paymentMethodId' ~ '^pm_[A-Za-z0-9_]+$'
+      and sepa_proof->>'mandateId' ~ '^mandate_[A-Za-z0-9_]+$'
+      and jsonb_typeof(sepa_proof->'acceptedAt')='number'
+      and (sepa_proof->>'acceptedAt')::bigint > 0
+      and (sepa_proof->>'acceptedAt')::bigint <= extract(epoch from now())::bigint+300
+      and exists(select 1 from public.billing_operations o where o.tenant_id=tid
+        and o.id=(sepa_proof->>'operationId')::uuid and o.kind='change'
+        and o.status in ('applying','payment_pending') and o.contract=c
+        and ((o.result->>'checkoutId'=sepa_proof->>'checkoutId' and o.stripe_params->>'subscriptionId' is null)
+          or (o.stripe_params->>'sepaDebit'='true' and o.stripe_params->>'subscriptionId'=p_data->>'subscriptionId'
+            and o.result->>'pendingInvoiceId'=sepa_proof->>'invoiceId'))), false);
+    if (sepa_proof is not null and sepa_proof <> 'null' and not verified_sepa)
+      or (p_data->>'paymentStatus'='processing' and not verified_sepa) then
+      raise exception 'BILLING_INVALID_SEPA_AUTHORIZATION';
+    end if;
+    -- This evidence comes only from the Edge service under the current sync token.
+    -- Access may start now; the economic operation remains pending until paid.
+
+    -- A voluntary downgrade may finish financially while a shift is still open.
+    -- Defer only the access reduction; never close cash/orders or touch sale records.
+    if c is not null and c <> 'null' and a.contract is not null and (
+      exists(select 1 from jsonb_array_elements_text(a.contract->'features') as old_feature(value) where not ((c->'features') ? old_feature.value))
+      or (c->'limits'->>'venues')::integer < (a.contract->'limits'->>'venues')::integer
+      or (c->'limits'->>'devices')::integer < (a.contract->'limits'->>'devices')::integer
+      or exists(select 1 from jsonb_array_elements(a.contract->'addons') old_addon
+        cross join lateral jsonb_array_elements_text(old_addon->'venueIds') as old_venue(value)
+        where old_addon->>'scope'='venue' and not exists(select 1 from jsonb_array_elements(c->'addons') new_addon
+          where new_addon->>'featureKey'=old_addon->>'featureKey' and (new_addon->'venueIds') ? old_venue.value))
+      or jsonb_array_length(coalesce(c->'access'->'deactivateVenueIds','[]'::jsonb)) > 0
+      or jsonb_array_length(coalesce(c->'access'->'deactivateDeviceIds','[]'::jsonb)) > 0
+    ) and (exists(select 1 from public.cash_sessions where tenant_id=tid and status='open')
+      or exists(select 1 from public.orders where tenant_id=tid and status in ('open','carried_forward'))) then
+      c := null; deferred := true;
+    end if;
+    if c is not null and c <> 'null' then
+      perform set_config('tickit.billing_projection',tid::text,true);
+      -- Downgrade: the venues/devices the owner chose stop with their TPV access. Data is kept and stays visible.
+      update public.venues set is_active=false where tenant_id=tid and is_active and id::text in (select jsonb_array_elements_text(coalesce(c->'access'->'deactivateVenueIds','[]'::jsonb)));
+      update public.devices set is_active=false where tenant_id=tid and is_active
+        and (id::text in (select jsonb_array_elements_text(coalesce(c->'access'->'deactivateDeviceIds','[]'::jsonb))) or venue_id::text in (select jsonb_array_elements_text(coalesce(c->'access'->'deactivateVenueIds','[]'::jsonb))));
+      update public.device_user_assignments set is_active=false where tenant_id=tid and is_active
+        and (device_id::text in (select jsonb_array_elements_text(coalesce(c->'access'->'deactivateDeviceIds','[]'::jsonb))) or venue_id::text in (select jsonb_array_elements_text(coalesce(c->'access'->'deactivateVenueIds','[]'::jsonb))));
+      -- Upgrade: venues the owner chose to reactivate, with the terminals billing had deactivated.
+      update public.venues set is_active=true where tenant_id=tid and not is_active and id::text in (select jsonb_array_elements_text(coalesce(c->'access'->'reactivateVenueIds','[]'::jsonb)));
+      update public.devices set is_active=true where tenant_id=tid and not is_active and id::text in (select jsonb_array_elements_text(coalesce(c->'access'->'reactivateDeviceIds','[]'::jsonb)));
+      -- Never give a user a second active terminal: POS login expects exactly one.
+      update public.device_user_assignments d set is_active=true where d.tenant_id=tid and not d.is_active and d.device_id::text in (select jsonb_array_elements_text(coalesce(c->'access'->'reactivateDeviceIds','[]'::jsonb)))
+        and not exists(select 1 from public.device_user_assignments other where other.tenant_id=tid and other.user_id=d.user_id and other.is_active);
+      if jsonb_typeof(c->'access')='object' then
+        insert into public.billing_audit(tenant_id,action,reason,details) values(tid,'access','Plan venues and devices',c->'access');
+      end if;
+      -- Protect operational capacity even when terminals/locales were added after a quote. Inactive venues keep their data only.
+      update public.tenants set max_venues=greatest((c->'limits'->>'venues')::integer,(select count(*)::integer from public.venues where tenant_id=tid and is_active)),
+        max_devices=greatest((c->'limits'->>'devices')::integer,(select count(*)::integer from public.devices where tenant_id=tid and is_active)), updated_at=now() where id=tid;
+      feature_keys := array(select jsonb_array_elements_text(c->'features'));
+      -- Only a confirmed contract takes ownership of the old assignment projection.
+      delete from public.tenant_feature_assignments where tenant_id=tid and not (feature_key=any(feature_keys));
+      insert into public.tenant_feature_assignments(tenant_id,feature_key) select tid,f.key from public.platform_features f where f.key=any(feature_keys) on conflict do nothing;
+      -- Explicit per-venue rows close the legacy default-true behavior for scoped addons.
+      for addon in select value from jsonb_array_elements(c->'addons') where value->>'scope'='venue' and value->>'featureKey' is not null loop
+        for venue in select id from public.venues where tenant_id=tid loop
+          insert into public.venue_addon_assignments(tenant_id,venue_id,addon_key,is_enabled)
+          values(tid,venue.id,addon->>'featureKey',(addon->'venueIds') ? venue.id::text)
+          on conflict(venue_id,addon_key) do update set is_enabled=excluded.is_enabled,updated_at=now();
+        end loop;
+      end loop;
+      update public.billing_accounts set source='stripe',contract=c where tenant_id=tid;
+    end if;
+    update public.billing_accounts set stripe_customer_id=p_data->>'customerId',stripe_subscription_id=p_data->>'subscriptionId',
+      schedule_operation_id=case when coalesce((p_data->>'clearSchedule')::boolean,false) then null else schedule_operation_id end,
+      billed_contract=case when p_data->'financialContract' is not null and p_data->'financialContract' <> 'null' then p_data->'financialContract' when p_data->'contract' is not null and p_data->'contract' <> 'null' then p_data->'contract' else billed_contract end,
+      subscription_started_at=case when p_data->>'status' in ('active','trialing') then coalesce(subscription_started_at,now()) else subscription_started_at end,
+      canceled_at=case when p_data->>'status'='canceled' then coalesce(canceled_at,now()) else null end,
+      status=p_data->>'status',period_end=(p_data->>'periodEnd')::timestamptz,cancel_at_period_end=coalesce((p_data->>'cancelAtPeriodEnd')::boolean,false),
+      sepa_authorization=case when verified_sepa then sepa_proof else sepa_authorization end,
+      legal_name=coalesce(nullif(p_data->'payer'->>'legalName',''),legal_name),
+      tax_id=coalesce(nullif(p_data->'payer'->>'taxId',''),tax_id),
+      email=coalesce(nullif(p_data->'payer'->>'email',''),email),
+      last_payment_status=p_data->>'paymentStatus',
+      delinquent_since=case when p_data->>'subscriptionId' is not null and p_data->>'status' in ('past_due','unpaid') then coalesce(delinquent_since,now()) else null end,
+      last_reconciled_at=now(),sync_error=case when deferred then 'ENTITLEMENTS_PENDING_OPERATIONAL_CLOSE' else p_data->>'discrepancy' end,sync_token=null,sync_until=null,updated_at=now() where tenant_id=tid;
+    -- Technical reconciliation timestamps/errors must not invalidate an otherwise unchanged quote.
+    select * into next_account from public.billing_accounts where tenant_id=tid;
+    if (to_jsonb(next_account) - array['revision','last_reconciled_at','sync_error','sync_token','sync_until','updated_at','last_attempt_at'])
+      is distinct from (to_jsonb(a) - array['revision','last_reconciled_at','sync_error','sync_token','sync_until','updated_at','last_attempt_at']) then
+      update public.billing_accounts set revision=revision+1 where tenant_id=tid;
+    end if;
+    if not deferred and p_data->>'completedOperationId' is not null then
+      update public.billing_operations set status='completed',updated_at=now() where id=(p_data->>'completedOperationId')::uuid and tenant_id=tid;
+    end if;
+    insert into public.billing_audit(tenant_id,action,reason,details) values(tid,'reconcile','Stripe snapshot',jsonb_build_object('status',p_data->>'status','discrepancy',p_data->>'discrepancy'));
+    return '{}';
+  elsif p_action = 'settings' then
+    update public.billing_accounts set grace_days=(p_data->>'graceDays')::integer,legal_name=p_data->>'legalName',tax_id=p_data->>'taxId',email=p_data->>'email' where tenant_id=tid;
+    insert into public.billing_audit(tenant_id,actor_id,action,reason) values(tid,actor,'settings',p_data->>'reason');
+    return '{}';
+  end if;
+  raise exception 'BILLING_UNKNOWN_TRANSITION';
+end;
+$$;
+
+
+-- Venue capacity counts active venues: a venue deactivated by a downgrade keeps its data without using a slot.
+create or replace function public.enforce_tenant_plan_limit() returns trigger
+language plpgsql security definer set search_path to 'public' as $$
+declare
+  current_usage integer;
+  resource_limit integer;
+  resource_label text;
+begin
+  -- The billing projection applies venue/device changes it already validated against the new contract.
+  if current_setting('tickit.billing_projection', true) = new.tenant_id::text then
+    return new;
+  end if;
+
+  if tg_table_name = 'venues' then
+    select max_venues into resource_limit from public.tenants where id = new.tenant_id for update;
+    select count(*) into current_usage from public.venues where tenant_id = new.tenant_id and is_active;
+    resource_label := 'locales';
+  elsif tg_table_name = 'devices' then
+    select max_devices into resource_limit from public.tenants where id = new.tenant_id for update;
+    select count(*) into current_usage from public.devices where tenant_id = new.tenant_id and is_active;
+    resource_label := 'dispositivos';
+  elsif tg_table_name = 'tenant_memberships' then
+    if new.role <> 'cashier' then
+      return new;
+    end if;
+    select max_devices into resource_limit from public.tenants where id = new.tenant_id for update;
+    select count(*) into current_usage from public.tenant_memberships where tenant_id = new.tenant_id and role = 'cashier';
+    resource_label := 'usuarios';
+  else
+    return new;
+  end if;
+
+  if resource_limit is null then
+    raise exception 'El negocio no existe.' using errcode = 'P0001';
+  end if;
+
+  if current_usage >= resource_limit then
+    raise exception 'Has alcanzado el límite de % de tu plan (%).', resource_label, resource_limit
+      using errcode = 'P0001';
+  end if;
+
+  return new;
+end;
+$$;
+
+-- Reactivation is a new use of capacity: an inactive venue/device cannot be switched back on above the plan.
+create trigger enforce_venue_plan_limit_on_reactivation before update of is_active on public.venues
+for each row when (new.is_active and not old.is_active) execute function public.enforce_tenant_plan_limit();
+create trigger enforce_device_plan_limit_on_reactivation before update of is_active on public.devices
+for each row when (new.is_active and not old.is_active) execute function public.enforce_tenant_plan_limit();
