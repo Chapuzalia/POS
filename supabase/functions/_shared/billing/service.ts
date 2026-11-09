@@ -6,6 +6,9 @@ import type { MollieGateway, MollieMandate, MolliePayment, MollieSubscription } 
 import { addMonths, promotionPhases, renewalOnOrAfter, resolvePromotions } from './promotions.ts'
 import type { PromotionPhase, PromotionPreview } from './promotions.ts'
 import { onboardingContract } from './onboarding.ts'
+import { odooSyncDiagnostic } from './diagnostics.ts'
+import type { OdooGateway } from './odoo.ts'
+import { syncOdoo } from './odoo-sync.ts'
 
 // shortcut: the stripe_* columns/keys are kept (expand-only migrations) and now hold Mollie IDs (cst_, sub_, tr_); rename them in a contract migration.
 export type Account = {
@@ -16,6 +19,7 @@ export type Account = {
   last_reconciled_at: string | null; sync_error: string | null; created_at: string
   schedule_operation_id: string | null
   onboarding_contract: Contract | null
+  odoo_partner_id: number | string | null
 }
 type ProviderParams = {
   provider?: 'mollie'; subscriptionId: string | null; checkoutPolicy?: string; baseline?: string
@@ -75,8 +79,9 @@ export class BillingService {
   readonly mollie: MollieGateway
   readonly appUrl: string
   readonly webhookUrl: string
-  constructor(db: SupabaseClient, mollie: MollieGateway, appUrl: string, webhookUrl: string) {
-    this.db = db; this.mollie = mollie; this.appUrl = appUrl; this.webhookUrl = webhookUrl
+  readonly odoo: OdooGateway | null
+  constructor(db: SupabaseClient, mollie: MollieGateway, appUrl: string, webhookUrl: string, odoo: OdooGateway | null = null) {
+    this.db = db; this.mollie = mollie; this.appUrl = appUrl; this.webhookUrl = webhookUrl; this.odoo = odoo
   }
 
   async transition<T>(action: string, data: object): Promise<T> {
@@ -611,8 +616,8 @@ export class BillingService {
           amount_due_cents: gross, amount_paid_cents: payment.status === 'paid' ? gross - returned : 0,
           paid_excluding_tax_cents: settled(payment) ? netFromGross(gross) : 0,
           issuer_snapshot: {}, customer_snapshot: { name: account.legal_name, taxIds: account.tax_id ? [account.tax_id] : [] },
-          // Mollie issues no fiscal invoice: rows stay pending_review for external issuance.
-          hosted_invoice_url: inTransit(payment) ? payment._links.checkout?.href ?? null : null, invoice_pdf: null, number: null,
+          // Fiscal fields (number, fiscal_export_status, fiscal_external_reference) belong to the Odoo sync: never overwrite them here.
+          hosted_invoice_url: inTransit(payment) ? payment._links.checkout?.href ?? null : null, invoice_pdf: null,
           created_at: payment.createdAt, paid_at: payment.paidAt ?? null,
         })
         if (saved.error) throw new Error('BILLING_DB_INVOICE')
@@ -694,6 +699,8 @@ export class BillingService {
         }
         if (!live(sub) && !paidPeriod) clearSchedule = true
       }
+      // Inside the sync claim so a webhook and the cron never issue the same Odoo document twice; never throws.
+      if (this.odoo) odooSyncDiagnostic(await syncOdoo({ odoo: this.odoo, db: this.db, account, payments, mode: this.mollie.mode }))
       // Card or SEPA charges that are accepted keep access; the paid snapshot moves only once settled.
       await this.transition('sync_commit', { tenantId, token, customerId, subscriptionId: sub?.id ?? account.stripe_subscription_id, status, contract, clearSchedule,
         financialContract: financial ?? contract, sepaAuthorization: null, payer: null,

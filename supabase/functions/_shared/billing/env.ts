@@ -21,5 +21,5 @@ export function odooFromEnv() {
 export function billingServiceFromEnv(db: SupabaseClient) {
   const env = billingEnv()
   if (!env.configured) throw new Error('BILLING_NOT_CONFIGURED')
-  return new BillingService(db, new MollieGateway(env.mollieKey), env.appUrl, env.webhookUrl)
+  return new BillingService(db, new MollieGateway(env.mollieKey), env.appUrl, env.webhookUrl, odooFromEnv())
 }

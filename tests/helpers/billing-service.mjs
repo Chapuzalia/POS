@@ -58,6 +58,7 @@ const epoch=date=>Math.floor(Date.parse(date)/1000)
 
 // In-memory Mollie test account: the HTTP surface the service uses, with real idempotency keys.
 export class FakeMollie {
+  mode='test'
   customers=new Map(); mandates=[]; payments=[]; subscriptions=[]; calls=[]; cache=new Map(); offline=false; seq=0
   id(prefix){return `${prefix}_${String(++this.seq).padStart(6,'0')}`}
   async list(path,key){
@@ -127,13 +128,61 @@ export class FakeMollie {
 }
 export const sepa={accountHolder:'Restaurante Prueba SL',iban:'ES91 2100 0418 4502 0005 1332'}
 export const payer={legalName:'Restaurante Prueba SL',taxId:'B12345678'}
-export async function createBillingService(t,baseAmountCents=10000) {
+export async function createBillingService(t,baseAmountCents=10000,{odoo=null}={}) {
   const {db,transition}=await createBillingDb(t)
   const base=await transition('catalog_save',{actorId:ids.owner,product:{key:'base',kind:'plan',name:'Synthetic base',description:'',scope:'tenant',featureKey:null,resource:null,active:true,sortOrder:0},version:{interval:'month',amountCents:baseAmountCents,features:['restaurant'],limits:{venues:3,devices:5},included:{},maximum:null,requires:[]},reason:'Test fixture'})
   const production=await transition('catalog_save',{actorId:ids.owner,product:{key:'production',kind:'addon',name:'Production',description:'',scope:'venue',featureKey:'production',resource:null,active:true,sortOrder:1},version:{interval:'month',amountCents:1000,features:[],limits:{venues:1,devices:0},included:{},maximum:10,requires:['restaurant']},reason:'Test fixture'})
-  const mollie=new FakeMollie(),service=new BillingService(billingClient(db),mollie,'http://localhost:5173','https://hooks.example.test/billing-webhook')
+  const mollie=new FakeMollie(),service=new BillingService(billingClient(db),mollie,'http://localhost:5173','https://hooks.example.test/billing-webhook',odoo)
   await service.publish(base.id); await service.publish(production.id)
   const selection={planVersionId:base.id,addons:[]}
   const activate=async()=>{const quote=await service.quote(ids.tenant,ids.owner,selection,null,'Test onboarding');await service.confirm(ids.tenant,ids.owner,quote.id,false,{sepa,payer});mollie.payFirst();await service.reconcile(ids.tenant)}
   return {db,mollie,service,selection,base,production,activate,transition}
+}
+
+// In-memory Odoo 19 (JSON-2 surface used by odoo-sync): partners, sale orders, invoices, payments, credit notes.
+export class FakeOdoo {
+  partners=[]; orders=[]; moves=[]; wizards=new Map(); calls=[]; offline=false; totalOffsetCents=0; seq=0; invoiceSeq=0
+  products=[{id:501,default_code:'TICKIT-SUB'}]; journals=[{id:601,code:'MOLL',type:'bank'}]; countries=[{id:68,code:'ES'},{id:75,code:'FR'}]
+  id(){return ++this.seq}
+  match(row,domain=[]){return domain.every(([field,op,value])=>op==='in'?value.includes(row[field]):row[field]===value)}
+  table(model){return {'res.partner':this.partners,'sale.order':this.orders,'account.move':this.moves,'product.product':this.products,'account.journal':this.journals,'res.country':this.countries}[model]}
+  pick(row,fields){return fields?Object.fromEntries(['id',...fields].map(key=>[key,row[key]])):{...row}}
+  amounts(order){const untaxed=order.lines.reduce((sum,line)=>sum+Math.round(line.price_unit*100)*line.product_uom_qty,0);return {untaxed,total:untaxed+Math.round(untaxed*21/100)+this.totalOffsetCents}}
+  async call(model,method,params){
+    this.calls.push({model,method,params:structuredClone(params)})
+    if(this.offline){const{OdooRequestError}=await import('../../supabase/functions/_shared/billing/odoo.ts');throw new OdooRequestError('ODOO_UNAVAILABLE')}
+    const ids=params.ids??[],active=params.context?.active_ids??[]
+    if(method==='search_read')return structuredClone(this.table(model).filter(row=>this.match(row,params.domain)).slice(0,params.limit??undefined).map(row=>this.pick(row,params.fields)))
+    if(method==='read')return structuredClone(this.table(model).filter(row=>ids.includes(row.id)).map(row=>this.pick(row,params.fields)))
+    if(method==='create'){
+      return params.vals_list.map(vals=>{
+        const id=this.id()
+        if(model==='res.partner')this.partners.push({id,...vals})
+        else if(model==='sale.order')this.orders.push({id,state:'draft',invoice_ids:[],partner_id:vals.partner_id,client_order_ref:vals.client_order_ref,origin:vals.origin,lines:vals.order_line.map(([,,line])=>line)})
+        else this.wizards.set(id,{model,vals,active})
+        return id
+      })
+    }
+    if(method==='get_portal_url')return model==='sale.order'?`/my/orders/${ids[0]}?access_token=tok${ids[0]}&report_type=pdf&download=true`:`/my/invoices/${ids[0]}?access_token=tok${ids[0]}&report_type=pdf&download=true`
+    if(model==='sale.order'&&method==='action_confirm'){for(const order of this.orders.filter(row=>ids.includes(row.id)))order.state='sale';return true}
+    if(model==='sale.order'&&method==='action_cancel'){for(const order of this.orders.filter(row=>ids.includes(row.id)))order.state='cancel';return true}
+    if(model==='sale.advance.payment.inv'&&method==='create_invoices'){
+      const wizard=this.wizards.get(ids[0]),order=this.orders.find(row=>row.id===wizard.vals.sale_order_ids[0][2][0])
+      if(order.state!=='sale')throw new Error('order not confirmed')
+      const {untaxed,total}=this.amounts(order),id=this.id()
+      this.moves.push({id,move_type:'out_invoice',state:'draft',name:'/',partner_id:order.partner_id,amount_untaxed:untaxed/100,amount_total:total/100,payment_state:'not_paid',reversed_entry_id:false,invoice_origin:order.client_order_ref})
+      order.invoice_ids.push(id)
+      return {type:'ir.actions.act_window'}
+    }
+    if(model==='account.move'&&method==='action_post'){for(const move of this.moves.filter(row=>ids.includes(row.id))){move.state='posted';if(move.name==='/')move.name=`${move.move_type==='out_refund'?'RINV':'INV'}/2026/${String(++this.invoiceSeq).padStart(5,'0')}`}return true}
+    if(model==='account.payment.register'&&method==='action_create_payments'){const wizard=this.wizards.get(ids[0]);for(const move of this.moves.filter(row=>wizard.active.includes(row.id))){if(move.state!=='posted')throw new Error('draft');move.payment_state='paid';move.payment={...wizard.vals}}return true}
+    if(model==='account.move.reversal'&&method==='refund_moves'){
+      const wizard=this.wizards.get(ids[0])
+      for(const origin of this.moves.filter(row=>wizard.active.includes(row.id)))this.moves.push({id:this.id(),move_type:'out_refund',state:'draft',name:'/',partner_id:origin.partner_id,amount_untaxed:origin.amount_untaxed,amount_total:origin.amount_total,payment_state:'not_paid',reversed_entry_id:origin.id,ref:wizard.vals.reason})
+      return {type:'ir.actions.act_window'}
+    }
+    throw new Error(`Unhandled Odoo ${model}.${method}`)
+  }
+  async pdf(path){if(this.offline)throw new Error('offline');this.calls.push({pdf:path});return new TextEncoder().encode(`%PDF-1.7 ${path}`)}
+  creates(model){return this.calls.filter(call=>call.model===model&&call.method==='create').length}
 }
