@@ -9,7 +9,7 @@ import type { OdooErrorCode, OdooGateway } from './odoo.ts'
 
 export type OdooState = 'proforma' | 'invoiced' | 'canceled' | 'refunded' | 'failed'
 type Target = Exclude<OdooState, 'failed'>
-type InvoiceRow = { stripe_invoice_id: string; status: string; amount_due_cents: number; paid_excluding_tax_cents: number; paid_at: string | Date | null; created_at: string | Date }
+type InvoiceRow = { stripe_invoice_id: string; status: string; amount_due_cents: number; amount_paid_cents: number; paid_excluding_tax_cents: number; paid_at: string | Date | null; created_at: string | Date }
 type DocumentRow = { payment_id: string; state: OdooState; sale_order_id: number | null; invoice_id: number | null; refund_id: number | null; invoice_number: string | null; attempts: number }
 type Ids = Pick<DocumentRow, 'sale_order_id' | 'invoice_id' | 'refund_id' | 'invoice_number'>
 type SyncAccount = { tenant_id: string; legal_name: string | null; tax_id: string | null; odoo_partner_id?: number | string | null }
@@ -32,7 +32,9 @@ export function targetOdooState(status: string): Target | null {
 function needsWork(doc: DocumentRow | undefined, target: Target | null) {
   if (!target || doc?.state === target) return false
   if (!doc) return target !== 'canceled'
-  if ((doc.state === 'invoiced' || doc.state === 'refunded') && (target === 'proforma' || target === 'canceled')) return false
+  // A posted credit note stays even if Mollie reverses the charge-back: that needs a person, not a silent "Emitida".
+  if (doc.state === 'refunded') return false
+  if (doc.state === 'invoiced' && (target === 'proforma' || target === 'canceled')) return false
   return !(doc.state === 'canceled' && target === 'proforma')
 }
 
@@ -41,6 +43,9 @@ const madridDate = (value: string | Date) => new Intl.DateTimeFormat('en-CA', { 
 const id = (value:number | string | null | undefined) => value === null || value === undefined ? null : Number(value)
 const codeOf = (error: unknown): OdooErrorCode => error instanceof OdooRequestError || (error instanceof Error && (ODOO_ERROR_CODES as readonly string[]).includes(error.message)) ? (error as Error).message as OdooErrorCode : 'ODOO_REJECTED'
 const fail = (code: OdooErrorCode): never => { throw new OdooRequestError(code) }
+// Time budget spent: stop without recording a failure; the next reconcile continues.
+class DeadlineReached extends Error {}
+type OdooCalls = Pick<OdooGateway, 'call'>
 
 export function odooVat(taxId: string) {
   const vat = taxId.replace(/[\s.-]/g, '').toUpperCase()
@@ -49,13 +54,13 @@ export function odooVat(taxId: string) {
 }
 
 class Sync {
-  private readonly odoo: OdooGateway
+  private readonly odoo: OdooCalls
   private readonly db: SupabaseClient
   private readonly account: SyncAccount
   private readonly mode: string
   private partnerId: number | null
   private setup: { product: number; journal: number } | null = null
-  constructor(odoo: OdooGateway, db: SupabaseClient, account: SyncAccount, mode: string) {
+  constructor(odoo: OdooCalls, db: SupabaseClient, account: SyncAccount, mode: string) {
     this.odoo = odoo; this.db = db; this.account = account; this.mode = mode; this.partnerId = id(account.odoo_partner_id)
   }
   private async first<T>(model: string, domain: unknown[], fields: string[]) {
@@ -146,7 +151,12 @@ class Sync {
     if (target === 'canceled') {
       // Never create a proforma only to cancel it.
       const existing = await this.first<{ id: number; state: string }>('sale.order', [['client_order_ref', '=', row.stripe_invoice_id]], ['state'])
-      if (existing && existing.state !== 'cancel') await this.odoo.call('sale.order', 'action_cancel', { ids: [existing.id] })
+      if (existing && existing.state !== 'cancel') {
+        // Without this flag a confirmed order returns the sale.order.cancel wizard instead of cancelling.
+        await this.odoo.call('sale.order', 'action_cancel', { ids: [existing.id], context: { disable_cancel_warning: true } })
+        const [reread] = await this.odoo.call<{ state: string }[]>('sale.order', 'read', { ids: [existing.id], fields: ['state'] })
+        if (reread?.state !== 'cancel') fail('ODOO_REJECTED')
+      }
       return { sale_order_id: existing?.id ?? null, invoice_id: null, refund_id: null, invoice_number: null }
     }
     const order = await this.order(row, payment)
@@ -154,6 +164,8 @@ class Sync {
     if (target === 'proforma') return ids
     const invoice = await this.settle(row, await this.invoice(order))
     Object.assign(ids, { invoice_id: invoice.id, invoice_number: invoice.name })
+    // shortcut: only full charge-backs get an automatic credit note; a partial one is left for manual review in Odoo.
+    if (target === 'refunded' && row.amount_paid_cents > 0) fail('ODOO_REVIEW_REQUIRED')
     if (target === 'refunded') ids.refund_id = (await this.refund(row, invoice)).id
     return ids
   }
@@ -161,21 +173,25 @@ class Sync {
 
 export async function syncOdoo(input: { odoo: OdooGateway; db: SupabaseClient; account: SyncAccount; payments: MolliePayment[]; mode: string; deadline?: number }) {
   const { odoo, db, account, payments, mode } = input
-  // The reconcile claim lasts 2 minutes; stop starting new payments well before it expires.
-  const deadline = input.deadline ?? Date.now() + 60_000
+  // The reconcile claim lasts 2 minutes: no Odoo call starts after 45 s, so even a final 15 s call ends near 60 s.
+  const deadline = input.deadline ?? Date.now() + 45_000
+  const bounded: OdooCalls = { call: (model, method, params) => Date.now() > deadline ? Promise.reject(new DeadlineReached()) : odoo.call(model, method, params) }
   const tenantId = account.tenant_id
   const [invoices, documents] = await Promise.all([
-    db.from('billing_invoices').select('stripe_invoice_id,status,amount_due_cents,paid_excluding_tax_cents,paid_at,created_at').eq('tenant_id', tenantId).order('created_at', { ascending: true }).limit(1000),
+    db.from('billing_invoices').select('stripe_invoice_id,status,amount_due_cents,amount_paid_cents,paid_excluding_tax_cents,paid_at,created_at').eq('tenant_id', tenantId).order('created_at', { ascending: true }).limit(1000),
     db.from('billing_odoo_documents').select('payment_id,state,sale_order_id,invoice_id,refund_id,invoice_number,attempts').eq('tenant_id', tenantId).limit(1000),
   ])
   if (invoices.error || documents.error) return { processed: 0, failed: 1 }
   const docs = new Map((documents.data as DocumentRow[]).map(doc => [doc.payment_id, doc]))
-  const sync = new Sync(odoo, db, account, mode)
+  const sync = new Sync(bounded, db, account, mode)
   let processed = 0, failed = 0
-  for (const row of invoices.data as InvoiceRow[]) {
+  // Fewest attempts first (stable, so oldest first among equals): payments that keep failing never starve newer ones.
+  const pending = (invoices.data as InvoiceRow[]).filter(row => needsWork(docs.get(row.stripe_invoice_id), targetOdooState(row.status)))
+    .sort((a, b) => (docs.get(a.stripe_invoice_id)?.attempts ?? 0) - (docs.get(b.stripe_invoice_id)?.attempts ?? 0))
+  for (const row of pending) {
     const doc = docs.get(row.stripe_invoice_id)
     const target = targetOdooState(row.status)
-    if (!needsWork(doc, target) || !target) continue
+    if (!target) continue
     if (processed >= MAX_PER_RUN || Date.now() > deadline) break
     processed++
     const previous: Ids = { sale_order_id: id(doc?.sale_order_id), invoice_id: id(doc?.invoice_id), refund_id: id(doc?.refund_id), invoice_number: doc?.invoice_number ?? null }
@@ -186,6 +202,7 @@ export async function syncOdoo(input: { odoo: OdooGateway; db: SupabaseClient; a
         fiscal_external_reference: ids.invoice_id ? `account.move:${ids.invoice_id}` : `sale.order:${ids.sale_order_id}`,
       })
     } catch (error) {
+      if (error instanceof DeadlineReached) break
       failed++
       try { await save(db, tenantId, row.stripe_invoice_id, { ...previous, state: 'failed', last_error: codeOf(error), attempts: (doc?.attempts ?? 0) + 1 }, { fiscal_export_status: 'failed' }) }
       catch { /* Retried on the next reconcile; billing must not fail because of Odoo bookkeeping. */ }

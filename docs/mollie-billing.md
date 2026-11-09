@@ -72,10 +72,11 @@ Mollie no emite facturas de suscripción: el emisor fiscal es el Odoo de Alteil 
 | Checkout abierto o SEPA en trámite | Pedido de venta = **proforma** pendiente de pago (`client_order_ref = tr_…`) | `proforma` |
 | Liquidado | Confirmar el pedido → factura → comprobar que el total coincide al céntimo con Mollie → validar (numera Odoo) → registrar el cobro en el diario `MOLL` | `invoiced` |
 | Caducado, cancelado o fallido sin liquidar | Cancelar la proforma (no se crea ninguna si Odoo no llegó a verla) | `canceled` |
-| Devuelto | Factura (si faltaba) y **rectificativa** validada | `refunded` |
+| Devuelto por completo | Factura (si faltaba) y **rectificativa** validada. Es definitivo: si Mollie revierte la devolución, la rectificativa se mantiene y hay que revisarla a mano | `refunded` |
+| Devuelto en parte | Nada automático: `failed`/`ODOO_REVIEW_REQUIRED` para revisarlo a mano en Odoo | `failed` |
 | Error de Odoo | Nada; se reintenta en la siguiente conciliación | `failed` + código |
 
-- Siempre se busca antes de crear (pedido por `client_order_ref`, factura entre las del pedido, rectificativa por `reversed_entry_id`), así que los reintentos no duplican nada. Como mucho se procesan 10 pagos y 60 s por conciliación.
+- Siempre se busca antes de crear (pedido por `client_order_ref`, factura entre las del pedido, rectificativa por `reversed_entry_id`), así que los reintentos no duplican nada. Como mucho se procesan 10 pagos por conciliación y no se inicia ninguna llamada a Odoo pasados 45 s, para no superar la reclamación de 2 minutos. Los pagos que más veces han fallado van al final.
 - Odoo nunca bloquea la facturación: un fallo o Odoo sin configurar no cambia el acceso, el contrato ni la deuda.
 - Si el total de Odoo no coincide con el bruto de Mollie, la factura queda en borrador sin número (`ODOO_TOTAL_MISMATCH`).
 - Tickit refleja el estado en `billing_invoices`: `fiscal_export_status` (`pending_review`/`exported`/`failed`), `number` (número de Odoo) y `fiscal_external_reference` (`sale.order:<id>` o `account.move:<id>`). El cliente de Odoo se busca o se crea por NIF (prefijo `ES` para NIF/NIE/CIF españoles) y su ID se guarda en `billing_accounts.odoo_partner_id`.

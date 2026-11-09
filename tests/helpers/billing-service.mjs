@@ -150,6 +150,7 @@ export class FakeOdoo {
   amounts(order){const untaxed=order.lines.reduce((sum,line)=>sum+Math.round(line.price_unit*100)*line.product_uom_qty,0);return {untaxed,total:untaxed+Math.round(untaxed*21/100)+this.totalOffsetCents}}
   async call(model,method,params){
     this.calls.push({model,method,params:structuredClone(params)})
+    this.onCall?.(model,method)
     if(this.offline){const{OdooRequestError}=await import('../../supabase/functions/_shared/billing/odoo.ts');throw new OdooRequestError('ODOO_UNAVAILABLE')}
     const ids=params.ids??[],active=params.context?.active_ids??[]
     if(method==='search_read')return structuredClone(this.table(model).filter(row=>this.match(row,params.domain)).slice(0,params.limit??undefined).map(row=>this.pick(row,params.fields)))
@@ -165,7 +166,8 @@ export class FakeOdoo {
     }
     if(method==='get_portal_url')return model==='sale.order'?`/my/orders/${ids[0]}?access_token=tok${ids[0]}&report_type=pdf&download=true`:`/my/invoices/${ids[0]}?access_token=tok${ids[0]}&report_type=pdf&download=true`
     if(model==='sale.order'&&method==='action_confirm'){for(const order of this.orders.filter(row=>ids.includes(row.id)))order.state='sale';return true}
-    if(model==='sale.order'&&method==='action_cancel'){for(const order of this.orders.filter(row=>ids.includes(row.id)))order.state='cancel';return true}
+    // Like Odoo: a confirmed order opens the sale.order.cancel wizard unless the warning is disabled.
+    if(model==='sale.order'&&method==='action_cancel'){for(const order of this.orders.filter(row=>ids.includes(row.id))){if(!['draft','sent'].includes(order.state)&&!params.context?.disable_cancel_warning)return {type:'ir.actions.act_window',res_model:'sale.order.cancel'};order.state='cancel'}return true}
     if(model==='sale.advance.payment.inv'&&method==='create_invoices'){
       const wizard=this.wizards.get(ids[0]),order=this.orders.find(row=>row.id===wizard.vals.sale_order_ids[0][2][0])
       if(order.state!=='sale')throw new Error('order not confirmed')

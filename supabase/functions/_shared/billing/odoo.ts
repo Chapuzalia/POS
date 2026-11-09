@@ -1,7 +1,7 @@
 // Odoo 19 JSON-2 client for Alteil's fiscal issuer. No SDK; never retain keys, bodies or Odoo messages.
 
-export type OdooErrorCode = 'ODOO_UNAVAILABLE' | 'ODOO_AUTH' | 'ODOO_REJECTED' | 'ODOO_TOTAL_MISMATCH' | 'ODOO_PARTNER_INVALID' | 'ODOO_SETUP_MISSING'
-export const ODOO_ERROR_CODES: readonly OdooErrorCode[] = ['ODOO_UNAVAILABLE', 'ODOO_AUTH', 'ODOO_REJECTED', 'ODOO_TOTAL_MISMATCH', 'ODOO_PARTNER_INVALID', 'ODOO_SETUP_MISSING']
+export type OdooErrorCode = 'ODOO_UNAVAILABLE' | 'ODOO_AUTH' | 'ODOO_REJECTED' | 'ODOO_TOTAL_MISMATCH' | 'ODOO_PARTNER_INVALID' | 'ODOO_SETUP_MISSING' | 'ODOO_REVIEW_REQUIRED'
+export const ODOO_ERROR_CODES: readonly OdooErrorCode[] = ['ODOO_UNAVAILABLE', 'ODOO_AUTH', 'ODOO_REJECTED', 'ODOO_TOTAL_MISMATCH', 'ODOO_PARTNER_INVALID', 'ODOO_SETUP_MISSING', 'ODOO_REVIEW_REQUIRED']
 
 export class OdooRequestError extends Error {
   readonly diagnostic: { status: number }

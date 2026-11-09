@@ -267,3 +267,79 @@ it('reports Odoo status and failed documents in overview', async () => {
   await activate()
   expect((await service.overview()).odoo).toEqual({ enabled: true, failed: 1 })
 })
+
+it('stops calling a slow Odoo well inside the sync claim and resumes on the next run', async () => {
+  const { service, mollie, odoo, db, activate, count } = await odooSetup()
+  odoo.offline = true
+  await activate()
+  for (let i = 0; i < 4; i++) mollie.renew('pending')
+  await service.reconcile(ids.tenant)
+  const failedBefore = await count(`state = 'failed'`)
+  const attempts = async () => ((await db.query('select coalesce(sum(attempts),0)::int n from billing_odoo_documents')).rows[0] as { n: number }).n
+  const attemptsBefore = await attempts()
+  odoo.offline = false
+  odoo.onCall = () => { vi.setSystemTime(Date.now() + 3_000) }
+  const startedAt = Date.now()
+  await expect(service.reconcile(ids.tenant)).resolves.toEqual({ reconciled: true, discrepancy: null })
+  expect(Date.now() - startedAt).toBeLessThanOrEqual(60_000)
+  // Some payments advanced; the ones the budget did not reach are left untouched, not counted as failures.
+  expect(await count(`state = 'failed'`)).toBeLessThan(failedBefore)
+  expect(await count(`state = 'failed'`)).toBeGreaterThan(0)
+  expect(await attempts()).toBe(attemptsBefore)
+  odoo.onCall = undefined
+  await service.reconcile(ids.tenant)
+  expect(await count(`state = 'failed'`)).toBe(0)
+})
+
+it('keeps the credit note when a charge-back is reversed', async () => {
+  const { service, mollie, odoo, activate, doc } = await odooSetup()
+  await activate()
+  const paid = mollie.payment('first')
+  mollie.chargeBack(paid)
+  await service.reconcile(ids.tenant)
+  const refunded = await doc(paid.id)
+  mollie.payments.find(row => row.id === paid.id).amountChargedBack = null
+  await service.reconcile(ids.tenant)
+  expect(await doc(paid.id)).toMatchObject({ state: 'refunded', refund_id: refunded?.refund_id })
+  expect(odoo.moves.filter(move => move.move_type === 'out_refund')).toHaveLength(1)
+})
+
+it('cancels a proforma that was confirmed in Odoo without opening the cancel wizard', async () => {
+  const { service, mollie, odoo, start, doc } = await odooSetup()
+  const payment = await start()
+  odoo.orders[0].state = 'sale'
+  mollie.payFirst('expired')
+  await service.reconcile(ids.tenant)
+  expect(odoo.orders[0].state).toBe('cancel')
+  expect(await doc(payment.id)).toMatchObject({ state: 'canceled' })
+})
+
+it('does not let repeatedly failing payments starve newer ones', async () => {
+  const { service, mollie, odoo, activate, doc, count } = await odooSetup()
+  odoo.offline = true
+  await activate()
+  odoo.offline = false
+  // The first invoice never matches Mollie: it fails on every run (proformas are unaffected by the offset).
+  odoo.totalOffsetCents = 1
+  await service.reconcile(ids.tenant)
+  await service.reconcile(ids.tenant)
+  const stuck = mollie.payment('first').id
+  vi.setSystemTime(new Date('2026-12-10T10:00:00Z'))
+  for (let i = 0; i < 10; i++) mollie.renew('pending')
+  odoo.offline = true
+  await service.reconcile(ids.tenant)
+  odoo.offline = false
+  await service.reconcile(ids.tenant)
+  expect(await count(`state = 'proforma'`)).toBe(10)
+  expect(await doc(stuck)).toMatchObject({ state: 'failed' })
+})
+
+it('flags a partial charge-back for review instead of refunding the whole invoice', async () => {
+  const { service, mollie, odoo, activate, doc } = await odooSetup()
+  await activate()
+  const paid = mollie.payment('first')
+  mollie.payments.find(row => row.id === paid.id).amountChargedBack = { currency: 'EUR', value: '20.00' }
+  await service.reconcile(ids.tenant)
+  expect(odoo.moves.filter(move => move.move_type === 'out_refund')).toHaveLength(0)
+  expect(await doc(paid.id)).toMatchObject({ state: 'failed', last_error: 'ODOO_REVIEW_REQUIRED', invoice_number: 'INV/2026/00001' })
+})
