@@ -47,8 +47,11 @@ export const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('portal'), tenantId: z.uuid() }).strict(),
   z.object({ action: z.literal('reconcile'), tenantId: z.uuid() }).strict(),
   z.object({ action: z.literal('reconcile-batch') }).strict(),
-  z.object({ action: z.literal('retry-event'), eventId: z.string().regex(/^evt_/).max(150) }).strict(),
-  z.object({ action: z.literal('confirm'), tenantId: z.uuid(), operationId: z.uuid() }).strict(),
+  z.object({ action: z.literal('retry-event'), eventId: z.string().regex(/^(evt_|mollie:tr_)/).max(150) }).strict(),
+  // The IBAN is forwarded to Mollie to create the SEPA mandate; it is never stored or logged.
+  z.object({ action: z.literal('confirm'), tenantId: z.uuid(), operationId: z.uuid(),
+    sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42) }).strict().optional(),
+    payer: z.object({ legalName: z.string().trim().min(1).max(200), taxId: z.string().trim().min(1).max(40) }).strict().optional() }).strict(),
   z.object({ action: z.literal('retry-operation'), tenantId: z.uuid(), operationId: z.uuid() }).strict(),
   z.object({ action: z.literal('quote'), tenantId: z.uuid(), selection: selectionSchema, exception: exceptionSchema.nullable(), reason: z.string().trim().min(1).max(500) }).strict(),
   z.object({ action: z.literal('quote-cancel'), tenantId: z.uuid(), immediate: z.boolean(), reason: z.string().trim().min(1).max(500) }).strict(),

@@ -11,7 +11,7 @@ vi.mock('../../src/services/backendService', () => ({
 it('shows the reviewed billing message from a non-2xx response without consuming its body', async () => {
   const response = Response.json({ code: 'BILLING_PENDING_CHANGE', error: 'untrusted provider text' }, { status: 409 })
   invoke.mockResolvedValue({ data: null, error: new FunctionsHttpError(response) })
-  await expect(billingRequest({ action: 'confirm' })).rejects.toThrow('Hay una modificación, calendario o condición de pago pendiente.')
+  await expect(billingRequest({ action: 'confirm' })).rejects.toThrow('Hay una modificación, un cobro en trámite o una baja programada.')
   expect(response.bodyUsed).toBe(false)
 })
 

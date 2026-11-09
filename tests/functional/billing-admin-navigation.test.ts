@@ -52,7 +52,7 @@ it('reports partial failures from batch reconciliation instead of implying every
   h.render()
   await vi.waitFor(() => expect(text(h.render())).toContain('Cliente con deuda'))
   h.button('Diagnóstico').props.onClick()
-  h.button('Actualizar estados con Stripe').props.onClick()
+  h.button('Actualizar estados con Mollie').props.onClick()
   await vi.waitFor(() => expect(text(h.render())).toContain('1 no se han podido comprobar'))
   expect(text(h.render())).toContain('1 cuentas actualizadas')
 })

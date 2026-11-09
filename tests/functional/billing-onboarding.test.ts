@@ -1,5 +1,5 @@
 import { expect, it, onTestFinished } from 'vitest'
-import { createBillingService } from '../helpers/billing-service.mjs'
+import { createBillingService, payer, sepa } from '../helpers/billing-service.mjs'
 import { billingIds as ids } from '../helpers/billing-db.mjs'
 import { onboardingContract } from '../../supabase/functions/_shared/billing/onboarding'
 import { generateOwnerPassword, changeBillingPlan } from '../../src/features/billing/selection'
@@ -7,13 +7,13 @@ import { canAccessCrmSection } from '../../src/features/crm/routing/crmPermissio
 import { readFileSync } from 'node:fs'
 import { z } from 'zod'
 import { BillingService } from '../../supabase/functions/_shared/billing/service'
-import { StripeGateway } from '../../supabase/functions/_shared/billing/stripe'
+import { MollieGateway } from '../../supabase/functions/_shared/billing/mollie'
 import { compileComponent } from '../helpers/component-harness.mjs'
 import { sendWelcomeEmail } from '../../supabase/functions/_shared/welcome-email'
 
 const setup = () => createBillingService({ after: onTestFinished }, 4900)
 
-it('creates Stripe tenants with a validated draft before returning success, preserves manual creation, and rolls back failed setup', async () => {
+it('creates gateway-billed tenants with a validated draft before returning success, preserves manual creation, and rolls back failed setup', async () => {
   const { db, selection, production } = await setup()
   const catalogRows = {
     billing_products: (await db.query('select * from billing_products')).rows,
@@ -59,7 +59,8 @@ it('creates Stripe tenants with a validated draft before returning success, pres
     let handler: (request: Request) => Promise<Response> = async () => new Response(null, { status: 500 })
     compileComponent(source, {
       'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
-      '../_shared/billing/service.ts': { BillingService }, '../_shared/billing/stripe.ts': { StripeGateway },
+      '../_shared/billing/service.ts': { BillingService }, '../_shared/billing/mollie.ts': { MollieGateway },
+      '../_shared/billing/env.ts': { billingEnv: () => ({ configured: true, mollieKey: 'test_fixturefixturefixturefixture', appUrl: 'http://localhost:5173', webhookUrl: 'https://hooks.example.test/billing-webhook' }) },
       '../_shared/platform-tenant-deletion.ts': {},
       '../_shared/billing/schemas.ts': schemas, '../_shared/billing/onboarding.ts': { onboardingContract },
       '../_shared/welcome-email.ts': { sendWelcomeEmail: (input: Parameters<typeof sendWelcomeEmail>[0], config: Parameters<typeof sendWelcomeEmail>[1]) => sendWelcomeEmail(input, config, async (_url, init) => {
@@ -72,7 +73,7 @@ it('creates Stripe tenants with a validated draft before returning success, pres
         return emailFailure ? Response.json({ message: 'unauthorized' }, { status: 401 }) : Response.json({ id: 'email-fixture' })
       }) },
     }, {
-      Deno: { serve: (callback: typeof handler) => { handler = callback }, env: { get: (name: string) => name === 'STRIPE_TEST_SECRET_KEY' ? 'sk_test_fixture' : 'http://localhost:5173' } },
+      Deno: { serve: (callback: typeof handler) => { handler = callback }, env: { get: () => 'http://localhost:5173' } },
       Response, crypto, console: { error() {} },
     })
     const reply = await handler(new Request('http://localhost', { method: 'POST', headers: { Authorization: 'Bearer fixture' }, body: JSON.stringify({
@@ -121,66 +122,65 @@ it('limits pending owners to Mi Plan even with every feature enabled', () => {
   expect(canAccessCrmSection('owner', 'dashboard')).toBe(true)
 })
 
-it('prepares plan and extras without contacting Stripe and assigns the first venue', async () => {
-  const { service, stripe, selection, production } = await setup()
+it('prepares plan and extras without contacting Mollie and assigns the first venue', async () => {
+  const { service, mollie, selection, production } = await setup()
   const contract = onboardingContract(await service.catalog(), { ...selection, addons: [{ key: 'production', versionId: production.id, quantity: 1, venueIds: [], deviceIds: [] }] }, ids.venue)
   expect(contract.recurringCents).toBe(5900)
   expect(contract.addons[0].venueIds).toEqual([ids.venue])
-  expect(stripe.calls).toHaveLength(0)
+  expect(mollie.calls).toHaveLength(0)
   expect(() => onboardingContract({ products: [], versions: [] }, selection, ids.venue)).toThrow()
   expect(() => onboardingContract({ products: [], versions: [] }, { ...selection, addons: [{ key: 'production', versionId: production.id, quantity: 1, venueIds: [ids.venueB], deviceIds: [] }] }, ids.venue)).toThrow()
 })
 
-it('keeps a Stripe tenant gated through Checkout and failed payment, then unlocks only on paid reconciliation', async () => {
-  const { service, stripe, db, selection } = await setup()
+it('keeps a Mollie tenant gated through Checkout and an unpaid card, then unlocks only on paid reconciliation', async () => {
+  const { service, mollie, db, selection } = await setup()
   await db.query('update tenants set billing_activation_required=true where id=$1', [ids.tenant])
   await service.account(ids.tenant)
   await db.query("update billing_accounts set source='stripe',status='pending_payment' where tenant_id=$1", [ids.tenant])
   await service.saveOnboarding(ids.tenant, selection)
   expect((await service.detail(ids.tenant, false)).account.onboarding_contract.planName).toBe('Synthetic base')
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Activar')
-  await service.confirm(ids.tenant, ids.owner, quote.id)
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
   const required = async () => (await db.query('select billing_activation_required pending from tenants where id=$1', [ids.tenant])).rows[0].pending
   expect(await required()).toBe(true)
-  stripe.completeCheckout(false)
   await service.reconcile(ids.tenant)
   expect(await required()).toBe(true)
-  stripe.pay()
+  mollie.payFirst()
   await service.reconcile(ids.tenant)
   expect(await required()).toBe(false)
   expect((await service.account(ids.tenant)).contract.recurringCents).toBe(4900)
 })
 
-it('does not unlock a trial without payment and leaves existing manual businesses active', async () => {
-  const { service, stripe, db, selection } = await setup()
+it('does not unlock after a failed card payment and leaves existing manual businesses active', async () => {
+  const { service, mollie, db, selection } = await setup()
   await db.query('update tenants set billing_activation_required=true where id=$1', [ids.tenant])
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Activar')
-  await service.confirm(ids.tenant, ids.owner, quote.id)
-  stripe.completeCheckout(false)
-  stripe.subscriptions[0].status = 'trialing'
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
+  mollie.payFirst('failed')
   await service.reconcile(ids.tenant)
+  expect(mollie.subscriptions).toHaveLength(0)
   const tenants = await db.query('select id,billing_activation_required pending from tenants order by id')
   expect(tenants.rows).toEqual([{ id: ids.tenant, pending: true }, { id: ids.other, pending: false }])
 })
 
 it('expires the old Checkout before allowing plan changes and prevents edits while payment is processing', async () => {
-  const { service, stripe, db, selection, production } = await setup()
+  const { service, mollie, db, selection, production } = await setup()
   await db.query('update tenants set billing_activation_required=true where id=$1', [ids.tenant])
   await service.account(ids.tenant)
   await service.saveOnboarding(ids.tenant, selection)
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Activar')
-  await service.confirm(ids.tenant, ids.owner, quote.id)
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
   await expect(service.saveOnboarding(ids.tenant, selection)).rejects.toThrow('BILLING_PENDING_CHANGE')
+  mollie.cancelableCards = true
   await service.restartCheckout(ids.tenant)
-  expect([...stripe.sessions.values()][0].status).toBe('expired')
+  expect(mollie.payment('first').status).toBe('canceled')
   expect((await db.query('select status from billing_operations where id=$1', [quote.id])).rows[0].status).toBe('expired')
   const updated = { ...selection, addons: [{ key: 'production', versionId: production.id, quantity: 1, venueIds: [ids.venue], deviceIds: [] }] }
   await service.saveOnboarding(ids.tenant, updated)
   const second = await service.quote(ids.tenant, ids.owner, updated, null, 'Cambiar plan')
   expect(second.contract.recurringCents).toBe(5900)
-  await service.confirm(ids.tenant, ids.owner, second.id)
-  const session = [...stripe.sessions.values()].at(-1)
-  session.status = 'complete'
+  await service.confirm(ids.tenant, ids.owner, second.id, false, { sepa, payer })
+  mollie.payFirst('pending')
   await expect(service.restartCheckout(ids.tenant)).rejects.toThrow('BILLING_PENDING_CHANGE')
   expect((await db.query('select status from billing_operations where id=$1', [second.id])).rows[0].status).toBe('payment_pending')
 })
@@ -190,7 +190,7 @@ it('invalidates previous quotes on draft edit and rejects foreign assignments an
   await db.query('update tenants set billing_activation_required=true where id=$1', [ids.tenant])
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Oferta inicial')
   await service.saveOnboarding(ids.tenant, selection)
-  await expect(service.confirm(ids.tenant, ids.owner, quote.id)).rejects.toThrow('BILLING_STALE')
+  await expect(service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })).rejects.toThrow('BILLING_STALE')
   await expect(service.saveOnboarding(ids.tenant, { ...selection, addons: [{ key: 'production', versionId: production.id, quantity: 1, venueIds: [ids.other], deviceIds: [] }] })).rejects.toThrow('BILLING_FOREIGN_ASSIGNMENT')
   await service.account(ids.other)
   await expect(service.saveOnboarding(ids.other, selection)).rejects.toThrow('BILLING_PENDING_CHANGE')

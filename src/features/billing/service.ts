@@ -30,6 +30,6 @@ export const billingDate = (value: string | null | undefined) => value ? new Int
 
 export function openBillingUrl(value: string) {
   const url = new URL(value)
-  if (url.protocol !== 'https:' || !['checkout.stripe.com','billing.stripe.com','invoice.stripe.com','pay.stripe.com'].includes(url.hostname)) throw new UserFacingError('Stripe no devolvió una dirección válida.')
+  if (url.protocol !== 'https:' || !['www.mollie.com','mollie.com','pay.mollie.com'].includes(url.hostname)) throw new UserFacingError('Mollie no devolvió una dirección de pago válida.')
   window.location.assign(url.href)
 }

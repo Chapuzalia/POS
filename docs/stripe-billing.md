@@ -1,5 +1,7 @@
 # Stripe Billing de Tickit: implementación y puesta en marcha sandbox
 
+> **Histórico.** La facturación usa Mollie desde 2026-11: ver [mollie-billing.md](mollie-billing.md).
+
 ## Diagnóstico de staging y simplificación del superadmin (03-11-2026)
 
 Inspección de solo lectura del staging actual `pre.tickitpos.com` / `pre-supa.tickitpos.com`, proyecto Compose `cvvgpifhnclvfc1evorkp74f`, y de su cuenta Stripe test. No se han desplegado cambios ni modificado datos remotos. Los destinos antiguos citados más abajo son históricos.

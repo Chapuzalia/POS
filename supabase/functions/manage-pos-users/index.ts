@@ -1,6 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { BillingService } from '../_shared/billing/service.ts'
-import { StripeGateway } from '../_shared/billing/stripe.ts'
+import { MollieGateway } from '../_shared/billing/mollie.ts'
+import { billingEnv } from '../_shared/billing/env.ts'
 import { selectionSchema } from '../_shared/billing/schemas.ts'
 import { onboardingContract } from '../_shared/billing/onboarding.ts'
 import { sendWelcomeEmail } from '../_shared/welcome-email.ts'
@@ -208,16 +209,16 @@ Deno.serve(async (request) => {
       const maxVenues = Number(body.maxVenues ?? 1)
       const maxDevices = Number(body.maxDevices ?? 5)
       const billingMode = body.billingMode ?? 'manual'
+      // 'stripe' is the N-1 wire value for gateway-billed signups; the gateway is now Mollie.
       if (!['manual', 'stripe'].includes(billingMode)) return response({ error: 'Selecciona un modo de facturación válido' }, 400)
       const firstVenueId = crypto.randomUUID()
       let initialContract = null
       if (billingMode === 'stripe') {
         const selection = selectionSchema.safeParse(body.billingSelection)
-        const stripeKey = Deno.env.get('STRIPE_TEST_SECRET_KEY')
-        const appUrl = Deno.env.get('BILLING_APP_URL')
+        const env = billingEnv()
         if (!selection.success) return response({ error: 'Selecciona un plan y complementos válidos' }, 400)
-        if (!stripeKey || !appUrl) return response({ error: 'Configura primero Stripe sandbox' }, 503)
-        const billing = new BillingService(adminClient, new StripeGateway(stripeKey), appUrl, '')
+        if (!env.configured) return response({ error: 'Configura primero Mollie' }, 503)
+        const billing = new BillingService(adminClient, new MollieGateway(env.mollieKey), env.appUrl, env.webhookUrl)
         try { initialContract = onboardingContract(await billing.catalog(), selection.data, firstVenueId) }
         catch { return response({ error: 'Revisa el plan, las tarifas publicadas y los complementos seleccionados' }, 400) }
       }
@@ -422,7 +423,7 @@ Deno.serve(async (request) => {
 
       try {
         await deletePlatformTenantData(adminClient, String(body.tenantId ?? ''), authData.user.id,
-          () => new StripeGateway(Deno.env.get('STRIPE_TEST_SECRET_KEY') ?? ''))
+          () => new MollieGateway(billingEnv().mollieKey))
         return response({ ok: true })
       } catch (error) {
         return response({ error: error instanceof TenantDeletionError ? error.message : 'No se pudo completar la eliminación. Vuelve a eliminar el negocio para continuar.' },

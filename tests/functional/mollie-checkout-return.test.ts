@@ -2,7 +2,7 @@ import { readFileSync } from 'node:fs'
 import { expect, it, vi, onTestFinished } from 'vitest'
 import { createCompiledHookRunner, jsxRuntime, nodes } from '../helpers/component-harness.mjs'
 
-function setup(search = '?billing=success', customerId: string | null = 'cus_test', operations: Array<{ id: string; status: string; result?: { url?: string } | null }> = []) {
+function setup(search = '?billing=success', customerId: string | null = 'cst_test', operations: Array<{ id: string; status: string; result?: { url?: string } | null }> = []) {
   let activationRequired = true
   let verified = false
   const onActivated = vi.fn()
@@ -12,7 +12,7 @@ function setup(search = '?billing=success', customerId: string | null = 'cus_tes
     if (action === 'reconcile') { if (verified) activationRequired = false; return {} }
     if (action === 'catalog') return { products: [], versions: [] }
     if (action === 'quote') return { id: 'new-quote', contract, preview: { amountDueCents: 5929 } }
-    if (action === 'confirm') return { url: 'https://checkout.stripe.com/new' }
+    if (action === 'confirm') return { url: 'https://www.mollie.com/checkout/new' }
     return { account: { stripe_customer_id: customerId, onboarding_contract: operations.length ? contract : null }, tenant: { billing_activation_required: activationRequired }, operations }
   })
   let poll: (() => void) | undefined
@@ -21,16 +21,28 @@ function setup(search = '?billing=success', customerId: string | null = 'cus_tes
     'react/jsx-runtime': jsxRuntime,
     '../../components/ui/Button': { Button: 'button' },
     '../../components/ui/AppModal': { AppModal: 'dialog' },
+    '../../components/ui/Checkbox': { Checkbox: 'checkbox' },
+    '../../components/ui/Input': { Input: 'input' },
     './BillingSelectionEditor': { BillingSelectionEditor: 'section' },
     './service': { billingRequest: request, billingMoney: String, openBillingUrl },
     './selection': { buildContract: vi.fn() },
   }, { Error, URLSearchParams, window: { location: { search }, setInterval: (callback: () => void) => { poll = callback; return 1 }, clearInterval } })
   onTestFinished(() => runner.unmount())
   const render = (disabled = false) => runner.render({ tenantId: 'tenant', onActivated, disabled })
-  return { request, onActivated, openBillingUrl, render, verify: () => { verified = true }, poll: () => poll?.(), clearInterval }
+  // The owner must authorize the SEPA mandate before the first card payment.
+  const fillSepa = async () => {
+    const values = ['Restaurante Prueba SL', 'B12345678', 'Restaurante Prueba SL', 'ES91 2100 0418 4502 0005 1332']
+    for (const [index, value] of values.entries()) {
+      nodes(render()).filter(node => node.type === 'input')[index].props.onChange({ target: { value } })
+      await vi.waitFor(() => expect(nodes(render()).filter(node => node.type === 'input')[index].props.value).toBe(index === 3 ? value.toUpperCase() : value))
+    }
+    nodes(render()).find(node => node.type === 'checkbox')?.props.onChange(true)
+    await vi.waitFor(() => expect(nodes(render()).find(node => node.type === 'checkbox')?.props.checked).toBe(true))
+  }
+  return { fillSepa, request, onActivated, openBillingUrl, render, verify: () => { verified = true }, poll: () => poll?.(), clearInterval }
 }
 
-it('checks Stripe immediately on Checkout return and activates without a customer click', async () => {
+it('checks Mollie immediately on Checkout return and activates without a customer click', async () => {
   const fixture = setup()
   fixture.verify()
   fixture.render()
@@ -38,7 +50,7 @@ it('checks Stripe immediately on Checkout return and activates without a custome
   expect(fixture.request.mock.calls.map(([body]) => body.action)).toEqual(['get', 'catalog', 'reconcile', 'get', 'catalog'])
 })
 
-it('keeps polling when Stripe has not confirmed yet and activates automatically later', async () => {
+it('keeps polling when Mollie has not confirmed yet and activates automatically later', async () => {
   const fixture = setup()
   fixture.render()
   await vi.waitFor(() => expect(fixture.request).toHaveBeenCalledTimes(5))
@@ -50,7 +62,7 @@ it('keeps polling when Stripe has not confirmed yet and activates automatically 
   expect(fixture.request.mock.calls.filter(([body]) => body.action === 'reconcile')).toHaveLength(2)
 })
 
-it.each(['', '?billing=cancelled'])('loads normally without an immediate Stripe check for %s', async search => {
+it.each(['', '?billing=cancelled'])('loads normally without an immediate Mollie check for %s', async search => {
   const fixture = setup(search)
   fixture.render()
   await vi.waitFor(() => expect(fixture.request).toHaveBeenCalledTimes(2))
@@ -58,7 +70,7 @@ it.each(['', '?billing=cancelled'])('loads normally without an immediate Stripe 
   expect(fixture.onActivated).not.toHaveBeenCalled()
 })
 
-it('does not reconcile without a Stripe customer or while offline', async () => {
+it('does not reconcile without a Mollie customer or while offline', async () => {
   const fixture = setup('?billing=success', null)
   fixture.render(true)
   expect(fixture.request).not.toHaveBeenCalled()
@@ -69,7 +81,7 @@ it('does not reconcile without a Stripe customer or while offline', async () => 
 
 it('shows a verification failure and recovers through the automatic poll', async () => {
   const fixture = setup()
-  fixture.request.mockImplementationOnce(async () => ({ account: { stripe_customer_id: 'cus_test', onboarding_contract: null }, tenant: { billing_activation_required: true }, operations: [] }))
+  fixture.request.mockImplementationOnce(async () => ({ account: { stripe_customer_id: 'cst_test', onboarding_contract: null }, tenant: { billing_activation_required: true }, operations: [] }))
   fixture.request.mockImplementationOnce(async () => ({ products: [], versions: [] }))
   fixture.request.mockRejectedValueOnce(new Error('No se pudo comprobar el pago.'))
   fixture.render()
@@ -81,49 +93,53 @@ it('shows a verification failure and recovers through the automatic poll', async
 })
 
 it('does not claim to be checking a payment when Checkout creation is blocked without a URL', async () => {
-  const fixture = setup('', 'cus_test', [{ id: 'blocked', status: 'applying', result: null }])
+  const fixture = setup('', 'cst_test', [{ id: 'blocked', status: 'applying', result: null }])
   fixture.render()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'h3' && node.props.children === 'Plan de prueba')).toBe(true))
   const tree = nodes(fixture.render())
   expect(tree.some(node => node.props?.role === 'alert' && String(node.props.children).includes('La apertura de la página de pago no se ha completado'))).toBe(true)
   expect(tree.some(node => String(node.props?.children).includes('Estamos comprobando'))).toBe(false)
-  expect(tree.find(node => node.type === 'button' && node.props.children === 'Pagar con Stripe')?.props.disabled).toBe(true)
+  expect(tree.find(node => node.type === 'button' && node.props.children === 'Pagar con Mollie')?.props.disabled).toBe(true)
 })
 
 it('opens an existing Checkout instead of claiming that payment is already being checked', async () => {
-  const fixture = setup('', 'cus_test', [{ id: 'ready', status: 'payment_pending', result: { url: 'https://checkout.stripe.com/ready' } }])
+  const fixture = setup('', 'cst_test', [{ id: 'ready', status: 'payment_pending', result: { url: 'https://www.mollie.com/checkout/ready' } }])
   fixture.render()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'h3' && node.props.children === 'Plan de prueba')).toBe(true))
   const tree = nodes(fixture.render())
   expect(tree.some(node => node.props?.role === 'status' && String(node.props.children).includes('Tu página de pago está lista'))).toBe(true)
-  const button = tree.find(node => node.type === 'button' && node.props.children === 'Continuar pago en Stripe')
+  const button = tree.find(node => node.type === 'button' && node.props.children === 'Continuar pago en Mollie')
   expect(button?.props.disabled).toBe(false)
   button?.props.onClick()
-  await vi.waitFor(() => expect(fixture.openBillingUrl).toHaveBeenCalledWith('https://checkout.stripe.com/ready'))
+  await vi.waitFor(() => expect(fixture.openBillingUrl).toHaveBeenCalledWith('https://www.mollie.com/checkout/ready'))
   expect(fixture.request.mock.calls.some(([body]) => body.action === 'quote')).toBe(false)
 })
 
-it('allows a fresh quote and navigates to Stripe after the rejected attempt is released', async () => {
-  const fixture = setup('', 'cus_test', [{ id: 'rejected', status: 'failed', result: null }])
+it('allows a fresh quote and navigates to Mollie after the rejected attempt is released', async () => {
+  const fixture = setup('', 'cst_test', [{ id: 'rejected', status: 'failed', result: null }])
   fixture.render()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'h3' && node.props.children === 'Plan de prueba')).toBe(true))
-  const pay = nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Pagar con Stripe')
+  const pay = nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Pagar con Mollie')
   expect(pay?.props.disabled).toBe(false)
   pay?.props.onClick()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'dialog')).toBe(true))
-  const confirm = nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Ir al pago en Stripe')
+  expect(nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Domiciliar e ir al pago')?.props.disabled).toBe(true)
+  await fixture.fillSepa()
+  const confirm = nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Domiciliar e ir al pago')
   confirm?.props.onClick()
-  await vi.waitFor(() => expect(fixture.openBillingUrl).toHaveBeenCalledWith('https://checkout.stripe.com/new'))
+  await vi.waitFor(() => expect(fixture.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'confirm', sepa: { accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332' }, payer: { legalName: 'Restaurante Prueba SL', taxId: 'B12345678' } })))
+  await vi.waitFor(() => expect(fixture.openBillingUrl).toHaveBeenCalledWith('https://www.mollie.com/checkout/new'))
 })
 
 it('shows a confirmation without a Checkout URL as an error and keeps the review open', async () => {
-  const fixture = setup('', 'cus_test', [{ id: 'rejected', status: 'failed', result: null }])
+  const fixture = setup('', 'cst_test', [{ id: 'rejected', status: 'failed', result: null }])
   fixture.render()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'h3' && node.props.children === 'Plan de prueba')).toBe(true))
-  nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Pagar con Stripe')?.props.onClick()
+  nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Pagar con Mollie')?.props.onClick()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'dialog')).toBe(true))
+  await fixture.fillSepa()
   fixture.request.mockResolvedValueOnce({})
-  nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Ir al pago en Stripe')?.props.onClick()
+  nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Domiciliar e ir al pago')?.props.onClick()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.props?.role === 'alert' && String(node.props.children).includes('No se ha podido abrir la página de pago'))).toBe(true))
   expect(nodes(fixture.render()).some(node => node.type === 'dialog')).toBe(true)
   expect(fixture.openBillingUrl).not.toHaveBeenCalled()

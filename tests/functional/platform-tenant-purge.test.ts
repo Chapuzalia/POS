@@ -3,12 +3,12 @@ import { beforeAll, afterAll, beforeEach, afterEach, describe, expect, it } from
 import { z } from 'zod'
 import { createBillingDb, billingIds as ids } from '../helpers/billing-db.mjs'
 import { compileComponent } from '../helpers/component-harness.mjs'
-import { StripeRequestError } from '../../supabase/functions/_shared/billing/stripe'
+import { MollieRequestError } from '../../supabase/functions/_shared/billing/mollie'
 
 const read = (path: string) => readFileSync(new URL(`../../${path}`, import.meta.url), 'utf8')
 const purgeSql = read('supabase/migrations/20261101192516_add_platform_tenant_purge.sql')
 const deletion = compileComponent(read('supabase/functions/_shared/platform-tenant-deletion.ts'), {
-  'npm:zod@4.4.3': { z }, './billing/stripe.ts': { StripeRequestError },
+  'npm:zod@4.4.3': { z }, './billing/mollie.ts': { MollieRequestError },
 })
 const member = '20000000-0000-4000-8000-000000000003'
 
@@ -195,7 +195,7 @@ describe('complete tenant purge in PostgreSQL', () => {
   })
 
   it('runs the real orchestrator and SQL phases through storage and Auth boundaries', async () => {
-    await db.query("update billing_accounts set stripe_customer_id='cus_fixture',stripe_subscription_id='sub_fixture',status='active' where tenant_id=$1", [ids.tenant])
+    await db.query("update billing_accounts set stripe_customer_id='cst_fixture',stripe_subscription_id='sub_fixture',status='active' where tenant_id=$1", [ids.tenant])
     await db.query("insert into storage.objects(bucket_id,name) values('product-images',$1 || '/image'),('supplier-documents',$2 || '/keep')", [ids.tenant,ids.other])
     const client = {
       rpc: async (name: string, params: Record<string, string>) => {
@@ -214,10 +214,9 @@ describe('complete tenant purge in PostgreSQL', () => {
       } }) },
       auth: { admin: { deleteUser: async (id: string) => { await db.query('delete from auth.users where id=$1', [id]); return { error: null } } } },
     }
-    const stripe = () => ({ request: async (method: string) => method === 'GET'
-      ? { id: 'cus_fixture', metadata: { tickit_tenant_id: ids.tenant } }
-      : { id: 'cus_fixture', deleted: true } })
-    await deletion.deletePlatformTenantData(client, ids.tenant, ids.owner, stripe)
+    const mollie = () => ({ list: async () => [], request: async (method: string) => method === 'GET'
+      ? { id: 'cst_fixture', metadata: { tickit_tenant_id: ids.tenant } } : null })
+    await deletion.deletePlatformTenantData(client, ids.tenant, ids.owner, mollie)
     expect((await db.query('select id from tenants')).rows).toEqual([{ id: ids.other }])
     expect((await db.query('select name from storage.objects')).rows).toEqual([{ name: `${ids.other}/keep` }])
     expect((await db.query('select * from platform_tenant_deletion_jobs')).rows).toEqual([])
@@ -226,7 +225,7 @@ describe('complete tenant purge in PostgreSQL', () => {
 
 function serviceFixture(options: { stripe?: boolean; shared?: boolean; stripeFailure?: boolean; stripeLostReply?: boolean; stripeTenant?: string; storageFailure?: boolean; authFailure?: boolean; lookupFailure?: boolean; foreignObject?: boolean; databaseFailure?: boolean; databaseLostReply?: boolean; finishFailure?: boolean } = {}) {
   let job: Record<string, unknown> | null = {
-    tenant_id: ids.tenant, request_id: ids.venue, stripe_customer_id: options.stripe ? 'cus_fixture' : null,
+    tenant_id: ids.tenant, request_id: ids.venue, stripe_customer_id: options.stripe ? 'cst_fixture' : null,
     stripe_subscription_id: null, user_ids: [member], database_purged: false,
   }
   let customerDeleted = false
@@ -265,15 +264,21 @@ function serviceFixture(options: { stripe?: boolean; shared?: boolean; stripeFai
       return { error: options.authFailure ? new Error('fixture') : null }
     } } },
   }
-  const stripe = () => ({ request: async (method: string) => {
-    calls.push(`stripe.${method}`)
-    if (options.stripeFailure) throw new Error('fixture')
-    if (method === 'GET') return { id: 'cus_fixture', deleted: customerDeleted, metadata: { tickit_tenant_id: options.stripeTenant ?? ids.tenant } }
-    customerDeleted = true
-    if (options.stripeLostReply) throw new Error('fixture lost reply')
-    return { id: 'cus_fixture', deleted: true }
-  } })
-  return { run: () => deletion.deletePlatformTenantData(db, ids.tenant, ids.owner, stripe), calls, options,
+  const subscriptions = [{ id: 'sub_live', status: 'active' }, { id: 'sub_old', status: 'canceled' }]
+  const mollie = () => ({
+    list: async () => { calls.push('stripe.LIST'); return structuredClone(subscriptions) },
+    request: async (method: string, path: string) => {
+      calls.push(`stripe.${method}`)
+      if (options.stripeFailure) throw new Error('fixture')
+      if (customerDeleted) throw new MollieRequestError(404, null)
+      if (method === 'GET') return { id: 'cst_fixture', metadata: { tickit_tenant_id: options.stripeTenant ?? ids.tenant } }
+      if (path.includes('/subscriptions/')) { subscriptions[0].status = 'canceled'; calls.push('subscription.canceled'); return null }
+      customerDeleted = true
+      if (options.stripeLostReply) throw new Error('fixture lost reply')
+      return null
+    },
+  })
+  return { run: () => deletion.deletePlatformTenantData(db, ids.tenant, ids.owner, mollie), calls, options,
     job: () => job, files: () => files }
 }
 
@@ -282,7 +287,10 @@ it('orders external cleanup before the atomic purge, hard-deletes exclusive user
   await fixture.run()
   expect(fixture.files()).toEqual([])
   expect(fixture.job()).toBeNull()
-  expect(fixture.calls.indexOf('stripe.DELETE')).toBeLessThan(fixture.calls.indexOf('purge_platform_tenant_data'))
+  // Future Mollie charges stop before the customer and the tenant data are removed.
+  expect(fixture.calls.indexOf('subscription.canceled')).toBeLessThan(fixture.calls.lastIndexOf('stripe.DELETE'))
+  expect(fixture.calls.filter(call => call === 'stripe.DELETE')).toHaveLength(2)
+  expect(fixture.calls.lastIndexOf('stripe.DELETE')).toBeLessThan(fixture.calls.indexOf('purge_platform_tenant_data'))
   expect(fixture.calls.indexOf('storage.remove')).toBeLessThan(fixture.calls.indexOf('purge_platform_tenant_data'))
   expect(fixture.calls.indexOf('purge_platform_tenant_data')).toBeLessThan(fixture.calls.indexOf('auth.delete'))
   await fixture.run()
@@ -296,7 +304,8 @@ it.each(['stripeFailure', 'stripeLostReply', 'storageFailure', 'authFailure', 'l
   fixture.options[key] = false
   await fixture.run()
   expect(fixture.job()).toBeNull()
-  expect(fixture.calls.filter(call => call === 'stripe.DELETE')).toHaveLength(1)
+  expect(fixture.calls.filter(call => call === 'subscription.canceled')).toHaveLength(1)
+  expect(fixture.job()).toBeNull()
 })
 
 it('never deletes a shared user or a storage path from another tenant', async () => {
@@ -320,7 +329,7 @@ it('checks Superadmin permission before dispatch and returns actionable deletion
       from: () => ({ select() { return this }, eq() { return this }, maybeSingle: async () => ({ data: { is_superadmin: superadmin }, error: null }) }) }
     compileComponent(source, {
       'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
-      '../_shared/billing/service.ts': {}, '../_shared/billing/stripe.ts': {}, '../_shared/billing/schemas.ts': {},
+      '../_shared/billing/service.ts': {}, '../_shared/billing/mollie.ts': {}, '../_shared/billing/env.ts': {}, '../_shared/billing/schemas.ts': {},
       '../_shared/billing/onboarding.ts': {}, '../_shared/welcome-email.ts': {},
       '../_shared/platform-tenant-deletion.ts': { TenantDeletionError: deletion.TenantDeletionError, deletePlatformTenantData: async () => {
         calls++; if (fail) throw new deletion.TenantDeletionError('Vuelve a eliminar el negocio para continuar.')

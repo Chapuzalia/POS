@@ -1,4 +1,5 @@
 import { addMonths } from '../../supabase/functions/_shared/billing/promotions.ts'
+import { MollieRequestError } from '../../supabase/functions/_shared/billing/mollie.ts'
 import { BillingService } from '../../supabase/functions/_shared/billing/service.ts'
 import { createBillingDb, billingIds as ids } from './billing-db.mjs'
 
@@ -49,132 +50,84 @@ export function billingClient(db) {
   }
 }
 
-export class FakeStripe {
-  sepa=false; invoicePayments=[]; intents=new Map(); mandates=new Map();
-  subscriptions=[]; invoices=[]; calls=[]; sessions=new Map(); schedules=new Map(); prices=new Map(); cache=new Map(); taxRates=[]; customerTaxExempt='none'
-  previewRecurring=false; priceAmounts=new Map([['price_base',10000],['price_production',1000]])
-  failPayment=false; offline=false; now=Math.floor(Date.now()/1000)
-  async list(path,params={}) {
+const iso=()=>new Date().toISOString()
+const day=seconds=>new Date(seconds*1000).toISOString().slice(0,10)
+const epoch=date=>Math.floor(Date.parse(date)/1000)
+
+// In-memory Mollie test account: the HTTP surface the service uses, with real idempotency keys.
+export class FakeMollie {
+  customers=new Map(); mandates=[]; payments=[]; subscriptions=[]; calls=[]; cache=new Map(); offline=false; seq=0
+  id(prefix){return `${prefix}_${String(++this.seq).padStart(6,'0')}`}
+  async list(path,key){
+    this.calls.push({method:'LIST',path})
     if(this.offline)throw new Error('offline')
-    if(path==='/subscriptions')return structuredClone(this.subscriptions)
-    if(path==='/invoices')return structuredClone(this.invoices)
-    if(path==='/invoice_payments')return structuredClone(this.invoicePayments.filter(row=>row.invoice===params.invoice))
-    if(path==='/prices')return [...this.prices.values()]
-    if(path==='/tax_rates')return structuredClone(this.taxRates.filter(rate=>rate.active))
-    throw new Error(path)
+    const customer=path.split('/')[2]
+    const rows={payments:this.payments,subscriptions:this.subscriptions,mandates:this.mandates}[key].filter(row=>row.customerId===customer)
+    return structuredClone(rows)
   }
-  totals(lines,rates,discounts=[],taxExempt=this.customerTaxExempt) {
-    let subtotal=lines.filter(item=>!item.deleted).reduce((sum,item)=>sum+(this.priceAmounts.get(item.price?.id??item.price)??0)*item.quantity,0)
-    for(const discount of discounts||[]){const coupon=discount.coupon??discount.source?.coupon;if(coupon?.startsWith('tickit_discount_'))subtotal=Math.round(subtotal*(10000-Number(coupon.split('_').at(-1)))/10000)}
-    const tax=(rates??[]).reduce((sum,value)=>{const rate=this.taxRates.find(row=>row.id===(value.id??value));return sum+(rate&&taxExempt==='none'?Math.round(subtotal*rate.percentage/100):0)},0)
-    return {subtotal,total:subtotal+tax}
-  }
-  invoice(paid=true,items=this.subscriptions[0].items.data,discounts=this.subscriptions[0].discounts){const sub=this.subscriptions[0],amounts=this.totals(items,sub.default_tax_rates,discounts);const invoice={id:`in_${this.invoices.length+1}`,customer:'cus_test',status:paid?'paid':'open',currency:'eur',amount_due:amounts.total,amount_paid:paid?amounts.total:0,total:amounts.total,total_excluding_tax:amounts.subtotal,subtotal_excluding_tax:amounts.subtotal,created:this.now,number:null,hosted_invoice_url:null,invoice_pdf:null,status_transitions:{paid_at:paid?this.now:null}};this.invoices.push(invoice);return invoice}
-  items(lines){return lines.map((line,index)=>({id:`si_${index}`,price:{id:line.price},quantity:line.quantity,current_period_start:this.now,current_period_end:this.now+2592000}))}
-  discounts(value){return value?value.map(discount=>({source:{coupon:discount.coupon}})):[]}
-  completeCheckout(paid=true){const session=[...this.sessions.values()].at(-1);session.status='complete';this.subscriptions=[{id:'sub_test',customer:'cus_test',livemode:false,status:paid?'active':'incomplete',billing_cycle_anchor:this.now,items:{data:this.items(session.params.line_items),has_more:false},default_tax_rates:(session.params.subscription_data.default_tax_rates??[]).map(id=>({id})),automatic_tax:{enabled:false},pending_update:null,cancel_at_period_end:false,latest_invoice:null,schedule:null,discounts:this.discounts(session.params.discounts),metadata:session.params.subscription_data.metadata}];this.subscriptions[0].latest_invoice=this.invoice(paid);Object.assign(session,{livemode:false,mode:'subscription',payment_status:paid?'paid':'unpaid',customer:'cus_test',subscription:'sub_test',invoice:this.subscriptions[0].latest_invoice.id,currency:'eur',client_reference_id:session.params.client_reference_id,metadata:session.params.metadata})}
-  authorizeSepaCheckout(){this.sepa=true;this.completeCheckout(false);this.subscriptions[0].status='active';this.processSepaInvoice()}
-  processSepaInvoice(){
-    const sub=this.subscriptions[0],invoice=sub.latest_invoice
-    const method={id:'pm_sepa_test',type:'sepa_debit',customer:'cus_test',livemode:false}
-    sub.default_payment_method=method
-    const intent={id:`pi_${invoice.id}`,customer:'cus_test',livemode:false,currency:'eur',status:'processing',amount:invoice.amount_due,last_payment_error:null,payment_method:method,
-      latest_charge:{id:`ch_${invoice.id}`,customer:'cus_test',payment_intent:`pi_${invoice.id}`,payment_method:method.id,livemode:false,status:'pending',currency:'eur',amount:invoice.amount_due,refunded:false,failure_code:null,payment_method_details:{type:'sepa_debit',sepa_debit:{mandate:'mandate_test'}}}}
-    this.intents.set(intent.id,intent)
-    this.invoicePayments.push({id:`inpay_${invoice.id}`,invoice:invoice.id,livemode:false,status:'open',currency:'eur',amount_requested:invoice.amount_due,is_default:true,payment:{type:'payment_intent',payment_intent:intent.id}})
-    this.mandates.set('mandate_test',{id:'mandate_test',livemode:false,status:'active',type:'multi_use',payment_method:method.id,payment_method_details:{type:'sepa_debit'},customer_acceptance:{type:'online',accepted_at:this.now}})
-  }
-  failSepa(){const sub=this.subscriptions[0];sub.status='past_due';const intent=this.intents.get(`pi_${sub.latest_invoice.id}`);intent.status='requires_payment_method';intent.last_payment_error={code:'insufficient_funds'};intent.latest_charge.status='failed';intent.latest_charge.failure_code='insufficient_funds'}
-  pay(){
-    const sub=this.subscriptions[0]
-    if(sub.pending_update){const params=sub.pending_update;sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null}
-    sub.status='active'
-    if(sub.latest_invoice?.status==='open'){
-      const invoice=sub.latest_invoice;invoice.status='paid';invoice.amount_paid=invoice.amount_due;invoice.status_transitions.paid_at=this.now
-      const intent=this.intents.get(`pi_${invoice.id}`);if(intent){intent.status='succeeded';intent.latest_charge.status='succeeded'}
-    }else sub.latest_invoice=this.invoice()
-  }
-  advancePhase(index=1){const sub=this.subscriptions[0],schedule=this.schedules.get(sub.schedule),phase=schedule.phases[index];this.now=schedule.current_phase.end_date+(index-1)*2592000;sub.items.data=this.items(phase.items);sub.metadata={...sub.metadata,...phase.metadata};sub.discounts=this.discounts(phase.discounts);if(phase.default_tax_rates)sub.default_tax_rates=phase.default_tax_rates.map(id=>({id}));sub.latest_invoice=this.invoice()}
-  applyScheduledPhase(at) {
-    const sub=this.subscriptions[0], schedule=this.schedules.get(sub.schedule)
-    if(!schedule?.phases)return
-    const index=schedule.phases.findIndex(p=>p.start_date<=at&&at<p.end_date)
-    if(index<0){if(at>=schedule.phases.at(-1).end_date){schedule.status='released';sub.schedule=null}return}
-    const phase=schedule.phases[index],period=sub.items.data[0]
-    const start=period.current_period_start,end=period.current_period_end
-    sub.items.data=this.items(phase.items).map(item=>({...item,current_period_start:start,current_period_end:end}))
-    sub.metadata={...sub.metadata,...phase.metadata};sub.discounts=this.discounts(phase.discounts)
-    if(phase.default_tax_rates)sub.default_tax_rates=phase.default_tax_rates.map(id=>({id}))
-    if(phase.automatic_tax)sub.automatic_tax=phase.automatic_tax
-    schedule.current_phase={start_date:phase.start_date,end_date:phase.end_date}
-  }
-  advanceTo(at,fail=false) {
-    this.now=at; const sub=this.subscriptions[0],period=sub.items.data[0]
-    const renewal=at>=period.current_period_end
-    let start=period.current_period_start,end=period.current_period_end
-    while(end<=at){start=end;end=addMonths(end,1)}
-    sub.items.data.forEach(item=>{item.current_period_start=start;item.current_period_end=end})
-    this.applyScheduledPhase(at)
-    if(renewal){sub.latest_invoice=this.invoice(!fail);sub.status=fail?'past_due':'active'}
-  }
-  async request(method,path,params={},idempotencyKey){
-    this.calls.push({method,path,params:structuredClone(params),idempotencyKey})
+  async request(method,path,body,key){
+    this.calls.push({method,path,body:structuredClone(body),key})
     if(this.offline)throw new Error('offline')
-    const cacheKey=`${method}:${path}:${idempotencyKey}`
-    if(idempotencyKey&&this.cache.has(cacheKey))return structuredClone(this.cache.get(cacheKey))
+    const cacheKey=`${method}:${path}:${key}`
+    if(key&&this.cache.has(cacheKey))return structuredClone(this.cache.get(cacheKey))
+    const parts=path.split('?')[0].split('/').filter(Boolean)
     let result
-    if(path==='/invoices/create_preview'){
-      const amounts=this.previewRecurring?this.totals(params.subscription_details.items,params.subscription_details.default_tax_rates,params.discounts,params.customer_details?.tax_exempt):{total:params.subscription_details.default_tax_rates?.length?605:500,subtotal:500}
-      result={amount_due:amounts.total,currency:'eur',total:amounts.total,total_excluding_tax:amounts.subtotal}
-    }
-    else if(path==='/tax_rates'){result={id:`txr_test_${this.taxRates.length}`,active:true,...params};this.taxRates.push(result)}
-    else if(path.startsWith('/payment_intents/'))result=this.intents.get(path.split('/').at(-1))
-    else if(path.startsWith('/mandates/'))result=this.mandates.get(path.split('/').at(-1))
-    else if(path.startsWith('/payment_methods/'))result=this.subscriptions[0]?.default_payment_method
-    else if(path==='/customers'||path==='/customers/cus_test'){if(params.tax_exempt)this.customerTaxExempt=params.tax_exempt;result={id:'cus_test',tax_exempt:this.customerTaxExempt}}
-    else if(path==='/checkout/sessions'){result={id:`cs_test_${this.sessions.size}`,url:'https://checkout.stripe.com/test'};this.sessions.set(result.id,{...result,status:'open',livemode:false,mode:'subscription',customer:params.customer,subscription:null,invoice:null,client_reference_id:params.client_reference_id,metadata:params.metadata,params})}
-    else if(path.startsWith('/checkout/sessions/')){result=this.sessions.get(path.split('/').at(path.endsWith('/expire')?-2:-1));if(path.endsWith('/expire')){if(result.status!=='open')throw new Error('STRIPE_CHECKOUT_NOT_OPEN');result.status='expired'}result.customer=result.params.customer}
-    else if(path==='/subscription_schedules'){result={id:'sub_sched_test',subscription:this.subscriptions[0].id,status:'active',metadata:{},current_phase:{start_date:this.subscriptions[0].items.data[0].current_period_start,end_date:this.subscriptions[0].items.data[0].current_period_end}};this.subscriptions[0].schedule=result.id;this.schedules.set(result.id,result)}
-    else if(path.startsWith('/subscription_schedules/')){
-      if(path.endsWith('/release')){result=this.schedules.get(path.split('/').at(-2));result.status='released';this.subscriptions[0].schedule=null}
-      else {result=this.schedules.get(path.split('/').at(-1));Object.assign(result,params);if(params.metadata){result.subscription='sub_test';result.status='active';this.applyScheduledPhase(this.now)}}
-    }
-    else if(path==='/subscriptions/sub_test'){
-      const sub=this.subscriptions[0]
-      if(method==='DELETE')sub.status='canceled'
-      else if(method==='POST'&&params.cancel_at_period_end)sub.cancel_at_period_end=true
-      else if(method==='POST'&&params.default_tax_rates){
-        if(params.payment_behavior==='pending_if_incomplete')throw new Error('Tax settings unsupported by pending updates')
-        sub.default_tax_rates=params.default_tax_rates.map(id=>({id}));sub.automatic_tax=params.automatic_tax
-        sub.items.data.forEach(item=>{item.tax_rates=[]})
-      }
-      else if(method==='POST'&&params.payment_behavior==='allow_incomplete'){
-        sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.pending_update=null;sub.latest_invoice=this.invoice(false);this.processSepaInvoice();if(this.failPayment)this.failSepa()
-      }
-      else if(method==='POST'){
-        if(this.sepa&&params.payment_behavior==='pending_if_incomplete')throw new Error('SEPA does not support pending_if_incomplete')
-        if(this.failPayment){sub.pending_update=params;sub.latest_invoice=this.invoice(false,params.items.filter(row=>!row.deleted),this.discounts(params.discounts))}
-        else{sub.items.data=this.items(params.items.filter(row=>!row.deleted));sub.discounts=this.discounts(params.discounts);sub.latest_invoice=this.invoice()}
-      }
-      result=sub
-    }else if(path.startsWith('/coupons/'))result={id:path.split('/').at(-1),percent_off:Number(path.split('_').at(-1))/100,amount_off:null,duration:'forever',valid:true}
-    else if(path==='/prices'){result={id:`price_custom_${this.prices.size}`,unit_amount:params.unit_amount,currency:params.currency,recurring:params.recurring,metadata:params.metadata,active:true};this.prices.set(result.id,result)}
-    else if(path.startsWith('/products/'))result={id:path.split('/').at(-1)}
-    else throw new Error(`Unhandled Stripe ${method} ${path}`)
-    if(idempotencyKey)this.cache.set(cacheKey,structuredClone(result))
+    if(parts[0]==='customers'&&parts.length===1){result={id:'cst_test',mode:'test',name:body.name,email:body.email,metadata:body.metadata};this.customers.set(result.id,result)}
+    else if(parts[0]==='customers'&&parts.length===2){result=this.customers.get(parts[1]);if(!result)throw new MollieRequestError(404,null);if(method==='DELETE'){this.customers.delete(parts[1]);result=null}}
+    else if(parts[2]==='mandates'){
+      result={id:this.id('mdt'),mode:'test',status:'valid',method:body.method,mandateReference:body.mandateReference,customerId:parts[1],details:{consumerName:body.consumerName,consumerAccount:body.consumerAccount}}
+      this.mandates.push(result)
+    }else if(parts[2]==='subscriptions'&&parts.length===3){
+      result={id:this.id('sub'),mode:'test',status:'active',amount:body.amount,interval:body.interval,startDate:body.startDate,nextPaymentDate:body.startDate,mandateId:body.mandateId,customerId:parts[1],description:body.description,metadata:body.metadata,webhookUrl:body.webhookUrl}
+      this.subscriptions.push(result)
+    }else if(parts[2]==='subscriptions'){
+      result=this.subscriptions.find(row=>row.id===parts[3]&&row.customerId===parts[1])
+      if(!result)throw new MollieRequestError(404,null)
+      if(method==='PATCH'){if(result.status==='canceled')throw new MollieRequestError(422,'status');Object.assign(result,body)}
+      if(method==='DELETE'){if(result.status==='canceled')throw new MollieRequestError(422,'status');result.status='canceled';result.canceledAt=iso();result.nextPaymentDate=null}
+    }else if(parts[0]==='payments'&&parts.length===1){
+      const mandate=this.mandates.find(row=>row.id===body.mandateId)
+      const recurring=body.sequenceType==='recurring'
+      const sepa=mandate?.method==='directdebit'
+      result={id:this.id('tr'),mode:'test',status:recurring?(sepa?'pending':'paid'):'open',amount:body.amount,amountChargedBack:null,customerId:body.customerId,subscriptionId:null,mandateId:body.mandateId??null,sequenceType:body.sequenceType??'oneoff',method:recurring?mandate?.method??'creditcard':body.method??null,description:body.description,createdAt:iso(),paidAt:recurring&&!sepa?iso():null,metadata:body.metadata,_links:{checkout:recurring?null:{href:`https://www.mollie.com/checkout/test-mode?payment=${this.seq}`}}}
+      this.payments.push(result)
+    }else if(parts[0]==='payments'){
+      result=this.payments.find(row=>row.id===parts[1])
+      if(!result)throw new MollieRequestError(404,null)
+      if(method==='DELETE'){if(result.method==='creditcard'&&result.status==='open'&&!this.cancelableCards)throw new MollieRequestError(422,null);result.status='canceled'}
+    }else throw new Error(`Unhandled Mollie ${method} ${path}`)
+    if(key)this.cache.set(cacheKey,structuredClone(result))
     return structuredClone(result)
   }
+  payment(kind){return this.payments.filter(row=>row.metadata?.tickit_kind===kind).at(-1)}
+  // The customer completes Mollie Checkout with a card; Mollie also creates a card mandate.
+  payFirst(status='paid'){
+    const payment=this.payment('first')
+    payment.status=status
+    if(status==='paid'){payment.paidAt=iso();payment.method='creditcard';const card={id:this.id('mdt'),mode:'test',status:'valid',method:'creditcard',mandateReference:null,customerId:payment.customerId};this.mandates.push(card);payment.mandateId=card.id}
+    return payment
+  }
+  settle(payment,status='paid'){const row=this.payments.find(item=>item.id===payment.id);row.status=status;if(status==='paid')row.paidAt=iso();return row}
+  chargeBack(payment){const row=this.payments.find(item=>item.id===payment.id);row.amountChargedBack=row.amount;return row}
+  // Mollie creates the charge on nextPaymentDate from the subscription's mandate.
+  renew(status='pending'){
+    const sub=this.subscriptions.find(row=>row.status==='active')
+    const mandate=this.mandates.find(row=>row.id===sub.mandateId)
+    const payment={id:this.id('tr'),mode:'test',status,amount:sub.amount,amountChargedBack:null,customerId:sub.customerId,subscriptionId:sub.id,mandateId:sub.mandateId,sequenceType:'recurring',method:mandate?.method??'directdebit',description:sub.description,createdAt:iso(),paidAt:status==='paid'?iso():null,metadata:sub.metadata,_links:{checkout:null}}
+    this.payments.push(payment)
+    sub.nextPaymentDate=day(addMonths(epoch(sub.nextPaymentDate),sub.interval==='12 months'?12:1))
+    return payment
+  }
 }
+export const sepa={accountHolder:'Restaurante Prueba SL',iban:'ES91 2100 0418 4502 0005 1332'}
+export const payer={legalName:'Restaurante Prueba SL',taxId:'B12345678'}
 export async function createBillingService(t,baseAmountCents=10000) {
   const {db,transition}=await createBillingDb(t)
   const base=await transition('catalog_save',{actorId:ids.owner,product:{key:'base',kind:'plan',name:'Synthetic base',description:'',scope:'tenant',featureKey:null,resource:null,active:true,sortOrder:0},version:{interval:'month',amountCents:baseAmountCents,features:['restaurant'],limits:{venues:3,devices:5},included:{},maximum:null,requires:[]},reason:'Test fixture'})
-  // The migration seeds a production addon draft, without price assumptions.
   const production=await transition('catalog_save',{actorId:ids.owner,product:{key:'production',kind:'addon',name:'Production',description:'',scope:'venue',featureKey:'production',resource:null,active:true,sortOrder:1},version:{interval:'month',amountCents:1000,features:[],limits:{venues:1,devices:0},included:{},maximum:10,requires:['restaurant']},reason:'Test fixture'})
-  await db.query('update billing_price_versions set stripe_price_id=$1,published=true where id=$2',['price_base',base.id])
-  await db.query('update billing_price_versions set stripe_price_id=$1,published=true where id=$2',['price_production',production.id])
-  const stripe=new FakeStripe(),service=new BillingService(billingClient(db),stripe,'http://localhost:5173','bpc_test')
-  stripe.priceAmounts.set('price_base',baseAmountCents)
+  const mollie=new FakeMollie(),service=new BillingService(billingClient(db),mollie,'http://localhost:5173','https://hooks.example.test/billing-webhook')
+  await service.publish(base.id); await service.publish(production.id)
   const selection={planVersionId:base.id,addons:[]}
-  const activate=async()=>{const quote=await service.quote(ids.tenant,ids.owner,selection,null,'Test onboarding');await service.confirm(ids.tenant,ids.owner,quote.id);stripe.completeCheckout();await service.reconcile(ids.tenant)}
-  return {db,stripe,service,selection,base,production,activate,transition}
+  const activate=async()=>{const quote=await service.quote(ids.tenant,ids.owner,selection,null,'Test onboarding');await service.confirm(ids.tenant,ids.owner,quote.id,false,{sepa,payer});mollie.payFirst();await service.reconcile(ids.tenant)}
+  return {db,mollie,service,selection,base,production,activate,transition}
 }

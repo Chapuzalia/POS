@@ -1,15 +1,14 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { billingErrorMessages } from '../_shared/billing/errors.ts'
 import { billingFailureDiagnostic } from '../_shared/billing/diagnostics.ts'
-import { BillingService } from '../_shared/billing/service.ts'
+import { billingEnv, billingServiceFromEnv } from '../_shared/billing/env.ts'
 import { requestSchema } from '../_shared/billing/schemas.ts'
-import { StripeGateway } from '../_shared/billing/stripe.ts'
 
 Deno.serve(async request => {
   const appUrl = Deno.env.get('BILLING_APP_URL')?.replace(/\/$/, '') ?? ''
   const headers = { 'Access-Control-Allow-Origin': appUrl ? new URL(appUrl).origin : 'null', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' }
   let admin = false
-  // Stripe URLs grant access to the customer's payment pages, including nested results.
+  // Mollie checkout URLs grant access to the customer's payment pages, including nested results.
   const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body, (key, value: unknown) => admin && ['url', 'hosted_invoice_url', 'invoice_pdf'].includes(key) ? undefined : value), { status, headers })
   if (request.method === 'OPTIONS') return reply({})
   if (request.method !== 'POST') return reply({ error: 'Método no permitido.' }, 405)
@@ -18,10 +17,9 @@ Deno.serve(async request => {
     const url = Deno.env.get('SUPABASE_URL')
     const publicKey = Deno.env.get('SUPABASE_ANON_KEY')
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-    const stripeKey = Deno.env.get('STRIPE_TEST_SECRET_KEY')
-    if (!url || !publicKey || !serviceKey || !stripeKey || !appUrl) return reply({ error: 'Facturación sandbox pendiente de configuración.' }, 503)
+    if (!url || !publicKey || !serviceKey || !billingEnv().configured) return reply({ error: 'Facturación sandbox pendiente de configuración.' }, 503)
     const db = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
-    const service = new BillingService(db, new StripeGateway(stripeKey), appUrl, Deno.env.get('STRIPE_TEST_PORTAL_CONFIGURATION_ID') ?? '')
+    const service = billingServiceFromEnv(db)
     const authorization = request.headers.get('Authorization') ?? ''
     const auth = createClient(url, publicKey, { global: { headers: { Authorization: authorization } }, auth: { persistSession: false } })
     const { data: user, error: authError } = await auth.auth.getUser()
@@ -43,7 +41,8 @@ Deno.serve(async request => {
     }
     const adminActions = ['overview','catalog-save','catalog-publish','retry-operation','retry-event','reconcile-batch','settings','quote-cancel']
     if (adminActions.includes(body.action) && !admin) return reply({ error: 'Esta operación requiere Superadmin.' }, 403)
-    if (body.action === 'portal' && admin) return reply({ error: 'El portal de pago solo está disponible desde la cuenta del cliente.' }, 403)
+    if (body.action === 'portal' && admin) return reply({ error: 'El pago de cuotas pendientes solo está disponible desde la cuenta del cliente.' }, 403)
+    if (body.action === 'confirm' && (body.sepa || body.payer) && admin) return reply({ error: 'Solo el propietario puede autorizar la domiciliación.' }, 403)
     switch (body.action) {
       case 'catalog': {
         const catalog = await service.catalog()
@@ -65,7 +64,7 @@ Deno.serve(async request => {
         return reply(await service.quote(body.tenantId, user.user.id, body.selection, body.exception, body.reason, admin))
       }
       case 'quote-cancel': return reply(await service.quoteCancel(body.tenantId, user.user.id, body.immediate, body.reason))
-      case 'confirm': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId))
+      case 'confirm': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, false, { sepa: body.sepa, payer: body.payer }))
       case 'retry-operation': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, true))
       case 'portal': return reply(await service.portal(body.tenantId))
       case 'reconcile': return reply(await service.reconcile(body.tenantId))
@@ -73,11 +72,11 @@ Deno.serve(async request => {
       case 'retry-event': {
         const stored = await db.from('billing_stripe_events').select('event_id,event_type,stripe_created,stripe_customer_id,status').eq('event_id', body.eventId).single()
         if (stored.error || stored.data.status !== 'failed') return reply({ error: 'El evento no admite reintento.' }, 409)
-        await service.processEvent({ id: stored.data.event_id, type: stored.data.event_type, created: stored.data.stripe_created, livemode: false, data: { object: { customer: stored.data.stripe_customer_id ?? undefined } } })
+        await service.processEvent({ id: stored.data.event_id, type: stored.data.event_type, created: stored.data.stripe_created, customer: stored.data.stripe_customer_id ?? undefined })
         return reply({ retried: true })
       }
       case 'reconcile-batch': {
-        const accounts = await db.from('billing_accounts').select('tenant_id').not('stripe_customer_id','is',null).order('last_attempt_at', { nullsFirst: true }).limit(20)
+        const accounts = await db.from('billing_accounts').select('tenant_id').like('stripe_customer_id','cst_%').order('last_attempt_at', { nullsFirst: true }).limit(20)
         if (accounts.error) throw new Error('BILLING_DB_BATCH')
         const results = []
         for (const account of accounts.data) {

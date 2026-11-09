@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0'
-import { BillingService } from '../_shared/billing/service.ts'
-import { StripeGateway } from '../_shared/billing/stripe.ts'
+import { billingServiceFromEnv } from '../_shared/billing/env.ts'
 
+// Runs period-end changes, promotion amounts and cancellations that no webhook announces.
 // A scheduler credential distinct from Supabase keys and never exposed to a browser.
 Deno.serve(async request => {
   if (request.method !== 'POST') return new Response(null, { status: 405 })
@@ -14,8 +14,9 @@ Deno.serve(async request => {
   if (secret.length < 32 || difference !== 0) return new Response(null, { status: 401 })
   try {
     const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', { auth: { persistSession: false, autoRefreshToken: false } })
-    const service = new BillingService(db, new StripeGateway(Deno.env.get('STRIPE_TEST_SECRET_KEY') ?? ''), '', '')
-    const accounts = await db.from('billing_accounts').select('tenant_id').not('stripe_customer_id','is',null).order('last_attempt_at',{nullsFirst:true}).limit(10)
+    const service = billingServiceFromEnv(db)
+    // Legacy Stripe sandbox links (cus_) are not reconciled through Mollie.
+    const accounts = await db.from('billing_accounts').select('tenant_id').like('stripe_customer_id','cst_%').order('last_attempt_at',{nullsFirst:true}).limit(10)
     if (accounts.error) throw new Error('BILLING_DB_BATCH')
     let succeeded = 0, failed = 0
     for (const account of accounts.data) {

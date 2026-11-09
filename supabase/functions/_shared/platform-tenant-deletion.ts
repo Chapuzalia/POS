@@ -1,10 +1,11 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { z } from 'npm:zod@4.4.3'
-import { StripeRequestError } from './billing/stripe.ts'
-import type { StripeGateway } from './billing/stripe.ts'
+import { MollieRequestError } from './billing/mollie.ts'
+import type { MollieGateway, MollieSubscription } from './billing/mollie.ts'
 
+// cus_ rows are legacy Stripe sandbox links: there is no Mollie resource to remove.
 const jobSchema = z.object({
-  tenant_id: z.uuid(), request_id: z.uuid(), stripe_customer_id: z.string().regex(/^cus_[a-zA-Z0-9]+$/).nullable(),
+  tenant_id: z.uuid(), request_id: z.uuid(), stripe_customer_id: z.string().regex(/^(cst|cus)_[a-zA-Z0-9]+$/).nullable(),
   stripe_subscription_id: z.string().regex(/^sub_[a-zA-Z0-9]+$/).nullable(), user_ids: z.array(z.uuid()), database_purged: z.boolean(),
 })
 const objectsSchema = z.array(z.object({ bucket_id: z.string().min(1), name: z.string().min(1) })).max(200)
@@ -14,12 +15,11 @@ export class TenantDeletionError extends Error {
   constructor(message: string, status = 503) { super(message); this.status = status }
 }
 
-const missingStripeResource = (error: unknown) => error instanceof StripeRequestError
-  && error.diagnostic.status === 404 && error.diagnostic.code === 'resource_missing'
+const missingProviderResource = (error: unknown) => error instanceof MollieRequestError && [404, 410].includes(error.diagnostic.status)
 
 /** Every phase is retryable. Keep the inactive tenant/job until all cleanup succeeds. */
 export async function deletePlatformTenantData(
-  db: SupabaseClient, tenantId: string, actorId: string, stripe: () => StripeGateway,
+  db: SupabaseClient, tenantId: string, actorId: string, mollie: () => MollieGateway,
 ) {
   if (!z.uuid().safeParse(tenantId).success) throw new TenantDeletionError('Negocio no válido.', 400)
   const params = { p_tenant_id: tenantId, p_actor_id: actorId }
@@ -37,27 +37,20 @@ export async function deletePlatformTenantData(
 
   if (!job.database_purged) {
     try {
-      if (job.stripe_customer_id) {
-        const gateway = stripe()
-        const customer = await gateway.request<{ id: string; deleted?: boolean; metadata?: Record<string, string> }>('GET', `/customers/${job.stripe_customer_id}`)
-        if (customer.id !== job.stripe_customer_id) throw new Error('TENANT_DELETION_STRIPE_MISMATCH')
-        if (!customer.deleted) {
-          if (customer.metadata?.tickit_tenant_id !== tenantId) throw new Error('TENANT_DELETION_STRIPE_MISMATCH')
-          // Stripe cancels this customer's active subscriptions on customer deletion.
-          const removed = await gateway.request<{ id: string; deleted: boolean }>('DELETE', `/customers/${customer.id}`, {}, `tenant-purge:${job.request_id}:customer`)
-          if (removed.id !== customer.id || removed.deleted !== true) throw new Error('TENANT_DELETION_STRIPE_UNCONFIRMED')
+      const customerId = job.stripe_customer_id
+      if (customerId?.startsWith('cst_')) {
+        const gateway = mollie()
+        const customer = await gateway.request<{ id: string; metadata?: Record<string, string> | null }>('GET', `/customers/${customerId}`)
+        if (customer.id !== customerId || customer.metadata?.tickit_tenant_id !== tenantId) throw new Error('TENANT_DELETION_PROVIDER_MISMATCH')
+        // Stop every future charge explicitly before removing the customer.
+        const subscriptions = await gateway.list<MollieSubscription>(`/customers/${customerId}/subscriptions`, 'subscriptions')
+        for (const subscription of subscriptions.filter(row => ['active', 'pending', 'suspended'].includes(row.status))) {
+          await gateway.request('DELETE', `/customers/${customerId}/subscriptions/${subscription.id}`, undefined, `tenant-purge:${job.request_id}:${subscription.id}`)
         }
-      } else if (job.stripe_subscription_id) {
-        const gateway = stripe()
-        const subscription = await gateway.request<{ id: string; status: string; metadata: Record<string, string> }>('GET', `/subscriptions/${job.stripe_subscription_id}`)
-        if (subscription.id !== job.stripe_subscription_id || subscription.metadata.tickit_tenant_id !== tenantId) throw new Error('TENANT_DELETION_STRIPE_MISMATCH')
-        if (subscription.status !== 'canceled') {
-          const removed = await gateway.request<{ id: string; status: string }>('DELETE', `/subscriptions/${subscription.id}`, { prorate: false, invoice_now: false }, `tenant-purge:${job.request_id}:subscription`)
-          if (removed.id !== subscription.id || removed.status !== 'canceled') throw new Error('TENANT_DELETION_STRIPE_UNCONFIRMED')
-        }
+        await gateway.request('DELETE', `/customers/${customerId}`, undefined, `tenant-purge:${job.request_id}:customer`)
       }
     } catch (error) {
-      if (!missingStripeResource(error)) throw new TenantDeletionError('No se pudo confirmar la baja en Stripe. El negocio queda desactivado; vuelve a eliminarlo para continuar.')
+      if (!missingProviderResource(error)) throw new TenantDeletionError('No se pudo confirmar la baja en Mollie. El negocio queda desactivado; vuelve a eliminarlo para continuar.')
     }
 
     // Use the Storage API to remove physical files, including abandoned uploads.

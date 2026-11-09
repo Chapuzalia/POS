@@ -1,5 +1,7 @@
 # Datos fiscales y domiciliación SEPA
 
+> **Histórico.** La facturación usa Mollie desde 2026-11: ver [mollie-billing.md](mollie-billing.md).
+
 Los nuevos Checkouts de suscripción permiten tarjeta y domiciliación SEPA en EUR.
 Solicitan dirección de facturación, razón social e identificador fiscal mediante
 `tax_id_collection.enabled=true` y `required=if_supported`. España está soportada;

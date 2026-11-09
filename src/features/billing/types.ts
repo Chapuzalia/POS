@@ -5,6 +5,7 @@ export type BillingAccount = {
   tenant_id: string
   name?: string
   venueCount?: number
+  // 'stripe' is the stored value for gateway-billed accounts (now Mollie); the column is not renamed.
   source: 'manual' | 'stripe'
   status: string
   legal_name: string | null
@@ -12,7 +13,6 @@ export type BillingAccount = {
   email: string | null
   contract: Contract | null
   onboarding_contract: Contract | null
-  sepa_authorization?: import('../../../supabase/functions/_shared/billing/sepa').SepaAuthorization | null
   billed_contract: Contract | null
   subscription_started_at: string | null
   canceled_at: string | null
@@ -21,6 +21,7 @@ export type BillingAccount = {
   last_payment_status: string | null
   last_reconciled_at: string | null
   sync_error: string | null
+  // Mollie IDs (cst_/sub_) in legacy-named columns.
   stripe_customer_id: string | null
   stripe_subscription_id: string | null
   schedule_operation_id: string | null

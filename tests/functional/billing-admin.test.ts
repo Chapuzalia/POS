@@ -3,7 +3,7 @@ import { expect, it, vi, onTestFinished } from 'vitest'
 import { createCompiledHookRunner, jsxRuntime, nodes } from '../helpers/component-harness.mjs'
 import { centsToInput, parseMoneyToCents, formatMoney } from '../../src/lib/format'
 import { billingFailureDiagnostic } from '../../supabase/functions/_shared/billing/diagnostics'
-import { StripeRequestError } from '../../supabase/functions/_shared/billing/stripe'
+import { MollieRequestError } from '../../supabase/functions/_shared/billing/mollie'
 import * as presentation from '../../src/features/billing/presentation'
 import type { BillingInvoice } from '../../src/features/billing/types'
 
@@ -32,7 +32,7 @@ const input = (tree: object, label: string) => nodes(nodes(tree).find(node => no
 function panel(active = false, temporary = false, pending = false, admin = true) {
   const agreement = { ...contract, exception: temporary ? { freeUnits: {}, limits: {}, discountBasisPoints: 1000, customAmounts: {}, cycles: 3, reason: 'Descuento temporal' } : null }
   const detail = {
-    account: { status: active ? 'active' : 'manual', stripe_customer_id: active ? 'cus_test' : null, stripe_subscription_id: active ? 'sub_test' : null, contract: active ? agreement : null, onboarding_contract: agreement },
+    account: { status: active ? 'active' : 'manual', stripe_customer_id: active ? 'cst_test' : null, stripe_subscription_id: active ? 'sub_test' : null, contract: active ? agreement : null, onboarding_contract: agreement },
     tenant: { id: 'tenant', name: 'Empresa', max_venues: 1, max_devices: 2 },
     venues: [{ id: 'venue', name: 'Centro' }], devices: [], operations: pending ? [{ id: 'pending', status: 'scheduled', reason: 'Añadir personal en Centro', effective_at: '2026-12-03', contract: { ...contract, recurringCents: 5900, limits: { venues: 2, devices: 4 }, addons: [{ key: 'personal', quantity: 2, included: 0, billable: 2, scope: 'venue', venueIds: ['venue'], deviceIds: [] }] } }] : [], audit: [], invoices: [] as BillingInvoice[],
   }
@@ -42,7 +42,7 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     if (action === 'catalog') return catalog
     if (action === 'get') return detail
     if (action === 'quote') return { id: 'quote', kind: 'change', timing: 'immediate', preview: { amountDueCents: 6534, recurringCents: 5400 } }
-    if (action === 'portal') return { url: 'https://billing.stripe.com/test' }
+    if (action === 'portal') return { url: 'https://www.mollie.com/checkout/arrears' }
     if (action === 'confirm') return confirm()
     throw new Error('No se pudo confirmar. Revisa el estado antes de reintentar.')
   })
@@ -79,7 +79,10 @@ it('keeps the customer plan minimal until Modify plan is opened and retains the 
   for (const label of ['Plan y tarifa', 'Último pago', 'Historial de cambios', 'Actualizar ficha']) expect(overview).not.toContain(label)
   expect(button(h.render(), 'Revisar cambio')).toBeUndefined()
   expect(h.request.mock.calls.some(([body]) => ['quote', 'confirm', 'portal'].includes(body.action))).toBe(false)
-  await button(h.render(), 'Métodos de pago').props.onClick()
+  expect(button(h.render(), 'Pagar cuota pendiente')).toBeUndefined()
+  // Mollie has no payment-method portal: the owner pays a failed or returned charge by card.
+  h.detail.account.status = 'past_due'
+  await button(h.render(), 'Pagar cuota pendiente').props.onClick()
   await vi.waitFor(() => expect(h.request.mock.calls.some(([body]) => body.action === 'portal')).toBe(true))
   button(h.render(), 'Modificar plan').props.onClick()
   expect(text(h.render())).toContain('Plan y tarifa')
@@ -99,7 +102,7 @@ it('keeps the customer plan minimal until Modify plan is opened and retains the 
 it('keeps customer pending payments visible while plan modifications remain blocked', async () => {
   const h = panel(true, false, true, false)
   h.detail.operations[0].status = 'payment_pending'
-  Object.assign(h.detail.operations[0], { result: { url: 'https://invoice.stripe.com/test' } })
+  Object.assign(h.detail.operations[0], { result: { url: 'https://www.mollie.com/checkout/invoice' } })
   h.render()
   await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
   expect(text(h.render())).toContain('Completar el pago pendiente')
@@ -112,7 +115,7 @@ it('keeps customer pending payments visible while plan modifications remain bloc
 
 it('keeps plan configuration in superadmin without opening payment pages, including older backend responses', async () => {
   const h = panel()
-  h.confirm.mockResolvedValue({ url: 'https://checkout.stripe.com/test' })
+  h.confirm.mockResolvedValue({ url: 'https://www.mollie.com/checkout/test' })
   h.render()
   await vi.waitFor(() => expect(button(h.render(), 'Ver importes')).toBeDefined())
   expect(button(h.render(), 'Métodos de pago')).toBeUndefined()
@@ -127,21 +130,23 @@ it('keeps plan configuration in superadmin without opening payment pages, includ
 it.each([true, false])('reserves pending payment and invoice links for the customer (admin=%s)', async admin => {
   const h = panel(true, false, true, admin)
   h.detail.operations[0].status = 'payment_pending'
-  Object.assign(h.detail.operations[0], { result: { url: 'https://checkout.stripe.com/test' } })
-  h.detail.invoices.push({ stripe_invoice_id: 'in_test', number: 'INV-1', status: 'open', amount_due_cents: 6534, amount_paid_cents: 0, created_at: '2026-11-04', hosted_invoice_url: 'https://invoice.stripe.com/test', invoice_pdf: null })
+  Object.assign(h.detail.operations[0], { result: { url: 'https://www.mollie.com/checkout/test' } })
+  h.detail.invoices.push({ stripe_invoice_id: 'in_test', number: 'INV-1', status: 'open', amount_due_cents: 6534, amount_paid_cents: 0, created_at: '2026-11-04', hosted_invoice_url: 'https://www.mollie.com/checkout/invoice', invoice_pdf: null })
   h.render()
   await vi.waitFor(() => expect(text(h.render())).toContain('Base'))
   const link = nodes(h.render()).find(node => node.type === 'a' && text(node) === 'Abrir factura')
   expect(Boolean(link)).toBe(!admin)
   expect(Boolean(button(h.render(), 'Continuar pago'))).toBe(!admin)
-  expect(Boolean(button(h.render(), 'Métodos de pago'))).toBe(!admin)
+  h.detail.account.status = 'past_due'
+  expect(Boolean(button(h.render(), 'Pagar cuota pendiente'))).toBe(!admin)
+  h.detail.account.status = 'active'
   if (admin) {
     expect(text(h.render())).toContain('El cliente debe completar el pago desde su cuenta')
     expect(text(h.render())).not.toContain('Facturas de suscripción')
     expect(text(h.render())).not.toContain('INV-1')
   } else {
     expect(text(h.render())).toContain('INV-1')
-    expect(link.props.href).toBe('https://invoice.stripe.com/test')
+    expect(link.props.href).toBe('https://www.mollie.com/checkout/invoice')
   }
 })
 
@@ -318,9 +323,10 @@ it('opens the existing catalogue without implicitly creating another tariff', as
   expect(h.request.mock.calls[0][0].version).toBeNull()
 })
 
-it('logs reviewed codes and sanitized Stripe diagnostics without request data or provider messages', () => {
+it('logs reviewed codes and sanitized Mollie diagnostics without request data or provider messages', () => {
   expect(billingFailureDiagnostic('quote', new Error('BILLING_INVALID_PROMOTION_CONTRACT'))).toMatchObject({ action: 'quote', code: 'BILLING_INVALID_PROMOTION_CONTRACT' })
-  const error = new StripeRequestError(400, { type: 'invalid_request_error', code: 'parameter_unknown', param: 'customer@example.com' }, 'Bearer secret')
-  expect(billingFailureDiagnostic('quote', error)).toMatchObject({ stripe: { status: 400, code: 'parameter_unknown', param: null, requestId: null } })
+  expect(billingFailureDiagnostic('quote', new MollieRequestError(422, 'consumerAccount'))).toMatchObject({ mollie: { status: 422, field: 'consumerAccount', outcome: 'rejected' } })
+  expect(billingFailureDiagnostic('quote', new MollieRequestError(422, 'customer@example.com'))).toMatchObject({ mollie: { field: null } })
+  expect(billingFailureDiagnostic('quote', new MollieRequestError(503, null))).toMatchObject({ mollie: { outcome: 'uncertain' } })
   expect(JSON.stringify(billingFailureDiagnostic('quote', new Error('private token and customer@example.com')))).not.toMatch(/private|token|@/)
 })

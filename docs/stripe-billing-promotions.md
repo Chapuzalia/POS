@@ -1,5 +1,7 @@
 # Promociones gratuitas de addons
 
+> **Histórico.** La facturación usa Mollie desde 2026-11: ver [mollie-billing.md](mollie-billing.md).
+
 Preparado en `Staging`. No se han aplicado migraciones, desplegado servicios ni consultado/modificado la promoción pendiente de **Test**. Se conserva el bloqueo existente que admite exclusivamente Stripe sandbox y la API fijada `2026-09-30.endive`.
 
 ## Funcionamiento

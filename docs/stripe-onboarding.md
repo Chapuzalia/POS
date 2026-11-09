@@ -1,5 +1,7 @@
 # Alta de negocios con Stripe
 
+> **Histórico.** La facturación usa Mollie desde 2026-11: ver [mollie-billing.md](mollie-billing.md).
+
 El modal de Superadmin permite mantener el alta manual o preparar una suscripción
 con un plan y extras del catálogo publicado. No crea suscripciones ni cobra al dar
 de alta. El servidor calcula importes y límites desde las versiones del catálogo;
