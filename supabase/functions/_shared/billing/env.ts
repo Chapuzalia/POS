@@ -1,5 +1,6 @@
 import type { SupabaseClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { MollieGateway } from './mollie.ts'
+import { OdooGateway } from './odoo.ts'
 import { BillingService } from './service.ts'
 
 // Mollie needs a public HTTPS webhook; inside self-hosted Edge Runtime SUPABASE_URL is internal.
@@ -9,6 +10,12 @@ export function billingEnv() {
   const appUrl = Deno.env.get('BILLING_APP_URL')?.replace(/\/$/, '') ?? ''
   const webhookUrl = Deno.env.get('BILLING_WEBHOOK_URL') ?? ''
   return { mollieKey, appUrl, webhookUrl, configured: Boolean(mollieKey && appUrl && /^https:\/\//.test(webhookUrl)) }
+}
+
+// Optional: without the three variables no document is sent to Odoo.
+export function odooFromEnv() {
+  const url = Deno.env.get('ODOO_URL') ?? '', db = Deno.env.get('ODOO_DB') ?? '', key = Deno.env.get('ODOO_API_KEY') ?? ''
+  return url && db && key ? new OdooGateway(url, db, key) : null
 }
 
 export function billingServiceFromEnv(db: SupabaseClient) {
