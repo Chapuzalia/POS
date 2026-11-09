@@ -1,4 +1,4 @@
-import type { BillingAccount } from './types'
+import type { BillingAccount, BillingInvoice } from './types'
 
 const labels: Record<string, string> = {
   active: 'Activa', trialing: 'En prueba', manual: 'Manual', pending_payment: 'Alta pendiente',
@@ -35,3 +35,7 @@ export function billingAccountState(account: Pick<BillingAccount, 'status' | 'la
   if (account.status === 'manual') return { label: 'Gestión manual', description: 'Este cliente todavía no tiene una suscripción activa en Mollie.', tone: 'neutral', needsAttention: false }
   return { label: billingStatusLabel(account.status), description: 'Comprueba el estado con Mollie antes de modificar la suscripción.', tone: 'warning', needsAttention: true }
 }
+
+const odooLabels: Record<string, string> = { proforma: 'Proforma', invoiced: 'Emitida', refunded: 'Rectificada', canceled: 'Anulada', failed: 'Pendiente de emisión' }
+export const odooDocumentLabel = (state: BillingInvoice['odoo_state']) => state ? odooLabels[state] ?? '—' : '—'
+export const odooDocumentAvailable = (state: BillingInvoice['odoo_state']) => state === 'proforma' || state === 'invoiced' || state === 'refunded'

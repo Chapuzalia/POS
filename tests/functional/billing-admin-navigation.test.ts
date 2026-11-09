@@ -4,14 +4,14 @@ import { createCompiledHookRunner, jsxRuntime, nodes } from '../helpers/componen
 import * as presentation from '../../src/features/billing/presentation'
 
 const text = (node: ReturnType<typeof nodes>[number]): string => typeof node === 'string' ? node : Array.isArray(node) ? node.map(text).join(' ') : node?.props ? text(node.props.children) : ''
-function setup() {
+function setup(odoo?: { enabled: boolean; failed: number }) {
   const accounts = [
     { tenant_id: 'active', name: 'Cliente al día', status: 'active', last_payment_status: 'paid' },
     { tenant_id: 'debt', name: 'Cliente con deuda', status: 'past_due', last_payment_status: 'open' },
     { tenant_id: 'sepa', name: 'Cliente SEPA', status: 'active', last_payment_status: 'processing' },
   ]
   const request = vi.fn(async ({ action }: { action: string }) => {
-    if (action === 'overview') return { accounts, events: [], metrics: {}, truncated: false }
+    if (action === 'overview') return { accounts, events: [], metrics: {}, truncated: false, odoo }
     if (action === 'catalog') return { products: [], versions: [] }
     if (action === 'reconcile-batch') return { results: [{ ok: true }, { ok: false }] }
     return {}
@@ -55,4 +55,13 @@ it('reports partial failures from batch reconciliation instead of implying every
   h.button('Actualizar estados con Mollie').props.onClick()
   await vi.waitFor(() => expect(text(h.render())).toContain('1 no se han podido comprobar'))
   expect(text(h.render())).toContain('1 cuentas actualizadas')
+})
+
+it.each([
+  [{ enabled: false, failed: 0 }, 'Odoo desactivado'],
+  [{ enabled: true, failed: 2 }, 'Odoo: 2 documentos pendientes de emisión'],
+])('shows the Odoo invoicing status (%o)', async (odoo, label) => {
+  const h = setup(odoo)
+  h.render()
+  await vi.waitFor(() => expect(text(h.render())).toContain(label))
 })

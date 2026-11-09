@@ -32,6 +32,8 @@ export type BillingInvoice = {
   stripe_invoice_id: string; number: string | null; status: string
   amount_due_cents: number; amount_paid_cents: number; created_at: string
   hosted_invoice_url: string | null; invoice_pdf: string | null
+  // Odoo (fiscal issuer) document state; older billing functions omit it.
+  odoo_state?: 'proforma' | 'invoiced' | 'canceled' | 'refunded' | 'failed' | null; has_refund?: boolean
 }
 export type BillingOperation = {
   id: string; kind: string; status: string; timing: 'immediate' | 'period_end'; reason: string
@@ -58,5 +60,6 @@ export type BillingOverview = {
   accounts: BillingAccount[]
   events: Array<{ event_id: string; event_type: string; status: string; error_code: string | null; attempts: number; created_at: string }>
   metrics: { arrCents: number; mrrCents: number; paidCents: number; paidExcludingTaxCents: number }
+  odoo?: { enabled: boolean; failed: number }
   truncated: boolean
 }

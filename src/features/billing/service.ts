@@ -33,3 +33,15 @@ export function openBillingUrl(value: string) {
   if (url.protocol !== 'https:' || !['www.mollie.com','mollie.com','pay.mollie.com'].includes(url.hostname)) throw new UserFacingError('Mollie no devolvió una dirección de pago válida.')
   window.location.assign(url.href)
 }
+
+// Odoo PDFs come through the billing function (the portal token never reaches the browser).
+export async function downloadBillingDocument(tenantId: string, paymentId: string, document: 'main' | 'refund') {
+  const file = await billingRequest<{ filename: string; base64: string }>({ action: 'invoice-document', tenantId, paymentId, document })
+  const bytes = Uint8Array.from(atob(file.base64), char => char.charCodeAt(0))
+  const url = URL.createObjectURL(new Blob([bytes], { type: 'application/pdf' }))
+  const link = window.document.createElement('a')
+  link.href = url; link.download = file.filename
+  link.click()
+  // iPad Safari reads the blob after click returns; revoke later.
+  setTimeout(() => URL.revokeObjectURL(url), 30_000)
+}

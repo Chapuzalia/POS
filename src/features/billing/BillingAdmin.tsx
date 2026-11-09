@@ -59,6 +59,7 @@ export default function BillingAdmin({ disabled, onBusyChange }: { disabled: boo
     {error ? <p role="alert" className="!m-0 !rounded-[var(--crm-radius-md)] !bg-[var(--crm-red-soft)] !p-4 !text-[var(--crm-red)]">{error}</p> : null}
     {message ? <p role="status" className="!m-0 !rounded-[var(--crm-radius-md)] !bg-[var(--crm-blue-soft)] !p-4 !text-sm">{message}</p> : null}
     {overview?.truncated ? <p role="status" className="!rounded-[var(--crm-radius-md)] !bg-[var(--crm-yellow-soft)] !p-4">Los datos auxiliares alcanzaron el límite de consulta. El ingreso recurrente incluye todas las cuentas; los cobros y locales necesitan una consulta adicional.</p> : null}
+    {overview?.odoo && (!overview.odoo.enabled || overview.odoo.failed > 0) ? <p role="status" className="!m-0 !rounded-[var(--crm-radius-md)] !bg-[var(--crm-yellow-soft)] !p-4 !text-sm">{overview.odoo.enabled ? `Odoo: ${overview.odoo.failed} documentos pendientes de emisión. Se reintentan en la siguiente conciliación.` : 'Odoo desactivado: los cobros no generan proformas ni facturas.'}</p> : null}
     {section === 'clients' ? tenantId ? <>
       <div><Button disabled={locked} onClick={() => setTenantId(null)}>← Volver a clientes</Button></div>
       <TenantBillingPanel key={tenantId} tenantId={tenantId} admin disabled={disabled} onBusyChange={setChildBusy} onChanged={() => void run(refresh)} />

@@ -41,6 +41,7 @@ function panel(active = false, temporary = false, pending = false, admin = true)
   const quoteResponse: { id: string; kind: string; timing: string; preview: { amountDueCents: number; recurringCents: number; losses?: string[] } } = { id: 'quote', kind: 'change', timing: 'immediate', preview: { amountDueCents: 6534, recurringCents: 5400 } }
   const confirm = vi.fn<() => Promise<{ url?: string }>>(async () => { throw new Error('No se pudo confirmar. Revisa el estado antes de reintentar.') })
   const openUrl = vi.fn()
+  const download = vi.fn(async () => undefined)
   const request = vi.fn(async ({ action }: { action: string }) => {
     if (action === 'catalog') return catalog
     if (action === 'get') return detail
@@ -59,7 +60,7 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     './SepaMandateFields': { SepaMandateFields: 'sepa-fields' },
     './sepa': sepaFields,
     './access': access,
-    './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: openUrl },
+    './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: openUrl, downloadBillingDocument: download },
   }, { Error, Date, crypto, URLSearchParams })
   const render = () => runner.render({ tenantId: 'tenant', admin })
   const exceptionTree = () => {
@@ -67,7 +68,7 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     return editor.type(editor.props)
   }
   onTestFinished(() => runner.unmount())
-  return { render, request, exceptionTree, detail, confirm, openUrl, quoteResponse }
+  return { render, request, exceptionTree, detail, confirm, openUrl, download, quoteResponse }
 }
 
 it('keeps the customer plan minimal until Modify plan is opened and retains the existing quote flow', async () => {
@@ -437,4 +438,25 @@ it('changes the direct-debit IBAN without asking for the company details again',
   await vi.waitFor(() => expect(text(h.render())).toContain('cuenta terminada en 3000'))
   expect(sent(h, 'change-mandate')[0]).toMatchObject({ tenantId: 'tenant', sepa: { accountHolder: 'Nuevo Titular', iban: 'DE89 3704 0044 0532 0130 00' } })
   expect(sent(h, 'change-mandate')[0].requestId).toMatch(/^[0-9a-f-]{36}$/)
+})
+
+it('shows Odoo number, fiscal state and downloads the PDF', async () => {
+  const h = panel(true, false, false, false)
+  const row = { status: 'paid', amount_due_cents: 5929, amount_paid_cents: 5929, created_at: '2026-11-10', hosted_invoice_url: null, invoice_pdf: null }
+  h.detail.invoices = [
+    { ...row, stripe_invoice_id: 'tr_invoiced', number: 'INV/2026/00001', odoo_state: 'invoiced', has_refund: false },
+    { ...row, stripe_invoice_id: 'tr_refunded', number: 'INV/2026/00002', odoo_state: 'refunded', has_refund: true },
+    { ...row, stripe_invoice_id: 'tr_pending', number: null, status: 'processing', odoo_state: 'proforma', has_refund: false },
+    { ...row, stripe_invoice_id: 'tr_failed', number: null, odoo_state: 'failed', has_refund: false },
+  ]
+  h.render()
+  await vi.waitFor(() => expect(text(h.render())).toContain('INV/2026/00001'))
+  const table = text(h.render())
+  for (const label of ['Emitida', 'Rectificada', 'Proforma', 'Pendiente de emisión', 'Estado fiscal']) expect(table).toContain(label)
+  const downloads = nodes(h.render()).filter(node => node.type === 'button' && text(node).includes('Descargar PDF'))
+  expect(downloads).toHaveLength(3)
+  await downloads[0].props.onClick()
+  expect(h.download).toHaveBeenCalledWith('tenant', 'tr_invoiced', 'main')
+  await button(h.render(), 'Descargar rectificativa').props.onClick()
+  expect(h.download).toHaveBeenCalledWith('tenant', 'tr_refunded', 'refund')
 })
