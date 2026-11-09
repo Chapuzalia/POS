@@ -66,7 +66,11 @@ export default defineConfig({
       this.emitFile({
         type: 'asset',
         fileName: 'offline-assets.json',
-        source: JSON.stringify(Object.keys(bundle).filter((file) => /\.(js|css|woff2?)$/.test(file)).map((file) => `/${file}`)),
+        // HTML entries leave empty facade chunks (pos-*.js, crm-*.js) that are never written;
+        // listing them makes the worker precache the SPA fallback HTML as JS.
+        source: JSON.stringify(Object.entries(bundle)
+          .filter(([file, output]) => /\.(js|css|woff2?)$/.test(file) && !(output.type === 'chunk' && output.facadeModuleId?.endsWith('.html')))
+          .map(([file]) => `/${file}`)),
       })
       this.emitFile({
         type: 'asset',
