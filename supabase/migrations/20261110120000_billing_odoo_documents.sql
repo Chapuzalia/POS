@@ -20,6 +20,5 @@ create table public.billing_odoo_documents (
 );
 create index billing_odoo_documents_tenant_idx on public.billing_odoo_documents(tenant_id);
 
--- Service role only (Edge Functions); owners see documents through the billing function.
+-- RLS without policies: service role only (Edge Functions); owners see documents through the billing function.
 alter table public.billing_odoo_documents enable row level security;
-revoke all on public.billing_odoo_documents from anon, authenticated;
