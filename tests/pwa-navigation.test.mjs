@@ -61,7 +61,7 @@ test('worker precaches both HTML entries and does not mix them across online and
   await app.navigate('/')
   await app.navigate('/crm/?install=1')
   app.offline()
-  for (const path of ['/', '/superadmin', '/crm/', '/crm/?install=1']) {
+  for (const path of ['/', '/superadmin', '/crm/', '/crm/?install=1', '/crm/products']) {
     const response = await app.navigate(path)
     assert.equal(response.status, 200)
     const html = await response.text()

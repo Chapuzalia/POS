@@ -12,6 +12,10 @@
       "destination": "/crm/index.html"
     },
     {
+      "source": "/crm/:section([^.]+)",
+      "destination": "/crm/index.html"
+    },
+    {
       "source": "/(.*)",
       "destination": "/index.html"
     }

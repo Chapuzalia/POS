@@ -53,6 +53,14 @@ export const productSections = new Set<CrmSection>(productNavItems.map((item) =>
 export const reportSections = new Set<CrmSection>(reportNavItems.map((item) => item.id))
 export const inventorySections = new Set<CrmSection>([...inventoryNavItems.map((item) => item.id), 'inventory-items'])
 export const purchaseSections = new Set<CrmSection>(purchaseNavItems.map((item) => item.id))
+// URL slug per section (the id unless renamed); the dashboard lives at /crm/.
+const sectionSlugs: Partial<Record<CrmSection, string>> = { reports: 'tickets' }
+const routableSections: CrmSection[] = [...allNavItems.map((item) => item.id), 'inventory-items']
+export const crmSectionPath = (section: CrmSection) => section === 'dashboard' ? '/crm/' : `/crm/${sectionSlugs[section] ?? section}`
+export function crmSectionFromPath(pathname: string): CrmSection {
+  const slug = pathname.replace(/^\/crm\/?/, '').replace(/\/+$/, '')
+  return routableSections.find((section) => (sectionSlugs[section] ?? section) === slug) ?? 'dashboard'
+}
 export const catalogSections = new Set<CrmSection>(['products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import', 'production', 'profitability'])
 
 export function getSectionTitle(section: CrmSection) {

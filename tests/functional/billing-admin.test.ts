@@ -5,6 +5,7 @@ import { centsToInput, parseMoneyToCents, formatMoney } from '../../src/lib/form
 import { billingFailureDiagnostic } from '../../supabase/functions/_shared/billing/diagnostics'
 import { MollieRequestError } from '../../supabase/functions/_shared/billing/mollie'
 import * as presentation from '../../src/features/billing/presentation'
+import * as sepaFields from '../../src/features/billing/sepa'
 import type { BillingInvoice } from '../../src/features/billing/types'
 
 const product = { key: 'base', kind: 'plan', name: 'Base', description: '', scope: 'tenant', featureKey: null, resource: null, active: true, sortOrder: 0 }
@@ -51,6 +52,8 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     '../../components/ui/AppModal': { AppModal: 'dialog' },
     '../../lib/format': { parseMoneyToCents },
     './presentation': presentation,
+    './SepaMandateFields': { SepaMandateFields: 'sepa-fields' },
+    './sepa': sepaFields,
     './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: openUrl },
   }, { Error, Date, crypto })
   const render = () => runner.render({ tenantId: 'tenant', admin })
@@ -113,18 +116,48 @@ it('keeps customer pending payments visible while plan modifications remain bloc
   expect(button(h.render(), 'Continuar pago')).toBeDefined()
 })
 
-it('keeps plan configuration in superadmin without opening payment pages, including older backend responses', async () => {
+it('leaves the first contract to the owner because only they can authorize the SEPA mandate', async () => {
   const h = panel()
-  h.confirm.mockResolvedValue({ url: 'https://www.mollie.com/checkout/test' })
   h.render()
   await vi.waitFor(() => expect(button(h.render(), 'Ver importes')).toBeDefined())
   expect(button(h.render(), 'Métodos de pago')).toBeUndefined()
   button(h.render(), 'Ver importes').props.onClick()
   await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
-  button(h.render(), 'Confirmar cambio').props.onClick()
-  await vi.waitFor(() => expect(text(h.render())).toContain('Plan configurado. El cliente debe completar el pago desde su cuenta'))
+  expect(text(h.render())).toContain('El propietario debe completar el alta desde Mi Plan')
+  expect(nodes(h.render()).some(node => node.type === 'sepa-fields')).toBe(false)
+  expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(true)
   expect(h.openUrl).not.toHaveBeenCalled()
-  expect(h.request.mock.calls.some(([body]) => body.action === 'portal')).toBe(false)
+})
+
+it('collects the SEPA mandate in Mi Plan before the first card payment', async () => {
+  const h = panel(false, false, false, false)
+  h.confirm.mockResolvedValue({ url: 'https://www.mollie.com/checkout/test' })
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
+  button(h.render(), 'Modificar plan').props.onClick()
+  button(h.render(), 'Revisar cambio').props.onClick()
+  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
+  expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(true)
+  const form = { legalName: 'Empresa SL', taxId: 'B12345678', accountHolder: 'Empresa SL', iban: 'ES91 2100 0418 4502 0005 1332', accepted: true }
+  nodes(h.render()).find(node => node.type === 'sepa-fields').props.onChange(form)
+  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(false))
+  button(h.render(), 'Confirmar cambio').props.onClick()
+  await vi.waitFor(() => expect(h.openUrl).toHaveBeenCalledWith('https://www.mollie.com/checkout/test'))
+  expect(h.request.mock.calls.find(([body]) => body.action === 'confirm')[0]).toMatchObject({ operationId: 'quote', sepa: { accountHolder: 'Empresa SL', iban: form.iban }, payer: { legalName: 'Empresa SL', taxId: 'B12345678' } })
+})
+
+it('does not ask for the IBAN again when changing an active subscription', async () => {
+  const h = panel(true, false, false, false)
+  h.confirm.mockResolvedValue({})
+  h.render()
+  await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
+  button(h.render(), 'Modificar plan').props.onClick()
+  button(h.render(), 'Revisar cambio').props.onClick()
+  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
+  expect(nodes(h.render()).some(node => node.type === 'sepa-fields')).toBe(false)
+  button(h.render(), 'Confirmar cambio').props.onClick()
+  await vi.waitFor(() => expect(h.request.mock.calls.some(([body]) => body.action === 'confirm')).toBe(true))
+  expect(h.request.mock.calls.find(([body]) => body.action === 'confirm')[0]).not.toHaveProperty('sepa')
 })
 
 it.each([true, false])('reserves pending payment and invoice links for the customer (admin=%s)', async admin => {

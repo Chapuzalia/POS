@@ -2,7 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { CrmModalBusyContext } from '../../features/crm/shared/components/CrmModalBusyContext'
 import { CrmShell } from '../../features/crm/layout/CrmShell'
 import { canAccessCrm, canAccessCrmSection } from '../../features/crm/routing/crmPermissions'
-import { catalogSections, type CrmSection } from '../../features/crm/routing/crmNavigation'
+import { catalogSections, crmSectionFromPath, crmSectionPath, type CrmSection } from '../../features/crm/routing/crmNavigation'
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
 import { applyCrmOpenCashSalesTotals, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
@@ -38,7 +38,18 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onError, onLog
 function reloadActivatedBusiness() { window.location.reload() }
 
 function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogout }: CrmPageProps) {
-  const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
+  // The section lives in the URL (/crm/products) so a reload or back button keeps it.
+  const [activeSection, setActiveSection] = useState<CrmSection>(() => crmSectionFromPath(window.location.pathname))
+  useEffect(() => {
+    const handlePopState = () => setActiveSection(crmSectionFromPath(window.location.pathname))
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+  useEffect(() => {
+    // Redirects to an allowed section (permissions, unknown path) replace the entry instead of stacking it.
+    const path = crmSectionPath(activeSection)
+    if (window.location.pathname !== path) window.history.replaceState(window.history.state, '', `${path}${window.location.search}${window.location.hash}`)
+  }, [activeSection])
   const [searchFocus, setSearchFocus] = useState<{ key: string; section: CrmSection; targetId: string } | null>(null)
   const [isBusy, setIsBusy] = useState(false)
   const [onboardingRequest, setOnboardingRequest] = useState(0)
@@ -130,10 +141,11 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
   const inventoryEnabled = selectedVenue ? hasTenantVenueCapability({ features: context.features, venue: selectedVenue }, 'inventory') : false
 
   useEffect(() => {
-    if (!inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock') {
+    // Wait for the venue: before it loads inventoryEnabled is false and would bounce a reloaded /crm/inventory-* URL.
+    if (selectedVenue && !inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock') {
       setActiveSection('inventory-stock')
     }
-  }, [activeSection, inventoryEnabled])
+  }, [activeSection, inventoryEnabled, selectedVenue])
 
   const statsLoadRequestId = useRef(0)
   const refreshStats = useCallback(async (options: { comparisonPeriod?: CrmStatsPeriod; period?: CrmStatsPeriod; silent?: boolean } = {}) => {
@@ -252,7 +264,10 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
 
   function changeSection(section: CrmSection) {
     const inventorySectionBlocked = !inventoryEnabled && section.startsWith('inventory-') && section !== 'inventory-stock'
-    if (canAccessCrmSection(context.role, section, context.features, selectedVenue) && !inventorySectionBlocked) setActiveSection(section)
+    if (canAccessCrmSection(context.role, section, context.features, selectedVenue) && !inventorySectionBlocked) {
+      if (section !== activeSection) window.history.pushState(null, '', crmSectionPath(section))
+      setActiveSection(section)
+    }
     setSearchFocus(null)
   }
 

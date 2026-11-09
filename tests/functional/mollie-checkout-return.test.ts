@@ -1,6 +1,7 @@
 import { readFileSync } from 'node:fs'
 import { expect, it, vi, onTestFinished } from 'vitest'
 import { createCompiledHookRunner, jsxRuntime, nodes } from '../helpers/component-harness.mjs'
+import * as sepaFields from '../../src/features/billing/sepa'
 
 function setup(search = '?billing=success', customerId: string | null = 'cst_test', operations: Array<{ id: string; status: string; result?: { url?: string } | null }> = []) {
   let activationRequired = true
@@ -24,6 +25,8 @@ function setup(search = '?billing=success', customerId: string | null = 'cst_tes
     '../../components/ui/Checkbox': { Checkbox: 'checkbox' },
     '../../components/ui/Input': { Input: 'input' },
     './BillingSelectionEditor': { BillingSelectionEditor: 'section' },
+    './SepaMandateFields': { SepaMandateFields: 'sepa-fields' },
+    './sepa': sepaFields,
     './service': { billingRequest: request, billingMoney: String, openBillingUrl },
     './selection': { buildContract: vi.fn() },
   }, { Error, URLSearchParams, window: { location: { search }, setInterval: (callback: () => void) => { poll = callback; return 1 }, clearInterval } })
@@ -31,13 +34,9 @@ function setup(search = '?billing=success', customerId: string | null = 'cst_tes
   const render = (disabled = false) => runner.render({ tenantId: 'tenant', onActivated, disabled })
   // The owner must authorize the SEPA mandate before the first card payment.
   const fillSepa = async () => {
-    const values = ['Restaurante Prueba SL', 'B12345678', 'Restaurante Prueba SL', 'ES91 2100 0418 4502 0005 1332']
-    for (const [index, value] of values.entries()) {
-      nodes(render()).filter(node => node.type === 'input')[index].props.onChange({ target: { value } })
-      await vi.waitFor(() => expect(nodes(render()).filter(node => node.type === 'input')[index].props.value).toBe(index === 3 ? value.toUpperCase() : value))
-    }
-    nodes(render()).find(node => node.type === 'checkbox')?.props.onChange(true)
-    await vi.waitFor(() => expect(nodes(render()).find(node => node.type === 'checkbox')?.props.checked).toBe(true))
+    const form = { legalName: 'Restaurante Prueba SL', taxId: 'B12345678', accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332', accepted: true }
+    nodes(render()).find(node => node.type === 'sepa-fields')?.props.onChange(form)
+    await vi.waitFor(() => expect(nodes(render()).find(node => node.type === 'sepa-fields')?.props.value).toEqual(form))
   }
   return { fillSepa, request, onActivated, openBillingUrl, render, verify: () => { verified = true }, poll: () => poll?.(), clearInterval }
 }

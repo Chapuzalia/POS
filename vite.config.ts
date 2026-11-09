@@ -10,6 +10,11 @@ import { validateBuildEnvironment } from './build/validateBuildEnvironment.ts'
 function configureCrmCanonicalRedirect(server: ViteDevServer | PreviewServer) {
   server.middlewares.use((request, response, next) => {
     const url = new URL(request.url ?? '/', 'http://localhost')
+    // CRM sections (/crm/products) are client routes served by the CRM entry, not the POS fallback.
+    if (/^\/crm\/[^.]+$/.test(url.pathname)) {
+      request.url = `/crm/index.html${url.search}`
+      return next()
+    }
     if (url.pathname !== '/crm') return next()
     response.writeHead(308, { Location: `/crm/${url.search}` })
     response.end()
