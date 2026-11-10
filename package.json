@@ -1,7 +1,7 @@
 {
   "name": "pos",
   "private": true,
-  "version": "1.0.21",
+  "version": "1.0.22",
   "packageManager": "pnpm@10.15.1",
   "type": "module",
   "scripts": {
@@ -15,9 +15,14 @@
     "test:legacy": "node --test tests/*.test.mjs",
     "lint": "oxlint",
     "preview": "vite preview",
-    "prepare": "git config core.hooksPath .githooks || true"
+    "prepare": "git config core.hooksPath .githooks || true",
+    "build:android": "vite build && cap sync android",
+    "apk:debug": "pnpm run build:android && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
     "@heroui/react": "3.2.2",
     "@heroui/styles": "3.2.2",
     "@internationalized/date": "3.12.2",
@@ -37,6 +42,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@electric-sql/pglite": "^0.5.8",
     "@sentry/vite-plugin": "^5.4.0",
     "@tailwindcss/vite": "^4.3.2",

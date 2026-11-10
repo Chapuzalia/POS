@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Tickit POS</string>
+    <string name="title_activity_main">Tickit POS</string>
+    <string name="package_name">com.tickit.pos</string>
+    <string name="custom_url_scheme">com.tickit.pos</string>
+</resources>
