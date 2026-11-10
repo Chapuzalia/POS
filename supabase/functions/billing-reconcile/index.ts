@@ -14,7 +14,7 @@ Deno.serve(async request => {
   if (secret.length < 32 || difference !== 0) return new Response(null, { status: 401 })
   try {
     const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', { auth: { persistSession: false, autoRefreshToken: false } })
-    const service = billingServiceFromEnv(db)
+    const service = await billingServiceFromEnv(db)
     // Legacy Stripe sandbox links (cus_) are not reconciled through Mollie.
     const accounts = await db.from('billing_accounts').select('tenant_id').like('stripe_customer_id','cst_%').order('last_attempt_at',{nullsFirst:true}).limit(10)
     if (accounts.error) throw new Error('BILLING_DB_BATCH')

@@ -63,3 +63,10 @@ export type BillingOverview = {
   odoo?: { enabled: boolean; failed: number }
   truncated: boolean
 }
+
+export type BillingSecretSource = 'stored' | 'env' | 'missing'
+export type BillingIntegrationsStatus = {
+  mollie: { source: BillingSecretSource; mode: 'live' | 'test' | null; keyHint: string | null }
+  odoo: { source: BillingSecretSource; serverUrl: string | null; db: string | null; keyHint: string | null }
+  urlsConfigured: boolean
+}

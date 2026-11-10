@@ -25,6 +25,7 @@ function harness() {
     './VerifactuConfiguration': { VerifactuConfiguration: component },
     '../../features/billing/BillingSelectionEditor': { BillingSelectionEditor: component },
     '../../features/billing/service': { billingRequest: vi.fn() },
+    '../../features/crm/layout/crmTheme': { useCrmTheme: () => ['light', vi.fn()] },
     '../../features/billing/selection': { emptyBillingSelection: { planVersionId: '', addons: [] }, generateOwnerPassword: vi.fn() },
   }, { window: { setInterval: () => 1, clearInterval() {} } })
   const props = { context: { userName: 'Admin' }, error: null, isOnline: true, onError: vi.fn(), onLogout: vi.fn(), onBusyChange }

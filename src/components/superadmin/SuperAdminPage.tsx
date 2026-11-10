@@ -6,7 +6,7 @@ import { Checkbox as UiCheckbox } from '../ui/Checkbox'
 import { AppModal } from '../ui/AppModal'
 import { DataTable } from '../ui/DataTable'
 import { DashboardShell, LiveStatus, dashboardMenuItemClass } from '../layout/DashboardShell'
-import { Building2, Check, ChevronRight, Crown, Eye, LockKeyhole, LogOut, Pencil, Plus, Power, RefreshCw, Store, Trash2, X } from 'lucide-react'
+import { Building2, Check, ChevronRight, Crown, Eye, LockKeyhole, LogOut, Moon, Pencil, Plus, Power, RefreshCw, Settings, Store, Sun, Trash2, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
   createPlatformTenant,
@@ -27,8 +27,13 @@ import { BillingSelectionEditor } from '../../features/billing/BillingSelectionE
 import { billingRequest } from '../../features/billing/service'
 import { buildContract, emptyBillingSelection, generateOwnerPassword } from '../../features/billing/selection'
 import type { BillingCatalog, Selection } from '../../features/billing/types'
+import { useCrmTheme } from '../../features/crm/layout/crmTheme'
 
 const BillingAdmin = lazy(() => import('../../features/billing/BillingAdmin'))
+const BillingIntegrationsSettings = lazy(() => import('../../features/billing/BillingIntegrationsSettings'))
+
+const sectionLabels = { tenants: 'Negocios', billing: 'Facturación', settings: 'Configuración' } as const
+type Section = keyof typeof sectionLabels
 
 type SuperAdminPageProps = {
   context: TenantContext
@@ -87,7 +92,8 @@ export function SuperAdminPage({ context, error, isOnline, onBusyChange, onError
   const [tenants, setTenants] = useState<PlatformTenant[]>([])
   const [verifactuIntegrations, setVerifactuIntegrations] = useState<VerifactuIntegration[]>([])
   const [platformFeatures, setPlatformFeatures] = useState<PlatformFeature[]>([])
-  const [section, setSection] = useState<'tenants' | 'billing'>('tenants')
+  const [section, setSection] = useState<Section>('tenants')
+  const [theme, toggleTheme] = useCrmTheme()
   const [tenantModal, setTenantModal] = useState<TenantModalState>(null)
   const [pendingActions, setPendingActions] = useState(0)
   const isBusy = pendingActions > 0
@@ -288,28 +294,37 @@ export function SuperAdminPage({ context, error, isOnline, onBusyChange, onError
       account={{
         name: context.userName,
         detail: 'Superadmin',
-        menu: <button className={dashboardMenuItemClass} disabled={isBusy || billingBusy} onClick={onLogout} type="button"><LogOut aria-hidden="true" className="size-4" /><span>Cerrar sesión</span></button>,
+        menu: <>
+          <button aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'} className={dashboardMenuItemClass} onClick={toggleTheme} type="button">
+            {theme === 'dark' ? <Sun aria-hidden="true" className="size-4" /> : <Moon aria-hidden="true" className="size-4" />}
+            <span>{theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}</span>
+          </button>
+          <button className={dashboardMenuItemClass} disabled={isBusy || billingBusy} onClick={onLogout} type="button"><LogOut aria-hidden="true" className="size-4" /><span>Cerrar sesión</span></button>
+        </>,
       }}
       activeId={section}
       brand={<div className="flex min-w-0 items-center gap-3">
         <div className="grid size-9 shrink-0 place-items-center rounded-[10px] border border-[var(--crm-sidebar-border)] bg-[var(--crm-sidebar-hover)] text-[#79b7ff]"><Crown className="size-5 stroke-[1.8]" /></div>
         <div className="min-w-0"><p className="m-0 truncate text-sm leading-tight font-bold tracking-[0.04em] text-[var(--crm-sidebar-text)]">TICKIT</p><p className="m-0 mt-0.5 text-[10px] font-semibold tracking-[0.16em] text-[var(--crm-sidebar-muted)] uppercase">Superadmin</p></div>
       </div>}
-      eyebrow={<><Crown aria-hidden="true" className="size-3.5" /><span>Plataforma</span><ChevronRight aria-hidden="true" className="size-3.5" /><span>{section === 'billing' ? 'Facturación' : 'Negocios'}</span></>}
+      eyebrow={<><Crown aria-hidden="true" className="size-3.5" /><span>Plataforma</span><ChevronRight aria-hidden="true" className="size-3.5" /><span>{sectionLabels[section]}</span></>}
       groups={[{ label: 'Plataforma', items: [
         { id: 'tenants', label: 'Negocios', icon: Building2, disabled: isBusy || billingBusy },
         { id: 'billing', label: 'Facturación', icon: Crown, disabled: isBusy || billingBusy },
+        { id: 'settings', label: 'Configuración', icon: Settings, disabled: isBusy || billingBusy },
       ] }]}
       notices={<>
         {success ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-green-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-green)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">{success}</div> : null}
         {welcomeEmailNotice ? <div role="alert" className="!mx-auto !mt-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!w-[calc(100%_-_56px)]">{welcomeEmailNotice}</div> : null}
         {!isOnline ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">La administración global requiere conexión.</div> : null}
       </>}
-      onNavigate={(id) => setSection(id === 'billing' ? 'billing' : 'tenants')}
+      onNavigate={(id) => setSection(id in sectionLabels ? id as Section : 'tenants')}
       sideFooter={<LiveStatus isOnline={isOnline} />}
-      title={section === 'billing' ? 'Facturación de suscripciones' : 'Gestión global de negocios'}
+      theme={theme}
+      title={section === 'billing' ? 'Facturación de suscripciones' : section === 'settings' ? 'Configuración de la plataforma' : 'Gestión global de negocios'}
     >
-          {section === 'billing' ? <Suspense fallback={<p>Cargando facturación…</p>}><BillingAdmin disabled={!isOnline} onBusyChange={setBillingBusy} /></Suspense> : <>
+          {section === 'billing' ? <Suspense fallback={<p>Cargando facturación…</p>}><BillingAdmin disabled={!isOnline} onBusyChange={setBillingBusy} /></Suspense>
+          : section === 'settings' ? <Suspense fallback={<p>Cargando configuración…</p>}><BillingIntegrationsSettings disabled={!isOnline} onBusyChange={setBillingBusy} /></Suspense> : <>
           {pendingVerifactu.length ? <div role="status" className="!mb-4 !grid !gap-2 !rounded-[12px] !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !text-[var(--crm-yellow)]">
             <strong>{pendingVerifactu.length} solicitudes de Verifactu pendientes</strong>
             <div className="!flex !flex-wrap !gap-2">{pendingVerifactu.map(integration => {

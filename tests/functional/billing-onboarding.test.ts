@@ -60,7 +60,7 @@ it('creates gateway-billed tenants with a validated draft before returning succe
     compileComponent(source, {
       'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
       '../_shared/billing/service.ts': { BillingService }, '../_shared/billing/mollie.ts': { MollieGateway },
-      '../_shared/billing/env.ts': { billingEnv: () => ({ configured: true, mollieKey: 'test_fixturefixturefixturefixture', appUrl: 'http://localhost:5173', webhookUrl: 'https://hooks.example.test/billing-webhook' }) },
+      '../_shared/billing/env.ts': { loadBillingSecrets: async () => ({}), billingEnv: () => ({ configured: true, mollieKey: 'test_fixturefixturefixturefixture', appUrl: 'http://localhost:5173', webhookUrl: 'https://hooks.example.test/billing-webhook' }) },
       '../_shared/platform-tenant-deletion.ts': {},
       '../_shared/billing/schemas.ts': schemas, '../_shared/billing/onboarding.ts': { onboardingContract },
       '../_shared/welcome-email.ts': { sendWelcomeEmail: (input: Parameters<typeof sendWelcomeEmail>[0], config: Parameters<typeof sendWelcomeEmail>[1]) => sendWelcomeEmail(input, config, async (_url, init) => {

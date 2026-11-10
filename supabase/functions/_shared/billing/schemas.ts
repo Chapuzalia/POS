@@ -39,6 +39,14 @@ export const versionSchema = z.object({
 export const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('overview') }).strict(),
   z.object({ action: z.literal('catalog') }).strict(),
+  z.object({ action: z.literal('integrations') }).strict(),
+  // Omitted fields keep the saved value; keys are write-only.
+  z.object({ action: z.literal('integrations-save'),
+    mollieApiKey: z.string().trim().regex(/^(live|test)_[A-Za-z0-9]{20,64}$/).optional(),
+    odooUrl: z.url({ protocol: /^https$/ }).max(300).optional(),
+    odooDb: z.string().trim().min(1).max(100).optional(),
+    odooApiKey: z.string().trim().min(16).max(200).optional(),
+  }).strict(),
   z.object({ action: z.literal('catalog-save'), product: productSchema, version: versionSchema.nullable(), reason: z.string().min(1).max(500) }).strict(),
   z.object({ action: z.literal('catalog-publish'), versionId: z.uuid() }).strict(),
   z.object({ action: z.literal('get'), tenantId: z.uuid() }).strict(),

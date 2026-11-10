@@ -10,7 +10,7 @@ Deno.serve(async request => {
   if (!id || !/^tr_[A-Za-z0-9]{4,40}$/.test(id)) return new Response('Invalid webhook', { status: 400 })
   try {
     const db = createClient(Deno.env.get('SUPABASE_URL') ?? '', Deno.env.get('SUPABASE_SERVICE_ROLE_KEY') ?? '', { auth: { persistSession: false, autoRefreshToken: false } })
-    await billingServiceFromEnv(db).handleWebhook(id)
+    await (await billingServiceFromEnv(db)).handleWebhook(id)
     return new Response(null, { status: 200 })
   } catch {
     // Non-2xx makes Mollie retry. Never log the payment, customer or Mollie response.

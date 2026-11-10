@@ -4,6 +4,8 @@ Sustituye a Stripe (`stripe-billing.md`, `stripe-sepa.md`, `stripe-onboarding.md
 
 ## Configuración (Edge Functions)
 
+La clave de Mollie y la conexión con Odoo también se pueden guardar desde **Superadmin → Configuración** (tabla `platform_billing_secrets`, solo service role). Lo guardado ahí sustituye a `MOLLIE_API_KEY`/`ODOO_*`; las claves nunca se devuelven al navegador (solo origen y últimos 4 caracteres). Los datos de Odoo guardados solo se usan si están completos (URL, base de datos y clave). `BILLING_APP_URL` y `BILLING_WEBHOOK_URL` siguen siendo variables de entorno.
+
 | Variable | Uso |
 | --- | --- |
 | `MOLLIE_API_KEY` | Clave `live_…` para cobros reales o `test_…` para el sandbox (`MOLLIE_TEST_API_KEY` se sigue leyendo si `MOLLIE_API_KEY` no existe). El gateway rechaza cualquier respuesta cuyo `mode` no coincida con la clave, para que una clave live nunca opere sobre IDs del sandbox. |

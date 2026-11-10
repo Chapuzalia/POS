@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { BillingService } from '../_shared/billing/service.ts'
 import { MollieGateway } from '../_shared/billing/mollie.ts'
-import { billingEnv } from '../_shared/billing/env.ts'
+import { billingEnv, loadBillingSecrets } from '../_shared/billing/env.ts'
 import { selectionSchema } from '../_shared/billing/schemas.ts'
 import { onboardingContract } from '../_shared/billing/onboarding.ts'
 import { sendWelcomeEmail } from '../_shared/welcome-email.ts'
@@ -215,7 +215,7 @@ Deno.serve(async (request) => {
       let initialContract = null
       if (billingMode === 'stripe') {
         const selection = selectionSchema.safeParse(body.billingSelection)
-        const env = billingEnv()
+        const env = billingEnv(await loadBillingSecrets(adminClient))
         if (!selection.success) return response({ error: 'Selecciona un plan y complementos válidos' }, 400)
         if (!env.configured) return response({ error: 'Configura primero Mollie' }, 503)
         const billing = new BillingService(adminClient, new MollieGateway(env.mollieKey), env.appUrl, env.webhookUrl)
@@ -422,8 +422,9 @@ Deno.serve(async (request) => {
       }
 
       try {
+        const { mollieKey } = billingEnv(await loadBillingSecrets(adminClient))
         await deletePlatformTenantData(adminClient, String(body.tenantId ?? ''), authData.user.id,
-          () => new MollieGateway(billingEnv().mollieKey))
+          () => new MollieGateway(mollieKey))
         return response({ ok: true })
       } catch (error) {
         return response({ error: error instanceof TenantDeletionError ? error.message : 'No se pudo completar la eliminación. Vuelve a eliminar el negocio para continuar.' },

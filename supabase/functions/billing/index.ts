@@ -1,7 +1,7 @@
 import { createClient } from 'npm:@supabase/supabase-js@2.115.0'
 import { billingErrorMessages } from '../_shared/billing/errors.ts'
 import { billingFailureDiagnostic } from '../_shared/billing/diagnostics.ts'
-import { billingEnv, billingServiceFromEnv } from '../_shared/billing/env.ts'
+import { billingEnv, billingSecretsStatus, billingServiceFromEnv, loadBillingSecrets } from '../_shared/billing/env.ts'
 import { requestSchema } from '../_shared/billing/schemas.ts'
 
 Deno.serve(async request => {
@@ -17,9 +17,8 @@ Deno.serve(async request => {
     const url = Deno.env.get('SUPABASE_URL')
     const publicKey = Deno.env.get('SUPABASE_ANON_KEY')
     const serviceKey = Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')
-    if (!url || !publicKey || !serviceKey || !billingEnv().configured) return reply({ error: 'Facturación sandbox pendiente de configuración.' }, 503)
+    if (!url || !publicKey || !serviceKey) return reply({ error: 'Facturación sandbox pendiente de configuración.' }, 503)
     const db = createClient(url, serviceKey, { auth: { persistSession: false, autoRefreshToken: false } })
-    const service = billingServiceFromEnv(db)
     const authorization = request.headers.get('Authorization') ?? ''
     const auth = createClient(url, publicKey, { global: { headers: { Authorization: authorization } }, auth: { persistSession: false } })
     const { data: user, error: authError } = await auth.auth.getUser()
@@ -39,13 +38,30 @@ Deno.serve(async request => {
       const membership = await db.from('tenant_memberships').select('role,is_active').eq('tenant_id', body.tenantId).eq('user_id', user.user.id).maybeSingle()
       if (membership.error || membership.data?.role !== 'owner' || !membership.data.is_active) return reply({ error: 'Solo el propietario puede acceder a la facturación de su empresa.' }, 403)
     }
-    const adminActions = ['overview','catalog-save','catalog-publish','retry-operation','retry-event','reconcile-batch','settings']
+    const adminActions = ['overview','catalog-save','catalog-publish','retry-operation','retry-event','reconcile-batch','settings','integrations','integrations-save']
     if (adminActions.includes(body.action) && !admin) return reply({ error: 'Esta operación requiere Superadmin.' }, 403)
     // The owner may cancel at the end of the paid period; only Superadmin cancels immediately.
     if (body.action === 'quote-cancel' && body.immediate && !admin) return reply({ error: 'Esta operación requiere Superadmin.' }, 403)
     if (body.action === 'change-mandate' && admin) return reply({ error: 'Solo el propietario puede autorizar la domiciliación.' }, 403)
     if (body.action === 'portal' && admin) return reply({ error: 'El pago de cuotas pendientes solo está disponible desde la cuenta del cliente.' }, 403)
     if (body.action === 'confirm' && (body.sepa || body.payer) && admin) return reply({ error: 'Solo el propietario puede autorizar la domiciliación.' }, 403)
+    // Credentials are managed before the "configured" gate so Superadmin can set the first Mollie key.
+    if (body.action === 'integrations') return reply(billingSecretsStatus(await loadBillingSecrets(db)))
+    if (body.action === 'integrations-save') {
+      const current = await loadBillingSecrets(db)
+      const next = {
+        mollie_api_key: body.mollieApiKey ?? current.mollie_api_key,
+        odoo_url: body.odooUrl ?? current.odoo_url,
+        odoo_db: body.odooDb ?? current.odoo_db,
+        odoo_api_key: body.odooApiKey ?? current.odoo_api_key,
+      }
+      const saved = await db.from('platform_billing_secrets').upsert({ id: true, ...next, updated_at: new Date().toISOString(), updated_by: user.user.id })
+      if (saved.error) throw new Error('BILLING_DB_SECRETS')
+      return reply(billingSecretsStatus(next))
+    }
+    const secrets = await loadBillingSecrets(db)
+    if (!billingEnv(secrets).configured) return reply({ error: 'Facturación sandbox pendiente de configuración.' }, 503)
+    const service = await billingServiceFromEnv(db, secrets)
     switch (body.action) {
       case 'catalog': {
         const catalog = await service.catalog()

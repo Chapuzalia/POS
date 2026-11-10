@@ -329,7 +329,8 @@ it('checks Superadmin permission before dispatch and returns actionable deletion
       from: () => ({ select() { return this }, eq() { return this }, maybeSingle: async () => ({ data: { is_superadmin: superadmin }, error: null }) }) }
     compileComponent(source, {
       'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
-      '../_shared/billing/service.ts': {}, '../_shared/billing/mollie.ts': {}, '../_shared/billing/env.ts': {}, '../_shared/billing/schemas.ts': {},
+      '../_shared/billing/service.ts': {}, '../_shared/billing/mollie.ts': {}, '../_shared/billing/schemas.ts': {},
+      '../_shared/billing/env.ts': { billingEnv: () => ({ mollieKey: '' }), loadBillingSecrets: async () => ({}) },
       '../_shared/billing/onboarding.ts': {}, '../_shared/welcome-email.ts': {},
       '../_shared/platform-tenant-deletion.ts': { TenantDeletionError: deletion.TenantDeletionError, deletePlatformTenantData: async () => {
         calls++; if (fail) throw new deletion.TenantDeletionError('Vuelve a eliminar el negocio para continuar.')

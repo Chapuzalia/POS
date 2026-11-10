@@ -4,13 +4,16 @@ import { z } from 'zod'
 import { compileComponent } from '../helpers/component-harness.mjs'
 import { billingErrorMessages } from '../../supabase/functions/_shared/billing/errors'
 import { billingFailureDiagnostic } from '../../supabase/functions/_shared/billing/diagnostics'
+import { billingSecretsStatus } from '../../supabase/functions/_shared/billing/env'
+import type { BillingSecrets } from '../../supabase/functions/_shared/billing/env'
 
-function endpoint(admin = true, role = 'owner', active = true) {
+function endpoint(admin = true, role = 'owner', active = true, secretsStatus: (secrets: BillingSecrets) => unknown = secrets => ({ status: secrets })) {
   let handler: (request: Request) => Promise<Response>
   const log = vi.fn()
+  const upsert = vi.fn(async (_row: object) => ({ error: null }))
   const client = {
     auth: { getUser: async () => ({ data: { user: { id: 'admin' } } }) },
-    from: () => ({ select() { return this }, eq() { return this }, single: async () => ({ data: { is_superadmin: admin } }), maybeSingle: async () => ({ data: { role, is_active: active } }) }),
+    from: () => ({ select() { return this }, eq() { return this }, single: async () => ({ data: { is_superadmin: admin } }), maybeSingle: async () => ({ data: { role, is_active: active } }), upsert }),
   }
   const operation = { id: 'operation', status: 'payment_pending', result: { url: 'https://www.mollie.com/checkout/private', paymentId: 'tr_test' } }
   const invoice = { number: 'INV-1', amount_due_cents: 5929, hosted_invoice_url: 'https://www.mollie.com/checkout/private-invoice', invoice_pdf: null }
@@ -25,7 +28,7 @@ function endpoint(admin = true, role = 'owner', active = true) {
     '../_shared/billing/errors.ts': { billingErrorMessages },
     '../_shared/billing/diagnostics.ts': { billingFailureDiagnostic },
     '../_shared/billing/schemas.ts': schemas,
-    '../_shared/billing/env.ts': { billingEnv: () => ({ configured: true }), billingServiceFromEnv: () => ({
+    '../_shared/billing/env.ts': { billingEnv: () => ({ configured: true }), loadBillingSecrets: async () => ({ mollie_api_key: 'test_oldoldoldoldoldoldoldold', odoo_url: 'https://odoo.example.test', odoo_db: 'Alteil', odoo_api_key: 'old-odoo-key-0000' }), billingSecretsStatus: secretsStatus, billingServiceFromEnv: () => ({
       async quote() { throw new Error('BILLING_INVALID_PROMOTION_CONTRACT') },
       async detail() { return { operations: [operation], invoices: [invoice] } },
       confirm,
@@ -38,7 +41,7 @@ function endpoint(admin = true, role = 'owner', active = true) {
     Deno: { serve: (callback: typeof handler) => { handler = callback }, env: { get: () => 'https://staging.example.test' } },
     Response, Request, URL, Error, console: { error: log },
   })
-  return { log, portal, confirm, quoteCancel, changeMandate, invoiceDocument, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
+  return { log, upsert, portal, confirm, quoteCancel, changeMandate, invoiceDocument, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
 }
 
 const tenantId = '11111111-1111-4111-8111-111111111111'
@@ -148,4 +151,38 @@ it('denies invoice documents to non-owners of the tenant', async () => {
   const h = endpoint(false, 'manager')
   expect((await h.send(JSON.stringify({ action: 'invoice-document', tenantId, paymentId: 'tr_abc123', document: 'main' }))).status).toBe(403)
   expect(h.invoiceDocument).not.toHaveBeenCalled()
+})
+
+it('saves integration keys only for Superadmin, keeping omitted values and never echoing keys', async () => {
+  const body = JSON.stringify({ action: 'integrations-save', mollieApiKey: 'live_newnewnewnewnewnewnewnew' })
+  const owner = endpoint(false)
+  expect((await owner.send(body)).status).toBe(403)
+  expect(owner.upsert).not.toHaveBeenCalled()
+  const admin = endpoint()
+  const response = await admin.send(body)
+  expect(response.status).toBe(200)
+  const stored = { mollie_api_key: 'live_newnewnewnewnewnewnewnew', odoo_url: 'https://odoo.example.test', odoo_db: 'Alteil', odoo_api_key: 'old-odoo-key-0000' }
+  expect(admin.upsert).toHaveBeenCalledWith(expect.objectContaining({ id: true, updated_by: 'admin', ...stored }))
+  expect(await response.json()).toEqual({ status: stored })
+})
+
+it.each([
+  { mollieApiKey: 'sk_live_123' },
+  { odooUrl: 'http://odoo.example.test' },
+  { odooApiKey: 'short' },
+])('rejects invalid integration settings %o', async changes => {
+  const admin = endpoint()
+  expect((await admin.send(JSON.stringify({ action: 'integrations-save', ...changes }))).status).toBe(400)
+  expect(admin.upsert).not.toHaveBeenCalled()
+})
+
+it('shows the saved Odoo server address to Superadmin through the redacting reply', async () => {
+  vi.stubGlobal('Deno', { env: { get: () => undefined } })
+  try {
+    const response = await endpoint(true, 'owner', true, billingSecretsStatus).send(JSON.stringify({ action: 'integrations' }))
+    expect(response.status).toBe(200)
+    const status = await response.json()
+    expect(status.odoo).toMatchObject({ source: 'stored', serverUrl: 'https://odoo.example.test', db: 'Alteil', keyHint: '…0000' })
+    expect(JSON.stringify(status)).not.toContain('old-odoo-key-0000')
+  } finally { vi.unstubAllGlobals() }
 })

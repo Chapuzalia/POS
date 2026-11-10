@@ -1,6 +1,6 @@
 import { afterEach, expect, it, vi } from 'vitest'
 import { OdooGateway, OdooRequestError } from '../../supabase/functions/_shared/billing/odoo'
-import { odooFromEnv } from '../../supabase/functions/_shared/billing/env'
+import { billingEnv, billingSecretsStatus, loadBillingSecrets, odooConfig, odooFromEnv } from '../../supabase/functions/_shared/billing/env'
 
 afterEach(() => { vi.unstubAllGlobals() })
 
@@ -58,4 +58,20 @@ it('is disabled without the three env vars', () => {
   expect(odooFromEnv()).toBeNull()
   values.ODOO_API_KEY = KEY
   expect(odooFromEnv()).toBeInstanceOf(OdooGateway)
+})
+
+it('prefers keys saved from Superadmin over env and only exposes hints', async () => {
+  const values: Record<string, string> = { MOLLIE_API_KEY: 'test_envenvenvenvenvenvenvenv', ODOO_URL: 'https://env.odoo.test', ODOO_DB: 'Env', ODOO_API_KEY: 'env-odoo-key-1234' }
+  vi.stubGlobal('Deno', { env: { get: (name: string) => values[name] } })
+  const stored = { mollie_api_key: 'live_storedstoredstoredstored', odoo_url: 'https://stored.odoo.test', odoo_db: null, odoo_api_key: null }
+  expect(billingEnv(stored).mollieKey).toBe(stored.mollie_api_key)
+  // An incomplete stored Odoo set never mixes with env values.
+  expect(odooConfig(stored)).toMatchObject({ url: 'https://env.odoo.test', source: 'env' })
+  const status = billingSecretsStatus(stored)
+  expect(status.mollie).toEqual({ source: 'stored', mode: 'live', keyHint: '…ored' })
+  expect(JSON.stringify(status)).not.toContain(stored.mollie_api_key)
+  expect(JSON.stringify(status)).not.toContain(values.ODOO_API_KEY)
+  const query = (error: object | null) => ({ from: () => ({ select() { return this }, eq() { return this }, maybeSingle: async () => ({ data: null, error }) }) })
+  await expect(loadBillingSecrets(query({ code: 'PGRST205' }) as never)).resolves.toMatchObject({ mollie_api_key: null })
+  await expect(loadBillingSecrets(query({ code: '57014' }) as never)).rejects.toThrow('BILLING_DB_SECRETS')
 })
