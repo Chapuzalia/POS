@@ -36,3 +36,5 @@ backups/
 .superdesign/tmp/
 .env*
 !apps/api/.env.example
+
+/trailer
