@@ -1,7 +1,7 @@
 {
   "name": "pos",
   "private": true,
-  "version": "1.0.23",
+  "version": "1.0.24",
   "packageManager": "pnpm@10.15.1",
   "type": "module",
   "scripts": {
@@ -17,7 +17,8 @@
     "preview": "vite preview",
     "prepare": "git config core.hooksPath .githooks || true",
     "build:android": "vite build && cap sync android",
-    "apk:debug": "pnpm run build:android && cd android && gradlew.bat assembleDebug"
+    "apk:debug": "pnpm run build:android && cd android && gradlew.bat assembleDebug",
+    "ios:device": "bash scripts/ios-device.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
