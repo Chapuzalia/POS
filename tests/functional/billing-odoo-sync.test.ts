@@ -343,3 +343,48 @@ it('flags a partial charge-back for review instead of refunding the whole invoic
   expect(odoo.moves.filter(move => move.move_type === 'out_refund')).toHaveLength(0)
   expect(await doc(paid.id)).toMatchObject({ state: 'failed', last_error: 'ODOO_REVIEW_REQUIRED', invoice_number: 'INV/2026/00001' })
 })
+
+it('stores the official invoice PDF without emailing anyone', async () => {
+  const { mollie, odoo, activate } = await odooSetup()
+  await activate()
+  const [invoice] = odoo.moves
+  expect(invoice).toMatchObject({ state: 'posted', is_move_sent: true, invoice_pdf_report_id: [expect.any(Number), 'INV_2026_00001.pdf'] })
+  expect(odoo.emails).toEqual([])
+  const writes = odoo.calls.filter(call => call.model === 'account.move.send.wizard' && call.method === 'write')
+  expect(writes.at(-1)?.params.vals.sending_method_checkboxes).toEqual({ email: { label: 'by Email', checked: false }, snailmail: { label: 'by Post', checked: false } })
+  expect(mollie.payment('first').status).toBe('paid')
+})
+
+it('stores the official PDF of the credit note too', async () => {
+  const { service, mollie, odoo, activate } = await odooSetup()
+  await activate()
+  mollie.chargeBack(mollie.payment('first'))
+  await service.reconcile(ids.tenant)
+  expect(odoo.moves.find(move => move.move_type === 'out_refund')).toMatchObject({ state: 'posted', invoice_pdf_report_id: [expect.any(Number), 'RINV_2026_00002.pdf'] })
+  expect(odoo.emails).toEqual([])
+})
+
+it('creates the missing official PDF before serving an invoice download', async () => {
+  const { service, mollie, odoo, activate } = await odooSetup()
+  await activate()
+  const [invoice] = odoo.moves
+  invoice.invoice_pdf_report_id = false
+  invoice.is_move_sent = false
+  odoo.calls.length = 0
+  await service.invoiceDocument(ids.tenant, mollie.payment('first').id, 'main')
+  const order = odoo.calls.map(call => call.pdf ? 'pdf' : `${call.model}.${call.method}`)
+  expect(order.indexOf('account.move.send.wizard.action_send_and_print')).toBeGreaterThan(-1)
+  expect(order.indexOf('account.move.send.wizard.action_send_and_print')).toBeLessThan(order.indexOf('account.move.get_portal_url'))
+  expect(invoice.invoice_pdf_report_id).toBeTruthy()
+  expect(odoo.emails).toEqual([])
+})
+
+it('never runs Send & Print while a sending method stays checked', async () => {
+  const { odoo, mollie, activate, doc } = await odooSetup()
+  odoo.stickyEmail = true
+  await activate()
+  expect(odoo.calls.some(call => call.method === 'action_send_and_print')).toBe(false)
+  expect(odoo.emails).toEqual([])
+  expect(odoo.moves[0]).toMatchObject({ state: 'posted', payment_state: 'paid', invoice_pdf_report_id: false })
+  expect(await doc(mollie.payment('first').id)).toMatchObject({ state: 'failed', last_error: 'ODOO_REJECTED' })
+})

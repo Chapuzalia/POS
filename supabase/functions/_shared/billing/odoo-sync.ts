@@ -47,6 +47,24 @@ const fail = (code: OdooErrorCode): never => { throw new OdooRequestError(code) 
 class DeadlineReached extends Error {}
 type OdooCalls = Pick<OdooGateway, 'call'>
 
+type SendWizard = { sending_methods: string[] | false; sending_method_checkboxes: Record<string, { checked?: boolean }> | false }
+
+// Odoo 18+ serves a posted invoice as "proforma" until Send & Print stores its official PDF. The wizard
+// defaults to email, so every method is unchecked and verified first: nothing is ever sent to the customer.
+export async function ensureOfficialPdf(odoo: OdooCalls, moveId: number) {
+  const [move] = await odoo.call<{ state: string; invoice_pdf_report_id: unknown }[]>('account.move', 'read', { ids: [moveId], fields: ['state', 'invoice_pdf_report_id'] })
+  if (!move || move.state !== 'posted' || move.invoice_pdf_report_id) return
+  const context = { active_model: 'account.move', active_ids: [moveId], active_id: moveId }
+  const [wizard] = await odoo.call<number[]>('account.move.send.wizard', 'create', { vals_list: [{ move_id: moveId }], context })
+  const read = async () => (await odoo.call<SendWizard[]>('account.move.send.wizard', 'read', { ids: [wizard], fields: ['sending_methods', 'sending_method_checkboxes'], context }))[0]
+  const boxes = (await read())?.sending_method_checkboxes || {}
+  const unchecked = Object.fromEntries(Object.entries(boxes).map(([method, box]) => [method, { ...box, checked: false }]))
+  await odoo.call('account.move.send.wizard', 'write', { ids: [wizard], vals: { sending_method_checkboxes: unchecked }, context })
+  const methods = (await read())?.sending_methods
+  if (methods && methods.length) fail('ODOO_REJECTED')
+  await odoo.call('account.move.send.wizard', 'action_send_and_print', { ids: [wizard], context })
+}
+
 export function odooVat(taxId: string) {
   const vat = taxId.replace(/[\s.-]/g, '').toUpperCase()
   // Spanish NIF/NIE/CIF (9 chars) get the ES prefix Odoo expects; foreign VAT numbers keep their own prefix.
@@ -134,6 +152,7 @@ class Sync {
       const wizard = await this.create('account.payment.register', { journal_id: (await this.references()).journal, payment_date: madridDate(row.paid_at ?? row.created_at), communication: row.stripe_invoice_id }, context)
       await this.odoo.call('account.payment.register', 'action_create_payments', { ids: [wizard], context })
     }
+    await ensureOfficialPdf(this.odoo, invoice.id)
     return invoice
   }
   private async refund(row: InvoiceRow, invoice: Move) {
@@ -145,6 +164,7 @@ class Sync {
       refund = await this.first<Move>('account.move', [['reversed_entry_id', '=', invoice.id]], MOVE_FIELDS) ?? fail('ODOO_REJECTED')
     }
     if (refund.state === 'draft') await this.odoo.call('account.move', 'action_post', { ids: [refund.id] })
+    await ensureOfficialPdf(this.odoo, refund.id)
     return refund
   }
   async advance(row: InvoiceRow, target: Target, payment: MolliePayment | undefined): Promise<Ids> {
@@ -234,6 +254,8 @@ export async function odooDocument(input: { odoo: OdooGateway | null; db: Supaba
   const moveId = id(document === 'refund' ? doc?.refund_id : doc?.invoice_id)
   const orderId = document === 'main' && !moveId ? id(doc?.sale_order_id) : null
   if (!moveId && !orderId) throw new Error('BILLING_DOCUMENT_UNAVAILABLE')
+  // Invoices issued before the official PDF existed (or whose generation failed) get it now, never a proforma.
+  if (moveId) await ensureOfficialPdf(odoo, moveId)
   const [model, recordId] = moveId ? ['account.move', moveId] : ['sale.order', orderId as number]
   const path = await odoo.call<string>(model, 'get_portal_url', { ids: [recordId], report_type: 'pdf', download: true })
   const bytes = await odoo.pdf(path)

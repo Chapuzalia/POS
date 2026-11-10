@@ -141,7 +141,7 @@ export async function createBillingService(t,baseAmountCents=10000,{odoo=null}={
 
 // In-memory Odoo 19 (JSON-2 surface used by odoo-sync): partners, sale orders, invoices, payments, credit notes.
 export class FakeOdoo {
-  partners=[]; orders=[]; moves=[]; wizards=new Map(); calls=[]; offline=false; totalOffsetCents=0; seq=0; invoiceSeq=0
+  partners=[]; orders=[]; moves=[]; wizards=new Map(); calls=[]; emails=[]; stickyEmail=false; offline=false; totalOffsetCents=0; seq=0; invoiceSeq=0
   products=[{id:501,default_code:'TICKIT-SUB'}]; journals=[{id:601,code:'MOLL',type:'bank'}]; countries=[{id:68,code:'ES'},{id:75,code:'FR'}]
   id(){return ++this.seq}
   match(row,domain=[]){return domain.every(([field,op,value])=>op==='in'?value.includes(row[field]):row[field]===value)}
@@ -153,6 +153,14 @@ export class FakeOdoo {
     this.onCall?.(model,method)
     if(this.offline){const{OdooRequestError}=await import('../../supabase/functions/_shared/billing/odoo.ts');throw new OdooRequestError('ODOO_UNAVAILABLE')}
     const ids=params.ids??[],active=params.context?.active_ids??[]
+    // Like Odoo 19: Send & Print defaults to email; only a write can uncheck it (stickyEmail simulates one that cannot).
+    if(model==='account.move.send.wizard'){
+      const view=wizard=>({id:wizard.id,move_id:wizard.move_id,sending_method_checkboxes:structuredClone(wizard.checkboxes),sending_methods:Object.entries(wizard.checkboxes).filter(([,box])=>box.checked).map(([key])=>key).length?Object.entries(wizard.checkboxes).filter(([,box])=>box.checked).map(([key])=>key):false})
+      if(method==='create')return params.vals_list.map(vals=>{const id=this.id();this.wizards.set(id,{id,model,move_id:vals.move_id,checkboxes:{email:{label:'by Email',checked:true},snailmail:{label:'by Post',checked:false}}});return id})
+      if(method==='write'){for(const id of ids)if(!this.stickyEmail)this.wizards.get(id).checkboxes=structuredClone(params.vals.sending_method_checkboxes);return true}
+      if(method==='read')return ids.map(id=>view(this.wizards.get(id)))
+      if(method==='action_send_and_print'){for(const id of ids){const wizard=this.wizards.get(id),move=this.moves.find(row=>row.id===wizard.move_id);if(view(wizard).sending_methods)this.emails.push(move.name);move.invoice_pdf_report_id=[this.id(),`${move.name.replace(/\//g,'_')}.pdf`];move.is_move_sent=true}return {type:'ir.actions.act_url'}}
+    }
     if(method==='search_read')return structuredClone(this.table(model).filter(row=>this.match(row,params.domain)).slice(0,params.limit??undefined).map(row=>this.pick(row,params.fields)))
     if(method==='read')return structuredClone(this.table(model).filter(row=>ids.includes(row.id)).map(row=>this.pick(row,params.fields)))
     if(method==='create'){
@@ -172,7 +180,7 @@ export class FakeOdoo {
       const wizard=this.wizards.get(ids[0]),order=this.orders.find(row=>row.id===wizard.vals.sale_order_ids[0][2][0])
       if(order.state!=='sale')throw new Error('order not confirmed')
       const {untaxed,total}=this.amounts(order),id=this.id()
-      this.moves.push({id,move_type:'out_invoice',state:'draft',name:'/',partner_id:order.partner_id,amount_untaxed:untaxed/100,amount_total:total/100,payment_state:'not_paid',reversed_entry_id:false,invoice_origin:order.client_order_ref})
+      this.moves.push({id,move_type:'out_invoice',state:'draft',name:'/',invoice_pdf_report_id:false,partner_id:order.partner_id,amount_untaxed:untaxed/100,amount_total:total/100,payment_state:'not_paid',reversed_entry_id:false,invoice_origin:order.client_order_ref})
       order.invoice_ids.push(id)
       return {type:'ir.actions.act_window'}
     }
@@ -180,7 +188,7 @@ export class FakeOdoo {
     if(model==='account.payment.register'&&method==='action_create_payments'){const wizard=this.wizards.get(ids[0]);for(const move of this.moves.filter(row=>wizard.active.includes(row.id))){if(move.state!=='posted')throw new Error('draft');move.payment_state='paid';move.payment={...wizard.vals}}return true}
     if(model==='account.move.reversal'&&method==='refund_moves'){
       const wizard=this.wizards.get(ids[0])
-      for(const origin of this.moves.filter(row=>wizard.active.includes(row.id)))this.moves.push({id:this.id(),move_type:'out_refund',state:'draft',name:'/',partner_id:origin.partner_id,amount_untaxed:origin.amount_untaxed,amount_total:origin.amount_total,payment_state:'not_paid',reversed_entry_id:origin.id,ref:wizard.vals.reason})
+      for(const origin of this.moves.filter(row=>wizard.active.includes(row.id)))this.moves.push({id:this.id(),move_type:'out_refund',state:'draft',name:'/',invoice_pdf_report_id:false,partner_id:origin.partner_id,amount_untaxed:origin.amount_untaxed,amount_total:origin.amount_total,payment_state:'not_paid',reversed_entry_id:origin.id,ref:wizard.vals.reason})
       return {type:'ir.actions.act_window'}
     }
     throw new Error(`Unhandled Odoo ${model}.${method}`)
