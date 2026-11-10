@@ -4,6 +4,8 @@ import { Input } from '../../components/ui/Input'
 import { Checkbox } from '../../components/ui/Checkbox'
 import { DataTable } from '../../components/ui/DataTable'
 import { SepaMandateFields } from './SepaMandateFields'
+import { BillingProfileFields } from './BillingProfileFields'
+import { billingProfileReady, emptyBillingAddress } from '../../../supabase/functions/_shared/billing/profile'
 import { emptySepaForm, sepaConfirmInput, sepaFormReady } from './sepa'
 import { accessNeeds, accessRequest, emptyAccessChoice, selectionLimits } from './access'
 import type { AccessChoice } from './access'
@@ -243,7 +245,7 @@ export function TenantBillingPanel({ tenantId, admin = false, disabled = false, 
       </Editor> : null}
       {admin && detail.account.stripe_subscription_id ? <details className={`${billingCard} !border !border-[var(--crm-border)]`}><summary className="!cursor-pointer !py-2 !font-semibold !text-[var(--crm-red)]">Dar de baja la suscripción</summary><p className="!text-sm !text-[var(--crm-text-muted)]">Revisa primero cuándo termina el servicio. No se reembolsan periodos pagados.</p><div className="!mt-4 !flex !flex-wrap !gap-2">{[false, true].map(immediate => <Button key={String(immediate)} disabled={locked || !detail.account.stripe_subscription_id} onClick={() => void run(async () => { setQuote(await billingRequest<BillingOperation>({ action: 'quote-cancel', tenantId, immediate, reason })) })}>{immediate ? 'Revisar baja inmediata…' : 'Revisar baja al renovar…'}</Button>)}</div></details> : null}
       {admin ? <PromotionHistory detail={detail} catalog={catalog} /> : null}
-      {admin ? <BillingSettings detail={detail} disabled={locked} onSave={action => void run(async () => { await action(); await refresh() })} /> : null}
+      <BillingSettings key={JSON.stringify([detail.account.legal_name, detail.account.tax_id, detail.account.email, detail.account.billing_address])} detail={detail} admin={admin} disabled={locked} onSave={action => void run(async () => { await action(); await refresh() })} />
       {!admin && !editingPlan && hasSubscription ? <section aria-label="Forma de pago" className={billingCard}>
         <h3 className="!m-0 !mb-2 !font-semibold">Forma de pago</h3>
         <p className="!m-0 !text-sm !leading-relaxed !text-[var(--crm-text-secondary)]">Las cuotas se cobran por domiciliación SEPA{detail.paymentMethod?.method === 'directdebit' && detail.paymentMethod.last4 ? ` en la cuenta terminada en ${detail.paymentMethod.last4}` : ''}. Las ampliaciones de plan se pagan con tarjeta en el momento.</p>
@@ -310,13 +312,20 @@ function ExceptionEditor({ catalog, selection, value, disabled, hasSubscription,
   </details>
 }
 
-function BillingSettings({ detail, disabled, onSave }: { detail: BillingDetail; disabled: boolean; onSave: (action: () => Promise<void>) => void }) {
+function BillingSettings({ detail, admin, disabled, onSave }: { detail: BillingDetail; admin: boolean; disabled: boolean; onSave: (action: () => Promise<void>) => void }) {
   const [graceDays, setGraceDays] = useState(detail.account.grace_days)
-  const [legalName, setLegalName] = useState(detail.account.legal_name ?? '')
-  const [taxId, setTaxId] = useState(detail.account.tax_id ?? '')
-  const [email, setEmail] = useState(detail.account.email ?? '')
+  const [profile, setProfile] = useState({ legalName: detail.account.legal_name ?? '', taxId: detail.account.tax_id ?? '', email: detail.account.email ?? '', address: detail.account.billing_address ?? emptyBillingAddress })
   const [reason, setReason] = useState('Configuración de la cuenta de facturación')
-  return <details className={billingCard}><summary className="!cursor-pointer !py-2 !font-semibold">Datos de facturación y continuidad</summary><div className="!mt-4 !grid !gap-3 sm:!grid-cols-2">{[{ label: 'Razón social', value: legalName, set: setLegalName }, { label: 'NIF/CIF', value: taxId, set: setTaxId }, { label: 'Email de facturación', value: email, set: setEmail }, { label: 'Motivo', value: reason, set: setReason }].map(field => <label key={field.label} className="!grid !gap-2 !text-sm">{field.label}<Input className={billingField} disabled={disabled} value={field.value} onChange={event => field.set(event.target.value)} /></label>)}<label className="!grid !gap-2 !text-sm">Días de gracia<Input className={billingField} disabled={disabled} type="number" min={0} max={365} value={graceDays} onChange={event => setGraceDays(Number(event.target.value))} /></label></div><Button className="!mt-4" disabled={disabled || !reason.trim()} onClick={() => onSave(async () => { await billingRequest({ action: 'settings', tenantId: detail.account.tenant_id, graceDays, legalName, taxId, email, reason }) })}>Guardar datos</Button></details>
+  return <details className={billingCard}><summary className="!cursor-pointer !py-2 !font-semibold">Datos de facturación y continuidad</summary>
+    <p className="!my-3 !text-sm !text-[var(--crm-text-muted)]">Estos datos se utilizarán en los nuevos cobros de la suscripción.</p>
+    <BillingProfileFields value={profile} disabled={disabled} onChange={setProfile} />
+    <Button className="!mt-4" disabled={disabled || !billingProfileReady(profile)} onClick={() => onSave(async () => {
+      await billingRequest({ action: 'save-profile', tenantId: detail.account.tenant_id, profile: { ...profile, email: profile.email.trim() } })
+    })}>Guardar datos</Button>
+    {admin ? <div className="!mt-4 !grid !gap-3 sm:!grid-cols-2"><label className="!grid !gap-2 !text-sm">Motivo<Input className={billingField} disabled={disabled} value={reason} onChange={event => setReason(event.target.value)} /></label><label className="!grid !gap-2 !text-sm">Días de gracia<Input className={billingField} disabled={disabled} type="number" min={0} max={365} value={graceDays} onChange={event => setGraceDays(Number(event.target.value))} /></label><Button disabled={disabled || !reason.trim()} onClick={() => onSave(async () => {
+      await billingRequest({ action: 'settings', tenantId: detail.account.tenant_id, graceDays, legalName: detail.account.legal_name ?? '', taxId: detail.account.tax_id ?? '', email: detail.account.email ?? '', reason })
+    })}>Guardar continuidad</Button></div> : null}
+  </details>
 }
 
 type AccessNeeds = NonNullable<ReturnType<typeof accessNeeds>>

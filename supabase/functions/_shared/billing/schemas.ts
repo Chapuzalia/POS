@@ -3,6 +3,11 @@ import { z } from 'npm:zod@4.4.3'
 const quantity = z.number().int().min(0).max(100_000)
 const key = z.string().regex(/^[a-z][a-z0-9_]{0,79}$/)
 const recordQuantity = z.record(key, quantity)
+const billingAddressSchema = z.object({
+  street: z.string().trim().min(1).max(200), postalCode: z.string().trim().min(1).max(20),
+  city: z.string().trim().min(1).max(100), province: z.string().trim().max(100), countryCode: z.string().trim().toUpperCase().regex(/^[A-Z]{2}$/),
+}).strict()
+const billingProfileSchema = z.object({ legalName: z.string().trim().min(1).max(200), taxId: z.string().trim().min(1).max(40), email: z.email(), address: billingAddressSchema }).strict()
 export const selectionSchema = z.object({
   planVersionId: z.uuid(),
   addons: z.array(z.object({ key, versionId: z.uuid(), quantity, venueIds: z.array(z.uuid()).max(1000), deviceIds: z.array(z.uuid()).max(1000) }).strict()).max(19),
@@ -50,6 +55,7 @@ export const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('catalog-save'), product: productSchema, version: versionSchema.nullable(), reason: z.string().min(1).max(500) }).strict(),
   z.object({ action: z.literal('catalog-publish'), versionId: z.uuid() }).strict(),
   z.object({ action: z.literal('get'), tenantId: z.uuid() }).strict(),
+  z.object({ action: z.literal('save-profile'), tenantId: z.uuid(), profile: billingProfileSchema }).strict(),
   z.object({ action: z.literal('save-onboarding'), tenantId: z.uuid(), selection: selectionSchema }).strict(),
   z.object({ action: z.literal('restart-checkout'), tenantId: z.uuid() }).strict(),
   z.object({ action: z.literal('portal'), tenantId: z.uuid() }).strict(),
@@ -60,7 +66,8 @@ export const requestSchema = z.discriminatedUnion('action', [
   // The IBAN is forwarded to Mollie to create the SEPA mandate; it is never stored or logged.
   z.object({ action: z.literal('confirm'), tenantId: z.uuid(), operationId: z.uuid(),
     sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42) }).strict().optional(),
-    payer: z.object({ legalName: z.string().trim().min(1).max(200), taxId: z.string().trim().min(1).max(40) }).strict().optional(),
+    // Older installed clients may still send only name and NIF.
+    payer: billingProfileSchema.partial({ email: true, address: true }).optional(),
     acceptLosses: z.boolean().optional() }).strict(),
   z.object({ action: z.literal('change-mandate'), tenantId: z.uuid(), requestId: z.uuid(),
     sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42) }).strict() }).strict(),

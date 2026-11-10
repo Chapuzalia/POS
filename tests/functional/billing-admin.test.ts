@@ -6,6 +6,7 @@ import { billingFailureDiagnostic } from '../../supabase/functions/_shared/billi
 import { MollieRequestError } from '../../supabase/functions/_shared/billing/mollie'
 import * as presentation from '../../src/features/billing/presentation'
 import * as sepaFields from '../../src/features/billing/sepa'
+import * as billingProfile from '../../supabase/functions/_shared/billing/profile'
 import * as access from '../../src/features/billing/access'
 import type { BillingInvoice } from '../../src/features/billing/types'
 
@@ -58,6 +59,8 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     '../../lib/format': { parseMoneyToCents },
     './presentation': presentation,
     './SepaMandateFields': { SepaMandateFields: 'sepa-fields' },
+    './BillingProfileFields': { BillingProfileFields: 'billing-profile-fields' },
+    '../../../supabase/functions/_shared/billing/profile': billingProfile,
     './sepa': sepaFields,
     './access': access,
     './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: openUrl, downloadBillingDocument: download },
@@ -144,7 +147,7 @@ it('collects the SEPA mandate in Mi Plan before the first card payment', async (
   button(h.render(), 'Revisar cambio').props.onClick()
   await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
   expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(true)
-  const form = { legalName: 'Empresa SL', taxId: 'B12345678', accountHolder: 'Empresa SL', iban: 'ES91 2100 0418 4502 0005 1332', accepted: true }
+  const form = { legalName: 'Empresa SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' }, accountHolder: 'Empresa SL', iban: 'ES91 2100 0418 4502 0005 1332', accepted: true }
   nodes(h.render()).find(node => node.type === 'sepa-fields').props.onChange(form)
   await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(false))
   button(h.render(), 'Confirmar cambio').props.onClick()

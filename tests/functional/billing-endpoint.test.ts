@@ -22,6 +22,7 @@ function endpoint(admin = true, role = 'owner', active = true, secretsStatus: (s
   const quoteCancel = vi.fn(async () => ({ id: 'cancel' }))
   const changeMandate = vi.fn(async () => ({ mandateId: 'mdt_new', last4: '1332' }))
   const invoiceDocument = vi.fn(async () => ({ filename: 'INV-1.pdf', contentType: 'application/pdf', base64: 'JVBERg==' }))
+  const saveProfile = vi.fn(async () => ({ saved: true }))
   const schemas = compileComponent(readFileSync(new URL('../../supabase/functions/_shared/billing/schemas.ts', import.meta.url), 'utf8'), { 'npm:zod@4.4.3': { z } })
   compileComponent(readFileSync(new URL('../../supabase/functions/billing/index.ts', import.meta.url), 'utf8'), {
     'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
@@ -36,12 +37,13 @@ function endpoint(admin = true, role = 'owner', active = true, secretsStatus: (s
       quoteCancel,
       changeMandate,
       invoiceDocument,
+      saveProfile,
     }) },
   }, {
     Deno: { serve: (callback: typeof handler) => { handler = callback }, env: { get: () => 'https://staging.example.test' } },
     Response, Request, URL, Error, console: { error: log },
   })
-  return { log, upsert, portal, confirm, quoteCancel, changeMandate, invoiceDocument, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
+  return { log, upsert, portal, confirm, quoteCancel, changeMandate, invoiceDocument, saveProfile, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
 }
 
 const tenantId = '11111111-1111-4111-8111-111111111111'
@@ -185,4 +187,24 @@ it('shows the saved Odoo server address to Superadmin through the redacting repl
     expect(status.odoo).toMatchObject({ source: 'stored', serverUrl: 'https://odoo.example.test', db: 'Alteil', keyHint: '…0000' })
     expect(JSON.stringify(status)).not.toContain('old-odoo-key-0000')
   } finally { vi.unstubAllGlobals() }
+})
+
+
+const profile = { legalName: 'Empresa SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' } }
+it.each([true, false])('allows an authorized owner/admin to save a complete fiscal profile (admin=%s)', async admin => {
+  const h = endpoint(admin)
+  expect((await h.send(JSON.stringify({ action: 'save-profile', tenantId, profile }))).status).toBe(200)
+  expect(h.saveProfile).toHaveBeenCalledWith(tenantId, 'admin', profile)
+})
+it.each([['manager', true], ['owner', false], ['cashier', true]])('denies profile writes for role=%s active=%s', async (role, active) => {
+  const h = endpoint(false, role, active)
+  expect((await h.send(JSON.stringify({ action: 'save-profile', tenantId, profile }))).status).toBe(403)
+  expect(h.saveProfile).not.toHaveBeenCalled()
+})
+it('rejects incomplete or malformed billing addresses before saving them', async () => {
+  for (const address of [{ ...profile.address, street: '' }, { ...profile.address, countryCode: 'España' }]) {
+    const h = endpoint(false)
+    expect((await h.send(JSON.stringify({ action: 'save-profile', tenantId, profile: { ...profile, address } }))).status).toBe(400)
+    expect(h.saveProfile).not.toHaveBeenCalled()
+  }
 })

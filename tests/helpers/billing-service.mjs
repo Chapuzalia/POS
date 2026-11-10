@@ -8,7 +8,7 @@ export function billingClient(db) {
   const identifier = value => { if (!/^[a-z_][a-z0-9_]*$/.test(value)) throw new Error(value); return `"${value}"` }
   return {
     async rpc(name, params) {
-      try { return {data:(await db.query(`select ${identifier(name)}($1,$2::jsonb) result`,name==='billing_save_onboarding'?[params.p_tenant_id,JSON.stringify(params.p_contract)]:[params.p_action,JSON.stringify(params.p_data)])).rows[0].result,error:null} }
+      try { return {data:(await db.query(`select ${identifier(name)}($1,$2::jsonb) result`,name==='billing_save_onboarding'?[params.p_tenant_id,JSON.stringify(params.p_contract)]:name==='billing_save_profile'?[params.p_tenant_id,JSON.stringify(params.p_data)]:[params.p_action,JSON.stringify(params.p_data)])).rows[0].result,error:null} }
       catch(error) {return {data:null,error:{code:error.code,message:error.message}}}
     },
     from(table) {
@@ -127,7 +127,7 @@ export class FakeMollie {
   }
 }
 export const sepa={accountHolder:'Restaurante Prueba SL',iban:'ES91 2100 0418 4502 0005 1332'}
-export const payer={legalName:'Restaurante Prueba SL',taxId:'B12345678'}
+export const payer={legalName:'Restaurante Prueba SL',taxId:'B12345678',email:'billing@example.test',address:{street:'Calle Mayor 1',postalCode:'28001',city:'Madrid',province:'Madrid',countryCode:'ES'}}
 export async function createBillingService(t,baseAmountCents=10000,{odoo=null}={}) {
   const {db,transition}=await createBillingDb(t)
   const base=await transition('catalog_save',{actorId:ids.owner,product:{key:'base',kind:'plan',name:'Synthetic base',description:'',scope:'tenant',featureKey:null,resource:null,active:true,sortOrder:0},version:{interval:'month',amountCents:baseAmountCents,features:['restaurant'],limits:{venues:3,devices:5},included:{},maximum:null,requires:[]},reason:'Test fixture'})
@@ -142,10 +142,10 @@ export async function createBillingService(t,baseAmountCents=10000,{odoo=null}={
 // In-memory Odoo 19 (JSON-2 surface used by odoo-sync): partners, sale orders, invoices, payments, credit notes.
 export class FakeOdoo {
   partners=[]; orders=[]; moves=[]; wizards=new Map(); calls=[]; emails=[]; stickyEmail=false; offline=false; totalOffsetCents=0; seq=0; invoiceSeq=0
-  products=[{id:501,default_code:'TICKIT-SUB'}]; journals=[{id:601,code:'MOLL',type:'bank'}]; countries=[{id:68,code:'ES'},{id:75,code:'FR'}]
+  products=[{id:501,default_code:'TICKIT-SUB'}]; journals=[{id:601,code:'MOLL',type:'bank'}]; countries=[{id:68,code:'ES'},{id:75,code:'FR'}]; states=[{id:701,country_id:68,name:'Madrid'}]
   id(){return ++this.seq}
-  match(row,domain=[]){return domain.every(([field,op,value])=>op==='in'?value.includes(row[field]):row[field]===value)}
-  table(model){return {'res.partner':this.partners,'sale.order':this.orders,'account.move':this.moves,'product.product':this.products,'account.journal':this.journals,'res.country':this.countries}[model]}
+  match(row,domain=[]){return domain.every(([field,op,value])=>op==='in'?value.includes(row[field]):op==='=ilike'?String(row[field]).toLowerCase()===String(value).toLowerCase():row[field]===value)}
+  table(model){return {'res.partner':this.partners,'sale.order':this.orders,'account.move':this.moves,'product.product':this.products,'account.journal':this.journals,'res.country':this.countries,'res.country.state':this.states}[model]}
   pick(row,fields){return fields?Object.fromEntries(['id',...fields].map(key=>[key,row[key]])):{...row}}
   amounts(order){const untaxed=order.lines.reduce((sum,line)=>sum+Math.round(line.price_unit*100)*line.product_uom_qty,0);return {untaxed,total:untaxed+Math.round(untaxed*21/100)+this.totalOffsetCents}}
   async call(model,method,params){

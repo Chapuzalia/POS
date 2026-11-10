@@ -9,6 +9,7 @@ import { onboardingContract } from './onboarding.ts'
 import { odooSyncDiagnostic } from './diagnostics.ts'
 import type { OdooGateway } from './odoo.ts'
 import { odooDocument, syncOdoo } from './odoo-sync.ts'
+import type { BillingAddress, BillingProfile } from './profile.ts'
 
 // shortcut: the stripe_* columns/keys are kept (expand-only migrations) and now hold Mollie IDs (cst_, sub_, tr_); rename them in a contract migration.
 export type Account = {
@@ -20,6 +21,7 @@ export type Account = {
   schedule_operation_id: string | null
   onboarding_contract: Contract | null
   odoo_partner_id: number | string | null
+  billing_address: BillingAddress | null
 }
 type ProviderParams = {
   provider?: 'mollie'; subscriptionId: string | null; checkoutPolicy?: string; baseline?: string
@@ -32,7 +34,7 @@ export type Operation = {
   stripe_params: ProviderParams
   result: { url?: string; paymentId?: string; mandateId?: string; scheduleId?: string } | null; created_at: string; proration_date: number; effective_at: string | null
 }
-export type ConfirmInput = { sepa?: { accountHolder: string; iban: string }; payer?: { legalName: string; taxId: string }; acceptLosses?: boolean }
+export type ConfirmInput = { sepa?: { accountHolder: string; iban: string }; payer?: Pick<BillingProfile, 'legalName' | 'taxId'> & Partial<Pick<BillingProfile, 'email' | 'address'>>; acceptLosses?: boolean }
 // What the owner chose to switch off (downgrade) or back on (upgrade) with a plan change.
 export type AccessRequest = { deactivateVenueIds: string[]; deactivateDeviceIds: string[]; reactivateVenueIds: string[] }
 type UsageVenue = { id: string; name: string; is_active: boolean }
@@ -103,6 +105,12 @@ export class BillingService {
     const created = await this.db.from('billing_accounts').upsert({ tenant_id: tenantId }, { onConflict: 'tenant_id', ignoreDuplicates: true })
     if (created.error) throw new Error('BILLING_DB_ACCOUNT')
     return this.account(tenantId)
+  }
+  async saveProfile(tenantId: string, actorId: string, profile: ConfirmInput['payer']) {
+    if (!profile) throw new Error('BILLING_INVALID_REQUEST')
+    const saved = await this.db.rpc('billing_save_profile', { p_tenant_id: tenantId, p_data: { ...profile, actorId } })
+    if (saved.error) throw new Error('BILLING_DB_PROFILE')
+    return { saved: true }
   }
   async catalog() {
     const [p, v, features] = await Promise.all([
@@ -477,13 +485,12 @@ export class BillingService {
       const contract = op.contract
       let customerId = account.stripe_customer_id
       if (!customerId) {
-        const customer = await this.mutate(op, () => this.mollie.request<{ id: string }>('POST', '/customers', { name: input.payer?.legalName || account.legal_name || undefined, email: account.email ?? undefined, metadata: { tickit_tenant_id: tenantId } }, `${key}:customer`), !retry)
+        const customer = await this.mutate(op, () => this.mollie.request<{ id: string }>('POST', '/customers', { name: input.payer?.legalName || account.legal_name || undefined, email: input.payer?.email || account.email || undefined, metadata: { tickit_tenant_id: tenantId } }, `${key}:customer`), !retry)
         customerId = customer.id
         await this.transition('link_customer', { tenantId, customerId })
       }
       if (input.payer) {
-        const saved = await this.db.from('billing_accounts').update({ legal_name: input.payer.legalName, tax_id: input.payer.taxId }).eq('tenant_id', tenantId)
-        if (saved.error) throw new Error('BILLING_DB_ACCOUNT')
+        await this.saveProfile(tenantId, actorId, input.payer)
       }
       const subs = await this.mollie.list<MollieSubscription>(`/customers/${customerId}/subscriptions`, 'subscriptions')
       if (subs.some(live)) throw new Error('BILLING_EXISTING_SUBSCRIPTION')
@@ -614,6 +621,9 @@ export class BillingService {
       let subs = await this.mollie.list<MollieSubscription>(`/customers/${customerId}/subscriptions`, 'subscriptions')
       const payments = await this.mollie.list<MolliePayment>(`/customers/${customerId}/payments`, 'payments')
       if ([...subs, ...payments].some(row => row.customerId && row.customerId !== customerId || row.metadata?.tickit_tenant_id && row.metadata.tickit_tenant_id !== tenantId)) throw new Error('BILLING_SUBSCRIPTION_MISMATCH')
+      const storedInvoices = payments.length ? await this.db.from('billing_invoices').select('stripe_invoice_id,customer_snapshot').eq('tenant_id', tenantId).in('stripe_invoice_id', payments.map(payment => payment.id)) : { data: [], error: null }
+      if (storedInvoices.error) throw new Error('BILLING_DB_INVOICE')
+      const snapshots = new Map((storedInvoices.data ?? []).map(row => [row.stripe_invoice_id, row.customer_snapshot]))
       for (const payment of payments) {
         const gross = cents(payment.amount), returned = cents(payment.amountChargedBack)
         const saved = await this.db.from('billing_invoices').upsert({
@@ -621,7 +631,7 @@ export class BillingService {
           status: settled(payment) ? 'paid' : returned ? 'uncollectible' : inTransit(payment) ? (payment.method === 'directdebit' ? 'processing' : 'open') : payment.status === 'canceled' ? 'void' : payment.status,
           amount_due_cents: gross, amount_paid_cents: payment.status === 'paid' ? gross - returned : 0,
           paid_excluding_tax_cents: settled(payment) ? netFromGross(gross) : 0,
-          issuer_snapshot: {}, customer_snapshot: { name: account.legal_name, taxIds: account.tax_id ? [account.tax_id] : [] },
+          issuer_snapshot: {}, customer_snapshot: snapshots.get(payment.id) ?? { name: account.legal_name, taxIds: account.tax_id ? [account.tax_id] : [], email: account.email, address: account.billing_address },
           // Fiscal fields (number, fiscal_export_status, fiscal_external_reference) belong to the Odoo sync: never overwrite them here.
           hosted_invoice_url: inTransit(payment) ? payment._links.checkout?.href ?? null : null, invoice_pdf: null,
           created_at: payment.createdAt, paid_at: payment.paidAt ?? null,

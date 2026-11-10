@@ -69,6 +69,7 @@ Deno.serve(async request => {
       }
       case 'overview': return reply(await service.overview())
       case 'get': return reply(await service.detail(body.tenantId, admin))
+      case 'save-profile': return reply(await service.saveProfile(body.tenantId, user.user.id, body.profile))
       case 'save-onboarding': return reply(await service.saveOnboarding(body.tenantId, body.selection))
       case 'restart-checkout': return reply(await service.restartCheckout(body.tenantId))
       case 'catalog-save': {

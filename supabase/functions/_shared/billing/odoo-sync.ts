@@ -6,13 +6,15 @@ import { netFromGross } from './mollie.ts'
 import type { MolliePayment } from './mollie.ts'
 import { ODOO_ERROR_CODES, OdooRequestError } from './odoo.ts'
 import type { OdooErrorCode, OdooGateway } from './odoo.ts'
+import { billingProfileReady } from './profile.ts'
+import type { BillingAddress } from './profile.ts'
 
 export type OdooState = 'proforma' | 'invoiced' | 'canceled' | 'refunded' | 'failed'
 type Target = Exclude<OdooState, 'failed'>
-type InvoiceRow = { stripe_invoice_id: string; status: string; amount_due_cents: number; amount_paid_cents: number; paid_excluding_tax_cents: number; paid_at: string | Date | null; created_at: string | Date }
+type InvoiceRow = { stripe_invoice_id: string; status: string; amount_due_cents: number; amount_paid_cents: number; paid_excluding_tax_cents: number; paid_at: string | Date | null; created_at: string | Date; customer_snapshot: { name?: string; taxIds?: string[]; email?: string; address?: BillingAddress } }
 type DocumentRow = { payment_id: string; state: OdooState; sale_order_id: number | null; invoice_id: number | null; refund_id: number | null; invoice_number: string | null; attempts: number }
 type Ids = Pick<DocumentRow, 'sale_order_id' | 'invoice_id' | 'refund_id' | 'invoice_number'>
-type SyncAccount = { tenant_id: string; legal_name: string | null; tax_id: string | null; odoo_partner_id?: number | string | null }
+type SyncAccount = { tenant_id: string }
 type Move = { id: number; state: string; name: string; amount_total: number; payment_state: string; move_type: string }
 
 export const ODOO_PRODUCT_CODE = 'TICKIT-SUB'
@@ -76,10 +78,9 @@ class Sync {
   private readonly db: SupabaseClient
   private readonly account: SyncAccount
   private readonly mode: string
-  private partnerId: number | null
   private setup: { product: number; journal: number } | null = null
   constructor(odoo: OdooCalls, db: SupabaseClient, account: SyncAccount, mode: string) {
-    this.odoo = odoo; this.db = db; this.account = account; this.mode = mode; this.partnerId = id(account.odoo_partner_id)
+    this.odoo = odoo; this.db = db; this.account = account; this.mode = mode
   }
   private async first<T>(model: string, domain: unknown[], fields: string[]) {
     const [row] = await this.odoo.call<T[]>(model, 'search_read', { domain, fields, limit: 1 })
@@ -97,27 +98,30 @@ class Sync {
     this.setup = { product: product!.id, journal: journal!.id }
     return this.setup
   }
-  private async partner() {
-    if (this.partnerId) return this.partnerId
-    const { legal_name: name, tax_id: taxId } = this.account
-    if (!name?.trim() || !taxId?.trim()) return fail('ODOO_PARTNER_INVALID')
+  private async partner(row: InvoiceRow) {
+    const { name, taxIds, email, address } = row.customer_snapshot ?? {}
+    const taxId = taxIds?.[0]
+    if (!name || !taxId || !email || !address || !billingProfileReady({ legalName: name, taxId, email, address })) return fail('ODOO_PARTNER_INVALID')
     const vat = odooVat(taxId)
-    const found = await this.first<{ id: number }>('res.partner', [['vat', '=', vat], ['is_company', '=', true]], ['id'])
+    const country = await this.first<{ id: number }>('res.country', [['code', '=', address.countryCode]], ['id'])
+    if (!country) return fail('ODOO_PARTNER_INVALID')
+    const province = address.province.trim()
+    const state = province ? await this.first<{ id: number }>('res.country.state', [['country_id', '=', country.id], ['name', '=ilike', province]], ['id']) : null
+    // Keep the province printable even when Odoo uses a different localized region name.
+    const vals = { ref: `tickit:${this.account.tenant_id}`, name: name.trim(), vat, is_company: true, email: email.trim(), street: address.street.trim(), street2: !state && province ? province : false, zip: address.postalCode.trim(), city: address.city.trim(), country_id: country.id, state_id: state?.id ?? false }
+    // A fiscal profile is reused only within this tenant and with identical data; never rewrite old invoices through a shared contact.
+    const found = await this.first<{ id: number }>('res.partner', Object.entries(vals).map(([key, value]) => [key, '=', value]), ['id'])
     let partner = found?.id
-    if (!partner) {
-      const country = await this.first<{ id: number }>('res.country', [['code', '=', vat.slice(0, 2)]], ['id'])
-      partner = await this.create('res.partner', { name: name.trim(), vat, is_company: true, ...(country ? { country_id: country.id } : {}) })
-    }
+    if (!partner) partner = await this.create('res.partner', vals)
     const saved = await this.db.from('billing_accounts').update({ odoo_partner_id: partner }).eq('tenant_id', this.account.tenant_id)
     if (saved.error) throw new Error('BILLING_DB_ODOO')
-    this.partnerId = partner
     return partner
   }
   private async order(row: InvoiceRow, payment: MolliePayment | undefined) {
     const fields = ['state', 'invoice_ids']
     const existing = await this.first<{ id: number; state: string; invoice_ids: number[] }>('sale.order', [['client_order_ref', '=', row.stripe_invoice_id]], fields)
     if (existing) return existing
-    const [partner, { product }] = [await this.partner(), await this.references()]
+    const [partner, { product }] = [await this.partner(row), await this.references()]
     const netCents = row.paid_excluding_tax_cents || netFromGross(row.amount_due_cents)
     const created = await this.create('sale.order', {
       partner_id: partner, client_order_ref: row.stripe_invoice_id, origin: `Tickit ${this.mode}`,
@@ -198,7 +202,7 @@ export async function syncOdoo(input: { odoo: OdooGateway; db: SupabaseClient; a
   const bounded: OdooCalls = { call: (model, method, params) => Date.now() > deadline ? Promise.reject(new DeadlineReached()) : odoo.call(model, method, params) }
   const tenantId = account.tenant_id
   const [invoices, documents] = await Promise.all([
-    db.from('billing_invoices').select('stripe_invoice_id,status,amount_due_cents,amount_paid_cents,paid_excluding_tax_cents,paid_at,created_at').eq('tenant_id', tenantId).order('created_at', { ascending: true }).limit(1000),
+    db.from('billing_invoices').select('stripe_invoice_id,status,amount_due_cents,amount_paid_cents,paid_excluding_tax_cents,paid_at,created_at,customer_snapshot').eq('tenant_id', tenantId).order('created_at', { ascending: true }).limit(1000),
     db.from('billing_odoo_documents').select('payment_id,state,sale_order_id,invoice_id,refund_id,invoice_number,attempts').eq('tenant_id', tenantId).limit(1000),
   ])
   if (invoices.error || documents.error) return { processed: 0, failed: 1 }

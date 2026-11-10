@@ -84,7 +84,14 @@ Mollie no emite facturas de suscripción: el emisor fiscal es el Odoo de Alteil 
 - Tickit refleja el estado en `billing_invoices`: `fiscal_export_status` (`pending_review`/`exported`/`failed`), `number` (número de Odoo) y `fiscal_external_reference` (`sale.order:<id>` o `account.move:<id>`). El cliente de Odoo se busca o se crea por NIF (prefijo `ES` para NIF/NIE/CIF españoles) y su ID se guarda en `billing_accounts.odoo_partner_id`.
 - `billing_odoo_documents` tiene RLS activada y ninguna política: solo la service role puede leerla.
 - **Mi Plan** muestra el número, el estado fiscal y los botones «Descargar PDF» / «Descargar rectificativa». La acción `invoice-document` (solo para el propietario o el superadmin, y solo para pagos de su negocio) obtiene el PDF del portal de Odoo desde el servidor; el token del portal no llega al navegador. Odoo no envía correos.
+- El alta recoge razón social, NIF, correo y domicilio fiscal. El propietario y Superadmin pueden actualizar el perfil desde Mi Plan; cada cobro conserva su propia instantánea. Odoo solo reutiliza contactos con la referencia del negocio y todos los datos fiscales coincidentes; no modifica contactos utilizados por otras facturas. Los clientes N-1 pueden contratar con el formato anterior, pero no se emiten documentos con una instantánea incompleta.
 - El resumen de Superadmin avisa si Odoo está desactivado o si hay documentos pendientes de emisión.
+
+### Estilos del PDF en Odoo
+
+El motor de PDF debe poder descargar directamente los recursos de Odoo. En el servidor actual, la URL pública HTTP devuelve una redirección 308 a HTTPS y `wkhtmltopdf` pierde los estilos; la misma prueba con `http://127.0.0.1:8069` conserva columnas y tablas. El cambio preparado es crear el parámetro de Odoo `report.url = http://127.0.0.1:8069`, manteniendo el diseño Wave y la URL pública. Esta configuración requiere aprobación de producción y no se aplica desde los webhooks ni las descargas del cliente.
+
+Después de aplicarlo se comprobará un PDF nuevo. Los PDF oficiales ya guardados se reutilizan y no se regeneran como parte de este cambio. No se modifican las facturas históricas de prueba.
 
 ### Configuración
 

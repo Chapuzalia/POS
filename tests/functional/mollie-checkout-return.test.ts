@@ -34,7 +34,7 @@ function setup(search = '?billing=success', customerId: string | null = 'cst_tes
   const render = (disabled = false) => runner.render({ tenantId: 'tenant', onActivated, disabled })
   // The owner must authorize the SEPA mandate before the first card payment.
   const fillSepa = async () => {
-    const form = { legalName: 'Restaurante Prueba SL', taxId: 'B12345678', accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332', accepted: true }
+    const form = { legalName: 'Restaurante Prueba SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' }, accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332', accepted: true }
     nodes(render()).find(node => node.type === 'sepa-fields')?.props.onChange(form)
     await vi.waitFor(() => expect(nodes(render()).find(node => node.type === 'sepa-fields')?.props.value).toEqual(form))
   }
@@ -126,7 +126,7 @@ it('allows a fresh quote and navigates to Mollie after the rejected attempt is r
   await fixture.fillSepa()
   const confirm = nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Domiciliar e ir al pago')
   confirm?.props.onClick()
-  await vi.waitFor(() => expect(fixture.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'confirm', sepa: { accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332' }, payer: { legalName: 'Restaurante Prueba SL', taxId: 'B12345678' } })))
+  await vi.waitFor(() => expect(fixture.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'confirm', sepa: { accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332' }, payer: { legalName: 'Restaurante Prueba SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' } } })))
   await vi.waitFor(() => expect(fixture.openBillingUrl).toHaveBeenCalledWith('https://www.mollie.com/checkout/new'))
 })
 

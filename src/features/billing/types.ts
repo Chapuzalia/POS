@@ -1,5 +1,6 @@
 export type { AddonSelection, CommercialException, Contract, Interval, Product, Selection, Version } from '../../../supabase/functions/_shared/billing/domain'
 import type { Contract, Product, Version } from '../../../supabase/functions/_shared/billing/domain'
+import type { BillingAddress } from '../../../supabase/functions/_shared/billing/profile'
 
 export type BillingAccount = {
   tenant_id: string
@@ -11,6 +12,7 @@ export type BillingAccount = {
   legal_name: string | null
   tax_id: string | null
   email: string | null
+  billing_address?: BillingAddress | null
   contract: Contract | null
   onboarding_contract: Contract | null
   billed_contract: Contract | null

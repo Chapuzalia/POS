@@ -50,6 +50,7 @@ it('creates a proforma while the first card payment is open', async () => {
   expect(odoo.orders).toHaveLength(1)
   expect(odoo.orders[0]).toMatchObject({ client_order_ref: payment.id, origin: 'Tickit test', state: 'draft', lines: [{ product_id: 501, product_uom_qty: 1, price_unit: 49 }] })
   expect(odoo.partners).toEqual([expect.objectContaining({ name: payer.legalName, vat: 'ESB12345678', is_company: true, country_id: 68 })])
+  expect(odoo.partners[0]).toMatchObject({ ref: `tickit:${ids.tenant}`, email: payer.email, street: payer.address.street, zip: payer.address.postalCode, city: payer.address.city, state_id: 701 })
   expect(await doc(payment.id)).toMatchObject({ state: 'proforma', sale_order_id: odoo.orders[0].id, invoice_id: null })
   expect(await invoice(payment.id)).toMatchObject({ fiscal_export_status: 'pending_review', number: null, fiscal_external_reference: `sale.order:${odoo.orders[0].id}` })
   expect(odoo.moves).toHaveLength(0)
@@ -165,7 +166,7 @@ it('fails without partner data and creates nothing', async () => {
   odoo.offline = true
   await activate()
   odoo.offline = false
-  await db.query('update billing_accounts set legal_name=null where tenant_id=$1', [ids.tenant])
+  await db.query(`update billing_invoices set customer_snapshot=customer_snapshot-'name' where tenant_id=$1`, [ids.tenant])
   odoo.calls.length = 0
   await service.reconcile(ids.tenant)
   expect(odoo.calls.filter(call => call.method === 'create')).toEqual([])
@@ -387,4 +388,82 @@ it('never runs Send & Print while a sending method stays checked', async () => {
   expect(odoo.emails).toEqual([])
   expect(odoo.moves[0]).toMatchObject({ state: 'posted', payment_state: 'paid', invoice_pdf_report_id: false })
   expect(await doc(mollie.payment('first').id)).toMatchObject({ state: 'failed', last_error: 'ODOO_REJECTED' })
+})
+
+
+it('does not reuse a cached or VAT-matching contact from another tenant', async () => {
+  const { service, odoo, db, start } = await odooSetup()
+  odoo.partners.push({ id: 999, ref: 'tickit:' + ids.other, name: payer.legalName, vat: 'ESB12345678', is_company: true, country_id: 68, state_id: 701, email: payer.email, street: payer.address.street, zip: payer.address.postalCode, city: payer.address.city })
+  await service.account(ids.tenant)
+  await db.query('update billing_accounts set odoo_partner_id=999 where tenant_id=$1', [ids.tenant])
+  await start()
+  await service.reconcile(ids.tenant)
+  expect(odoo.partners).toHaveLength(2)
+  expect(odoo.orders[0].partner_id).not.toBe(999)
+  expect(odoo.partners[1]).toMatchObject({ ref: 'tickit:' + ids.tenant, name: payer.legalName })
+})
+
+it('uses the new fiscal profile on renewal without rewriting the first invoice or contact', async () => {
+  const { service, odoo, mollie, activate, invoice } = await odooSetup()
+  await activate()
+  const first = mollie.payment('first')
+  const oldSnapshot = (await invoice(first.id)).customer_snapshot
+  const originalPartner = structuredClone(odoo.partners[0])
+  const next = { ...payer, legalName: 'Nueva Empresa SL', email: 'new@example.test', address: { ...payer.address, street: 'Calle Nueva 2' } }
+  await service.saveProfile(ids.tenant, ids.owner, next)
+  const renewal = mollie.renew('paid')
+  await service.reconcile(ids.tenant)
+  expect((await invoice(first.id)).customer_snapshot).toEqual(oldSnapshot)
+  expect((await invoice(renewal.id)).customer_snapshot).toMatchObject({ name: next.legalName, email: next.email, address: next.address })
+  expect(odoo.partners[0]).toEqual(originalPartner)
+  expect(odoo.partners).toHaveLength(2)
+  expect(odoo.partners[1]).toMatchObject({ name: next.legalName, street: next.address.street, email: next.email })
+  expect(odoo.moves[0].partner_id).toBe(originalPartner.id)
+  expect(odoo.moves[1].partner_id).toBe(odoo.partners[1].id)
+})
+
+it('accepts an N-1 signup but refuses to issue an invoice with an incomplete fiscal snapshot', async () => {
+  const { service, odoo, mollie, selection, doc } = await odooSetup()
+  const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Alta N-1')
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer: { legalName: payer.legalName, taxId: payer.taxId } })
+  const payment = mollie.payFirst()
+  await service.reconcile(ids.tenant)
+  expect((await service.account(ids.tenant)).status).toBe('active')
+  expect(await doc(payment.id)).toMatchObject({ state: 'failed', last_error: 'ODOO_PARTNER_INVALID' })
+  expect(odoo.moves).toHaveLength(0)
+})
+
+it('reserves direct profile writes to the service role and audits them atomically', async () => {
+  const { service, db } = await odooSetup()
+  await service.account(ids.tenant)
+  await service.saveProfile(ids.tenant, ids.owner, payer)
+  expect(await service.account(ids.tenant)).toMatchObject({ legal_name: payer.legalName, email: payer.email, billing_address: payer.address })
+  expect((await db.query("select action from billing_audit where tenant_id=$1 and action='profile'", [ids.tenant])).rows).toHaveLength(1)
+  await service.saveProfile(ids.tenant, ids.owner, { legalName: 'Otra Empresa SL', taxId: payer.taxId })
+  expect((await service.account(ids.tenant)).billing_address).toBeNull()
+  await db.exec('set role authenticated')
+  try { await expect(db.query('select billing_save_profile($1,$2::jsonb)', [ids.other, JSON.stringify({ ...payer, actorId: ids.owner })])).rejects.toThrow(/permission denied/) }
+  finally { await db.exec('reset role') }
+  const before = await service.account(ids.tenant)
+  await expect(service.saveProfile(ids.tenant, 'invalid-actor', { ...payer, legalName: 'Should roll back' })).rejects.toThrow('BILLING_DB_PROFILE')
+  expect((await service.account(ids.tenant)).legal_name).toBe(before.legal_name)
+})
+
+it('keeps a province printable when its entered name is not in the Odoo region catalog', async () => {
+  const { service, odoo, start, doc } = await odooSetup()
+  odoo.states = []
+  const payment = await start()
+  await service.reconcile(ids.tenant)
+  expect(odoo.partners[0]).toMatchObject({ street2: payer.address.province, state_id: false })
+  expect(await doc(payment.id)).toMatchObject({ state: 'proforma' })
+})
+
+
+it('reconciles a linked customer with no payments without querying an empty invoice filter', async () => {
+  const { service, db, odoo } = await odooSetup()
+  await service.account(ids.tenant)
+  await db.query("update billing_accounts set stripe_customer_id='cst_empty', source='stripe' where tenant_id=$1", [ids.tenant])
+  await expect(service.reconcile(ids.tenant)).resolves.toBeDefined()
+  expect((await db.query('select * from billing_invoices')).rows).toHaveLength(0)
+  expect(odoo.moves).toHaveLength(0)
 })
