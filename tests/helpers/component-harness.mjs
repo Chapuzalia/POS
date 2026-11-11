@@ -47,6 +47,11 @@ export function createCompiledHookRunner(source, exportName, modules = {}, globa
       return slots[index].callback
     },
     useDeferredValue: (value) => value,
+    useId() {
+      const index = cursor++
+      slots[index] ??= { value: `:r${index}:` }
+      return slots[index].value
+    },
     useEffect(callback, dependencies) {
       const index = cursor++
       if (dependenciesChanged(slots[index], dependencies)) {
