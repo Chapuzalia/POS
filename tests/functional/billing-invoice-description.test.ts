@@ -34,7 +34,7 @@ it('handles an annual first period starting on a leap day', () => {
 })
 
 it('uses the accepted quote window for an upgrade, not its later payment date', () => {
-  const op = operation({ id: 'upgrade', stripe_params: { subscriptionId: 'sub_1', baseline: JSON.stringify({ nextPaymentDate: '2026-03-21' }) }, proration_date: Date.parse('2026-03-10T10:00:00Z') / 1000 })
+  const op = operation({ id: 'upgrade', stripe_params: { subscriptionId: 'sub_1', baseline: JSON.stringify({ next: '2026-03-21' }) }, proration_date: Date.parse('2026-03-10T10:00:00Z') / 1000 })
   expect(describe(payment({ paidAt: '2026-03-12T10:00:00Z', metadata: { tickit_kind: 'proration', tickit_operation_id: 'upgrade' } }), [op])).toMatchObject({ kind: 'proration', periodStart: '2026-03-10', periodEnd: '2026-03-21', description: expect.stringContaining('Ampliación de suscripción') })
 })
 

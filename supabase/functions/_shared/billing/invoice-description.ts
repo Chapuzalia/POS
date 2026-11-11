@@ -49,7 +49,7 @@ export function invoiceServiceSnapshot(payment: MolliePayment, payments: MollieP
   if (kind === 'proration' && operation?.contract) {
     if (!Number.isFinite(operation.proration_date)) return {}
     let end: unknown
-    try { end = JSON.parse(operation.stripe_params.baseline ?? '{}').nextPaymentDate } catch { return {} }
+    try { end = JSON.parse(operation.stripe_params.baseline ?? '{}').next } catch { return {} }
     return typeof end === 'string' ? snapshot(operation.contract, 'proration', dateOnly(operation.proration_date), end) : {}
   }
   const subscription = subscriptions.find(sub => sub.id === payment.subscriptionId)
