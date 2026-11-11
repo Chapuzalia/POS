@@ -4,7 +4,7 @@ import { createCompiledHookRunner, jsxRuntime, nodes } from '../helpers/componen
 
 const source = readFileSync(new URL('../../src/features/local-printing/components/CashlogyPaymentModal.tsx', import.meta.url), 'utf8')
 
-function harness(status: string | null = 'unknown', finalize = vi.fn(async (_transaction: object) => {})) {
+function harness(status: string | null = 'unknown', finalize = vi.fn(async (_transaction: object) => {}), confirm = vi.fn(async (_message: string) => true)) {
   const transaction = { id: 'tx', requestId: 'request', status: 'completed', automaticAcceptedCents: 1250, returnedCents: 0 }
   const state = {
     modalOpen: true, intent: { requestId: 'request', amountCents: 1250 },
@@ -17,7 +17,7 @@ function harness(status: string | null = 'unknown', finalize = vi.fn(async (_tra
   }
   const cancelled = vi.fn()
   const runner = createCompiledHookRunner(source, 'CashlogyPaymentModal', {
-    'react/jsx-runtime': jsxRuntime, 'lucide-react': { AlertTriangle: 'icon', LoaderCircle: 'spinner' },
+    'react/jsx-runtime': jsxRuntime, '../../../components/ui/appDialogStore': { appConfirm: confirm }, 'lucide-react': { AlertTriangle: 'icon', LoaderCircle: 'spinner' },
     'zustand/react/shallow': { useShallow: (selector: object) => selector },
     '../../../components/ui': { AppModal: 'modal', Button: 'button', Metric: 'metric' },
     '../../../lib/format': { formatMoney: (cents: number) => String(cents) },
@@ -26,13 +26,14 @@ function harness(status: string | null = 'unknown', finalize = vi.fn(async (_tra
   }, { Error })
   const render = (props: { finalizeDisabled?: boolean } = {}) => runner.render({ onFinalizeRecovered: finalize, onCancelled: cancelled, ...props })
   const buttons = () => nodes(render()).filter(node => node.type === 'button')
-  return { state, finalize, cancelled, render, buttons,
+  return { state, finalize, cancelled, confirm, render, buttons,
     click: (label: string) => buttons().find(node => node.props.children === label).props.onClick() }
 }
 
-it.each([null, 'unknown', 'needs_attention', 'failed', 'cancelled'])('unifies error state %s with only a recovery action', status => {
+it.each([null, 'unknown', 'needs_attention', 'failed', 'cancelled'])('offers cancel and a recovery action in error state %s', status => {
   const h = harness(status)
-  expect(h.buttons().map(button => button.props.children)).toEqual(['Reintentar'])
+  expect(h.buttons().map(button => button.props.children)).toEqual(['Cancelar cobro', 'Reintentar'])
+  expect(h.buttons()[0].props.disabled).toBeFalsy()
   expect(nodes(h.render()).some(node => node.props?.role === 'alert')).toBe(true)
   expect(nodes(h.render()).some(node => node.type === 'input')).toBe(false)
 })
@@ -101,7 +102,8 @@ it('retries registration directly when Cashlogy already confirmed the payment', 
   const finalize = vi.fn(async (_transaction: object) => { throw new Error('No se pudo guardar la venta') })
   const h = harness('completed', finalize)
   h.click('Reintentar')
-  await vi.waitFor(() => expect(h.buttons()).toHaveLength(2))
+  await vi.waitFor(() => expect(JSON.stringify(h.render())).toContain('No se pudo guardar la venta'))
+  expect(h.buttons().map(button => button.props.children)).toEqual(['Cancelar cobro', 'Marcar como pagado'])
   expect(h.state.recover).not.toHaveBeenCalled()
   expect(h.finalize).toHaveBeenCalledOnce()
   expect(JSON.stringify(h.render())).toContain('No se pudo guardar la venta')
@@ -122,7 +124,7 @@ it('does not apply a previous recovery failure to a different payment attempt', 
   h.click('Reintentar')
   await vi.waitFor(() => expect(h.buttons()).toHaveLength(2))
   h.state.intent = { requestId: 'next-request', amountCents: 500 }
-  expect(h.buttons().map(button => button.props.children)).toEqual(['Reintentar'])
+  expect(h.buttons().map(button => button.props.children)).toEqual(['Cancelar cobro', 'Reintentar'])
 })
 
 it('shows the coins and notes available for change while charging', () => {
@@ -132,4 +134,27 @@ it('shows the coins and notes available for change while charging', () => {
   const levelCards = nodes(h.render()).filter(node => node.type === 'levels')
   expect(levelCards).toHaveLength(1)
   expect(levelCards[0].props).toEqual({ levels: h.state.levels, variant: 'payment' })
+})
+
+it('keeps cancel enabled while Cashlogy waits for cash, even with the sale busy', async () => {
+  const h = harness('waiting_for_cash')
+  h.state.error = null
+  h.state.isPolling = true
+  const buttons = nodes(h.render({ finalizeDisabled: true })).filter(node => node.type === 'button')
+  expect(buttons.map(button => button.props.children)).toEqual(['Cancelar cobro'])
+  expect(buttons[0].props.disabled).toBeFalsy()
+  buttons[0].props.onClick()
+  await vi.waitFor(() => expect(h.cancelled).toHaveBeenCalledOnce())
+  expect(h.confirm).not.toHaveBeenCalled()
+})
+
+it('asks before cancelling a charge Cashlogy already collected, and keeps it when declined', async () => {
+  const h = harness('completed', undefined, vi.fn(async (_message: string) => false))
+  h.state.error = null
+  h.click('Cancelar cobro')
+  await vi.waitFor(() => expect(h.confirm).toHaveBeenCalledOnce())
+  expect(h.state.cancelAttempt).not.toHaveBeenCalled()
+  h.confirm.mockResolvedValueOnce(true)
+  h.click('Cancelar cobro')
+  await vi.waitFor(() => expect(h.cancelled).toHaveBeenCalledOnce())
 })
