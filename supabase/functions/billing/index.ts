@@ -6,7 +6,10 @@ import { requestSchema } from '../_shared/billing/schemas.ts'
 
 Deno.serve(async request => {
   const appUrl = Deno.env.get('BILLING_APP_URL')?.replace(/\/$/, '') ?? ''
-  const headers = { 'Access-Control-Allow-Origin': appUrl ? new URL(appUrl).origin : 'null', 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' }
+  // App nativa Capacitor: iOS usa capacitor://localhost y Android https://localhost.
+  const allowedOrigins = [appUrl ? new URL(appUrl).origin : 'null', 'capacitor://localhost', 'https://localhost']
+  const requestOrigin = request.headers.get('Origin') ?? ''
+  const headers = { 'Access-Control-Allow-Origin': allowedOrigins.includes(requestOrigin) ? requestOrigin : allowedOrigins[0], 'Access-Control-Allow-Headers': 'authorization, apikey, content-type, x-client-info', 'Access-Control-Allow-Methods': 'POST, OPTIONS', 'Content-Type': 'application/json', 'Cache-Control': 'no-store', Vary: 'Origin' }
   let admin = false
   // Mollie checkout URLs grant access to the customer's payment pages, including nested results.
   const reply = (body: unknown, status = 200) => new Response(JSON.stringify(body, (key, value: unknown) => admin && ['url', 'hosted_invoice_url', 'invoice_pdf'].includes(key) ? undefined : value), { status, headers })

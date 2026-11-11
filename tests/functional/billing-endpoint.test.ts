@@ -43,7 +43,7 @@ function endpoint(admin = true, role = 'owner', active = true, secretsStatus: (s
     Deno: { serve: (callback: typeof handler) => { handler = callback }, env: { get: () => 'https://staging.example.test' } },
     Response, Request, URL, Error, console: { error: log },
   })
-  return { log, upsert, portal, confirm, quoteCancel, changeMandate, invoiceDocument, saveProfile, operation, invoice, send: (body: string) => handler(new Request('https://staging.example.test', { method: 'POST', body })) }
+  return { log, upsert, portal, confirm, quoteCancel, changeMandate, invoiceDocument, saveProfile, operation, invoice, send: (body: string, origin?: string) => handler(new Request('https://staging.example.test', { method: 'POST', body, headers: origin ? { Origin: origin } : {} })) }
 }
 
 const tenantId = '11111111-1111-4111-8111-111111111111'
@@ -207,4 +207,14 @@ it('rejects incomplete or malformed billing addresses before saving them', async
     expect((await h.send(JSON.stringify({ action: 'save-profile', tenantId, profile: { ...profile, address } }))).status).toBe(400)
     expect(h.saveProfile).not.toHaveBeenCalled()
   }
+})
+
+it.each([
+  ['https://staging.example.test', 'https://staging.example.test'],
+  ['capacitor://localhost', 'capacitor://localhost'],
+  ['https://localhost', 'https://localhost'],
+  ['https://evil.example.test', 'https://staging.example.test'],
+])('answers CORS for origin %s with %s', async (origin, allowed) => {
+  const response = await endpoint().send(JSON.stringify({ action: 'portal', tenantId }), origin)
+  expect(response.headers.get('Access-Control-Allow-Origin')).toBe(allowed)
 })
