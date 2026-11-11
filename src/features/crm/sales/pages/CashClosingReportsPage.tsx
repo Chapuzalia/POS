@@ -4,7 +4,7 @@ import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPaginat
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { CrmModal } from '../../shared/components/CrmModal'
-import { Download, Pencil, RefreshCw, Save, X } from "lucide-react";
+import { Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
 import {
@@ -27,7 +27,8 @@ import {
 import type { OperationalDayConfig } from "../../../../lib/operationalDay";
 import { loadCashClosingReports } from '../services/revoCashClosingService';
 import { loadAccountingClosures, type AccountingClosureRow } from '../services/accountingExportService'
-import { buildCsv, downloadCsv } from '../../../../lib/csv'
+import { downloadSpreadsheet, type SpreadsheetFormat } from '../../../../lib/spreadsheet'
+import { ExportFormatMenu } from '../../shared/components/ExportFormatMenu'
 import { ImportedClosingDetail } from '../components/ImportedClosingDetail';
 import { formatRevoDate, type ImportedCashClosing } from '../../../../lib/revoCashClosings.ts';
 import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
@@ -608,7 +609,7 @@ export function CashClosingReportsCrm({
   );
   const [isExporting, setIsExporting] = useState(false)
 
-  async function exportAccountingCsv() {
+  async function exportAccountingClosures(format: SpreadsheetFormat) {
     if (isExporting || !dateFrom || !dateTo || dateFrom > dateTo) return
     setIsExporting(true)
     try {
@@ -620,7 +621,7 @@ export function CashClosingReportsCrm({
         return
       }
       const { headers, rowsCsv } = exportClosureRowsToCsv(rows, timeZone)
-      downloadCsv(buildCsv(headers, rowsCsv), `cierres_gestoria_${dateFrom}_${dateTo}.csv`)
+      downloadSpreadsheet(format, headers, rowsCsv, `cierres_gestoria_${dateFrom}_${dateTo}`)
       sileo.success({ title: 'Exportación generada' })
     } catch {
       sileo.error({ title: 'No se ha podido generar la exportación.' })
@@ -711,9 +712,7 @@ export function CashClosingReportsCrm({
                 : "Cargando cierres..."}
             </p>
            </div>
-           <UiButton className="!min-h-10 !rounded-[10px] !bg-[var(--crm-blue)] !px-3 !text-white" disabled={disabled || isExporting || !selectedVenueId} onClick={() => void exportAccountingCsv()} type="button">
-             <Download className="!size-4" />{isExporting ? 'Exportando...' : 'Exportar gestoría'}
-           </UiButton>
+           <ExportFormatMenu disabled={disabled || !selectedVenueId} isExporting={isExporting} label="Exportar gestoría" onExport={(format) => void exportAccountingClosures(format)} />
          </div>
          <div className="!overflow-x-auto">
           <UiDataTable aria-label="Cierres de caja" className="!w-full !min-w-[1050px] !border-collapse" emptyContent={closings ? 'No hay cierres de caja para el período seleccionado.' : 'Cargando cierres…'} filterable={false}
