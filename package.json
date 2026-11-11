@@ -1,7 +1,7 @@
 {
   "name": "pos",
   "private": true,
-  "version": "1.0.28",
+  "version": "1.0.29",
   "packageManager": "pnpm@10.15.1",
   "type": "module",
   "scripts": {
@@ -20,7 +20,10 @@
     "apk:debug": "pnpm run build:android && cd android && gradlew.bat assembleDebug",
     "ios:device": "bash scripts/ios-device.sh",
     "build:print-agent": "node ../backend-impresora/scripts/build-mobile.mjs dist/nodejs",
-    "build:ios": "vite build && pnpm run build:print-agent && cap sync ios"
+    "build:ios": "vite build && pnpm run build:print-agent && cap sync ios",
+    "build:android:prod": "vite build --mode prod && pnpm run build:print-agent && cap sync android",
+    "build:ios:prod": "vite build --mode prod && pnpm run build:print-agent && cap sync ios",
+    "ios:archive": "bash scripts/ios-archive.sh"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
