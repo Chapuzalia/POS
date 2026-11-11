@@ -1,0 +1,14 @@
+<data>
+  <xpath expr="//div[@name='origin']" position="replace"/>
+  <xpath expr="//div[@name='customer_code']" position="replace"/>
+  <xpath expr="//div[@name='reference']" position="replace"/>
+  <xpath expr="//p[@name='payment_communication']/.." position="replace"/>
+  <xpath expr="//t[@t-set='taxes']" position="attributes">
+    <attribute name="t-value">', '.join(('%g %%' % tax.amount) if tax.amount_type == 'percent' else tax.tax_label for tax in line.tax_ids if tax.tax_label)</attribute>
+  </xpath>
+  <xpath expr="//div[@id='informations']" position="after">
+    <p t-if="o.move_type == 'out_refund' and o.reversed_entry_id" name="tickit_rectified_invoice">
+      Factura rectificada: <span t-field="o.reversed_entry_id.name"/> · <span t-field="o.reversed_entry_id.invoice_date"/>
+    </p>
+  </xpath>
+</data>

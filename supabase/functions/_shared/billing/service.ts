@@ -10,6 +10,7 @@ import { odooSyncDiagnostic } from './diagnostics.ts'
 import type { OdooGateway } from './odoo.ts'
 import { odooDocument, syncOdoo } from './odoo-sync.ts'
 import type { BillingAddress, BillingProfile } from './profile.ts'
+import { invoiceServiceSnapshot } from './invoice-description.ts'
 
 // shortcut: the stripe_* columns/keys are kept (expand-only migrations) and now hold Mollie IDs (cst_, sub_, tr_); rename them in a contract migration.
 export type Account = {
@@ -621,17 +622,26 @@ export class BillingService {
       let subs = await this.mollie.list<MollieSubscription>(`/customers/${customerId}/subscriptions`, 'subscriptions')
       const payments = await this.mollie.list<MolliePayment>(`/customers/${customerId}/payments`, 'payments')
       if ([...subs, ...payments].some(row => row.customerId && row.customerId !== customerId || row.metadata?.tickit_tenant_id && row.metadata.tickit_tenant_id !== tenantId)) throw new Error('BILLING_SUBSCRIPTION_MISMATCH')
-      const storedInvoices = payments.length ? await this.db.from('billing_invoices').select('stripe_invoice_id,customer_snapshot').eq('tenant_id', tenantId).in('stripe_invoice_id', payments.map(payment => payment.id)) : { data: [], error: null }
+      const storedInvoices = payments.length ? await this.db.from('billing_invoices').select('stripe_invoice_id,customer_snapshot,service_snapshot').eq('tenant_id', tenantId).in('stripe_invoice_id', payments.map(payment => payment.id)) : { data: [], error: null }
       if (storedInvoices.error) throw new Error('BILLING_DB_INVOICE')
       const snapshots = new Map((storedInvoices.data ?? []).map(row => [row.stripe_invoice_id, row.customer_snapshot]))
+      const services = new Map((storedInvoices.data ?? []).map(row => [row.stripe_invoice_id, row.service_snapshot]))
+      const operations = payments.some(payment => !services.has(payment.id) || services.get(payment.id) && !services.get(payment.id).periodEnd)
+        ? await this.db.from('billing_operations').select('*').eq('tenant_id', tenantId).eq('kind', 'change').order('created_at', { ascending: false }).limit(1000).returns<Operation[]>()
+        : { data: [], error: null }
+      if (operations.error) throw new Error('BILLING_DB_OPERATION')
       for (const payment of payments) {
         const gross = cents(payment.amount), returned = cents(payment.amountChargedBack)
+        const storedService = services.get(payment.id)
+        const serviceSnapshot = services.has(payment.id) && (storedService === null || storedService?.periodEnd)
+          ? storedService : invoiceServiceSnapshot(payment, payments, subs, operations.data ?? [], services)
         const saved = await this.db.from('billing_invoices').upsert({
           stripe_invoice_id: payment.id, tenant_id: tenantId, currency: 'eur',
           status: settled(payment) ? 'paid' : returned ? 'uncollectible' : inTransit(payment) ? (payment.method === 'directdebit' ? 'processing' : 'open') : payment.status === 'canceled' ? 'void' : payment.status,
           amount_due_cents: gross, amount_paid_cents: payment.status === 'paid' ? gross - returned : 0,
           paid_excluding_tax_cents: settled(payment) ? netFromGross(gross) : 0,
           issuer_snapshot: {}, customer_snapshot: snapshots.get(payment.id) ?? { name: account.legal_name, taxIds: account.tax_id ? [account.tax_id] : [], email: account.email, address: account.billing_address },
+          service_snapshot: serviceSnapshot,
           // Fiscal fields (number, fiscal_export_status, fiscal_external_reference) belong to the Odoo sync: never overwrite them here.
           hosted_invoice_url: inTransit(payment) ? payment._links.checkout?.href ?? null : null, invoice_pdf: null,
           created_at: payment.createdAt, paid_at: payment.paidAt ?? null,
