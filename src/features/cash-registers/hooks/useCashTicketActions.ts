@@ -31,7 +31,7 @@ type Options = {
   persistTickets: (tickets: SetStateAction<SessionTicketRecord[]>) => void
   persistLedger: (ledger: SetStateAction<SaleRecord[]>) => void
   mergeRemotePrintStates: (tickets: SessionTicketRecord[]) => SessionTicketRecord[]
-  printTicket: (payload: SessionTicketRecord['payload'], options?: { isReprint?: boolean; copyNumber?: number }) => Promise<void>
+  printTicket: (payload: SessionTicketRecord['payload'], options?: { isReprint?: boolean; copyNumber?: number; isManualPrint?: boolean; cashDrawerAlreadyRequested?: boolean }) => Promise<void>
   subtractProductSalesStats: (lines: Array<{ productId: string; quantity: number; lineTotalCents: number }>) => void
   setBusy: (value: boolean) => void
   setError: (value: string | null) => void
@@ -172,7 +172,10 @@ export function useCashTicketActions(options: Options) {
     const scope = usePrintAgentStore.getState().scope
     if (!scope) { options.setError('No se ha inicializado la configuración de impresión de esta terminal.'); return }
      try {
-       await options.printTicket(ticket.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, ticket.id) })
+       // An original that never reached the printer (automatic printing off, no printer configured)
+       // prints as the original once, without the COPIA label and without opening the drawer.
+       if (ticket.printStatus === 'not_requested') await options.printTicket(ticket.payload, { isManualPrint: true, cashDrawerAlreadyRequested: true })
+       else await options.printTicket(ticket.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, ticket.id) })
        for (const refund of [...(ticket.refundDocuments ?? [])].sort((left, right) => left.createdAt.localeCompare(right.createdAt) || (left.payload.localFiscal?.number ?? 0) - (right.payload.localFiscal?.number ?? 0))) {
          try {
            await options.printTicket(refund.payload, { isReprint: true, copyNumber: nextPrintCopyNumber(scope, refund.id) })

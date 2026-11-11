@@ -15,7 +15,8 @@ type PrintTicketOptions = {
   tickets: SessionTicketRecord[]
   updateTicketPrintState: (saleId: string, patch: Partial<Pick<SessionTicketRecord,
     'printStatus' | 'printJobId' | 'printRequestId' | 'printedAt' | 'printErrorCode' | 'printAttempts'>>) => void
-  options?: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean }
+  /** isManualPrint: the user asked to print now, so it prints even with automatic printing disabled. */
+  options?: { isReprint?: boolean; isManualPrint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean }
 }
 
 export async function printTicket({ cashSession, context, payload, tickets, updateTicketPrintState, options = {} }: PrintTicketOptions) {
@@ -25,7 +26,7 @@ export async function printTicket({ cashSession, context, payload, tickets, upda
   const payments = payload.payments ?? (payload.payment ? [payload.payment] : [])
   const hardwareAction = getAutomaticSaleHardwareAction({
     payments,
-    isReprint: options.isReprint,
+    isReprint: options.isReprint || options.isManualPrint,
     settings: { ...printState.preferences, cashlogyConfigured: printState.cashlogyConfigured },
   })
   if (hardwareAction !== 'print') {

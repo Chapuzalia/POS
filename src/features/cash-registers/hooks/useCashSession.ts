@@ -195,7 +195,7 @@ export function useCashSession(options: Options) {
 
   const printSale = useCallback(async (
     payload: SessionTicketRecord['payload'],
-    printOptions: { isReprint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean; fiscalMode?: 'legacy' | 'verifactu' } = {},
+    printOptions: { isReprint?: boolean; isManualPrint?: boolean; copyNumber?: number; cashDrawerAlreadyRequested?: boolean; fiscalMode?: 'legacy' | 'verifactu' } = {},
   ) => {
     if (!options.context) return
     const printState = usePrintAgentStore.getState()

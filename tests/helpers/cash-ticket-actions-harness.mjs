@@ -75,7 +75,7 @@ export function createCashTicketActionsHarness({
     '../../fiscal/local/localLedger.ts': { buildLocalRectificative: async () => null, findLocalFiscalEntryByTicket: async () => null, persistLocalRectificative: async () => undefined },
     '../../fiscal/local/clock.ts': { assertFiscalLease: () => undefined },
     '../../local-printing/services/printAgentStorage': { nextPrintCopyNumber: () => 1 },
-    '../../local-printing/store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({}) } },
+    '../../local-printing/store/usePrintAgentStore': { usePrintAgentStore: { getState: () => ({ scope: { tenantId: 'tenant' } }) } },
     '../../local-printing/cashlogy/useCashlogyStore': {
       finishCashlogyPayment: (transaction) => calls.finished.push(transaction),
       getCashlogyPaymentAmounts: (transaction, totalCents) => ({ changeCents: transaction?.changeCents ?? 0, receivedCents: transaction?.receivedCents ?? totalCents }),
