@@ -8,7 +8,8 @@ function harness(status: string | null = 'unknown', finalize = vi.fn(async (_tra
   const transaction = { id: 'tx', requestId: 'request', status: 'completed', automaticAcceptedCents: 1250, returnedCents: 0 }
   const state = {
     modalOpen: true, intent: { requestId: 'request', amountCents: 1250 },
-    transaction: status ? { ...transaction, status } : null, error: new Error('Error de prueba'),
+    transaction: status ? { ...transaction, status } : null, error: new Error('Error de prueba') as Error | null,
+    levels: [] as Array<{ index: number; valueCents: number; percentage: number; state: string }>,
     isStarting: false, isPolling: false, isRecovering: false, isCancelling: false, missingTransaction: false,
     recover: vi.fn(async (): Promise<typeof transaction | null> => { throw new Error('La recuperación ha fallado') }),
     cancelAttempt: vi.fn(async () => { state.modalOpen = false }),
@@ -20,6 +21,7 @@ function harness(status: string | null = 'unknown', finalize = vi.fn(async (_tra
     'zustand/react/shallow': { useShallow: (selector: object) => selector },
     '../../../components/ui': { AppModal: 'modal', Button: 'button', Metric: 'metric' },
     '../../../lib/format': { formatMoney: (cents: number) => String(cents) },
+    './CashlogyLevelCards': { CashlogyLevelCards: 'levels' },
     '../cashlogy/useCashlogyStore': { useCashlogyStore: Object.assign((selector: (value: typeof state) => object) => selector(state), { getState: () => state }) },
   }, { Error })
   const render = (props: { finalizeDisabled?: boolean } = {}) => runner.render({ onFinalizeRecovered: finalize, onCancelled: cancelled, ...props })
@@ -121,4 +123,13 @@ it('does not apply a previous recovery failure to a different payment attempt', 
   await vi.waitFor(() => expect(h.buttons()).toHaveLength(2))
   h.state.intent = { requestId: 'next-request', amountCents: 500 }
   expect(h.buttons().map(button => button.props.children)).toEqual(['Reintentar'])
+})
+
+it('shows the coins and notes available for change while charging', () => {
+  const h = harness('waiting_for_cash')
+  h.state.error = null
+  h.state.levels = [{ index: 0, valueCents: 200, percentage: 40, state: 'ok' }, { index: 1, valueCents: 1000, percentage: 5, state: 'low' }]
+  const levelCards = nodes(h.render()).filter(node => node.type === 'levels')
+  expect(levelCards).toHaveLength(1)
+  expect(levelCards[0].props).toEqual({ levels: h.state.levels, variant: 'payment' })
 })
