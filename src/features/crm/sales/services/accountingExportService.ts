@@ -48,11 +48,21 @@ export type AccountingTicketRow = {
   tip_cents: number | string
 }
 
+const EXPORT_PAGE_SIZE = 1000
+
+// PostgREST caps every response (max-rows, 1000 by default), so long ranges must be paged
+// or the export silently stops after the first ~1000 tickets. Both RPCs use a stable ORDER BY.
 async function callRpc<T>(name: string, args: Record<string, unknown>) {
   if (!supabase) throw new Error('Supabase no está configurado.')
-  const { data, error } = await supabase.rpc(name, args)
-  if (error) throw error
-  return (data ?? []) as T[]
+  const rows: T[] = []
+  for (;;) {
+    const { data, error } = await supabase.rpc(name, args).range(rows.length, rows.length + EXPORT_PAGE_SIZE - 1)
+    if (error) throw error
+    const page = (data ?? []) as T[]
+    // Stop on an empty page, not a short one: the server cap may be lower than our page size.
+    if (!page.length) return rows
+    rows.push(...page)
+  }
 }
 
 type AccountingClosureSummaryRow = Omit<AccountingClosureRow, 'first_ticket_code' | 'last_ticket_code'>

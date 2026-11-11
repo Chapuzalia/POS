@@ -1,7 +1,8 @@
 import { UserFacingError } from '../utils/UserFacingError.ts'
 import { supabase } from '../lib/supabase'
-import { getFunctionInvokeErrorMessage } from '../features/crm/shared/services/crmServiceSupport'
+import { getFunctionInvokeErrorMessage } from './backendService'
 import type { TenantAddonKey } from '../features/platform/tenantFeatureAccess'
+import type { WelcomeEmailStatus } from '../../supabase/functions/_shared/welcome-email'
 
 export type PlatformTenantFeature = TenantAddonKey
 
@@ -49,6 +50,8 @@ export type CreatePlatformTenantInput = {
   ownerFullName: string
   maxDevices: number
   maxVenues: number
+  billingMode?: 'manual' | 'stripe'
+  billingSelection?: import('../features/billing/types').Selection
 }
 
 export type UpdatePlatformTenantInput = {
@@ -97,6 +100,7 @@ export async function createPlatformTenant(input: CreatePlatformTenantInput) {
   const { data, error } = await client.functions.invoke<{
     tenant?: Pick<PlatformTenant, 'id' | 'name' | 'slug' | 'createdAt'>
     ownerId?: string
+    welcomeEmailStatus?: WelcomeEmailStatus
     error?: string
   }>(
     'manage-pos-users',
@@ -109,7 +113,7 @@ export async function createPlatformTenant(input: CreatePlatformTenantInput) {
   if (!data?.tenant) {
     throw new Error('La funcion no devolvio el negocio creado.')
   }
-  return data.tenant
+  return { ...data.tenant, welcomeEmailStatus: data.welcomeEmailStatus }
 }
 
 async function invokePlatformAction<T>(body: Record<string, unknown>, fallbackError: string) {
@@ -127,7 +131,7 @@ async function invokePlatformAction<T>(body: Record<string, unknown>, fallbackEr
 
 export async function updatePlatformTenant(input: UpdatePlatformTenantInput) {
   return invokePlatformAction<{ tenant?: Pick<PlatformTenant, 'id' | 'name' | 'slug'> }>(
-    { action: 'platform-update-tenant', featureCatalogVersion: 2, assistCatalogVersion: 1, ...input },
+    { action: 'platform-update-tenant', featureCatalogVersion: 2, assistCatalogVersion: 1, personalCatalogVersion: 1, ...input },
     'No se pudo actualizar el negocio.',
   )
 }

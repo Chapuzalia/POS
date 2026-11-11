@@ -1,7 +1,7 @@
 import { DEFAULT_PRINT_AGENT_PORT } from '../constants/config.ts'
 import { PrintAgentError } from '../api/PrintAgentError.ts'
 
-type NormalizeOptions = { allowHttpInDevelopment?: boolean; defaultPort?: string; isDevelopment?: boolean }
+type NormalizeOptions = { allowHttpInDevelopment?: boolean; allowLoopbackHttp?: boolean; defaultPort?: string; isDevelopment?: boolean }
 
 function isValidHostname(hostname: string) {
   if (hostname === 'localhost') return true
@@ -34,7 +34,9 @@ export function normalizePrintAgentUrl(value: string, options: NormalizeOptions 
     throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'La dirección del agente no es válida.', cause })
   }
 
-  const allowHttp = options.allowHttpInDevelopment === true && options.isDevelopment === true
+  // El agente integrado en la app nativa escucha solo en 127.0.0.1 sin TLS.
+  const allowHttp = (options.allowHttpInDevelopment === true && options.isDevelopment === true)
+    || (options.allowLoopbackHttp === true && url.hostname === '127.0.0.1')
   if (url.protocol !== 'https:' && !(allowHttp && url.protocol === 'http:')) {
     throw new PrintAgentError({ code: 'CONFIGURATION_ERROR', message: 'El agente debe utilizar HTTPS.' })
   }

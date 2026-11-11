@@ -1,0 +1,26 @@
+.crm-onboarding-popover.driver-popover {
+  background: var(--crm-surface);
+  color: var(--crm-text);
+  border-radius: 16px;
+  max-width: min(360px, calc(100vw - 24px));
+  font-family: inherit;
+}
+.crm-onboarding-popover .driver-popover-title { font-size: 18px; }
+.crm-onboarding-popover .driver-popover-description { line-height: 1.6; }
+.crm-onboarding-popover .driver-popover-footer { flex-wrap: wrap; gap: 10px; }
+.crm-onboarding-popover .driver-popover-footer button,
+.crm-onboarding-back { min-height: 44px; padding: 8px 12px; text-shadow: none; border-radius: 10px; }
+.crm-onboarding-popover .driver-popover-next-btn { background: var(--crm-blue); color: white; border: 0; }
+.crm-onboarding-popover .driver-popover-prev-btn,
+.crm-onboarding-back { background: var(--crm-surface-soft); color: var(--crm-text); border: 0; }
+.crm-onboarding-popover .driver-popover-close-btn { width: 44px; height: 44px; color: var(--crm-text-muted); }
+.crm-onboarding-popover .driver-popover-progress-text { color: var(--crm-text-muted); }
+.crm-onboarding-popover .driver-popover-arrow { display: none; }
+/* Select menus are portalled: keep their options above the guided explanation. */
+.driver-active:has(.crm-onboarding-popover) [data-crm-select-popover] {
+  z-index: 1000000001 !important;
+}
+.driver-active:has(.crm-onboarding-popover) [data-crm-select-popover],
+.driver-active:has(.crm-onboarding-popover) [data-crm-select-popover] * {
+  pointer-events: auto;
+}

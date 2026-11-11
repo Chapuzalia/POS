@@ -1,4 +1,5 @@
-import { openLedger, request, transactionDone, assertInstallationBinding, readLocalFiscalHead } from './localLedger.ts'
+import { openLedger, request, transactionDone } from '../../../lib/localDatabase.ts'
+import { assertInstallationBinding, readLocalFiscalHead } from './localLedger.ts'
 import type { LocalFiscalEntry } from './localLedger.ts'
 import { canonicalRecordSchema } from './canonical.ts'
 import { aeatHash } from './verifactu.ts'

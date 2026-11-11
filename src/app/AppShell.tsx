@@ -1,72 +1,29 @@
-import { lazy, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, useCallback, useState } from 'react'
 import { AppUpdateBanner } from '../components/feedback/AppUpdateBanner'
 import { LoginScreen } from '../components/screens/LoginScreen'
-import { LoadingScreen, MissingConfigScreen, PosStartupReveal } from '../components/screens/StateScreens'
+import { LoadingScreen, MissingConfigScreen } from '../components/screens/StateScreens'
 import themesData from '../config/themes.json'
 import type { AppVersionStatus } from '../config/appVersion'
-import { CashSessionGate } from '../features/cash-registers/CashSessionGate'
-import { useCashSession } from '../features/cash-registers'
-import { useOfflineController, useRejectedSaleRecovery } from '../features/offline'
-import { useQuickSale } from '../features/quick-sale'
-import { useCashlogyManagementStore, useCashlogyStore, usePrintAgentStore } from '../features/local-printing'
-import type { CatalogData } from '../features/catalog/domain/types'
-import { subscribeToCatalogTabChanges } from '../features/catalog/data/catalog-realtime'
-import { addConfirmedProductSalesStats, removeProductSalesStats } from '../features/quick-sale/services/productSalesStats'
-import { createProductSalesStatsRefresh, PRODUCT_SALES_STATS_REFRESH_MS } from '../features/quick-sale/services/productSalesStatsRefresh'
-import { useRestaurantController } from '../features/restaurant'
-import { useReservationsController } from '../features/reservations/hooks/useReservationsController'
+import { useOfflineController } from '../features/offline/hooks/useOfflineController'
+import { useTenantFeatures } from '../features/platform/useTenantFeatures'
+import { hasTenantAddon } from '../features/platform/tenantFeatureAccess'
 import { useLoginActivity, useTenantSession } from '../features/session'
-import { loadTenantState } from '../features/session/services/loadTenantState'
-import { shouldResetTenantState } from '../features/session/session-state'
-import { useAddProductFeedback } from '../hooks/useAddProductFeedback'
 import { useThemeTokens } from '../hooks/useThemeTokens'
-import { hasTenantCapability } from '../features/platform/tenantFeatureAccess'
-import { createTenantFeatureRefresh, subscribeTenantFeatureRefresh } from '../features/platform/tenantFeatureRefresh'
-import {
-  clearSaleLedger,
-  clearSessionTickets,
-  getCatalogStartTab,
-  getCachedCashSession,
-  getCachedCatalog,
-  getCachedContext,
-  getCachedProductSalesStats,
-  getCachedTicket,
-  getSaleLedger,
-  getSessionTickets,
-  saveCatalogStartTab,
-  saveCachedCashSession,
-  saveCachedCatalog,
-  saveCachedContext,
-  saveCachedProductSalesStats,
-  saveSaleLedger,
-} from '../lib/offlineStore'
+import { getCachedContext, saveCachedContext } from '../lib/offlineStore'
 import { supabaseConfig } from '../lib/supabase'
 import { releaseLocalLoginLock } from '../services/loginLeaseService'
-import {
-  loadTenantFeatures,
-  loadPosCatalogFromSupabase,
-  loadProductSalesStatsFromSupabase,
-  logoutTenant,
-} from '../services/posService'
-import type {
-  CatalogStartTab,
-  Discount,
-  PaymentMethod,
-  ProductSalesStat,
-  SessionTicketRecord,
-  TenantContext,
-  ThemeDefinition,
-} from '../types'
-import { getReadableError } from '../utils/errors'
+import { logoutTenant } from '../services/posService'
+import type { TenantContext, ThemeDefinition } from '../types'
 import { AppRouter } from './AppRouter'
-import { isBackofficeUser, isCrmUser, isSuperadmin } from './app-permissions'
+import { isCrmUser, isSuperadmin } from './app-permissions'
+import { loadApplicationState, loadOfflineApplicationState } from './application-bootstrap'
+import type { PosBootstrap } from './application-bootstrap'
 import { useDomainErrors } from './useDomainErrors'
-import { FiscalInstallationGate } from '../features/fiscal/local/FiscalInstallationGate'
-import { useFiscalQueue } from '../features/fiscal/local/useFiscalQueue'
 
 const CrmPage = lazy(() => import('../components/crm/CrmPage').then((module) => ({ default: module.CrmPage })))
 const SuperAdminPage = lazy(() => import('../components/superadmin/SuperAdminPage').then((module) => ({ default: module.SuperAdminPage })))
-const PosPage = lazy(() => import('./PosPage').then((module) => ({ default: module.PosPage })))
+const PosRuntime = lazy(() => import('./PosRuntime').then((module) => ({ default: module.PosRuntime })))
+const PersonalDeviceSession = lazy(() => import('../features/personal/PersonalDeviceSession').then((module) => ({ default: module.PersonalDeviceSession })))
 const KdsPage = lazy(() => import('../features/production/components/KdsPage').then((module) => ({ default: module.KdsPage })))
 
 const themes = themesData as ThemeDefinition[]
@@ -83,419 +40,56 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   const isOnline = networkOnline && sessionReady
   const offline = useOfflineController(networkOnline, sessionReady)
   const [context, setContext] = useState<TenantContext | null>(null)
-  const [catalog, setCatalog] = useState<CatalogData | null>(null)
-  const [discounts, setDiscounts] = useState<Discount[]>([])
-  const [manualDiscountEnabled, setManualDiscountEnabled] = useState(false)
-  const [manualDiscountRequiresPin, setManualDiscountRequiresPin] = useState(false)
-  const [discountSchedule, setDiscountSchedule] = useState({
-    dayChangeTime: null as string | null,
-    timeZone: 'Europe/Madrid',
-  })
-  const [catalogStartTab, setCatalogStartTab] = useState<CatalogStartTab>(() => getCatalogStartTab())
-  const [productSalesStats, setProductSalesStats] = useState<ProductSalesStat[]>([])
-  const productStatsRevisionRef = useRef(0)
-  const pendingProductStatsRef = useRef(0)
-  const productStatsRefreshBlockedRef = useRef(false)
+  const [bootstrap, setBootstrap] = useState<PosBootstrap | null>(null)
   const [isBootstrapping, setIsBootstrapping] = useState(true)
   const [isBusy, setIsBusy] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
-  const cashlogyPaymentActive = useCashlogyStore((state) => Boolean(
-    state.intent || state.isStarting || state.isPolling || state.isCancelling,
-  ))
-  const cashlogyManagementActive = useCashlogyManagementStore((state) => Boolean(
-    state.intent
-      || state.isStarting
-      || state.isPolling
-      || state.isMutating
-      || state.isCancelling
-      || state.isRecordingStackerCollection
-      || state.stackerCollectionPending,
-  ))
-  const localHardwareActive = usePrintAgentStore((state) => state.isPrintingTicket || state.isOpeningCashDrawer)
-  const {
-    error,
-    errorId,
-    clear: clearErrors,
-    setCashError,
-    setGeneralError,
-    setRestaurantError,
-    setSaleError,
-    setSessionError,
-  } = useDomainErrors()
+  const [applicationBusy, setApplicationBusy] = useState(false)
   const [loginLeaseBlocked, setLoginLeaseBlocked] = useState(false)
   const [pendingLoginContext, setPendingLoginContext] = useState<TenantContext | null>(null)
-  const [mobileTicketOpen, setMobileTicketOpen] = useState(false)
-  const [restaurantPaidFeedback, setRestaurantPaidFeedback] = useState<PaymentMethod | null>(null)
-  const [auxiliaryOperationBusy, setAuxiliaryOperationBusy] = useState(false)
-  const floatingTicketButtonRef = useRef<HTMLButtonElement>(null)
-  const addFeedback = useAddProductFeedback(floatingTicketButtonRef)
-  const tenantIdForFeatureSync = context && !isSuperadmin(context) ? context.tenantId : null
-  const userIdForFeatureSync = context?.userId ?? null
-  const venueIdForFeatureSync = context?.venueId || undefined
-  const featuresInitiallyLoaded = context?.features !== undefined
-  const featureRefreshRef = useRef<{
-    tenantId: string
-    userId: string
-    venueId?: string
-    controller: ReturnType<typeof createTenantFeatureRefresh>
-  } | null>(null)
+  const { error, errorId, clear: clearErrors, setGeneralError, setSessionError } = useDomainErrors()
+  useTenantFeatures(context, isOnline, setContext)
 
-  useEffect(() => {
-    if (!tenantIdForFeatureSync || !userIdForFeatureSync) {
-      featureRefreshRef.current = null
-      return undefined
-    }
-    if (!isOnline) return undefined
-    if (featureRefreshRef.current?.tenantId !== tenantIdForFeatureSync
-      || featureRefreshRef.current.userId !== userIdForFeatureSync
-      || featureRefreshRef.current.venueId !== venueIdForFeatureSync) {
-      featureRefreshRef.current = {
-        tenantId: tenantIdForFeatureSync,
-        userId: userIdForFeatureSync,
-        venueId: venueIdForFeatureSync,
-        controller: createTenantFeatureRefresh(() => loadTenantFeatures(tenantIdForFeatureSync, venueIdForFeatureSync), featuresInitiallyLoaded),
-      }
-    }
-    const controller = featureRefreshRef.current.controller
-    let active = true
-    const refreshFeatures = async () => {
-      try {
-        const features = await controller.refreshIfStale()
-        if (!active || features === undefined) return
-        setContext((current) => {
-          if (!current || current.tenantId !== tenantIdForFeatureSync || current.userId !== userIdForFeatureSync || (current.venueId || undefined) !== venueIdForFeatureSync) return current
-          const unchanged = current.features?.length === features.length
-            && current.features.every((feature, index) => feature === features[index])
-          if (unchanged) return current
-          const nextContext = { ...current, features }
-          saveCachedContext(nextContext)
-          return nextContext
-        })
-      } catch {
-        // A temporary refresh failure must not interrupt an active POS session.
-      }
-    }
-    const unsubscribe = subscribeTenantFeatureRefresh(refreshFeatures)
-    return () => {
-      active = false
-      unsubscribe()
-    }
-  }, [featuresInitiallyLoaded, isOnline, tenantIdForFeatureSync, userIdForFeatureSync, venueIdForFeatureSync])
-
-  const persistProductSalesStats = useCallback((stats: ProductSalesStat[]) => {
-    productStatsRevisionRef.current++
-    setProductSalesStats(stats)
-    if (context) saveCachedProductSalesStats(context.tenantId, stats)
-  }, [context])
-  const subtractProductSalesStats = useCallback((
-    lines: Array<{ productId: string; quantity: number; lineTotalCents: number }>,
-  ) => {
-    persistProductSalesStats(removeProductSalesStats(productSalesStats, lines))
-  }, [persistProductSalesStats, productSalesStats])
-  const addConfirmedProductStats = useCallback((ticket: SessionTicketRecord) => {
-    productStatsRevisionRef.current++
-    setProductSalesStats((current) => {
-      const next = addConfirmedProductSalesStats(current, ticket.payload.lines)
-      if (context) saveCachedProductSalesStats(context.tenantId, next)
-      return next
-    })
-  }, [context])
-
-  const cash = useCashSession({
-    context,
-    isOnline,
-    onError: setCashError,
-    refreshPendingCount: offline.refreshPendingCount,
-    setBusy: setIsBusy,
-    subtractProductSalesStats,
-    onConfirmedSale: addConfirmedProductStats,
-    syncPendingEvents: offline.syncPendingEvents,
-  })
-  const promotionsEnabled = Boolean(context && hasTenantCapability(context, 'promotions'))
-  const fiscalPendingTicketIds = useFiscalQueue({
-    context: context && !isBackofficeUser(context) && context.deviceMode !== 'kds' ? context : null,
-    cashSession: cash.session,
-  })
-  const quickSale = useQuickSale({
-    catalog,
-    cashSession: cash.session,
-    discounts,
-    discountSchedule,
-    context,
-    isOnline,
-    ledger: cash.ledger,
-    onAddFeedback: addFeedback.triggerAddFeedback,
-    persistLedger: cash.persistLedger,
-    persistProductSalesStats,
-    persistTickets: cash.persistTickets,
-    printSale: cash.printSale,
-    onError: setSaleError,
-    productSalesStats,
-    refreshPendingCount: offline.refreshPendingCount,
-    setMobileTicketOpen,
-    syncPendingEvents: offline.syncPendingEvents,
-    tickets: cash.tickets,
-  })
-  const closeDiscountModal = quickSale.closeDiscountModal
-  const setAppliedDiscount = quickSale.setDiscount
-  useEffect(() => {
-    if (promotionsEnabled) return
-    if (quickSale.discount?.discountId) setAppliedDiscount(null)
-    closeDiscountModal()
-  }, [closeDiscountModal, promotionsEnabled, quickSale.discount?.discountId, setAppliedDiscount])
-  const restaurant = useRestaurantController({
-    appliedDiscount: promotionsEnabled ? quickSale.discount : null,
-    catalog,
-    cashSession: cash.session,
-    context,
-    enabled: Boolean(context && context.deviceMode !== 'kds' && !isBackofficeUser(context) && hasTenantCapability(context, 'restaurant')),
-    isBusy,
-    isOnline,
-    onAddFeedback: addFeedback.triggerAddFeedback,
-    onError: setRestaurantError,
-    onPaidFeedback: setRestaurantPaidFeedback,
-    printSale: cash.printSale,
-    refreshCashSales: async (ticketId, missingTicketTitle, shouldPrint) => {
-      productStatsRevisionRef.current++
-      pendingProductStatsRef.current++
-      try { await cash.refreshConfirmedSale(ticketId, missingTicketTitle, shouldPrint) }
-      finally { pendingProductStatsRef.current-- }
-    },
-    setAppliedDiscount: quickSale.setDiscount,
-    setBusy: setIsBusy,
-    setMobileTicketOpen,
-    syncPendingEvents: offline.syncPendingEvents,
-  })
-  const reservations = useReservationsController({
-    cashSession: cash.session,
-    context,
-    enabled: Boolean(context && context.deviceMode !== 'kds' && !isBackofficeUser(context) && hasTenantCapability(context, 'reservations') && restaurant.tablesEnabled),
-    isOnline,
-    operationalMap: restaurant.map,
-    onError: setRestaurantError,
-    onOpenOrder: async (orderId) => { await restaurant.openExistingOrder(orderId) },
-    refreshOperationalMap: restaurant.reloadMap,
-  })
-
-  useEffect(() => {
-    const blocked = isBusy || offline.isSyncing || offline.pendingCount > 0 || quickSale.paymentInFlight
-    productStatsRefreshBlockedRef.current = blocked
-    if (blocked) productStatsRevisionRef.current++
-  }, [isBusy, offline.isSyncing, offline.pendingCount, quickSale.paymentInFlight])
-
-  useEffect(() => {
-    if (!context || !isOnline || isBackofficeUser(context) || context.deviceMode === 'kds') return undefined
-    const controller = createProductSalesStatsRefresh({
-      load: () => loadProductSalesStatsFromSupabase(context),
-      apply: (stats) => {
-        setProductSalesStats(stats)
-        saveCachedProductSalesStats(context.tenantId, stats)
-      },
-      canRefresh: () => document.visibilityState === 'visible'
-        && !productStatsRefreshBlockedRef.current && pendingProductStatsRef.current === 0,
-      revision: () => productStatsRevisionRef.current,
-    })
-    const refresh = () => {
-      void controller.refreshIfStale().catch(() => {
-        // Keep the local ranking when the backend is temporarily unavailable.
-      })
-    }
-    const intervalId = window.setInterval(refresh, PRODUCT_SALES_STATS_REFRESH_MS)
-    document.addEventListener('visibilitychange', refresh)
-    return () => {
-      controller.dispose()
-      window.clearInterval(intervalId)
-      document.removeEventListener('visibilitychange', refresh)
-    }
-  }, [context, isOnline])
-
-  useRejectedSaleRecovery({
-    context,
-    cashSession: cash.session,
-    rejectedSaleEvent: offline.rejectedSaleEvent,
-    clearRejectedSaleEvent: offline.clearRejectedSaleEvent,
-    setCashSession: cash.setSession,
-    setTicketLines: quickSale.hydrate,
-    setDiscount: quickSale.setDiscount,
-    setSalesLedger: cash.setLedger,
-    setSessionTickets: cash.setTickets,
-    resetCashUi: () => {
-      quickSale.closeCashPayment()
-      cash.setCloseModalOpen(false)
-      cash.setHistoryOpen(false)
-      setRestaurantPaidFeedback(null)
-    },
-    setError: setSaleError,
-  })
-
-  const clearActiveState = () => {
+  const clearActiveState = useCallback(() => {
     setContext(null)
-    setCatalog(null)
-    setDiscounts([])
-    setManualDiscountEnabled(false)
-    setManualDiscountRequiresPin(false)
-    setProductSalesStats([])
-    setDiscountSchedule({ dayChangeTime: null, timeZone: 'Europe/Madrid' })
+    setBootstrap(null)
     setPendingLoginContext(null)
-    setMobileTicketOpen(false)
-    setRestaurantPaidFeedback(null)
+    setApplicationBusy(false)
     clearErrors()
-    cash.reset()
-    quickSale.reset()
-    restaurant.reset()
-  }
-  const clearActiveStateRef = useRef(clearActiveState)
-  clearActiveStateRef.current = clearActiveState
+  }, [clearErrors])
+
   const closeActiveLogin = useCallback(async (message: string, leaseBlocked: boolean) => {
-    clearActiveStateRef.current()
+    clearActiveState()
     saveCachedContext(null)
     setLoginLeaseBlocked(leaseBlocked)
     setSessionError(message)
-    try {
-      await logoutTenant()
-    } catch {
-      releaseLocalLoginLock()
-    }
-  }, [setSessionError])
+    try { await logoutTenant() }
+    catch { releaseLocalLoginLock() }
+  }, [clearActiveState, setSessionError])
   useLoginActivity({ context, isOnline, onSessionClosed: closeActiveLogin })
 
-  const applyTenantState = (
-    nextContext: TenantContext,
-    state: Awaited<ReturnType<typeof loadTenantState>>,
-  ) => {
-    if (shouldResetTenantState(context, nextContext)) {
-      cash.reset()
-      quickSale.reset()
-      restaurant.reset()
-    }
-    setContext(nextContext)
-    setLoginLeaseBlocked(false)
+  const applyTenantState = useCallback((nextContext: TenantContext, state: PosBootstrap | null) => {
+    state?.persist?.()
     saveCachedContext(nextContext)
-    setCatalog(state.catalog)
-    setDiscounts(state.discounts)
-    setManualDiscountEnabled(state.manualDiscountEnabled)
-    setManualDiscountRequiresPin(state.manualDiscountRequiresPin)
-    setDiscountSchedule(state.discountSchedule)
-    productStatsRevisionRef.current++
-    setProductSalesStats(state.productSalesStats)
-    quickSale.hydrate(isBackofficeUser(nextContext) ? [] : getCachedTicket(nextContext))
-    const nextTickets = state.cashSession ? getSessionTickets(nextContext, state.cashSession.id) : []
-    cash.hydrate(state.cashSession, state.salesLedger, nextTickets)
-    if (state.catalog) saveCachedCatalog(nextContext, {
-      catalog: state.catalog,
-      discounts: state.discounts,
-      manualDiscountEnabled: state.manualDiscountEnabled,
-      manualDiscountRequiresPin: state.manualDiscountRequiresPin,
-      discountSchedule: state.discountSchedule,
-    })
-    saveCachedProductSalesStats(nextContext.tenantId, state.productSalesStats)
-    const previousSession = getCachedCashSession(nextContext)
-    saveCachedCashSession(nextContext, state.cashSession)
-    if (!isBackofficeUser(nextContext) && state.cashSession) {
-      saveSaleLedger(nextContext, state.salesLedger)
-    } else if (!isBackofficeUser(nextContext)) {
-      clearSaleLedger(nextContext)
-      if (previousSession) clearSessionTickets(nextContext, previousSession.id)
-    }
-  }
-  const applyOfflineState = async (cachedContext: TenantContext) => {
-    const cachedCatalog = getCachedCatalog(cachedContext)
+    setContext(nextContext)
+    setBootstrap(state)
+    setLoginLeaseBlocked(false)
+  }, [])
+  const applyOfflineState = useCallback(async (cachedContext: TenantContext, isCurrent: () => boolean) => {
+    const state = await loadOfflineApplicationState(cachedContext)
+    if (!isCurrent()) return
     setContext(cachedContext)
-    setCatalog(cachedCatalog?.catalog ?? null)
-    setDiscounts(cachedCatalog?.discounts ?? [])
-    setManualDiscountEnabled(cachedCatalog?.manualDiscountEnabled ?? false)
-    setManualDiscountRequiresPin(cachedCatalog?.manualDiscountRequiresPin ?? false)
-    setDiscountSchedule(cachedCatalog?.discountSchedule ?? { dayChangeTime: null, timeZone: 'Europe/Madrid' })
-    productStatsRevisionRef.current++
-    setProductSalesStats(getCachedProductSalesStats(cachedContext.tenantId))
-    const cachedSession = getCachedCashSession(cachedContext)
-    cash.hydrate(
-      cachedSession,
-      getSaleLedger(cachedContext),
-      cachedSession ? getSessionTickets(cachedContext, cachedSession.id) : [],
-    )
-    quickSale.hydrate(getCachedTicket(cachedContext))
-  }
+    setBootstrap(state)
+  }, [])
   const session = useTenantSession({
-    context,
-    isOnline: networkOnline,
-    setSessionReady,
-    loginLeaseBlocked,
-    pendingLoginContext,
-    loadTenantState,
-    applyTenantState,
-    applyOfflineState,
-    clearActiveState,
-    syncPendingEvents: offline.syncPendingEvents,
-    setError: setSessionError,
-    setIsBootstrapping,
-    setIsBusy,
-    setIsLoading,
-    setLoginLeaseBlocked,
-    setPendingLoginContext,
+    context, isOnline: networkOnline, setSessionReady, loginLeaseBlocked, pendingLoginContext,
+    loadTenantState: loadApplicationState, applyTenantState, applyOfflineState, clearActiveState,
+    syncPendingEvents: offline.syncPendingEvents, setError: setSessionError,
+    setIsBootstrapping, setIsBusy, setIsLoading, setLoginLeaseBlocked, setPendingLoginContext,
   })
 
-  const refreshCatalog = useCallback(async (activeContext = context) => {
-    if (!activeContext || !isOnline) return
-    setIsLoading(true)
-    setGeneralError(null)
-    try {
-      const nextCatalog = await loadPosCatalogFromSupabase(activeContext, true)
-      setCatalog(nextCatalog.catalog)
-      setDiscounts(nextCatalog.discounts)
-      setManualDiscountEnabled(nextCatalog.manualDiscountEnabled)
-      setManualDiscountRequiresPin(nextCatalog.manualDiscountRequiresPin)
-      setDiscountSchedule(nextCatalog.discountSchedule)
-      saveCachedCatalog(activeContext, nextCatalog)
-    } catch (refreshError) {
-      setGeneralError(getReadableError(refreshError, { operation: 'app.AppShell' }))
-    } finally {
-      setIsLoading(false)
-    }
-  }, [context, isOnline, setGeneralError])
-
-  useEffect(() => {
-    if (!context || !isOnline || isBackofficeUser(context)) return undefined
-    let refreshTimer: number | null = null
-    const scheduleRefresh = () => {
-      if (refreshTimer) window.clearTimeout(refreshTimer)
-      refreshTimer = window.setTimeout(() => void refreshCatalog(context), 200)
-    }
-    const unsubscribe = subscribeToCatalogTabChanges(context, scheduleRefresh)
-    const refreshWhenVisible = () => {
-      if (document.visibilityState === 'visible') scheduleRefresh()
-    }
-    document.addEventListener('visibilitychange', refreshWhenVisible)
-    return () => {
-      if (refreshTimer) window.clearTimeout(refreshTimer)
-      document.removeEventListener('visibilitychange', refreshWhenVisible)
-      unsubscribe()
-    }
-  }, [context, isOnline, refreshCatalog])
-  const updateCatalogStartTab = (next: CatalogStartTab) => {
-    setCatalogStartTab(next)
-    saveCatalogStartTab(next)
-  }
-
-  const updateBlocked = !networkOnline
-    || isBusy
-    || quickSale.paymentInFlight
-    || quickSale.cashPaymentOpen
-    || offline.isSyncing
-    || offline.pendingCount > 0
-    || Boolean(offline.rejectedSaleEvent)
-    || auxiliaryOperationBusy
-    || restaurant.saveState !== 'saved'
-    || Boolean(restaurant.pendingPayment)
-    || restaurant.equalSplitOpen
-    || reservations.isLoading
-    || Boolean(reservations.editor)
-    || Boolean(reservations.pendingConflictDraft)
-    || cash.movementSaving
-    || Boolean(cash.printingClosingId)
-    || cashlogyPaymentActive
-    || cashlogyManagementActive
-    || localHardwareActive
+  const updateBlocked = !networkOnline || isBusy || applicationBusy
+    || offline.isSyncing || offline.pendingCount > 0 || Boolean(offline.rejectedSaleEvent)
 
   if (!selectedTheme) return null
   if (!supabaseConfig.isReady) return <><MissingConfigScreen /><AppUpdateBanner blocked={false} status={versionStatus} /></>
@@ -514,82 +108,19 @@ export function AppShell({ networkOnline, versionStatus }: AppShellProps) {
   /><AppUpdateBanner blocked={updateBlocked} status={versionStatus} /></>
 
   return <><AppRouter context={context}>{() => {
-    if (isSuperadmin(context)) return <SuperAdminPage context={context} error={error} isOnline={isOnline} onError={setGeneralError} onLogout={session.logout} />
-    if (isCrmUser(context)) return <CrmPage
-      context={context}
-      error={error}
-      isOnline={isOnline}
-      onBusyChange={setAuxiliaryOperationBusy}
-      onCatalogChanged={(venueId) => refreshCatalog({ ...context, venueId })}
-      onError={setGeneralError}
-      onLogout={session.logout}
+    if (isSuperadmin(context)) return <SuperAdminPage context={context} error={error} isOnline={isOnline} onBusyChange={setApplicationBusy} onError={setGeneralError} onLogout={session.logout} />
+    if (isCrmUser(context)) return <CrmPage context={context} error={error} isOnline={isOnline} onBusyChange={setApplicationBusy} onError={setGeneralError} onLogout={session.logout} />
+    if (context.deviceMode === 'kds') return <KdsPage context={context} isOnline={isOnline} onBusyChange={setApplicationBusy} onLogout={session.logout} />
+    if (!bootstrap) return <LoadingScreen />
+    const renderPos = (posContext: TenantContext, onStaffBusyChange?: (busy: boolean) => void) => <PosRuntime
+      key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}`}
+      context={posContext} bootstrap={bootstrap} offline={offline} isOnline={isOnline} onStaffBusyChange={onStaffBusyChange}
+      error={error} errorId={errorId} onError={setGeneralError} onLogout={session.logout}
+      onBusyChange={setApplicationBusy} themes={themes} selectedThemeId={themeId} setThemeId={setThemeId}
     />
-    if (context.deviceMode === 'kds') return <KdsPage context={context} isOnline={isOnline} onBusyChange={setAuxiliaryOperationBusy} onLogout={session.logout} />
-    if (isOnline && !restaurant.tablesConfigLoaded) return <LoadingScreen />
-    if (!cash.session && !reservations.isOpen) return <PosStartupReveal><CashSessionGate
-      canOpenReservations={hasTenantCapability(context, 'restaurant') && hasTenantCapability(context, 'reservations')}
-      cashClosings={cash.cashClosings}
-      closingHistoryOpen={cash.closingHistoryOpen}
-      completedClosing={cash.completedClosing}
-      context={context}
-      error={error}
-      isBusy={isBusy}
-      isOnline={isOnline}
-      onJoin={(nextSession) => void cash.join(nextSession)}
-      onCloseClosingHistory={() => cash.setClosingHistoryOpen(false)}
-      onCloseCompletedClosing={() => cash.setCompletedClosing(null)}
-      onLogout={() => void session.logout()}
-      onOpen={cash.open}
-      onOpenReservations={reservations.open}
-      onOpenClosingHistory={() => void cash.openClosingHistory()}
-      onPrintClosing={(closing, isReprint, confirmedNotPrinted) => void cash.printClosing(closing, isReprint ? { isReprint: true, confirmedNotPrinted } : {})}
-      onRefresh={() => void cash.options.refresh(context)}
-      registers={cash.options.registers}
-      printingClosingId={cash.printingClosingId}
-      sessions={cash.options.sessions}
-    /></PosStartupReveal>
-    return <PosStartupReveal><FiscalInstallationGate key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${context.deviceMode}:${cash.session?.cashRegisterId}`} context={context} cashSession={cash.session} onLogout={session.logout} onBusyChange={setAuxiliaryOperationBusy}><PosPage
-      fiscalPendingTicketIds={fiscalPendingTicketIds}
-      addFeedback={addFeedback}
-      catalog={catalog}
-      discounts={discounts}
-      discountSchedule={discountSchedule}
-      manualDiscountEnabled={manualDiscountEnabled}
-      manualDiscountRequiresPin={manualDiscountRequiresPin}
-      cash={cash}
-      catalogStartTab={catalogStartTab}
-      context={context}
-      error={error}
-      errorId={errorId}
-      floatingTicketButtonRef={floatingTicketButtonRef}
-      isBusy={isBusy}
-      isLoading={isLoading}
-      isOnline={isOnline}
-      mobileTicketOpen={mobileTicketOpen}
-      offline={{ lastSyncError: offline.lastSyncError, pendingCount: offline.pendingCount, retry: offline.syncPendingEvents }}
-      onLogout={session.logout}
-      onRefreshCatalog={refreshCatalog}
-      onSelectProduct={(item, allowVariantSelection, source) => quickSale.selectProduct(
-        item,
-        allowVariantSelection,
-        source,
-        restaurant.posView.type === 'table_order'
-          ? (sellable, selection, selectedItem, sourceElement) => restaurant.addLine(sellable, selection, selectedItem, undefined, sourceElement)
-          : quickSale.addLine,
-      )}
-      onSetError={setGeneralError}
-      onSetMobileTicketOpen={setMobileTicketOpen}
-      onUpdateBlockingOperationChange={setAuxiliaryOperationBusy}
-      onUpdateCatalogStartTab={updateCatalogStartTab}
-      productSalesStats={productSalesStats}
-      quickSale={quickSale}
-      restaurant={restaurant}
-      reservations={reservations}
-      restaurantPaidFeedback={restaurantPaidFeedback}
-      selectedThemeId={themeId}
-      setThemeId={setThemeId}
-      themes={themes}
-    /></FiscalInstallationGate></PosStartupReveal>
+    return hasTenantAddon(context, 'tickit_personal')
+      ? <PersonalDeviceSession key={`${context.tenantId}:${context.venueId}:${context.deviceId}:${context.userId}`} context={context} isOnline={isOnline} onLogout={session.logout}>{renderPos}</PersonalDeviceSession>
+      : renderPos(context)
   }}</AppRouter><AppUpdateBanner blocked={updateBlocked} status={versionStatus} /></>
 }
 

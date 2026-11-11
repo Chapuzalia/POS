@@ -6,7 +6,7 @@ export function isCrmOwner(context: TenantContext) {
 }
 
 export function isCrmUser(context: TenantContext) {
-  return context.role === 'owner' || context.role === 'manager'
+  return context.role === 'owner' || context.role === 'manager' || context.role === 'gestor'
 }
 
 export function isSuperadmin(context: TenantContext) {

@@ -89,7 +89,8 @@ function identityHarness({ readError = false } = {}) {
     add: value => data.set(value.scope,value),
   }
   const service = compileComponent(readFileSync(new URL('../src/features/fiscal/local/localIdentity.ts',import.meta.url),'utf8'), {
-    './localLedger.ts': { openLedger: async()=>({transaction:()=>({objectStore:()=>store}),close:()=>{}}), request:async value=>value, transactionDone:async()=>{}, assertInstallationBinding:()=>{} },
+    '../../../lib/localDatabase.ts': { openLedger: async()=>({transaction:()=>({objectStore:()=>store}),close:()=>{}}), request:async value=>value, transactionDone:async()=>{} },
+    './localLedger.ts': { assertInstallationBinding:()=>{} },
     './canonical.ts': {canonicalRecordSchema}, './verifactu.ts': {aeatHash},
     '../../../utils/UserFacingError.ts':{UserFacingError},
   }, {crypto})
@@ -140,7 +141,8 @@ function ledgerHarness(initial={},failWrites=false){
     else {if(tx.mode==='readwrite') for(const [name,rows] of tx.copy) stores.set(name,rows);resolve()}
   }})
   const service=compileComponent(readFileSync(new URL('../src/features/fiscal/local/localIdentity.ts',import.meta.url),'utf8'),{
-    './localLedger.ts':{openLedger,request:async x=>x,transactionDone,assertInstallationBinding:(binding,id)=>{if(binding&&binding.deviceId!==id)throw new Error('wrong device')}},
+    '../../../lib/localDatabase.ts':{openLedger,request:async x=>x,transactionDone},
+    './localLedger.ts':{assertInstallationBinding:(binding,id)=>{if(binding&&binding.deviceId!==id)throw new Error('wrong device')}},
     './canonical.ts':{canonicalRecordSchema},'./verifactu.ts':{aeatHash},'../../../utils/UserFacingError.ts':{UserFacingError},
   },{crypto,IDBKeyRange:{bound:()=>null}})
   return {service,stores}

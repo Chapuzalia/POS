@@ -70,7 +70,7 @@ import { VirtualTableModal } from './VirtualTableModal'
 import {
   MobileGroupActionsSheet,
 } from "./MobileTableMapSheets";
-import { ReservationTableBadge } from "../../reservations/components/ReservationTableBadge";
+import { ReservationTableBadge } from "./ReservationTableBadge";
 
 type Props = {
   canOpen: boolean;

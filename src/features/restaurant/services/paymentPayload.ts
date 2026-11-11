@@ -2,7 +2,7 @@ import type { SaleCreatedPayload } from '../../../types/domain.ts'
 
 /** Hydrate the complete tender list before saving a fiscal or durable copy. */
 export function withConfirmedRestaurantPayments(payload: SaleCreatedPayload, result: Record<string, unknown>): SaleCreatedPayload {
-  if (result.singleTicket !== true) return payload
+  if (result.singleTicket !== true && !Array.isArray(result.payments)) return payload
   if (!Array.isArray(result.payments)) throw new Error('Falta el desglose de pagos de la venta.')
   const payments: NonNullable<SaleCreatedPayload['payments']> = result.payments.map((value: unknown) => {
     if (typeof value !== 'object' || value === null) throw new Error('Pago de la venta no válido.')

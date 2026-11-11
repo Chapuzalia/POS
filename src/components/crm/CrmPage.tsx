@@ -1,8 +1,8 @@
-import { Suspense, useCallback, useEffect, useRef, useState } from 'react'
+import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { CrmModalBusyContext } from '../../features/crm/shared/components/CrmModalBusyContext'
 import { CrmShell } from '../../features/crm/layout/CrmShell'
-import { canAccessCrm, canAccessCrmSection } from '../../features/crm/routing/crmPermissions'
-import { catalogSections, type CrmSection } from '../../features/crm/routing/crmNavigation'
+import { canAccessCrm, canAccessCrmSection, defaultCrmSection } from '../../features/crm/routing/crmPermissions'
+import { catalogSections, crmSectionFromPath, crmSectionPath, type CrmSection } from '../../features/crm/routing/crmNavigation'
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
 import { applyCrmOpenCashSalesTotals, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
@@ -11,22 +11,49 @@ import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
 import { catalogAdminService } from '../../features/crm/catalog/services/catalogAdminService.ts'
 import { recoverSupabaseRealtimeConnection } from '../../lib/supabase'
+import type { CrmSearchItem } from '../../features/crm/search/crmSearchService'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../types'
 import { getReadableError } from '../../utils/errors'
+import { BillingActivationPanel } from '../../features/billing/BillingActivationPanel'
+import { NativeBillingNotice, billingManagedOnWeb } from '../../features/billing/NativeBillingNotice'
+import { refreshCachedPosCatalog } from '../../features/catalog/data/load-pos-catalog'
+
+const CrmOnboarding = lazy(() => import('../../features/crm/onboarding/CrmOnboarding'))
 
 export type CrmPageProps = {
   context: TenantContext
   error: string | null
   isOnline: boolean
-  onCatalogChanged: (venueId: string) => Promise<void>
   onBusyChange?: (busy: boolean) => void
   onError: (error: string | null) => void
   onLogout: () => void
 }
 
-export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChanged, onError, onLogout }: CrmPageProps) {
-  const [activeSection, setActiveSection] = useState<CrmSection>('dashboard')
+export function CrmPage({ context, error, isOnline, onBusyChange, onError, onLogout }: CrmPageProps) {
+  if (context.billingActivationRequired) return <CrmShell activeSection="plan" context={context} disabled={!isOnline} error={error} inventoryEnabled={false} isOnline={isOnline} onLogout={onLogout} onSectionChange={() => {}} onVenueChange={() => {}} selectedVenueId="" venues={[]}>
+    {billingManagedOnWeb ? <NativeBillingNotice activationRequired /> : context.role === 'owner' ? <BillingActivationPanel tenantId={context.tenantId} disabled={!isOnline} onActivated={reloadActivatedBusiness} /> : <p>El propietario debe completar el pago en Mi Plan para activar el negocio.</p>}
+  </CrmShell>
+  return <CrmWorkspace context={context} error={error} isOnline={isOnline} onBusyChange={onBusyChange} onError={onError} onLogout={onLogout} />
+}
+
+function reloadActivatedBusiness() { window.location.reload() }
+
+function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogout }: CrmPageProps) {
+  // The section lives in the URL (/crm/products) so a reload or back button keeps it.
+  const [activeSection, setActiveSection] = useState<CrmSection>(() => crmSectionFromPath(window.location.pathname))
+  useEffect(() => {
+    const handlePopState = () => setActiveSection(crmSectionFromPath(window.location.pathname))
+    window.addEventListener('popstate', handlePopState)
+    return () => window.removeEventListener('popstate', handlePopState)
+  }, [])
+  useEffect(() => {
+    // Redirects to an allowed section (permissions, unknown path) replace the entry instead of stacking it.
+    const path = crmSectionPath(activeSection)
+    if (window.location.pathname !== path) window.history.replaceState(window.history.state, '', `${path}${window.location.search}${window.location.hash}`)
+  }, [activeSection])
+  const [searchFocus, setSearchFocus] = useState<{ key: string; section: CrmSection; targetId: string } | null>(null)
   const [isBusy, setIsBusy] = useState(false)
+  const [onboardingRequest, setOnboardingRequest] = useState(0)
   const [stats, setStats] = useState<CrmStats | null>(null)
   const [comparisonStats, setComparisonStats] = useState<CrmStats | null>(null)
 
@@ -56,10 +83,11 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
     }
   }, [onError])
 
-  const refreshCurrentProjectedCatalog = useCallback(async () => {
-    if (!selectedVenueId) return
-    await onCatalogChanged(selectedVenueId)
-  }, [onCatalogChanged, selectedVenueId])
+  const refreshCurrentProjectedCatalog = useCallback(async (venueId = selectedVenueId) => {
+    if (!venueId) return
+    try { await refreshCachedPosCatalog(context, venueId) }
+    catch (refreshError) { onError(getReadableError(refreshError, { operation: 'crm.catalog.projection' })) }
+  }, [context, onError, selectedVenueId])
 
   const mutateCatalog = useCallback(async (action: () => Promise<unknown>) => {
     setIsBusy(true)
@@ -83,7 +111,7 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
     try {
       if (targetVenueId === catalog.venueId) await catalogAdminService.duplicateProduct(catalog, sourceProductId)
       else await catalogAdminService.duplicateProductToVenue(catalog, targetVenueId, sourceProductId)
-      await onCatalogChanged(targetVenueId)
+      await refreshCurrentProjectedCatalog(targetVenueId)
       if (targetVenueId === selectedVenueId) await refreshAdminCatalog(true)
       return true
     } catch (actionError) {
@@ -92,7 +120,7 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
     } finally {
       setIsBusy(false)
     }
-  }, [catalog, onCatalogChanged, onError, refreshAdminCatalog, selectedVenueId])
+  }, [catalog, onError, refreshAdminCatalog, refreshCurrentProjectedCatalog, selectedVenueId])
 
   const refreshVenues = useCallback(async () => {
     const nextVenues = await loadCrmVenues(context)
@@ -107,17 +135,18 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
   const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
 
   useEffect(() => {
-    if (!canAccessCrmSection(context.role, activeSection, context.features, selectedVenue)) setActiveSection('dashboard')
+    if (!canAccessCrmSection(context.role, activeSection, context.features, selectedVenue)) setActiveSection(defaultCrmSection(context.role))
   }, [activeSection, context.features, context.role, selectedVenue])
 
 
   const inventoryEnabled = selectedVenue ? hasTenantVenueCapability({ features: context.features, venue: selectedVenue }, 'inventory') : false
 
   useEffect(() => {
-    if (!inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock') {
+    // Wait for the venue: before it loads inventoryEnabled is false and would bounce a reloaded /crm/inventory-* URL.
+    if (selectedVenue && !inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock') {
       setActiveSection('inventory-stock')
     }
-  }, [activeSection, inventoryEnabled])
+  }, [activeSection, inventoryEnabled, selectedVenue])
 
   const statsLoadRequestId = useRef(0)
   const refreshStats = useCallback(async (options: { comparisonPeriod?: CrmStatsPeriod; period?: CrmStatsPeriod; silent?: boolean } = {}) => {
@@ -234,16 +263,27 @@ export function CrmPage({ context, error, isOnline, onBusyChange, onCatalogChang
   if (!canAccessCrm(context.role)) return null
   const disabled = !isOnline || isBusy || (shouldLoadCatalog && isCatalogLoading)
 
-  return <CrmModalBusyContext value={isBusy || (shouldLoadCatalog && isCatalogLoading)}><CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSectionChange={(section) => {
+  function changeSection(section: CrmSection) {
     const inventorySectionBlocked = !inventoryEnabled && section.startsWith('inventory-') && section !== 'inventory-stock'
-    if (canAccessCrmSection(context.role, section, context.features, selectedVenue) && !inventorySectionBlocked) setActiveSection(section)
-  }} onVenueChange={(venueId) => {
+    if (canAccessCrmSection(context.role, section, context.features, selectedVenue) && !inventorySectionBlocked) {
+      if (section !== activeSection) window.history.pushState(null, '', crmSectionPath(section))
+      setActiveSection(section)
+    }
+    setSearchFocus(null)
+  }
+
+  function openSearchResult(item: CrmSearchItem) {
+    changeSection(item.section)
+    setSearchFocus({ key: `${item.id}:${Date.now()}`, section: item.section, targetId: item.targetId })
+  }
+
+  return <CrmModalBusyContext value={isBusy || (shouldLoadCatalog && isCatalogLoading)}><CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSearchSelect={openSearchResult} onboarding={selectedVenue ? <Suspense fallback={null}><CrmOnboarding key={`${context.tenantId}:${context.userId}:${selectedVenueId}`} activeSection={activeSection} context={context} disabled={disabled} isOnline={isOnline} onSectionChange={changeSection} openRequest={onboardingRequest} venue={selectedVenue} /></Suspense> : null} onSectionChange={changeSection} onVenueChange={(venueId) => {
     setStats(null)
     setComparisonStats(null)
     setSelectedVenueId(venueId)
   }} selectedVenueId={selectedVenueId} venues={venues}>
     <Suspense fallback={<section aria-busy="true" className="grid min-h-48 place-items-center rounded-2xl bg-[var(--crm-surface)] p-6 text-sm font-bold text-[var(--crm-text-muted)]" role="status">Cargando sección…</section>}>
-      <CrmSectionContent activeSection={activeSection} catalog={catalog} comparisonStats={comparisonStats} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+      <CrmSectionContent activeSection={activeSection} catalog={catalog} comparisonStats={comparisonStats} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} focus={searchFocus?.section === activeSection ? searchFocus : null} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStartOnboarding={() => setOnboardingRequest((request) => request + 1)} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
     </Suspense>
   </CrmShell></CrmModalBusyContext>
 }

@@ -1,6 +1,6 @@
-import { Armchair, BarChart3, Beaker, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackageOpen, PackagePlus, PlugZap, Printer, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
+import { Armchair, BarChart3, Beaker, BookOpen, Boxes, Building2, ChefHat, FileText, Gauge, LayoutDashboard, LayoutGrid, ListChecks, Package, PackagePlus, PlugZap, Printer, Puzzle, Ruler, type LucideIcon, ReceiptText, Settings, Settings2, Tags, Upload, Users, Warehouse } from 'lucide-react'
 
-export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-replenishment' | 'purchases-invoices' | 'purchases-suppliers' | 'profitability' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'print-templates' | 'settings' | 'plan'
+export type CrmSection = 'dashboard' | 'access' | 'products' | 'formats' | 'categories' | 'selection-groups' | 'modifiers' | 'discounts' | 'tables' | 'production' | 'reports' | 'x-reports' | 'purchases-summary' | 'purchases-replenishment' | 'purchases-invoices' | 'purchases-suppliers' | 'profitability' | 'inventory-stock' | 'inventory-items' | 'inventory-preparations' | 'inventory-warehouses' | 'inventory-units' | 'inventory-settings' | 'import' | 'stats' | 'integrations' | 'print-templates' | 'settings' | 'plan' | 'documentation'
 
 export type CrmNavItem = { id: CrmSection; label: string; icon: LucideIcon }
 
@@ -20,7 +20,6 @@ export const reportNavItems: CrmNavItem[] = [
 
 export const inventoryNavItems: CrmNavItem[] = [
   { id: 'inventory-stock', label: 'Stock', icon: Package },
-  { id: 'inventory-items', label: 'Artículos', icon: PackageOpen },
   { id: 'inventory-preparations', label: 'Elaboraciones', icon: Beaker },
   { id: 'inventory-warehouses', label: 'Almacenes', icon: Warehouse },
   { id: 'inventory-units', label: 'Unidades', icon: Ruler },
@@ -46,13 +45,22 @@ export const navItems: CrmNavItem[] = [
   { id: 'plan', label: 'Mi Plan', icon: Gauge },
   { id: 'print-templates', label: 'Plantillas de impresión', icon: Printer },
   { id: 'settings', label: 'Configuración', icon: Settings },
+  { id: 'documentation', label: 'Documentación y ayuda', icon: BookOpen },
 ]
 
 export const allNavItems = [...navItems, ...productNavItems, ...purchaseNavItems, ...reportNavItems, ...inventoryNavItems]
 export const productSections = new Set<CrmSection>(productNavItems.map((item) => item.id))
 export const reportSections = new Set<CrmSection>(reportNavItems.map((item) => item.id))
-export const inventorySections = new Set<CrmSection>(inventoryNavItems.map((item) => item.id))
+export const inventorySections = new Set<CrmSection>([...inventoryNavItems.map((item) => item.id), 'inventory-items'])
 export const purchaseSections = new Set<CrmSection>(purchaseNavItems.map((item) => item.id))
+// URL slug per section (the id unless renamed); the dashboard lives at /crm/.
+const sectionSlugs: Partial<Record<CrmSection, string>> = { reports: 'tickets' }
+const routableSections: CrmSection[] = [...allNavItems.map((item) => item.id), 'inventory-items']
+export const crmSectionPath = (section: CrmSection) => section === 'dashboard' ? '/crm/' : `/crm/${sectionSlugs[section] ?? section}`
+export function crmSectionFromPath(pathname: string): CrmSection {
+  const slug = pathname.replace(/^\/crm\/?/, '').replace(/\/+$/, '')
+  return routableSections.find((section) => (sectionSlugs[section] ?? section) === slug) ?? 'dashboard'
+}
 export const catalogSections = new Set<CrmSection>(['products', 'formats', 'categories', 'selection-groups', 'modifiers', 'import', 'production', 'profitability'])
 
 export function getSectionTitle(section: CrmSection) {
@@ -69,12 +77,12 @@ export function getSectionTitle(section: CrmSection) {
     discounts: 'Descuentos del local',
     reports: 'Tickets',
     'x-reports': 'Informes Z',
-    'inventory-stock': 'Stock del local',
+    'inventory-stock': 'Artículos y stock del local',
     'purchases-summary': 'Resumen de compras',
     'purchases-replenishment': 'Reposición de stock',
     'purchases-invoices': 'Facturas y albaranes',
     'purchases-suppliers': 'Proveedores del local',
-    'inventory-items': 'Artículos de inventario',
+    'inventory-items': 'Artículos y stock del local',
     'inventory-preparations': 'Elaboraciones de inventario',
     'inventory-warehouses': 'Almacenes del local',
     'inventory-units': 'Unidades de inventario',
@@ -85,6 +93,7 @@ export function getSectionTitle(section: CrmSection) {
     'print-templates': 'Configuración · Impresión · Plantillas',
     settings: 'Configuración de locales',
     plan: 'Mi Plan',
+    documentation: 'Documentación y ayuda',
   }
   return titles[section] ?? 'Panel de control'
 }

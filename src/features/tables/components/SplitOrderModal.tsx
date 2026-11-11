@@ -15,9 +15,9 @@ import {
 } from 'lucide-react'
 import { CashPaymentModal, DiscountModal } from '../../../components/modals'
 import { PaymentPanel } from '../../../components/pos'
-import { usePrintAgentStore } from '../../local-printing'
+import { usePrintAgentStore } from '../../local-printing/store/usePrintAgentStore'
 import { calculateDiscountForLines, type DiscountScheduleContext } from '../../../lib/discounts'
-import { formatMoney, normalizeText } from '../../../lib/format'
+import { formatMoney, normalizeText, quantityAmountCents } from '../../../lib/format'
 import type { AppliedDiscount, Discount, PaymentMethod } from '../../../types'
 import type {
   PayRestaurantOrderItemsResult,
@@ -29,6 +29,7 @@ import { getMenuComponentSearchText } from '../../../components/pos/menuComponen
 
 type PendingPayment = {
   method: PaymentMethod | null
+  customCashCents?: number
   receivedCents: number | null
   pendingUnits: number
   discount: AppliedDiscount | null
@@ -50,6 +51,7 @@ type Props = {
     receivedCents: number | null,
     allowPending: boolean,
     discount: AppliedDiscount | null,
+    customCashCents?: number,
   ) => Promise<PayRestaurantOrderItemsResult>
   order: RestaurantOrderDetail
   venueId: string
@@ -91,12 +93,12 @@ export function SplitOrderModal({
 
   const selectedUnits = moves.reduce((sum, move) => sum + move.quantity, 0)
   const subtotalCents = order.lines.reduce(
-    (sum, line) => sum + (quantities[line.id] ?? 0) * line.unitPriceCents,
+    (sum, line) => sum + quantityAmountCents(line.unitPriceCents, quantities[line.id] ?? 0),
     0,
   )
   const paymentTotals = calculateDiscountForLines(
     order.lines.filter((line) => (quantities[line.id] ?? 0) > 0)
-      .map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: (quantities[line.id] ?? 0) * line.unitPriceCents, quantity: quantities[line.id] ?? 0 })),
+      .map((line) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: quantityAmountCents(line.unitPriceCents, quantities[line.id] ?? 0), quantity: quantities[line.id] ?? 0 })),
     currentDiscount,
   )
   const normalizedSearchQuery = normalizeText(deferredSearchQuery.trim())
@@ -126,6 +128,7 @@ export function SplitOrderModal({
     receivedCents: number | null,
     allowPending = false,
     paymentDiscount = currentDiscount,
+    customCashCents?: number,
   ) {
     if (moves.length === 0 || paying) return
 
@@ -139,6 +142,7 @@ export function SplitOrderModal({
         receivedCents,
         allowPending,
         paymentDiscount,
+        customCashCents,
       )
 
       if (result.requiresConfirmation) {
@@ -147,6 +151,7 @@ export function SplitOrderModal({
           receivedCents,
           pendingUnits: result.pendingUnits,
           discount: paymentDiscount,
+          customCashCents,
         })
         return
       }
@@ -274,7 +279,7 @@ export function SplitOrderModal({
                         </span>
                         <MenuComponentDetails compact components={line.components} />
                         <span className="mt-1 block font-mono text-sm">
-                          {formatMoney(line.unitPriceCents * line.quantity)}
+                          {formatMoney(quantityAmountCents(line.unitPriceCents, line.quantity))}
                         </span>
                       </div>
 
@@ -390,6 +395,7 @@ export function SplitOrderModal({
             </div>
 
             <PaymentPanel
+              onCustomPayment={(cashCents) => void completePayment('card', null, false, currentDiscount, cashCents)}
               discount={currentDiscount}
               disabled={isBusy || paying}
               feedback={feedback}
@@ -485,6 +491,7 @@ export function SplitOrderModal({
                   pendingPayment.receivedCents,
                   true,
                   pendingPayment.discount,
+                  pendingPayment.customCashCents,
                 )}
                 type="button"
               >

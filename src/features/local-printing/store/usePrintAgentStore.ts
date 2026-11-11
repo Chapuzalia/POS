@@ -1,6 +1,7 @@
 import { reportOperationError } from '../../../lib/observability.ts'
 import { create } from 'zustand'
 import { createPrintAgentClient } from '../api/printAgentClient'
+import { getEmbeddedPrintAgent } from '../embedded/embeddedPrintAgent'
 import { PrintAgentError, toPrintAgentError } from '../api/PrintAgentError'
 import { DEFAULT_PRINT_AGENT_URL, PRINT_AGENT_ENABLED } from '../constants/config'
 import { printRequestSchema, printerActionSchema, selectPrinterSchema } from '../schemas/printSchemas'
@@ -152,8 +153,9 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
 
     configureScope(scope) {
       const config = loadPrintAgentConfig(scope)
+      const embedded = getEmbeddedPrintAgent()
       set({
-        scope, baseUrl: config.baseUrl, token: config.token, selectedPrinterId: config.selectedPrinterId,
+        scope, baseUrl: embedded?.baseUrl ?? config.baseUrl, token: embedded?.token ?? config.token, selectedPrinterId: config.selectedPrinterId,
         cashlogyConfigured: config.cashlogyConfigured, cashlogyTerminalCode: config.cashlogyTerminalCode,
         cashlogyHealth: null, cashlogyConnectors: [], cashlogyConnectorsLoaded: false,
         isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, isRecoveringCashlogy: false, cashlogyConnectorAction: null,
@@ -421,7 +423,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
         let job: PrintJob = { jobId: response.jobId, id: response.jobId, requestId: payload.requestId, status: (response.status || 'pending') as PrintJob['status'] }
         set({ currentJob: job })
         if (response.jobId && !['printed', 'failed', 'cancelled'].includes(job.status)) {
-          job = await pollPrintJob(activeClient, response.jobId, { signal, onUpdate: (next) => set({ currentJob: next }) })
+          job = await pollPrintJob(activeClient, response.jobId, { signal, requestId: payload.requestId, onUpdate: (next) => set({ currentJob: next }) })
         }
         if (job.status === 'unknown') throw new PrintAgentError({ code: 'PRINT_STATUS_UNKNOWN', details: job })
         if (job.status === 'failed' || job.status === 'cancelled') throw new PrintAgentError({ code: job.errorCode === 'PRINTER_NOT_FOUND' ? 'PRINTER_NOT_FOUND' : 'PRINT_FAILED', details: job })
@@ -433,10 +435,10 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
         if (['NETWORK_ERROR', 'TIMEOUT', 'INVALID_RESPONSE'].includes(mapped.code)) {
           try {
             const known = acceptedJobId
-              ? await activeClient.getJob(acceptedJobId, signal)
+              ? await activeClient.getJob(acceptedJobId, signal, payload.requestId)
               : await activeClient.findJobByRequestId(payload.requestId, signal)
             if (known) {
-              const resolved = known.jobId || known.id ? await pollPrintJob(activeClient, String(known.jobId || known.id), { signal, onUpdate: (job) => set({ currentJob: job }) }) : known
+              const resolved = known.jobId || known.id ? await pollPrintJob(activeClient, String(known.jobId || known.id), { signal, requestId: payload.requestId, onUpdate: (job) => set({ currentJob: job }) }) : known
               if (resolved.status === 'printed') { set({ currentJob: resolved, lastPrintAt: resolved.printedAt || new Date().toISOString() }); return resolved }
               if (resolved.status === 'failed' || resolved.status === 'cancelled') {
                 const failed = new PrintAgentError({ code: resolved.errorCode === 'PRINTER_NOT_FOUND' ? 'PRINTER_NOT_FOUND' : 'PRINT_FAILED', details: resolved })
@@ -463,7 +465,7 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
       const activeClient = client()
       if (jobId) {
         try {
-          const job = await activeClient.getJob(jobId)
+          const job = await activeClient.getJob(jobId, undefined, requestId)
           if (job.requestId === requestId) return job
         }
         catch (error) {
@@ -502,8 +504,9 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     resetConfiguration() {
       const scope = get().scope
       if (scope) clearPrintAgentConfig(scope)
+      const embedded = getEmbeddedPrintAgent()
       set({
-        baseUrl: DEFAULT_PRINT_AGENT_URL, token: null, selectedPrinterId: null, selectedPrinter: null,
+        baseUrl: embedded?.baseUrl ?? DEFAULT_PRINT_AGENT_URL, token: embedded?.token ?? null, selectedPrinterId: null, selectedPrinter: null,
         cashlogyConfigured: false, cashlogyTerminalCode: 'POS_MAIN', cashlogyHealth: null,
         cashlogyConnectors: [], cashlogyConnectorsLoaded: false,
         isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, isRecoveringCashlogy: false, cashlogyConnectorAction: null,

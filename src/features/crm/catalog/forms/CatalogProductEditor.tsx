@@ -471,6 +471,7 @@ export function CatalogProductEditor({
       </header>
       <div className="!grid !gap-5 !overflow-y-auto !p-5">
         <form
+          data-onboarding="product-form" data-onboarding-dialog
           className="!grid !gap-4"
           onSubmit={(event) => void submitGeneral(event)}
         >
@@ -478,6 +479,7 @@ export function CatalogProductEditor({
           <div className="!grid !gap-3 sm:!grid-cols-2">
             <Field label="Nombre">
               <UiInput
+                data-onboarding="product-name"
                 className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] !bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px]"
                 onChange={(event) => {
                   setName(event.target.value);
@@ -493,7 +495,7 @@ export function CatalogProductEditor({
                 value={type}
               />
             </Field>
-            <Field className="sm:!col-span-2" label="IVA">
+            <Field data-onboarding="product-tax" className="sm:!col-span-2" label="IVA">
               <div className="!grid !gap-2 sm:!grid-cols-2">
                 <CrmSelect
                   ariaLabel="Tipo de IVA"
@@ -602,7 +604,7 @@ export function CatalogProductEditor({
                   crear el producto.
                 </p>
               ) : null}
-              <div className="!grid !gap-2">
+              <div data-onboarding="product-variants" className="!grid !gap-2">
                 {(advanced ? variantDrafts : variantDrafts.slice(0, 1)).map(
                   (variant) => (
                     <div
@@ -696,7 +698,7 @@ export function CatalogProductEditor({
                 Producto interno, sin aparición inicial en TPV
               </UiCheckbox>
               {!internal ? (
-                <div className="!grid !gap-3 sm:!grid-cols-[1fr_1fr_auto] sm:!items-end">
+                <div data-onboarding="product-placement" className="!grid !gap-3 sm:!grid-cols-[1fr_1fr_auto] sm:!items-end">
                   <Field label="Pestaña inicial">
                     <CrmSelect
                       onChange={(value) => {
@@ -747,6 +749,7 @@ export function CatalogProductEditor({
             </p>
           ) : null}
           <UiButton
+            data-onboarding="product-save"
             className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !w-fit !items-center !gap-2"
             disabled={disabled || (!product && !activeFormats.length)}
             type="submit"
@@ -1118,7 +1121,7 @@ export function CatalogProductEditor({
               ))}
             </section>
 
-            <section className="!grid !gap-3 !border-t !border-[var(--crm-border-subtle)] !pt-5">
+            <section data-onboarding="product-assignments" className="!grid !gap-3 !border-t !border-[var(--crm-border-subtle)] !pt-5">
               <div>
                 <h3 className="!font-bold">Mixers y modificadores asignados</h3>
                 <p className="!text-sm !text-[var(--crm-text-muted)]">
@@ -1127,7 +1130,7 @@ export function CatalogProductEditor({
                 </p>
               </div>
               <div className="!grid !gap-2 sm:!grid-cols-5">
-                <CrmSelect
+                <div data-onboarding="product-assignment-type"><CrmSelect
                   onChange={(value) => {
                     setAssignmentDomain(value as typeof assignmentDomain);
                     setAssignmentGroupId("");
@@ -1137,15 +1140,15 @@ export function CatalogProductEditor({
                     { label: "Modificadores", value: "modifier" },
                   ]}
                   value={assignmentDomain}
-                />
-                <CrmSelect
+                /></div>
+                <div data-onboarding="product-assignment-group"><CrmSelect
                   onChange={setAssignmentGroupId}
                   options={assignmentGroups
                     .filter((group) => group.active)
                     .map((group) => ({ label: group.name, value: group.id }))}
                   value={assignmentGroupId}
-                />
-                <UiInput
+                /></div>
+                <UiInput data-onboarding="assignment-min"
                   aria-label="Mínimo"
                   className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px]"
                   min={0}
@@ -1155,7 +1158,7 @@ export function CatalogProductEditor({
                   type="number"
                   value={assignmentMin}
                 />
-                <UiInput
+                <UiInput data-onboarding="assignment-max"
                   aria-label="Máximo"
                   className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px]"
                   min={1}
@@ -1165,7 +1168,7 @@ export function CatalogProductEditor({
                   type="number"
                   value={assignmentMax}
                 />
-                <CrmSelect
+                <div data-onboarding="product-assignment-variant"><CrmSelect
                   onChange={setAssignmentVariantId}
                   options={[
                     { label: "Todas las variantes", value: "" },
@@ -1175,9 +1178,9 @@ export function CatalogProductEditor({
                     })),
                   ]}
                   value={assignmentVariantId}
-                />
+                /></div>
               </div>
-              <UiButton
+              <UiButton data-onboarding="assignment-save"
                 className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !w-fit"
                 disabled={disabled || !assignmentGroupId}
                 onClick={() => void addAssignment()}

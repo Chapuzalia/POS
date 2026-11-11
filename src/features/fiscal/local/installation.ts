@@ -231,6 +231,10 @@ export async function activateFiscalInstallation(context: TenantContext, cashSes
         await clearFiscalActivationRequest(key)
         throw new FiscalActivationConfirmationError('La instalación activa cambió. Vuelve a comprobar la caja y confirma su estado actual.')
       }
+      if (/FISCAL_(SUBJECT|VENUE)_SETUP_REQUIRED/.test(error.message)) {
+        await clearFiscalActivationRequest(key)
+        throw new UserFacingError('Falta la configuración fiscal del negocio. Un administrador debe completar «Titular y numeración de cajas» (razón social, NIF y código del local) en CRM > Integraciones antes de activar esta caja.', { cause: error })
+      }
       throw error
     }
     const id = z.uuid().parse(data)

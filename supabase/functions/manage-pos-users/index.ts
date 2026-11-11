@@ -1,4 +1,12 @@
-import { createClient } from 'jsr:@supabase/supabase-js@2'
+import { createClient } from 'npm:@supabase/supabase-js@2.115.0'
+import { BillingService } from '../_shared/billing/service.ts'
+import { MollieGateway } from '../_shared/billing/mollie.ts'
+import { billingEnv, loadBillingSecrets } from '../_shared/billing/env.ts'
+import { selectionSchema } from '../_shared/billing/schemas.ts'
+import { onboardingContract } from '../_shared/billing/onboarding.ts'
+import { sendWelcomeEmail } from '../_shared/welcome-email.ts'
+import type { WelcomeEmailStatus } from '../_shared/welcome-email.ts'
+import { deletePlatformTenantData, TenantDeletionError } from '../_shared/platform-tenant-deletion.ts'
 
 const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
@@ -200,12 +208,26 @@ Deno.serve(async (request) => {
       const ownerFullName = String(body.ownerFullName ?? '').trim()
       const maxVenues = Number(body.maxVenues ?? 1)
       const maxDevices = Number(body.maxDevices ?? 5)
+      const billingMode = body.billingMode ?? 'manual'
+      // 'stripe' is the N-1 wire value for gateway-billed signups; the gateway is now Mollie.
+      if (!['manual', 'stripe'].includes(billingMode)) return response({ error: 'Selecciona un modo de facturación válido' }, 400)
+      const firstVenueId = crypto.randomUUID()
+      let initialContract = null
+      if (billingMode === 'stripe') {
+        const selection = selectionSchema.safeParse(body.billingSelection)
+        const env = billingEnv(await loadBillingSecrets(adminClient))
+        if (!selection.success) return response({ error: 'Selecciona un plan y complementos válidos' }, 400)
+        if (!env.configured) return response({ error: 'Configura primero Mollie' }, 503)
+        const billing = new BillingService(adminClient, new MollieGateway(env.mollieKey), env.appUrl, env.webhookUrl)
+        try { initialContract = onboardingContract(await billing.catalog(), selection.data, firstVenueId) }
+        catch { return response({ error: 'Revisa el plan, las tarifas publicadas y los complementos seleccionados' }, 400) }
+      }
 
       if (
         !tenantName || !venueName || !ownerEmail || !ownerFullName || ownerPassword.length < 8
         || !/^[a-z0-9]+(?:[_-][a-z0-9]+)*$/.test(tenantSlug)
-        || !Number.isInteger(maxVenues) || maxVenues < 1
-        || !Number.isInteger(maxDevices) || maxDevices < 0
+        || (billingMode === 'manual' && (!Number.isInteger(maxVenues) || maxVenues < 1
+          || !Number.isInteger(maxDevices) || maxDevices < 0))
       ) {
         return response({ error: 'Completa todos los campos, usa un slug válido, una contraseña de al menos 8 caracteres y límites de plan válidos' }, 400)
       }
@@ -243,8 +265,9 @@ Deno.serve(async (request) => {
           .insert({
             name: tenantName,
             slug: tenantSlug,
-            max_venues: maxVenues,
-            max_devices: maxDevices,
+            max_venues: initialContract?.limits.venues ?? maxVenues,
+            max_devices: initialContract?.limits.devices ?? maxDevices,
+            ...(initialContract ? { billing_activation_required: true } : {}),
           })
           .select('id, name, slug, created_at')
           .single()
@@ -257,6 +280,7 @@ Deno.serve(async (request) => {
         const { data: createdVenue, error: venueCreateError } = await adminClient
           .from('venues')
           .insert({
+            id: firstVenueId,
             tenant_id: createdTenant.id,
             name: venueName,
             sort_order: 1,
@@ -267,6 +291,14 @@ Deno.serve(async (request) => {
 
         if (venueCreateError || !createdVenue) {
           throw venueCreateError ?? new Error('No se pudo crear el local inicial')
+        }
+
+        if (initialContract) {
+          const { error: billingError } = await adminClient.from('billing_accounts').insert({
+            tenant_id: createdTenant.id, source: 'stripe', status: 'pending_payment',
+            onboarding_contract: initialContract, email: ownerEmail,
+          })
+          if (billingError) throw billingError
         }
 
         const setupResults = await Promise.all([
@@ -295,6 +327,14 @@ Deno.serve(async (request) => {
           throw setupError
         }
 
+        let welcomeEmailStatus: WelcomeEmailStatus = 'unknown'
+        try {
+          welcomeEmailStatus = await sendWelcomeEmail({ ownerId, ownerEmail, ownerPassword, ownerFullName, tenantName, billingMode }, {
+            apiKey: Deno.env.get('RESEND_WELCOME_API_KEY'),
+            appUrl: Deno.env.get('BILLING_APP_URL'),
+          })
+        } catch { /* Email failure must never roll back the completed business. */ }
+
         return response({
           tenant: {
             id: createdTenant.id,
@@ -303,9 +343,11 @@ Deno.serve(async (request) => {
             createdAt: createdTenant.created_at,
           },
           ownerId,
+          welcomeEmailStatus,
         }, 201)
       } catch (setupError) {
         if (createdTenantId) {
+          if (initialContract) await adminClient.from('billing_accounts').delete().eq('tenant_id', createdTenantId)
           await adminClient.from('tenants').delete().eq('id', createdTenantId)
         }
         await adminClient.auth.admin.deleteUser(ownerId)
@@ -340,7 +382,7 @@ Deno.serve(async (request) => {
           p_slug: tenantSlug,
           p_max_venues: maxVenues,
           p_max_devices: maxDevices,
-          p_feature_keys: body.featureCatalogVersion === 2 ? [...enabledFeatures, '__addon_catalog_v2'].concat(body.assistCatalogVersion === 1 ? ['__assist_catalog_v1'] : []) : enabledFeatures,
+          p_feature_keys: body.featureCatalogVersion === 2 ? [...enabledFeatures, '__addon_catalog_v2'].concat(body.assistCatalogVersion === 1 ? ['__assist_catalog_v1'] : []).concat(body.personalCatalogVersion === 1 ? ['__personal_catalog_v1'] : []) : enabledFeatures,
         })
         .maybeSingle()
       if (updateError) {
@@ -379,30 +421,15 @@ Deno.serve(async (request) => {
         return response({ error: 'Solo un superadmin puede eliminar negocios' }, 403)
       }
 
-      const targetTenantId = String(body.tenantId ?? '')
-      if (!targetTenantId) return response({ error: 'Negocio no valido' }, 400)
-
-      const [{ data: targetTenant, error: tenantLookupError }, { data: tenantMembers, error: membersError }] = await Promise.all([
-        adminClient.from('tenants').select('id').eq('id', targetTenantId).maybeSingle(),
-        adminClient.from('tenant_memberships').select('user_id').eq('tenant_id', targetTenantId),
-      ])
-      if (tenantLookupError || membersError) throw tenantLookupError ?? membersError
-      if (!targetTenant) return response({ error: 'Negocio no encontrado' }, 404)
-
-      const { error: deleteError } = await adminClient.from('tenants').delete().eq('id', targetTenantId)
-      if (deleteError) throw deleteError
-
-      for (const member of tenantMembers ?? []) {
-        const [{ data: remainingMembership }, { data: memberProfile }] = await Promise.all([
-          adminClient.from('tenant_memberships').select('id').eq('user_id', member.user_id).limit(1).maybeSingle(),
-          adminClient.from('profiles').select('is_superadmin').eq('id', member.user_id).maybeSingle(),
-        ])
-        if (!remainingMembership && memberProfile?.is_superadmin !== true) {
-          await adminClient.auth.admin.deleteUser(member.user_id, true)
-        }
+      try {
+        const { mollieKey } = billingEnv(await loadBillingSecrets(adminClient))
+        await deletePlatformTenantData(adminClient, String(body.tenantId ?? ''), authData.user.id,
+          () => new MollieGateway(mollieKey))
+        return response({ ok: true })
+      } catch (error) {
+        return response({ error: error instanceof TenantDeletionError ? error.message : 'No se pudo completar la eliminación. Vuelve a eliminar el negocio para continuar.' },
+          error instanceof TenantDeletionError ? error.status : 503)
       }
-
-      return response({ ok: true })
     }
 
     const { data: membership, error: membershipError } = await adminClient
@@ -417,6 +444,9 @@ Deno.serve(async (request) => {
     }
 
     const isOwner = membership.role === 'owner'
+    const { data: billingTenant, error: billingTenantError } = await adminClient.from('tenants').select('billing_activation_required').eq('id', tenantId).single()
+    if (billingTenantError) throw billingTenantError
+    if (billingTenant.billing_activation_required && action !== 'tenant-plan') return response({ error: 'Completa el pago en Mi Plan para activar el negocio' }, 403)
     const managerVenueIds = new Set<string>()
     if (!isOwner) {
       const { data: managerVenues, error: managerVenuesError } = await adminClient
@@ -665,7 +695,7 @@ Deno.serve(async (request) => {
       const visibleAssignments = (assignments ?? []).filter((item) => canManageVenue(item.venue_id))
       const deviceUserIds = new Set(visibleAssignments.map((item) => item.user_id))
       const managementMemberships = isOwner ? (memberships ?? []).filter((item) =>
-        item.role === 'owner' || (item.role === 'manager' && (!venueId || (managerScopes ?? []).some(
+        item.role === 'owner' || item.role === 'gestor' || (item.role === 'manager' && (!venueId || (managerScopes ?? []).some(
           (scope) => scope.manager_user_id === item.user_id && scope.venue_id === venueId,
         )))
       ) : []
@@ -759,8 +789,8 @@ Deno.serve(async (request) => {
       if (password.length < 8 || password.length > 72) {
         return response({ error: 'La contraseña debe tener entre 8 y 72 caracteres' }, 400)
       }
-      if (!['owner', 'manager'].includes(role)) {
-        return response({ error: 'El rol debe ser owner o manager' }, 400)
+      if (!['owner', 'manager', 'gestor'].includes(role)) {
+        return response({ error: 'El rol debe ser owner, manager o gestor' }, 400)
       }
       if (role === 'manager' && !venueIds.length) {
         return response({ error: 'Selecciona al menos un local para el manager' }, 400)

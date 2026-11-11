@@ -1,6 +1,7 @@
 import { supabase } from '../../../lib/supabase.ts'
+import { saveCachedCatalog } from '../../../lib/offlineStore'
 import type { Discount, TenantContext } from '../../../types/index.ts'
-import type { CatalogData } from '../domain/types.ts'
+import type { PosCatalogState } from '../domain/types.ts'
 import { CatalogRepository } from './repository.ts'
 
 type DiscountRow = {
@@ -25,18 +26,13 @@ type DiscountRow = {
   discount_targets?: Array<{ product_id: string; variant_id: string | null }>
 }
 
-export type PosCatalogState = {
-  catalog: CatalogData
-  discounts: Discount[]
-  manualDiscountEnabled: boolean
-  manualDiscountRequiresPin: boolean
-  discountSchedule: {
-    dayChangeTime: string | null
-    timeZone: string
-  }
-}
-
 const catalogRepository = supabase ? new CatalogRepository(supabase) : null
+
+export async function refreshCachedPosCatalog(context: TenantContext, venueId = context.venueId) {
+  const scope = { ...context, venueId }
+  const state = await loadPosCatalog(scope, true)
+  saveCachedCatalog(scope, state)
+}
 
 function decimalEurosToCents(value: number | string) {
   const normalized = String(value).trim()

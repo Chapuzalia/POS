@@ -1,12 +1,14 @@
 import './lib/browserCrypto.ts'
 import { StrictMode } from 'react'
 import { createRoot } from 'react-dom/client'
+import { Capacitor } from '@capacitor/core'
 import { Toaster } from 'sileo'
 import { AppErrorBoundary } from './components/errors/AppErrorBoundary.tsx'
 import './index.css'
 import 'sileo/styles.css'
 import App from './App.tsx'
 import { registerServiceWorker } from './pwa/registerServiceWorker.ts'
+import { listenForNativeDeepLinks, restoreDeepLinkRoute } from './app/nativeDeepLinks.ts'
 
 registerServiceWorker()
 
@@ -20,8 +22,14 @@ if (
 const appleStandalone = (navigator as Navigator & { standalone?: boolean }).standalone === true
 const displayModeStandalone = window.matchMedia('(display-mode: standalone)').matches
 
-if (appleStandalone || displayModeStandalone) {
+// Native shells are full-screen like an installed PWA, so they need the same safe-area chrome.
+if (appleStandalone || displayModeStandalone || Capacitor.isNativePlatform()) {
   document.documentElement.classList.add('pwa-standalone')
+}
+
+if (Capacitor.isNativePlatform()) {
+  restoreDeepLinkRoute()
+  void listenForNativeDeepLinks().catch(() => { /* sin enlaces profundos la app sigue funcionando */ })
 }
 
 const sentryFallback = (

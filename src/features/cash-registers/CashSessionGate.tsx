@@ -2,6 +2,7 @@ import { Button as UiButton } from "../../components/ui/Button";
 import { NativeSelect as UiNativeSelect } from "../../components/ui/NativeSelect";
 import { NumericKeypadModal } from "../../components/ui/NumericKeypadModal";
 import { useState } from "react";
+import { staffCan } from '../personal/permissions';
 import { Vault } from "lucide-react";
 import type {
   CashClosingRecord,
@@ -199,7 +200,7 @@ export function CashSessionGate({
           </UiButton>
           <UiButton
             className="min-h-11 w-full rounded-[var(--radius)] border border-[var(--separator)]"
-            disabled={!isOnline}
+            disabled={!isOnline || !staffCan(context, 'pos.sales.read')}
             onClick={onOpenClosingHistory}
             type="button"
           >
@@ -239,7 +240,7 @@ export function CashSessionGate({
           onConfirmedReprint={() => onPrintClosing(completedClosing, true, true)}
         />
       ) : null}
-      {closingHistoryOpen ? (
+      {closingHistoryOpen && staffCan(context, 'pos.sales.read') ? (
         <CashClosingsHistoryModal
           canReprint={Boolean(
             context.canManageCash ||

@@ -5,7 +5,8 @@ import { Button as UiButton } from '../ui/Button'
 import { Checkbox as UiCheckbox } from '../ui/Checkbox'
 import { AppModal } from '../ui/AppModal'
 import { DataTable } from '../ui/DataTable'
-import { Building2, Check, ChevronRight, Crown, Eye, LockKeyhole, LogOut, Menu, Pencil, Plus, Power, RefreshCw, Store, Trash2, UserRound, X } from 'lucide-react'
+import { DashboardShell, LiveStatus, dashboardMenuItemClass } from '../layout/DashboardShell'
+import { Building2, Check, ChevronRight, Crown, Eye, LockKeyhole, LogOut, Moon, Pencil, Plus, Power, RefreshCw, Settings, Store, Sun, Trash2, X } from 'lucide-react'
 import { lazy, Suspense, useCallback, useEffect, useState, type FormEvent, type ReactNode } from 'react'
 import {
   createPlatformTenant,
@@ -22,13 +23,23 @@ import { getReadableError } from '../../utils/errors'
 import { tenantAddonCatalog, updateTenantAddons } from '../../features/platform/tenantFeatureAccess'
 import { loadPlatformVerifactuIntegrations, type VerifactuIntegration } from '../../features/fiscal/local/integration'
 import { VerifactuConfiguration } from './VerifactuConfiguration'
+import { BillingSelectionEditor } from '../../features/billing/BillingSelectionEditor'
+import { billingRequest } from '../../features/billing/service'
+import { buildContract, emptyBillingSelection, generateOwnerPassword } from '../../features/billing/selection'
+import type { BillingCatalog, Selection } from '../../features/billing/types'
+import { useCrmTheme } from '../../features/crm/layout/crmTheme'
 
 const BillingAdmin = lazy(() => import('../../features/billing/BillingAdmin'))
+const BillingIntegrationsSettings = lazy(() => import('../../features/billing/BillingIntegrationsSettings'))
+
+const sectionLabels = { tenants: 'Negocios', billing: 'Facturación', settings: 'Configuración' } as const
+type Section = keyof typeof sectionLabels
 
 type SuperAdminPageProps = {
   context: TenantContext
   error: string | null
   isOnline: boolean
+  onBusyChange?: (busy: boolean) => void
   onError: (error: string | null) => void
   onLogout: () => void
 }
@@ -76,16 +87,19 @@ function SuperAdminModal({ children, label, onClose, dismissDisabled, size = 'co
   )
 }
 
-export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: SuperAdminPageProps) {
+export function SuperAdminPage({ context, error, isOnline, onBusyChange, onError, onLogout }: SuperAdminPageProps) {
   useEffect(() => { if (error) notifyOperationalError(error) }, [error])
   const [tenants, setTenants] = useState<PlatformTenant[]>([])
   const [verifactuIntegrations, setVerifactuIntegrations] = useState<VerifactuIntegration[]>([])
   const [platformFeatures, setPlatformFeatures] = useState<PlatformFeature[]>([])
-  const [isSidebarOpen, setIsSidebarOpen] = useState(false)
-  const [section, setSection] = useState<'tenants' | 'billing'>('tenants')
+  const [section, setSection] = useState<Section>('tenants')
+  const [theme, toggleTheme] = useCrmTheme()
   const [tenantModal, setTenantModal] = useState<TenantModalState>(null)
-  const [isBusy, setIsBusy] = useState(false)
+  const [pendingActions, setPendingActions] = useState(0)
+  const isBusy = pendingActions > 0
+  const [billingBusy, setBillingBusy] = useState(false)
   const [success, setSuccess] = useState<string | null>(null)
+  const [welcomeEmailNotice, setWelcomeEmailNotice] = useState<string | null>(null)
   const [tenantName, setTenantName] = useState('')
   const [tenantSlug, setTenantSlug] = useState('')
   const [slugEdited, setSlugEdited] = useState(false)
@@ -93,6 +107,12 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [ownerFullName, setOwnerFullName] = useState('')
   const [ownerEmail, setOwnerEmail] = useState('')
   const [ownerPassword, setOwnerPassword] = useState('')
+  const [showOwnerPassword, setShowOwnerPassword] = useState(false)
+  const [billingMode, setBillingMode] = useState<'manual' | 'stripe'>('manual')
+  const [billingCatalog, setBillingCatalog] = useState<BillingCatalog | null>(null)
+  const [billingSelection, setBillingSelection] = useState<Selection>(emptyBillingSelection)
+  const [billingCatalogError, setBillingCatalogError] = useState('')
+  const [catalogAttempt, setCatalogAttempt] = useState(0)
   const [maxVenues, setMaxVenues] = useState(1)
   const [maxDevices, setMaxDevices] = useState(5)
   const [editingTenantName, setEditingTenantName] = useState('')
@@ -100,6 +120,11 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const [editingMaxVenues, setEditingMaxVenues] = useState(1)
   const [editingMaxDevices, setEditingMaxDevices] = useState(5)
   const [editingTenantFeatures, setEditingTenantFeatures] = useState<PlatformTenantFeature[]>([])
+
+  useEffect(() => {
+    onBusyChange?.(isBusy || billingBusy)
+    return () => onBusyChange?.(false)
+  }, [isBusy, billingBusy, onBusyChange])
 
   const refresh = useCallback(async () => {
     const [platform, integrations] = await Promise.all([loadPlatformTenants(), loadPlatformVerifactuIntegrations()])
@@ -109,7 +134,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   }, [])
 
   const runAction = useCallback(async (action: () => Promise<void>) => {
-    setIsBusy(true)
+    setPendingActions(count => count + 1)
     setSuccess(null)
     onError(null)
     try {
@@ -117,7 +142,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
     } catch (actionError) {
       onError(getReadableError(actionError, { operation: 'components.superadmin.SuperAdminPage' }))
     } finally {
-      setIsBusy(false)
+      setPendingActions(count => count - 1)
     }
   }, [onError])
 
@@ -133,17 +158,6 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
     return () => window.clearInterval(timer)
   }, [isOnline])
 
-  useEffect(() => {
-    if (!isSidebarOpen) return undefined
-
-    const closeOnEscape = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') setIsSidebarOpen(false)
-    }
-
-    window.addEventListener('keydown', closeOnEscape)
-    return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [isSidebarOpen])
-
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     await runAction(async () => {
@@ -156,6 +170,8 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
         ownerFullName: ownerFullName.trim(),
         maxDevices,
         maxVenues,
+        billingMode,
+        ...(billingMode === 'stripe' ? { billingSelection } : {}),
       })
       setTenantName('')
       setTenantSlug('')
@@ -165,12 +181,17 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
       setOwnerEmail('')
       setOwnerPassword('')
       setTenantModal(null)
-      setSuccess(`${created.name} y su cuenta OWNER se han creado correctamente.`)
+      setSuccess(`${created.name} y su cuenta OWNER se han creado correctamente.${billingMode === 'stripe' ? ' Acceso limitado a Mi Plan hasta confirmar el primer pago.' : ''}${created.welcomeEmailStatus === 'sent' ? ' Correo de bienvenida enviado.' : ''}`)
+      setWelcomeEmailNotice(created.welcomeEmailStatus === 'sent' ? null
+        : created.welcomeEmailStatus === 'unknown' ? 'El negocio ya está creado, pero no se pudo confirmar el envío del correo. Comprueba su estado en Resend antes de contactar con el cliente. No vuelvas a crear el negocio.'
+        : created.welcomeEmailStatus === 'failed' ? 'El negocio ya está creado, pero el correo de bienvenida no se ha enviado. Entrega las credenciales al cliente por otro medio. No vuelvas a crear el negocio.'
+        : 'El negocio ya está creado, pero el envío de bienvenida no está configurado en el servidor. Entrega las credenciales al cliente por otro medio.')
       await refresh()
     })
   }
 
   function openCreateModal() {
+    setWelcomeEmailNotice(null)
     setTenantName('')
     setTenantSlug('')
     setSlugEdited(false)
@@ -178,9 +199,30 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
     setOwnerFullName('')
     setOwnerEmail('')
     setOwnerPassword('')
+    setShowOwnerPassword(false)
+    setBillingMode('manual')
+    setBillingSelection(emptyBillingSelection)
     setMaxVenues(1)
     setMaxDevices(5)
     setTenantModal({ mode: 'create' })
+  }
+
+  useEffect(() => {
+    if (tenantModal?.mode !== 'create' || billingMode !== 'stripe' || !isOnline) return
+    let active = true
+    setBillingCatalog(null)
+    setBillingCatalogError('')
+    void billingRequest<BillingCatalog>({ action: 'catalog' }).then(catalog => {
+      if (active) setBillingCatalog(catalog)
+    }).catch(failure => {
+      if (active) setBillingCatalogError(getReadableError(failure, { operation: 'billing.catalog' }))
+    })
+    return () => { active = false }
+  }, [tenantModal?.mode, billingMode, isOnline, catalogAttempt])
+
+  let validBillingSelection = billingMode === 'manual'
+  if (billingMode === 'stripe' && billingCatalog) {
+    try { buildContract(billingCatalog.products, billingCatalog.versions, billingSelection); validBillingSelection = true } catch { /* Selection must be complete before creating the tenant. */ }
   }
 
   function openEditModal(tenant: PlatformTenant) {
@@ -225,10 +267,16 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   }
 
   async function removeTenant(tenant: PlatformTenant) {
-    if (!(await appConfirm(`¿Eliminar "${tenant.name}" de forma permanente? Se borrarán todos sus locales, productos, ventas y usuarios exclusivos. Esta acción no se puede deshacer.`))) return
+    if (!(await appConfirm(`¿Eliminar "${tenant.name}" de forma permanente? Se borrarán sus locales, productos, ventas, datos fiscales, facturación, archivos y usuarios exclusivos. También se cancelarán sus suscripciones y se eliminará su cliente de Mollie. Esta acción no se puede deshacer.`))) return
 
     await runAction(async () => {
-      await deletePlatformTenant(tenant.id)
+      try {
+        await deletePlatformTenant(tenant.id)
+      } catch (error) {
+        // Preparation may have deactivated the tenant before a retryable failure.
+        try { await refresh() } catch { /* Keep the original deletion error. */ }
+        throw error
+      }
       await refresh()
       setTenantModal(null)
       setSuccess(`${tenant.name} se ha eliminado definitivamente.`)
@@ -241,96 +289,42 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
   const pendingVerifactu = verifactuIntegrations.filter(integration => integration.requested_at && !integration.enabled_at)
 
   return (
-    <div className="crm-shell !flex !h-full !min-h-0 !w-screen !overflow-hidden !bg-[var(--crm-canvas)] !text-[var(--crm-text)] !antialiased">
-      <UiButton
-        aria-label="Cerrar menú de navegación"
-        className={isSidebarOpen
-          ? '!fixed !inset-0 !z-[39] !block !border-0 !bg-[rgba(0,0,0,0.52)] !opacity-100 !transition-opacity !duration-200 xl:!hidden'
-          : '!pointer-events-none !fixed !inset-0 !z-[39] !block !border-0 !bg-[rgba(0,0,0,0.52)] !opacity-0 !transition-opacity !duration-200 xl:!hidden'}
-        onClick={() => setIsSidebarOpen(false)}
-        tabIndex={isSidebarOpen ? 0 : -1}
-        type="button"
-      />
-
-      <aside
-        className={isSidebarOpen
-          ? '!fixed !top-0 !bottom-0 !left-0 !z-40 !flex !h-full !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !translate-x-0 !flex-col !overflow-y-auto !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !px-5 !pt-6 !pb-[18px] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] !transition-transform !duration-200 xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none'
-          : '!fixed !top-0 !bottom-0 !left-0 !z-40 !flex !h-full !w-[min(88vw,var(--crm-sidebar-width))] !min-w-[min(88vw,var(--crm-sidebar-width))] !-translate-x-[102%] !flex-col !overflow-y-auto !border-r !border-[var(--crm-border-subtle)] !bg-[var(--crm-sidebar-bg)] !px-5 !pt-6 !pb-[18px] !text-[var(--crm-text)] !shadow-[var(--crm-shadow-floating)] !transition-transform !duration-200 xl:!relative xl:!w-[var(--crm-sidebar-width)] xl:!min-w-[var(--crm-sidebar-width)] xl:!translate-x-0 xl:!shadow-none'}
-        id="superadmin-sidebar"
-      >
-        <div className="!grid !min-h-11 !grid-cols-[40px_minmax(0,1fr)] !items-center !justify-stretch !gap-[11px] !border-0 !p-0">
-          <div className="!grid !size-10 !place-items-center !rounded-[10px] !border !border-[var(--crm-border)] !bg-[var(--crm-surface)] !text-[var(--crm-blue)]">
-            <Crown className="size-5 stroke-[1.8]" />
-          </div>
-          <div>
-            <p className="!m-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-sm !leading-tight !font-semibold !text-[var(--crm-text)]">TICKIT</p>
-            <p className="!mt-0.5 !mb-0 !block !overflow-hidden !text-ellipsis !whitespace-nowrap !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Superadmin</p>
-          </div>
-        </div>
-
-        <nav aria-label="Navegación del Superadmin" className="!mt-[30px] !flex !flex-col !gap-[5px]">
-          <p className="!mx-0 !mt-0 !mb-[7px] !ml-[3px] !text-[11px] !font-medium !text-[var(--crm-text-muted)]">Menú principal</p>
-          <UiButton
-            aria-current={section === 'tenants' ? 'page' : undefined}
-            className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none"
-            onClick={() => { setSection('tenants'); setIsSidebarOpen(false) }}
-            type="button"
-          >
-            <Building2 className="h-4 w-4" />
-            <span>Negocios</span>
-          </UiButton>
-          <UiButton aria-current={section === 'billing' ? 'page' : undefined} className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !px-3.5 !text-left !text-sm !font-medium !shadow-none" onClick={() => { setSection('billing'); setIsSidebarOpen(false) }} type="button"><Crown className="h-4 w-4" /><span>Facturación</span></UiButton>
-        </nav>
-
-        <div className="!mt-auto !grid !gap-[5px] !border-0 !pt-7">
-          <UiButton className="!flex !min-h-[46px] !min-w-0 !items-center !justify-start !gap-[13px] !rounded-[10px] !border-0 !bg-transparent !px-3.5 !text-left !text-sm !font-medium !text-[var(--crm-text-secondary)] !shadow-none" onClick={onLogout} type="button">
-            <LogOut className="h-4 w-4" />
-            <span>Cerrar sesión</span>
-          </UiButton>
-        </div>
-      </aside>
-
-      <section className="!flex !min-h-0 !min-w-0 !flex-1 !flex-col !overflow-hidden !bg-[var(--crm-canvas)]">
-        <header className="!relative !z-30 !flex !min-h-16 [.pwa-standalone_&]:!pt-[calc(0.625rem+env(safe-area-inset-top,0px))] md:[.pwa-standalone_&]:!min-h-[calc(5rem+env(safe-area-inset-top,0px))] md:[.pwa-standalone_&]:!basis-[calc(5rem+env(safe-area-inset-top,0px))] md:[.pwa-standalone_&]:!pt-[env(safe-area-inset-top,0px)] !w-full !flex-[0_0_auto] !flex-row !items-center !justify-between !gap-2.5 !border-b !border-[var(--crm-border-subtle)] !bg-[var(--crm-topbar-bg)] !px-4 !py-2.5 md:!min-h-20 md:!flex-[0_0_80px] md:!gap-[22px] md:!px-7 md:!py-0">
-          <UiButton
-            aria-controls="superadmin-sidebar"
-            aria-expanded={isSidebarOpen}
-            aria-label="Abrir menú de navegación"
-            className="!inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface)] !text-[var(--crm-text-secondary)] !shadow-none xl:!hidden"
-            onClick={() => setIsSidebarOpen(true)}
-            type="button"
-          >
-            <Menu className="h-5 w-5" />
-          </UiButton>
-
-          <div className="!mr-auto !min-w-0 md:!min-w-[180px]">
-            <div className="!hidden !items-center !gap-1.5 !text-[11px] !font-medium !text-[var(--crm-text-muted)] md:!flex">
-              <Crown className="size-3.5" />
-              <span>Plataforma</span>
-              <ChevronRight className="size-3.5" />
-              <span>{section === 'billing' ? 'Facturación' : 'Negocios'}</span>
-            </div>
-            <h1 className="!mt-0 !min-h-0 !overflow-hidden !text-[17px] !leading-tight !font-bold !tracking-[-0.025em] !text-ellipsis !whitespace-nowrap !text-[var(--crm-text)] md:!mt-1 md:!text-xl">{section === 'billing' ? 'Facturación de suscripciones' : 'Gestión global de negocios'}</h1>
-          </div>
-
-          <div className="!flex !w-auto !min-w-0 !items-center !justify-end !gap-2.5 !overflow-visible">
-            <div className={isOnline
-              ? '!hidden !min-h-7 !items-center !gap-2 !rounded-full !border !border-transparent !bg-[var(--crm-green-soft)] !px-2.5 !text-[11px] !font-semibold !whitespace-nowrap !text-[var(--crm-green)] sm:!inline-flex'
-              : '!hidden !min-h-7 !items-center !gap-2 !rounded-full !border !border-transparent !bg-[var(--crm-red-soft)] !px-2.5 !text-[11px] !font-semibold !whitespace-nowrap !text-[var(--crm-red)] sm:!inline-flex'}>
-              {isOnline ? 'Online' : 'Offline'}
-            </div>
-            <div className="!hidden !min-h-[42px] !items-center !gap-2 !rounded-[11px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-[13px] !text-xs !font-medium !whitespace-nowrap !text-[var(--crm-text-secondary)] md:!inline-flex">
-              <UserRound className="h-4 w-4" />
-              <span>{context.userName}</span>
-            </div>
-          </div>
-        </header>
-
+    <>
+    <DashboardShell
+      account={{
+        name: context.userName,
+        detail: 'Superadmin',
+        menu: <>
+          <button aria-label={theme === 'dark' ? 'Cambiar a modo claro' : 'Cambiar a modo oscuro'} className={dashboardMenuItemClass} onClick={toggleTheme} type="button">
+            {theme === 'dark' ? <Sun aria-hidden="true" className="size-4" /> : <Moon aria-hidden="true" className="size-4" />}
+            <span>{theme === 'dark' ? 'Modo claro' : 'Modo oscuro'}</span>
+          </button>
+          <button className={dashboardMenuItemClass} disabled={isBusy || billingBusy} onClick={onLogout} type="button"><LogOut aria-hidden="true" className="size-4" /><span>Cerrar sesión</span></button>
+        </>,
+      }}
+      activeId={section}
+      brand={<div className="flex min-w-0 items-center gap-3">
+        <div className="grid size-9 shrink-0 place-items-center rounded-[10px] border border-[var(--crm-sidebar-border)] bg-[var(--crm-sidebar-hover)] text-[#79b7ff]"><Crown className="size-5 stroke-[1.8]" /></div>
+        <div className="min-w-0"><p className="m-0 truncate text-sm leading-tight font-bold tracking-[0.04em] text-[var(--crm-sidebar-text)]">TICKIT</p><p className="m-0 mt-0.5 text-[10px] font-semibold tracking-[0.16em] text-[var(--crm-sidebar-muted)] uppercase">Superadmin</p></div>
+      </div>}
+      eyebrow={<><Crown aria-hidden="true" className="size-3.5" /><span>Plataforma</span><ChevronRight aria-hidden="true" className="size-3.5" /><span>{sectionLabels[section]}</span></>}
+      groups={[{ label: 'Plataforma', items: [
+        { id: 'tenants', label: 'Negocios', icon: Building2, disabled: isBusy || billingBusy },
+        { id: 'billing', label: 'Facturación', icon: Crown, disabled: isBusy || billingBusy },
+        { id: 'settings', label: 'Configuración', icon: Settings, disabled: isBusy || billingBusy },
+      ] }]}
+      notices={<>
         {success ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-green-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-green)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">{success}</div> : null}
+        {welcomeEmailNotice ? <div role="alert" className="!mx-auto !mt-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!w-[calc(100%_-_56px)]">{welcomeEmailNotice}</div> : null}
         {!isOnline ? <div className="!mx-auto !mt-3 !-mb-3 !w-[calc(100%_-_32px)] !max-w-[1664px] !rounded-[14px] !border-0 !bg-[var(--crm-yellow-soft)] !px-4 !py-3 !text-[13px] !font-semibold !text-[var(--crm-yellow)] md:!mt-[18px] md:!-mb-5 md:!w-[calc(100%_-_56px)]">La administración global requiere conexión.</div> : null}
-
-        <main className="!mx-auto !min-h-0 !w-full !max-w-[1720px] !flex-1 !overflow-auto !px-4 !pt-[26px] !pb-7 md:!px-7 md:!pt-[42px] md:!pb-9">
-          {section === 'billing' ? <Suspense fallback={<p>Cargando facturación…</p>}><BillingAdmin disabled={!isOnline} /></Suspense> : <>
+      </>}
+      onNavigate={(id) => setSection(id in sectionLabels ? id as Section : 'tenants')}
+      sideFooter={<LiveStatus isOnline={isOnline} />}
+      theme={theme}
+      title={section === 'billing' ? 'Facturación de suscripciones' : section === 'settings' ? 'Configuración de la plataforma' : 'Gestión global de negocios'}
+    >
+          {section === 'billing' ? <Suspense fallback={<p>Cargando facturación…</p>}><BillingAdmin disabled={!isOnline} onBusyChange={setBillingBusy} /></Suspense>
+          : section === 'settings' ? <Suspense fallback={<p>Cargando configuración…</p>}><BillingIntegrationsSettings disabled={!isOnline} onBusyChange={setBillingBusy} /></Suspense> : <>
           {pendingVerifactu.length ? <div role="status" className="!mb-4 !grid !gap-2 !rounded-[12px] !bg-[var(--crm-yellow-soft)] !p-4 !text-sm !text-[var(--crm-yellow)]">
             <strong>{pendingVerifactu.length} solicitudes de Verifactu pendientes</strong>
             <div className="!flex !flex-wrap !gap-2">{pendingVerifactu.map(integration => {
@@ -374,8 +368,7 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
             </DataTable> : !isBusy ? <div className="!grid !min-h-[260px] !place-items-center !content-center !gap-2 !text-[13px] !font-medium !text-[var(--crm-text-muted)]"><Store className="h-6 w-6" /><span>Todavía no hay negocios.</span></div> : null}
           </section>
           </>}
-        </main>
-      </section>
+      </DashboardShell>
 
       {tenantModal?.mode === 'create' ? (
         <SuperAdminModal dismissDisabled={isBusy} label="Crear nuevo negocio" onClose={() => setTenantModal(null)} size="large">
@@ -389,15 +382,20 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Primer local</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setVenueName(event.target.value)} required value={venueName} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Nombre del OWNER</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setOwnerFullName(event.target.value)} required value={ownerFullName} /></label>
             <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Email del OWNER</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} onChange={(event) => setOwnerEmail(event.target.value)} required type="email" value={ownerEmail} /></label>
-            <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Contraseña inicial</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} minLength={8} onChange={(event) => setOwnerPassword(event.target.value)} required type="password" value={ownerPassword} /></label>
-            <fieldset className="!col-span-full !grid !grid-cols-1 !gap-3 !rounded-[12px] !border-0 !bg-[var(--crm-surface-soft)] !p-4 sm:!grid-cols-2">
+            <div><label className="!mb-1.5 !block !text-[11px] !font-semibold" htmlFor="new-owner-password">Contraseña inicial</label><div className="!flex !gap-2"><UiInput id="new-owner-password" aria-label="Contraseña inicial" autoComplete="new-password" className={`${inputClassName} !min-w-0 !flex-1`} disabled={!isOnline || isBusy} minLength={8} onChange={event => setOwnerPassword(event.target.value)} required type={showOwnerPassword ? 'text' : 'password'} value={ownerPassword} /><UiButton aria-label={showOwnerPassword ? 'Ocultar contraseña' : 'Mostrar contraseña'} disabled={isBusy} type="button" onClick={() => setShowOwnerPassword(current => !current)}><Eye className="!size-4" /></UiButton><UiButton disabled={!isOnline || isBusy} type="button" onClick={() => { setOwnerPassword(generateOwnerPassword()); setShowOwnerPassword(true) }}>Generar</UiButton></div><p className="!mt-1 !text-xs !text-[var(--crm-text-muted)]">Mínimo 8 caracteres. Se enviará con los datos de acceso al email del propietario.</p></div>
+            <fieldset className="!col-span-full !grid !gap-3 !rounded-[12px] !border !border-[var(--crm-border)] !p-4">
+              <legend className="!px-1 !text-xs !font-bold">Facturación</legend>
+              <div className="!flex !flex-wrap !gap-4">{(['manual', 'stripe'] as const).map(mode => <label key={mode} className="!flex !min-h-11 !items-center !gap-2 !text-sm"><input type="radio" name="billing-mode" value={mode} checked={billingMode === mode} disabled={!isOnline || isBusy} onChange={() => setBillingMode(mode)} />{mode === 'manual' ? 'Facturación manual' : 'Suscripción con Mollie'}</label>)}</div>
+              {billingMode === 'stripe' ? <><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Cobro con Mollie. El cliente verá este plan en Mi Plan y podrá modificarlo antes de pagar. Paga la primera cuota con tarjeta y domicilia las siguientes por SEPA; el resto de funciones se activará al confirmarse el pago con tarjeta.</p>{billingCatalog ? <BillingSelectionEditor catalog={billingCatalog} selection={billingSelection} onChange={setBillingSelection} disabled={!isOnline || isBusy} /> : billingCatalogError ? <div role="alert"><p>{billingCatalogError}</p><UiButton type="button" onClick={() => setCatalogAttempt(current => current + 1)}>Reintentar catálogo</UiButton></div> : <p role="status">Cargando planes y productos…</p>}</> : <p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">El negocio tendrá acceso desde su creación, con los límites indicados.</p>}
+            </fieldset>
+            {billingMode === 'manual' ? <fieldset className="!col-span-full !grid !grid-cols-1 !gap-3 !rounded-[12px] !border-0 !bg-[var(--crm-surface-soft)] !p-4 sm:!grid-cols-2">
               <legend className="!mb-2 !px-1 !text-xs !font-bold">Límites del plan</legend>
               <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Locales</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} min={1} onChange={(event) => setMaxVenues(Number(event.target.value))} required type="number" value={maxVenues} /></label>
               <label className="block"><span className="mb-[5px] block text-[11px] font-bold uppercase text-[var(--crm-text-secondary)] !mb-1.5 !text-[11px] !font-semibold !normal-case !text-[var(--crm-text-secondary)]">Dispositivos</span><UiInput className={inputClassName} disabled={!isOnline || isBusy} min={0} onChange={(event) => setMaxDevices(Number(event.target.value))} required type="number" value={maxDevices} /></label>
-            </fieldset>
+            </fieldset> : null}
             <div className="!col-span-full !flex !justify-end !gap-2 !border-t !border-[var(--crm-border)] !pt-4">
               <UiButton disabled={isBusy} className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-semibold leading-none text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !min-h-10 !items-center !justify-center !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-4 !text-[13px] !font-semibold !text-[var(--crm-text)]" onClick={() => setTenantModal(null)} type="button">Cancelar</UiButton>
-              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={!isOnline || isBusy || !tenantSlug || ownerPassword.length < 8} type="submit"><Plus className="!size-4" />Crear negocio</UiButton>
+              <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white" disabled={!isOnline || isBusy || !tenantSlug || ownerPassword.length < 8 || !validBillingSelection} type="submit"><Plus className="!size-4" />Crear negocio</UiButton>
             </div>
           </form>
         </SuperAdminModal>
@@ -486,6 +484,6 @@ export function SuperAdminPage({ context, error, isOnline, onError, onLogout }: 
           </div>
         </SuperAdminModal>
       ) : null}
-    </div>
+    </>
   )
 }

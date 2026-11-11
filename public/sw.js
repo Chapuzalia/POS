@@ -16,6 +16,12 @@ const APP_SHELL = [
   '/icons/pwa-maskable-512x512.png',
 ]
 const CACHEABLE_DESTINATIONS = new Set(['font', 'image', 'script', 'style', 'worker'])
+// During a rollout (or behind a CDN) a missing chunk can come back as the SPA's
+// index.html with 200. Storing it as JS would leave this build blank until the next one.
+function isUsableAsset(path, response) {
+  if (!response.ok) return false
+  return !/\.(js|css|woff2?)$/.test(path) || !(response.headers.get('content-type') || '').includes('text/html')
+}
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -27,7 +33,12 @@ self.addEventListener('install', (event) => {
         const response = await fetch('/offline-assets.json', { cache: 'no-store' })
         if (!response.ok) throw new Error('No se pudo cargar el manifiesto offline')
         const assets = await response.json()
-        await cache.addAll([...APP_SHELL, ...assets])
+        // Fail the install (the current worker keeps serving) rather than precache HTML as a chunk.
+        await Promise.all([...APP_SHELL, ...assets].map(async (path) => {
+          const asset = await fetch(path)
+          if (!isUsableAsset(path, asset)) throw new Error(`Recurso offline no válido: ${path}`)
+          await cache.put(path, asset)
+        }))
       }),
   )
 })
@@ -73,7 +84,7 @@ async function cacheFirstStaticAsset(request) {
   if (cachedResponse) return cachedResponse
 
   const response = await fetch(request)
-  if (response.ok) {
+  if (isUsableAsset(new URL(request.url).pathname, response)) {
     const cache = await caches.open(STATIC_CACHE)
     await cache.put(request, response.clone())
   }

@@ -135,7 +135,7 @@ export type AppliedDiscount = {
   }>
 }
 
-export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'cashier'
+export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'gestor' | 'cashier'
 export type DeviceMode = 'satellite' | 'checkout' | 'hybrid' | 'kds'
 
 export type ThemeMode = 'light' | 'dark'
@@ -152,6 +152,7 @@ export type ThemeDefinition = {
 }
 
 export type TenantContext = {
+  personalStaff?: { employee: import('../../apps/api/src/personal-contracts').StaffSnapshot | null; venueId: string; deviceCanManageCash: boolean }
   tenantId: string
   tenantName: string
   tenantSlug: string
@@ -175,6 +176,7 @@ export type TenantContext = {
   userId: string
   userName: string
   role: TenantRole
+  billingActivationRequired?: boolean
   features?: string[]
   venueAddonActivations?: Partial<Record<string, boolean>>
   venueInventoryEnabled?: boolean
@@ -232,7 +234,7 @@ export type CrmAccessUser = {
   email: string
   fullName: string
   isActive: boolean
-  role: 'owner' | 'manager'
+  role: 'owner' | 'manager' | 'gestor'
   venueIds: string[]
 }
 
@@ -821,3 +823,11 @@ export type CrmSalesReports = {
   byModifier: CrmSalesReportAggregate[]
   tickets: CrmSalesReportTicket[]
 }
+
+export type ReservationStatus =
+  | 'confirmed'
+  | 'arrived'
+  | 'seated'
+  | 'completed'
+  | 'cancelled'
+  | 'no_show'

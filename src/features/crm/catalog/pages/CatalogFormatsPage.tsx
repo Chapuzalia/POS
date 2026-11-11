@@ -133,7 +133,7 @@ export function CatalogFormatsCrm({ catalog, disabled, inventoryFeatureEnabled, 
         description={inventoryFeatureEnabled ? 'Define los formatos reutilizables y cuánto inventario consume cada venta.' : 'Define los formatos reutilizables para las variantes de producto.'}
         title="Formatos de venta"
       >
-        <div className="!flex !max-w-xl !gap-2">
+        <div data-onboarding="formats-page" className="!flex !max-w-xl !gap-2">
           <UiInput
             aria-label="Nombre del nuevo formato"
             className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !min-w-0 !flex-1"
@@ -142,7 +142,7 @@ export function CatalogFormatsCrm({ catalog, disabled, inventoryFeatureEnabled, 
             placeholder="Ej. Copa, Botella, Chupito…"
             value={name}
           />
-          <UiButton className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)]" disabled={disabled || !name.trim()} onClick={() => void createFormat()} type="button">
+          <UiButton data-onboarding="format-create" className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)]" disabled={disabled || !name.trim()} onClick={() => void createFormat()} type="button">
             <Plus className="!size-4" /> Añadir formato
           </UiButton>
         </div>
@@ -159,10 +159,10 @@ export function CatalogFormatsCrm({ catalog, disabled, inventoryFeatureEnabled, 
           const draft = consumptionDrafts[format.id] ?? { quantity: '', unitId: '' }
           const selectedUnit = inventoryUnits.find((unit) => unit.id === draft.unitId)
           return (
-          <div className={`!grid !min-h-[72px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !py-3 !text-sm ${inventoryFeatureEnabled ? '!min-w-[980px] !grid-cols-[minmax(160px,1fr)_110px_minmax(330px,1.4fr)_110px_auto]' : '!min-w-[620px] !grid-cols-[minmax(160px,1fr)_110px_110px_auto]'}`} key={format.id}>
+          <div data-onboarding="format-row" className={`!grid !min-h-[72px] !items-center !gap-3 !border-b !border-[var(--crm-border-subtle)] !px-[22px] !py-3 !text-sm ${inventoryFeatureEnabled ? '!min-w-[980px] !grid-cols-[minmax(160px,1fr)_110px_minmax(330px,1.4fr)_110px_auto]' : '!min-w-[620px] !grid-cols-[minmax(160px,1fr)_110px_110px_auto]'}`} key={format.id}>
             <strong className="!text-[var(--crm-text)]">{format.name}</strong>
             <span className="!text-[var(--crm-text-secondary)]">{usageByFormat.get(format.id) ?? 0} variantes</span>
-            {inventoryFeatureEnabled ? <div className="!grid !grid-cols-[110px_minmax(150px,1fr)_40px] !items-center !gap-2">
+            {inventoryFeatureEnabled ? <div data-onboarding="format-consumption" className="!grid !grid-cols-[110px_minmax(150px,1fr)_40px] !items-center !gap-2">
               <UiInput
                 aria-label={`Cantidad consumida por ${format.name}`}
                 className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !font-mono"

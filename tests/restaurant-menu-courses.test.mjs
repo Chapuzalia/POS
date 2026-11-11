@@ -8,6 +8,7 @@ import { getProductionUnsentQuantity, buildOptimisticProductionEntries } from '.
 import { buildSaleLine, canonicalizeProductLineSelection } from '../src/features/catalog/services/saleLineBuilder.ts'
 import { resolveSellableProduct } from '../src/features/catalog/domain/resolver.ts'
 import { createMenuCatalog } from './helpers/menu-catalog.mjs'
+import { getKdsEventChanges } from '../src/features/production/kds-event-changes.ts'
 
 // pg_get_functiondef is normalized to LF inside this migration. Match that
 // format in its multiline patch literals when the checkout uses Windows CRLF.
@@ -53,6 +54,7 @@ async function setup(t) {
     create function production_table_label_for_line(uuid) returns text language sql as $$ select 'Mesa 1' $$;
     create function production_create_event_dispatch(uuid) returns void language sql as $$ select $$;
     create function production_cancel_line_excess_decimal(uuid,numeric,boolean) returns numeric language sql as $$ select 0::numeric $$;`)
+  await db.exec(readProductionSql('20261028220358_kds_current_kitchen_comments'))
   for (const name of ['products', 'product_variants', 'selection_groups', 'selection_group_options',
     'product_selection_group_assignments', 'product_selection_group_assignment_variants', 'modifier_groups', 'modifiers',
     'product_modifier_group_assignments', 'product_modifier_group_assignment_variants', 'order_line_components']) {
@@ -79,6 +81,7 @@ async function setup(t) {
   await db.exec(`create function production_resolve_pass(uuid,uuid,uuid,uuid) returns public.production_passes language sql as $$ select * from public.production_passes where id='${pass}' $$;`)
   await db.exec(`create function canonical_catalog_modifiers(uuid,uuid,uuid,jsonb) returns jsonb language sql as $$ select coalesce($4,'[]') $$;`)
   await db.exec(migration)
+  await db.exec(readProductionSql('20261028230136_kds_modifier_updates_and_change_notices'))
   await db.exec(`create trigger notify_menu_update after update of quantity,product_id,variant_id,product_name,variant_name,modifiers,components,mixer,note
     on order_lines for each row execute function production_notify_line_change();
     create trigger notify_menu_delete before delete on order_lines for each row execute function production_notify_line_change();
@@ -203,10 +206,13 @@ test('identical menus stay separate, direct service is never resent, quantity re
 })
 
 test('kitchen notes affect only outstanding sent dishes and repeat saves leave no extra notices', async t => {
-  const { db, save, send, serve } = await setup(t)
+  const { db, save, send, serve, queue } = await setup(t)
   await db.exec(readProductionSql('20261024203609_kitchen_order_comments'))
   await save([component(0), component(1)], 1, { note: 'Salsa aparte' })
   await send('both', 2)
+  const sentItems = (await db.query('select id,source_component_id from production_items')).rows
+  const firstItemId = sentItems.find(item => item.source_component_id === optionIds[0]).id
+  const secondItemId = sentItems.find(item => item.source_component_id === optionIds[1]).id
   assert.ok((await db.query('select snapshot from production_items')).rows.every(row => row.snapshot.note === 'Salsa aparte'))
   await serve(optionIds[0], 1, 2)
   await save([component(0), component(1)], 3, { note: 'Segundo sin sal' })
@@ -215,12 +221,19 @@ test('kitchen notes affect only outstanding sent dishes and repeat saves leave n
   assert.equal(events[0].event_type, 'modified')
   assert.equal(events[0].payload.productName, 'Menú diario')
   assert.equal(events[0].payload.note, 'Segundo sin sal')
+  assert.equal(events[0].payload.tableName, 'Mesa 1')
+  assert.equal((await queue()).items.find(item => item.id === secondItemId).snapshot.note, 'Segundo sin sal')
+  assert.equal((await queue()).items.find(item => item.id === firstItemId).snapshot.note, 'Salsa aparte', 'served dishes keep their original note')
+  for (const event of (await queue()).events) await db.query('select acknowledge_kds_event($1,$2)', [kds, event.id])
+  assert.equal((await queue()).events.length, 0)
+  assert.equal((await queue()).items.find(item => item.id === secondItemId).snapshot.note, 'Segundo sin sal')
   assert.ok((await db.query('select production_render_event_lines(id) lines from production_events')).rows[0].lines.includes('NOTA: Segundo sin sal'))
   assert.ok((await db.query('select snapshot from production_items')).rows.every(row => row.snapshot.note === 'Salsa aparte'), 'already sent snapshots remain immutable')
   await save([component(0), component(1)], 4, { note: 'Segundo sin sal' })
   assert.equal((await db.query('select count(*)::int n from production_events')).rows[0].n, 1)
   await save([component(0), component(1)], 5, { note: null })
   assert.equal((await db.query('select count(*)::int n from production_events')).rows[0].n, 2)
+  assert.equal((await queue()).items.find(item => item.id === secondItemId).snapshot.note, null)
   assert.ok((await db.query("select production_render_event_lines(id) lines from production_events where payload->>'note' is null")).rows[0].lines.includes('NOTA: SIN COMENTARIO'))
 })
 
@@ -238,6 +251,26 @@ test('an optional course chosen after all previous dishes were served reopens ju
   assert.equal(entries.find(entry => entry.componentId === optionIds[2]).unsentQuantity, 1)
   await send('late-optional-dessert', 5)
   assert.deepEqual((await db.query('select source_component_id from production_items')).rows.map(row => row.source_component_id), [optionIds[2]])
+})
+
+test('modifier notices and KDS cards update only the outstanding menu course and retain immutable snapshots', async t => {
+  const { db, save, send, serve, queue } = await setup(t)
+  await save([component(0), component(1)], 1)
+  await send('menu-modifiers', 2)
+  const sentItems = (await db.query('select id,source_component_id,snapshot from production_items')).rows
+  await serve(optionIds[0], 1, 2)
+  const cheese = { id: 'cheese', groupId: 'extras', name: 'Queso', priceCents: 100 }
+  await db.query('update order_lines set modifiers=$1 where id=$2', [JSON.stringify([cheese]), line])
+  let result = await queue()
+  assert.equal(result.events.length, 1)
+  assert.deepEqual(getKdsEventChanges(result.events[0]), ['Añadido: Queso'])
+  for (const sent of sentItems) assert.deepEqual(result.items.find(item => item.id === sent.id).snapshot.lineModifiers,
+    sent.source_component_id === optionIds[0] ? [] : [cheese])
+  await db.query('select acknowledge_kds_event($1,$2)', [kds, result.events[0].id])
+  result = await queue()
+  assert.equal(result.events.length, 0)
+  assert.deepEqual(result.items.find(item => item.id === sentItems.find(sent => sent.source_component_id === optionIds[1]).id).snapshot.lineModifiers, [cheese])
+  assert.ok((await db.query('select snapshot from production_items')).rows.every(row => row.snapshot.lineModifiers.length === 0))
 })
 
 test('cancelling a ready split course cannot mark its unprepared sibling ready', async t => {

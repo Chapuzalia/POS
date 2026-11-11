@@ -117,7 +117,7 @@ Los workflows de `main` y `Staging` ejecutan Python, lint, tests y build, y desp
 
 En el host, el receptor lee `supabase_migrations.schema_migrations` en la base objetivo y calcula las migraciones pendientes por versión. Valida el contenido SQL real antes de cualquier escritura. Un commit que omite versiones ya aplicadas se rechaza. Si no hay pendientes, no cambia la contraseña de PostgreSQL, no genera backup ni ejecuta `db push`; continúa con Edge y frontend. La misma SHA puede volver a desplegarse con un request ID nuevo. El idempotency key identifica entorno, run y attempt, no el contenido del commit.
 
-Las migraciones nuevas deben guardarse en UTF-8 sin BOM. `scripts/prepare-production-migrations.mjs` elimina el BOM inicial únicamente de la copia SQL que se empaqueta para producción, conservando las fuentes históricas y el resto de bytes. PostgreSQL rechaza ese marcador con `SQLSTATE 42601` antes de ejecutar la primera sentencia; una migración posterior no puede corregir ese fallo de lectura.
+Las migraciones nuevas deben guardarse en UTF-8 sin BOM. `scripts/prepare-production-migrations.mjs`, del repositorio independiente `deploy-controller`, elimina el BOM inicial únicamente de la copia SQL que se empaqueta para producción, conservando las fuentes históricas y el resto de bytes. PostgreSQL rechaza ese marcador con `SQLSTATE 42601` antes de ejecutar la primera sentencia; una migración posterior no puede corregir ese fallo de lectura.
 
 La CLI de producción ejecuta migraciones en pipeline, donde PostgreSQL rechaza `CREATE INDEX CONCURRENTLY` con `SQLSTATE 25001`. Por autorización explícita, se retira únicamente esa palabra de los tres índices de `20260912222539_paginate_pos_session_tickets.sql` y los dos de `20261003183458_optimize_pos_sale_latency.sql`. El checker compara el texto completo con el baseline y permite exclusivamente esas cinco retiradas en esos dos archivos; cualquier otra modificación histórica sigue bloqueada. La preparación acepta las fuentes corregidas y conserva la adaptación de copias antiguas, comprobando el número esperado de índices. Los índices normales pueden bloquear escrituras mientras se crean; `lock_timeout = '5s'` limita la espera para adquirir el bloqueo y `statement_timeout = '5min'` limita la ejecución.
 
@@ -143,6 +143,15 @@ La configuración del receptor puede declarar:
 ```
 
 El hash corresponde a los bytes SQL que recibe el receptor, después de la preparación compatible de BOM y de los índices históricos. La autorización debe coincidir con el entorno, nombre completo, hash y fecha UTC futura; exige una razón de revisión. No basta el nombre, un commit anterior, un workflow correcto ni un waiver global. Cambiar un byte invalida la autorización. Para un contract, la autorización exige además `expand_migration`, cuyo timestamp debe existir en el ledger aplicado real; no se permite aplicar expand y contract juntos. La revisión debe confirmar que ningún cliente admitido depende del contrato antiguo.
+
+El controller también permite una aprobación interactiva por Telegram para
+riesgos SQL pendientes sin autorización vigente. El grupo recibe el archivo y
+los motivos detectados; todos los archivos sensibles deben aprobarse antes de
+backup y SQL. Cada voto está ligado a contenido, entorno y commit, se verifica
+la pertenencia al grupo y la autorización solo vive en ese intento. Cancelar
+o dejar caducar la solicitud no aplica SQL. No sustituye los controles de
+historial, hashes históricos o dependencias de contracts. Ver
+[configuración de Telegram](deployment-controller.md#aprobar-migraciones-sensibles-por-telegram).
 
 El receptor mantiene además un registro instalado de contenido SQL por entorno (`/var/lib/tickit-deploy/migration-history.<environment>.json`). Esto permite detectar cambios posteriores de bytes en versiones ya aplicadas sin depender de una SHA anterior. Inicializar ese registro sobre una base existente exige una autorización `migration_history_bootstrap` con entorno, caducidad y digest de su mapa canónico aplicado; ver [operaciones del controlador](deployment-controller.md). El directorio del registro debe ser propiedad de root y no permitir escritura de otros usuarios.
 

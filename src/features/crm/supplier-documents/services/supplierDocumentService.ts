@@ -1,7 +1,7 @@
 import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
 import { PRODUCT_IMAGE_TYPE, convertImageFileToWebp, isProductImageWebp } from '../../../../lib/productImages.ts'
-import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
+import { getFunctionInvokeErrorMessage, requireSupabase } from '../../../../services/backendService'
 import { loadSupplierReceiptInventoryData } from '../../inventory/services/inventoryService'
 import { loadVenueSuppliers } from '../../purchases/services/supplierService'
 import type {

@@ -7,11 +7,12 @@ import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPaginat
 import { CrmModal } from '../../shared/components/CrmModal'
 import { Field } from '../../shared/components/Field'
 import { CrmSelect } from '../../shared/components/CrmSelect'
-import { KpiCard } from '../../dashboard/pages/DashboardPage'
+import { KpiCard } from '../../shared/components/KpiCard'
 import { formatMoney, formatTicketNumber, normalizeText } from '../../../../lib/format'
 import { getOperationalDateKey, getOperationalDayRangeIso, shiftIsoDate } from '../../../../lib/operationalDay'
 import { loadAccountingTickets, type AccountingTicketRow } from '../services/accountingExportService'
-import { buildCsv, downloadCsv } from '../../../../lib/csv'
+import { downloadSpreadsheet, type SpreadsheetFormat } from '../../../../lib/spreadsheet'
+import { ExportFormatMenu } from '../../shared/components/ExportFormatMenu'
 import { sileo } from 'sileo'
 import { loadCrmSalesReportTicketDetail, loadCrmSalesReportPage, loadCrmSalesReportAggregatePage, type CrmSalesReportAggregatePage, type CrmSalesReportTicketListItem, type CrmSalesReportFilters, type CrmSalesReportPage } from '../services/salesReportsService'
 import { buildSalesReportTicketTotals, crmReportDateTimeFormatter, paymentLabels, salesReportTabs, type SalesReportSortDirection, type SalesReportSortKey, type SalesReportView } from '../services/salesReportModel'
@@ -178,7 +179,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
     setSortDirection(nextSortKey === 'label' || nextSortKey === 'ticketId' || nextSortKey === 'paymentMethod' || nextSortKey === 'status' ? 'asc' : 'desc')
   }
 
-  async function exportAccountingTickets() {
+  async function exportAccountingTickets(format: SpreadsheetFormat) {
     if (isExporting || activeView !== 'tickets' || !selectedVenueId || !reportFilters.dateFromIso || !reportFilters.dateToIso) return
     setIsExporting(true)
     try {
@@ -188,7 +189,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
         return
       }
       const { headers, rowsCsv } = exportTicketRowsToCsv(rows, timeZone)
-      downloadCsv(buildCsv(headers, rowsCsv), `tickets_${dateFrom}_${dateTo}.csv`)
+      downloadSpreadsheet(format, headers, rowsCsv, `tickets_${dateFrom}_${dateTo}`)
       sileo.success({ title: 'Exportación generada' })
     } catch {
       sileo.error({ title: 'No se ha podido generar la exportación.' })
@@ -215,9 +216,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
             <p>Datos del local seleccionado</p>
           </div>
            <div className="!flex !items-center !gap-2">
-             <UiButton className="!min-h-10 !rounded-[10px] !bg-[var(--crm-blue)] !px-3 !text-white" disabled={disabled || isExporting || activeView !== 'tickets' || !selectedVenueId || !dateFrom || !dateTo} onClick={() => void exportAccountingTickets()} type="button">
-               <Download className="!size-4" />{isExporting ? 'Exportando...' : 'Exportar tickets'}
-             </UiButton>
+             <ExportFormatMenu disabled={disabled || activeView !== 'tickets' || !selectedVenueId || !dateFrom || !dateTo} isExporting={isExporting} label="Exportar tickets" onExport={(format) => void exportAccountingTickets(format)} />
              <UiButton
              aria-label="Actualizar informes de ventas"
             className="inline-flex size-9 min-h-9 min-w-9 items-center justify-center gap-2 rounded-[9px] border-0 bg-[var(--crm-surface-soft)] p-0 text-[var(--crm-text-secondary)] shadow-none transition-[background-color,color,transform] duration-150 hover:bg-[var(--crm-surface-hover)] hover:text-[var(--crm-text)] !inline-flex !size-10 !min-h-10 !min-w-10 !items-center !justify-center !gap-[7px] !rounded-[10px] !border-0 !bg-transparent !p-0 !text-[13px] !font-semibold !text-[var(--crm-text-muted)] !shadow-none !transition-[background-color,color,box-shadow,transform] !duration-150"

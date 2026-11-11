@@ -10,7 +10,7 @@ export function createProductSalesStatsRefresh(options: {
   now?: () => number
 }) {
   const now = options.now ?? Date.now
-  let lastAttempt = now()
+  let lastAttempt = Number.NEGATIVE_INFINITY
   let inFlight: Promise<void> | null = null
   let active = true
   return {

@@ -1,0 +1,53 @@
+warning: in the working copy of 'docs/coolify-edge-functions-deploy.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/coolify-production-deploy.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/coolify-staging-deploy.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'docs/deployment-controller.md', LF will be replaced by CRLF the next time Git touches it
+warning: in the working copy of 'scripts/request-deployment.mjs', LF will be replaced by CRLF the next time Git touches it
+ .github/workflows/production.yml                |   7 [32m+[m[31m-[m
+ .github/workflows/staging.yml                   |   7 [32m+[m[31m-[m
+ apps/deploy-controller/package.json             |   7 [31m-[m
+ apps/deploy-controller/src/auth.ts              |  86 [31m---[m
+ apps/deploy-controller/src/config.ts            |  42 [31m--[m
+ apps/deploy-controller/src/gateway.ts           |   3 [31m-[m
+ apps/deploy-controller/src/http.ts              |  81 [31m---[m
+ apps/deploy-controller/src/pipeline.ts          | 110 [31m----[m
+ apps/deploy-controller/src/store.ts             |  98 [31m----[m
+ apps/deploy-controller/src/worker.ts            |  55 [31m--[m
+ apps/deploy-controller/tsconfig.json            |   9 [31m-[m
+ docker-compose.deploy-controller.yml            |  75 [31m---[m
+ docs/coolify-edge-functions-deploy.md           | 157 [32m+[m[31m----[m
+ docs/coolify-production-deploy.md               | 198 [32m+[m[31m------[m
+ docs/coolify-staging-deploy.md                  | 360 [32m+[m[31m-----------[m
+ docs/deployment-controller.md                   | 301 [32m++[m[31m--------[m
+ docs/safe-production-migrations.md              |   2 [32m+[m[31m-[m
+ infra/deploy-controller/Dockerfile              |  60 [31m--[m
+ infra/deploy-controller/controller.example.json |  44 [31m--[m
+ package.json                                    |   3 [32m+[m[31m-[m
+ pnpm-lock.yaml                                  |   2 [31m-[m
+ scripts/controller-package.py                   |  82 [31m---[m
+ scripts/deploy-backup-retention.py              |  79 [31m---[m
+ scripts/deploy-coolify.mjs                      | 138 [31m-----[m
+ scripts/deploy-pos.py                           | 737 [31m------------------------[m
+ scripts/edge-router.ts                          |  58 [31m--[m
+ scripts/pending-migration-safety.mjs            | 184 [31m------[m
+ scripts/pos-deploy.production.json              |  12 [31m-[m
+ scripts/pos-deploy.staging.example.json         |  12 [31m-[m
+ scripts/prepare-edge-functions.mjs              |  38 [31m--[m
+ scripts/prepare-production-migrations.mjs       |  75 [31m---[m
+ scripts/request-deployment.mjs                  |  28 [32m+[m[31m-[m
+ scripts/send-pos-migrations.sh                  |  55 [31m--[m
+ scripts/start-deploy-worker.py                  | 123 [31m----[m
+ scripts/telegram_migration_approval.py          | 225 [31m--------[m
+ tests/coolify-deployment.test.mjs               |  57 [31m--[m
+ tests/deployment-request.test.mjs               |  16 [32m+[m[31m-[m
+ tests/deployment-workflows.test.mjs             |   3 [32m+[m[31m-[m
+ tests/edge-deployment.test.mjs                  |  56 [31m--[m
+ tests/functional/deploy-controller.test.ts      | 229 [31m--------[m
+ tests/functional/deploy-pipeline.test.ts        |  77 [31m---[m
+ tests/pending-migration-safety.test.mjs         | 138 [31m-----[m
+ tests/test_backup_retention.py                  |  36 [31m--[m
+ tests/test_controller_package.py                |  85 [31m---[m
+ tests/test_deploy_pos.py                        | 714 [31m-----------------------[m
+ tests/test_deploy_worker_start.py               |  77 [31m---[m
+ tests/test_telegram_migration_approval.py       | 176 [31m------[m
+ 47 files changed, 107 insertions(+), 5110 deletions(-)

@@ -24,7 +24,7 @@ type UseTenantSessionOptions<TenantState> = {
   pendingLoginContext: TenantContext | null
   loadTenantState: (context: TenantContext) => Promise<TenantState>
   applyTenantState: (context: TenantContext, state: TenantState) => void
-  applyOfflineState: (context: TenantContext) => Promise<void>
+  applyOfflineState: (context: TenantContext, isCurrent: () => boolean) => Promise<void>
   clearActiveState: () => void
   syncPendingEvents: () => Promise<void>
   setError: (error: string | null) => void
@@ -47,9 +47,13 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
     setIsLoading, setLoginLeaseBlocked, setPendingLoginContext, syncPendingEvents,
   } = options
 
-  const activateAuthenticatedContext = useCallback(async (context: TenantContext) => {
+  const activateAuthenticatedContext = useCallback(async (context: TenantContext, version: number) => {
+    if (version !== sessionVersionRef.current) return
     if (!isBackofficeUser(context)) await syncPendingEvents()
-    applyTenantState(context, await loadTenantState(context))
+    if (version !== sessionVersionRef.current) return
+    const state = await loadTenantState(context)
+    if (version !== sessionVersionRef.current) return
+    applyTenantState(context, state)
     pendingValidationRef.current = false
     latestOptionsRef.current.setSessionReady(true)
   }, [applyTenantState, loadTenantState, syncPendingEvents])
@@ -102,7 +106,7 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
         if (!isOnline) {
           if (!current.context && !isBackofficeUser(cachedContext) && cachedContext.deviceMode !== 'kds'
             && await hasValidOfflineSession(cachedContext) && isCurrent()) {
-            await current.applyOfflineState(cachedContext)
+            await current.applyOfflineState(cachedContext, isCurrent)
           }
           return
         }
@@ -139,7 +143,7 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
             // live state intact; hydrate storage only when booting the app.
             if (!latestOptionsRef.current.context && !isBackofficeUser(cachedContext)
               && cachedContext.deviceMode !== 'kds' && await hasValidOfflineSession(cachedContext) && isCurrent()) {
-              await latestOptionsRef.current.applyOfflineState(cachedContext)
+              await latestOptionsRef.current.applyOfflineState(cachedContext, isCurrent)
             }
             current.setError(getReadableError(error, { operation: 'auth.session', recoverable: true }))
           }
@@ -199,10 +203,11 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
   }, [isOnline])
 
   const login = useCallback(async (input: LoginInput) => {
+    const version = sessionVersionRef.current
     setIsBusy(true); setIsLoading(true); setError(null)
     setLoginLeaseBlocked(false); setPendingLoginContext(null)
     try {
-      await activateAuthenticatedContext(await loginTenant(input))
+      await activateAuthenticatedContext(await loginTenant(input), version)
     } catch (error) {
       if (error instanceof LoginLeaseConflictError) {
         setLoginLeaseBlocked(true); setPendingLoginContext(error.context); setError(null)
@@ -212,10 +217,11 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
 
   const forceLogin = useCallback(async () => {
     if (!pendingLoginContext) return
+    const version = sessionVersionRef.current
     setIsBusy(true); setError(null)
     try {
       if (!(await forceClaimLoginLease())) throw new Error('No se ha podido sustituir la sesión anterior.')
-      await activateAuthenticatedContext(pendingLoginContext)
+      await activateAuthenticatedContext(pendingLoginContext, version)
       setPendingLoginContext(null); setLoginLeaseBlocked(false)
     } catch (error) { setError(getReadableError(error, { operation: 'auth.session', recoverable: true, step: 'forceLogin' })) } finally { setIsBusy(false) }
   }, [activateAuthenticatedContext, pendingLoginContext, setError, setIsBusy, setLoginLeaseBlocked, setPendingLoginContext])
@@ -234,11 +240,12 @@ export function useTenantSession<TenantState>(options: UseTenantSessionOptions<T
     if (loginLeaseBlocked) return
     const context = getCachedContext()
     if (!context) return
+    const version = sessionVersionRef.current
     setIsBusy(true); setError(null)
     try {
       if (isBackofficeUser(context)) throw new TenantSessionError('El CRM requiere conexión.')
       if (!(await hasValidOfflineSession(context))) throw new TenantSessionError('La sesión ha caducado. Conecta el TPV e inicia sesión de nuevo.')
-      await applyOfflineState(context)
+      if (version === sessionVersionRef.current) await applyOfflineState(context, () => version === sessionVersionRef.current)
     } catch (error) { setError(getReadableError(error, { operation: 'auth.session', recoverable: true, step: 'enterOffline' })) } finally { setIsBusy(false) }
   }, [applyOfflineState, loginLeaseBlocked, setError, setIsBusy])
 

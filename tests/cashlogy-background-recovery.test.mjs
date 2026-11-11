@@ -1,3 +1,4 @@
+import * as customPayments from '../src/lib/customPayments.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import { stripTypeScriptTypes } from 'node:module'
@@ -134,7 +135,8 @@ async function journalFixture() {
 async function restaurantRecovery(store) {
   const source = await readFile(new URL('../src/features/restaurant/services/payment.ts', import.meta.url), 'utf8')
   return compileComponent(source, {
-    './checkout.ts': { prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
+    './checkout.ts': { reconcileCancelledRestaurantCheckouts: async () => {}, prepareRestaurantCheckout: async () => {}, releaseRestaurantCheckout: async () => true, startRestaurantCheckout: async () => {} },
+    '../../../lib/customPayments': customPayments,
     './paymentPayload.ts': { withConfirmedRestaurantPayments },
     '../../../lib/durableSales.ts': durable,
     '../../local-printing/cashlogy/useCashlogyStore.ts': {

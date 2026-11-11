@@ -5,7 +5,7 @@ import type { HistoricalPaymentMethod, PaymentMethod, SessionTicketRecord } from
 import { AppModal, Button, Input } from '../ui'
 import { NumericKeypadModal } from '../ui/NumericKeypadModal'
 import { HoldButton } from '../ui/HoldButton'
-import { usePrintAgent } from '../../features/local-printing'
+import { usePrintAgent } from '../../features/local-printing/hooks/usePrintAgent'
 import {
   getVisibleTicketPages,
   SESSION_TICKETS_PAGE_SIZE,

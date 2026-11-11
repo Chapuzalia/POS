@@ -1,3 +1,5 @@
+import * as personalPermissions from '../src/features/personal/permissions.ts'
+import * as customPayments from '../src/lib/customPayments.ts'
 import { UserFacingError } from '../src/utils/UserFacingError.ts'
 import { createDurableSalesHarness } from './helpers/durable-sales-harness.mjs'
 import * as observability from '../src/lib/observability.ts'
@@ -6,6 +8,7 @@ import { readFileSync } from 'node:fs'
 import test from 'node:test'
 import vm from 'node:vm'
 import ts from 'typescript'
+import { createCompiledHookRunner } from './helpers/component-harness.mjs'
 import { hasPersistedSessionForUser, isInvalidAuthError } from '../src/features/session/services/sessionValidity.ts'
 import { appendFrozenQueueEvent, recordQueueEventFailure } from '../src/features/offline/services/offlineQueueState.ts'
 import { isClosedCashSaleRejection } from '../src/features/offline/services/cashSessionRejection.ts'
@@ -25,41 +28,6 @@ function load(path, modules, globals = {}) {
   return exports
 }
 
-function hooks() {
-  const slots = []
-  let cursor = 0
-  let effects = []
-  const changed = (slot, deps) => !slot || deps.some((dep, i) => !Object.is(dep, slot.deps[i]))
-  const react = {
-    useRef(initial) { return slots[cursor++] ??= { current: initial } },
-    useState(initial) {
-      const i = cursor++
-      slots[i] ??= { value: typeof initial === 'function' ? initial() : initial }
-      return [slots[i].value, (value) => { slots[i].value = typeof value === 'function' ? value(slots[i].value) : value }]
-    },
-    useCallback(callback, deps) {
-      const i = cursor++
-      if (changed(slots[i], deps)) slots[i] = { callback, deps }
-      return slots[i].callback
-    },
-    useEffect(callback, deps) {
-      const i = cursor++
-      if (changed(slots[i], deps)) effects.push(() => {
-        slots[i]?.cleanup?.()
-        slots[i] = { deps, cleanup: callback() }
-      })
-    },
-  }
-  return {
-    react,
-    render(fn, ...args) {
-      cursor = 0; effects = []
-      const result = fn(...args)
-      effects.forEach((effect) => effect())
-      return result
-    },
-  }
-}
 const flush = () => new Promise((resolve) => setImmediate(resolve))
 const storage = () => {
   const values = new Map()
@@ -122,23 +90,22 @@ async function harness({ online = true, boot = false, refreshError = null } = {}
     '../features/platform/tenantFeatureAccess': { normalizeTenantFeatures: (features) => features, hasTenantCapability: () => false },
     './loginLeaseService': lease,
   }, globals)
-  const syncRunner = hooks()
   const synced = []
-  const syncHook = load('hooks/useOfflineSync', {
+  const syncRunner = createCompiledHookRunner(readFileSync(new URL('../src/hooks/useOfflineSync.ts', import.meta.url), 'utf8'), 'useOfflineSync', {
+    '../lib/observability.ts': observability,
     '../lib/durableSales.ts': durable,
-    react: syncRunner.react, '../lib/offlineStore': store, '../lib/supabase': supabaseModule,
+    '../lib/offlineStore': store, '../lib/supabase': supabaseModule,
     '../services/posService': { syncEvent: async (event) => { calls.push('sync'); synced.push(event) } },
     '../utils/errors': { getReadableError: String },
     '../features/offline/services/cashSessionRejection': { isClosedCashSaleRejection },
-  }, globals).useOfflineSync
-  const runner = hooks()
-  const hook = load('features/session/hooks/useTenantSession', {
-    react: runner.react, '../../../lib/offlineStore': store, '../../../lib/supabase': supabaseModule,
+  }, globals)
+  const runner = createCompiledHookRunner(readFileSync(new URL('../src/features/session/hooks/useTenantSession.ts', import.meta.url), 'utf8'), 'useTenantSession', {
+    '../../../lib/offlineStore': store, '../../../lib/supabase': supabaseModule,
     '../../../services/posService': service, '../../../services/loginLeaseService': lease,
     '../../../utils/errors': { getReadableError: String }, '../../../app/app-permissions': { isBackofficeUser: () => false },
     '../../../lib/diagnostics': { addDiagnosticBreadcrumb() {} },
     '../../../lib/backendFetch': { backendUnavailableEvent: 'pos:backend-unavailable' },
-  }, globals).useTenantSession
+  }, globals)
   const state = { ready: false, context: boot ? null : context, cash: boot ? null : cash, cleared: 0, hydrated: 0, error: null }
   const options = {
     context: state.context, isOnline: online, loginLeaseBlocked: false, pendingLoginContext: null,
@@ -155,9 +122,9 @@ async function harness({ online = true, boot = false, refreshError = null } = {}
   let actions
   function render() {
     options.context = state.context
-    const offline = syncRunner.render(syncHook, options.isOnline, state.ready)
+    const offline = syncRunner.render(options.isOnline, state.ready)
     options.syncPendingEvents = offline.syncPendingEvents
-    actions = runner.render(hook, options)
+    actions = runner.render(options)
   }
   render()
   await flush()
@@ -192,11 +159,14 @@ test('3 y 8: rechazo explícito del refresh, también al reconectar, cierra sesi
 test('4 y 7: venta offline en la caja existente, validar → lease → sincronizar al reconectar', async () => {
   const h = await harness()
   h.options.isOnline = false; h.render(); await flush()
-  const paymentRunner = hooks()
-  const pay = load('features/quick-sale/hooks/useQuickSalePayment', {
+  const paymentRunner = createCompiledHookRunner(readFileSync(new URL('../src/features/quick-sale/hooks/useQuickSalePayment.ts', import.meta.url), 'utf8'), 'useQuickSalePayment', {
+    '../../../lib/observability.ts': observability,
+    '../../../utils/errors.ts': { getReadableError: String },
+    '../../customers/service': {},
     '../../../lib/durableSales.ts': h.durable,
-    react: paymentRunner.react, '../../../lib/offlineStore': h.store,
-    '../../../lib/format': { createId: () => crypto.randomUUID() }, '../services/salePayload': { buildSalePayload },
+    '../../../lib/offlineStore': h.store,
+    '../../../lib/format': { createId: () => crypto.randomUUID() }, '../../personal/permissions': personalPermissions,
+    '../../../lib/customPayments': customPayments, '../services/salePayload': { buildSalePayload },
     '../../local-printing/cashlogy/useCashlogyStore': { getCashlogyPaymentAmounts: () => ({}), finishCashlogyPayment() {} },
     '../../local-printing/services/earlyCashDrawer': { requestEarlyCashDrawer: () => false },
     '../../../services/posService': { loadSessionTicketFromSupabase: async () => null },
@@ -206,9 +176,9 @@ test('4 y 7: venta offline en la caja existente, validar → lease → sincroniz
     '../../fiscal/local/economicSync.ts': { synchronizeFiscalEconomicSales: async () => {} },
     '../../fiscal/local/sync.ts': { synchronizeLocalFiscalQueue: async () => {} },
     '../../fiscal/local/installation.ts': { fiscalBridgeAccessToken: async () => '', fiscalBridgeBaseUrl: () => '' },
-  }, h.globals).useQuickSalePayment
+  }, h.globals)
   const paymentInFlightChanges = []
-  const payment = paymentRunner.render(pay, {
+  const payment = paymentRunner.render({
     context, cashSession: h.state.cash, isOnline: false, discount: null, invoiceCustomer: null, ledger: [], tickets: [],
     lines: [{ id: 'line', productId: 'product', productName: 'Café', variantId: 'variant', variantName: 'Normal', quantity: 1,
       basePriceCents: 200, unitPriceCents: 200, componentDeltaCents: 0, modifierDeltaCents: 0, components: [], modifiers: [], catalogSnapshot: { vatRate: 10 } }],
@@ -236,15 +206,15 @@ test('4 y 7: venta offline en la caja existente, validar → lease → sincroniz
 
 test('6: un heartbeat fallido conserva el lease y la sesión; false confirmado sí cierra', async () => {
   const h = await harness()
-  const runner = hooks()
-  const useActivity = load('features/session/hooks/useLoginActivity', {
-    react: runner.react, '../../../services/loginLeaseService': h.lease,
+  const runner = createCompiledHookRunner(readFileSync(new URL('../src/features/session/hooks/useLoginActivity.ts', import.meta.url), 'utf8'), 'useLoginActivity', {
+    '../../../lib/observability.ts': observability,
+    '../../../services/loginLeaseService': h.lease,
     '../../../app/app-permissions': { isCrmUser },
-  }, h.globals).useLoginActivity
+  }, h.globals)
   const closed = []
   const activityOptions = { context, isOnline: true, onSessionClosed: async (...args) => closed.push(args) }
   h.faults.lease = new TypeError('fetch failed')
-  runner.render(useActivity, activityOptions); await flush()
+  runner.render(activityOptions); await flush()
   await assert.rejects(h.lease.heartbeatLoginLease(), /fetch failed/)
   assert.equal(closed.length, 0)
   const identity = h.globals.sessionStorage.getItem('club-pos:login-instance-id')
@@ -268,4 +238,33 @@ test('SIGNED_OUT durante una restauración pendiente no resucita el usuario', as
   resolveRefresh({ data: { session: { user: { id: 'user' } } }, error: null }); await flush()
   assert.equal(h.state.context, null)
   assert.equal(h.store.getCachedContext(), null)
+})
+
+test('SIGNED_OUT while login loads POS state cannot reactivate the session', async () => {
+  const h = await harness()
+  let resolveLoad
+  h.service.loginTenant = async () => context
+  h.options.loadTenantState = () => new Promise(resolve => { resolveLoad = resolve })
+  h.render()
+  const login = h.actions.login({ email: 'test@example.com', password: 'test-password' })
+  await flush()
+  h.signOut()
+  resolveLoad({ cashSession: cash })
+  await login
+  assert.equal(h.state.context, null)
+  assert.equal(h.state.ready, false)
+  assert.equal(h.store.getCachedContext(), null)
+})
+
+test('SIGNED_OUT during offline validation cannot reopen the cached session', async () => {
+  const h = await harness()
+  let resolveValid
+  h.service.hasValidOfflineSession = () => new Promise(resolve => { resolveValid = resolve })
+  const enter = h.actions.enterOffline()
+  await flush()
+  h.signOut()
+  resolveValid(true)
+  await enter
+  assert.equal(h.state.context, null)
+  assert.equal(h.state.ready, false)
 })

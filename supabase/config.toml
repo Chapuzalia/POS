@@ -21,10 +21,14 @@ import_map = "./functions/deno.json"
 verify_jwt = false
 
 [functions.billing-webhook]
-# Only raw-body Stripe HMAC verification authorizes this endpoint.
+# Mollie webhooks are unsigned: only the payment id is read and its state is re-fetched from the Mollie API.
 verify_jwt = false
 
 [functions.billing-reconcile]
-# Separate scheduler secret validated inside; sandbox only.
+# Separate scheduler secret validated inside.
+verify_jwt = false
+
+[functions.activate-personal]
+# Validates the POS session before forwarding to the configured Personal backend.
 verify_jwt = false
 

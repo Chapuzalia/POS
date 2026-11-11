@@ -1,0 +1,10 @@
+[
+  {
+    "relation": ["delegate_permission/common.handle_all_urls"],
+    "target": {
+      "namespace": "android_app",
+      "package_name": "com.tickit.pos",
+      "sha256_cert_fingerprints": ["5F:83:E5:39:08:57:92:B0:9F:E3:2E:62:58:EE:DC:68:0A:36:A9:42:21:83:80:53:A5:00:C5:FB:F6:BB:F7:AA"]
+    }
+  }
+]

@@ -4,7 +4,7 @@ import { normalizeDayChangeTime } from "../../../../lib/operationalDay";
 import {
   getFunctionInvokeErrorMessage,
   requireSupabase,
-} from "../../shared/services/crmServiceSupport";
+} from "../../../../services/backendService";
 import {
   type CatalogProfile,
   type CrmAccessUser,
@@ -321,7 +321,7 @@ export async function createCrmUser(
       `La contraseña debe tener entre ${CRM_USER_PASSWORD_MIN_LENGTH} y 72 caracteres.`,
     );
   }
-  if (!["owner", "manager"].includes(input.role)) {
+  if (!["owner", "manager", "gestor"].includes(input.role)) {
     throw new UserFacingError("Selecciona un rol válido.");
   }
 

@@ -1,5 +1,5 @@
 import type { TenantContext } from '../../../../types'
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import type { VenueSupplier, VenueSupplierInput } from '../types'
 
 type DbRow = Record<string, unknown>

@@ -20,17 +20,17 @@ import {
 } from "lucide-react";
 
 import type { CashSession } from "../../types";
+import { APP_DISPLAY_VERSION } from '../../config/appVersion'
 
 import { Chip } from "../ui";
-import {
-  ManualCashDrawerButton,
-  PrintAgentStatusBadge,
-} from "../../features/local-printing";
+import { ManualCashDrawerButton } from '../../features/local-printing/components/ManualCashDrawerButton'
+import { PrintAgentStatusBadge } from '../../features/local-printing/components/PrintAgentStatusBadge'
 
 type AppHeaderProps = {
   cashSession: CashSession | null;
   canCloseCash: boolean;
   canManageCash: boolean;
+  canReadSales?: boolean;
   canGenerateInvoice: boolean;
   canOpenCashDrawer: boolean;
   canOpenReservations: boolean;
@@ -61,6 +61,7 @@ export function AppHeader({
   cashSession,
   canCloseCash,
   canManageCash,
+  canReadSales,
   canGenerateInvoice,
   canOpenCashDrawer,
   canOpenReservations,
@@ -99,10 +100,10 @@ export function AppHeader({
 
   if (cashSession) {
     if (canGenerateInvoice) menuItems.push({ action: onGenerateInvoice, disabled: !isOnline || isLoading, icon: FileText, id: 'invoice', label: 'Generar factura' })
-    if (canCloseCash) menuItems.push({ action: onOpenTicketHistory, icon: ReceiptText, id: 'tickets', label: 'Histórico de tickets' })
+    if (canReadSales ?? canCloseCash) menuItems.push({ action: onOpenTicketHistory, icon: ReceiptText, id: 'tickets', label: 'Histórico de tickets' })
     if (canManageCash) menuItems.push({ action: onOpenCashMovements, disabled: isLoading || !isOnline, icon: ArrowLeftRight, id: 'movements', label: 'Entradas / salidas' })
     menuItems.push({ action: onCloseCash, icon: Euro, id: 'close-cash', label: 'Cerrar caja' })
-    menuItems.push({ action: onOpenShiftSummary, icon: ChartPie, id: 'shift-summary', label: 'Resumen de turno' })
+    if (canReadSales !== false) menuItems.push({ action: onOpenShiftSummary, icon: ChartPie, id: 'shift-summary', label: 'Resumen de turno' })
   }
   if (canCloseCash) menuItems.push({ action: onOpenCashClosingHistory, icon: WalletCards, id: 'closings', label: 'Histórico de cierres' })
   if (cashlogyConnected) menuItems.push({ action: onOpenCashlogyMachine, icon: Vault, id: 'cashlogy-machine', label: 'Máquina de efectivo' })
@@ -136,6 +137,7 @@ export function AppHeader({
                   )
                 })}
               </Dropdown.Menu>
+              <p className="m-0 px-3 pt-1 pb-2 text-center text-[11px] text-[var(--muted)] tabular-nums">{APP_DISPLAY_VERSION}</p>
             </Dropdown.Popover>
           </Dropdown>
 

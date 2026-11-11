@@ -1,7 +1,7 @@
 {
   "name": "pos",
   "private": true,
-  "version": "0.0.0",
+  "version": "1.0.34",
   "packageManager": "pnpm@10.15.1",
   "type": "module",
   "scripts": {
@@ -9,15 +9,29 @@
     "start:api": "pnpm --filter @tickit/api start",
     "build:api": "pnpm --filter @tickit/api build",
     "dev": "vite",
-    "build": "pnpm run build:api && pnpm run build:deploy-controller && tsc -b && vite build",
-    "build:deploy-controller": "tsc --noEmit -p apps/deploy-controller/tsconfig.json",
+    "build": "pnpm run build:api && tsc -b && vite build",
     "test": "pnpm run test:functional && pnpm run test:legacy",
     "test:functional": "vitest run",
     "test:legacy": "node --test tests/*.test.mjs",
     "lint": "oxlint",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "prepare": "git config core.hooksPath .githooks || true",
+    "build:android": "vite build && pnpm run build:print-agent && cap sync android",
+    "apk:debug": "pnpm run build:android && cd android && gradlew.bat assembleDebug",
+    "ios:device": "bash scripts/ios-device.sh",
+    "build:print-agent": "node ../backend-impresora/scripts/build-mobile.mjs dist/nodejs",
+    "build:ios": "vite build && pnpm run build:print-agent && cap sync ios",
+    "build:android:prod": "vite build --mode prod && pnpm run build:print-agent && cap sync android",
+    "build:ios:prod": "vite build --mode prod && pnpm run build:print-agent && cap sync ios",
+    "ios:archive": "bash scripts/ios-archive.sh"
   },
   "dependencies": {
+    "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/browser": "^8.0.5",
+    "@capacitor/core": "^8.6.0",
+    "@capacitor/ios": "^8.6.0",
+    "@capawesome/capacitor-nodejs": "^0.2.0",
     "@heroui/react": "3.2.2",
     "@heroui/styles": "3.2.2",
     "@internationalized/date": "3.12.2",
@@ -26,6 +40,7 @@
     "@supabase/ssr": "^0.12.5",
     "@supabase/supabase-js": "^2.115.0",
     "@types/qrcode": "^1.5.6",
+    "driver.js": "1.10.2",
     "fflate": "^0.8.3",
     "lucide-react": "^1.23.0",
     "qrcode": "^1.5.4",
@@ -36,6 +51,7 @@
     "zustand": "^5.0.14"
   },
   "devDependencies": {
+    "@capacitor/cli": "^8.6.0",
     "@electric-sql/pglite": "^0.5.8",
     "@sentry/vite-plugin": "^5.4.0",
     "@tailwindcss/vite": "^4.3.2",

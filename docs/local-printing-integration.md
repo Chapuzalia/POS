@@ -8,6 +8,23 @@ El navegador nunca abre sockets con la impresora. La PWA publica llama por HTTPS
 PWA Vercel (Safari/iPad) -> HTTPS + Bearer -> agente local -> TCP RAW -> impresora
 ```
 
+### App nativa (Android/iOS): agente integrado
+
+En la app compilada con Capacitor el mismo `backend-impresora` corre dentro de la app (Node.js 18 embebido con `@capawesome/capacitor-nodejs`) y escucha solo en `http://127.0.0.1:47913`:
+
+```text
+App Tickit POS -> HTTP loopback + Bearer -> agente embebido -> TCP RAW -> impresora / CashlogyConnector
+```
+
+- `embedded/embeddedPrintAgent.ts` detecta la plataforma nativa y recibe URL y token por el canal del plugin (`agent-hello` -> `agent-ready`). El token se regenera en cada arranque.
+- El bundle se genera con `pnpm build:print-agent` (lo incluyen `build:android`, `build:ios` e `ios:device`) en `dist/nodejs`. La build de la PWA (`pnpm build`) no lo incluye.
+- Persistencia: SQLite en JS puro (sql.js) en el directorio de datos de la app. Sin TLS ni mDNS.
+- Ajustes del dashboard (establecimiento, CashlogyConnector, producción cloud, diagnóstico): Ajustes -> Hardware · Servidor de impresión (solo visible en la app nativa).
+- Android 11+ no permite `os.networkInterfaces()`: el agente usa la IP de salida y asume una red /24.
+- Compilar Android en Windows requiere rutas largas habilitadas (`LongPathsEnabled`), porque el plugin compila código nativo dentro de `node_modules/.pnpm`.
+
+La PWA no cambia: sigue usando el agente externo de la LAN por HTTPS.
+
 El codigo vive en `src/features/local-printing/`. `api/` contiene el cliente HTTP, `store/` el estado Zustand, `services/` el mapper y las reglas de negocio, `schemas/` la validacion Zod y `components/` la interfaz. El resto del TPV solo usa el hook o los servicios publicos de `index.ts`.
 
 ## Configuracion

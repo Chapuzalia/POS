@@ -1,4 +1,4 @@
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import type { SupplierDocumentType } from '../../supplier-documents/types'
 import { PRODUCT_IMAGE_TYPE, convertImageFileToWebp, isProductImageWebp } from '../../../../lib/productImages.ts'
 

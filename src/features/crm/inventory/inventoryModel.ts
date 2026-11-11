@@ -70,6 +70,13 @@ export function addInventoryStockQuantity(currentQuantity: number, value: string
   return Math.round((currentQuantity + addition) * scale) / scale
 }
 
+export function buildInventoryStockTotalChanges(current: Array<{ warehouseId: string; quantity: number }>, drafts: Record<string, string>, decimalPlaces: number) {
+  return current.flatMap((level) => {
+    const quantity = parseInventoryStockQuantity(drafts[level.warehouseId] ?? String(level.quantity), decimalPlaces)
+    return quantity === level.quantity ? [] : [{ warehouseId: level.warehouseId, quantity, expectedQuantity: level.quantity, enabled: true }]
+  })
+}
+
 export function parsePositiveInventoryQuantity(value: string, decimalPlaces: number, label: string) {
   const quantity = parseInventoryQuantity(value, decimalPlaces)
   if (quantity <= 0) throw new UserFacingError(`${label} debe ser mayor que cero.`)

@@ -4,6 +4,8 @@ import { useCallback, useEffect, useRef } from 'react'
 import { acceptPaymentOperation, commitPaymentOperation, discardPreparedPaymentOperation, loadPaymentOperations, markPaymentCharging, paymentScope, preparePaymentOperation, withPaymentLock } from '../../../lib/durableSales.ts'
 import { loadSessionTicketFromSupabase } from '../../../services/posService'
 import { buildSalePayload } from '../services/salePayload'
+import { assertStaffDiscount, staffCan } from '../../personal/permissions'
+import { getPayloadPayments, withCustomPayments } from '../../../lib/customPayments'
 import { loadTicketInvoice } from '../../customers/service'
 import {
   finishCashlogyPayment,
@@ -54,6 +56,7 @@ export function useQuickSalePayment(options: Options) {
     receivedCents: number | null,
     confirmedCashlogyTransaction: CashlogyTransaction | null = null,
     recoveryKey?: string,
+    customCashCents?: number,
   ) => {
     const { context, cashSession, lines } = options
     const fail = (message: string) => {
@@ -85,7 +88,7 @@ export function useQuickSalePayment(options: Options) {
     }
     const quickSaleKey = `${paymentScope(context, cashSession.id)}|quick-sale`
     const operations = (await loadPaymentOperations(context, cashSession.id))
-      .filter(operation => operation.key === quickSaleKey || operation.key.startsWith(`${quickSaleKey}:`))
+      .filter(operation => operation.state !== 'cancelled' && (operation.key === quickSaleKey || operation.key.startsWith(`${quickSaleKey}:`)))
     const stored = operations.find(operation => {
       if (recoveryKey) return operation.key === recoveryKey
       if (confirmedCashlogyTransaction) return operation.payload.sale.id === confirmedCashlogyTransaction.saleId
@@ -109,8 +112,8 @@ export function useQuickSalePayment(options: Options) {
       fail('Conéctate antes de cobrar una factura para asignar su número definitivo.')
       return
     }
-    const fingerprint = JSON.stringify({ lines, discount: options.discount, customer: options.invoiceCustomer?.id, paymentMethod, fiscalMode: localFiscalProduction ? 'verifactu' : 'legacy' })
-    const candidate = pending?.payload ?? buildSalePayload(
+    const fingerprint = JSON.stringify({ lines, discount: options.discount, customer: options.invoiceCustomer?.id, paymentMethod, customCashCents, fiscalMode: localFiscalProduction ? 'verifactu' : 'legacy' })
+    const draft = pending?.payload ?? buildSalePayload(
       context,
       cashSession,
       lines,
@@ -120,6 +123,12 @@ export function useQuickSalePayment(options: Options) {
       options.invoiceCustomer,
       confirmedCashlogyTransaction?.saleId ? { saleId: confirmedCashlogyTransaction.saleId } : undefined,
     )
+    const candidate = !pending && customCashCents !== undefined ? withCustomPayments(draft, customCashCents) : draft
+    if (!pending) {
+      if (!staffCan(context, 'pos.payment.take')) { fail('El trabajador no tiene permiso para cobrar.'); return }
+      try { if (context.personalStaff) assertStaffDiscount(context, options.discount, candidate.lines.map(line => ({ ...line, grossCents: line.lineTotalCents }))) }
+      catch (error) { fail(error instanceof Error ? error.message : 'Descuento no autorizado.'); return }
+    }
     // Additive keys retain old singleton journals and give every new ticket its
     // own recovery identity; one unresolved payment cannot occupy the register.
     const operationKey = stored?.key ?? `${quickSaleKey}:${candidate.sale.id}`
@@ -156,14 +165,17 @@ export function useQuickSalePayment(options: Options) {
       }
     }
     let cashlogyTransaction = operation.cashlogy
-    if (paymentMethod === 'cash' && operation.state !== 'accepted') {
+    const cashPayment = getPayloadPayments(preview).find(payment => payment.method === 'cash')
+      ?? (paymentMethod === 'cash' ? preview.payment : null)
+    const cashAmountCents = cashPayment?.amountCents ?? preview.sale.totalCents
+    if (cashPayment && operation.state !== 'accepted') {
       try {
         const recovery = operation.state === 'charging'
         if (operation.state === 'prepared' && isCashlogyPaymentConfigured()) operation = await markPaymentCharging(operation)
         cashlogyTransaction = confirmedCashlogyTransaction
-          ?? await settleCashlogyPaymentIfConfigured(preview.sale.totalCents, preview.sale.id, operation.cashlogyRequestId ?? `cashlogy:sale:${preview.sale.id}`, recovery, operation.key)
+          ?? await settleCashlogyPaymentIfConfigured(cashAmountCents, preview.sale.id, operation.cashlogyRequestId ?? `cashlogy:sale:${preview.sale.id}`, recovery, operation.key)
         if (cashlogyTransaction && (
-          cashlogyTransaction.requestedAmountCents !== preview.sale.totalCents
+          cashlogyTransaction.requestedAmountCents !== cashAmountCents
           || cashlogyTransaction.saleId !== preview.sale.id
         )) {
           throw new Error('El cobro confirmado en Cashlogy no coincide con esta venta.')
@@ -173,17 +185,23 @@ export function useQuickSalePayment(options: Options) {
         return
       }
     }
-    const cashlogyAmounts = getCashlogyPaymentAmounts(cashlogyTransaction, preview.sale.totalCents)
-    const payload = cashlogyTransaction && preview.payment
+    const cashlogyAmounts = getCashlogyPaymentAmounts(cashlogyTransaction, cashAmountCents)
+    const payload = cashlogyTransaction && cashPayment
       ? {
           ...preview,
-          payment: {
-            ...preview.payment,
+          ...(preview.payments ? { payments: preview.payments.map(payment => payment.method === 'cash' ? {
+            ...payment,
             receivedCents: cashlogyAmounts.receivedCents,
             changeCents: cashlogyAmounts.changeCents ?? 0,
             cashlogyRequestId: cashlogyTransaction.requestId,
             cashlogyTransactionId: cashlogyTransaction.id,
-          },
+          } : payment) } : { payment: {
+            ...cashPayment,
+            receivedCents: cashlogyAmounts.receivedCents,
+            changeCents: cashlogyAmounts.changeCents ?? 0,
+            cashlogyRequestId: cashlogyTransaction.requestId,
+            cashlogyTransactionId: cashlogyTransaction.id,
+          } }),
         }
       : preview
     if (operation.state !== 'accepted') operation = await acceptPaymentOperation(operation, payload, cashlogyTransaction)
@@ -197,7 +215,7 @@ export function useQuickSalePayment(options: Options) {
       }
     }
     const fiscalPayload = fiscalEntry ? printPayloadWithLocalFiscal(payload, fiscalEntry) : payload
-    const saleRecord: SaleRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt }
+    const saleRecord: SaleRecord = { id: payload.sale.id, cashSessionId: cashSession.id, paymentMethod, payments: getPayloadPayments(payload), totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt }
     const ticketRecord: SessionTicketRecord = { id: payload.sale.id, ticketNumber: payload.ticket.ticketNumber ?? 0, cashSessionId: cashSession.id, paymentMethod, totalCents: payload.sale.totalCents, createdAt: payload.sale.createdAt, status: 'active', payload: fiscalPayload, printStatus: 'not_requested', printAttempts: 0 }
     operationBreadcrumb({ operation: 'sale.payment', saleId: payload.sale.id, ticketId: payload.ticket.id, cashSessionId: cashSession.id, step: 'persist' })
     try {
@@ -233,7 +251,7 @@ export function useQuickSalePayment(options: Options) {
     updateSecondary('pending_count', options.refreshPendingCount)
     const cashDrawerAlreadyRequested = requestEarlyCashDrawer({
       requestId: `drawer:${payload.sale.id}:payment`,
-      payments: [{ method: payload.payment?.method, amountCents: payload.payment?.amountCents }],
+      payments: getPayloadPayments(payload),
     })
     updateSecondary('clear_paid_draft', clearPaidDraftLines)
     if (!sameDraft) options.onError('Se ha recuperado el cobro pendiente con sus datos originales. Los productos nuevos del ticket todavía no se han cobrado.')
@@ -302,6 +320,7 @@ export function useQuickSalePayment(options: Options) {
     receivedCents: number | null,
     confirmedCashlogyTransaction: CashlogyTransaction | null = null,
     recoveryKey?: string,
+    customCashCents?: number,
   ) => {
     if (paymentInFlightRef.current) {
       if (confirmedCashlogyTransaction) throw new Error('El registro del cobro anterior sigue en curso. Espera a que termine antes de aplicarlo de nuevo.')
@@ -311,8 +330,8 @@ export function useQuickSalePayment(options: Options) {
     options.onPaymentInFlightChange?.(true)
     try {
       if (options.context && options.cashSession) {
-        await withPaymentLock(paymentScope(options.context, options.cashSession.id), () => completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction, recoveryKey))
-      } else await completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction, recoveryKey)
+        await withPaymentLock(paymentScope(options.context, options.cashSession.id), () => completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction, recoveryKey, customCashCents))
+      } else await completePayment(paymentMethod, receivedCents, confirmedCashlogyTransaction, recoveryKey, customCashCents)
     } catch (error) {
       reportOperationError(error, { operation: 'sale.payment', step: 'payment_recovery', recoverable: true })
       options.onError(getReadableError(error, { operation: 'sale.payment' }, 'No se pudo completar el registro. Revisa el cobro original antes de repetirlo.'))

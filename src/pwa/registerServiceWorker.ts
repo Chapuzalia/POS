@@ -1,7 +1,9 @@
 import { APP_VERSION } from '../config/appVersion'
+import { Capacitor } from '@capacitor/core'
 
 export function registerServiceWorker() {
-  if (!import.meta.env.PROD || !('serviceWorker' in navigator)) return
+  // Native builds bundle their assets; a SW would serve stale code after an APK update.
+  if (!import.meta.env.PROD || Capacitor.isNativePlatform() || !('serviceWorker' in navigator)) return
 
   window.addEventListener(
     'load',

@@ -10,8 +10,25 @@ import type { RestaurantEqualSplit, RestaurantOrderLine, RestaurantOrderLineMove
 import { calculateDiscountForLines } from '../../../lib/discounts.ts'
 import { calculateTaxFromGross, isValidTaxRate } from '../../../lib/tax.ts'
 import { normalizeCatalogSnapshot } from '../../catalog/services/catalogSnapshots.ts'
+import { quantityAmountCents } from '../../../lib/format.ts'
 
 export type RestaurantPrintLine = RestaurantOrderLine & { lineTotalCents?: number }
+
+export function getRestaurantCalculationLines(lines: RestaurantPrintLine[]) {
+  return lines.map((line) => ({
+    productId: line.productId ?? '',
+    variantId: line.variantId ?? '',
+    grossCents: line.lineTotalCents ?? quantityAmountCents(line.unitPriceCents, line.quantity),
+    quantity: line.quantity,
+  }))
+}
+
+export function withRestaurantCalculationLines(discount: AppliedDiscount | null, lines: RestaurantPrintLine[]) {
+  return discount ? {
+    ...discount,
+    calculationLines: getRestaurantCalculationLines(lines).map((line, index) => ({ ...line, variantId: lines[index].variantId })),
+  } : null
+}
 
 function printComponents(line: RestaurantOrderLine) {
   if (line.components?.length) return line.components
@@ -53,11 +70,9 @@ type BuildRestaurantPrintPayloadInput = {
 
 export function buildRestaurantPrintPayload(input: BuildRestaurantPrintPayloadInput): SaleCreatedPayload {
   const discountAmountCents = Math.max(0, input.subtotalCents - input.totalCents)
-  const grossLineTotals = input.lines.map((line) => line.lineTotalCents ?? line.unitPriceCents * line.quantity)
-  const calculated = calculateDiscountForLines(
-    input.lines.map((line, index) => ({ productId: line.productId ?? '', variantId: line.variantId ?? '', grossCents: grossLineTotals[index], quantity: line.quantity })),
-    input.discount,
-  )
+  const calculationLines = getRestaurantCalculationLines(input.lines)
+  const grossLineTotals = calculationLines.map((line) => line.grossCents)
+  const calculated = calculateDiscountForLines(calculationLines, input.discount)
   const lineAllocations = calculated.totalCents === input.totalCents ? calculated.lineAllocations : null
   return {
     ticket: {
@@ -138,7 +153,7 @@ export function getMovedRestaurantPrintLines(lines: RestaurantOrderLine[], moves
   const linesById = new Map(lines.map((line) => [line.id, line]))
   return moves.flatMap((move) => {
     const line = linesById.get(move.lineId)
-    return line ? [{ ...line, quantity: move.quantity, lineTotalCents: line.unitPriceCents * move.quantity }] : []
+    return line ? [{ ...line, quantity: move.quantity, lineTotalCents: quantityAmountCents(line.unitPriceCents, move.quantity) }] : []
   })
 }
 
@@ -154,7 +169,7 @@ export function getEqualSplitPrintLines(lines: RestaurantOrderLine[], split: Res
   return [...lines]
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt) || left.id.localeCompare(right.id))
     .flatMap((line) => {
-      const lineTotalCents = line.quantity * line.unitPriceCents
+      const lineTotalCents = quantityAmountCents(line.unitPriceCents, line.quantity)
       const lineEnd = lineStart + lineTotalCents
       const allocatedCents = Math.max(0, Math.min(lineEnd, partEnd) - Math.max(lineStart, partStart))
       lineStart = lineEnd
@@ -166,5 +181,5 @@ export function getEqualSplitPrintLines(lines: RestaurantOrderLine[], split: Res
 }
 
 export function getRestaurantPrintSubtotal(lines: RestaurantPrintLine[]) {
-  return lines.reduce((total, line) => total + (line.lineTotalCents ?? line.unitPriceCents * line.quantity), 0)
+  return getRestaurantCalculationLines(lines).reduce((total, line) => total + line.grossCents, 0)
 }

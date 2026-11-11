@@ -1,4 +1,5 @@
 import { sentryVitePlugin } from "@sentry/vite-plugin";
+import { readFileSync } from 'node:fs'
 import { resolve } from 'node:path'
 import { defineConfig, type PreviewServer, type ViteDevServer } from 'vite'
 import react from '@vitejs/plugin-react'
@@ -9,6 +10,11 @@ import { validateBuildEnvironment } from './build/validateBuildEnvironment.ts'
 function configureCrmCanonicalRedirect(server: ViteDevServer | PreviewServer) {
   server.middlewares.use((request, response, next) => {
     const url = new URL(request.url ?? '/', 'http://localhost')
+    // CRM sections (/crm/products) are client routes served by the CRM entry, not the POS fallback.
+    if (/^\/crm\/[^.]+$/.test(url.pathname)) {
+      request.url = `/crm/index.html${url.search}`
+      return next()
+    }
     if (url.pathname !== '/crm') return next()
     response.writeHead(308, { Location: `/crm/${url.search}` })
     response.end()
@@ -19,6 +25,8 @@ const appVersion = process.env.APP_VERSION
   ?? process.env.VERCEL_GIT_COMMIT_SHA
   ?? process.env.GITHUB_SHA
   ?? 'development'
+// Human-readable release (package.json "version"); the SHA above stays the compatibility key.
+const appDisplayVersion = (JSON.parse(readFileSync(resolve(import.meta.dirname, 'package.json'), 'utf8')) as { version: string }).version
 const configuredSupportedVersions = process.env.SUPPORTED_APP_VERSIONS
   ?.split(',')
   .map((version) => version.trim())
@@ -41,6 +49,7 @@ export default defineConfig({
   },
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
+    __APP_DISPLAY_VERSION__: JSON.stringify(appDisplayVersion),
   },
   plugins: [react(), tailwindcss(), {
     name: 'crm-canonical-entry',
@@ -57,7 +66,11 @@ export default defineConfig({
       this.emitFile({
         type: 'asset',
         fileName: 'offline-assets.json',
-        source: JSON.stringify(Object.keys(bundle).filter((file) => /\.(js|css|woff2?)$/.test(file)).map((file) => `/${file}`)),
+        // HTML entries leave empty facade chunks (pos-*.js, crm-*.js) that are never written;
+        // listing them makes the worker precache the SPA fallback HTML as JS.
+        source: JSON.stringify(Object.entries(bundle)
+          .filter(([file, output]) => /\.(js|css|woff2?)$/.test(file) && !(output.type === 'chunk' && output.facadeModuleId?.endsWith('.html')))
+          .map(([file]) => `/${file}`)),
       })
       this.emitFile({
         type: 'asset',

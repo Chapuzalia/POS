@@ -1,0 +1,10 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["2W97PK6779.com.tickit.pos"],
+        "components": [{ "/": "/crm*", "comment": "Retornos de Mollie y enlaces del CRM abren la app nativa" }]
+      }
+    ]
+  }
+}

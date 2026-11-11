@@ -44,11 +44,12 @@ export type CommercialException = {
   limits: Partial<{ venues: number; devices: number }>
   discountBasisPoints: number
   customAmounts: Record<string, number>
-  // A temporary exception ends at an exact subscription boundary via a Stripe schedule.
+  // A temporary exception ends at an exact renewal boundary.
   cycles: number | null
   reason: string
   promotions?: AddonPromotion[]
 }
+// stripePriceId is a historical snapshot field; Mollie lines are priced from amountCents.
 export type Line = { key: string; versionId: string; stripePriceId: string | null; quantity: number; amountCents: number }
 export type Contract = {
   selection: Selection
@@ -60,7 +61,10 @@ export type Contract = {
   limits: { venues: number; devices: number }
   recurringCents: number
   exception: CommercialException | null
+  // Venues/devices switched off (downgrade) or back on (upgrade) when this contract is projected.
+  access?: ContractAccess
 }
+export type ContractAccess = { deactivateVenueIds: string[]; deactivateDeviceIds: string[]; reactivateVenueIds: string[]; reactivateDeviceIds: string[] }
 
 function integer(value: number, label: string, max = 100_000) {
   if (!Number.isSafeInteger(value) || value < 0 || value > max) throw new Error(`BILLING_INVALID_${label}`)
@@ -132,29 +136,6 @@ export function changeTiming(current: Contract, next: Contract): 'immediate' | '
     if (!target || target.quantity < addon.quantity || addon.venueIds.some(id => !target.venueIds.includes(id)) || addon.deviceIds.some(id => !target.deviceIds.includes(id))) return 'period_end'
   }
   return 'immediate'
-}
-
-export function stripeItems(current: { id: string; price: { id: string }; quantity: number }[], next: Line[]) {
-  const result: Array<{ id?: string; price?: string; quantity?: number; deleted?: boolean }> = []
-  const matched = new Set<string>()
-  for (const item of current) {
-    const line = next.find(value => value.stripePriceId === item.price.id)
-    if (line && !matched.has(item.price.id)) { result.push({ id: item.id, price: item.price.id, quantity: line.quantity }); matched.add(item.price.id) }
-    else result.push({ id: item.id, deleted: true })
-  }
-  for (const line of next) {
-    if (!line.stripePriceId) throw new Error('BILLING_UNSYNCED_PRICE')
-    if (!matched.has(line.stripePriceId)) result.push({ price: line.stripePriceId, quantity: line.quantity })
-  }
-  return result
-}
-
-export function matchesContract(items: { price: { id: string }; quantity: number }[], contract: Contract) {
-  return items.length === contract.lines.length && contract.lines.every(line => items.some(item => item.price.id === line.stripePriceId && item.quantity === line.quantity))
-}
-
-export function mayProject(status: string, pending: boolean, latestInvoicePaid: boolean) {
-  return !pending && (status === 'trialing' || (status === 'active' && latestInvoicePaid))
 }
 
 export function commercialState(status: string, delinquentSince: string | null, graceDays: number, now = Date.now()) {

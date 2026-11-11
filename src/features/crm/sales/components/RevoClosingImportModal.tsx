@@ -3,6 +3,7 @@ import { useId, useRef, useState } from 'react'
 import { Upload, X } from 'lucide-react'
 import { Button } from '../../../../components/ui/Button'
 import { Select } from '../../../../components/ui/Select'
+import { DataTable } from '../../../../components/ui/DataTable'
 import { formatMoney } from '../../../../lib/format'
 import { formatRevoDate, parseRevoClosingsCsv, REVO_CLOSING_MAX_BYTES, type RevoClosingImport } from '../../../../lib/revoCashClosings.ts'
 import type { CrmVenue } from '../../../../types'
@@ -91,7 +92,7 @@ export function RevoClosingImportModal({ venues, disabled, onClose, onImported }
               <p>Este archivo no contiene arqueos, fondos, horas de cierre ni número de tickets.</p>
             </div>
             <div className="!h-64 !min-h-48 !overflow-auto !rounded-xl !border !border-[var(--crm-border-subtle)]">
-              <table aria-label="Vista previa de cierres REVO" className="!w-full !text-right !text-sm">
+              <DataTable aria-label="Vista previa de cierres REVO" className="!w-full !text-right !text-sm" filterable={false} sortable={false}>
                 <thead className="!sticky !top-0 !bg-[var(--crm-surface-soft)]"><tr>
                   <th className="!p-3 !text-left">Fecha</th><th className="!p-3">Efectivo</th><th className="!p-3">Tarjeta</th><th className="!p-3">Total</th><th className="!p-3">Propinas</th>
                 </tr></thead>
@@ -101,7 +102,7 @@ export function RevoClosingImportModal({ venues, disabled, onClose, onImported }
                   <td className="!p-3 !font-semibold">{formatMoney(day.cashCents + day.cardCents)}</td>
                   <td className="!p-3">{formatMoney(day.cashTipCents + day.cardTipCents)}</td>
                 </tr>)}</tbody>
-              </table>
+              </DataTable>
             </div>
             {preview.days.length > 100 ? <p className="!text-xs !text-[var(--crm-text-muted)]">Vista previa de los primeros 100 días. Se procesarán los {preview.days.length} días del archivo.</p> : null}
           </> : null}

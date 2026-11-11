@@ -45,7 +45,9 @@ import type { useCashSession } from '../features/cash-registers'
 import type { useQuickSale } from '../features/quick-sale'
 import type { useRestaurantController } from '../features/restaurant'
 import type { useReservationsController } from '../features/reservations/hooks/useReservationsController'
-import { CashlogyMachineModal, CashlogyPaymentModal, PreTicketButton } from '../features/local-printing'
+import { CashlogyMachineModal } from '../features/local-printing/components/CashlogyMachineModal'
+import { CashlogyPaymentModal } from '../features/local-printing/components/CashlogyPaymentModal'
+import { PreTicketButton } from '../features/local-printing/components/PreTicketButton'
 import { CustomerInvoiceModal } from '../features/customers'
 import { useCashlogyManagementStore } from '../features/local-printing/cashlogy/useCashlogyManagementStore'
 import { finishCashlogyPayment, getCashlogyPaymentSaleId, useCashlogyStore } from '../features/local-printing/cashlogy/useCashlogyStore'
@@ -54,6 +56,7 @@ import {
   isActiveCashlogyError,
   POS_TRANSIENT_ERROR_DURATION_MS,
 } from './pos-error-lifecycle'
+import { staffCan } from '../features/personal/permissions'
 import type {
   CatalogStartTab,
   Customer,
@@ -166,11 +169,11 @@ export function PosPage(props: Props) {
   const cashlogyPaymentLocked = Boolean(cashlogyPaymentIntent)
   const posInteractionBlocked = props.isBusy || (cashlogyPaymentLocked && cashlogyPaymentModalOpen)
   const cashlogyManagementOpen = useCashlogyManagementStore((state) => state.modalOpen)
-  const canManageCash = Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))
+  const canManageCash = Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role)) && staffCan(props.context, 'pos.cash.move')
   const promotionsEnabled = hasTenantCapability(props.context, 'promotions')
   const restaurantEnabled = hasTenantCapability(props.context, 'restaurant')
   const reservationsEnabled = hasTenantCapability(props.context, 'reservations')
-  const inventoryRecipesEnabled = hasTenantCapability(props.context, 'costing')
+  const inventoryRecipesEnabled = hasTenantCapability(props.context, 'costing') && staffCan(props.context, 'pos.inventory.manage')
   const cashlogyEnabled = hasTenantCapability(props.context, 'cashlogy')
   const appliedDiscount = promotionsEnabled ? quickSale.discount : null
 
@@ -189,11 +192,11 @@ export function PosPage(props: Props) {
     transaction: cashlogyPaymentTransaction,
   })
   useEffect(() => {
-    if (!displayedError || activeCashlogyError) return undefined
+    if (!displayedError || activeCashlogyError || cashlogyPaymentModalOpen) return undefined
     notifyOperationalError(displayedError)
     const timer = window.setTimeout(() => clearDisplayedError(null), POS_TRANSIENT_ERROR_DURATION_MS)
     return () => window.clearTimeout(timer)
-  }, [activeCashlogyError, clearDisplayedError, displayedError, displayedErrorId])
+  }, [activeCashlogyError, cashlogyPaymentModalOpen, clearDisplayedError, displayedError, displayedErrorId])
   useEffect(() => {
     addDiagnosticBreadcrumb('pos.mount', { venueId: props.context.venueId })
     return () => addDiagnosticBreadcrumb('pos.unmount', { venueId: props.context.venueId })
@@ -304,13 +307,13 @@ export function PosPage(props: Props) {
           const item = resolvedCatalog?.items.find((candidate) => (
             candidate.product.id === line.productId
             && (line.variantId ? candidate.variant.id === line.variantId : true)
-          )) ?? null
+          )) ?? resolvedCatalog?.items.find((candidate) => candidate.product.id === line.productId) ?? null
           if (!item) {
             props.onSetError('El producto de esta línea ya no está disponible.')
             return
           }
           quickSale.openProductDialog({
-            allowVariantSelection: false,
+            allowVariantSelection: true,
             initialSelection: {
               modifiers: line.modifiers,
               components: line.components,
@@ -344,7 +347,7 @@ export function PosPage(props: Props) {
         invoiceCustomerName={invoiceCustomer?.legalName}
         isBusy={posInteractionBlocked}
         lines={activeLines}
-        onClear={quickSale.clear}
+        onClear={() => { if (staffCan(props.context, 'pos.order.void')) quickSale.clear(); else props.onSetError('El trabajador no tiene permiso para descartar esta venta.') }}
         onDecrement={(lineId) => updateQuantity(lineId, -1)}
         onChangeInvoiceCustomer={() => setCustomerModalOpen(true)}
         onEdit={(line) => {
@@ -384,7 +387,8 @@ export function PosPage(props: Props) {
     try { await action() }
     finally { setPaymentProgress((current) => current === progress ? null : current) }
   }
-  const handlePayment = (method: PaymentMethod | null) => {
+  const handlePayment = (method: PaymentMethod | null, customCashCents?: number) => {
+    if (!staffCan(props.context, 'pos.payment.take')) { props.onSetError('El trabajador no tiene permiso para cobrar.'); return }
     if (cashlogyPaymentLocked && method === 'cash' && cashlogyEnabled && cashlogyConfigured) {
       showCashlogyPayment()
       return
@@ -393,7 +397,7 @@ export function PosPage(props: Props) {
       props.onSetError('Conéctate antes de cobrar una factura para asignar su número definitivo.')
       return
     }
-    if (restaurant.posView.type === 'table_order' && restaurant.requestPendingPaymentConfirmation(method, null)) return
+    if (restaurant.posView.type === 'table_order' && restaurant.requestPendingPaymentConfirmation(method, null, customCashCents)) return
     if (method === 'cash') {
       if (cashlogyEnabled && cashlogyConfigured) {
         if (restaurant.posView.type === 'table_order') void showPaymentProgress('cash', () => restaurant.completePayment('cash', null))
@@ -403,8 +407,8 @@ export function PosPage(props: Props) {
       quickSale.openCashPayment()
       return
     }
-    if (restaurant.posView.type === 'table_order') void showPaymentProgress(method, () => restaurant.completePayment(method, null))
-    else void showPaymentProgress(method, () => quickSale.completePayment(method, null))
+    if (restaurant.posView.type === 'table_order') void showPaymentProgress(method, () => restaurant.completePayment(method, null, false, null, customCashCents))
+    else void showPaymentProgress(method, () => quickSale.completePayment(method, null, null, undefined, customCashCents))
   }
 
   const requestReturnFromQuickSale = () => {
@@ -442,6 +446,7 @@ export function PosPage(props: Props) {
   }
 
   const discardQuickSaleAndReturnToMap = () => {
+    if (!staffCan(props.context, 'pos.order.void')) { props.onSetError('El trabajador no tiene permiso para descartar esta venta.'); return }
     setQuickSaleExitOpen(false)
     quickSale.clear()
     props.onSetMobileTicketOpen(false)
@@ -479,7 +484,8 @@ export function PosPage(props: Props) {
         canCloseCash={props.context.canCloseCashSession === true && !cashlogyPaymentLocked}
         canGenerateInvoice={Boolean(cash.session && activeLines.length > 0 && props.context.canTakePayments && !posInteractionBlocked)}
         canManageCash={canManageCash && !cashlogyPaymentLocked}
-        canOpenCashDrawer={canManageCash && !cashlogyPaymentLocked}
+        canOpenCashDrawer={Boolean(props.context.personalStaff?.deviceCanManageCash ?? canManageCash) && staffCan(props.context, 'pos.drawer.open') && !cashlogyPaymentLocked}
+        canReadSales={props.context.personalStaff ? staffCan(props.context, 'pos.sales.read') : undefined}
         canOpenReservations={Boolean(reservationsEnabled && restaurant.tablesEnabled && (props.context.canTakeOrders || ['manager', 'owner'].includes(props.context.role)))}
         canOpenPreparations={inventoryRecipesEnabled}
         cashlogyConnected={cashlogyEnabled && cashlogyConfigured && canManageCash && !cashlogyPaymentLocked}
@@ -515,7 +521,7 @@ export function PosPage(props: Props) {
         /> : null}
         themeMode={props.themes.find((theme) => theme.id === props.selectedThemeId)?.mode ?? 'light'}
       />
-      {props.error && activeCashlogyError ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
+      {props.error && activeCashlogyError && !cashlogyPaymentModalOpen ? <div className="mx-auto max-w-[1600px] px-4 pt-4">
         <div className="flex items-center gap-2.5 rounded-[var(--radius)] border border-[var(--danger)] bg-[var(--danger-soft)] p-3 text-sm font-semibold text-[var(--danger)]">
           <span>{props.error}</span>
         </div>
@@ -592,7 +598,7 @@ export function PosPage(props: Props) {
         <section className="flex min-h-0 w-[35%] min-w-[360px] flex-col gap-4 max-lg:hidden max-lg:w-full max-lg:min-w-0">
           {activeTicketPanel}
           <PaymentPanel
-            allowDiscount={props.manualDiscountEnabled || promotionsEnabled}
+            allowDiscount={(props.manualDiscountEnabled && staffCan(props.context, 'pos.discount.manual')) || (promotionsEnabled && staffCan(props.context, 'pos.promotion.apply'))}
             discount={appliedDiscount}
             disabled={!canSell}
             feedback={paymentProcessing ? null : paidFeedback}
@@ -601,6 +607,7 @@ export function PosPage(props: Props) {
             heading={undefined}
             onOpenDiscount={quickSale.openDiscountModal}
             onPayment={handlePayment}
+            onCustomPayment={(cashCents) => handlePayment('card', cashCents)}
             onRemoveDiscount={quickSale.removeDiscount}
             subtotalCents={subtotalCents}
             totalCents={totalCents}
@@ -633,7 +640,7 @@ export function PosPage(props: Props) {
           </div>
           <div className="shrink-0">
             <PaymentPanel
-              allowDiscount={props.manualDiscountEnabled || promotionsEnabled}
+              allowDiscount={(props.manualDiscountEnabled && staffCan(props.context, 'pos.discount.manual')) || (promotionsEnabled && staffCan(props.context, 'pos.promotion.apply'))}
               discount={appliedDiscount}
               disabled={!canSell}
               feedback={paymentProcessing ? null : paidFeedback}
@@ -642,6 +649,7 @@ export function PosPage(props: Props) {
               heading={undefined}
               onOpenDiscount={quickSale.openDiscountModal}
               onPayment={handlePayment}
+              onCustomPayment={(cashCents) => handlePayment('card', cashCents)}
               onRemoveDiscount={quickSale.removeDiscount}
               subtotalCents={subtotalCents}
               totalCents={totalCents}
@@ -672,7 +680,7 @@ export function PosPage(props: Props) {
                 quickSale.openCashPayment()
                 return
               }
-              if (payment) void showPaymentProgress(payment.method, () => restaurant.completePayment(payment.method, payment.receivedCents, true))
+              if (payment) void showPaymentProgress(payment.method, () => restaurant.completePayment(payment.method, payment.receivedCents, true, null, payment.customCashCents))
             }} type="button">Cobrar igualmente</UiButton>
           </div>
         </section>
@@ -687,9 +695,9 @@ export function PosPage(props: Props) {
       {restaurantEnabled && restaurant.splitOrderGroup && restaurant.order ? <SplitOrderModal
         defaultDiscount={appliedDiscount}
         discountSchedule={props.discountSchedule}
-        discounts={promotionsEnabled ? props.discounts : []}
+        discounts={promotionsEnabled && staffCan(props.context, 'pos.promotion.apply') ? props.discounts : []}
         isBusy={props.isBusy}
-        manualDiscountEnabled={props.manualDiscountEnabled}
+        manualDiscountEnabled={props.manualDiscountEnabled && staffCan(props.context, 'pos.discount.manual')}
         manualDiscountRequiresPin={promotionsEnabled && props.manualDiscountRequiresPin}
         onClose={() => restaurant.setSplitOrderGroup(null)}
         onPay={restaurant.paySelectedOrderItems}
@@ -700,10 +708,10 @@ export function PosPage(props: Props) {
       /> : null}
       {restaurantEnabled && restaurant.equalSplitOpen && restaurant.order ? <EqualSplitOrderModal
         defaultDiscount={appliedDiscount}
-        discounts={promotionsEnabled ? props.discounts : []}
+        discounts={promotionsEnabled && staffCan(props.context, 'pos.promotion.apply') ? props.discounts : []}
         discountSchedule={props.discountSchedule}
         isBusy={props.isBusy}
-        manualDiscountEnabled={props.manualDiscountEnabled}
+        manualDiscountEnabled={props.manualDiscountEnabled && staffCan(props.context, 'pos.discount.manual')}
         manualDiscountRequiresPin={promotionsEnabled && props.manualDiscountRequiresPin}
         onClose={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
         onCompleted={() => { restaurant.setEqualSplitOpen(false); restaurant.setEqualSplit(null) }}
@@ -731,8 +739,11 @@ export function PosPage(props: Props) {
         totalCents={totalCents}
       /> : null}
       <CashlogyPaymentModal
+        error={props.error}
+        onCancelled={() => { props.onSetError(null); restaurant.reconcileCancelledPayments() }}
         finalizeDisabled={props.isBusy}
         onFinalizeRecovered={async (transaction) => {
+          props.onSetError(null)
           const saleId = getCashlogyPaymentSaleId(transaction)
           const historicalTicket = saleId
             ? cash.tickets.find((ticket) => ticket.payload.sale.id === saleId)
@@ -743,7 +754,7 @@ export function PosPage(props: Props) {
             return
           }
           const original = cash.session && saleId ? (await loadPaymentOperations(props.context, cash.session.id))
-            .find(operation => operation.payload.sale.id === saleId) : undefined
+            .find(operation => operation.state !== 'cancelled' && operation.payload.sale.id === saleId) : undefined
           if (original?.key.includes('|quick-sale')) {
             await quickSale.completePayment('cash', null, transaction)
             return
@@ -786,7 +797,6 @@ export function PosPage(props: Props) {
         initialUnitPriceCents={quickSale.productDialog.initialUnitPriceCents}
         isBusy={props.isBusy}
         item={quickSale.productDialog.item}
-        suggestedMenuCount={restaurant.order?.order.guestCount}
         onAddMenus={restaurant.posView.type === 'table_order' && !quickSale.productDialog.lineId ? restaurant.addMenuBatch : undefined}
         key={`${quickSale.productDialog.item.placement.id}-${quickSale.productDialog.initialVariantId ?? quickSale.productDialog.item.variant.id}-${quickSale.productDialog.lineId ?? 'new'}`}
         onAdd={(sellable, selection, item, sourceElement) => restaurant.posView.type === 'table_order'
@@ -797,9 +807,9 @@ export function PosPage(props: Props) {
         onCancel={quickSale.closeProductDialog}
       /> : null}
       {quickSale.discountModalOpen ? <DiscountModal
-        discounts={promotionsEnabled ? props.discounts : []}
+        discounts={promotionsEnabled && staffCan(props.context, 'pos.promotion.apply') ? props.discounts : []}
         isBusy={props.isBusy}
-        manualDiscountEnabled={props.manualDiscountEnabled}
+        manualDiscountEnabled={props.manualDiscountEnabled && staffCan(props.context, 'pos.discount.manual')}
         manualDiscountRequiresPin={props.manualDiscountRequiresPin}
         onCancel={quickSale.closeDiscountModal}
         onSelect={(discount) => { quickSale.applyDiscount(discount); quickSale.closeDiscountModal() }}
@@ -809,13 +819,13 @@ export function PosPage(props: Props) {
         validateManualPin={validateManualDiscountPin}
         venueId={props.context.venueId}
       /> : null}
-      {cash.movementModalOpen && cash.session ? <CashMovementModal
+      {cash.movementModalOpen && cash.session && canManageCash ? <CashMovementModal
         isOnline={props.isOnline}
         isSaving={cash.movementSaving}
         onCancel={() => cash.setMovementModalOpen(false)}
         onConfirm={cash.registerMovement}
       /> : null}
-      {shiftSummaryOpen && cash.session ? <ShiftSummaryModal
+      {shiftSummaryOpen && cash.session && staffCan(props.context, 'pos.sales.read') ? <ShiftSummaryModal
         cashSession={cash.session}
         error={shiftSummaryError}
         isLoading={shiftSummaryLoading}
@@ -824,7 +834,7 @@ export function PosPage(props: Props) {
         onRefresh={() => void refreshShiftSummary()}
         sales={cash.ledger}
       /> : null}
-      {cash.closeModalOpen && cash.session ? <CloseCashModal
+      {cash.closeModalOpen && cash.session && staffCan(props.context, 'pos.cash.close') ? <CloseCashModal
         openOrderCount={cash.openOrderCount}
         cashSession={cash.session}
         cashlogyCashCents={cash.cashlogyClosingCashCents}
@@ -840,7 +850,7 @@ export function PosPage(props: Props) {
         summary={cash.summary}
         userId={props.context.userId}
       /> : null}
-      {cash.historyOpen ? <SessionTicketsModal
+      {cash.historyOpen && staffCan(props.context, 'pos.sales.read') ? <SessionTicketsModal
         canReprint={Boolean(props.context.canManageCash || props.context.canCloseCashSession || ['manager', 'owner'].includes(props.context.role))}
         initialPage={initialTicketHistoryPage}
         pendingTicketIds={pending.pendingTicketIds}
@@ -862,7 +872,7 @@ export function PosPage(props: Props) {
         onPrint={() => void cash.printClosing(cash.completedClosing!, cash.completedClosing!.printStatus === 'failed' ? { isReprint: true } : {})}
         onConfirmedReprint={() => void cash.printClosing(cash.completedClosing!, { isReprint: true, confirmedNotPrinted: true })}
       /> : null}
-      {cash.closingHistoryOpen ? <CashClosingsHistoryModal
+      {cash.closingHistoryOpen && staffCan(props.context, 'pos.sales.read') ? <CashClosingsHistoryModal
         canReprint={Boolean(props.context.canManageCash || ['manager', 'owner'].includes(props.context.role))}
         closings={cash.cashClosings}
         onClose={() => cash.setClosingHistoryOpen(false)}

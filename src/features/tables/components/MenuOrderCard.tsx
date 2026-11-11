@@ -9,7 +9,7 @@ import { getMenuCourseGroups, isMenuServiceComplete } from '../menu-service-mode
 import type { RestaurantOrderLine } from '../types'
 import { MenuCourseRow } from './MenuCourseRow'
 import { MenuDetailsModal } from './MenuDetailsModal'
-import { useOrderLineLongPress } from '../hooks/useOrderLineLongPress'
+import { useOrderLineLongPress, type OrderLineActionPoint } from '../hooks/useOrderLineLongPress'
 
 type Props = {
   line: RestaurantOrderLine
@@ -29,7 +29,7 @@ type Props = {
   onRemove: (lineId: string) => void
   onOpenQuantity: () => void
   onOpenPrice: () => void
-  onOpenActions?: () => void
+  onOpenActions?: (point: OrderLineActionPoint) => void
   onComment?: () => void
 }
 
@@ -42,7 +42,7 @@ export function MenuOrderCard({ line, number, entries, catalog, routing, product
   const completed = isMenuServiceComplete(line, entries, missingChoices.length)
   const label = `${line.productName} · ${number}`
   const total = discount?.netCents ?? quantityAmountCents(line.unitPriceCents, line.quantity)
-  const longPress = useOrderLineLongPress(disabled || !onOpenActions, () => onOpenActions?.())
+  const longPress = useOrderLineLongPress(disabled || !onOpenActions, (point) => onOpenActions?.(point))
 
   return <article {...longPress} tabIndex={!disabled && onOpenActions ? 0 : undefined} aria-label={label} className="touch-pan-y select-none rounded-[14px] border border-[var(--separator)] bg-[var(--surface)] px-3.5 [-webkit-touch-callout:none]" data-menu-id={line.id}>
     <div className="flex min-h-16 items-center gap-2 py-2">

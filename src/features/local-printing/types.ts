@@ -169,6 +169,7 @@ export type CashlogyDeviceError = {
 }
 
 export type CashlogyTransaction = {
+  operatorConfirmed?: boolean
   id: string
   requestId: string
   saleId: string | null
@@ -312,6 +313,7 @@ export type CashlogyManagementIntent = {
   operationId: string | null
   agentBaseUrl?: string
   cashSessionId?: string | null
+  cashMovementRequestId?: string
   denominationOptions?: CashlogyAvailableDenomination[]
   createdAt: string
 }
@@ -349,6 +351,24 @@ export type PrintAgentServerInfo = {
   https?: boolean
   certificate?: { expiresAt?: string; issuer?: string; valid?: boolean }
   [key: string]: unknown
+}
+
+export type PrintAgentRequestLog = { time: string; method: string; url: string; statusCode: number }
+
+export type PrintAgentProductionStatus = {
+  enabled: boolean
+  configured: boolean
+  workerState: 'disabled' | 'idle' | 'polling' | 'error'
+  lastError: string | null
+  remoteAgentId: string | null
+}
+
+/** Subconjunto de GET /api/v1/config que edita la página del servidor integrado. */
+export type PrintAgentRemoteConfig = {
+  server?: { establishmentName?: string }
+  printer?: { paperWidth?: 58 | 80 }
+  cloudProduction?: { enabled?: boolean; endpoint?: string }
+  cashlogy?: { connector?: { host?: string; port?: number } }
 }
 
 export type Printer = {

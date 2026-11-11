@@ -1,6 +1,7 @@
 import { Building2, LoaderCircle, Pencil, Plus, X } from 'lucide-react'
 import { type FormEvent, useEffect, useState } from 'react'
 import { Button, Input } from '../../../../components/ui'
+import { DataTable } from '../../../../components/ui/DataTable'
 import { CrmModal } from '../../shared/components/CrmModal'
 import type { TenantContext } from '../../../../types'
 import { getReadableError } from '../../../../utils/errors'
@@ -101,30 +102,24 @@ export function PurchasesSuppliersCrm({ disabled, selectedVenueId, tenantContext
       {error && !isFormOpen ? <p className="rounded-2xl bg-[var(--crm-red-soft)] p-4 text-sm font-semibold text-[var(--crm-red)]">{error}</p> : null}
 
       <div className="overflow-hidden rounded-3xl bg-[var(--crm-surface)] shadow-[var(--crm-shadow-card)]">
-        <div className="overflow-x-auto">
-          <table className="w-full min-w-[560px] border-collapse text-left">
-            <thead className="bg-[var(--crm-surface-soft)] text-xs font-black uppercase tracking-wider text-[var(--crm-text-muted)]">
-              <tr>
-                <th className="px-5 py-4" scope="col">Nombre</th>
-                <th className="px-5 py-4" scope="col">CIF / NIF</th>
-                <th className="px-5 py-4 text-right" scope="col">Acciones</th>
+        <DataTable aria-label="Proveedores" className="w-full min-w-[560px] border-collapse text-left" emptyContent={loading ? <><LoaderCircle className="mx-auto size-6 animate-spin" /><span className="sr-only">Cargando proveedores</span></> : 'Todavía no hay proveedores registrados en este local.'} filterable={false} sortable={false}>
+          <thead className="bg-[var(--crm-surface-soft)] text-xs font-black uppercase tracking-wider text-[var(--crm-text-muted)]">
+            <tr>
+              <th className="px-5 py-4" scope="col">Nombre</th>
+              <th className="px-5 py-4" scope="col">CIF / NIF</th>
+              <th className="px-5 py-4 text-right" scope="col">Acciones</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-[var(--crm-border-subtle)]">
+            {loading ? null : suppliers.map((supplier) => (
+              <tr className="transition-colors hover:bg-[var(--crm-surface-soft)]" key={supplier.id}>
+                <td className="px-5 py-4"><span className="flex items-center gap-3 font-bold"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--crm-blue-soft)] text-[var(--crm-blue)]"><Building2 className="size-4" /></span>{supplier.name}</span></td>
+                <td className="px-5 py-4 text-sm font-semibold text-[var(--crm-text-muted)]">{supplier.taxId ?? '—'}</td>
+                <td className="px-5 py-4 text-right"><Button aria-label={`Editar ${supplier.name}`} disabled={disabled || saving} onClick={() => openEditForm(supplier)} type="button" variant="tertiary"><Pencil className="size-4" /> Editar</Button></td>
               </tr>
-            </thead>
-            <tbody className="divide-y divide-[var(--crm-border-subtle)]">
-              {loading ? (
-                <tr><td className="px-5 py-12 text-center text-[var(--crm-text-muted)]" colSpan={3}><LoaderCircle className="mx-auto size-6 animate-spin" /><span className="sr-only">Cargando proveedores</span></td></tr>
-              ) : suppliers.length ? suppliers.map((supplier) => (
-                <tr className="transition-colors hover:bg-[var(--crm-surface-soft)]" key={supplier.id}>
-                  <td className="px-5 py-4"><span className="flex items-center gap-3 font-bold"><span className="grid size-9 shrink-0 place-items-center rounded-xl bg-[var(--crm-blue-soft)] text-[var(--crm-blue)]"><Building2 className="size-4" /></span>{supplier.name}</span></td>
-                  <td className="px-5 py-4 text-sm font-semibold text-[var(--crm-text-muted)]">{supplier.taxId ?? '—'}</td>
-                  <td className="px-5 py-4 text-right"><Button aria-label={`Editar ${supplier.name}`} disabled={disabled || saving} onClick={() => openEditForm(supplier)} type="button" variant="tertiary"><Pencil className="size-4" /> Editar</Button></td>
-                </tr>
-              )) : (
-                <tr><td className="px-5 py-14 text-center text-sm text-[var(--crm-text-muted)]" colSpan={3}>Todavía no hay proveedores registrados en este local.</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+            ))}
+          </tbody>
+        </DataTable>
       </div>
 
       {isFormOpen ? (

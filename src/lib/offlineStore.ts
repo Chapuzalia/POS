@@ -1,6 +1,6 @@
 import { reportOperationError } from './observability.ts'
 import { cachedDurableEvents, updateDurableEvent } from './durableSales.ts'
-import type { PosCatalogState } from '../features/catalog/data/load-pos-catalog.ts'
+import type { PosCatalogState } from '../features/catalog/domain/types.ts'
 import { appendFrozenQueueEvent, recordQueueEventFailure } from '../features/offline/services/offlineQueueState.ts'
 import { getAppRoute, type AppRoute } from '../app/app-routes'
 import type { AssistConfiguration, AssistSituation } from '../features/assist/types'
@@ -99,7 +99,7 @@ function contextKey(route: AppRoute = getAppRoute()) {
 
 function contextRoute(context: TenantContext): AppRoute {
   if (context.role === 'superadmin') return 'superadmin'
-  if (context.role === 'owner' || context.role === 'manager') return 'crm'
+  if (context.role === 'owner' || context.role === 'manager' || context.role === 'gestor') return 'crm'
   return 'pos'
 }
 

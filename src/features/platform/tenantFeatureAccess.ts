@@ -1,6 +1,6 @@
 import type { CrmVenue, TenantContext } from '../../types'
 
-export const tenantAddonKeys = ['analytics_advanced', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'document_ai', 'promotions', 'cashlogy', 'tickit_assist'] as const
+export const tenantAddonKeys = ['analytics_advanced', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'document_ai', 'promotions', 'cashlogy', 'tickit_assist', 'tickit_personal'] as const
 export const tenantCapabilityKeys = ['analytics_basic', 'analytics_advanced', 'profitability', 'purchase_analytics', 'restaurant', 'reservations', 'production', 'inventory', 'costing', 'purchases', 'replenishment', 'document_ai', 'manual_discounts', 'promotions', 'cashlogy'] as const
 
 export type TenantAddonKey = typeof tenantAddonKeys[number]
@@ -37,6 +37,7 @@ export const tenantAddonCatalog: ReadonlyArray<{
   { key: 'promotions', name: 'Promociones avanzadas', description: 'Reglas, autoaplicación, horarios, targets, PIN y redondeos.', requires: [] },
   { key: 'tickit_assist', name: 'Tickit Assist', description: 'Asistencia operativa orientativa durante el servicio.', requires: [] },
   { key: 'cashlogy', name: 'Cashlogy', description: 'Configuración y operativa de la integración Cashlogy.', requires: [] },
+  { key: 'tickit_personal', name: 'Tickit Personal', description: 'Trabajadores, PIN y permisos operativos gestionados desde Tickit Personal.', requires: [] },
 ]
 
 export function normalizeTenantFeatures(value: unknown): TenantAddonKey[] {
@@ -50,7 +51,7 @@ export function normalizeTenantFeatures(value: unknown): TenantAddonKey[] {
   return tenantAddonKeys.filter((feature) => requested.has(feature))
 }
 
-const legacyCachedAddonKeys = tenantAddonKeys.filter((key) => key !== 'analytics_advanced' && key !== 'cashlogy' && key !== 'tickit_assist')
+const legacyCachedAddonKeys = tenantAddonKeys.filter((key) => key !== 'analytics_advanced' && key !== 'cashlogy' && key !== 'tickit_assist' && key !== 'tickit_personal')
 
 function resolvedAddons(context: FeatureContext) {
   return context.features === undefined ? new Set<TenantAddonKey>(legacyCachedAddonKeys) : new Set(normalizeTenantFeatures(context.features))

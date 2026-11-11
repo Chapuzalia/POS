@@ -1,0 +1,38 @@
+// Top-level build file where you can add configuration options common to all sub-projects/modules.
+
+buildscript {
+    
+    repositories {
+        google()
+        mavenCentral()
+    }
+    dependencies {
+        classpath 'com.android.tools.build:gradle:8.13.0'
+        classpath 'com.google.gms:google-services:4.4.4'
+
+        // NOTE: Do not place your application dependencies here; they belong
+        // in the individual module build.gradle files
+    }
+}
+
+apply from: "variables.gradle"
+
+allprojects {
+    repositories {
+        google()
+        mavenCentral()
+    }
+}
+
+// El plugin de Node.js compila C++ dentro de node_modules/.pnpm/...; en Windows esa ruta
+// supera los 260 caracteres y CMake/ninja fallan. Se compila en carpetas cortas del proyecto.
+project(':capawesome-capacitor-nodejs') {
+    layout.buildDirectory = rootProject.file('build/nodejs-plugin')
+    afterEvaluate {
+        android.externalNativeBuild.cmake.buildStagingDirectory = rootProject.file('build/nodejs-cxx')
+    }
+}
+
+task clean(type: Delete) {
+    delete rootProject.buildDir
+}

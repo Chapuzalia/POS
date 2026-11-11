@@ -72,6 +72,8 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
     isCancelling: state.isCancelling,
     isRecordingStackerCollection: state.isRecordingStackerCollection,
     stackerCollectionPending: state.stackerCollectionPending,
+    isRecordingCashMovement: state.isRecordingCashMovement,
+    cashMovementPending: state.cashMovementPending,
     open: state.open,
     hide: state.hide,
     startRefill: state.startRefill,
@@ -105,7 +107,7 @@ export function CashlogyMachineModal({ canManage, onClose }: Props) {
   const [pinError, setPinError] = useState<string | null>(null)
 
   const operationActive = Boolean(management.operation && cashlogyManagementActiveStatuses.has(management.operation.status))
-  const operationBusy = management.isStarting || management.isMutating || management.isCancelling || management.isRecordingStackerCollection || operationActive
+  const operationBusy = management.isStarting || management.isMutating || management.isCancelling || management.isRecordingStackerCollection || management.isRecordingCashMovement || operationActive
   const ready = health?.enabled === true && health.ok === true && health.sessionState === 'ready'
   const denominationOptions = useMemo(() => {
     const live = getDispensableDenominations(accounting)
@@ -343,6 +345,7 @@ type OperationViewProps = {
   management: Pick<CashlogyManagementState,
     | 'intent' | 'operation' | 'error' | 'isStarting' | 'isPolling' | 'isMutating' | 'isCancelling'
     | 'isRecordingStackerCollection' | 'stackerCollectionPending' | 'missingIntent'
+    | 'isRecordingCashMovement' | 'cashMovementPending'
     | 'finalizeRefill' | 'finalizeGiveChangeAdmission' | 'dispenseGiveChange' | 'cancel' | 'recover' | 'discardMissingIntent'>
   onCloseResolved: () => void
   onQuantitiesChange: (valueCents: number, quantity: number) => void
@@ -356,8 +359,8 @@ function OperationView(props: OperationViewProps) {
   const type = management.intent!.type
   const active = Boolean(operation && cashlogyManagementActiveStatuses.has(operation.status))
   const canCancel = Boolean(operation && cashlogyManagementCancellableStatuses.has(operation.status))
-  const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || management.stackerCollectionPending || (!operation && Boolean(management.error))
-  const busy = management.isStarting || management.isMutating || management.isCancelling || management.isRecordingStackerCollection
+  const critical = operation?.status === 'unknown' || operation?.status === 'needs_attention' || management.stackerCollectionPending || management.cashMovementPending || (!operation && Boolean(management.error))
+  const busy = management.isStarting || management.isMutating || management.isCancelling || management.isRecordingStackerCollection || management.isRecordingCashMovement
   const acceptedCents = operation?.acceptedCents ?? 0
 
   return <section className="grid gap-5">
@@ -418,7 +421,7 @@ function OperationView(props: OperationViewProps) {
         }}
         variant="dangerSoft"
       >Descartar referencia local</Button> : null}
-      <Button disabled={management.isPolling || management.isMutating} onClick={() => void management.recover().catch(() => undefined)} variant="primary">
+      <Button disabled={busy || management.isPolling} onClick={() => void management.recover().catch(() => undefined)} variant="primary">
         {management.isPolling ? <LoaderCircle className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />} Consultar estado de nuevo
       </Button>
     </div> : null}

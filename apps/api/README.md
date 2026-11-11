@@ -1,6 +1,6 @@
 # Tickit API — Express
 
-Paquete `@tickit/api` del monorepo POS. Express 5 + TypeScript, Node >=22.18. API v1 de servidor a servidor para Tickit Carta. El POS conserva su aplicación Vite en la raíz; no cambia su URL ni su despliegue. La API se ejecuta como servicio separado.
+Paquete `@tickit/api` del monorepo POS. Express 5 + TypeScript, Node >=22.18. API de servidor a servidor con módulos separados para Tickit Carta (`/v1/*`) y [Tickit Personal (`/personal/*`)](../../docs/tickit-personal.md). Ambos comparten servidor, configuración y despliegue. El POS conserva su aplicación Vite en la raíz; no cambia su URL ni su despliegue. La API se ejecuta como servicio separado.
 
 ## Preparar y ejecutar
 

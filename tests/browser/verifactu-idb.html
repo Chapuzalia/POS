@@ -2,7 +2,8 @@
 <html lang="es"><meta charset="utf-8"><title>Tickit fiscal IndexedDB smoke test</title><body>RUNNING
 <script type="module">
   import { issueLocalInvoice, issueSyntheticTestInvoice, listLocalFiscalEntries, reconcileLocalFiscalCopies,
-    listPendingFiscalEconomicSales, openLedger, readLocalFiscalHead, request, transactionDone } from '/src/features/fiscal/local/localLedger.ts'
+    listPendingFiscalEconomicSales, readLocalFiscalHead } from '/src/features/fiscal/local/localLedger.ts'
+  import { openLedger, request, transactionDone } from '/src/lib/localDatabase.ts'
   import { confirmLocalRectificative, buildLocalRectificative, markLocalFiscalIncidence } from '/src/features/fiscal/local/localLedger.ts'
   import { createLocalFallbackLease } from '/src/features/fiscal/local/clock.ts'
   import { assertFiscalLedgerHeadValid } from '/src/features/fiscal/local/localIdentity.ts'

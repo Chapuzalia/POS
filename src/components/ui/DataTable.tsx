@@ -7,10 +7,12 @@ import {
   useDeferredValue,
   useState,
   type ComponentProps,
+  type KeyboardEvent,
   type MouseEvent,
   type ReactElement,
   type ReactNode,
 } from 'react'
+import { useMediaQuery } from '../../hooks/useMediaQuery'
 import { Button } from './Button'
 import { Input } from './Input'
 
@@ -43,6 +45,8 @@ type BodyCellProps = ComponentProps<'td'> & {
   'data-sort-value'?: string | number
 }
 
+// Phones held upright cannot fit wide tables: each row becomes a card instead of scrolling sideways.
+export const MOBILE_CARD_QUERY = '(max-width: 767px) and (orientation: portrait)'
 const collator = new Intl.Collator('es', { numeric: true, sensitivity: 'base' })
 const actionColumnPattern = /^(acciones?|abrir\b|opciones?)/i
 const interactiveElements = new Set(['a', 'button', 'input', 'select', 'textarea'])
@@ -99,6 +103,7 @@ export function DataTable({
   sortDescriptor,
   toolbarClassName,
 }: DataTableProps) {
+  const isCardLayout = useMediaQuery(MOBILE_CARD_QUERY)
   const [localFilter, setLocalFilter] = useState('')
   const [localSort, setLocalSort] = useState<DataTableSortDescriptor | undefined>()
   const currentFilter = filterValue ?? localFilter
@@ -112,6 +117,10 @@ export function DataTable({
   const headerRow = head ? elementsOfType(headProps?.children, 'tr')[0] : undefined
   const columns = headerRow ? elementsOfType((headerRow.props as { children?: ReactNode }).children, 'th') : []
   const rows = body ? elementsOfType(bodyProps?.children, 'tr') : []
+  const columnLabels = columns.map((column) => {
+    const props = column.props as HeaderCellProps
+    return textValue(props.children).trim() || props['aria-label'] || ''
+  })
   const columnKeys = columns.map((column, index) => {
     const props = column.props as HeaderCellProps
     return props['data-column-key'] ?? `column-${index}`
@@ -193,7 +202,53 @@ export function DataTable({
           ) : null}
         </div>
       ) : null}
-      <HeroTable variant="secondary">
+      {isCardLayout ? (
+        <ul aria-label={ariaLabel ?? 'Tabla de datos'} className="m-0 grid list-none gap-2.5 p-3">
+          {visibleRows.map((row, rowIndex) => {
+            const rowProps = row.props as ComponentProps<'tr'>
+            const cells = elementsOfType(rowProps.children, 'td')
+            const rowId = String(row.key ?? `row-${rowIndex}`)
+            const isRowAction = Boolean(rowProps.onClick) && !cells.some((cell) => containsInteractiveControl(cell))
+            const open = () => rowProps.onClick?.({} as MouseEvent<HTMLTableRowElement>)
+            const headerCell = cells.length === 1 ? 0 : rowHeaderIndex
+            return (
+              <li
+                aria-current={rowProps['aria-current']}
+                aria-label={rowProps['aria-label']}
+                className={`grid min-w-0 gap-3 rounded-2xl border border-[var(--separator)] bg-[var(--surface)] p-4 text-[var(--foreground)] ${isRowAction ? 'cursor-pointer touch-manipulation outline-none focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--accent)]' : ''}`}
+                data-motion="row"
+                key={rowId}
+                onClick={isRowAction ? open : undefined}
+                onKeyDown={isRowAction ? (event: KeyboardEvent<HTMLLIElement>) => {
+                  if (event.key !== 'Enter' && event.key !== ' ') return
+                  event.preventDefault()
+                  open()
+                } : undefined}
+                role={isRowAction ? 'button' : undefined}
+                tabIndex={isRowAction ? 0 : undefined}
+              >
+                {headerCell >= 0 && cells[headerCell] ? <div className="min-w-0 text-[15px] font-semibold break-words">{(cells[headerCell].props as BodyCellProps).children}</div> : null}
+                {cells.some((_, index) => index !== headerCell && !actionColumnIndexes.includes(index)) ? (
+                  <dl className="m-0 grid grid-cols-[repeat(auto-fit,minmax(130px,1fr))] gap-x-4 gap-y-3">
+                    {cells.map((cell, index) => index === headerCell || actionColumnIndexes.includes(index) ? null : (
+                      <div className="min-w-0" key={`${rowId}-cell-${index}`}>
+                        {columnLabels[index] ? <dt className="text-[11px] font-semibold tracking-wide text-[var(--muted)] uppercase">{columnLabels[index]}</dt> : null}
+                        <dd className="m-0 mt-0.5 min-w-0 text-sm break-words">{(cell.props as BodyCellProps).children}</dd>
+                      </div>
+                    ))}
+                  </dl>
+                ) : null}
+                {actionColumnIndexes.some((index) => cells[index] && index !== headerCell) ? (
+                  <div className="flex flex-wrap items-center justify-end gap-2 border-t border-[var(--separator)] pt-3">
+                    {actionColumnIndexes.map((index) => index === headerCell ? null : <Fragment key={`${rowId}-action-${index}`}>{(cells[index]?.props as BodyCellProps | undefined)?.children}</Fragment>)}
+                  </div>
+                ) : null}
+              </li>
+            )
+          })}
+          {visibleRows.length ? null : <li className="p-6 text-center text-sm font-semibold text-[var(--muted)]">{emptyContent}</li>}
+        </ul>
+      ) : <HeroTable variant="secondary">
         <HeroTable.ScrollContainer>
           <HeroTable.Content
             aria-label={ariaLabel ?? 'Tabla de datos'}
@@ -269,7 +324,7 @@ export function DataTable({
             </HeroTable.Body>
           </HeroTable.Content>
         </HeroTable.ScrollContainer>
-      </HeroTable>
+      </HeroTable>}
     </div>
   )
 }

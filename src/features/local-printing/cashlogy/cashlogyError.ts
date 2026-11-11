@@ -10,7 +10,7 @@ export type CashlogyErrorCode =
   | 'CASHLOGY_OPERATION_FAILED' | 'CASHLOGY_TRANSACTION_NOT_FOUND'
 
 const messages: Record<CashlogyErrorCode, string> = {
-  CASHLOGY_TRANSACTION_NOT_FOUND: 'El agente no conoce este cobro. Puedes cancelarlo o crear un nuevo intento.',
+  CASHLOGY_TRANSACTION_NOT_FOUND: 'No se ha encontrado la operación en Cashlogy.',
   CASHLOGY_BAD_DATA: 'Los datos enviados a Cashlogy no son válidos.',
   CASHLOGY_DISABLED: 'Cashlogy está deshabilitado en el servidor local.',
   CASHLOGY_NOT_CONFIGURED: 'Cashlogy no está configurado en el servidor local.',
@@ -21,8 +21,8 @@ const messages: Record<CashlogyErrorCode, string> = {
   CASHLOGY_BUSY: 'Cashlogy ya está procesando otra operación.',
   CASHLOGY_OPERATION_CANCELLED: 'La operación de Cashlogy se ha cancelado.',
   CASHLOGY_CONNECTION_LOST: 'Se ha perdido la conexión con Cashlogy durante el cobro.',
-  CASHLOGY_STATUS_UNKNOWN: 'Cashlogy pudo mover efectivo, pero no se puede confirmar el resultado. Revisa la máquina y la contabilidad.',
-  CASHLOGY_RECONCILIATION_MISMATCH: 'Los importes de Cashlogy no cuadran. Es necesaria una revisión manual.',
+  CASHLOGY_STATUS_UNKNOWN: 'No se ha podido confirmar el resultado del cobro.',
+  CASHLOGY_RECONCILIATION_MISMATCH: 'Los importes devueltos por Cashlogy no coinciden con el cobro.',
   CASHLOGY_CANCEL_ON_CONNECTOR_SCREEN: 'Cancela la operación desde la pantalla de CashlogyConnector.',
   CASHLOGY_NOT_READY: 'Cashlogy está configurado, pero no está listo para iniciar un cobro.',
   CASHLOGY_INVALID_STATE: 'La operación de Cashlogy debe resolverse antes de iniciar otro cobro.',

@@ -12,7 +12,7 @@ import {
   Search,
   Rows3,
 } from "lucide-react";
-import { shiftDateKey } from "../domain/reservationAvailability";
+import { shiftDateKey } from "../../../utils/dates";
 import { isReservationLate } from "../domain/reservationStatus";
 import type { useReservationsController } from "../hooks/useReservationsController";
 import type { Reservation, ReservationTable } from "../types";

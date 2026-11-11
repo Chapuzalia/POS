@@ -1,12 +1,6 @@
 import type { DiningArea, RestaurantMap, RestaurantTable } from '../tables/types'
-
-export type ReservationStatus =
-  | 'confirmed'
-  | 'arrived'
-  | 'seated'
-  | 'completed'
-  | 'cancelled'
-  | 'no_show'
+import type { ReservationStatus } from '../../types/domain'
+export type { ReservationStatus } from '../../types/domain'
 
 export type ReservationTable = {
   id: string

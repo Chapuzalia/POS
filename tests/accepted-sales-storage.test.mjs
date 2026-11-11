@@ -1,8 +1,8 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { IDBFactory, IDBObjectStore } from 'fake-indexeddb'
-import { preparePaymentOperation, acceptPaymentOperation, commitPaymentOperation, loadDurableEvents, loadDurableSessionTickets, paymentScope, updateDurableEvent, markPaymentCharging, loadPaymentOperation, loadPaymentOperations } from '../src/lib/durableSales.ts'
-import { openLedger, request, transactionDone } from '../src/features/fiscal/local/localLedger.ts'
+import { preparePaymentOperation, acceptPaymentOperation, commitPaymentOperation, loadDurableEvents, loadDurableSessionTickets, paymentScope, updateDurableEvent, markPaymentCharging, loadPaymentOperation, loadPaymentOperations, updateCashlogyPaymentAttempt } from '../src/lib/durableSales.ts'
+import { openLedger, request, transactionDone } from '../src/lib/localDatabase.ts'
 
 const context = { tenantId: 'tenant', venueId: 'venue', deviceId: 'device', userId: 'cashier' }
 const payload = { ticket: { id: 'ticket', tenantId: 'tenant', venueId: 'venue', cashSessionId: 'session' },
@@ -19,6 +19,47 @@ async function rows(store) {
   try { const tx = db.transaction(store, 'readonly'); const done = transactionDone(tx); const value = await request(tx.objectStore(store).getAll()); await done; return value }
   finally { db.close() }
 }
+
+test('operator cancellation retains its audit identity, permits a new sale and rejects late acceptance/commit', async () => {
+  const key = await setup()
+  const original = await markPaymentCharging(await preparePaymentOperation(key, 'draft', payload, { sourceLineIds: ['line'] }))
+  const intent = { paymentOperationKey: key, requestId: original.cashlogyRequestId, saleId: payload.sale.id,
+    amountCents: 600, chargeRequestedAt: '2026-11-04', terminalCode: 'POS_MAIN', transactionId: null, createdAt: '2026-11-04' }
+  const scope = { tenantId: 'tenant', establishmentId: 'venue', terminalId: 'device' }
+  await updateCashlogyPaymentAttempt(intent, scope, { type: 'cancel' })
+  assert.equal(await loadPaymentOperation(key), undefined)
+  const [cancelled] = await loadPaymentOperations(context, 'session')
+  assert.equal(cancelled.state, 'cancelled')
+  assert.equal(cancelled.originalKey, key)
+  assert.equal(cancelled.key.startsWith(`${paymentScope(context, 'session')}|cancelled:`), true)
+  assert.equal(cancelled.payload.sale.id, payload.sale.id)
+  await assert.rejects(acceptPaymentOperation(original, payload, null), /cancelado/)
+  await assert.rejects(commitPaymentOperation(original, payload, true), /cancelado/)
+  const next = await preparePaymentOperation(`${key}:next`, 'new', {
+    ...payload, ticket: { ...payload.ticket, id: 'ticket-next' }, sale: { ...payload.sale, id: 'sale-next' },
+  }, { sourceLineIds: ['line'] })
+  assert.equal(next.state, 'prepared')
+  assert.notEqual(next.eventId, original.eventId)
+  assert.equal((await loadDurableEvents()).length, 0)
+  await commitPaymentOperation(cancelled, payload, false, { ticketId: 'ticket', saleId: 'sale' })
+  assert.equal((await loadPaymentOperation(cancelled.key)).state, 'committed')
+  assert.equal((await loadDurableSessionTickets(context, 'session')).length, 1)
+})
+
+test('operator cancellation keeps tenant scoping and cannot erase an issued fiscal sale', async () => {
+  const key = await setup()
+  const original = await markPaymentCharging(await preparePaymentOperation(key, 'draft', payload))
+  const intent = { paymentOperationKey: key, requestId: original.cashlogyRequestId, saleId: payload.sale.id, chargeRequestedAt: '2026-11-04' }
+  const scope = { tenantId: 'tenant', establishmentId: 'venue', terminalId: 'device' }
+  await assert.rejects(updateCashlogyPaymentAttempt(intent, { ...scope, tenantId: 'other' }, { type: 'cancel' }), /identificar/)
+  const db = await openLedger()
+  const tx = db.transaction('economicSales', 'readwrite')
+  const done = transactionDone(tx)
+  tx.objectStore('economicSales').put({ id: 'fiscal', scope: 'installation', payload })
+  await done; db.close()
+  await assert.rejects(updateCashlogyPaymentAttempt(intent, scope, { type: 'cancel' }), /ya está registrada/)
+  assert.equal((await loadPaymentOperation(key)).state, 'charging')
+})
 
 test('sale, payment and pending event survive a reload with their original ids and scoped snapshot', async () => {
   const key = await setup()

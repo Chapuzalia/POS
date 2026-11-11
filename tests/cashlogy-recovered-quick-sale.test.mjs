@@ -1,8 +1,9 @@
+import * as personalPermissions from '../src/features/personal/permissions.ts'
+import * as customPayments from '../src/lib/customPayments.ts'
 import assert from 'node:assert/strict'
 import { readFile } from 'node:fs/promises'
 import test from 'node:test'
-import vm from 'node:vm'
-import ts from 'typescript'
+import { compileComponent as compile } from './helpers/component-harness.mjs'
 
 const read = (path) => readFile(new URL(`../${path}`, import.meta.url), 'utf8')
 const paymentSource = await read('src/features/quick-sale/hooks/useQuickSalePayment.ts')
@@ -10,24 +11,12 @@ const paymentSource = await read('src/features/quick-sale/hooks/useQuickSalePaym
 const storeSource = await read('src/features/local-printing/cashlogy/useCashlogyStore.ts')
 const identitySource = storeSource.match(/export function getCashlogyPaymentSaleId[\s\S]*?\n}/)[0]
 
-function compile(source, modules, globals = {}) {
-  const exports = {}
-  const code = ts.transpileModule(source, { compilerOptions: {
-    module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2023, jsx: ts.JsxEmit.ReactJSX,
-  } }).outputText
-  vm.runInNewContext(code, { exports, Error, require: (name) => {
-    assert.ok(name in modules, `Missing dependency: ${name}`)
-    return modules[name]
-  }, ...globals })
-  return exports
-}
-
 function harness({ saleId = null, lines = [{ quantity: 1 }], intentPatch = {}, busySync = false, secondaryFailure = false, fiscal = false, syncFails = false, bridgeFails = false } = {}) {
   const transaction = { id: 'tx', requestId: 'req', saleId, requestedAmountCents: 600, status: 'completed' }
   const state = { modalOpen: true, intent: { requestId: 'req', transactionId: 'tx', saleId: 'sale', amountCents: 600, ...intentPatch }, transaction }
   const calls = { events: [], errors: [], charges: 0, finishes: 0, prints: 0, economicSyncs: 0, economicConfirmed: false, bridgeSyncs: 0 }
   const store = { getState: () => state }
-  const { getCashlogyPaymentSaleId } = compile(identitySource, {}, { useCashlogyStore: store })
+  const { getCashlogyPaymentSaleId } = compile(identitySource, {}, { Error, useCashlogyStore: store })
   let releaseSync
   const sync = busySync ? new Promise((resolve) => { releaseSync = resolve }) : Promise.resolve()
   const cashlogy = {
@@ -53,6 +42,8 @@ function harness({ saleId = null, lines = [{ quantity: 1 }], intentPatch = {}, b
       discardPreparedPaymentOperation: async () => { operation = undefined },
       commitPaymentOperation: async (current, payload) => { operation = { ...current, payload, state: 'committed' }; calls.events.push({ payload }) },
     },
+    '../../personal/permissions': personalPermissions,
+    '../../../lib/customPayments': customPayments,
     '../services/salePayload': { buildSalePayload: (_context, _session, _lines, _method, _received, _discount, _customer, identity) => ({
       sale: { id: identity?.saleId ?? 'new-sale', totalCents: 600, createdAt: 'now', paymentMethod: _method }, ticket: { id: 'ticket' }, payment: {},
     }) },
@@ -84,7 +75,7 @@ function harness({ saleId = null, lines = [{ quantity: 1 }], intentPatch = {}, b
       if (bridgeFails) throw new Error('Bridge unavailable')
     } },
     '../../fiscal/local/installation.ts': { fiscalBridgeAccessToken: async () => '', fiscalBridgeBaseUrl: () => fiscal ? 'https://bridge.example' : '' },
-  })
+  }, { Error })
   const pay = createPayment({ context: { tenantId: 'tenant' }, cashSession: { id: 'session' }, lines,
     ledger: [], tickets: [], isOnline: true, persistLedger() { if (secondaryFailure) throw new Error('QuotaExceeded') }, persistTickets() {}, persistLines() {},
     mergeProductStats() { if (secondaryFailure) throw new Error('Stats failed') }, resetUi() {}, refreshPendingCount() {}, syncPendingEvents: () => sync,

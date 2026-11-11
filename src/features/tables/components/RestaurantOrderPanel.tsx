@@ -26,7 +26,7 @@ import type { RestaurantOrderDetail, RestaurantOrderLine } from "../types";
 import { MenuComponentDetails } from "../../../components/pos/MenuComponentDetails";
 import { MenuOrderCard } from "./MenuOrderCard";
 import { OrderLineActionsModal } from "./OrderLineActionsModal";
-import { isOrderLineActionTarget, useOrderLineLongPress } from "../hooks/useOrderLineLongPress";
+import { isOrderLineActionTarget, useOrderLineLongPress, type OrderLineActionPoint } from "../hooks/useOrderLineLongPress";
 import { isMenuOrderLine } from "../menu-service-model";
 import { InvoiceTicketNotice } from "../../../components/pos/InvoiceTicketNotice";
 import { NumericKeypadModal } from "../../../components/ui/NumericKeypadModal";
@@ -114,7 +114,7 @@ function OrderLineRow({
   displayQuantity?: number;
   displayServedQuantity?: number;
   line: RestaurantOrderLine;
-  onOpenActions?: () => void;
+  onOpenActions?: (point: OrderLineActionPoint) => void;
   onOpenQuantityEditor: () => void;
   onOpenUnitPriceEditor: () => void;
   readOnly?: boolean;
@@ -141,7 +141,7 @@ function OrderLineRow({
   );
   const [offsetX, setOffsetX] = useState(0);
   const isDragging = dragStart !== null;
-  const longPress = useOrderLineLongPress(readOnly || isBusy || !onOpenActions, () => onOpenActions?.());
+  const longPress = useOrderLineLongPress(readOnly || isBusy || !onOpenActions, (point) => onOpenActions?.(point));
 
   function handlePointerDown(event: PointerEvent<HTMLElement>) {
     if (
@@ -387,7 +387,7 @@ export function RestaurantOrderPanel(props: Props) {
     catalog,
     ...lineProps
   } = props;
-  const [lineActions, setLineActions] = useState<{ lineId: string; mode: 'actions' | 'note' } | null>(null);
+  const [lineActions, setLineActions] = useState<{ lineId: string; mode: 'actions' | 'note'; point?: OrderLineActionPoint } | null>(null);
   const actionLine = order.lines.find((line) => line.id === lineActions?.lineId);
   const [valueEditor, setValueEditor] = useState<OrderValueEditor | null>(null);
   const [valueEditorError, setValueEditorError] = useState<string | null>(null);
@@ -537,7 +537,7 @@ export function RestaurantOrderPanel(props: Props) {
       isBusy={isBusy}
       key={`${line.id}:${displayQuantity ?? "full"}`}
       line={line}
-      onOpenActions={onSetNote || onChangeProductionPass ? () => setLineActions({ lineId: line.id, mode: 'actions' }) : undefined}
+      onOpenActions={(point) => setLineActions({ lineId: line.id, mode: 'actions', point })}
       onOpenQuantityEditor={() => openQuantityEditor(line, displayQuantity)}
       onOpenUnitPriceEditor={() => openUnitPriceEditor(line)}
       productionRouting={productionRouting}
@@ -547,7 +547,7 @@ export function RestaurantOrderPanel(props: Props) {
   );
   const renderMenu = (line: RestaurantOrderLine, index: number) => <MenuOrderCard key={line.id} line={line} number={index + 1} entries={productionEntriesByLine.get(line.id) ?? []}
     catalog={catalog} routing={productionRouting} productionEnabled={Boolean(productionState?.effective)} disabled={isBusy} discount={lineDiscounts[line.id]}
-    onOpenActions={onSetNote || onChangeProductionPass ? () => setLineActions({ lineId: line.id, mode: 'actions' }) : undefined}
+    onOpenActions={(point) => setLineActions({ lineId: line.id, mode: 'actions', point })}
     onComment={onSetNote ? () => setLineActions({ lineId: line.id, mode: 'note' }) : undefined}
     onEdit={lineProps.onEdit} onIncrement={lineProps.onIncrement} onDecrement={lineProps.onDecrement} onRemove={lineProps.onRemove}
     onOpenQuantity={() => openQuantityEditor(line)} onOpenPrice={() => openUnitPriceEditor(line)}
@@ -666,7 +666,8 @@ export function RestaurantOrderPanel(props: Props) {
       {actionLine && lineActions ? <OrderLineActionsModal key={`${actionLine.id}:${lineActions.mode}`} line={actionLine}
         label={isMenuOrderLine(actionLine) ? `${actionLine.productName} · ${menuLines.findIndex((line) => line.id === actionLine.id) + 1}` : actionLine.productName}
         entries={productionEntriesByLine.get(actionLine.id) ?? []} routing={productionRouting} disabled={isBusy}
-        initialMode={lineActions.mode} onClose={() => setLineActions(null)} onSetNote={onSetNote} onChangePass={onChangeProductionPass} /> : null}
+        initialMode={lineActions.mode} point={lineActions.point} onClose={() => setLineActions(null)} onSetNote={onSetNote} onChangePass={onChangeProductionPass}
+        onEdit={() => { setLineActions(null); lineProps.onEdit(actionLine) }} /> : null}
       {valueEditor ? (
         <NumericKeypadModal
           allowDecimal

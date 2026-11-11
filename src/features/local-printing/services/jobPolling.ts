@@ -8,6 +8,7 @@ type PollOptions = {
   maxWaitMs?: number
   onUpdate?: (job: PrintJob) => void
   signal?: AbortSignal
+  requestId?: string
 }
 
 export async function pollPrintJob(client: PrintAgentClient, jobId: string, options: PollOptions = {}) {
@@ -15,7 +16,7 @@ export async function pollPrintJob(client: PrintAgentClient, jobId: string, opti
   const deadline = Date.now() + (options.maxWaitMs || 15_000)
   while (Date.now() < deadline) {
     if (options.signal?.aborted) throw new PrintAgentError({ code: 'ABORTED' })
-    const job = await client.getJob(jobId, options.signal)
+    const job = await client.getJob(jobId, options.signal, options.requestId)
     options.onUpdate?.(job)
     if (FINAL_JOB_STATUSES.has(job.status)) return job
     await new Promise<void>((resolve, reject) => {

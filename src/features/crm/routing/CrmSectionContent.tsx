@@ -5,6 +5,7 @@ import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../..
 import { canAccessCrmSection } from './crmPermissions'
 import { catalogSections, type CrmSection } from './crmNavigation'
 import { hasTenantVenueCapability } from '../../platform/tenantFeatureAccess'
+import { getOnboardingTopics } from '../onboarding/onboardingModel'
 
 const AccessManagementCrm = lazy(() => import('../access/pages/AccessPage').then((module) => ({ default: module.AccessManagementCrm })))
 const StatsCrm = lazy(() => import('../analytics/pages/StatsPage').then((module) => ({ default: module.StatsCrm })))
@@ -16,6 +17,7 @@ const CatalogStructureCrm = lazy(() => import('../catalog/pages/CatalogStructure
 const CatalogTransferCrm = lazy(() => import('../catalog/pages/CatalogTransferPage.tsx').then((module) => ({ default: module.CatalogTransferCrm })))
 const DashboardCrm = lazy(() => import('../dashboard/pages/DashboardPage').then((module) => ({ default: module.DashboardCrm })))
 const DiscountsCrm = lazy(() => import('../discounts/pages/DiscountsPage').then((module) => ({ default: module.DiscountsCrm })))
+const DocumentationCrm = lazy(() => import('../documentation/pages/DocumentationPage').then((module) => ({ default: module.DocumentationCrm })))
 const PlanCrm = lazy(() => import('../plan/pages/PlanPage').then((module) => ({ default: module.PlanCrm })))
 const InventoryStockCrm = lazy(() => import('../inventory/pages/InventoryStockPage').then((module) => ({ default: module.InventoryStockCrm })))
 const PurchasesOverviewCrm = lazy(() => import('../purchases/pages/PurchasesOverviewPage').then((module) => ({ default: module.PurchasesOverviewCrm })))
@@ -24,7 +26,6 @@ const PurchasesInvoicesCrm = lazy(() => import('../purchases/pages/PurchasesInvo
 const PurchasesSuppliersCrm = lazy(() => import('../purchases/pages/PurchasesSuppliersPage').then((module) => ({ default: module.PurchasesSuppliersCrm })))
 const InventoryWarehousesCrm = lazy(() => import('../inventory/pages/InventoryWarehousesPage').then((module) => ({ default: module.InventoryWarehousesCrm })))
 const InventorySettingsCrm = lazy(() => import('../inventory/pages/InventorySettingsPage').then((module) => ({ default: module.InventorySettingsCrm })))
-const InventoryItemsCrm = lazy(() => import('../inventory/pages/InventoryItemsPage').then((module) => ({ default: module.InventoryItemsCrm })))
 const InventoryPreparationsCrm = lazy(() => import('../inventory/pages/InventoryPreparationsPage').then((module) => ({ default: module.InventoryPreparationsCrm })))
 const InventoryConfigurationCrm = lazy(() => import('../inventory/pages/InventoryConfigurationPage').then((module) => ({ default: module.InventoryConfigurationCrm })))
 const IntegrationsCrm = lazy(() => import('../integrations/pages/IntegrationsPage').then((module) => ({ default: module.IntegrationsCrm })))
@@ -42,12 +43,15 @@ type Props = {
   context: TenantContext
   disabled: boolean
   duplicateCatalogProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
+  /** Record picked in the global search; `key` remounts the page so it opens that record. */
+  focus?: { key: string; targetId: string } | null
   inventoryEnabled: boolean
   isCatalogLoading: boolean
   mutateCatalog: (action: () => Promise<unknown>) => Promise<boolean>
   onCatalogChanged: () => Promise<void>
   onError: (error: string | null) => void
   onInventoryEnabledChange: () => Promise<void>
+  onStartOnboarding: () => void
   onStatsRefresh: (options?: { comparisonPeriod?: CrmStatsPeriod; period?: CrmStatsPeriod; silent?: boolean }) => Promise<void>
   onVenuesChanged: () => Promise<void>
   runAction: RunAction
@@ -63,12 +67,14 @@ export function CrmSectionContent({
   context,
   disabled,
   duplicateCatalogProduct,
+  focus,
   inventoryEnabled,
   isCatalogLoading,
   mutateCatalog,
   onCatalogChanged,
   onError,
   onInventoryEnabledChange,
+  onStartOnboarding,
   onStatsRefresh,
   onVenuesChanged,
   runAction,
@@ -84,7 +90,7 @@ export function CrmSectionContent({
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">{isCatalogLoading ? 'Cargando catálogo…' : 'Selecciona un local'}</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">La gestión del catálogo está aislada por local.</p></section>
   }
 
-  if (!inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock') {
+  if (!inventoryEnabled && activeSection.startsWith('inventory-') && activeSection !== 'inventory-stock' && activeSection !== 'inventory-items') {
     return <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !rounded-2xl !bg-[var(--crm-surface)] !p-6 !shadow-[var(--crm-shadow-card)]"><h2 className="!font-bold">Control de stock desactivado</h2><p className="!mt-1 !text-sm !text-[var(--crm-text-muted)]">Actívalo desde la página Stock para acceder a esta configuración.</p></section>
   }
 
@@ -92,15 +98,15 @@ export function CrmSectionContent({
     case 'dashboard':
       return <DashboardCrm disabled={disabled} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} />
     case 'products':
-      return catalog ? <CatalogProductsCrm catalog={catalog} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} venues={venues} /> : null
+      return catalog ? <CatalogProductsCrm catalog={catalog} initialProductId={focus?.targetId} key={focus?.key} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':
       return catalog ? <CatalogFormatsCrm catalog={catalog} disabled={disabled} inventoryFeatureEnabled={hasTenantVenueCapability(venueContext, 'inventory')} mutate={mutateCatalog} /> : null
     case 'categories':
       return catalog ? <CatalogStructureCrm catalog={catalog} disabled={disabled} mutate={mutateCatalog} /> : null
     case 'selection-groups':
-      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="selection" initialGroupId={focus?.targetId} key={focus?.key} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
     case 'modifiers':
-      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
+      return catalog ? <CatalogGroupsCrm catalog={catalog} disabled={disabled} domain="modifier" initialGroupId={focus?.targetId} key={focus?.key} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} /> : null
     case 'access':
       return <AccessManagementCrm disabled={disabled} key={`${context.tenantId}:${selectedVenueId}`} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} venues={venues} />
     case 'discounts':
@@ -112,17 +118,16 @@ export function CrmSectionContent({
     case 'production':
       return catalog ? <ProductionCrm catalog={catalog} context={context} disabled={disabled} runAction={runAction} venueId={selectedVenueId} /> : null
     case 'inventory-stock':
-      return <InventoryStockCrm disabled={disabled} inventoryEnabled={inventoryEnabled} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
+    case 'inventory-items':
+      return <InventoryStockCrm dayChangeTime={selectedVenue?.dayChangeTime ?? null} disabled={disabled} inventoryEnabled={inventoryEnabled} key={`${context.tenantId}:${selectedVenueId}`} onInventoryEnabledChange={onInventoryEnabledChange} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} timeZone={selectedVenue?.timeZone ?? 'Europe/Madrid'} />
     case 'purchases-summary':
       return <PurchasesOverviewCrm selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'purchases-replenishment':
-      return <PurchasesReplenishmentCrm selectedVenueId={selectedVenueId} tenantContext={context} />
+      return <PurchasesReplenishmentCrm key={`${context.tenantId}:${selectedVenueId}`} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'purchases-invoices':
       return <PurchasesInvoicesCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'purchases-suppliers':
       return <PurchasesSuppliersCrm disabled={disabled} selectedVenueId={selectedVenueId} tenantContext={context} />
-    case 'inventory-items':
-      return <InventoryItemsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-preparations':
       return <InventoryPreparationsCrm disabled={disabled} runAction={runAction} selectedVenueId={selectedVenueId} tenantContext={context} />
     case 'inventory-warehouses':
@@ -142,6 +147,8 @@ export function CrmSectionContent({
       />
     case 'x-reports':
       return <CashClosingReportsCrm
+        initialClosingId={focus?.targetId}
+        key={focus?.key}
         dayChangeTime={venues.find((venue) => venue.id === selectedVenueId)?.dayChangeTime ?? null}
         disabled={disabled}
         runAction={runAction}
@@ -169,6 +176,8 @@ export function CrmSectionContent({
     case 'settings':
       return <VenueSettingsCrm disabled={disabled} onVenuesChanged={onVenuesChanged} runAction={runAction} tenantContext={context} venues={venues} />
     case 'plan':
-      return <PlanCrm disabled={disabled} runAction={runAction} tenantContext={context} />
+      return <PlanCrm disabled={disabled} tenantContext={context} />
+    case 'documentation':
+      return <DocumentationCrm canStartOnboarding={!disabled && Boolean(selectedVenue && getOnboardingTopics(context, selectedVenue).length)} onStartOnboarding={onStartOnboarding} />
   }
 }

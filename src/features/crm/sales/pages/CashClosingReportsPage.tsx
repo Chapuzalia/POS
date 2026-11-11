@@ -4,7 +4,7 @@ import { CRM_PAGE_SIZE, CrmPagination } from '../../shared/components/CrmPaginat
 import { Input as UiInput } from '../../../../components/ui/Input'
 import { Button as UiButton } from '../../../../components/ui/Button'
 import { CrmModal } from '../../shared/components/CrmModal'
-import { Download, Pencil, RefreshCw, Save, X } from "lucide-react";
+import { Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
 import {
@@ -27,7 +27,8 @@ import {
 import type { OperationalDayConfig } from "../../../../lib/operationalDay";
 import { loadCashClosingReports } from '../services/revoCashClosingService';
 import { loadAccountingClosures, type AccountingClosureRow } from '../services/accountingExportService'
-import { buildCsv, downloadCsv } from '../../../../lib/csv'
+import { downloadSpreadsheet, type SpreadsheetFormat } from '../../../../lib/spreadsheet'
+import { ExportFormatMenu } from '../../shared/components/ExportFormatMenu'
 import { ImportedClosingDetail } from '../components/ImportedClosingDetail';
 import { formatRevoDate, type ImportedCashClosing } from '../../../../lib/revoCashClosings.ts';
 import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
@@ -35,6 +36,7 @@ import { getOperationalDayRangeIso } from '../../../../lib/operationalDay'
 type Props = {
   dayChangeTime: string | null;
   disabled: boolean;
+  initialClosingId?: string;
   runAction: RunAction;
   selectedVenueId: string;
   tenantContext: TenantContext;
@@ -196,7 +198,8 @@ function CashClosingDetailModal({
   closing: CashClosingRecord;
   disabled: boolean;
   onClose: () => void;
-  onSave: (
+  // Absent for read-only roles (gestor): the closing is shown without count editing.
+  onSave?: (
     countedCashCents: number,
     countedCardCents: number,
   ) => Promise<boolean>;
@@ -262,7 +265,7 @@ function CashClosingDetailModal({
     }
     setIsSaving(true);
     try {
-      if (await onSave(countedCashCents, countedCardCents)) {
+      if (onSave && await onSave(countedCashCents, countedCardCents)) {
         setIsEditing(false);
       }
     } finally {
@@ -295,7 +298,7 @@ function CashClosingDetailModal({
             </p>
           </div>
           <div className="!flex !shrink-0 !items-center !gap-2">
-            {!isEditing ? (
+            {!isEditing && onSave ? (
               <UiButton
                 className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-xl !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-bold !text-[var(--crm-blue)]"
                 disabled={disabled}
@@ -538,6 +541,7 @@ function CashClosingDetailModal({
 export function CashClosingReportsCrm({
   dayChangeTime,
   disabled,
+  initialClosingId,
   runAction,
   selectedVenueId,
   tenantContext,
@@ -549,6 +553,7 @@ export function CashClosingReportsCrm({
   const [currentPage, setCurrentPage] = useState(1);
   const [sortDescriptor, setSortDescriptor] = useState<DataTableSortDescriptor>({ column: 'column-0', direction: 'descending' });
   const requestId = useRef(0);
+  const pendingClosingId = useRef(initialClosingId);
   const operationalDayConfig = useMemo<OperationalDayConfig>(
     () => ({ dayChangeTime, timeZone }),
     [dayChangeTime, timeZone],
@@ -571,7 +576,11 @@ export function CashClosingReportsCrm({
         { ...tenantContext, venueId: selectedVenueId },
         operationalDayConfig,
     );
-    if (currentRequest === requestId.current) setClosings(next);
+    if (currentRequest !== requestId.current) return;
+    setClosings(next);
+    const focused = next.find((closing) => closing.id === pendingClosingId.current);
+    pendingClosingId.current = undefined;
+    if (focused) setSelectedClosing(focused);
   }, [selectedVenueId, tenantContext, operationalDayConfig]);
 
   useEffect(() => {
@@ -601,7 +610,7 @@ export function CashClosingReportsCrm({
   );
   const [isExporting, setIsExporting] = useState(false)
 
-  async function exportAccountingCsv() {
+  async function exportAccountingClosures(format: SpreadsheetFormat) {
     if (isExporting || !dateFrom || !dateTo || dateFrom > dateTo) return
     setIsExporting(true)
     try {
@@ -613,7 +622,7 @@ export function CashClosingReportsCrm({
         return
       }
       const { headers, rowsCsv } = exportClosureRowsToCsv(rows, timeZone)
-      downloadCsv(buildCsv(headers, rowsCsv), `cierres_gestoria_${dateFrom}_${dateTo}.csv`)
+      downloadSpreadsheet(format, headers, rowsCsv, `cierres_gestoria_${dateFrom}_${dateTo}`)
       sileo.success({ title: 'Exportación generada' })
     } catch {
       sileo.error({ title: 'No se ha podido generar la exportación.' })
@@ -704,9 +713,7 @@ export function CashClosingReportsCrm({
                 : "Cargando cierres..."}
             </p>
            </div>
-           <UiButton className="!min-h-10 !rounded-[10px] !bg-[var(--crm-blue)] !px-3 !text-white" disabled={disabled || isExporting || !selectedVenueId} onClick={() => void exportAccountingCsv()} type="button">
-             <Download className="!size-4" />{isExporting ? 'Exportando...' : 'Exportar gestoría'}
-           </UiButton>
+           <ExportFormatMenu disabled={disabled || !selectedVenueId} isExporting={isExporting} label="Exportar gestoría" onExport={(format) => void exportAccountingClosures(format)} />
          </div>
          <div className="!overflow-x-auto">
           <UiDataTable aria-label="Cierres de caja" className="!w-full !min-w-[1050px] !border-collapse" emptyContent={closings ? 'No hay cierres de caja para el período seleccionado.' : 'Cargando cierres…'} filterable={false}
@@ -819,7 +826,7 @@ export function CashClosingReportsCrm({
           closing={selectedClosing}
           disabled={disabled}
           onClose={() => setSelectedClosing(null)}
-          onSave={(countedCashCents, countedCardCents) =>
+          onSave={tenantContext.role === 'gestor' ? undefined : (countedCashCents, countedCardCents) =>
             saveClosingCounts(
               selectedClosing.id,
               countedCashCents,

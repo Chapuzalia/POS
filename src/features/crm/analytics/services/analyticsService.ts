@@ -1,4 +1,4 @@
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import { getOperationalDateKey, getOperationalDayRangeIso, getOperationalPeriodRangeIso } from '../../../../lib/operationalDay'
 import { supabase } from '../../../../lib/supabase'
 import { type CrmStats, type CrmStatsPeriod, type CrmVenue, type HistoricalPaymentMethod, type PaymentMethod, type TenantContext } from '../../../../types'

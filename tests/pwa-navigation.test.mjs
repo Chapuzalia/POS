@@ -6,7 +6,7 @@ import vm from 'node:vm'
 const read = (path) => readFileSync(new URL(`../${path}`, import.meta.url), 'utf8')
 const origin = 'https://tickit.example'
 
-function worker() {
+function worker({ assets = [], assetType = 'text/javascript' } = {}) {
   const handlers = new Map()
   const entries = new Map()
   let offline = false
@@ -24,13 +24,14 @@ function worker() {
   async function fetchResponse(request) {
     if (offline) throw new TypeError('Network unavailable')
     const path = new URL(typeof request === 'string' ? request : request.url, origin).pathname
-    if (path === '/offline-assets.json') return new Response('[]')
+    if (path === '/offline-assets.json') return new Response(JSON.stringify(assets))
+    if (path.startsWith('/assets/')) return new Response(assetType === 'text/html' ? read('index.html') : 'export {}', { headers: { 'Content-Type': assetType } })
     const entry = path === '/crm' || path.startsWith('/crm/') ? 'crm/index.html' : 'index.html'
     return new Response(read(entry), { headers: { 'Content-Type': 'text/html' } })
   }
   vm.runInNewContext(read('public/sw.js'), {
     URL, Response, fetch: fetchResponse,
-    caches: { open: async () => cache },
+    caches: { open: async () => cache, match: async (key) => cache.match(key) },
     self: { location: { href: `${origin}/sw.js?v=test`, origin },
       addEventListener: (name, handler) => handlers.set(name, handler) },
   })
@@ -40,6 +41,14 @@ function worker() {
       let pending
       handlers.get('install')({ waitUntil: (promise) => { pending = promise } })
       await pending
+    },
+    request: async (path, destination) => {
+      let pending
+      handlers.get('fetch')({
+        request: { url: new URL(path, origin).href, method: 'GET', mode: 'cors', destination },
+        respondWith: (promise) => { pending = promise },
+      })
+      return pending
     },
     navigate: async (path) => {
       let pending
@@ -61,11 +70,24 @@ test('worker precaches both HTML entries and does not mix them across online and
   await app.navigate('/')
   await app.navigate('/crm/?install=1')
   app.offline()
-  for (const path of ['/', '/superadmin', '/crm/', '/crm/?install=1']) {
+  for (const path of ['/', '/superadmin', '/crm/', '/crm/?install=1', '/crm/products']) {
     const response = await app.navigate(path)
     assert.equal(response.status, 200)
     const html = await response.text()
     const manifest = path.startsWith('/crm') ? '/crm.webmanifest' : '/manifest.webmanifest'
     assert.ok(html.includes(`href="${manifest}"`), path)
   }
+})
+
+test('worker never stores the SPA fallback HTML as a JavaScript chunk', async () => {
+  const healthy = worker({ assets: ['/assets/main-abc.js'] })
+  await healthy.install()
+  assert.ok(healthy.entries.has('/assets/main-abc.js'))
+
+  // A rollout or CDN served index.html for a chunk: keep the current worker instead.
+  const poisoned = worker({ assets: ['/assets/main-abc.js'], assetType: 'text/html' })
+  await assert.rejects(poisoned.install(), /Recurso offline no válido: \/assets\/main-abc\.js/)
+  assert.equal(poisoned.entries.has('/assets/main-abc.js'), false)
+  await poisoned.request('/assets/lazy-def.js', 'script')
+  assert.equal([...poisoned.entries.keys()].some((key) => String(key?.url ?? key).includes('lazy-def')), false)
 })

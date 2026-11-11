@@ -1,5 +1,5 @@
 import { UserFacingError } from '../../../../utils/UserFacingError.ts'
-import { requireSupabase } from '../../shared/services/crmServiceSupport'
+import { requireSupabase } from '../../../../services/backendService'
 import {
   type Discount,
   type DiscountCreateInput,

@@ -23,6 +23,7 @@ function queryClient(tables, calls) {
         in(key, values) { call.include = [key, values]; return this },
         order() { return this },
         maybeSingle() { single = true; return this },
+        single() { single = true; return this },
         then(resolve) {
           const rows = (tables[table] ?? []).filter(row =>
             Object.entries(call.filters).every(([key, value]) => row[key] === value)
@@ -56,7 +57,7 @@ test('access queries only selected venue devices and accounts, reuses layout ven
   const { loadCrmAccessData } = compileComponent(serviceSource, {
     '../../../../utils/UserFacingError.ts': { UserFacingError: Error },
     '../../../../lib/tax': {}, '../../../../lib/operationalDay': {},
-    '../../shared/services/crmServiceSupport': { requireSupabase: () => client },
+    '../../../../services/backendService': { requireSupabase: () => client },
   })
   const data = await loadCrmAccessData(context, 'venue-a')
   assert.deepEqual(calls[0].filters, { tenant_id: 'tenant-a', venue_id: 'venue-a' })
@@ -72,12 +73,13 @@ test('access queries only selected venue devices and accounts, reuses layout ven
   assert.equal(calls.length, 0)
 })
 
-function edgeFixture({ role = 'owner', extraDevices = 0 } = {}) {
+function edgeFixture({ role = 'owner', extraDevices = 0, pendingPayment = false } = {}) {
   const calls = []
   const usersRequested = []
   let maxConcurrent = 0
   let concurrent = 0
   const tables = {
+    tenants: [{ id: 'tenant-a', billing_activation_required: pendingPayment }],
     profiles: [{ id: 'owner', is_superadmin: false }],
     tenant_memberships: [
       { tenant_id: 'tenant-a', user_id: 'owner', role, is_active: true },
@@ -114,7 +116,13 @@ function edgeFixture({ role = 'owner', extraDevices = 0 } = {}) {
     },
   }
   let handler
-  compileComponent(edgeSource, { 'jsr:@supabase/supabase-js@2': { createClient: () => client } }, {
+  compileComponent(edgeSource, {
+    'npm:@supabase/supabase-js@2.115.0': { createClient: () => client },
+    '../_shared/billing/service.ts': {}, '../_shared/billing/mollie.ts': {}, '../_shared/billing/env.ts': {},
+    '../_shared/platform-tenant-deletion.ts': {},
+    '../_shared/billing/schemas.ts': {}, '../_shared/billing/onboarding.ts': {},
+    '../_shared/welcome-email.ts': {},
+  }, {
     Deno: { env: { get: () => 'test-value' }, serve: callback => { handler = callback } },
     Response, console,
   })
@@ -126,6 +134,16 @@ function edgeFixture({ role = 'owner', extraDevices = 0 } = {}) {
     },
   }
 }
+
+test('unpaid owners cannot create users or venues through the service-role Edge API', async () => {
+  const fixture = edgeFixture({ pendingPayment: true })
+  for (const action of ['list', 'create-venue', 'create-device-account']) {
+    const reply = await fixture.request({ action })
+    assert.equal(reply.status, 403)
+    assert.match((await reply.json()).error, /Mi Plan/)
+  }
+  assert.equal(fixture.usersRequested.length, 0)
+})
 
 test('edge denies manager requests outside assigned venue and never exposes management accounts', async () => {
   const denied = edgeFixture({ role: 'manager' })

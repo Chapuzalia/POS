@@ -69,14 +69,20 @@ export function useOfflineSync(isOnline: boolean, sessionReady = true) {
       await loadDurableEvents()
       const events = getOfflineQueue()
 
-      // Cada evento se intenta una vez por pasada. Un evento antiguo con error
-      // no debe bloquear las ventas posteriores de la misma cola.
+      // Independent sales can progress, but a later mutation must never overtake
+      // a failed creation/payment change belonging to the same sale.
+      const blockedSales = new Set<string>()
       for (const event of events) {
+        const saleId = event.kind === 'sale_created' ? event.payload.sale.id
+          : event.kind === 'sale_payment_changed' || event.kind === 'sale_voided' ? event.payload.saleId : null
+        const saleKey = saleId ? `${event.tenantId}:${saleId}` : null
+        if (saleKey && blockedSales.has(saleKey)) continue
         try {
           operationBreadcrumb({ operation: 'offline.sync', operationId: event.id, saleId: event.kind === 'sale_created' ? event.payload.sale.id : undefined, step: event.kind })
           await syncEvent(event)
           await forgetOfflineEvent(event.id)
         } catch (syncError) {
+          if (saleKey) blockedSales.add(saleKey)
           const incident = { operation: 'offline.sync', operationId: event.id, saleId: event.kind === 'sale_created' ? event.payload.sale.id : undefined, step: event.kind, syncStatus: 'failed', recoverable: true }
           reportOperationError(syncError, incident)
           if (isClosedCashSaleRejection(event, syncError)) {

@@ -1,6 +1,17 @@
-import type { ProductType, SelectionGroupKind } from '../../../types/index.ts'
+import type { Discount, ProductType, SelectionGroupKind } from '../../../types/index.ts'
 
 export type CatalogReadMode = 'admin' | 'pos'
+
+export type PosCatalogState = {
+  catalog: CatalogData
+  discounts: Discount[]
+  manualDiscountEnabled: boolean
+  manualDiscountRequiresPin: boolean
+  discountSchedule: {
+    dayChangeTime: string | null
+    timeZone: string
+  }
+}
 
 export type CatalogImage = {
   id: string

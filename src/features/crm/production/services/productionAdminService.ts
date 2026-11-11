@@ -1,6 +1,6 @@
 import { UserFacingError } from '../../../../utils/UserFacingError.ts'
 import type { TenantContext } from '../../../../types'
-import { getFunctionInvokeErrorMessage, requireSupabase } from '../../shared/services/crmServiceSupport'
+import { getFunctionInvokeErrorMessage, requireSupabase } from '../../../../services/backendService'
 
 export type ProductionDestination = {
   id: string
