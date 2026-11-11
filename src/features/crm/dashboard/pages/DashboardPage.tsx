@@ -9,8 +9,12 @@ import { useState } from "react";
 import type { CrmStats } from "../../../../types";
 import { groupOpenCashSessionsByVenue } from "../openCashSessionsModel";
 
+/** The month card loads apart from the live cash state, which must never wait for it. */
+export type DashboardMonthStatus = "loading" | "ready" | "error";
+
 export type DashboardCrmProps = {
   disabled: boolean;
+  monthStatus?: DashboardMonthStatus;
   onRefresh: () => Promise<void>;
   selectedVenueId: string;
   stats: CrmStats | null;
@@ -18,6 +22,7 @@ export type DashboardCrmProps = {
 
 export function DashboardCrm({
   disabled,
+  monthStatus = "ready",
   onRefresh,
   selectedVenueId,
   stats,
@@ -83,27 +88,32 @@ export function DashboardCrm({
         <div className="flex min-h-11 items-center justify-between gap-2.5 border-b border-[var(--crm-border-subtle)] px-4 py-3 text-[var(--crm-text)] [&_h2]:m-0 [&_p]:m-0 [&_p]:mt-1 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)] !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Actividad del mes</span>
         </div>
-        <div className="grid gap-[9px] px-[22px] pt-3 pb-[22px]">
-          <MiniMetric
-            label="Tickets"
-            value={String(stats?.monthTicketCount ?? 0)}
-          />
-          <MiniMetric
-            label="Ticket medio"
-            value={formatMoney(stats?.averageTicketCents ?? 0)}
-          />
-          <MiniMetric
-            label="Ingresos"
-            value={formatMoney(stats?.monthSalesCents ?? 0)}
-          />
-        </div>
+        {monthStatus === "error" ? (
+          <EmptyList message="No se ha podido cargar la actividad del mes. Pulsa actualizar para reintentarlo." />
+        ) : (
+          <div aria-busy={monthStatus === "loading"} className="grid gap-[9px] px-[22px] pt-3 pb-[22px]">
+            <MiniMetric
+              label="Tickets"
+              value={monthStatus === "loading" ? "…" : String(stats?.monthTicketCount ?? 0)}
+            />
+            <MiniMetric
+              label="Ticket medio"
+              value={monthStatus === "loading" ? "…" : formatMoney(stats?.averageTicketCents ?? 0)}
+            />
+            <MiniMetric
+              label="Ingresos"
+              value={monthStatus === "loading" ? "…" : formatMoney(stats?.monthSalesCents ?? 0)}
+            />
+          </div>
+        )}
       </section>
 
       <section className="min-w-0 overflow-hidden rounded-[var(--crm-radius-lg)] border-0 bg-[var(--crm-surface)] text-[var(--crm-text)] shadow-[var(--crm-shadow-card)] !min-w-0 !overflow-hidden !rounded-2xl !border-0 !bg-[var(--crm-surface)] !shadow-[var(--crm-shadow-card)] sm:!rounded-[var(--crm-radius-lg)]">
         <div className="flex min-h-11 items-center justify-between gap-2.5 border-b border-[var(--crm-border-subtle)] px-4 py-3 text-[var(--crm-text)] [&_h2]:m-0 [&_p]:m-0 [&_p]:mt-1 [&_p]:text-xs [&_p]:font-medium [&_p]:text-[var(--crm-text-muted)] !flex !min-h-[60px] !items-center !justify-between !gap-3 !border-0 !bg-transparent !px-[18px] !pt-[18px] !pb-2 !text-base !font-bold !text-[var(--crm-text)] md:!px-[22px]">
           <span>Productos top</span>
         </div>
-        <TopProductsList stats={stats} />
+        {monthStatus === "ready" ? <TopProductsList stats={stats} />
+          : <EmptyList message={monthStatus === "loading" ? "Cargando productos top." : "No se han podido cargar los productos top."} />}
       </section>
     </div>
   );

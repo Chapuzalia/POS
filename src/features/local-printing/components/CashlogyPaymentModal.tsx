@@ -1,3 +1,4 @@
+import { appConfirm } from '../../../components/ui/appDialogStore'
 import { AlertTriangle, LoaderCircle } from 'lucide-react'
 import { useRef, useState } from 'react'
 import { useShallow } from 'zustand/react/shallow'
@@ -65,7 +66,18 @@ export function CashlogyPaymentModal({ error, finalizeDisabled, onCancelled, onF
   }
 
   const retryInProgress = action === 'retry' || (!action && state.isRecovering)
-  const cancelButton = <Button disabled={state.isCancelling || Boolean(action && action !== 'retry') || (!retryInProgress && (finalizeDisabled || (manualResolution && busy)))} onClick={() => void runAction('cancel')} variant="dangerSoft">Cancelar cobro</Button>
+  // Registering a confirmed charge must finish; cancelling then would leave cash without a sale.
+  const registering = action === 'confirm' || action === 'finalize'
+  const cancelPayment = async () => {
+    if (state.transaction?.status === 'completed' && !(await appConfirm('Cashlogy ya ha cobrado este importe. Cancelar no devuelve el dinero ni registra la venta: comprueba el efectivo antes de continuar. ¿Quieres cancelar el cobro?'))) return
+    await runAction('cancel')
+  }
+  // Cancelling is always available while charging: it must not wait on the sale's busy state.
+  const cancelButton = <Button disabled={state.isCancelling || action === 'cancel' || registering} onClick={() => void cancelPayment()} variant="dangerSoft">Cancelar cobro</Button>
+  const primaryButton = registering || retryInProgress || action === 'cancel' ? null
+    : manualResolution ? <Button disabled={busy || finalizeDisabled} onClick={() => void runAction('confirm')} variant="primary">Marcar como pagado</Button>
+      : message || state.transaction?.status === 'completed' ? <Button disabled={busy || finalizeDisabled} onClick={() => void runAction('retry')} variant="primary">Reintentar</Button>
+        : null
 
   return <AppModal dismissDisabled label="Cobro Cashlogy" maxWidth={520} onClose={() => undefined}>
     <section className="flex max-h-[calc(100dvh-48px)] w-full flex-col overflow-hidden">
@@ -89,11 +101,8 @@ export function CashlogyPaymentModal({ error, finalizeDisabled, onCancelled, onF
         </p>}
       </div>
       <div className="flex shrink-0 flex-wrap justify-end gap-2 border-t border-[var(--separator)] bg-[var(--surface)] p-4">
-        {retryInProgress || action === 'cancel' || action === 'finalize' ? cancelButton : manualResolution ? <>
-          {cancelButton}
-          <Button disabled={busy || finalizeDisabled} onClick={() => void runAction('confirm')} variant="primary">Marcar como pagado</Button>
-        </> : message || state.transaction?.status === 'completed' ? <Button disabled={busy || finalizeDisabled} onClick={() => void runAction('retry')} variant="primary">Reintentar</Button>
-          : cancelButton}
+        {cancelButton}
+        {primaryButton}
       </div>
     </section>
   </AppModal>

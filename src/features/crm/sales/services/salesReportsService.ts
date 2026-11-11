@@ -45,6 +45,23 @@ const ticketListSelect = `
   fiscal_local_records(record_kind, series:invoice_snapshot->>series, number:invoice_snapshot->number, issued_at:invoice_snapshot->>issuedAt)
 `
 
+// PostgREST joins embedded rows by foreign key only, but their indexes lead with
+// tenant_id (and a ticket's fiscal record is indexed only for 'alta'). Without
+// these filters every page scanned all fiscal records and refunds and timed out
+// on busy tenants. Rows are unchanged: embeds share the ticket's tenant and the
+// report only reads the ticket's 'alta' record.
+const ticketListEmbedFilters = (tenantId: string): Array<[string, string]> => [
+  ['fiscal_local_records.tenant_id', tenantId],
+  ['fiscal_local_records.record_kind', 'alta'],
+  ['refund_requests.tenant_id', tenantId],
+]
+const ticketDetailEmbedFilters = (tenantId: string): Array<[string, string]> => [
+  ...ticketListEmbedFilters(tenantId),
+  ['refund_requests.refund_payments.tenant_id', tenantId],
+  ['refund_requests.fiscal_local_records.tenant_id', tenantId],
+  ['sales.sale_payments.tenant_id', tenantId],
+]
+
 export type CrmSalesReportAggregatePage = {
   items: CrmSalesReportAggregate[]
   totalResults: number
@@ -279,6 +296,7 @@ async function loadTicketRows(context: TenantContext, venueId: string | undefine
       .select(ticketSelect)
       .eq('tenant_id', context.tenantId)
       .in('id', ticketIds.slice(offset, offset + detailBatchSize))
+    for (const [column, value] of ticketDetailEmbedFilters(context.tenantId)) query = query.eq(column, value)
 
     if (venueId) query = query.eq('venue_id', venueId)
     if (signal) query = query.abortSignal(signal)
@@ -453,6 +471,7 @@ export async function loadCrmSalesReportPage(
     signal?.throwIfAborted()
     let query = requireSupabase().from('tickets').select(ticketListSelect)
       .eq('tenant_id', context.tenantId).in('id', pageRows.slice(offset, offset + 50).map((row) => row.ticket_id))
+    for (const [column, value] of ticketListEmbedFilters(context.tenantId)) query = query.eq(column, value)
     if (venueId) query = query.eq('venue_id', venueId)
     if (signal) query = query.abortSignal(signal)
     const { data, error } = await query

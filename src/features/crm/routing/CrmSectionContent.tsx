@@ -15,6 +15,7 @@ const CatalogFormatsCrm = lazy(() => import('../catalog/pages/CatalogFormatsPage
 const CatalogProductsCrm = lazy(() => import('../catalog/pages/CatalogProductsPage.tsx').then((module) => ({ default: module.CatalogProductsCrm })))
 const CatalogStructureCrm = lazy(() => import('../catalog/pages/CatalogStructurePage.tsx').then((module) => ({ default: module.CatalogStructureCrm })))
 const CatalogTransferCrm = lazy(() => import('../catalog/pages/CatalogTransferPage.tsx').then((module) => ({ default: module.CatalogTransferCrm })))
+import type { DashboardMonthStatus } from '../dashboard/pages/DashboardPage'
 const DashboardCrm = lazy(() => import('../dashboard/pages/DashboardPage').then((module) => ({ default: module.DashboardCrm })))
 const DiscountsCrm = lazy(() => import('../discounts/pages/DiscountsPage').then((module) => ({ default: module.DiscountsCrm })))
 const DocumentationCrm = lazy(() => import('../documentation/pages/DocumentationPage').then((module) => ({ default: module.DocumentationCrm })))
@@ -41,6 +42,7 @@ type Props = {
   catalog: CatalogData | null
   comparisonStats: CrmStats | null
   context: TenantContext
+  dashboardMonthStatus: DashboardMonthStatus
   disabled: boolean
   duplicateCatalogProduct: (sourceProductId: string, targetVenueId: string) => Promise<boolean>
   /** Record picked in the global search; `key` remounts the page so it opens that record. */
@@ -65,6 +67,7 @@ export function CrmSectionContent({
   catalog,
   comparisonStats,
   context,
+  dashboardMonthStatus,
   disabled,
   duplicateCatalogProduct,
   focus,
@@ -96,7 +99,7 @@ export function CrmSectionContent({
 
   switch (activeSection) {
     case 'dashboard':
-      return <DashboardCrm disabled={disabled} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} />
+      return <DashboardCrm disabled={disabled} monthStatus={dashboardMonthStatus} onRefresh={onStatsRefresh} selectedVenueId={selectedVenueId} stats={stats} />
     case 'products':
       return catalog ? <CatalogProductsCrm catalog={catalog} initialProductId={focus?.targetId} key={focus?.key} defaultTaxRate={venues.find((venue) => venue.id === selectedVenueId)?.defaultTaxRate ?? 21} disabled={disabled} duplicateProduct={duplicateCatalogProduct} inventoryRecipesEnabled={hasTenantVenueCapability(venueContext, 'costing')} mutate={mutateCatalog} venues={venues} /> : null
     case 'formats':

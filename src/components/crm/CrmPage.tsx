@@ -5,7 +5,7 @@ import { canAccessCrm, canAccessCrmSection, defaultCrmSection } from '../../feat
 import { catalogSections, crmSectionFromPath, crmSectionPath, type CrmSection } from '../../features/crm/routing/crmNavigation'
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
-import { applyCrmOpenCashSalesTotals, loadCrmDashboardStats, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
+import { applyCrmOpenCashSalesTotals, createEmptyCrmDashboardPeriodStats, loadCrmDashboardLive, loadCrmDashboardPeriod, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
 import { hasTenantVenueCapability } from '../../features/platform/tenantFeatureAccess'
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
@@ -13,6 +13,7 @@ import { catalogAdminService } from '../../features/crm/catalog/services/catalog
 import { recoverSupabaseRealtimeConnection } from '../../lib/supabase'
 import type { CrmSearchItem } from '../../features/crm/search/crmSearchService'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../types'
+import type { DashboardMonthStatus } from '../../features/crm/dashboard/pages/DashboardPage'
 import { getReadableError } from '../../utils/errors'
 import { BillingActivationPanel } from '../../features/billing/BillingActivationPanel'
 import { NativeBillingNotice, billingManagedOnWeb } from '../../features/billing/NativeBillingNotice'
@@ -56,6 +57,7 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
   const [onboardingRequest, setOnboardingRequest] = useState(0)
   const [stats, setStats] = useState<CrmStats | null>(null)
   const [comparisonStats, setComparisonStats] = useState<CrmStats | null>(null)
+  const [dashboardMonthStatus, setDashboardMonthStatus] = useState<DashboardMonthStatus>('loading')
 
   const [venues, setVenues] = useState<CrmVenue[]>([])
   const [selectedVenueId, setSelectedVenueId] = useState('')
@@ -167,15 +169,36 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
         setComparisonStats(null)
         return
       }
-      const dashboardOnly = activeSection === 'dashboard' && !options.period && !options.comparisonPeriod
+      if (activeSection === 'dashboard' && !options.period && !options.comparisonPeriod) {
+        // Render open cash sessions as soon as they arrive; the month loads on its own.
+        const periodPromise = loadCrmDashboardPeriod(context, selectedVenue)
+        periodPromise.catch(() => undefined)
+        if (!options.silent) setDashboardMonthStatus('loading')
+        const live = await loadCrmDashboardLive(context, selectedVenue)
+        if (statsLoadRequestId.current !== requestId) return
+        statsAreDashboardOnly.current = true
+        setStats((current) => ({ ...(current ?? createEmptyCrmDashboardPeriodStats(selectedVenue)), ...live }))
+        setComparisonStats(null)
+        void periodPromise.then((period) => {
+          if (statsLoadRequestId.current !== requestId) return
+          setStats((current) => (current ? { ...current, ...period } : current))
+          setDashboardMonthStatus('ready')
+        }, (periodError: unknown) => {
+          if (statsLoadRequestId.current !== requestId) return
+          getReadableError(periodError, { operation: 'crm.dashboard.period' })
+          // A silent refresh keeps the month already on screen.
+          setDashboardMonthStatus((current) => (options.silent && current === 'ready' ? current : 'error'))
+        })
+        return
+      }
       const [nextStats, nextComparisonStats] = await Promise.all([
-        dashboardOnly ? loadCrmDashboardStats(context, selectedVenue) : loadCrmStats(context, selectedVenue, options.period),
+        loadCrmStats(context, selectedVenue, options.period),
         options.comparisonPeriod && selectedVenue && hasTenantVenueCapability({ features: context.features, venue: selectedVenue }, 'analytics_advanced')
           ? loadCrmStats(context, selectedVenue, options.comparisonPeriod, { includeLiveState: false })
           : Promise.resolve(null),
       ])
       if (statsLoadRequestId.current !== requestId) return
-      statsAreDashboardOnly.current = dashboardOnly
+      statsAreDashboardOnly.current = false
       setStats(nextStats)
       setComparisonStats(nextComparisonStats)
     }
@@ -288,10 +311,11 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
   return <CrmModalBusyContext value={isBusy || (shouldLoadCatalog && isCatalogLoading)}><CrmShell activeSection={activeSection} context={context} disabled={disabled} error={error} inventoryEnabled={inventoryEnabled} isOnline={isOnline} onLogout={onLogout} onSearchSelect={openSearchResult} onboarding={selectedVenue ? <Suspense fallback={null}><CrmOnboarding key={`${context.tenantId}:${context.userId}:${selectedVenueId}`} activeSection={activeSection} context={context} disabled={disabled} isOnline={isOnline} onSectionChange={changeSection} openRequest={onboardingRequest} venue={selectedVenue} /></Suspense> : null} onSectionChange={changeSection} onVenueChange={(venueId) => {
     setStats(null)
     setComparisonStats(null)
+    setDashboardMonthStatus('loading')
     setSelectedVenueId(venueId)
   }} selectedVenueId={selectedVenueId} venues={venues}>
     <Suspense fallback={<section aria-busy="true" className="grid min-h-48 place-items-center rounded-2xl bg-[var(--crm-surface)] p-6 text-sm font-bold text-[var(--crm-text-muted)]" role="status">Cargando sección…</section>}>
-      <CrmSectionContent activeSection={activeSection} catalog={catalog} comparisonStats={comparisonStats} context={context} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} focus={searchFocus?.section === activeSection ? searchFocus : null} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStartOnboarding={() => setOnboardingRequest((request) => request + 1)} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
+      <CrmSectionContent activeSection={activeSection} catalog={catalog} comparisonStats={comparisonStats} context={context} dashboardMonthStatus={dashboardMonthStatus} disabled={disabled} duplicateCatalogProduct={duplicateCatalogProduct} focus={searchFocus?.section === activeSection ? searchFocus : null} inventoryEnabled={inventoryEnabled} isCatalogLoading={isCatalogLoading} mutateCatalog={mutateCatalog} onCatalogChanged={refreshCurrentProjectedCatalog} onError={onError} onInventoryEnabledChange={refreshVenues} onStartOnboarding={() => setOnboardingRequest((request) => request + 1)} onStatsRefresh={refreshStats} onVenuesChanged={refreshVenues} runAction={runAction} selectedVenueId={selectedVenueId} stats={stats} venues={venues} />
     </Suspense>
   </CrmShell></CrmModalBusyContext>
 }

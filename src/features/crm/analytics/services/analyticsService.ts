@@ -478,50 +478,71 @@ export async function loadCrmStats(
   return { ...(periodResult.data as CrmStats), ...(liveResult.data as Pick<CrmStats, 'dayActivity' | 'openCashSessions'>) }
 }
 
+export type CrmDashboardLiveStats = Pick<CrmStats, 'dayActivity' | 'openCashSessions'>
+export type CrmDashboardPeriodStats = Omit<CrmStats, 'dayActivity' | 'openCashSessions'>
 type CrmDashboardPeriodSummary = Pick<CrmStats, 'averageTicketCents' | 'monthSalesCents' | 'monthTicketCount' | 'topProducts'>
 
-/**
- * Dashboard-only stats: live state plus the current month's totals and top
- * products. Skips the full period breakdowns, which time out for venues with
- * many tickets. Breakdown fields are empty; the stats page loads them itself.
- */
-export async function loadCrmDashboardStats(context: TenantContext, venue: CrmVenue): Promise<CrmStats> {
-  const client = requireSupabase()
+function getCrmDashboardMonth(venue: CrmVenue) {
   const operationalDayConfig = { dayChangeTime: venue.dayChangeTime, timeZone: venue.timeZone }
   const currentDay = getOperationalDateKey(new Date(), operationalDayConfig)
   const period = createCrmStatsPeriod('month', currentDay.slice(0, 7))
   const periodSummary = summarizeCrmStatsPeriod(period, currentDay)
   const periodRange = getOperationalPeriodRangeIso(operationalDayConfig, periodSummary.startDate, periodSummary.effectiveEndDate)
-  const dayRange = getOperationalDayRangeIso(operationalDayConfig)
-  const [summaryResult, liveResult] = await Promise.all([
-    client.rpc('crm_dashboard_period_summary', {
-      p_tenant_id: context.tenantId,
-      p_venue_id: venue.id,
-      p_period_start: periodRange.startIso,
-      p_period_end: periodRange.endIso,
-    }),
-    client.rpc('crm_stats_live', { p_tenant_id: context.tenantId, p_venue_id: venue.id, p_day_start: dayRange.startIso, p_day_end: dayRange.endIso }),
-  ])
-  if (summaryResult.error) {
-    // Backend not yet migrated: keep the previous full-stats behaviour.
-    if (summaryResult.error.code === 'PGRST202' || summaryResult.error.code === '42883') return loadCrmStats(context, venue)
-    throw summaryResult.error
-  }
-  if (liveResult.error) throw liveResult.error
+  return { operationalDayConfig, period, periodRange, periodSummary }
+}
+
+/** Month fields with no data yet; breakdowns stay empty because the dashboard never shows them. */
+export function createEmptyCrmDashboardPeriodStats(venue: CrmVenue): CrmDashboardPeriodStats {
+  const { period, periodSummary } = getCrmDashboardMonth(venue)
   return {
+    averageTicketCents: 0,
     byPayment: [],
     discountApplications: [],
     discountedTicketCount: 0,
     discountsCents: 0,
     hourlySales: [],
     monthKey: period.startDate.slice(0, 7),
+    monthSalesCents: 0,
+    monthTicketCount: 0,
     period: periodSummary,
     salesByCategory: [],
     salesByProduct: [],
     topProductCombinations: [],
-    ...(summaryResult.data as CrmDashboardPeriodSummary),
-    ...(liveResult.data as Pick<CrmStats, 'dayActivity' | 'openCashSessions'>),
+    topProducts: [],
   }
+}
+
+/** Open cash sessions and today's activity: small, and what the venue needs to see first. */
+export async function loadCrmDashboardLive(context: TenantContext, venue: CrmVenue): Promise<CrmDashboardLiveStats> {
+  const dayRange = getOperationalDayRangeIso({ dayChangeTime: venue.dayChangeTime, timeZone: venue.timeZone })
+  const { data, error } = await requireSupabase().rpc('crm_stats_live', {
+    p_tenant_id: context.tenantId, p_venue_id: venue.id, p_day_start: dayRange.startIso, p_day_end: dayRange.endIso,
+  })
+  if (error) throw error
+  return data as CrmDashboardLiveStats
+}
+
+/**
+ * The current month's totals and top products. Loaded apart from the live
+ * state so a slow month on a busy venue never hides the open cash sessions.
+ */
+export async function loadCrmDashboardPeriod(context: TenantContext, venue: CrmVenue): Promise<CrmDashboardPeriodStats> {
+  const { periodRange } = getCrmDashboardMonth(venue)
+  const { data, error } = await requireSupabase().rpc('crm_dashboard_period_summary', {
+    p_tenant_id: context.tenantId,
+    p_venue_id: venue.id,
+    p_period_start: periodRange.startIso,
+    p_period_end: periodRange.endIso,
+  })
+  if (error) {
+    // Backend not yet migrated: use the full period stats, without the live state.
+    if (error.code === 'PGRST202' || error.code === '42883') {
+      const { dayActivity: _dayActivity, openCashSessions: _openCashSessions, ...period } = await loadCrmStats(context, venue, undefined, { includeLiveState: false })
+      return period
+    }
+    throw error
+  }
+  return { ...createEmptyCrmDashboardPeriodStats(venue), ...(data as CrmDashboardPeriodSummary) }
 }
 
 export function subscribeToCrmStatsChanges(
