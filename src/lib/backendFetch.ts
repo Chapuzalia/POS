@@ -10,7 +10,9 @@ export const backendFetch: typeof fetch = async (input, init) => {
   // Bound auth validation only; long-running business RPCs keep their existing
   // timeouts (for example, document processing).
   const requestUrl = input instanceof Request ? input.url : String(input)
-  const backgroundStats = /\/rest\/v1\/rpc\/pos_product_sales_stats(?:[?#]|$)/.test(requestUrl)
+  // Read-only analytics can exceed the SQL timeout on high-volume venues; that
+  // is a slow query, not a lost backend, so it must not degrade the session.
+  const backgroundStats = /\/rest\/v1\/rpc\/(?:pos_product_sales_stats|crm_stats_period|crm_stats_live|crm_dashboard_period_summary|crm_sales_report_ticket_page|crm_sales_report_summary|crm_sales_report_aggregate_page|crm_sales_report_filter_suggestions)(?:[?#]|$)/.test(requestUrl)
   const timer = requestUrl.includes('/auth/v1/') ? setTimeout(abort, 15_000) : undefined
   try {
     const response = await fetch(input, { ...init, signal: controller.signal })

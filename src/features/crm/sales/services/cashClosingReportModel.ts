@@ -1,4 +1,4 @@
-import { getOperationalDateKey, getZonedDateTimeParts, toIsoDate, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
+import { getOperationalDateKey, getOperationalDayRangeIso, getZonedDateTimeParts, shiftIsoDate, toIsoDate, type OperationalDayConfig } from '../../../../lib/operationalDay.ts'
 import type { CashClosingPrintSnapshot, CashClosingRecord } from '../../../../types'
 import type { ImportedCashClosing } from '../../../../lib/revoCashClosings.ts'
 import { getCashClosingAmounts } from '../../../cash-registers/services/cashClosingAmounts.ts'
@@ -93,6 +93,20 @@ export function buildCashClosingDailyValues(closings: readonly CashClosingReport
   }
 
   return [...values.values()].sort((left, right) => left.date.localeCompare(right.date))
+}
+
+/** Inclusive operational days (YYYY-MM-DD); an empty bound means no limit. */
+export type CashClosingDateRange = { dateFrom: string; dateTo: string }
+
+/**
+ * Server-side closed_at bounds for the selected days, widened by one day because
+ * a closing's day uses its snapshot time zone. The page still filters exactly.
+ */
+export function getCashClosingQueryRange(range: CashClosingDateRange, config: OperationalDayConfig) {
+  return {
+    fromIso: range.dateFrom ? getOperationalDayRangeIso(config, shiftIsoDate(range.dateFrom, -1)).startIso : null,
+    toIso: range.dateTo ? getOperationalDayRangeIso(config, shiftIsoDate(range.dateTo, 1)).endIso : null,
+  }
 }
 
 export function filterCashClosingsByDate(

@@ -217,13 +217,20 @@ export async function loadCashClosing(context: TenantContext, closingId: string)
   return mapClosing(data as ClosingRow)
 }
 
-export async function loadCashClosingHistory(context: TenantContext, limit: number | null = 50) {
+export async function loadCashClosingHistory(
+  context: TenantContext,
+  limit: number | null = 50,
+  closedRange: { fromIso: string | null; toIso: string | null } = { fromIso: null, toIso: null },
+) {
   const closings: CashClosingRecord[] = []
   while (limit === null || closings.length < limit) {
     const size = limit === null ? 500 : Math.min(500, limit - closings.length)
-    const { data, error } = await client().from('cash_sessions').select(closingColumns)
+    let query = client().from('cash_sessions').select(closingColumns)
       .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'closed')
-      .not('print_snapshot', 'is', null).order('closed_at', { ascending: false }).order('id')
+      .not('print_snapshot', 'is', null)
+    if (closedRange.fromIso) query = query.gte('closed_at', closedRange.fromIso)
+    if (closedRange.toIso) query = query.lt('closed_at', closedRange.toIso)
+    const { data, error } = await query.order('closed_at', { ascending: false }).order('id')
       .range(closings.length, closings.length + size - 1)
     if (error) throw error
     closings.push(...((data ?? []) as ClosingRow[]).map(mapClosing))
