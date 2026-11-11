@@ -223,8 +223,10 @@ export async function loadCashClosingHistory(
   closedRange: { fromIso: string | null; toIso: string | null } = { fromIso: null, toIso: null },
 ) {
   const closings: CashClosingRecord[] = []
+  // Each closing carries its full print snapshot: small batches keep every request under the SQL timeout.
+  const batchSize = 100
   while (limit === null || closings.length < limit) {
-    const size = limit === null ? 500 : Math.min(500, limit - closings.length)
+    const size = limit === null ? batchSize : Math.min(batchSize, limit - closings.length)
     let query = client().from('cash_sessions').select(closingColumns)
       .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('status', 'closed')
       .not('print_snapshot', 'is', null)
