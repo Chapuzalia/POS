@@ -1,3 +1,4 @@
+import { Capacitor } from '@capacitor/core'
 import { FunctionsHttpError } from '@supabase/supabase-js'
 import { billingErrorMessages } from '../../../supabase/functions/_shared/billing/errors'
 import { requireSupabase } from '../../services/backendService'
@@ -31,7 +32,9 @@ export const billingDate = (value: string | null | undefined) => value ? new Int
 export function openBillingUrl(value: string) {
   const url = new URL(value)
   if (url.protocol !== 'https:' || !['www.mollie.com','mollie.com','pay.mollie.com'].includes(url.hostname)) throw new UserFacingError('Mollie no devolvió una dirección de pago válida.')
-  window.location.assign(url.href)
+  // En la app nativa el pago se abre fuera del WebView; Mollie vuelve por Universal/App Link.
+  if (Capacitor.isNativePlatform()) void import('@capacitor/browser').then(({ Browser }) => Browser.open({ url: url.href })).catch(() => window.location.assign(url.href))
+  else window.location.assign(url.href)
 }
 
 // Odoo PDFs come through the billing function (the portal token never reaches the browser).

@@ -353,6 +353,24 @@ export type PrintAgentServerInfo = {
   [key: string]: unknown
 }
 
+export type PrintAgentRequestLog = { time: string; method: string; url: string; statusCode: number }
+
+export type PrintAgentProductionStatus = {
+  enabled: boolean
+  configured: boolean
+  workerState: 'disabled' | 'idle' | 'polling' | 'error'
+  lastError: string | null
+  remoteAgentId: string | null
+}
+
+/** Subconjunto de GET /api/v1/config que edita la página del servidor integrado. */
+export type PrintAgentRemoteConfig = {
+  server?: { establishmentName?: string }
+  printer?: { paperWidth?: 58 | 80 }
+  cloudProduction?: { enabled?: boolean; endpoint?: string }
+  cashlogy?: { connector?: { host?: string; port?: number } }
+}
+
 export type Printer = {
   id: string
   name?: string

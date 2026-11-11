@@ -2,12 +2,13 @@ import { z } from 'zod'
 import { DEFAULT_PRINT_AGENT_TIMEOUT_MS, PRINT_AGENT_HEALTH_TIMEOUT_MS } from '../constants/config.ts'
 import { normalizePrintAgentUrl } from '../utils/normalizePrintAgentUrl.ts'
 import { PrintAgentError, type PrintAgentErrorCode } from './PrintAgentError.ts'
+import { isEmbeddedPrintAgent } from '../embedded/embeddedPrintAgent.ts'
 import { expectedCashlogyCharge, validateCashlogyTransactionResponse, type ExpectedTransaction } from '../cashlogy/cashlogyTransactionValidation.ts'
 import type {
   CashlogyAccounting, CashlogyCancelResponse, CashlogyCapabilities, CashlogyCashManagementOperation, CashlogyChargeRequest,
   CashlogyConnector, CashlogyDenominations, CashlogyDevice, CashlogyDeviceError, CashlogyDiagnosticLog,
   CashlogyHealth, CashlogyLevels, CashlogyOperationResponse, CashlogyRecoveryResult, CashlogyRequestedDenomination,
-  CashlogyTotal, CashlogyTransaction, DiscoveryProgress, PrintJob, Printer, PrintRequest,
+  CashlogyTotal, CashlogyTransaction, DiscoveryProgress, PrintAgentProductionStatus, PrintAgentRequestLog, PrintJob, Printer, PrintRequest,
 } from '../types.ts'
 
 type ClientOptions = { baseUrl: string; token?: string | null; defaultTimeoutMs?: number; fetchImpl?: typeof fetch }
@@ -102,6 +103,7 @@ function delay(ms: number, signal?: AbortSignal) {
 export function createPrintAgentClient(options: ClientOptions) {
   const baseUrl = normalizePrintAgentUrl(options.baseUrl, {
     allowHttpInDevelopment: true,
+    allowLoopbackHttp: isEmbeddedPrintAgent,
     isDevelopment: import.meta.env?.DEV,
   })
   const fetchImpl = options.fetchImpl || fetch
@@ -282,6 +284,10 @@ export function createPrintAgentClient(options: ClientOptions) {
     },
     getConfig: (signal?: AbortSignal) => request<Record<string, unknown>>('/api/v1/config', { retries: 1, signal }),
     updateConfig: (payload: unknown, signal?: AbortSignal) => request<Record<string, unknown>>('/api/v1/config', { body: payload, method: 'PATCH', signal }),
+    getRecentRequests: (signal?: AbortSignal) => request<{ logs: PrintAgentRequestLog[] }>('/api/v1/logs', { retries: 1, signal }),
+    getProductionStatus: (signal?: AbortSignal) => request<PrintAgentProductionStatus>('/api/v1/production/status', { retries: 1, signal }),
+    pairProduction: (payload: { code: string; endpoint?: string }, signal?: AbortSignal) => request<{ ok: true; agentId: string }>('/api/v1/production/pair', { body: payload, method: 'POST', signal }),
+    unlinkProduction: (signal?: AbortSignal) => request<{ ok: true }>('/api/v1/production/unlink', { body: {}, method: 'POST', signal }),
   }
 }
 

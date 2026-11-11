@@ -1,7 +1,7 @@
 {
   "name": "pos",
   "private": true,
-  "version": "1.0.27",
+  "version": "1.0.28",
   "packageManager": "pnpm@10.15.1",
   "type": "module",
   "scripts": {
@@ -16,14 +16,19 @@
     "lint": "oxlint",
     "preview": "vite preview",
     "prepare": "git config core.hooksPath .githooks || true",
-    "build:android": "vite build && cap sync android",
+    "build:android": "vite build && pnpm run build:print-agent && cap sync android",
     "apk:debug": "pnpm run build:android && cd android && gradlew.bat assembleDebug",
-    "ios:device": "bash scripts/ios-device.sh"
+    "ios:device": "bash scripts/ios-device.sh",
+    "build:print-agent": "node ../backend-impresora/scripts/build-mobile.mjs dist/nodejs",
+    "build:ios": "vite build && pnpm run build:print-agent && cap sync ios"
   },
   "dependencies": {
     "@capacitor/android": "^8.6.0",
+    "@capacitor/app": "^8.1.2",
+    "@capacitor/browser": "^8.0.5",
     "@capacitor/core": "^8.6.0",
     "@capacitor/ios": "^8.6.0",
+    "@capawesome/capacitor-nodejs": "^0.2.0",
     "@heroui/react": "3.2.2",
     "@heroui/styles": "3.2.2",
     "@internationalized/date": "3.12.2",

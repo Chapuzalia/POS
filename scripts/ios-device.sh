@@ -22,6 +22,7 @@ if [[ -z "$device" ]]; then
 fi
 
 pnpm exec vite build --mode "$mode"
+pnpm run build:print-agent
 pnpm exec cap sync ios
 
 sign_flags=()

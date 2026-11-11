@@ -1,9 +1,11 @@
 import { appConfirm } from '../ui/appDialogStore'
 import { Button as UiButton } from '../ui/Button'
-import { ArrowLeft, LayoutList, Palette, Printer, RefreshCw, Trash2, X } from 'lucide-react'
+import { ArrowLeft, LayoutList, Palette, Printer, RefreshCw, Server, Trash2, X } from 'lucide-react'
 import { useState } from 'react'
 import type { CatalogStartTab, TenantContext, ThemeDefinition } from '../../types'
 import { PrintAgentSettings } from '../../features/local-printing/components/PrintAgentSettings'
+import { EmbeddedPrintAgentSettings } from '../../features/local-printing/components/EmbeddedPrintAgentSettings'
+import { isEmbeddedPrintAgent } from '../../features/local-printing/embedded/embeddedPrintAgent'
 import { AppModal, Button, Metric } from '../ui'
 import { Select } from '../ui/Select'
 import { clearLocalCache } from '../../lib/clearLocalCache'
@@ -33,7 +35,7 @@ export function ConfigModal({
   themeId,
   themes,
 }: ConfigModalProps) {
-  const [section, setSection] = useState<'general' | 'printing'>('general')
+  const [section, setSection] = useState<'general' | 'printing' | 'print-server'>('general')
   const [clearingCache, setClearingCache] = useState(false)
   const [clearCacheError, setClearCacheError] = useState<string | null>(null)
 
@@ -51,15 +53,15 @@ export function ConfigModal({
   const theme = themes.find((item) => item.id === themeId)
   const canManageHardware = context.canManageCash === true || ['manager', 'owner', 'superadmin'].includes(context.role)
 
-  if (section === 'printing') {
+  if (section === 'printing' || section === 'print-server') {
     return (
-      <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={1024} label="Configuración de impresión" onClose={onClose} placement="bottom">
+      <AppModal containerClassName="!p-0 sm:!p-4" maxWidth={1024} label={section === 'printing' ? 'Configuración de impresión' : 'Servidor de impresión integrado'} onClose={onClose} placement="bottom">
         <section className="flex max-h-[100svh] w-full flex-col bg-[var(--surface)] text-[var(--foreground)] shadow-[var(--shadow)] sm:max-h-[94svh] sm:rounded-[var(--radius)] sm:border sm:border-[var(--separator)]">
           <div className="flex items-center justify-between gap-3 border-b border-[var(--separator)] p-4">
             <Button onClick={() => setSection('general')} size="sm" type="button" variant="tertiary"><ArrowLeft className="h-4 w-4" />Ajustes</Button>
             <Button disabled={clearingCache} className="!size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0" aria-label="Cerrar" onClick={onClose} size="sm" type="button" variant="tertiary"><X className="h-4 w-4" /></Button>
           </div>
-          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-4 sm:p-5"><PrintAgentSettings canConfigure={canManageHardware} canOpenDrawer={canManageHardware} /></div>
+          <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain [-webkit-overflow-scrolling:touch] p-4 sm:p-5">{section === 'printing' ? <PrintAgentSettings canConfigure={canManageHardware} canOpenDrawer={canManageHardware} /> : <EmbeddedPrintAgentSettings canConfigure={canManageHardware} />}</div>
         </section>
       </AppModal>
     )
@@ -98,6 +100,13 @@ export function ConfigModal({
           <span className="flex items-center gap-3"><Printer className="h-5 w-5 text-[var(--accent)]" /><span><strong className="block">Hardware · Impresión</strong><small className="text-[var(--muted)]">Agente local, impresoras, cajón y diagnóstico</small></span></span>
           <span aria-hidden="true">›</span>
         </UiButton>
+
+        {isEmbeddedPrintAgent ? (
+          <UiButton disabled={clearingCache} className="mt-3 flex min-h-14 w-full items-center justify-between rounded-[var(--radius)] border border-[var(--separator)] bg-[var(--background)] px-4 text-left transition hover:border-[var(--accent)]" onClick={() => setSection('print-server')} type="button">
+            <span className="flex items-center gap-3"><Server className="h-5 w-5 text-[var(--accent)]" /><span><strong className="block">Hardware · Servidor de impresión</strong><small className="text-[var(--muted)]">Servidor integrado: Cashlogy, producción cloud y diagnóstico</small></span></span>
+            <span aria-hidden="true">›</span>
+          </UiButton>
+        ) : null}
 
         {lastSyncError ? (
           <div className="mt-4 rounded-[var(--radius)] border border-red-400/45 bg-red-500/10 p-3 text-sm">

@@ -1,6 +1,7 @@
 import { reportOperationError } from '../../../lib/observability.ts'
 import { create } from 'zustand'
 import { createPrintAgentClient } from '../api/printAgentClient'
+import { getEmbeddedPrintAgent } from '../embedded/embeddedPrintAgent'
 import { PrintAgentError, toPrintAgentError } from '../api/PrintAgentError'
 import { DEFAULT_PRINT_AGENT_URL, PRINT_AGENT_ENABLED } from '../constants/config'
 import { printRequestSchema, printerActionSchema, selectPrinterSchema } from '../schemas/printSchemas'
@@ -152,8 +153,9 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
 
     configureScope(scope) {
       const config = loadPrintAgentConfig(scope)
+      const embedded = getEmbeddedPrintAgent()
       set({
-        scope, baseUrl: config.baseUrl, token: config.token, selectedPrinterId: config.selectedPrinterId,
+        scope, baseUrl: embedded?.baseUrl ?? config.baseUrl, token: embedded?.token ?? config.token, selectedPrinterId: config.selectedPrinterId,
         cashlogyConfigured: config.cashlogyConfigured, cashlogyTerminalCode: config.cashlogyTerminalCode,
         cashlogyHealth: null, cashlogyConnectors: [], cashlogyConnectorsLoaded: false,
         isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, isRecoveringCashlogy: false, cashlogyConnectorAction: null,
@@ -502,8 +504,9 @@ export const usePrintAgentStore = create<StoreState>((set, get) => {
     resetConfiguration() {
       const scope = get().scope
       if (scope) clearPrintAgentConfig(scope)
+      const embedded = getEmbeddedPrintAgent()
       set({
-        baseUrl: DEFAULT_PRINT_AGENT_URL, token: null, selectedPrinterId: null, selectedPrinter: null,
+        baseUrl: embedded?.baseUrl ?? DEFAULT_PRINT_AGENT_URL, token: embedded?.token ?? null, selectedPrinterId: null, selectedPrinter: null,
         cashlogyConfigured: false, cashlogyTerminalCode: 'POS_MAIN', cashlogyHealth: null,
         cashlogyConnectors: [], cashlogyConnectorsLoaded: false,
         isLoadingCashlogyConnectors: false, isDiscoveringCashlogyConnectors: false, isRecoveringCashlogy: false, cashlogyConnectorAction: null,
