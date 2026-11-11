@@ -5,7 +5,6 @@ import { Checkbox as UiCheckbox } from "../../../../components/ui/Checkbox";
 import {
   Copy,
   LogOut,
-  MapPin,
   MonitorSmartphone,
   Pencil,
   Plus,
@@ -45,10 +44,11 @@ import {
   createCrmDevice,
   createCrmUser,
   deleteCrmDevice,
+  deleteCrmUser,
   loadCrmAccessData,
   releaseCrmDeviceLogin,
-  updateManagerVenueAssignments,
   updateCrmDevice,
+  updateCrmUser,
 } from "../services/accessService";
 
 export type AccessManagementCrmProps = {
@@ -106,10 +106,8 @@ export function AccessManagementCrm({
   const [userPassword, setUserPassword] = useState("");
   const [userRole, setUserRole] = useState<CrmAccessUser["role"]>("manager");
   const [userVenueIds, setUserVenueIds] = useState<string[]>([]);
-  const [editingManagerId, setEditingManagerId] = useState<string | null>(null);
-  const [editingManagerVenueIds, setEditingManagerVenueIds] = useState<
-    string[]
-  >([]);
+  /** CRM user edited in the user modal; null while creating one. */
+  const [editingUserId, setEditingUserId] = useState<string | null>(null);
 
   const requestId = useRef(0);
   const refresh = useCallback(async () => {
@@ -139,12 +137,15 @@ export function AccessManagementCrm({
     });
   }
 
-  function openUserModal() {
-    setUserEmail("");
+  function openUserModal(user?: CrmAccessUser) {
+    setEditingUserId(user?.id ?? null);
+    setUserEmail(user?.email ?? "");
     setUserPassword("");
-    setUserRole("manager");
+    setUserRole(user?.role ?? "manager");
     setUserVenueIds(
-      venues.filter((venue) => venue.id === selectedVenueId && venue.isActive).map((venue) => venue.id),
+      user?.role === "manager"
+        ? user.venueIds.filter((venueId) => venues.some((venue) => venue.id === venueId && venue.isActive))
+        : venues.filter((venue) => venue.id === selectedVenueId && venue.isActive).map((venue) => venue.id),
     );
     setIsUserModalOpen(true);
   }
@@ -152,20 +153,32 @@ export function AccessManagementCrm({
   async function submitUser(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     await runAction(async () => {
-      const user = await createCrmUser(tenantContext, {
+      const input = {
         email: userEmail,
         password: userPassword,
         role: userRole,
         venueIds: userRole === "manager" ? userVenueIds : [],
-      });
+      };
+      const user = editingUserId
+        ? await updateCrmUser(tenantContext, editingUserId, input)
+        : await createCrmUser(tenantContext, input);
       setData((current) => ({
         ...current,
-        users: [...current.users, user].sort((first, second) =>
+        users: [...current.users.filter((item) => item.id !== user.id), user].sort((first, second) =>
           first.email.localeCompare(second.email),
         ),
       }));
       setIsUserModalOpen(false);
-      sileo.success({ title: "Usuario CRM creado" });
+      sileo.success({ title: editingUserId ? "Usuario CRM actualizado" : "Usuario CRM creado" });
+    });
+  }
+
+  async function removeUser(user: CrmAccessUser) {
+    if (!(await appConfirm(`¿Eliminar el acceso al CRM de "${user.email}"? Dejará de poder iniciar sesión en este negocio. Su histórico se conservará.`))) return;
+    await runAction(async () => {
+      await deleteCrmUser(tenantContext, user.id);
+      setData((current) => ({ ...current, users: current.users.filter((item) => item.id !== user.id) }));
+      sileo.success({ title: "Usuario CRM eliminado" });
     });
   }
 
@@ -179,36 +192,6 @@ export function AccessManagementCrm({
         ? [...new Set([...current, venueId])]
         : current.filter((id) => id !== venueId),
     );
-  }
-
-  function openManagerVenues(user: CrmAccessData["users"][number]) {
-    if (user.role !== "manager") return;
-    setEditingManagerId(user.id);
-    setEditingManagerVenueIds(
-      user.venueIds.filter((venueId) =>
-        venues.some((venue) => venue.id === venueId && venue.isActive),
-      ),
-    );
-  }
-
-  async function saveManagerVenues(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!editingManagerId) return;
-    await runAction(async () => {
-      const venueIds = await updateManagerVenueAssignments(
-        tenantContext,
-        editingManagerId,
-        editingManagerVenueIds,
-      );
-      setData((current) => ({
-        ...current,
-        users: current.users.map((user) =>
-          user.id === editingManagerId ? { ...user, venueIds } : user,
-        ),
-      }));
-      setEditingManagerId(null);
-      sileo.success({ title: "Locales del manager actualizados" });
-    });
   }
 
   async function copyCredential(value: string, label: string) {
@@ -510,7 +493,7 @@ export function AccessManagementCrm({
               <UiButton data-onboarding="user-create"
                 className="inline-flex min-h-10 w-auto items-center justify-center gap-2 rounded-[var(--crm-radius-sm)] border-0 bg-[var(--crm-blue)] px-3.5 text-[13px] font-semibold leading-none text-white shadow-none transition-[background-color,color,box-shadow,transform] duration-150 hover:bg-[var(--crm-blue-hover)] hover:shadow-[0_8px_20px_rgba(20,120,237,0.22)] !inline-flex !min-h-10 !shrink-0 !items-center !justify-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
                 disabled={disabled}
-                onClick={openUserModal}
+                onClick={() => openUserModal()}
                 type="button"
               >
                 <Plus className="!size-4" />{" "}
@@ -548,16 +531,27 @@ export function AccessManagementCrm({
                   >
                     {user.isActive ? "Activo" : "Inactivo"}
                   </span>
-                  {user.role === "manager" ? (
-                    <UiButton
-                      aria-label={`Gestionar locales de ${user.email}`}
-                      className="!inline-flex !min-h-9 !items-center !gap-2 !rounded-[9px] !border-0 !bg-[var(--crm-surface-soft)] !px-3 !text-xs !font-semibold !text-[var(--crm-text-secondary)]"
-                      disabled={disabled}
-                      onClick={() => openManagerVenues(user)}
-                      type="button"
-                    >
-                      <MapPin className="!size-4" /> Locales
-                    </UiButton>
+                  {user.id !== tenantContext.userId ? (
+                    <div className="!flex !gap-2">
+                      <UiButton
+                        aria-label={`Editar usuario ${user.email}`}
+                        className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-surface-soft)] !px-3 !text-[13px] !font-semibold !text-[var(--crm-text-secondary)]"
+                        disabled={disabled}
+                        onClick={() => openUserModal(user)}
+                        type="button"
+                      >
+                        <Pencil className="!size-4" /> Editar
+                      </UiButton>
+                      <UiButton
+                        aria-label={`Eliminar usuario ${user.email}`}
+                        className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-[10px] !border-0 !bg-[var(--crm-red-soft)] !px-3 !text-[13px] !font-semibold !text-[var(--crm-red)]"
+                        disabled={disabled}
+                        onClick={() => void removeUser(user)}
+                        type="button"
+                      >
+                        <Trash2 className="!size-4" /> Eliminar
+                      </UiButton>
+                    </div>
                   ) : (
                     <span />
                   )}
@@ -573,15 +567,17 @@ export function AccessManagementCrm({
 
       {isUserModalOpen ? (
         <CrmModal dismissDisabled={modalBusy}
-          label="Añadir usuario CRM"
+          label={editingUserId ? "Editar usuario CRM" : "Añadir usuario CRM"}
           onClose={() => setIsUserModalOpen(false)}
         >
           <form data-onboarding-dialog onSubmit={(event) => void submitUser(event)}>
             <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
               <div>
-                <h2 className="!m-0 !text-lg !font-bold">Nuevo usuario CRM</h2>
+                <h2 className="!m-0 !text-lg !font-bold">{editingUserId ? "Editar usuario CRM" : "Nuevo usuario CRM"}</h2>
                 <p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">
-                  Crea sus credenciales y asigna el nivel de acceso al negocio.
+                  {editingUserId
+                    ? "Cambia su usuario, contraseña, rol o locales de acceso."
+                    : "Crea sus credenciales y asigna el nivel de acceso al negocio."}
                 </p>
               </div>
               <UiButton
@@ -609,7 +605,7 @@ export function AccessManagementCrm({
                   value={userEmail}
                 />
               </Field>
-              <Field data-onboarding="user-password" label="Contraseña">
+              <Field data-onboarding="user-password" label={editingUserId ? "Nueva contraseña" : "Contraseña"}>
                 <UiInput
                   autoComplete="new-password"
                   className="h-11 min-h-11 w-full rounded-[var(--crm-radius-sm)] border border-transparent bg-[var(--crm-input-bg)] px-3.5 text-[13px] font-medium leading-[1.4] text-[var(--crm-text)] shadow-none outline-none transition-[border-color,box-shadow,background-color] duration-150 placeholder:text-[var(--crm-text-muted)] focus:border-[var(--crm-blue)] focus:shadow-[0_0_0_3px_var(--crm-blue-soft)] [&:is(textarea)]:h-auto [&:is(textarea)]:min-h-[88px] [&:is(textarea)]:resize-y [&:is(textarea)]:py-[11px] !h-11 !w-full !rounded-[10px] !border !border-transparent !bg-[var(--crm-input-bg)] !px-3.5 !text-[13px] !font-medium !text-[var(--crm-text)] !shadow-none !outline-none"
@@ -617,7 +613,8 @@ export function AccessManagementCrm({
                   maxLength={72}
                   minLength={CRM_USER_PASSWORD_MIN_LENGTH}
                   onChange={(event) => setUserPassword(event.target.value)}
-                  required
+                  placeholder={editingUserId ? "Déjala vacía para mantener la actual" : undefined}
+                  required={!editingUserId}
                   type="password"
                   value={userPassword}
                 />
@@ -644,8 +641,8 @@ export function AccessManagementCrm({
                 />
               ) : null}
               <p className="m-0 text-xs leading-6 text-[var(--crm-text-muted)]">
-                La contraseña debe tener al menos {CRM_USER_PASSWORD_MIN_LENGTH}{" "}
-                caracteres.
+                {editingUserId ? "Si la cambias, la nueva contraseña" : "La contraseña"} debe tener al menos{" "}
+                {CRM_USER_PASSWORD_MIN_LENGTH} caracteres.
               </p>
               <div className="!flex !flex-col-reverse !gap-2 sm:!flex-row sm:!justify-end">
                 <UiButton
@@ -661,68 +658,14 @@ export function AccessManagementCrm({
                   disabled={
                     disabled ||
                     !userEmail.trim() ||
-                    userPassword.length < CRM_USER_PASSWORD_MIN_LENGTH ||
+                    ((!editingUserId || userPassword) && userPassword.length < CRM_USER_PASSWORD_MIN_LENGTH) ||
                     (userRole === "manager" && !userVenueIds.length)
                   }
                   type="submit"
                 >
-                  <ShieldCheck className="!size-4" /> Crear usuario
-                </UiButton>
-              </div>
-            </div>
-          </form>
-        </CrmModal>
-      ) : null}
-
-      {editingManagerId ? (
-        <CrmModal dismissDisabled={modalBusy}
-          label="Locales del manager"
-          onClose={() => setEditingManagerId(null)}
-        >
-          <form onSubmit={(event) => void saveManagerVenues(event)}>
-            <div className="!flex !items-start !justify-between !gap-4 !border-b !border-[var(--crm-border)] !px-5 !py-4">
-              <div>
-                <h2 className="!m-0 !text-lg !font-bold">Locales permitidos</h2>
-                <p className="!mt-1 !mb-0 !text-xs !text-[var(--crm-text-muted)]">
-                  El manager solo podrá ver y gestionar los locales
-                  seleccionados.
-                </p>
-              </div>
-              <UiButton
-                aria-label="Cerrar"
-                className="!inline-flex !items-center !justify-center !border-0 !bg-[var(--crm-surface-soft)] !size-11 !min-h-11 !min-w-11 !shrink-0 !rounded-[12px] !p-0"
-                disabled={modalBusy}
-                onClick={() => setEditingManagerId(null)}
-                type="button"
-              >
-                <X className="!size-4" />
-              </UiButton>
-            </div>
-            <div className="!grid !gap-4 !px-5 !py-5">
-              <VenueScopePicker
-                disabled={disabled}
-                onChange={(venueId, checked) =>
-                  toggleVenue(venueId, checked, setEditingManagerVenueIds)
-                }
-                selectedVenueIds={editingManagerVenueIds}
-                venues={venues}
-              />
-              <div className="!flex !justify-end !gap-2">
-                <UiButton
-                  className="!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-input-bg)] !px-4 !text-[13px] !font-semibold"
-                  disabled={modalBusy}
-                  onClick={() => setEditingManagerId(null)}
-                  type="button"
-                >
-                  Cancelar
-                </UiButton>
-                <UiButton
-                  className="!min-h-10 !rounded-[10px] !border-0 !bg-[var(--crm-blue)] !px-4 !text-[13px] !font-semibold !text-white"
-                  disabled={disabled || !editingManagerVenueIds.length}
-                  type="submit"
-                >
-                  <Save className="mr-2 inline !size-4" />
-                  Guardar locales
+                  {editingUserId
+                    ? <><Save className="!size-4" /> Guardar cambios</>
+                    : <><ShieldCheck className="!size-4" /> Crear usuario</>}
                 </UiButton>
               </div>
             </div>

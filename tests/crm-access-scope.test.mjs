@@ -17,7 +17,9 @@ function queryClient(tables, calls) {
       calls.push(call)
       let single = false
       return {
-        select() { return this },
+        select(_columns, options) { call.head = options?.head === true; return this },
+        update(values) { call.update = values; return this },
+        delete() { call.delete = true; return this },
         eq(key, value) { call.filters[key] = value; return this },
         neq(key, value) { call.exclude = [key, value]; return this },
         in(key, values) { call.include = [key, values]; return this },
@@ -25,11 +27,13 @@ function queryClient(tables, calls) {
         maybeSingle() { single = true; return this },
         single() { single = true; return this },
         then(resolve) {
-          const rows = (tables[table] ?? []).filter(row =>
-            Object.entries(call.filters).every(([key, value]) => row[key] === value)
+          const matches = row => Object.entries(call.filters).every(([key, value]) => row[key] === value)
             && (!call.exclude || row[call.exclude[0]] !== call.exclude[1])
-            && (!call.include || call.include[1].includes(row[call.include[0]])),
-          )
+            && (!call.include || call.include[1].includes(row[call.include[0]]))
+          const rows = (tables[table] ?? []).filter(matches)
+          if (call.delete) tables[table] = (tables[table] ?? []).filter(row => !matches(row))
+          if (call.update) rows.forEach(row => Object.assign(row, call.update))
+          if (call.head) return Promise.resolve(resolve({ count: rows.length, data: null, error: null }))
           return Promise.resolve(resolve({ data: single ? rows[0] ?? null : rows, error: null }))
         },
       }
@@ -76,6 +80,9 @@ test('access queries only selected venue devices and accounts, reuses layout ven
 function edgeFixture({ role = 'owner', extraDevices = 0, pendingPayment = false } = {}) {
   const calls = []
   const usersRequested = []
+  const authUpdates = []
+  const authDeletes = []
+  const rpcCalls = []
   let maxConcurrent = 0
   let concurrent = 0
   const tables = {
@@ -97,6 +104,7 @@ function edgeFixture({ role = 'owner', extraDevices = 0, pendingPayment = false 
       ...(role === 'manager' ? [{ tenant_id: 'tenant-a', manager_user_id: 'owner', venue_id: 'venue-a' }] : []),
     ],
     user_login_leases: [{ user_id: 'cashier-a', expires_at: '2999-01-01', heartbeat_at: '2026-10-16' }],
+    venues: ['a', 'b'].map(suffix => ({ id: `venue-${suffix}`, tenant_id: 'tenant-a', is_active: true })),
   }
   for (let index = 0; index < extraDevices; index++) {
     tables.device_user_assignments.push({ tenant_id: 'tenant-a', user_id: `extra-${index}`, venue_id: 'venue-a', device_id: `extra-${index}`, is_active: true })
@@ -112,8 +120,18 @@ function edgeFixture({ role = 'owner', extraDevices = 0, pendingPayment = false 
         concurrent--
         return { data: { user: { id, email: `${id}@example.test`, user_metadata: {} } }, error: null }
       },
+      async updateUserById(id, attributes) { authUpdates.push({ id, ...attributes }); return { data: {}, error: null } },
+      async deleteUser(id, soft) { authDeletes.push({ id, soft }); return { data: {}, error: null } },
       listUsers() { assert.fail('Access listing must never enumerate project Auth users') },
     },
+  }
+  client.rpc = async (name, args) => {
+    rpcCalls.push({ name, args })
+    if (name === 'set_manager_venue_assignments') {
+      tables.manager_venue_assignments = tables.manager_venue_assignments.filter(row => row.manager_user_id !== args.p_manager_user_id)
+      tables.manager_venue_assignments.push(...args.p_venue_ids.map(venueId => ({ tenant_id: args.p_tenant_id, manager_user_id: args.p_manager_user_id, venue_id: venueId })))
+    }
+    return { data: args?.p_venue_ids ?? null, error: null }
   }
   let handler
   compileComponent(edgeSource, {
@@ -127,7 +145,7 @@ function edgeFixture({ role = 'owner', extraDevices = 0, pendingPayment = false 
     Response, console,
   })
   return {
-    calls, usersRequested,
+    calls, usersRequested, authUpdates, authDeletes, rpcCalls, tables,
     get maxConcurrent() { return maxConcurrent },
     request(body = {}) {
       return handler(new Request('https://example.test', { method: 'POST', headers: { Authorization: 'Bearer test' }, body: JSON.stringify({ action: 'list', tenantId: 'tenant-a', ...body }) }))
@@ -155,4 +173,64 @@ test('edge denies manager requests outside assigned venue and never exposes mana
   assert.deepEqual(data.allowedVenueIds, ['venue-a'])
   assert.deepEqual(allowed.usersRequested, ['cashier-a'])
   assert.equal((await allowed.request({ tenantId: 'tenant-b', venueId: 'venue-a' })).status, 403)
+})
+
+test('only owners edit or delete other CRM users of their own business', async () => {
+  const manager = edgeFixture({ role: 'manager' })
+  for (const action of ['update-crm-user', 'delete-crm-user']) {
+    assert.equal((await manager.request({ action, userId: 'manager-b', email: 'x@example.test', role: 'gestor' })).status, 403)
+  }
+  const owner = edgeFixture()
+  const update = body => owner.request({ action: 'update-crm-user', email: 'new@example.test', role: 'gestor', ...body })
+  assert.equal((await update({ userId: 'owner' })).status, 400)
+  assert.equal((await owner.request({ action: 'delete-crm-user', userId: 'owner' })).status, 400)
+  // Cashiers are managed with their device; other businesses' users are out of reach.
+  assert.equal((await update({ userId: 'cashier-a' })).status, 404)
+  assert.equal((await update({ userId: 'foreign-owner' })).status, 404)
+  assert.equal((await owner.request({ action: 'delete-crm-user', userId: 'cashier-a' })).status, 404)
+  assert.equal((await update({ userId: 'manager-a', role: 'manager', venueIds: ['venue-x'] })).status, 400)
+  assert.equal((await update({ userId: 'manager-a', password: 'short' })).status, 400)
+  assert.equal(owner.authUpdates.length + owner.authDeletes.length + owner.rpcCalls.length, 0)
+})
+
+test('owner changes a CRM user email, password, role and venues', async () => {
+  const fixture = edgeFixture()
+  const reply = await fixture.request({ action: 'update-crm-user', userId: 'manager-a', email: ' New@Example.test ', password: 'new-password', role: 'gestor' })
+  assert.equal(reply.status, 200)
+  assert.deepEqual((await reply.json()).user, { id: 'manager-a', email: 'new@example.test', fullName: '', isActive: true, role: 'gestor', venueIds: [] })
+  assert.deepEqual(plain(fixture.authUpdates), [{ id: 'manager-a', email: 'new@example.test', email_confirm: true, password: 'new-password' }])
+  assert.equal(fixture.tables.tenant_memberships.find(row => row.user_id === 'manager-a').role, 'gestor')
+  assert.deepEqual(fixture.tables.manager_venue_assignments.filter(row => row.manager_user_id === 'manager-a'), [])
+
+  // Back to manager with one venue; an unchanged email and empty password leave Auth alone.
+  const back = await fixture.request({ action: 'update-crm-user', userId: 'manager-a', email: 'manager-a@example.test', password: '', role: 'manager', venueIds: ['venue-b'] })
+  assert.equal(back.status, 200)
+  assert.equal(fixture.authUpdates.length, 1)
+  assert.deepEqual(plain(fixture.rpcCalls), [{ name: 'set_manager_venue_assignments', args: { p_manager_user_id: 'manager-a', p_tenant_id: 'tenant-a', p_venue_ids: ['venue-b'] } }])
+  assert.deepEqual(fixture.tables.manager_venue_assignments.filter(row => row.manager_user_id === 'manager-a').map(row => row.venue_id), ['venue-b'])
+})
+
+test('credentials of an account shared with another business are never changed here', async () => {
+  const fixture = edgeFixture()
+  fixture.tables.tenant_memberships.push({ tenant_id: 'tenant-b', user_id: 'manager-b', role: 'manager', is_active: true })
+  const base = { action: 'update-crm-user', userId: 'manager-b', email: 'manager-b@example.test', role: 'gestor' }
+  assert.equal((await fixture.request({ ...base, password: 'new-password' })).status, 409)
+  assert.equal((await fixture.request({ ...base, email: 'other@example.test' })).status, 409)
+  assert.equal(fixture.tables.tenant_memberships.find(row => row.user_id === 'manager-b' && row.tenant_id === 'tenant-a').role, 'manager')
+  assert.equal((await fixture.request(base)).status, 200)
+  assert.equal(fixture.authUpdates.length, 0)
+
+  // Deleting it removes only this business's access and keeps the account.
+  assert.equal((await fixture.request({ action: 'delete-crm-user', userId: 'manager-b' })).status, 200)
+  assert.deepEqual(fixture.tables.tenant_memberships.filter(row => row.user_id === 'manager-b').map(row => row.tenant_id), ['tenant-b'])
+  assert.equal(fixture.authDeletes.length, 0)
+})
+
+test('deleting a CRM user removes its access and soft-deletes its own account', async () => {
+  const fixture = edgeFixture()
+  assert.equal((await fixture.request({ action: 'delete-crm-user', userId: 'manager-a' })).status, 200)
+  assert.equal(fixture.tables.tenant_memberships.some(row => row.user_id === 'manager-a'), false)
+  assert.equal(fixture.tables.manager_venue_assignments.some(row => row.manager_user_id === 'manager-a'), false)
+  assert.equal(fixture.tables.manager_venue_assignments.some(row => row.manager_user_id === 'manager-b'), true)
+  assert.deepEqual(plain(fixture.authDeletes), [{ id: 'manager-a', soft: true }])
 })

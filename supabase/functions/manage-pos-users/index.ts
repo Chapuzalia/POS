@@ -860,6 +860,129 @@ Deno.serve(async (request) => {
       }, 201)
     }
 
+    if (action === 'update-crm-user' || action === 'delete-crm-user') {
+      if (!isOwner) return response({ error: 'Solo el owner puede gestionar los usuarios del CRM' }, 403)
+      const userId = String(body.userId ?? '')
+      if (!userId || userId === authData.user.id) {
+        return response({ error: 'No puedes modificar tu propio usuario desde Accesos' }, 400)
+      }
+
+      const { data: targetMemberships, error: targetMembershipsError } = await adminClient
+        .from('tenant_memberships')
+        .select('tenant_id, role, is_active')
+        .eq('user_id', userId)
+      if (targetMembershipsError) throw targetMembershipsError
+      const target = (targetMemberships ?? []).find((item) =>
+        item.tenant_id === tenantId && ['owner', 'manager', 'gestor'].includes(item.role))
+      if (!target) return response({ error: 'El usuario no tiene acceso al CRM de este negocio' }, 404)
+      // The Auth account is global: credentials of an account shared with another business stay untouched.
+      const sharedAccount = (targetMemberships ?? []).some((item) => item.tenant_id !== tenantId)
+
+      if (action === 'delete-crm-user') {
+        const removalResults = await Promise.all([
+          adminClient.from('manager_venue_assignments').delete().eq('tenant_id', tenantId).eq('manager_user_id', userId),
+          adminClient.from('tenant_memberships').delete().eq('tenant_id', tenantId).eq('user_id', userId).eq('role', target.role),
+        ])
+        const removalError = removalResults.find((result) => result.error)?.error
+        if (removalError) throw removalError
+        if (!sharedAccount) {
+          const cleanupResults = await Promise.all([
+            adminClient.from('user_login_leases').delete().eq('user_id', userId),
+            adminClient.from('profiles').delete().eq('id', userId),
+          ])
+          const cleanupError = cleanupResults.find((result) => result.error)?.error
+          if (cleanupError) throw cleanupError
+          // Soft delete keeps the history's foreign keys and blocks any new sign-in.
+          const { error: deleteAuthError } = await adminClient.auth.admin.deleteUser(userId, true)
+          if (deleteAuthError) throw deleteAuthError
+        }
+        return response({ ok: true })
+      }
+
+      const email = String(body.email ?? '').trim().toLowerCase()
+      const password = String(body.password ?? '')
+      const role = String(body.role ?? '')
+      const venueIds = [...new Set(
+        (Array.isArray(body.venueIds) ? body.venueIds : []).map((value: unknown) => String(value)),
+      )]
+      if (!email || email.length > 254 || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+        return response({ error: 'Introduce un email válido' }, 400)
+      }
+      if (password && (password.length < 8 || password.length > 72)) {
+        return response({ error: 'La contraseña debe tener entre 8 y 72 caracteres' }, 400)
+      }
+      if (!['owner', 'manager', 'gestor'].includes(role)) {
+        return response({ error: 'El rol debe ser owner, manager o gestor' }, 400)
+      }
+      if (role === 'manager' && !venueIds.length) {
+        return response({ error: 'Selecciona al menos un local para el manager' }, 400)
+      }
+      if (role === 'manager') {
+        const { count, error: venuesError } = await adminClient
+          .from('venues')
+          .select('id', { count: 'exact', head: true })
+          .eq('tenant_id', tenantId)
+          .eq('is_active', true)
+          .in('id', venueIds)
+        if (venuesError) throw venuesError
+        if ((count ?? 0) !== venueIds.length) return response({ error: 'Alguno de los locales no pertenece al negocio' }, 400)
+      }
+
+      const { data: authUser, error: authUserError } = await adminClient.auth.admin.getUserById(userId)
+      if (authUserError || !authUser.user) throw authUserError ?? new Error('Usuario Auth no encontrado')
+      const emailChanges = (authUser.user.email ?? '').toLowerCase() !== email
+      if (emailChanges || password) {
+        if (sharedAccount) {
+          return response({ error: 'Esta cuenta también accede a otro negocio: no se puede cambiar su email ni su contraseña desde aquí' }, 409)
+        }
+        const { error: authUpdateError } = await adminClient.auth.admin.updateUserById(userId, {
+          email,
+          email_confirm: true,
+          ...(password ? { password } : {}),
+        })
+        if (authUpdateError) {
+          const duplicateEmail = /already|registered|exists/i.test(authUpdateError.message ?? '')
+          return response({ error: duplicateEmail ? 'Ya existe una cuenta con ese email' : authUpdateError.message || 'No se pudo actualizar el usuario' }, duplicateEmail ? 409 : 400)
+        }
+      }
+
+      if (role !== target.role) {
+        const { error: roleError } = await adminClient
+          .from('tenant_memberships')
+          .update({ role })
+          .eq('tenant_id', tenantId)
+          .eq('user_id', userId)
+          .eq('role', target.role)
+        if (roleError) throw roleError
+      }
+      if (role === 'manager') {
+        const { error: scopeError } = await authClient.rpc('set_manager_venue_assignments', {
+          p_manager_user_id: userId,
+          p_tenant_id: tenantId,
+          p_venue_ids: venueIds,
+        })
+        if (scopeError) return response({ error: scopeError.message || 'No se pudieron guardar los locales del manager' }, 400)
+      } else {
+        const { error: scopeError } = await adminClient
+          .from('manager_venue_assignments')
+          .delete()
+          .eq('tenant_id', tenantId)
+          .eq('manager_user_id', userId)
+        if (scopeError) throw scopeError
+      }
+
+      return response({
+        user: {
+          id: userId,
+          email,
+          fullName: String(authUser.user.user_metadata?.full_name ?? ''),
+          isActive: Boolean(target.is_active),
+          role,
+          venueIds: role === 'manager' ? venueIds : [],
+        },
+      })
+    }
+
     if (action === 'create-device-with-user' || action === 'create-kds-device') {
       const venueId = String(body.venueId ?? '')
       const deviceName = String(body.deviceName ?? '').trim()
