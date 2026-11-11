@@ -24,6 +24,15 @@ allprojects {
     }
 }
 
+// El plugin de Node.js compila C++ dentro de node_modules/.pnpm/...; en Windows esa ruta
+// supera los 260 caracteres y CMake/ninja fallan. Se compila en carpetas cortas del proyecto.
+project(':capawesome-capacitor-nodejs') {
+    layout.buildDirectory = rootProject.file('build/nodejs-plugin')
+    afterEvaluate {
+        android.externalNativeBuild.cmake.buildStagingDirectory = rootProject.file('build/nodejs-cxx')
+    }
+}
+
 task clean(type: Delete) {
     delete rootProject.buildDir
 }
