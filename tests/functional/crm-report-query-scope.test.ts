@@ -42,6 +42,17 @@ beforeEach(() => {
 })
 
 describe('CRM report queries on busy tenants', () => {
+  it('keeps the stored issuer for original and corrective documents without enabling QR for local-only sales', async () => {
+    const invoice = { series: 'F', number: 3, issuedAt: '2026-11-10T16:15:00Z', issuerName: 'Stored issuer', issuerNif: 'B00000000', issuerAddress: 'Stored address', transmissionMode: 'local-only', qrUrl: 'https://example.com/unused-qr' }
+    rows.set('tickets', [{ id: 't1', ticket_number: 7, local_created_at: invoice.issuedAt, status: 'paid', total_cents: 500,
+      sales: [], ticket_lines: [], fiscal_local_records: [{ record_kind: 'alta', invoice_snapshot: invoice }],
+      refund_requests: [{ id: 'r1', total_cents: 100, created_at: invoice.issuedAt, refund_method: 'cash', refund_lines: [], fiscal_local_records: [{ invoice_snapshot: { ...invoice, issuerName: 'Corrective issuer' } }] }],
+    }])
+    const detail = await loadCrmSalesReportTicketDetail(context, 'venue', 't1')
+    expect(detail?.fiscal).toMatchObject({ issuer: { name: 'Stored issuer', nif: 'B00000000', address: 'Stored address' }, verificationUrl: null, verifactuLegend: false })
+    expect(detail?.refundDocuments[0]).toMatchObject({ issuer: { name: 'Corrective issuer', nif: 'B00000000', address: 'Stored address' }, verificationUrl: null })
+  })
+
   it('scopes the ticket list embeds to the tenant and the fiscal alta record', async () => {
     rpc.mockResolvedValue({ data: [{ ticket_id: 't1', total_count: 1 }], error: null })
     rows.set('tickets', [{ id: 't1', ticket_number: 7, local_created_at: '2026-11-02T10:00:00Z', status: 'paid', total_cents: 500, discount_amount_cents: 0,

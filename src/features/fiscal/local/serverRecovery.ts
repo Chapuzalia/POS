@@ -8,6 +8,8 @@ import { readLocalFiscalHead, readLocalFiscalRecord, reconcileLocalFiscalCopies,
 
 // Las páginas llevan sobres fiscales completos: 3 s no basta en redes móviles y aquí no hay alternativa local.
 const RECOVERY_READ_TIMEOUT_MS = 20_000
+const RECOVERY_PAGE_SIZE = 100
+const RECOVERY_MIN_PAGE_SIZE = 25
 
 const recordSchema = z.object({
   idempotencyKey: z.uuid(), environment: z.literal('production'), tenantId: z.uuid(),
@@ -94,15 +96,32 @@ async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstall
     return 0
   }
   const copies: RestorableFiscalCopy[] = []
-  let offset = 0
-  for (;;) {
-    const page = await readFiscalBackend(signal => scopeQuery().gte('chain_position', lastLocal?.record.chainPosition ?? 1)
-      .order('chain_position', { ascending: true }).range(offset, offset + 499).abortSignal(signal), RECOVERY_READ_TIMEOUT_MS)
+  let nextPosition = lastLocal?.record.chainPosition ?? 1
+  let pageSize = RECOVERY_PAGE_SIZE
+  // Sin un límite superior por página, el plan puede filtrar/ordenar todo el histórico antes de LIMIT.
+  while (nextPosition <= lastServer.chain_position) {
+    const endPosition = Math.min(nextPosition + pageSize - 1, lastServer.chain_position)
+    const page = await readFiscalBackend(signal => scopeQuery().gte('chain_position', nextPosition)
+      .lte('chain_position', endPosition).order('chain_position', { ascending: true })
+      .limit(pageSize).abortSignal(signal), RECOVERY_READ_TIMEOUT_MS)
+    if (page.error?.code === '57014' && pageSize > RECOVERY_MIN_PAGE_SIZE) {
+      pageSize = Math.max(RECOVERY_MIN_PAGE_SIZE, Math.floor(pageSize / 2))
+      continue
+    }
     if (page.error) throw page.error
     const rows = (page.data ?? []).map(row => toCopy(rowSchema.parse(row), installation))
+    if (!rows.length) throw new Error('Falta un registro anterior; se bloquea la conciliación fiscal.')
+    for (const copy of rows) {
+      if (copy.entry.record.chainPosition !== nextPosition) {
+        throw new Error('Falta un registro anterior; se bloquea la conciliación fiscal.')
+      }
+      nextPosition += 1
+    }
     copies.push(...rows)
-    if (rows.length < 500) break
-    offset += rows.length
+  }
+  const recoveredHead = copies.at(-1)?.entry
+  if (recoveredHead?.id !== lastServer.id || recoveredHead.record.hash !== lastServer.hash) {
+    throw new Error('La cadena recuperada no coincide con el último registro del servidor.')
   }
   return reconcileLocalFiscalCopies(scope, installation.deviceId, copies)
 }

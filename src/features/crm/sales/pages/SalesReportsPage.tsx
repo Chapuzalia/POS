@@ -22,7 +22,7 @@ import { getReadableError } from '../../../../utils/errors'
 import { type CrmSalesReportAggregate, type CrmSalesReports, type TenantContext } from '../../../../types'
 import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { type RunAction } from '../../shared/types'
-import { openRefundDocument, openTicketDocument } from '../../integrations/services/fiscalInvoiceDocument'
+import { FiscalDocumentPreview } from '../../integrations/components/FiscalDocumentPreview'
 
 export type SalesReportsCrmProps = {
   dayChangeTime: string | null
@@ -578,6 +578,8 @@ export function SalesReportTicketModal({
   tenantContext: TenantContext
   ticket: CrmSalesReports['tickets'][number]
 }) {
+  const [preview, setPreview] = useState<{ refund: CrmSalesReports['tickets'][number]['refundDocuments'][number] | null } | null>(null)
+  const closePreview = useCallback(() => setPreview(null), [])
   const fiscalTotals = buildSalesReportTicketTotals(ticket)
   const netTotalCents = fiscalTotals.totalCents + ticket.refundDocuments.reduce((sum, document) => sum + document.totalCents, 0)
   const netSubtotalCents = fiscalTotals.subtotalCents + ticket.refundDocuments.reduce((sum, document) => sum + document.taxableBaseCents, 0)
@@ -587,8 +589,10 @@ export function SalesReportTicketModal({
     ...ticket.refundDocuments.flatMap((document) => document.lines.map((line, index) => ({ key: `${document.id}-${index}`, line: { productName: line.name, variantName: line.variantName, quantity: line.quantity, lineTotalCents: line.amountCents, unitPriceCents: line.quantity ? Math.round(line.amountCents / line.quantity) : 0, modifiers: [], components: [] }, quantity: line.quantity, totalCents: line.amountCents }))),
   ]
 
+  if (preview) return <FiscalDocumentPreview context={tenantContext} onClose={closePreview} refund={preview.refund} ticket={ticket} />
+
   return (
-    <CrmModal label={`Detalle del ticket ${getDisplayedTicketNumber(ticket)}`} onClose={onClose} size="large">
+    <CrmModal label={`Detalle del ticket ${getDisplayedTicketNumber(ticket)}`} onClose={onClose} size="large" scroll="content" dialogClassName="!flex !flex-col [&>div:first-child]:!shrink-0">
       <div className="flex items-center justify-between gap-3 border-b border-[var(--crm-border-subtle)] bg-transparent p-3 text-[var(--crm-text)] [&>div]:grid [&>div]:min-w-0 [&>div]:gap-1 [&_span]:text-[15px] [&_span]:font-bold [&_small]:truncate [&_small]:text-xs [&_small]:font-medium [&_small]:text-[var(--crm-text-muted)] !flex !items-center !justify-between !gap-3 !border-b !border-[var(--crm-border-subtle)] !bg-transparent !px-[18px] !py-5 !text-[var(--crm-text)] md:!px-[22px]">
         <div>
           <span>Ticket #{getDisplayedTicketNumber(ticket)}</span>
@@ -647,9 +651,9 @@ export function SalesReportTicketModal({
          <section className="!mb-5 !grid !gap-3 !rounded-xl !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface-soft)] !p-4">
            <h3 className="!m-0 !text-sm !font-bold">Documentos fiscales de la venta</h3>
            <div className="!grid !gap-3 !text-xs">
-             <div className="!flex !flex-wrap !items-center !justify-between !gap-2 !rounded-lg !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-3"><span><strong>Original</strong><span className="!ml-2">{ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number} · ${crmReportDateTimeFormatter.format(new Date(ticket.fiscal.issuedAt))} · ${formatMoney(ticket.totalCents)}` : 'Sin documento fiscal emitido'}</span></span>{ticket.fiscal ? <UiButton onClick={() => void openTicketDocument(ticket, tenantContext)} type="button"><Download className="!size-3.5" />Descargar</UiButton> : null}</div>
+             <div className="!flex !flex-wrap !items-center !justify-between !gap-2 !rounded-lg !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-3"><span><strong>Original</strong><span className="!ml-2">{ticket.fiscal ? `${ticket.fiscal.series}-${ticket.fiscal.number} · ${crmReportDateTimeFormatter.format(new Date(ticket.fiscal.issuedAt))} · ${formatMoney(ticket.totalCents)}` : 'Sin documento fiscal emitido'}</span></span>{ticket.fiscal ? <UiButton onClick={() => setPreview({ refund: null })} type="button"><Download className="!size-3.5" />Descargar</UiButton> : null}</div>
              {ticket.refundDocuments.map((document) => <div className="!rounded-lg !border !border-[var(--crm-border-subtle)] !bg-[var(--crm-surface)] !p-3" key={document.id}>
-               <div><strong>Definitiva / correctiva</strong><span className="!ml-2">{document.series && document.number ? `${document.series}-${document.number}` : 'Numeración no disponible'} · {crmReportDateTimeFormatter.format(new Date(document.issuedAt))} · {formatMoney(document.totalCents)} · {paymentLabels[document.method]}</span><UiButton className="!ml-2" onClick={() => void openRefundDocument(ticket, document, tenantContext)} type="button"><Download className="!size-3.5" />Descargar</UiButton></div>
+               <div><strong>Definitiva / correctiva</strong><span className="!ml-2">{document.series && document.number ? `${document.series}-${document.number}` : 'Numeración no disponible'} · {crmReportDateTimeFormatter.format(new Date(document.issuedAt))} · {formatMoney(document.totalCents)} · {paymentLabels[document.method]}</span><UiButton className="!ml-2" onClick={() => setPreview({ refund: document })} type="button"><Download className="!size-3.5" />Descargar</UiButton></div>
                {document.rectifies ? <div className="!mt-1">Rectifica factura {document.rectifies.seriesAndNumber}</div> : null}
                <div className="!mt-1">{document.lines.map((line) => `${line.quantity} × ${line.name}${line.variantName ? ` (${line.variantName})` : ''} · ${formatMoney(line.amountCents)}`).join(' · ')}</div>
                <div className="!mt-2 !flex !flex-wrap !items-center !gap-3">{document.verificationUrl ? <a className="!text-[var(--crm-blue)] !underline" href={document.verificationUrl} rel="noreferrer" target="_blank">Verificación fiscal / QR</a> : null}</div>

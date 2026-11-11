@@ -16,6 +16,11 @@ export const backendFetch: typeof fetch = async (input, init) => {
   const timer = requestUrl.includes('/auth/v1/') ? setTimeout(abort, 15_000) : undefined
   try {
     const response = await fetch(input, { ...init, signal: controller.signal })
+    if (response.status === 500 && requestUrl.includes('/rest/v1/')) {
+      // Preserve SQL timeouts so callers can reduce their queries instead of resetting the session.
+      const failure: unknown = await response.clone().json().catch(() => null)
+      if (failure && typeof failure === 'object' && 'code' in failure && failure.code === '57014') return response
+    }
     if (response.status >= 500 || response.status === 408 || response.status === 429) {
       // Let Supabase classify infrastructure failures as retryable, preserving
       // its own persisted session even for a proxy's non-JSON error response.

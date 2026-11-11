@@ -309,6 +309,14 @@ async function loadTicketRows(context: TenantContext, venueId: string | undefine
   return ticketIds.map((ticketId) => rowsById.get(ticketId)).filter((row): row is SalesReportTicketRow => Boolean(row))
 }
 
+function mapFiscalIssuer(invoice: Record<string, unknown>): NonNullable<CrmSalesReportTicket['fiscal']>['issuer'] {
+  return {
+    name: typeof invoice.issuerName === 'string' ? invoice.issuerName : '',
+    nif: typeof invoice.issuerNif === 'string' ? invoice.issuerNif : '',
+    address: typeof invoice.issuerAddress === 'string' ? invoice.issuerAddress : '',
+  }
+}
+
 function mapFiscalRecord(ticket: SalesReportTicketRow): CrmSalesReportTicket['fiscal'] {
   const localRecord = ticket.fiscal_local_records?.find((record) => record.record_kind === 'alta')
   const localInvoice = localRecord?.invoice_snapshot
@@ -321,7 +329,7 @@ function mapFiscalRecord(ticket: SalesReportTicketRow): CrmSalesReportTicket['fi
     if (series && number && issuedAt) {
       return {
         provider: 'verifactu', status: 'pending', documentKind: ticket.customer_id ? 'complete' : 'simplified',
-        series, number, issuedAt, verificationUrl, externalCode: `${series}/${number}`,
+        series, number, issuedAt, verificationUrl, externalCode: `${series}/${number}`, issuer: mapFiscalIssuer(localInvoice),
         errorCode: null, errorMessage: null, verifactuLegend: transmissionMode !== 'local-only',
       }
     }
@@ -342,6 +350,7 @@ function mapRefundDocuments(ticket: SalesReportTicketRow): CrmSalesReportTicket[
     const lines = request.refund_lines ?? []
     return {
       id: request.id,
+      issuer: mapFiscalIssuer(invoice),
       series: request.fiscal_series ?? (typeof invoice.series === 'string' ? invoice.series : null),
       number,
       issuedAt,
