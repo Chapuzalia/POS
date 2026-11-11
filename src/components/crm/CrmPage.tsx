@@ -1,7 +1,7 @@
 import { lazy, Suspense, useCallback, useEffect, useRef, useState } from 'react'
 import { CrmModalBusyContext } from '../../features/crm/shared/components/CrmModalBusyContext'
 import { CrmShell } from '../../features/crm/layout/CrmShell'
-import { canAccessCrm, canAccessCrmSection } from '../../features/crm/routing/crmPermissions'
+import { canAccessCrm, canAccessCrmSection, defaultCrmSection } from '../../features/crm/routing/crmPermissions'
 import { catalogSections, crmSectionFromPath, crmSectionPath, type CrmSection } from '../../features/crm/routing/crmNavigation'
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
@@ -135,7 +135,7 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
   const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
 
   useEffect(() => {
-    if (!canAccessCrmSection(context.role, activeSection, context.features, selectedVenue)) setActiveSection('dashboard')
+    if (!canAccessCrmSection(context.role, activeSection, context.features, selectedVenue)) setActiveSection(defaultCrmSection(context.role))
   }, [activeSection, context.features, context.role, selectedVenue])
 
 

@@ -26,6 +26,7 @@ import {
 } from "react";
 import { sileo } from "sileo";
 import {
+  type CrmAccessUser,
   type CrmDevice,
   type CrmVenue,
   type DeviceMode,
@@ -65,6 +66,7 @@ const modeOptions = [
 ];
 
 const roleLabels = {
+  gestor: "Gestor",
   manager: "Manager",
   owner: "Owner",
 };
@@ -72,6 +74,7 @@ const roleLabels = {
 const roleOptions = [
   { label: "Manager", value: "manager" },
   { label: "Owner", value: "owner" },
+  { label: "Gestor (solo informes de ventas)", value: "gestor" },
 ];
 
 export function AccessManagementCrm({
@@ -101,7 +104,7 @@ export function AccessManagementCrm({
   const [isUserModalOpen, setIsUserModalOpen] = useState(false);
   const [userEmail, setUserEmail] = useState("");
   const [userPassword, setUserPassword] = useState("");
-  const [userRole, setUserRole] = useState<"owner" | "manager">("manager");
+  const [userRole, setUserRole] = useState<CrmAccessUser["role"]>("manager");
   const [userVenueIds, setUserVenueIds] = useState<string[]>([]);
   const [editingManagerId, setEditingManagerId] = useState<string | null>(null);
   const [editingManagerVenueIds, setEditingManagerVenueIds] = useState<
@@ -623,7 +626,7 @@ export function AccessManagementCrm({
                 <CrmSelect
                   disabled={disabled}
                   onChange={(value) =>
-                    setUserRole(value as "owner" | "manager")
+                    setUserRole(value as CrmAccessUser["role"])
                   }
                   options={roleOptions}
                   required

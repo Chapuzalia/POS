@@ -135,7 +135,7 @@ export type AppliedDiscount = {
   }>
 }
 
-export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'cashier'
+export type TenantRole = 'superadmin' | 'owner' | 'manager' | 'gestor' | 'cashier'
 export type DeviceMode = 'satellite' | 'checkout' | 'hybrid' | 'kds'
 
 export type ThemeMode = 'light' | 'dark'
@@ -234,7 +234,7 @@ export type CrmAccessUser = {
   email: string
   fullName: string
   isActive: boolean
-  role: 'owner' | 'manager'
+  role: 'owner' | 'manager' | 'gestor'
   venueIds: string[]
 }
 

@@ -163,9 +163,9 @@ export async function loginTenant(input: LoginInput): Promise<TenantContext> {
     throw tenantError
   }
 
-  const features = membership.role === 'owner' || membership.role === 'manager' ? await loadTenantFeatures(tenant.id) : undefined
+  const features = membership.role === 'owner' || membership.role === 'manager' || membership.role === 'gestor' ? await loadTenantFeatures(tenant.id) : undefined
 
-  if (membership.role === 'owner' || membership.role === 'manager') {
+  if (membership.role === 'owner' || membership.role === 'manager' || membership.role === 'gestor') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
       tenantName: tenant.name,
@@ -355,9 +355,9 @@ export async function restoreTenantContext(cachedContext: TenantContext): Promis
     throw new TenantSessionError('El usuario ya no tiene acceso activo a este negocio.')
   }
 
-  const features = membership.role === 'owner' || membership.role === 'manager' ? await loadTenantFeatures(tenant.id) : undefined
+  const features = membership.role === 'owner' || membership.role === 'manager' || membership.role === 'gestor' ? await loadTenantFeatures(tenant.id) : undefined
 
-  if (membership.role === 'owner' || membership.role === 'manager') {
+  if (membership.role === 'owner' || membership.role === 'manager' || membership.role === 'gestor') {
     return requireExclusiveLogin({
       tenantId: tenant.id,
       tenantName: tenant.name,

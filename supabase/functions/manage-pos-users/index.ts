@@ -695,7 +695,7 @@ Deno.serve(async (request) => {
       const visibleAssignments = (assignments ?? []).filter((item) => canManageVenue(item.venue_id))
       const deviceUserIds = new Set(visibleAssignments.map((item) => item.user_id))
       const managementMemberships = isOwner ? (memberships ?? []).filter((item) =>
-        item.role === 'owner' || (item.role === 'manager' && (!venueId || (managerScopes ?? []).some(
+        item.role === 'owner' || item.role === 'gestor' || (item.role === 'manager' && (!venueId || (managerScopes ?? []).some(
           (scope) => scope.manager_user_id === item.user_id && scope.venue_id === venueId,
         )))
       ) : []
@@ -789,8 +789,8 @@ Deno.serve(async (request) => {
       if (password.length < 8 || password.length > 72) {
         return response({ error: 'La contraseña debe tener entre 8 y 72 caracteres' }, 400)
       }
-      if (!['owner', 'manager'].includes(role)) {
-        return response({ error: 'El rol debe ser owner o manager' }, 400)
+      if (!['owner', 'manager', 'gestor'].includes(role)) {
+        return response({ error: 'El rol debe ser owner, manager o gestor' }, 400)
       }
       if (role === 'manager' && !venueIds.length) {
         return response({ error: 'Selecciona al menos un local para el manager' }, 400)

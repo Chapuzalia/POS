@@ -466,7 +466,7 @@ function canonicalCheckMigration(sql) {
     .map(token => token.startsWith("'") || token.startsWith('"') ? token : token.toLowerCase()).join(' ')
 }
 
-// These two statements retain the deployed predicate verbatim as an OR branch.
+// These statements retain the deployed predicate verbatim as an OR branch.
 // Allow only the complete three-statement migration: fixed timeouts and a single
 // atomic replacement of the same named CHECK, NOT VALID. No general DROP waiver.
 const compatibleCheckMigrations = new Set([
@@ -492,6 +492,15 @@ alter table public.refund_requests
     check (
       fiscal_series ~ '^[A-Z0-9]{1,8}-[A-Z0-9]{1,8}-[0-9]{4}-R$'
       or fiscal_series ~ '^[A-Z0-9]{1,8}-[A-Z0-9]{1,8}-[1-9][0-9]*-[0-9]{4}-R$'
+    ) not valid;`,
+  String.raw`set lock_timeout = '5s';
+set statement_timeout = '5min';
+alter table public.tenant_memberships
+  drop constraint tenant_memberships_role_check,
+  add constraint tenant_memberships_role_check
+    check (
+      role = any (array['owner'::text, 'manager'::text, 'cashier'::text])
+      or role = 'gestor'::text
     ) not valid;`,
 ].map(canonicalCheckMigration))
 

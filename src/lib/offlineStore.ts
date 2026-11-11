@@ -99,7 +99,7 @@ function contextKey(route: AppRoute = getAppRoute()) {
 
 function contextRoute(context: TenantContext): AppRoute {
   if (context.role === 'superadmin') return 'superadmin'
-  if (context.role === 'owner' || context.role === 'manager') return 'crm'
+  if (context.role === 'owner' || context.role === 'manager' || context.role === 'gestor') return 'crm'
   return 'pos'
 }
 

@@ -198,7 +198,8 @@ function CashClosingDetailModal({
   closing: CashClosingRecord;
   disabled: boolean;
   onClose: () => void;
-  onSave: (
+  // Absent for read-only roles (gestor): the closing is shown without count editing.
+  onSave?: (
     countedCashCents: number,
     countedCardCents: number,
   ) => Promise<boolean>;
@@ -264,7 +265,7 @@ function CashClosingDetailModal({
     }
     setIsSaving(true);
     try {
-      if (await onSave(countedCashCents, countedCardCents)) {
+      if (onSave && await onSave(countedCashCents, countedCardCents)) {
         setIsEditing(false);
       }
     } finally {
@@ -297,7 +298,7 @@ function CashClosingDetailModal({
             </p>
           </div>
           <div className="!flex !shrink-0 !items-center !gap-2">
-            {!isEditing ? (
+            {!isEditing && onSave ? (
               <UiButton
                 className="!inline-flex !min-h-10 !items-center !gap-2 !rounded-xl !border-0 !bg-[var(--crm-blue-soft)] !px-3 !text-xs !font-bold !text-[var(--crm-blue)]"
                 disabled={disabled}
@@ -825,7 +826,7 @@ export function CashClosingReportsCrm({
           closing={selectedClosing}
           disabled={disabled}
           onClose={() => setSelectedClosing(null)}
-          onSave={(countedCashCents, countedCardCents) =>
+          onSave={tenantContext.role === 'gestor' ? undefined : (countedCashCents, countedCardCents) =>
             saveClosingCounts(
               selectedClosing.id,
               countedCashCents,
