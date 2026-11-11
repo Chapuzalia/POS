@@ -6,6 +6,9 @@ import { readFiscalBackend } from './backendRead.ts'
 import { readLocalFiscalHead, readLocalFiscalRecord, reconcileLocalFiscalCopies, type LocalFiscalEntry,
   type RestorableFiscalCopy } from './localLedger.ts'
 
+// Las páginas llevan sobres fiscales completos: 3 s no basta en redes móviles y aquí no hay alternativa local.
+const RECOVERY_READ_TIMEOUT_MS = 20_000
+
 const recordSchema = z.object({
   idempotencyKey: z.uuid(), environment: z.literal('production'), tenantId: z.uuid(),
   fiscalSubjectId: z.uuid(), issuerNif: z.string(), venueId: z.uuid(), cashRegisterId: z.uuid(),
@@ -77,7 +80,8 @@ async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstall
   ).eq('tenant_id', installation.tenantId).eq('fiscal_subject_id', installation.fiscalSubjectId)
     .eq('installation_id', installation.installationId)
   const latest = preparedHead ? { data: preparedHead.record, error: null }
-    : await readFiscalBackend(signal => scopeQuery().order('chain_position', { ascending: false }).limit(1).abortSignal(signal).maybeSingle())
+    : await readFiscalBackend(signal => scopeQuery().order('chain_position', { ascending: false })
+    .limit(1).abortSignal(signal).maybeSingle(), RECOVERY_READ_TIMEOUT_MS)
   if (latest.error) throw latest.error
   if (!latest.data) return 0
   const lastServer = rowSchema.parse(latest.data)
@@ -93,7 +97,7 @@ async function runServerConfirmedFiscalChainRecovery(installation: FiscalInstall
   let offset = 0
   for (;;) {
     const page = await readFiscalBackend(signal => scopeQuery().gte('chain_position', lastLocal?.record.chainPosition ?? 1)
-      .order('chain_position', { ascending: true }).range(offset, offset + 499).abortSignal(signal))
+      .order('chain_position', { ascending: true }).range(offset, offset + 499).abortSignal(signal), RECOVERY_READ_TIMEOUT_MS)
     if (page.error) throw page.error
     const rows = (page.data ?? []).map(row => toCopy(rowSchema.parse(row), installation))
     copies.push(...rows)
