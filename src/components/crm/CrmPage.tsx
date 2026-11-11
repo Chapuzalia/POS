@@ -5,7 +5,7 @@ import { canAccessCrm, canAccessCrmSection, defaultCrmSection } from '../../feat
 import { catalogSections, crmSectionFromPath, crmSectionPath, type CrmSection } from '../../features/crm/routing/crmNavigation'
 import { CrmSectionContent } from '../../features/crm/routing/CrmSectionContent'
 import { resolveSelectedVenueId } from '../../features/crm/venues/services/venueSelection'
-import { applyCrmOpenCashSalesTotals, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
+import { applyCrmOpenCashSalesTotals, loadCrmDashboardStats, loadCrmDayActivity, loadCrmOpenCashSalesTotals, loadCrmStats, subscribeToCrmStatsChanges } from '../../features/crm/analytics/services/analyticsService'
 import { hasTenantVenueCapability } from '../../features/platform/tenantFeatureAccess'
 import { loadCrmVenues } from '../../features/crm/access/services/accessService'
 import { useCatalogAdmin } from '../../features/crm/catalog/hooks/useCatalogAdmin.ts'
@@ -149,6 +149,8 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
   }, [activeSection, inventoryEnabled, selectedVenue])
 
   const statsLoadRequestId = useRef(0)
+  // Dashboard stats omit the period breakdowns; the stats page must not render them as empty.
+  const statsAreDashboardOnly = useRef(false)
   const refreshStats = useCallback(async (options: { comparisonPeriod?: CrmStatsPeriod; period?: CrmStatsPeriod; silent?: boolean } = {}) => {
     const loadStats = async () => {
       const requestId = statsLoadRequestId.current + 1
@@ -165,13 +167,15 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
         setComparisonStats(null)
         return
       }
+      const dashboardOnly = activeSection === 'dashboard' && !options.period && !options.comparisonPeriod
       const [nextStats, nextComparisonStats] = await Promise.all([
-        loadCrmStats(context, selectedVenue, options.period),
+        dashboardOnly ? loadCrmDashboardStats(context, selectedVenue) : loadCrmStats(context, selectedVenue, options.period),
         options.comparisonPeriod && selectedVenue && hasTenantVenueCapability({ features: context.features, venue: selectedVenue }, 'analytics_advanced')
           ? loadCrmStats(context, selectedVenue, options.comparisonPeriod, { includeLiveState: false })
           : Promise.resolve(null),
       ])
       if (statsLoadRequestId.current !== requestId) return
+      statsAreDashboardOnly.current = dashboardOnly
       setStats(nextStats)
       setComparisonStats(nextComparisonStats)
     }
@@ -180,13 +184,17 @@ function CrmWorkspace({ context, error, isOnline, onBusyChange, onError, onLogou
       return
     }
     await runAction(loadStats)
-  }, [context, onError, runAction, selectedVenueId, venues])
+  }, [activeSection, context, onError, runAction, selectedVenueId, venues])
   const refreshStatsRef = useRef(refreshStats)
   refreshStatsRef.current = refreshStats
   const statsRef = useRef(stats)
   statsRef.current = stats
 
   useEffect(() => {
+    if (activeSection === 'stats' && statsAreDashboardOnly.current) {
+      statsAreDashboardOnly.current = false
+      setStats(null)
+    }
     if ((activeSection === 'dashboard' || activeSection === 'stats') && isOnline && selectedVenueId) void refreshStats()
   }, [activeSection, isOnline, refreshStats, selectedVenueId])
 

@@ -8,6 +8,7 @@ import { Pencil, RefreshCw, Save, X } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { sileo } from "sileo";
 import {
+  loadCashClosing,
   updateCashClosingCounts,
 } from "../../../cash-registers/service";
 import { getCashClosingAmounts } from "../../../cash-registers/services/cashClosingAmounts";
@@ -572,16 +573,19 @@ export function CashClosingReportsCrm({
       setClosings([]);
       return;
     }
-    const next = await loadCashClosingReports(
-        { ...tenantContext, venueId: selectedVenueId },
-        operationalDayConfig,
-    );
+    const venueContext = { ...tenantContext, venueId: selectedVenueId };
+    // Only the selected period: the full history with print snapshots times out on busy venues.
+    const next = await loadCashClosingReports(venueContext, operationalDayConfig, { dateFrom, dateTo });
     if (currentRequest !== requestId.current) return;
     setClosings(next);
-    const focused = next.find((closing) => closing.id === pendingClosingId.current);
+    const focusId = pendingClosingId.current;
     pendingClosingId.current = undefined;
-    if (focused) setSelectedClosing(focused);
-  }, [selectedVenueId, tenantContext, operationalDayConfig]);
+    if (!focusId) return;
+    // A closing opened from search may fall outside the default period.
+    const focused = next.find((closing) => closing.id === focusId)
+      ?? await loadCashClosing(venueContext, focusId).catch(() => null);
+    if (focused && currentRequest === requestId.current) setSelectedClosing(focused);
+  }, [dateFrom, dateTo, selectedVenueId, tenantContext, operationalDayConfig]);
 
   useEffect(() => {
     setClosings(null);

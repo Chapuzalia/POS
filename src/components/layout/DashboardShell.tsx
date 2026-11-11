@@ -210,20 +210,24 @@ export function DashboardShell({ account, activeId, brand, children, eyebrow, go
   }
 
   function toggleParent(parent: DashboardNavParent) {
-    const isInside = parent.items.some((item) => item.id === activeId)
-    const willOpen = !openParents.has(parent.id) || !isInside
+    if (rail) {
+      // The rail hides sub-items, so the parent is the only way into the group.
+      if (!parent.items.some((item) => item.id === activeId)) {
+        const first = parent.items.find((item) => !item.disabled)
+        if (first) navigate(first.id)
+      }
+      return
+    }
+    // Expanded sidebar and mobile: the parent only expands or collapses its group.
+    const willOpen = !openParents.has(parent.id)
     setOpenParents((current) => {
       const next = new Set(current)
       if (willOpen) next.add(parent.id)
       else next.delete(parent.id)
       return next
     })
-    if (willOpen && !openParents.has(parent.id)) {
+    if (willOpen) {
       requestAnimationFrame(() => play(document.querySelectorAll(`[data-sub="${CSS.escape(parent.id)}"] button`), [{ transform: 'translateX(-8px)', opacity: 0 }, { transform: 'none', opacity: 1 }], { duration: 400, delay: 60, stagger: 30 }))
-    }
-    if (!isInside) {
-      const first = parent.items.find((item) => !item.disabled)
-      if (first) navigate(first.id)
     }
   }
 

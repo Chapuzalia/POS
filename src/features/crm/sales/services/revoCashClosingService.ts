@@ -3,7 +3,7 @@ import { supabase } from '../../../../lib/supabase'
 import type { ImportedCashClosing, RevoClosingDay } from '../../../../lib/revoCashClosings.ts'
 import type { TenantContext } from '../../../../types'
 import { loadCashClosingHistory } from '../../../cash-registers/service'
-import { getCashClosingDay, type CashClosingReportRecord } from './cashClosingReportModel.ts'
+import { getCashClosingDay, getCashClosingQueryRange, type CashClosingDateRange, type CashClosingReportRecord } from './cashClosingReportModel.ts'
 import type { OperationalDayConfig } from '../../../../lib/operationalDay.ts'
 
 function client() {
@@ -11,14 +11,16 @@ function client() {
   return supabase
 }
 
-export async function loadImportedCashClosings(context: TenantContext): Promise<ImportedCashClosing[]> {
+export async function loadImportedCashClosings(context: TenantContext, range?: CashClosingDateRange): Promise<ImportedCashClosing[]> {
   const closings: ImportedCashClosing[] = []
   const pageSize = 500
   for (let offset = 0; ; offset += pageSize) {
-    const { data, error } = await client().from('imported_cash_closings')
+    let query = client().from('imported_cash_closings')
       .select('id, tenant_id, venue_id, business_date, cash_cents, card_cents, cash_tip_cents, card_tip_cents, source_row_count, file_name, imported_at')
       .eq('tenant_id', context.tenantId).eq('venue_id', context.venueId).eq('source', 'revo')
-      .order('business_date', { ascending: false }).order('id').range(offset, offset + pageSize - 1)
+    if (range?.dateFrom) query = query.gte('business_date', range.dateFrom)
+    if (range?.dateTo) query = query.lte('business_date', range.dateTo)
+    const { data, error } = await query.order('business_date', { ascending: false }).order('id').range(offset, offset + pageSize - 1)
     if (error) throw error
     closings.push(...(data ?? []).map((row): ImportedCashClosing => ({
       id: row.id, tenantId: row.tenant_id, venueId: row.venue_id, source: 'revo', date: row.business_date,
@@ -29,9 +31,10 @@ export async function loadImportedCashClosings(context: TenantContext): Promise<
   }
 }
 
-export async function loadCashClosingReports(context: TenantContext, config: OperationalDayConfig): Promise<CashClosingReportRecord[]> {
+export async function loadCashClosingReports(context: TenantContext, config: OperationalDayConfig, range?: CashClosingDateRange): Promise<CashClosingReportRecord[]> {
   const [native, imported] = await Promise.all([
-    loadCashClosingHistory(context, null), loadImportedCashClosings(context),
+    loadCashClosingHistory(context, null, range ? getCashClosingQueryRange(range, config) : undefined),
+    loadImportedCashClosings(context, range),
   ])
   return [...native, ...imported].sort((a, b) => getCashClosingDay(b, config).localeCompare(getCashClosingDay(a, config)))
 }

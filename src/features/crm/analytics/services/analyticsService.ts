@@ -478,6 +478,52 @@ export async function loadCrmStats(
   return { ...(periodResult.data as CrmStats), ...(liveResult.data as Pick<CrmStats, 'dayActivity' | 'openCashSessions'>) }
 }
 
+type CrmDashboardPeriodSummary = Pick<CrmStats, 'averageTicketCents' | 'monthSalesCents' | 'monthTicketCount' | 'topProducts'>
+
+/**
+ * Dashboard-only stats: live state plus the current month's totals and top
+ * products. Skips the full period breakdowns, which time out for venues with
+ * many tickets. Breakdown fields are empty; the stats page loads them itself.
+ */
+export async function loadCrmDashboardStats(context: TenantContext, venue: CrmVenue): Promise<CrmStats> {
+  const client = requireSupabase()
+  const operationalDayConfig = { dayChangeTime: venue.dayChangeTime, timeZone: venue.timeZone }
+  const currentDay = getOperationalDateKey(new Date(), operationalDayConfig)
+  const period = createCrmStatsPeriod('month', currentDay.slice(0, 7))
+  const periodSummary = summarizeCrmStatsPeriod(period, currentDay)
+  const periodRange = getOperationalPeriodRangeIso(operationalDayConfig, periodSummary.startDate, periodSummary.effectiveEndDate)
+  const dayRange = getOperationalDayRangeIso(operationalDayConfig)
+  const [summaryResult, liveResult] = await Promise.all([
+    client.rpc('crm_dashboard_period_summary', {
+      p_tenant_id: context.tenantId,
+      p_venue_id: venue.id,
+      p_period_start: periodRange.startIso,
+      p_period_end: periodRange.endIso,
+    }),
+    client.rpc('crm_stats_live', { p_tenant_id: context.tenantId, p_venue_id: venue.id, p_day_start: dayRange.startIso, p_day_end: dayRange.endIso }),
+  ])
+  if (summaryResult.error) {
+    // Backend not yet migrated: keep the previous full-stats behaviour.
+    if (summaryResult.error.code === 'PGRST202' || summaryResult.error.code === '42883') return loadCrmStats(context, venue)
+    throw summaryResult.error
+  }
+  if (liveResult.error) throw liveResult.error
+  return {
+    byPayment: [],
+    discountApplications: [],
+    discountedTicketCount: 0,
+    discountsCents: 0,
+    hourlySales: [],
+    monthKey: period.startDate.slice(0, 7),
+    period: periodSummary,
+    salesByCategory: [],
+    salesByProduct: [],
+    topProductCombinations: [],
+    ...(summaryResult.data as CrmDashboardPeriodSummary),
+    ...(liveResult.data as Pick<CrmStats, 'dayActivity' | 'openCashSessions'>),
+  }
+}
+
 export function subscribeToCrmStatsChanges(
   context: TenantContext,
   _venueId: string,

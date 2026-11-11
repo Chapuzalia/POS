@@ -5,6 +5,7 @@ import { AppModal, Button, Metric } from '../../../components/ui'
 import { formatMoney } from '../../../lib/format'
 import { useCashlogyStore } from '../cashlogy/useCashlogyStore'
 import type { CashlogyTransaction } from '../types'
+import { CashlogyLevelCards } from './CashlogyLevelCards'
 
 type PaymentAction = 'retry' | 'cancel' | 'confirm' | 'finalize'
 
@@ -13,7 +14,7 @@ export function CashlogyPaymentModal({ error, finalizeDisabled, onCancelled, onF
   const [pendingAction, setPendingAction] = useState<{ requestId: string; type: PaymentAction } | null>(null)
   const [failure, setFailure] = useState<{ requestId: string; message: string; retryFailed: boolean } | null>(null)
   const state = useCashlogyStore(useShallow(value => ({
-    modalOpen: value.modalOpen, intent: value.intent, transaction: value.transaction, error: value.error,
+    modalOpen: value.modalOpen, intent: value.intent, transaction: value.transaction, levels: value.levels, error: value.error,
     isStarting: value.isStarting, isPolling: value.isPolling, isRecovering: value.isRecovering, isCancelling: value.isCancelling,
     missingTransaction: value.missingTransaction, recover: value.recover, cancelAttempt: value.cancelAttempt, confirmPaid: value.confirmPaid,
   })))
@@ -76,6 +77,7 @@ export function CashlogyPaymentModal({ error, finalizeDisabled, onCancelled, onF
           {state.transaction?.returnedCents !== null && state.transaction?.returnedCents !== undefined
             ? <Metric label="Cambio" value={formatMoney(state.transaction.returnedCents)} /> : null}
         </div>
+        <CashlogyLevelCards levels={state.levels} variant="payment" />
         {message ? <div role="alert" className="mt-4 flex items-start gap-3 rounded-[var(--radius)] border border-red-500/40 bg-red-500/10 p-4 text-sm text-red-700 dark:text-red-300">
           <AlertTriangle className="h-5 w-5 shrink-0" /><p>{message}</p>
         </div> : <p className="mt-4 flex items-center gap-2 text-sm text-[var(--muted)]">
