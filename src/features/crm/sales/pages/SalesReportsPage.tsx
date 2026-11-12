@@ -183,7 +183,7 @@ export function SalesReportsCrm({ dayChangeTime, disabled, runAction, selectedVe
     if (isExporting || activeView !== 'tickets' || !selectedVenueId || !reportFilters.dateFromIso || !reportFilters.dateToIso) return
     setIsExporting(true)
     try {
-      const rows = await loadAccountingTickets({ ...tenantContext, venueId: selectedVenueId }, reportFilters)
+      const rows = await loadAccountingTickets({ ...tenantContext, venueId: selectedVenueId }, { ...reportFilters, dateFrom, dateTo, timeZone })
       if (!rows.length) {
         sileo.info({ title: 'No hay tickets en el periodo seleccionado.' })
         return
