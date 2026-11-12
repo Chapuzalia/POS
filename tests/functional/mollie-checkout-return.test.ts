@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs'
 import { expect, it, vi, onTestFinished } from 'vitest'
 import { createCompiledHookRunner, jsxRuntime, nodes } from '../helpers/component-harness.mjs'
 import * as sepaFields from '../../src/features/billing/sepa'
+import * as legalFields from '../../supabase/functions/_shared/billing/legal'
 
 function setup(search = '?billing=success', customerId: string | null = 'cst_test', operations: Array<{ id: string; status: string; result?: { url?: string } | null }> = []) {
   let activationRequired = true
@@ -13,7 +14,7 @@ function setup(search = '?billing=success', customerId: string | null = 'cst_tes
     if (action === 'reconcile') { if (verified) activationRequired = false; return {} }
     if (action === 'catalog') return { products: [], versions: [] }
     if (action === 'quote') return { id: 'new-quote', contract, preview: { amountDueCents: 5929 } }
-    if (action === 'confirm') return { url: 'https://www.mollie.com/checkout/new' }
+    if (action === 'confirm') return { url: 'https://www.mollie.com/checkout/new', acceptance: { operation_id: 'new-quote', accepted_at: '2026-11-12T10:00:00Z', receipt: {} } }
     return { account: { stripe_customer_id: customerId, onboarding_contract: operations.length ? contract : null }, tenant: { billing_activation_required: activationRequired }, operations }
   })
   let poll: (() => void) | undefined
@@ -27,6 +28,9 @@ function setup(search = '?billing=success', customerId: string | null = 'cst_tes
     './BillingSelectionEditor': { BillingSelectionEditor: 'section' },
     './SepaMandateFields': { SepaMandateFields: 'sepa-fields' },
     './sepa': sepaFields,
+    './BillingLegalAcceptance': { ...legalFields, BillingLegalAcceptance: 'legal-fields', BillingLegalLinks: 'legal-links', BillingOfferSummary: 'offer-summary' },
+    './BillingLegalReceipt': { BillingLegalReceipt: 'legal-receipt' },
+    '../../../supabase/functions/_shared/billing/legal': legalFields,
     './service': { billingRequest: request, billingMoney: String, openBillingUrl },
     './selection': { buildContract: vi.fn() },
   }, { Error, URLSearchParams, window: { location: { search }, setInterval: (callback: () => void) => { poll = callback; return 1 }, clearInterval } })
@@ -37,6 +41,8 @@ function setup(search = '?billing=success', customerId: string | null = 'cst_tes
     const form = { legalName: 'Restaurante Prueba SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' }, accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332', accepted: true }
     nodes(render()).find(node => node.type === 'sepa-fields')?.props.onChange(form)
     await vi.waitFor(() => expect(nodes(render()).find(node => node.type === 'sepa-fields')?.props.value).toEqual(form))
+    expect(nodes(render()).find(node => node.type === 'button' && node.props.children === 'Aceptar y pagar')?.props.disabled).toBe(true)
+    nodes(render()).find(node => node.type === 'legal-fields')?.props.onChange({ version: legalFields.billingLegalVersion, terms: true, dpa: true, businessRepresentative: true })
   }
   return { fillSepa, request, onActivated, openBillingUrl, render, verify: () => { verified = true }, poll: () => poll?.(), clearInterval }
 }
@@ -122,11 +128,13 @@ it('allows a fresh quote and navigates to Mollie after the rejected attempt is r
   expect(pay?.props.disabled).toBe(false)
   pay?.props.onClick()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'dialog')).toBe(true))
-  expect(nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Domiciliar e ir al pago')?.props.disabled).toBe(true)
+  expect(nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Aceptar y pagar')?.props.disabled).toBe(true)
   await fixture.fillSepa()
-  const confirm = nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Domiciliar e ir al pago')
+  const confirm = nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Aceptar y pagar')
   confirm?.props.onClick()
   await vi.waitFor(() => expect(fixture.request).toHaveBeenCalledWith(expect.objectContaining({ action: 'confirm', sepa: { accountHolder: 'Restaurante Prueba SL', iban: 'ES91 2100 0418 4502 0005 1332' }, payer: { legalName: 'Restaurante Prueba SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' } } })))
+  await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'legal-receipt' && node.props.acceptance.operation_id === 'new-quote')).toBe(true))
+  expect(nodes(fixture.render()).some(node => node.type === 'dialog')).toBe(false)
   await vi.waitFor(() => expect(fixture.openBillingUrl).toHaveBeenCalledWith('https://www.mollie.com/checkout/new'))
 })
 
@@ -138,7 +146,7 @@ it('shows a confirmation without a Checkout URL as an error and keeps the review
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.type === 'dialog')).toBe(true))
   await fixture.fillSepa()
   fixture.request.mockResolvedValueOnce({})
-  nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Domiciliar e ir al pago')?.props.onClick()
+  nodes(fixture.render()).find(node => node.type === 'button' && node.props.children === 'Aceptar y pagar')?.props.onClick()
   await vi.waitFor(() => expect(nodes(fixture.render()).some(node => node.props?.role === 'alert' && String(node.props.children).includes('No se ha podido abrir la página de pago'))).toBe(true))
   expect(nodes(fixture.render()).some(node => node.type === 'dialog')).toBe(true)
   expect(fixture.openBillingUrl).not.toHaveBeenCalled()

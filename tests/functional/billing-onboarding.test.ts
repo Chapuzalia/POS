@@ -1,5 +1,5 @@
 import { expect, it, onTestFinished } from 'vitest'
-import { createBillingService, payer, sepa } from '../helpers/billing-service.mjs'
+import { createBillingService, payer, sepa, legal } from '../helpers/billing-service.mjs'
 import { billingIds as ids } from '../helpers/billing-db.mjs'
 import { onboardingContract } from '../../supabase/functions/_shared/billing/onboarding'
 import { generateOwnerPassword, changeBillingPlan } from '../../src/features/billing/selection'
@@ -140,7 +140,7 @@ it('keeps a Mollie tenant gated through Checkout and an unpaid card, then unlock
   await service.saveOnboarding(ids.tenant, selection)
   expect((await service.detail(ids.tenant, false)).account.onboarding_contract.planName).toBe('Synthetic base')
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Activar')
-  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer, legal })
   const required = async () => (await db.query('select billing_activation_required pending from tenants where id=$1', [ids.tenant])).rows[0].pending
   expect(await required()).toBe(true)
   await service.reconcile(ids.tenant)
@@ -155,7 +155,7 @@ it('does not unlock after a failed card payment and leaves existing manual busin
   const { service, mollie, db, selection } = await setup()
   await db.query('update tenants set billing_activation_required=true where id=$1', [ids.tenant])
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Activar')
-  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer, legal })
   mollie.payFirst('failed')
   await service.reconcile(ids.tenant)
   expect(mollie.subscriptions).toHaveLength(0)
@@ -169,7 +169,7 @@ it('expires the old Checkout before allowing plan changes and prevents edits whi
   await service.account(ids.tenant)
   await service.saveOnboarding(ids.tenant, selection)
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Activar')
-  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer, legal })
   await expect(service.saveOnboarding(ids.tenant, selection)).rejects.toThrow('BILLING_PENDING_CHANGE')
   mollie.cancelableCards = true
   await service.restartCheckout(ids.tenant)
@@ -179,7 +179,7 @@ it('expires the old Checkout before allowing plan changes and prevents edits whi
   await service.saveOnboarding(ids.tenant, updated)
   const second = await service.quote(ids.tenant, ids.owner, updated, null, 'Cambiar plan')
   expect(second.contract.recurringCents).toBe(5900)
-  await service.confirm(ids.tenant, ids.owner, second.id, false, { sepa, payer })
+  await service.confirm(ids.tenant, ids.owner, second.id, false, { sepa, payer, legal })
   mollie.payFirst('pending')
   await expect(service.restartCheckout(ids.tenant)).rejects.toThrow('BILLING_PENDING_CHANGE')
   expect((await db.query('select status from billing_operations where id=$1', [second.id])).rows[0].status).toBe('payment_pending')
@@ -190,7 +190,7 @@ it('invalidates previous quotes on draft edit and rejects foreign assignments an
   await db.query('update tenants set billing_activation_required=true where id=$1', [ids.tenant])
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Oferta inicial')
   await service.saveOnboarding(ids.tenant, selection)
-  await expect(service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })).rejects.toThrow('BILLING_STALE')
+  await expect(service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer, legal })).rejects.toThrow('BILLING_STALE')
   await expect(service.saveOnboarding(ids.tenant, { ...selection, addons: [{ key: 'production', versionId: production.id, quantity: 1, venueIds: [ids.other], deviceIds: [] }] })).rejects.toThrow('BILLING_FOREIGN_ASSIGNMENT')
   await service.account(ids.other)
   await expect(service.saveOnboarding(ids.other, selection)).rejects.toThrow('BILLING_PENDING_CHANGE')

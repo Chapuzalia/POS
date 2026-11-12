@@ -45,6 +45,7 @@ export type BillingOperation = {
   created_at: string; effective_at?: string | null
 }
 export type BillingDetail = {
+  legalAcceptances?: import('../../../supabase/functions/_shared/billing/legal').BillingLegalReceipt[]
   account: BillingAccount
   scheduledContract: Contract | null
   tenant: { id: string; name: string; max_venues: number; max_devices: number; billing_activation_required?: boolean }

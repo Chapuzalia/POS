@@ -1,5 +1,5 @@
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest'
-import { createBillingService, payer, sepa } from '../helpers/billing-service.mjs'
+import { createBillingService, payer, sepa, legal } from '../helpers/billing-service.mjs'
 import { billingIds as ids } from '../helpers/billing-db.mjs'
 import { MollieGateway, cents, grossCents, money, normalizeIban } from '../../supabase/functions/_shared/billing/mollie'
 import { prorationNet } from '../../supabase/functions/_shared/billing/service'
@@ -36,7 +36,7 @@ it('creates the SEPA mandate, charges the first period by card and renews by SEP
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Alta')
   expect(quote.preview.amountDueCents).toBe(5929)
   await expect(service.confirm(ids.tenant, ids.owner, quote.id)).rejects.toThrow('BILLING_SEPA_REQUIRED')
-  const first = await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
+  const first = await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer, legal })
   expect(first.url).toMatch(/^https:\/\/www\.mollie\.com\/checkout\//)
   const payment = mollie.payment('first')
   expect(payment).toMatchObject({ sequenceType: 'first', method: 'creditcard', amount: { value: '59.29' }, metadata: { tickit_tenant_id: ids.tenant, tickit_operation_id: quote.id } })
@@ -165,7 +165,7 @@ it('drops an upgrade whose card checkout expires and leaves the subscription unt
 it('schedules a downgrade at renewal: Mollie charges the new amount, access changes only on that date', async () => {
   const { service, mollie, db, base, withProduction, operation } = await setup()
   const quote0 = await service.quote(ids.tenant, ids.owner, withProduction, null, 'Alta')
-  await service.confirm(ids.tenant, ids.owner, quote0.id, false, { sepa, payer }); mollie.payFirst(); await service.reconcile(ids.tenant)
+  await service.confirm(ids.tenant, ids.owner, quote0.id, false, { sepa, payer, legal }); mollie.payFirst(); await service.reconcile(ids.tenant)
   at('2026-11-20T10:00:00Z')
   const quote = await service.quote(ids.tenant, ids.owner, { planVersionId: base.id, addons: [] }, null, 'Quitar producción')
   expect(quote).toMatchObject({ timing: 'period_end', preview: { amountDueCents: 0, renewalCents: 5929, effectiveAt: '2026-12-10T00:00:00.000Z', losses: ['Production: dejará de estar disponible.'] } })
@@ -204,7 +204,7 @@ it('cancels at period end: no more charges, access until the paid period ends, t
 it('keeps a pending SEPA renewal collectable after an immediate cancellation and supersedes a scheduled change', async () => {
   const { service, mollie, base, withProduction, operation } = await setup()
   const quote0 = await service.quote(ids.tenant, ids.owner, withProduction, null, 'Alta')
-  await service.confirm(ids.tenant, ids.owner, quote0.id, false, { sepa, payer }); mollie.payFirst(); await service.reconcile(ids.tenant)
+  await service.confirm(ids.tenant, ids.owner, quote0.id, false, { sepa, payer, legal }); mollie.payFirst(); await service.reconcile(ids.tenant)
   const downgrade = await service.quote(ids.tenant, ids.owner, { planVersionId: base.id, addons: [] }, null, 'Bajar')
   await service.confirm(ids.tenant, ids.owner, downgrade.id, false, { acceptLosses: true })
   const cancel = await service.quoteCancel(ids.tenant, ids.owner, true, 'Baja inmediata')
@@ -268,14 +268,14 @@ it('grants free addon units now and charges them from the renewal after the prom
 it('only abandons a signup checkout once Mollie confirms it can no longer be paid', async () => {
   const { service, mollie, selection, operation } = await setup()
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Alta')
-  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer, legal })
   await expect(service.restartCheckout(ids.tenant)).rejects.toThrow('BILLING_PENDING_CHANGE')
   mollie.payFirst('expired')
   await service.reconcile(ids.tenant)
   expect((await operation(quote.id)).status).toBe('expired')
   await expect(service.restartCheckout(ids.tenant)).resolves.toEqual({ editable: true })
   const retry = await service.quote(ids.tenant, ids.owner, selection, null, 'Nuevo intento')
-  await service.confirm(ids.tenant, ids.owner, retry.id, false, { sepa, payer })
+  await service.confirm(ids.tenant, ids.owner, retry.id, false, { sepa, payer, legal })
   expect(mollie.payments.filter(row => row.metadata?.tickit_kind === 'first')).toHaveLength(2)
 })
 

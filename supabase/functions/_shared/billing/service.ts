@@ -11,6 +11,8 @@ import type { OdooGateway } from './odoo.ts'
 import { odooDocument, syncOdoo } from './odoo-sync.ts'
 import type { BillingAddress, BillingProfile } from './profile.ts'
 import { invoiceServiceSnapshot } from './invoice-description.ts'
+import { billingLegalDocuments, billingLegalVersion, requireBillingLegalAcceptance } from './legal.ts'
+import type { BillingLegalInput, BillingLegalReceipt } from './legal.ts'
 
 // shortcut: the stripe_* columns/keys are kept (expand-only migrations) and now hold Mollie IDs (cst_, sub_, tr_); rename them in a contract migration.
 export type Account = {
@@ -25,6 +27,7 @@ export type Account = {
   billing_address: BillingAddress | null
 }
 type ProviderParams = {
+  legalVersion?: string
   provider?: 'mollie'; subscriptionId: string | null; checkoutPolicy?: string; baseline?: string
   previousContract?: Contract | null; phases?: PromotionPhase[]; scheduleId?: string; cancelSchedule?: boolean; supersededOperationId?: string
 }
@@ -35,7 +38,7 @@ export type Operation = {
   stripe_params: ProviderParams
   result: { url?: string; paymentId?: string; mandateId?: string; scheduleId?: string } | null; created_at: string; proration_date: number; effective_at: string | null
 }
-export type ConfirmInput = { sepa?: { accountHolder: string; iban: string }; payer?: Pick<BillingProfile, 'legalName' | 'taxId'> & Partial<Pick<BillingProfile, 'email' | 'address'>>; acceptLosses?: boolean }
+export type ConfirmInput = { sepa?: { accountHolder: string; iban: string }; payer?: Pick<BillingProfile, 'legalName' | 'taxId'> & Partial<Pick<BillingProfile, 'email' | 'address'>>; acceptLosses?: boolean; legal?: BillingLegalInput }
 // What the owner chose to switch off (downgrade) or back on (upgrade) with a plan change.
 export type AccessRequest = { deactivateVenueIds: string[]; deactivateDeviceIds: string[]; reactivateVenueIds: string[] }
 type UsageVenue = { id: string; name: string; is_active: boolean }
@@ -156,7 +159,9 @@ export class BillingService {
       const { id, kind, status, timing, preview, result, reason, created_at, effective_at, contract } = scheduled
       history.push({ id, kind, status, timing, preview, result, reason, created_at, effective_at, contract })
     }
-    return { account, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, paymentMethod: await this.paymentMethod(account), invoices: invoiceRows, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
+    const legal = await this.db.rpc('billing_legal_receipts', { p_tenant_id: tenantId, p_data: {} })
+    if (legal.error) throw new Error('BILLING_DB_LEGAL')
+    return { account, legalAcceptances: legal.data, scheduledContract: scheduled?.contract ?? null, tenant: tenant.data, venues: venues.data, devices: devices.data, paymentMethod: await this.paymentMethod(account), invoices: invoiceRows, operations: history, audit: audit.data, commercialState: commercialState(account.status, account.delinquent_since, account.grace_days) }
   }
   // Masked direct-debit account of the live subscription. Never returns or logs the full IBAN.
   async paymentMethod(account: Account) {
@@ -374,7 +379,7 @@ export class BillingService {
           ? 'Pagarás ahora con tarjeta en Mollie la parte proporcional del aumento hasta la renovación, IVA del 21 % incluido. El acceso se amplía al confirmarse el pago. Cuotas recurrentes sin IVA.'
           : 'Sin cargo inmediato. El cambio se aplica ahora y la siguiente cuota se cobrará con el nuevo importe, IVA del 21 % incluido. Cuotas recurrentes sin IVA.'
     return this.transition<Operation>('quote', { tenantId, actorId, revision: account.revision, kind: 'change', contract: next, restoreContract: restore, timing,
-      stripeParams: { provider: 'mollie', subscriptionId: subscription?.id ?? null, ...(!subscription ? { checkoutPolicy: 'mollie_card_sepa_v1' } : { baseline: baseline(subscription), previousContract: existingContract }) },
+      stripeParams: { provider: 'mollie', subscriptionId: subscription?.id ?? null, ...(!subscription ? { checkoutPolicy: 'mollie_card_sepa_v1', legalVersion: billingLegalVersion } : { baseline: baseline(subscription), previousContract: existingContract }) },
       preview: { amountDueCents, renewalCents: timing === 'period_end' ? grossCents(next.recurringCents) : null, recurringCents: next.recurringCents, currency: 'eur', effectiveAt: timing === 'period_end' ? iso(periodEnd) : null, details, ...(losses.length ? { losses } : {}) }, reason, prorationDate: at })
   }
   async quotePromotions(account: Account, actorId: string, selection: Selection, exception: CommercialException, reason: string, products: Product[], versions: Version[], sub: MollieSubscription, at: number, agreement: Contract | null) {
@@ -454,13 +459,15 @@ export class BillingService {
   async confirm(tenantId: string, actorId: string, operationId: string, retry = false, input: ConfirmInput = {}) {
     const before = await this.db.from('billing_operations').select('*').eq('id', operationId).eq('tenant_id', tenantId).single<Operation>()
     if (before.error) throw new Error('BILLING_OPERATION_NOT_FOUND')
-    if (before.data.status !== 'quoted' && !retry) return confirmationResult(before.data)
+    if (before.data.status !== 'quoted' && !retry) return { ...confirmationResult(before.data), acceptance: await this.legalAcceptance(tenantId, operationId) }
     if (retry && (before.data.status !== 'applying' || Date.now() - Date.parse(before.data.created_at) > 23 * 3600_000)) throw new Error('BILLING_MANUAL_RECONCILIATION_REQUIRED')
     // Stripe-era quotes cannot be executed against Mollie.
     if (before.data.stripe_params.provider !== 'mollie') throw new Error('BILLING_STALE_PROVIDER_QUOTE')
     const signup = before.data.kind === 'change' && !before.data.stripe_params.subscriptionId
     const iban = input.sepa ? normalizeIban(input.sepa.iban) : null
     if (signup && !retry && !iban) throw new Error('BILLING_SEPA_REQUIRED')
+    if (signup && !retry) requireBillingLegalAcceptance(input.legal)
+    if (signup && retry && before.data.stripe_params.legalVersion && !await this.legalAcceptance(tenantId, operationId)) throw new Error('BILLING_LEGAL_REQUIRED')
     if (!retry && before.data.preview.losses?.length && input.acceptLosses !== true) throw new Error('BILLING_LOSSES_NOT_ACCEPTED')
     if (!retry && before.data.stripe_params.baseline) {
       const sub = await this.subscription(await this.account(tenantId))
@@ -468,7 +475,20 @@ export class BillingService {
     }
     if (before.data.contract) await this.validateSelection(tenantId, before.data.contract)
     // Cross-terminal serialization is enforced in the DB, including duplicate button presses.
-    const op = retry ? before.data : await this.transition<Operation>('apply_claim', { tenantId, actorId, operationId })
+    let op: Operation
+    if (signup && !retry) {
+      if (!before.data.contract || !input.payer?.legalName.trim() || !input.payer.taxId.trim()) throw new Error('BILLING_INVALID_REQUEST')
+      const receipt: BillingLegalReceipt['receipt'] = {
+        version: billingLegalVersion, documents: billingLegalDocuments,
+        declarations: { terms: true, dpa: true, businessRepresentative: true },
+        payer: { legalName: input.payer.legalName, taxId: input.payer.taxId, ...(input.payer.email ? { email: input.payer.email } : {}) },
+        contract: before.data.contract,
+        offer: { amountDueCents: before.data.preview.amountDueCents, recurringNetCents: before.data.contract.recurringCents, recurringGrossCents: grossCents(before.data.contract.recurringCents), vatBasisPoints: 2100, currency: 'EUR', interval: before.data.contract.interval, automaticRenewal: true, firstPayment: 'card', renewals: 'sepa' },
+      }
+      const accepted = await this.db.rpc('billing_accept_contract', { p_tenant_id: tenantId, p_data: { actorId, operationId, receipt } })
+      if (accepted.error) throw new Error(accepted.error.message === 'BILLING_STALE' ? 'BILLING_STALE' : 'BILLING_LEGAL_REQUIRED')
+      op = accepted.data as Operation
+    } else op = retry ? before.data : await this.transition<Operation>('apply_claim', { tenantId, actorId, operationId })
     if (op.status !== 'applying') return confirmationResult(op)
     const account = await this.account(tenantId)
     const key = `tickit:${op.id}`
@@ -545,7 +565,13 @@ export class BillingService {
     const operation = await this.transition<Operation>('apply_result', { tenantId, operationId, status, result, effectiveAt: op.timing === 'period_end' ? op.preview.effectiveAt : null })
     // Completion is determined by Mollie, not the browser redirect or this POST response.
     await this.reconcile(tenantId)
-    return { operation, url: result?.url }
+    return { operation, url: result?.url, ...(signup ? { acceptance: await this.legalAcceptance(tenantId, operationId) } : {}) }
+  }
+  async legalAcceptance(tenantId: string, operationId: string): Promise<BillingLegalReceipt | null> {
+    const result = await this.db.rpc('billing_legal_receipts', { p_tenant_id: tenantId, p_data: { operationId } })
+    if (result.error) throw new Error('BILLING_DB_LEGAL')
+    const receipts = result.data as BillingLegalReceipt[]
+    return receipts[0] ?? null
   }
   // New IBAN for the renewals: a new SEPA mandate replaces the subscription's one, then older direct-debit mandates are revoked.
   // requestId makes a repeated click reuse the same mandate. The IBAN goes to Mollie only; it is never stored or logged.
