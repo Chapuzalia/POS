@@ -1,4 +1,5 @@
-import { lazy } from 'react'
+import { lazy, useMemo } from 'react'
+import { buildCrmVenueContext } from '../venues/services/venueSelection'
 import type { RunAction } from '../shared/types'
 import type { CatalogData } from '../../catalog/domain/types.ts'
 import type { CrmStats, CrmStatsPeriod, CrmVenue, TenantContext } from '../../../types'
@@ -85,8 +86,9 @@ export function CrmSectionContent({
   stats,
   venues,
 }: Props) {
-  if (!canAccessCrmSection(context.role, activeSection, context.features, venues.find((venue) => venue.id === selectedVenueId))) return null
   const selectedVenue = venues.find((venue) => venue.id === selectedVenueId)
+  const reportContext = useMemo(() => buildCrmVenueContext(context, selectedVenue), [context, selectedVenue])
+  if (!canAccessCrmSection(context.role, activeSection, context.features, selectedVenue)) return null
   const venueContext = selectedVenue ? { features: context.features, venue: selectedVenue } : context
 
   if (catalogSections.has(activeSection) && !catalog) {
@@ -145,7 +147,7 @@ export function CrmSectionContent({
         disabled={disabled}
         runAction={runAction}
         selectedVenueId={selectedVenueId}
-        tenantContext={context}
+        tenantContext={reportContext}
         timeZone={venues.find((venue) => venue.id === selectedVenueId)?.timeZone ?? 'Europe/Madrid'}
       />
     case 'x-reports':

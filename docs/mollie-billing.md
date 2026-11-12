@@ -87,6 +87,14 @@ Mollie no emite facturas de suscripción: el emisor fiscal es el Odoo de Alteil 
 - El alta recoge razón social, NIF, correo y domicilio fiscal. El propietario y Superadmin pueden actualizar el perfil desde Mi Plan; cada cobro conserva su propia instantánea. Odoo solo reutiliza contactos con la referencia del negocio y todos los datos fiscales coincidentes; no modifica contactos utilizados por otras facturas. Los clientes N-1 pueden contratar con el formato anterior, pero no se emiten documentos con una instantánea incompleta.
 - El resumen de Superadmin avisa si Odoo está desactivado o si hay documentos pendientes de emisión.
 
+### Concepto y período de las nuevas facturas
+
+`billing_invoices.service_snapshot` conserva el concepto y las fechas del servicio para cada nuevo pago. El período se imprime con el último día incluido; internamente el fin es exclusivo. El alta empieza al pagarse la primera cuota; la renovación sigue el calendario de la suscripción, no la fecha de liquidación SEPA. Las ampliaciones usan el período del presupuesto aceptado y las regularizaciones mantienen el período de la deuda original. Si faltan datos para determinarlo, Odoo deja el documento pendiente de revisión, sin inventar fechas ni bloquear los derechos del plan.
+
+Las filas anteriores a esta ampliación conservan `service_snapshot = NULL`: no se completan ni se regeneran. El informe `tickit.report_subscription_invoice` es independiente de la plantilla estándar y mantiene la cabecera, datos fiscales y elementos de localización, incluidos Veri*Factu y la factura rectificada. Oculta origen, código de cliente, referencia de pago y comunicación bancaria; los identificadores se conservan internamente. La descripción final se escribe en la línea del borrador antes de numerar, evitando que Odoo añada el código técnico del producto.
+
+Antes de desplegar el backend nuevo, configurar ese informe con `node scripts/configure-odoo-billing-report.mjs --apply`, usando `ODOO_URL`, `ODOO_DB` y `ODOO_API_KEY` desde un entorno de confianza. Sin `--apply` solo inspecciona y muestra lo pendiente. Requiere autorización de producción; no modifica plantillas estándar, facturas ni PDF existentes. La migración aditiva debe aplicarse antes del backend. No se cambia la plantilla preferida del cliente o del diario: el backend selecciona el informe exclusivamente al generar nuevos documentos con esta instantánea.
+
 ### Estilos del PDF en Odoo
 
 El motor de PDF debe poder descargar directamente los recursos de Odoo. En el servidor actual, la URL pública HTTP devuelve una redirección 308 a HTTPS y `wkhtmltopdf` pierde los estilos; la misma prueba con `http://127.0.0.1:8069` conserva columnas y tablas. El cambio preparado es crear el parámetro de Odoo `report.url = http://127.0.0.1:8069`, manteniendo el diseño Wave y la URL pública. Esta configuración requiere aprobación de producción y no se aplica desde los webhooks ni las descargas del cliente.

@@ -8,10 +8,11 @@ import { ODOO_ERROR_CODES, OdooRequestError } from './odoo.ts'
 import type { OdooErrorCode, OdooGateway } from './odoo.ts'
 import { billingProfileReady } from './profile.ts'
 import type { BillingAddress } from './profile.ts'
+import type { InvoiceServiceSnapshot } from './invoice-description.ts'
 
 export type OdooState = 'proforma' | 'invoiced' | 'canceled' | 'refunded' | 'failed'
 type Target = Exclude<OdooState, 'failed'>
-type InvoiceRow = { stripe_invoice_id: string; status: string; amount_due_cents: number; amount_paid_cents: number; paid_excluding_tax_cents: number; paid_at: string | Date | null; created_at: string | Date; customer_snapshot: { name?: string; taxIds?: string[]; email?: string; address?: BillingAddress } }
+type InvoiceRow = { stripe_invoice_id: string; status: string; amount_due_cents: number; amount_paid_cents: number; paid_excluding_tax_cents: number; paid_at: string | Date | null; created_at: string | Date; customer_snapshot: { name?: string; taxIds?: string[]; email?: string; address?: BillingAddress }; service_snapshot: InvoiceServiceSnapshot | null }
 type DocumentRow = { payment_id: string; state: OdooState; sale_order_id: number | null; invoice_id: number | null; refund_id: number | null; invoice_number: string | null; attempts: number }
 type Ids = Pick<DocumentRow, 'sale_order_id' | 'invoice_id' | 'refund_id' | 'invoice_number'>
 type SyncAccount = { tenant_id: string }
@@ -19,6 +20,7 @@ type Move = { id: number; state: string; name: string; amount_total: number; pay
 
 export const ODOO_PRODUCT_CODE = 'TICKIT-SUB'
 export const ODOO_PAYMENT_JOURNAL_CODE = 'MOLL'
+export const ODOO_INVOICE_REPORT_NAME = 'tickit.report_subscription_invoice'
 const MAX_PER_RUN = 10
 const MOVE_FIELDS = ['state', 'name', 'amount_total', 'payment_state', 'move_type']
 
@@ -53,11 +55,14 @@ type SendWizard = { sending_methods: string[] | false; sending_method_checkboxes
 
 // Odoo 18+ serves a posted invoice as "proforma" until Send & Print stores its official PDF. The wizard
 // defaults to email, so every method is unchecked and verified first: nothing is ever sent to the customer.
-export async function ensureOfficialPdf(odoo: OdooCalls, moveId: number) {
+export async function ensureOfficialPdf(odoo: OdooCalls, moveId: number, report?: number | 'subscription') {
   const [move] = await odoo.call<{ state: string; invoice_pdf_report_id: unknown }[]>('account.move', 'read', { ids: [moveId], fields: ['state', 'invoice_pdf_report_id'] })
   if (!move || move.state !== 'posted' || move.invoice_pdf_report_id) return
+  const reportId = report === 'subscription'
+    ? (await odoo.call<{ id: number }[]>('ir.actions.report', 'search_read', { domain: [['report_name', '=', ODOO_INVOICE_REPORT_NAME], ['model', '=', 'account.move'], ['is_invoice_report', '=', true]], fields: ['id'], limit: 1 }))[0]?.id ?? fail('ODOO_SETUP_MISSING')
+    : report
   const context = { active_model: 'account.move', active_ids: [moveId], active_id: moveId }
-  const [wizard] = await odoo.call<number[]>('account.move.send.wizard', 'create', { vals_list: [{ move_id: moveId }], context })
+  const [wizard] = await odoo.call<number[]>('account.move.send.wizard', 'create', { vals_list: [{ move_id: moveId, ...(reportId ? { pdf_report_id: reportId } : {}) }], context })
   const read = async () => (await odoo.call<SendWizard[]>('account.move.send.wizard', 'read', { ids: [wizard], fields: ['sending_methods', 'sending_method_checkboxes'], context }))[0]
   const boxes = (await read())?.sending_method_checkboxes || {}
   const unchecked = Object.fromEntries(Object.entries(boxes).map(([method, box]) => [method, { ...box, checked: false }]))
@@ -79,6 +84,7 @@ class Sync {
   private readonly account: SyncAccount
   private readonly mode: string
   private setup: { product: number; journal: number } | null = null
+  private reportId: number | null = null
   constructor(odoo: OdooCalls, db: SupabaseClient, account: SyncAccount, mode: string) {
     this.odoo = odoo; this.db = db; this.account = account; this.mode = mode
   }
@@ -117,6 +123,10 @@ class Sync {
     if (saved.error) throw new Error('BILLING_DB_ODOO')
     return partner
   }
+  private async invoiceReport() {
+    if (!this.reportId) this.reportId = (await this.first<{ id: number }>('ir.actions.report', [['report_name', '=', ODOO_INVOICE_REPORT_NAME], ['model', '=', 'account.move'], ['is_invoice_report', '=', true]], ['id']))?.id ?? fail('ODOO_SETUP_MISSING')
+    return this.reportId
+  }
   private async order(row: InvoiceRow, payment: MolliePayment | undefined) {
     const fields = ['state', 'invoice_ids']
     const existing = await this.first<{ id: number; state: string; invoice_ids: number[] }>('sale.order', [['client_order_ref', '=', row.stripe_invoice_id]], fields)
@@ -125,7 +135,7 @@ class Sync {
     const netCents = row.paid_excluding_tax_cents || netFromGross(row.amount_due_cents)
     const created = await this.create('sale.order', {
       partner_id: partner, client_order_ref: row.stripe_invoice_id, origin: `Tickit ${this.mode}`,
-      order_line: [[0, 0, { product_id: product, name: payment?.description || 'Tickit POS', product_uom_qty: 1, price_unit: netCents / 100 }]],
+      order_line: [[0, 0, { product_id: product, name: row.service_snapshot?.description || (row.service_snapshot ? fail('ODOO_REVIEW_REQUIRED') : payment?.description || 'Tickit POS'), product_uom_qty: 1, price_unit: netCents / 100 }]],
     })
     return { id: created, state: 'draft', invoice_ids: [] as number[] }
   }
@@ -144,9 +154,17 @@ class Sync {
     return move ?? fail('ODOO_REJECTED')
   }
   private async settle(row: InvoiceRow, invoice: Move) {
+    const reportId = row.service_snapshot ? await this.invoiceReport() : undefined
     if (invoice.state === 'draft') {
       // The fiscal invoice must match what Mollie charged to the cent; otherwise nothing is numbered.
       if (Math.round(invoice.amount_total * 100) !== row.amount_due_cents) fail('ODOO_TOTAL_MISMATCH')
+      if (row.service_snapshot) {
+        if (!row.service_snapshot.description || !row.service_snapshot.periodEnd) fail('ODOO_REVIEW_REQUIRED')
+        const lines = await this.odoo.call<{ id: number }[]>('account.move.line', 'search_read', { domain: [['move_id', '=', invoice.id], ['product_id', '=', (await this.references()).product]], fields: ['id'], limit: 2 })
+        if (lines.length !== 1) fail('ODOO_REVIEW_REQUIRED')
+        // Odoo may prepend its product code when converting the order: set the final fiscal description before posting.
+        await this.odoo.call('account.move.line', 'write', { ids: [lines[0].id], vals: { name: row.service_snapshot.description } })
+      }
       await this.odoo.call('account.move', 'action_post', { ids: [invoice.id] })
       invoice = await this.move(invoice.id)
     }
@@ -156,7 +174,7 @@ class Sync {
       const wizard = await this.create('account.payment.register', { journal_id: (await this.references()).journal, payment_date: madridDate(row.paid_at ?? row.created_at), communication: row.stripe_invoice_id }, context)
       await this.odoo.call('account.payment.register', 'action_create_payments', { ids: [wizard], context })
     }
-    await ensureOfficialPdf(this.odoo, invoice.id)
+    await ensureOfficialPdf(this.odoo, invoice.id, reportId)
     return invoice
   }
   private async refund(row: InvoiceRow, invoice: Move) {
@@ -168,7 +186,7 @@ class Sync {
       refund = await this.first<Move>('account.move', [['reversed_entry_id', '=', invoice.id]], MOVE_FIELDS) ?? fail('ODOO_REJECTED')
     }
     if (refund.state === 'draft') await this.odoo.call('account.move', 'action_post', { ids: [refund.id] })
-    await ensureOfficialPdf(this.odoo, refund.id)
+    await ensureOfficialPdf(this.odoo, refund.id, row.service_snapshot ? await this.invoiceReport() : undefined)
     return refund
   }
   async advance(row: InvoiceRow, target: Target, payment: MolliePayment | undefined): Promise<Ids> {
@@ -202,7 +220,7 @@ export async function syncOdoo(input: { odoo: OdooGateway; db: SupabaseClient; a
   const bounded: OdooCalls = { call: (model, method, params) => Date.now() > deadline ? Promise.reject(new DeadlineReached()) : odoo.call(model, method, params) }
   const tenantId = account.tenant_id
   const [invoices, documents] = await Promise.all([
-    db.from('billing_invoices').select('stripe_invoice_id,status,amount_due_cents,amount_paid_cents,paid_excluding_tax_cents,paid_at,created_at,customer_snapshot').eq('tenant_id', tenantId).order('created_at', { ascending: true }).limit(1000),
+    db.from('billing_invoices').select('stripe_invoice_id,status,amount_due_cents,amount_paid_cents,paid_excluding_tax_cents,paid_at,created_at,customer_snapshot,service_snapshot').eq('tenant_id', tenantId).order('created_at', { ascending: true }).limit(1000),
     db.from('billing_odoo_documents').select('payment_id,state,sale_order_id,invoice_id,refund_id,invoice_number,attempts').eq('tenant_id', tenantId).limit(1000),
   ])
   if (invoices.error || documents.error) return { processed: 0, failed: 1 }
@@ -259,7 +277,11 @@ export async function odooDocument(input: { odoo: OdooGateway | null; db: Supaba
   const orderId = document === 'main' && !moveId ? id(doc?.sale_order_id) : null
   if (!moveId && !orderId) throw new Error('BILLING_DOCUMENT_UNAVAILABLE')
   // Invoices issued before the official PDF existed (or whose generation failed) get it now, never a proforma.
-  if (moveId) await ensureOfficialPdf(odoo, moveId)
+  if (moveId) {
+    const invoice = await db.from('billing_invoices').select('service_snapshot').eq('stripe_invoice_id', paymentId).eq('tenant_id', tenantId).maybeSingle()
+    if (invoice.error) throw new Error('BILLING_DB_ODOO')
+    await ensureOfficialPdf(odoo, moveId, invoice.data?.service_snapshot ? 'subscription' : undefined)
+  }
   const [model, recordId] = moveId ? ['account.move', moveId] : ['sale.order', orderId as number]
   const path = await odoo.call<string>(model, 'get_portal_url', { ids: [recordId], report_type: 'pdf', download: true })
   const bytes = await odoo.pdf(path)

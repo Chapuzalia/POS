@@ -66,8 +66,34 @@ it('posts and pays the invoice when the payment settles', async () => {
   const [move] = odoo.moves
   expect(move).toMatchObject({ move_type: 'out_invoice', state: 'posted', amount_total: 59.29, payment_state: 'paid', name: 'INV/2026/00001' })
   expect(move.payment).toMatchObject({ journal_id: 601, payment_date: '2026-11-10', communication: payment.id })
+  expect(move.pdfReportId).toBe(801)
+  expect(odoo.lines.find(line => line.move_id === move.id)?.name).toBe('Suscripción Tickit Synthetic base — mensual\nPeríodo: del 10/11/2026 al 09/12/2026')
   expect(await doc(payment.id)).toMatchObject({ state: 'invoiced', invoice_id: move.id, invoice_number: 'INV/2026/00001', last_error: null })
   expect(await invoice(payment.id)).toMatchObject({ fiscal_export_status: 'exported', number: 'INV/2026/00001', fiscal_external_reference: `account.move:${move.id}` })
+})
+
+it('leaves a pre-existing invoice snapshot and stored PDF unchanged', async () => {
+  const { service, odoo, mollie, activate, db, invoice } = await odooSetup()
+  await activate()
+  const payment = mollie.payment('first')
+  await db.query('update billing_invoices set service_snapshot=null where stripe_invoice_id=$1', [payment.id])
+  const before = structuredClone(odoo.moves[0])
+  const writes = odoo.calls.filter(call => call.method === 'write').length
+  await service.reconcile(ids.tenant)
+  expect((await invoice(payment.id)).service_snapshot).toBeNull()
+  expect(odoo.moves[0]).toEqual(before)
+  expect(odoo.calls.filter(call => call.method === 'write')).toHaveLength(writes)
+})
+
+it('does not number a new invoice before its dedicated report is configured', async () => {
+  const { service, odoo, mollie, start, doc } = await odooSetup()
+  odoo.reports = []
+  const payment = await start()
+  mollie.payFirst()
+  await service.reconcile(ids.tenant)
+  expect(odoo.moves[0]).toMatchObject({ state: 'draft', name: '/' })
+  expect(await doc(payment.id)).toMatchObject({ state: 'failed', last_error: 'ODOO_SETUP_MISSING' })
+  expect((await service.account(ids.tenant)).status).toBe('active')
 })
 
 it('invoices a SEPA renewal only after it settles', async () => {
@@ -377,6 +403,7 @@ it('creates the missing official PDF before serving an invoice download', async 
   expect(order.indexOf('account.move.send.wizard.action_send_and_print')).toBeGreaterThan(-1)
   expect(order.indexOf('account.move.send.wizard.action_send_and_print')).toBeLessThan(order.indexOf('account.move.get_portal_url'))
   expect(invoice.invoice_pdf_report_id).toBeTruthy()
+  expect(invoice.pdfReportId).toBe(801)
   expect(odoo.emails).toEqual([])
 })
 

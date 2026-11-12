@@ -212,7 +212,8 @@ export function applyCrmOpenCashSalesTotals(
   if (!stats) return stats
   let changed = false
   const openCashSessions = stats.openCashSessions.map((current) => {
-    const salesCents = totalsByCashSession.get(current.id) ?? 0
+    // Totals requested before this session loaded say nothing about it: keep its server total.
+    const salesCents = totalsByCashSession.get(current.id) ?? current.salesCents
     if (salesCents === current.salesCents) return current
     changed = true
     return { ...current, salesCents }

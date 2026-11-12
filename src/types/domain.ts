@@ -717,6 +717,7 @@ export type CrmStats = {
 }
 
 export type CrmSalesReportFiscal = {
+  issuer?: { name: string; nif: string; address: string }
   provider: 'verifactu' | 'ticketbai'
   status: 'pending' | 'accepted' | 'accepted_with_errors' | 'rejected' | 'cancelled' | 'error'
   documentKind: 'simplified' | 'complete' | 'normal' | 'corrective'
@@ -731,6 +732,7 @@ export type CrmSalesReportFiscal = {
 }
 
 export type CrmSalesReportRefundDocument = {
+  issuer?: CrmSalesReportFiscal['issuer']
   id: string
   series: string | null
   number: string | null

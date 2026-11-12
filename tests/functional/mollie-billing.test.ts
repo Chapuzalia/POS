@@ -113,7 +113,7 @@ it('treats a charge-back of a settled renewal as debt', async () => {
 })
 
 it('charges the prorated increase of an immediate upgrade by card checkout and grants access only once paid', async () => {
-  const { service, mollie, activate, withProduction, operation } = await setup()
+  const { service, mollie, activate, withProduction, operation, db } = await setup()
   await activate()
   at('2026-11-25T00:00:00Z')
   const quote = await service.quote(ids.tenant, ids.owner, withProduction, null, 'Añadir producción')
@@ -122,6 +122,9 @@ it('charges the prorated increase of an immediate upgrade by card checkout and g
   expect(quote.preview.amountDueCents).toBe(605)
   const confirmed = await service.confirm(ids.tenant, ids.owner, quote.id)
   const charge = mollie.payment('proration')
+  const serviceSnapshot = { kind: 'proration', periodStart: '2026-11-25', periodEnd: '2026-12-10', description: expect.stringContaining('Ampliación de suscripción') }
+  const invoice = async () => (await db.query('select service_snapshot from billing_invoices where stripe_invoice_id=$1', [charge.id])).rows[0]
+  expect((await invoice()).service_snapshot).toEqual(serviceSnapshot)
   expect(charge).toMatchObject({ sequenceType: 'oneoff', method: 'creditcard', amount: { value: '6.05' }, status: 'open' })
   expect(confirmed.url).toBe(charge._links.checkout.href)
   expect(mollie.calls.find(call => call.method === 'POST' && call.path === '/payments' && call.body.metadata.tickit_kind === 'proration').body.redirectUrl).toBe('http://localhost:5173/crm/plan?billing=return')
@@ -131,8 +134,11 @@ it('charges the prorated increase of an immediate upgrade by card checkout and g
   expect(waiting.contract.features).not.toContain('production')
   expect(waiting.last_payment_status).toBe('paid')
   expect((await operation(quote.id)).status).toBe('payment_pending')
+  // Reconciliation must also recover the incomplete snapshot stored by older backends.
+  await db.query("update billing_invoices set service_snapshot='{}'::jsonb where stripe_invoice_id=$1", [charge.id])
   mollie.settle(charge)
   await service.handleWebhook(charge.id)
+  expect((await invoice()).service_snapshot).toEqual(serviceSnapshot)
   const paid = await service.account(ids.tenant)
   expect(paid.contract.features).toContain('production')
   expect(paid.billed_contract.recurringCents).toBe(5900)

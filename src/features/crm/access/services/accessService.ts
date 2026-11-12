@@ -352,29 +352,59 @@ export async function createCrmUser(
   return data.user;
 }
 
-export async function updateManagerVenueAssignments(
+/** Empty password keeps the current one. */
+export async function updateCrmUser(
   context: TenantContext,
-  managerUserId: string,
-  venueIds: string[],
+  userId: string,
+  input: {
+    email: string;
+    password: string;
+    role: CrmAccessUser["role"];
+    venueIds: string[];
+  },
 ) {
-  if (context.role !== "owner") throw new Error("Solo el owner puede asignar locales a managers.");
-  if (!venueIds.length) throw new UserFacingError("Selecciona al menos un local.");
+  const email = input.email.trim().toLowerCase();
+  if (!email || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+    throw new UserFacingError("Introduce un email válido.");
+  }
+  if (input.password && (input.password.length < CRM_USER_PASSWORD_MIN_LENGTH || input.password.length > 72)) {
+    throw new UserFacingError(`La contraseña debe tener entre ${CRM_USER_PASSWORD_MIN_LENGTH} y 72 caracteres.`);
+  }
+  if (!["owner", "manager", "gestor"].includes(input.role)) {
+    throw new UserFacingError("Selecciona un rol válido.");
+  }
+  if (input.role === "manager" && !input.venueIds.length) {
+    throw new UserFacingError("Selecciona al menos un local.");
+  }
 
-  const { data, error } = await requireSupabase().functions.invoke<{ error?: string; venueIds?: string[] }>(
+  const { data, error } = await requireSupabase().functions.invoke<{ error?: string; user?: CrmAccessUser }>(
     "manage-pos-users",
     {
       body: {
-        action: "set-manager-venues",
-        managerUserId,
+        action: "update-crm-user",
+        email,
+        password: input.password,
+        role: input.role,
         tenantId: context.tenantId,
-        venueIds,
+        userId,
+        venueIds: input.role === "manager" ? input.venueIds : [],
       },
     },
   );
-  if (error || data?.error) {
-    throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, "No se pudieron actualizar los locales del manager."));
+  if (error || data?.error || !data?.user) {
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, "No se pudo actualizar el usuario CRM."));
   }
-  return data?.venueIds ?? venueIds;
+  return data.user;
+}
+
+export async function deleteCrmUser(context: TenantContext, userId: string) {
+  const { data, error } = await requireSupabase().functions.invoke<{ error?: string }>(
+    "manage-pos-users",
+    { body: { action: "delete-crm-user", tenantId: context.tenantId, userId } },
+  );
+  if (error || data?.error) {
+    throw new UserFacingError(await getFunctionInvokeErrorMessage(data, error, "No se pudo eliminar el usuario CRM."));
+  }
 }
 
 export async function updateCrmDevice(
