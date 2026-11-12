@@ -4,6 +4,7 @@ import { LogIn, TriangleAlert, WifiOff, Wifi } from "lucide-react";
 import { useEffect, useRef, useState, type FormEvent } from "react";
 import type { LoginInput, TenantContext } from "../../types";
 import { AppModal, Button, Chip } from "../ui";
+import { billingLegalDocuments } from "../../../supabase/functions/_shared/billing/legal";
 
 const rememberedEmailKey = "club-pos:remembered-email";
 
@@ -170,6 +171,9 @@ export function LoginScreen({
             Entrar offline en {cachedContext.tenantName}
           </Button>
         ) : null}
+        <nav aria-label="Información legal" className="mt-5 flex flex-wrap justify-center gap-x-4 text-sm">
+          {[billingLegalDocuments.notice, billingLegalDocuments.privacy].map(doc => <a key={doc.url} className="inline-flex min-h-11 items-center text-[var(--muted)] underline" href={doc.url} target="_blank" rel="noreferrer">{doc.title}</a>)}
+        </nav>
       </section>
 
       {conflictAccountName ? (

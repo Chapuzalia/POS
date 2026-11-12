@@ -47,7 +47,7 @@ Deno.serve(async request => {
     if (body.action === 'quote-cancel' && body.immediate && !admin) return reply({ error: 'Esta operación requiere Superadmin.' }, 403)
     if (body.action === 'change-mandate' && admin) return reply({ error: 'Solo el propietario puede autorizar la domiciliación.' }, 403)
     if (body.action === 'portal' && admin) return reply({ error: 'El pago de cuotas pendientes solo está disponible desde la cuenta del cliente.' }, 403)
-    if (body.action === 'confirm' && (body.sepa || body.payer) && admin) return reply({ error: 'Solo el propietario puede autorizar la domiciliación.' }, 403)
+    if (body.action === 'confirm' && (body.sepa || body.payer || body.legal) && admin) return reply({ error: 'Solo el propietario puede aceptar el contrato y autorizar la domiciliación.' }, 403)
     // Credentials are managed before the "configured" gate so Superadmin can set the first Mollie key.
     if (body.action === 'integrations') return reply(billingSecretsStatus(await loadBillingSecrets(db)))
     if (body.action === 'integrations-save') {
@@ -87,7 +87,7 @@ Deno.serve(async request => {
         return reply(await service.quote(body.tenantId, user.user.id, body.selection, body.exception, body.reason, admin, body.access ?? null))
       }
       case 'quote-cancel': return reply(await service.quoteCancel(body.tenantId, user.user.id, body.immediate, body.reason))
-      case 'confirm': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, false, { sepa: body.sepa, payer: body.payer, acceptLosses: body.acceptLosses }))
+      case 'confirm': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, false, { sepa: body.sepa, payer: body.payer, acceptLosses: body.acceptLosses, legal: body.legal }))
       case 'change-mandate': return reply(await service.changeMandate(body.tenantId, body.requestId, body.sepa))
       case 'retry-operation': return reply(await service.confirm(body.tenantId, user.user.id, body.operationId, true))
       case 'portal': return reply(await service.portal(body.tenantId))

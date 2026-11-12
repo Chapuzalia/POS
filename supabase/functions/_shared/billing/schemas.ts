@@ -65,6 +65,7 @@ export const requestSchema = z.discriminatedUnion('action', [
   z.object({ action: z.literal('retry-event'), eventId: z.string().regex(/^(evt_|mollie:tr_)/).max(150) }).strict(),
   // The IBAN is forwarded to Mollie to create the SEPA mandate; it is never stored or logged.
   z.object({ action: z.literal('confirm'), tenantId: z.uuid(), operationId: z.uuid(),
+    legal: z.object({ version: z.string().max(40), terms: z.boolean(), dpa: z.boolean(), businessRepresentative: z.boolean() }).strict().optional(),
     sepa: z.object({ accountHolder: z.string().trim().min(2).max(70), iban: z.string().max(42) }).strict().optional(),
     // Older installed clients may still send only name and NIF.
     payer: billingProfileSchema.partial({ email: true, address: true }).optional(),

@@ -6,6 +6,7 @@ import { billingErrorMessages } from '../../supabase/functions/_shared/billing/e
 import { billingFailureDiagnostic } from '../../supabase/functions/_shared/billing/diagnostics'
 import { billingSecretsStatus } from '../../supabase/functions/_shared/billing/env'
 import type { BillingSecrets } from '../../supabase/functions/_shared/billing/env'
+import { billingLegalVersion } from '../../supabase/functions/_shared/billing/legal'
 
 function endpoint(admin = true, role = 'owner', active = true, secretsStatus: (secrets: BillingSecrets) => unknown = secrets => ({ status: secrets })) {
   let handler: (request: Request) => Promise<Response>
@@ -107,13 +108,24 @@ it('forwards the owner SEPA authorization and refuses it from Superadmin', async
   const payer = { legalName: 'Restaurante Prueba SL', taxId: 'B12345678' }
   const owner = endpoint(false)
   expect((await owner.send(JSON.stringify({ action: 'confirm', tenantId, operationId: tenantId, sepa, payer }))).status).toBe(200)
-  expect(owner.confirm).toHaveBeenCalledWith(tenantId, 'admin', tenantId, false, { sepa, payer })
+  expect(owner.confirm).toHaveBeenCalledWith(tenantId, 'admin', tenantId, false, { sepa, payer, legal: undefined })
   const admin = endpoint()
   expect((await admin.send(JSON.stringify({ action: 'confirm', tenantId, operationId: tenantId, sepa }))).status).toBe(403)
   expect(admin.confirm).not.toHaveBeenCalled()
   // The IBAN never reaches the failure log.
   await owner.send(JSON.stringify({ action: 'confirm', tenantId, operationId: tenantId, sepa: { ...sepa, extra: 1 } }))
   expect(JSON.stringify(owner.log.mock.calls)).not.toContain('ES91')
+})
+
+it('forwards separate contractual declarations from the owner and never accepts them from Superadmin', async () => {
+  const legal = { version: billingLegalVersion, terms: true, dpa: true, businessRepresentative: true }
+  const owner = endpoint(false)
+  expect((await owner.send(JSON.stringify({ action: 'confirm', tenantId, operationId: tenantId, legal }))).status).toBe(200)
+  expect(owner.confirm).toHaveBeenCalledWith(tenantId, 'admin', tenantId, false, expect.objectContaining({ legal }))
+  const admin = endpoint()
+  expect((await admin.send(JSON.stringify({ action: 'confirm', tenantId, operationId: tenantId, legal }))).status).toBe(403)
+  expect(admin.confirm).not.toHaveBeenCalled()
+  expect((await owner.send(JSON.stringify({ action: 'confirm', tenantId, operationId: tenantId, legal: { ...legal, replay: true } }))).status).toBe(400)
 })
 
 it('lets the owner cancel at the end of the paid period but keeps immediate cancellation for Superadmin', async () => {

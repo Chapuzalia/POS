@@ -1,6 +1,7 @@
 import { addMonths } from '../../supabase/functions/_shared/billing/promotions.ts'
 import { MollieRequestError } from '../../supabase/functions/_shared/billing/mollie.ts'
 import { BillingService } from '../../supabase/functions/_shared/billing/service.ts'
+import { billingLegalVersion } from '../../supabase/functions/_shared/billing/legal.ts'
 import { createBillingDb, billingIds as ids } from './billing-db.mjs'
 
 // Supabase query surface backed by real PostgreSQL, not a stub of business logic.
@@ -8,7 +9,7 @@ export function billingClient(db) {
   const identifier = value => { if (!/^[a-z_][a-z0-9_]*$/.test(value)) throw new Error(value); return `"${value}"` }
   return {
     async rpc(name, params) {
-      try { return {data:(await db.query(`select ${identifier(name)}($1,$2::jsonb) result`,name==='billing_save_onboarding'?[params.p_tenant_id,JSON.stringify(params.p_contract)]:name==='billing_save_profile'?[params.p_tenant_id,JSON.stringify(params.p_data)]:[params.p_action,JSON.stringify(params.p_data)])).rows[0].result,error:null} }
+      try { return {data:(await db.query(`select ${identifier(name)}($1,$2::jsonb) result`,name==='billing_save_onboarding'?[params.p_tenant_id,JSON.stringify(params.p_contract)]:['billing_save_profile','billing_accept_contract','billing_legal_receipts'].includes(name)?[params.p_tenant_id,JSON.stringify(params.p_data)]:[params.p_action,JSON.stringify(params.p_data)])).rows[0].result,error:null} }
       catch(error) {return {data:null,error:{code:error.code,message:error.message}}}
     },
     from(table) {
@@ -127,6 +128,7 @@ export class FakeMollie {
   }
 }
 export const sepa={accountHolder:'Restaurante Prueba SL',iban:'ES91 2100 0418 4502 0005 1332'}
+export const legal={version:billingLegalVersion,terms:true,dpa:true,businessRepresentative:true}
 export const payer={legalName:'Restaurante Prueba SL',taxId:'B12345678',email:'billing@example.test',address:{street:'Calle Mayor 1',postalCode:'28001',city:'Madrid',province:'Madrid',countryCode:'ES'}}
 export async function createBillingService(t,baseAmountCents=10000,{odoo=null}={}) {
   const {db,transition}=await createBillingDb(t)
@@ -135,7 +137,7 @@ export async function createBillingService(t,baseAmountCents=10000,{odoo=null}={
   const mollie=new FakeMollie(),service=new BillingService(billingClient(db),mollie,'http://localhost:5173','https://hooks.example.test/billing-webhook',odoo)
   await service.publish(base.id); await service.publish(production.id)
   const selection={planVersionId:base.id,addons:[]}
-  const activate=async()=>{const quote=await service.quote(ids.tenant,ids.owner,selection,null,'Test onboarding');await service.confirm(ids.tenant,ids.owner,quote.id,false,{sepa,payer});mollie.payFirst();await service.reconcile(ids.tenant)}
+  const activate=async()=>{const quote=await service.quote(ids.tenant,ids.owner,selection,null,'Test onboarding');await service.confirm(ids.tenant,ids.owner,quote.id,false,{sepa,payer,legal});mollie.payFirst();await service.reconcile(ids.tenant)}
   return {db,mollie,service,selection,base,production,activate,transition}
 }
 

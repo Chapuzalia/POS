@@ -64,7 +64,7 @@ async function networkFirstNavigation(request) {
     return Response.redirect(`${url.origin}/crm/${url.search}`, 308)
   }
   const cache = await caches.open(STATIC_CACHE)
-  const shellKey = url.pathname.startsWith('/crm/')
+  const shellKey = url.pathname.startsWith('/legal/') ? url.pathname : url.pathname.startsWith('/crm/')
     ? '/crm/index.html'
     : '/index.html'
 

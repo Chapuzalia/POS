@@ -1,4 +1,5 @@
 import { supabase } from '../../../../lib/supabase'
+import { getOperationalPeriodRangeIso } from '../../../../lib/operationalDay'
 import type { TenantContext } from '../../../../types'
 import type { CrmSalesReportFilters } from './salesReportsService'
 
@@ -127,13 +128,19 @@ export async function loadAccountingClosures(context: TenantContext, from: strin
 
 export function loadAccountingTickets(
   context: TenantContext,
-  filters: CrmSalesReportFilters,
+  filters: Pick<CrmSalesReportFilters, 'categoryQuery' | 'discountFilter' | 'productQuery'> & {
+    dateFrom: string
+    dateTo: string
+    timeZone: string
+  },
 ) {
+  // Accounting exports follow calendar dates in the venue's timezone, regardless of its operating hours.
+  const range = getOperationalPeriodRangeIso({ dayChangeTime: null, timeZone: filters.timeZone }, filters.dateFrom, filters.dateTo)
   return callRpc<AccountingTicketRow>('get_accounting_tickets_export', {
     p_tenant_id: context.tenantId,
     p_venue_id: context.venueId,
-    p_from: filters.dateFromIso,
-    p_to: filters.dateToIso,
+    p_from: range.startIso,
+    p_to: range.endIso,
     p_product_query: filters.productQuery || null,
     p_category_query: filters.categoryQuery || null,
     p_discount_filter: filters.discountFilter,

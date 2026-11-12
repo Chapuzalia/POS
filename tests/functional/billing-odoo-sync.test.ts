@@ -1,5 +1,5 @@
 import { afterEach, expect, it, onTestFinished, vi } from 'vitest'
-import { FakeOdoo, createBillingService, payer, sepa } from '../helpers/billing-service.mjs'
+import { FakeOdoo, createBillingService, payer, sepa, legal } from '../helpers/billing-service.mjs'
 import { billingIds as ids } from '../helpers/billing-db.mjs'
 import { grossCents, netFromGross } from '../../supabase/functions/_shared/billing/mollie'
 import { odooVat } from '../../supabase/functions/_shared/billing/odoo-sync'
@@ -21,7 +21,7 @@ async function odooSetup() {
   const count = async (where = 'true') => ((await fixture.db.query(`select count(*)::int n from billing_odoo_documents where ${where}`)).rows[0] as { n: number }).n
   const start = async () => {
     const quote = await fixture.service.quote(ids.tenant, ids.owner, fixture.selection, null, 'Alta')
-    await fixture.service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer })
+    await fixture.service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer, legal })
     return fixture.mollie.payment('first')
   }
   return { ...fixture, odoo, invoice, doc, count, start }
@@ -452,7 +452,7 @@ it('uses the new fiscal profile on renewal without rewriting the first invoice o
 it('accepts an N-1 signup but refuses to issue an invoice with an incomplete fiscal snapshot', async () => {
   const { service, odoo, mollie, selection, doc } = await odooSetup()
   const quote = await service.quote(ids.tenant, ids.owner, selection, null, 'Alta N-1')
-  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, payer: { legalName: payer.legalName, taxId: payer.taxId } })
+  await service.confirm(ids.tenant, ids.owner, quote.id, false, { sepa, legal, payer: { legalName: payer.legalName, taxId: payer.taxId } })
   const payment = mollie.payFirst()
   await service.reconcile(ids.tenant)
   expect((await service.account(ids.tenant)).status).toBe('active')

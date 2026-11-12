@@ -3,6 +3,10 @@ import { Button } from '../../components/ui/Button'
 import { AppModal } from '../../components/ui/AppModal'
 import { BillingSelectionEditor } from './BillingSelectionEditor'
 import { SepaMandateFields } from './SepaMandateFields'
+import { BillingLegalAcceptance, BillingLegalLinks, BillingOfferSummary } from './BillingLegalAcceptance'
+import { emptyLegalAcceptance, legalAcceptanceReady } from '../../../supabase/functions/_shared/billing/legal'
+import { BillingLegalReceipt } from './BillingLegalReceipt'
+import type { BillingLegalReceipt as Receipt } from '../../../supabase/functions/_shared/billing/legal'
 import { emptySepaForm, sepaConfirmInput, sepaFormReady } from './sepa'
 import { billingMoney, billingRequest, openBillingUrl } from './service'
 import { buildContract } from './selection'
@@ -17,6 +21,8 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
   const [sepa, setSepa] = useState(emptySepaForm)
+  const [legal, setLegal] = useState(emptyLegalAcceptance)
+  const [acceptedContract, setAcceptedContract] = useState<Receipt | null>(null)
   const [returnedFromCheckout] = useState(() => new URLSearchParams(window.location.search).get('billing') === 'success')
   const refresh = useCallback(async (reconcile = false) => {
     if (reconcile) await billingRequest({ action: 'reconcile', tenantId })
@@ -81,6 +87,7 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
         <div className="!flex !flex-wrap !gap-3">
           <Button className="!rounded-[10px] !bg-[var(--crm-blue)] !px-5 !font-semibold !text-white" disabled={locked || Boolean(pending && (pending.status !== 'payment_pending' || !pending.result?.url))} onClick={() => void run(async () => {
             if (pending?.result?.url) { openBillingUrl(pending.result.url); return }
+            setLegal(emptyLegalAcceptance)
             setQuote(await billingRequest<BillingOperation>({ action: 'quote', tenantId, selection: contract.selection, exception: null, reason: 'Activación inicial del negocio' }))
           })}>{pending?.result?.url ? 'Continuar pago en Mollie' : 'Pagar con Mollie'}</Button>
           <Button disabled={locked || Boolean(pending && pending.status !== 'payment_pending')} onClick={() => void run(async () => {
@@ -93,16 +100,20 @@ export function BillingActivationPanel({ tenantId, disabled = false, onActivated
         </div>
       </> : <p role="alert">No hay un plan preparado. Contacta con el administrador.</p>}
     </section>
-    {quote ? <AppModal label="Revisar pago del plan" theme="crm" maxWidth={520} dismissDisabled={busy} onClose={() => setQuote(null)}><div className="!grid !gap-4 !p-6"><h3 className="!m-0 !text-lg !font-bold">Revisar pago</h3><p className="!m-0">{quote.contract?.planName}</p><p className="!m-0 !text-2xl !font-bold">{billingMoney(quote.preview.amountDueCents)} <span className="!text-sm !font-normal">IVA incluido</span></p><p className="!m-0 !text-sm !text-[var(--crm-text-muted)]">Suscripción {quote.contract?.interval === 'year' ? 'anual' : 'mensual'}. Pagarás esta primera cuota con tarjeta en Mollie. Las siguientes se cargarán por domiciliación SEPA en esta cuenta.</p>
+    <BillingLegalLinks />
+    {acceptedContract ? <BillingLegalReceipt acceptance={acceptedContract} /> : null}
+    {detail?.legalAcceptances?.filter(acceptance => acceptance.operation_id !== acceptedContract?.operation_id).map(acceptance => <BillingLegalReceipt key={acceptance.operation_id} acceptance={acceptance} />)}
+    {quote ? <AppModal label="Revisar pago del plan" theme="crm" maxWidth={520} dismissDisabled={busy} onClose={() => setQuote(null)}><div className="!grid !gap-4 !p-6"><h3 className="!m-0 !text-lg !font-bold">Confirma tu suscripción</h3><BillingOfferSummary quote={quote} catalog={catalog} />
       <SepaMandateFields value={sepa} disabled={locked} onChange={setSepa} />
-      {error ? <p role="alert" className="!text-sm !text-[var(--crm-red)]">{error}</p> : null}<div className="!flex !flex-wrap !justify-end !gap-3"><Button disabled={locked} onClick={() => setQuote(null)}>Volver</Button><Button disabled={locked || !sepaFormReady(sepa)} onClick={() => void run(async () => {
-      const result = await billingRequest<{ url?: string }>({ action: 'confirm', tenantId, operationId: quote.id, ...sepaConfirmInput(sepa) })
-      if (result.url) openBillingUrl(result.url)
+      <BillingLegalAcceptance value={legal} disabled={locked} onChange={setLegal} />
+      {error ? <p role="alert" className="!text-sm !text-[var(--crm-red)]">{error}</p> : null}<div className="!flex !flex-wrap !justify-end !gap-3"><Button disabled={locked} onClick={() => setQuote(null)}>Volver</Button><Button variant="primary" disabled={locked || !sepaFormReady(sepa) || !legalAcceptanceReady(legal)} onClick={() => void run(async () => {
+      const result = await billingRequest<{ url?: string; acceptance?: Receipt }>({ action: 'confirm', tenantId, operationId: quote.id, ...sepaConfirmInput(sepa), legal })
+      if (result.url) { setQuote(null); setAcceptedContract(result.acceptance ?? null); openBillingUrl(result.url) }
       else {
         const next = await refresh(Boolean(customerId))
         if (next.tenant.billing_activation_required) throw new Error('No se ha podido abrir la página de pago. Comprueba el estado o contacta con soporte para recuperar el intento.')
         setQuote(null)
       }
-    })}>Domiciliar e ir al pago</Button></div></div></AppModal> : null}
+    })}>Aceptar y pagar</Button></div></div></AppModal> : null}
   </div>
 }

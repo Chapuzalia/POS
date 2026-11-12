@@ -26,6 +26,7 @@ function worker({ assets = [], assetType = 'text/javascript' } = {}) {
     const path = new URL(typeof request === 'string' ? request : request.url, origin).pathname
     if (path === '/offline-assets.json') return new Response(JSON.stringify(assets))
     if (path.startsWith('/assets/')) return new Response(assetType === 'text/html' ? read('index.html') : 'export {}', { headers: { 'Content-Type': assetType } })
+    if (path.startsWith('/legal/')) return new Response(`Legal document ${path}`, { headers: { 'Content-Type': 'text/html' } })
     const entry = path === '/crm' || path.startsWith('/crm/') ? 'crm/index.html' : 'index.html'
     return new Response(read(entry), { headers: { 'Content-Type': 'text/html' } })
   }
@@ -90,4 +91,16 @@ test('worker never stores the SPA fallback HTML as a JavaScript chunk', async ()
   assert.equal(poisoned.entries.has('/assets/main-abc.js'), false)
   await poisoned.request('/assets/lazy-def.js', 'script')
   assert.equal([...poisoned.entries.keys()].some((key) => String(key?.url ?? key).includes('lazy-def')), false)
+})
+
+test('legal documents keep their own offline copy and never replace the POS or CRM shell', async () => {
+  const app = worker()
+  await app.install()
+  const path = '/legal/2026-11-12/condiciones-saas.html'
+  assert.equal(await (await app.navigate(path)).text(), `Legal document ${path}`)
+  app.offline()
+  assert.equal(await (await app.navigate(path)).text(), `Legal document ${path}`)
+  assert.ok((await (await app.navigate('/')).text()).includes('href="/manifest.webmanifest"'))
+  assert.ok((await (await app.navigate('/crm/')).text()).includes('href="/crm.webmanifest"'))
+  assert.equal((await app.navigate('/legal/missing.html')).type, 'error')
 })

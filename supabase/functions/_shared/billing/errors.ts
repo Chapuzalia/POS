@@ -1,5 +1,7 @@
 // Only reviewed public billing messages may reach the UI. Never include provider errors.
 export const billingErrorMessages: Record<string, string> = {
+  BILLING_LEGAL_REQUIRED: 'Acepta los Términos y Condiciones y el DPA y confirma que contratas como profesional con facultades de representación. Si no aparecen las casillas, actualiza la aplicación.',
+  BILLING_LEGAL_VERSION: 'Los documentos contractuales han cambiado. Actualiza la aplicación y revisa la nueva versión antes de aceptar.',
   BILLING_INVALID_REQUEST: 'Revisa los campos obligatorios, importes y condiciones de facturación.',
   BILLING_NOTHING_DUE: 'No hay cuotas pendientes de pago.',
   BILLING_DOCUMENT_UNAVAILABLE: 'El documento todavía no está disponible.',

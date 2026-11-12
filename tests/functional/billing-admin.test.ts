@@ -8,6 +8,7 @@ import * as presentation from '../../src/features/billing/presentation'
 import * as sepaFields from '../../src/features/billing/sepa'
 import * as billingProfile from '../../supabase/functions/_shared/billing/profile'
 import * as access from '../../src/features/billing/access'
+import * as legalFields from '../../supabase/functions/_shared/billing/legal'
 import type { BillingInvoice } from '../../src/features/billing/types'
 
 const product = { key: 'base', kind: 'plan', name: 'Base', description: '', scope: 'tenant', featureKey: null, resource: null, active: true, sortOrder: 0 }
@@ -62,6 +63,9 @@ function panel(active = false, temporary = false, pending = false, admin = true)
     './BillingProfileFields': { BillingProfileFields: 'billing-profile-fields' },
     '../../../supabase/functions/_shared/billing/profile': billingProfile,
     './sepa': sepaFields,
+    './BillingLegalAcceptance': { ...legalFields, BillingLegalAcceptance: 'legal-fields', BillingLegalLinks: 'legal-links', BillingOfferSummary: 'offer-summary' },
+    './BillingLegalReceipt': { BillingLegalReceipt: 'legal-receipt' },
+    '../../../supabase/functions/_shared/billing/legal': legalFields,
     './access': access,
     './service': { billingRequest: request, billingMoney: formatMoney, billingDate: String, openBillingUrl: openUrl, downloadBillingDocument: download },
   }, { Error, Date, crypto, URLSearchParams })
@@ -131,10 +135,10 @@ it('leaves the first contract to the owner because only they can authorize the S
   await vi.waitFor(() => expect(button(h.render(), 'Ver importes')).toBeDefined())
   expect(button(h.render(), 'Métodos de pago')).toBeUndefined()
   button(h.render(), 'Ver importes').props.onClick()
-  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
+  await vi.waitFor(() => expect(button(h.render(), 'Aceptar y pagar')).toBeDefined())
   expect(text(h.render())).toContain('El propietario debe completar el alta desde Mi Plan')
   expect(nodes(h.render()).some(node => node.type === 'sepa-fields')).toBe(false)
-  expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(true)
+  expect(button(h.render(), 'Aceptar y pagar').props.disabled).toBe(true)
   expect(h.openUrl).not.toHaveBeenCalled()
 })
 
@@ -145,14 +149,18 @@ it('collects the SEPA mandate in Mi Plan before the first card payment', async (
   await vi.waitFor(() => expect(button(h.render(), 'Modificar plan')).toBeDefined())
   button(h.render(), 'Modificar plan').props.onClick()
   button(h.render(), 'Revisar cambio').props.onClick()
-  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio')).toBeDefined())
-  expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(true)
+  await vi.waitFor(() => expect(button(h.render(), 'Aceptar y pagar')).toBeDefined())
+  expect(button(h.render(), 'Aceptar y pagar').props.disabled).toBe(true)
   const form = { legalName: 'Empresa SL', taxId: 'B12345678', email: 'billing@example.test', address: { street: 'Calle Mayor 1', postalCode: '28001', city: 'Madrid', province: 'Madrid', countryCode: 'ES' }, accountHolder: 'Empresa SL', iban: 'ES91 2100 0418 4502 0005 1332', accepted: true }
   nodes(h.render()).find(node => node.type === 'sepa-fields').props.onChange(form)
-  await vi.waitFor(() => expect(button(h.render(), 'Confirmar cambio').props.disabled).toBe(false))
-  button(h.render(), 'Confirmar cambio').props.onClick()
+  expect(button(h.render(), 'Aceptar y pagar').props.disabled).toBe(true)
+  const legalForm = () => nodes(h.render()).find(node => node.type === 'legal-fields')
+  expect(legalForm().props.value).toMatchObject({ terms: false, dpa: false, businessRepresentative: false })
+  legalForm().props.onChange({ ...legalFields.emptyLegalAcceptance, terms: true, dpa: true, businessRepresentative: true })
+  await vi.waitFor(() => expect(button(h.render(), 'Aceptar y pagar').props.disabled).toBe(false))
+  button(h.render(), 'Aceptar y pagar').props.onClick()
   await vi.waitFor(() => expect(h.openUrl).toHaveBeenCalledWith('https://www.mollie.com/checkout/test'))
-  expect(h.request.mock.calls.find(([body]) => body.action === 'confirm')[0]).toMatchObject({ operationId: 'quote', sepa: { accountHolder: 'Empresa SL', iban: form.iban }, payer: { legalName: 'Empresa SL', taxId: 'B12345678' } })
+  expect(h.request.mock.calls.find(([body]) => body.action === 'confirm')[0]).toMatchObject({ operationId: 'quote', legal: { version: legalFields.billingLegalVersion, terms: true, dpa: true, businessRepresentative: true }, sepa: { accountHolder: 'Empresa SL', iban: form.iban }, payer: { legalName: 'Empresa SL', taxId: 'B12345678' } })
 })
 
 it('does not ask for the IBAN again when changing an active subscription', async () => {
